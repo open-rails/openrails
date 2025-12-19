@@ -21,6 +21,9 @@ type Product struct {
 	// Entitlements configuration: map entitlement name -> duration days (nil or 0 means indefinite)
 	EntitlementsSpec map[string]*int `bun:"entitlements_spec,type:jsonb,nullzero" json:"entitlements_spec,omitempty"`
 
+	// Credits configuration: bundled promo credits for subscriptions
+	CreditsSpec *CreditsSpec `bun:"credits_spec,type:jsonb,nullzero" json:"credits_spec,omitempty"`
+
 	// Tier configuration for upgrade/downgrade relationships
 	// Products in the same TierGroup are mutually exclusive - user must upgrade/downgrade between them
 	// TierRank determines direction: higher rank = more premium (upgrade), lower rank = downgrade
@@ -33,6 +36,14 @@ type Product struct {
 
 	// Relationships
 	Prices []*Price `bun:"rel:has-many,join:id=product_id" json:"prices,omitempty"`
+}
+
+// CreditsSpec defines bundled promotional credits for a product subscription.
+// Amounts are stored in cents.
+type CreditsSpec struct {
+	PromoAmountCents int64  `json:"promo_amount_cents,omitempty"`
+	PromoExpiresDays int    `json:"promo_expires_days,omitempty"`
+	GrantOn          string `json:"grant_on,omitempty"` // initial|renewal
 }
 
 // Price represents a specific pricing option for a product
@@ -72,6 +83,7 @@ const (
 	ProcessorKeyProvider       = "provider"
 	ProcessorKeyCCBillFormName = "form_name"
 	ProcessorKeyCCBillFlexID   = "flex_id"
+	ProcessorKeyStripePriceID  = "price_id"
 )
 
 // GetProcessorConfig returns the configuration for a specific processor, or nil if not configured
@@ -148,6 +160,16 @@ func (p *Price) GetSolanaConfig() (ok bool) {
 	return p.HasProcessor(ProcessorSolana)
 }
 
+// GetStripeConfig returns Stripe price ID
+func (p *Price) GetStripeConfig() (priceID string, ok bool) {
+	config := p.GetProcessorConfig(ProcessorStripe)
+	if config == nil {
+		return "", false
+	}
+	priceID = strings.TrimSpace(config[ProcessorKeyStripePriceID])
+	return priceID, priceID != ""
+}
+
 // SetProcessorConfig sets the configuration for a specific processor
 func (p *Price) SetProcessorConfig(processor Processor, config map[string]string) {
 	if p.Processors == nil {
@@ -187,5 +209,12 @@ func (p *Price) SetCCBillConfig(formName, flexID string) {
 func (p *Price) SetSolanaConfig() {
 	p.SetProcessorConfig(ProcessorSolana, map[string]string{
 		"enabled": "true",
+	})
+}
+
+// SetStripeConfig sets the Stripe price ID
+func (p *Price) SetStripeConfig(priceID string) {
+	p.SetProcessorConfig(ProcessorStripe, map[string]string{
+		ProcessorKeyStripePriceID: priceID,
 	})
 }

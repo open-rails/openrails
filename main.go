@@ -17,7 +17,7 @@ import (
 	"github.com/doujins-org/doujins-billing/internal/app"
 	"github.com/doujins-org/doujins-billing/internal/audit"
 	"github.com/doujins-org/doujins-billing/internal/migrate"
-	"github.com/doujins-org/doujins-billing/internal/server"
+	"github.com/doujins-org/doujins-billing/pkg/embedded"
 )
 
 func main() {
@@ -127,29 +127,19 @@ func runServer(cmd *cobra.Command, args []string) error {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	application, err := app.Bootstrap(cfg)
+	embeddedApp, err := embedded.New(embedded.Options{Config: cfg})
 	if err != nil {
 		return fmt.Errorf("bootstrap application: %w", err)
 	}
 	cleanupOnError := true
 	defer func() {
 		if cleanupOnError {
-			if err := application.Close(context.Background()); err != nil {
+			if err := embeddedApp.Close(context.Background()); err != nil {
 				log.WithError(err).Error("Application cleanup failed")
 			}
 		}
 	}()
 
-	billingServer, err := server.New(server.Dependencies{
-		Config:       application.Config,
-		Cache:        application.Cache,
-		Runtime:      application.Runtime,
-		Redis:        application.RedisClient,
-		AuthProvider: application.AuthProvider,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create billing server: %w", err)
-	}
 	cleanupOnError = false
 
 	sigChan := make(chan os.Signal, 1)
@@ -157,7 +147,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Public API server (user/admin JWT auth)
 	publicSrv := &http.Server{
-		Handler: billingServer.Handler(),
+		Handler: embeddedApp.Handler(),
 		Addr:    fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 	}
 
@@ -165,7 +155,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	var privateSrv *http.Server
 	if cfg.PrivatePort > 0 {
 		privateSrv = &http.Server{
-			Handler: billingServer.PrivateHandler(),
+			Handler: embeddedApp.PrivateHandler(),
 			Addr:    fmt.Sprintf("%s:%d", cfg.Host, cfg.PrivatePort),
 		}
 	}
@@ -204,10 +194,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if err := billingServer.Close(shutdownCtx); err != nil {
-		log.WithError(err).Error("Error during billing server cleanup")
-	}
-	if err := application.Close(shutdownCtx); err != nil {
+	if err := embeddedApp.Close(shutdownCtx); err != nil {
 		log.WithError(err).Error("Application shutdown encountered issues")
 	}
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/doujins-org/doujins-billing/internal/db/models"
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 )
 
 // WebhookProcessor orchestrates loading, dispatching, and updating webhook events.
@@ -27,18 +28,36 @@ func (p *WebhookProcessor) Process(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("get webhook event: %w", err)
 	}
+	if event.Status == WebhookStatusProcessed {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"event_id":  event.ID,
+			"processor": event.Processor,
+			"eventType": event.EventType,
+		}).Info("webhook already processed; skipping")
+		return nil
+	}
 
 	if err := p.Dispatcher.Process(ctx, event); err != nil {
 		// Mark as failed for audit trail
 		if markErr := p.Events.MarkFailed(ctx, id, err); markErr != nil {
 			return fmt.Errorf("processing failed and could not mark failure: %w (original: %v)", markErr, err)
 		}
+		log.WithContext(ctx).WithFields(log.Fields{
+			"event_id":  event.ID,
+			"processor": event.Processor,
+			"eventType": event.EventType,
+		}).WithError(err).Error("webhook processing failed")
 		return err
 	}
 
 	if err := p.Events.MarkProcessed(ctx, id); err != nil {
 		return fmt.Errorf("mark webhook success: %w", err)
 	}
+	log.WithContext(ctx).WithFields(log.Fields{
+		"event_id":  event.ID,
+		"processor": event.Processor,
+		"eventType": event.EventType,
+	}).Info("webhook processed")
 	return nil
 }
 

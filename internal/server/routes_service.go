@@ -39,6 +39,16 @@ func (s *Server) registerServiceRoutes() {
 		{
 			// GET /v1/users/:user_id/entitlements - Get user's active entitlements
 			users.GET("/entitlements", s.wrap(handlers.ServiceGetUserEntitlements))
+			// GET /v1/users/:user_id/credits - Get user's credit balance
+			users.GET("/credits", s.wrap(handlers.ServiceGetUserCredits))
+		}
+
+		credits := v1.Group("/credits")
+		{
+			credits.POST("/withdraw", s.wrap(handlers.ServiceWithdrawCredits))
+			credits.POST("/hold", s.wrap(handlers.ServiceHoldCredits))
+			credits.POST("/hold/:id/capture", s.wrap(handlers.ServiceCaptureHold))
+			credits.POST("/hold/:id/release", s.wrap(handlers.ServiceReleaseHold))
 		}
 	}
 

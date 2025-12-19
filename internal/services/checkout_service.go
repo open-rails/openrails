@@ -6,6 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +30,8 @@ type CheckoutRequest struct {
 	PaymentMethodID string `json:"payment_method_id,omitempty"` // For stored payment methods
 	PaymentToken    string `json:"payment_token,omitempty"`     // For direct tokenized card
 	Processor       string `json:"processor"`                   // mobius, ccbill, solana
+	SuccessURL      string `json:"success_url,omitempty"`
+	CancelURL       string `json:"cancel_url,omitempty"`
 
 	// IdempotencyKey is an optional client-provided key for deduplication.
 	// If provided, the same key with a successful result will return the cached response.
@@ -440,6 +446,8 @@ func (s *CheckoutService) processSubscription(
 		return s.processCCBillSubscription(ctx, req, user, price)
 	case "mobius", "nmi":
 		return s.processNMISubscription(ctx, req, user, price, product, coverage)
+	case "stripe":
+		return s.processStripeSubscription(ctx, req, user, price, coverage)
 	case "solana":
 		return nil, errors.New("solana does not support recurring subscriptions; use a one-time price instead")
 	default:
@@ -464,6 +472,8 @@ func (s *CheckoutService) processOneTimePurchase(
 		return s.processSolanaPurchase(ctx, req, user, price, product, coverage)
 	case "ccbill":
 		return nil, errors.New("ccbill does not support one-time purchases; use a subscription price instead")
+	case "stripe":
+		return s.processStripePayment(ctx, req, user, price)
 	default:
 		return nil, fmt.Errorf("unsupported processor for one-time purchases: %s", processor)
 	}
@@ -955,6 +965,197 @@ func (s *CheckoutService) processSolanaPurchase(
 		Action:  "new",
 		Message: "Use POST /v1/payment-intents to create a Solana payment",
 	}, nil
+}
+
+func (s *CheckoutService) processStripeSubscription(
+	ctx context.Context,
+	req *CheckoutRequest,
+	user *UserIdentity,
+	price *models.Price,
+	coverage *CoverageInfo,
+) (*CheckoutResponse, error) {
+	if s.Config == nil || s.Config.Stripe == nil {
+		return nil, errors.New("stripe configuration is not available")
+	}
+	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+		return nil, errors.New("stripe secret key is not configured")
+	}
+	stripePriceID, err := getStripePriceID(price)
+	if err != nil {
+		return nil, err
+	}
+	successURL := strings.TrimSpace(req.SuccessURL)
+	cancelURL := strings.TrimSpace(req.CancelURL)
+	if successURL == "" {
+		successURL = strings.TrimSpace(s.Config.Stripe.SuccessURL)
+	}
+	if cancelURL == "" {
+		cancelURL = strings.TrimSpace(s.Config.Stripe.CancelURL)
+	}
+	if successURL == "" || cancelURL == "" {
+		return nil, errors.New("stripe success/cancel URLs not available")
+	}
+
+	trialEnd := int64(0)
+	if coverage != nil && coverage.HasCoverage && coverage.EndDate != nil && coverage.EndDate.After(time.Now().Add(5*time.Minute)) {
+		trialEnd = coverage.EndDate.Unix()
+	}
+	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
+		Mode:            "subscription",
+		PriceID:         stripePriceID,
+		SuccessURL:      successURL,
+		CancelURL:       cancelURL,
+		UserID:          user.ID,
+		InternalPriceID: price.ID.String(),
+		TrialEnd:        trialEnd,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &CheckoutResponse{
+		Status:      "redirect_required",
+		Action:      "new",
+		Message:     "Redirect to Stripe checkout",
+		RedirectURL: urlStr,
+	}, nil
+}
+
+func (s *CheckoutService) processStripePayment(
+	ctx context.Context,
+	req *CheckoutRequest,
+	user *UserIdentity,
+	price *models.Price,
+) (*CheckoutResponse, error) {
+	if s.Config == nil || s.Config.Stripe == nil {
+		return nil, errors.New("stripe configuration is not available")
+	}
+	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+		return nil, errors.New("stripe secret key is not configured")
+	}
+	stripePriceID, err := getStripePriceID(price)
+	if err != nil {
+		return nil, err
+	}
+	successURL := strings.TrimSpace(req.SuccessURL)
+	cancelURL := strings.TrimSpace(req.CancelURL)
+	if successURL == "" {
+		successURL = strings.TrimSpace(s.Config.Stripe.SuccessURL)
+	}
+	if cancelURL == "" {
+		cancelURL = strings.TrimSpace(s.Config.Stripe.CancelURL)
+	}
+	if successURL == "" || cancelURL == "" {
+		return nil, errors.New("stripe success/cancel URLs not available")
+	}
+
+	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
+		Mode:            "payment",
+		PriceID:         stripePriceID,
+		SuccessURL:      successURL,
+		CancelURL:       cancelURL,
+		UserID:          user.ID,
+		InternalPriceID: price.ID.String(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &CheckoutResponse{
+		Status:      "redirect_required",
+		Action:      "new",
+		Message:     "Redirect to Stripe checkout",
+		RedirectURL: urlStr,
+	}, nil
+}
+
+func getStripePriceID(price *models.Price) (string, error) {
+	if price == nil {
+		return "", errors.New("price is required")
+	}
+	cfg := price.GetProcessorConfig(models.ProcessorStripe)
+	if cfg == nil {
+		return "", errors.New("stripe price not configured")
+	}
+	id := strings.TrimSpace(cfg[models.ProcessorKeyStripePriceID])
+	if id == "" {
+		return "", errors.New("stripe price id missing")
+	}
+	return id, nil
+}
+
+type stripeCheckoutParams struct {
+	Mode            string
+	PriceID         string
+	SuccessURL      string
+	CancelURL       string
+	UserID          string
+	InternalPriceID string
+	TrialEnd        int64
+}
+
+func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
+	if s.Config == nil || s.Config.Stripe == nil {
+		return "", errors.New("stripe configuration is not available")
+	}
+	values := url.Values{}
+	values.Set("mode", params.Mode)
+	values.Set("success_url", params.SuccessURL)
+	values.Set("cancel_url", params.CancelURL)
+	values.Set("client_reference_id", params.UserID)
+	values.Set("line_items[0][price]", params.PriceID)
+	values.Set("line_items[0][quantity]", "1")
+	values.Set("metadata[user_id]", params.UserID)
+	values.Set("metadata[internal_price_id]", params.InternalPriceID)
+	if params.Mode == "subscription" {
+		values.Set("subscription_data[metadata][user_id]", params.UserID)
+		values.Set("subscription_data[metadata][internal_price_id]", params.InternalPriceID)
+		if params.TrialEnd > 0 {
+			values.Set("subscription_data[trial_end]", strconv.FormatInt(params.TrialEnd, 10))
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(values.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.Config.Stripe.SecretKey))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("stripe checkout failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		msg := parseStripeError(body)
+		if msg == "" {
+			msg = fmt.Sprintf("stripe checkout failed (%d)", resp.StatusCode)
+		}
+		return "", errors.New(msg)
+	}
+	var out struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", fmt.Errorf("stripe checkout parse failed: %w", err)
+	}
+	if strings.TrimSpace(out.URL) == "" {
+		return "", errors.New("stripe checkout returned empty URL")
+	}
+	return out.URL, nil
+}
+
+func parseStripeError(body []byte) string {
+	var out struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.Error.Message)
 }
 
 // resolveVault gets an existing vault or creates one from payment token

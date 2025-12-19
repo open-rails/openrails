@@ -36,6 +36,29 @@ func (r *Runtime) buildRiverWorkers(ctx context.Context) (*river.Workers, error)
 	}); err != nil {
 		return nil, fmt.Errorf("add cleanup expired data worker: %w", err)
 	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.CreditExpiryWorker{
+		DB:    r.DB,
+		Clock: clock,
+	}); err != nil {
+		return nil, fmt.Errorf("add credit expiry worker: %w", err)
+	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.CancelSubscriptionWorker{
+		DB:                           r.DB,
+		Config:                       r.Config,
+		UserSubscriptionService:      r.UserSubscriptionService,
+		SubscriptionService:          r.SubscriptionService,
+		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
+	}); err != nil {
+		return nil, fmt.Errorf("add cancel subscription worker: %w", err)
+	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.ResumeSubscriptionWorker{
+		DB:                  r.DB,
+		Config:              r.Config,
+		EntitlementService:  r.EntitlementService,
+		SubscriptionService: r.SubscriptionService,
+	}); err != nil {
+		return nil, fmt.Errorf("add resume subscription worker: %w", err)
+	}
 	return workers, nil
 }
 
@@ -84,6 +107,17 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		river.PeriodicInterval(time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.CleanupExpiredDataArgs{}, &river.InsertOpts{
+				Queue: riverjobs.QueueBilling,
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every hour: expire credit batches
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(time.Hour),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.CreditExpiryArgs{}, &river.InsertOpts{
 				Queue: riverjobs.QueueBilling,
 			}
 		},

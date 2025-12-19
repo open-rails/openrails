@@ -48,6 +48,8 @@ func (s *Server) registerPublicRoutes() {
 	me.GET("/subscriptions", s.wrap(handlers.GetMySubscriptions))
 	me.PUT("/subscriptions/payment-method", s.wrap(handlers.UpdateSubscriptionPaymentMethod))
 	me.POST("/subscriptions/cancel", s.wrap(handlers.CancelSubscription))
+	me.POST("/subscriptions/resume", s.wrap(handlers.ResumeSubscription))
+	me.POST("/subscriptions/change", s.wrap(handlers.ChangeSubscription))
 	me.GET("/payments", s.wrap(handlers.GetUserPayments))
 	me.GET("/payment-methods", s.wrap(handlers.ListPaymentMethods))
 	me.POST("/payment-methods", s.wrap(handlers.CreatePaymentMethod))
@@ -57,6 +59,10 @@ func (s *Server) registerPublicRoutes() {
 	me.GET("/notifications", s.wrap(handlers.GetNotifications))
 	me.GET("/notifications/unread-count", s.wrap(handlers.GetUnreadNotificationCount))
 	me.POST("/notifications/:id/read", s.wrap(handlers.MarkNotificationRead))
+	me.GET("/credits", s.wrap(handlers.GetMyCredits))
+	me.GET("/credits/:type", s.wrap(handlers.GetMyCreditsType))
+	me.GET("/credits/:type/transactions", s.wrap(handlers.GetMyCreditTransactions))
+	me.POST("/portal", s.wrap(handlers.CreatePortalSession))
 
 	s.publicHandler.GET("/health/live", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "billing"})

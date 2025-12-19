@@ -2,7 +2,7 @@
   "issues": [
     {
       "name": "post-charge-crash-safety",
-      "description": "Ensure payment flows are resilient to failures after charging a card.\n\n## Metadata\n\n- Category: critical\n- Status: reverted_and_reconsidered\n- Passes: false\n\n## Details\n\n- card_charging_locations: [\"internal/services/checkout_service.go:processNMISale() - one-time purchases\",\"internal/services/checkout_service.go:processUpgrade() - tier upgrade proration\",\"internal/river/jobs_dunning.go:processSubscription() - subscription rebills\"]\n- context: {\"scenario\":\"User checkout → NMI.RunSale() succeeds (card charged) → subsequent step fails/panics → user sees error\",\"problem\":\"If we charge a card and then crash before returning success, the user sees an error but their card was charged.\",\"critical_window\":\"Between NMI.RunSale() returning success and HTTP 200 being sent to user\"}\n- reverted_approach: {\"what_was_built\":\"Ad-hoc durable workflow system with FulfillPaymentWorker, LazyFulfillmentEnqueuer, and fallback job enqueueing\",\"why_reverted\":[\"Durable workflows don't compensate for faulty code - unit tests do\",\"The ad-hoc retry system was complex but didn't address root causes\",\"Proper durable workflow libraries exist (e.g., go-workflows) if we need this pattern\",\"Simpler solution: idempotency keys prevent double-charging on retry\"],\"files_removed\":[\"internal/river/jobs_fulfill_payment.go\",\"internal/river/fulfillment_enqueuer.go\",\"internal/jobs/fulfillment.go\"],\"reverted_date\":\"2025-12-14\"}\n- correct_approach: {\"primary\":\"Unit tests to ensure code paths work correctly\",\"secondary\":\"Idempotency keys on NMI calls to prevent double-charging (see wrap-nmi-calls-with-idempotency issue)\",\"tertiary\":\"If durable workflows are needed later, use a proper library like go-workflows (see durable-workflow-execution issue)\"}",
+      "description": "Ensure payment flows are resilient to failures after charging a card.\n\n## Metadata\n\n- Category: critical\n- Status: reverted_and_reconsidered\n- Passes: false\n\n## Details\n\n- card_charging_locations: [\"internal/services/checkout_service.go:processNMISale() - one-time purchases\",\"internal/services/checkout_service.go:processUpgrade() - tier upgrade proration\",\"internal/river/jobs_dunning.go:processSubscription() - subscription rebills\"]\n- context: {\"scenario\":\"User checkout \u2192 NMI.RunSale() succeeds (card charged) \u2192 subsequent step fails/panics \u2192 user sees error\",\"problem\":\"If we charge a card and then crash before returning success, the user sees an error but their card was charged.\",\"critical_window\":\"Between NMI.RunSale() returning success and HTTP 200 being sent to user\"}\n- reverted_approach: {\"what_was_built\":\"Ad-hoc durable workflow system with FulfillPaymentWorker, LazyFulfillmentEnqueuer, and fallback job enqueueing\",\"why_reverted\":[\"Durable workflows don't compensate for faulty code - unit tests do\",\"The ad-hoc retry system was complex but didn't address root causes\",\"Proper durable workflow libraries exist (e.g., go-workflows) if we need this pattern\",\"Simpler solution: idempotency keys prevent double-charging on retry\"],\"files_removed\":[\"internal/river/jobs_fulfill_payment.go\",\"internal/river/fulfillment_enqueuer.go\",\"internal/jobs/fulfillment.go\"],\"reverted_date\":\"2025-12-14\"}\n- correct_approach: {\"primary\":\"Unit tests to ensure code paths work correctly\",\"secondary\":\"Idempotency keys on NMI calls to prevent double-charging (see wrap-nmi-calls-with-idempotency issue)\",\"tertiary\":\"If durable workflows are needed later, use a proper library like go-workflows (see durable-workflow-execution issue)\"}",
       "tasks": [
         "REVERTED - See wrap-nmi-calls-with-idempotency for the correct approach",
         "The ad-hoc FulfillPaymentWorker system was removed on 2025-12-14",
@@ -74,15 +74,15 @@
         "[x] - REMOVE old endpoints: POST /v1/subscriptions/:processor (mobius, ccbill, solana) - replaced by unified checkout",
         "[x] - Request: { price_id, payment_method_id } OR { price_id, payment_token }",
         "[x] - Look up Price and check BillingCycleDays:",
-        "[x] - If BillingCycleDays != nil → subscription flow (see deduplication below)",
-        "[x] - If BillingCycleDays == nil → one-time purchase flow",
+        "[x] - If BillingCycleDays != nil \u2192 subscription flow (see deduplication below)",
+        "[x] - If BillingCycleDays == nil \u2192 one-time purchase flow",
         "[x] Deduplication Logic (CRITICAL - check BOTH subscriptions AND entitlements):",
         "[x] - Get user's active entitlements for the Product (from any source: subscription, one-off, admin)",
         "[x] - Get user's active subscriptions for the Product",
         "[x] - Determine 'coverage_end_date' = latest of (subscription.current_period_ends_at, entitlement.end_at)",
-        "[x] - If coverage has NO end date (indefinite) → Block: 'You already have active access'",
-        "[x] - If coverage has an end date → Allow purchase with delayed start = coverage_end_date",
-        "[x] - If no active coverage → Allow immediate purchase",
+        "[x] - If coverage has NO end date (indefinite) \u2192 Block: 'You already have active access'",
+        "[x] - If coverage has an end date \u2192 Allow purchase with delayed start = coverage_end_date",
+        "[x] - If no active coverage \u2192 Allow immediate purchase",
         "[x] - NOTE: No 'expiring soon' threshold - user can buy anytime if coverage has an end date.",
         "[x] Processor-Specific Handling for Delayed Start:",
         "[x] - CCBill: BLOCK if user has existing coverage - CCBill API cannot schedule future start dates",
@@ -101,10 +101,10 @@
         "[x] Entitlement Duration for One-Time:",
         "[x] - Product.EntitlementsSpec has { entitlement_name: duration_days }",
         "[x] Cross-Processor Scenarios:",
-        "[x] - User has NMI sub expiring → buys Solana one-off → Solana entitlement starts when NMI ends",
-        "[x] - User has Solana entitlement expiring → creates NMI sub → NMI sub starts when Solana ends",
-        "[x] - User has CCBill sub expiring → buys NMI sub → NMI starts when CCBill ends",
-        "[x] - User has any coverage → tries CCBill → BLOCKED (CCBill limitation)",
+        "[x] - User has NMI sub expiring \u2192 buys Solana one-off \u2192 Solana entitlement starts when NMI ends",
+        "[x] - User has Solana entitlement expiring \u2192 creates NMI sub \u2192 NMI sub starts when Solana ends",
+        "[x] - User has CCBill sub expiring \u2192 buys NMI sub \u2192 NMI starts when CCBill ends",
+        "[x] - User has any coverage \u2192 tries CCBill \u2192 BLOCKED (CCBill limitation)",
         "[x] Write tests for checkout scenarios (tests/checkout_test.go)",
         "[x] Denormalized ProductID onto Subscription model for efficient product-based lookups:",
         "[x] - Added ProductID column to Subscription model and migration 006_add_subscription_product_id",
@@ -399,9 +399,9 @@
       "description": "Multiple integration tests are failing due to outdated assertions, wrong field names, and test isolation issues\n\n## Metadata\n\n- Category: testing\n- Status: in_progress\n- Passes: false\n\n## Details\n\n- problems: {\"wrong_field_names\":[\"Tests check for 'total_items' but API returns 'total'\",\"Tests check for 'page' and 'page_size' but API uses 'offset' and 'limit'\",\"Tests use 'page=1&page_size=1' query params but API expects 'offset=0&limit=1'\"],\"product_seeding\":[\"TestGetProductsEndpoint expects 2 products but SeedProducts may return more due to test isolation issues\",\"Multiple test suites seed products independently causing count mismatches\"],\"test_isolation\":[\"TestTierGroupDetection panics with 'Fail in goroutine after TestAdminGrantsRequireAuth has completed'\",\"Tests share database state and may interfere with each other\",\"Cleanup functions (defer) may run after test context is gone\"],\"nmi_config\":[\"TestNMIRuntimeClientConfigured checks for real NMI endpoint but test uses mock URL\"]}",
       "tasks": [
         "FIXES APPLIED:",
-        "[x] Changed total_items → total in notifications_test.go",
-        "[x] Changed total_items → total in payment_methods_test.go",
-        "[x] Changed page/page_size → offset/limit in notifications_test.go pagination test",
+        "[x] Changed total_items \u2192 total in notifications_test.go",
+        "[x] Changed total_items \u2192 total in payment_methods_test.go",
+        "[x] Changed page/page_size \u2192 offset/limit in notifications_test.go pagination test",
         "[ ] [PARTIAL] Fixed some assertions to use safe type assertions (total, _ := response['total'].(float64))",
         "REMAINING FIXES:",
         "[ ] Fix TestGetProductsEndpoint to not hardcode expected count or improve test isolation",
@@ -448,7 +448,7 @@
     },
     {
       "name": "durable-workflow-execution",
-      "description": "Evaluate and potentially adopt embedded durable workflow execution for critical payment flows\n\n## Metadata\n\n- Category: architecture\n- Status: on_hold\n- Passes: false\n\n## Details\n\n- status_update: {\"date\":\"2025-12-14\",\"decision\":\"On hold - focus on simpler solutions first\",\"reasoning\":[\"Ad-hoc durable workflow system was built and then reverted\",\"Durable workflows don't compensate for faulty code - unit tests do\",\"Idempotency keys on NMI calls solve the double-charge problem more simply\",\"If we need durable workflows later, use a proper library like go-workflows\"],\"prerequisite\":\"Implement wrap-nmi-calls-with-idempotency first, then reassess if durable workflows are still needed\"}\n- candidate_library: {\"go_workflows\":{\"repo\":\"github.com/cschleiden/go-workflows\",\"maturity\":\"Production-ready, supports PostgreSQL\",\"when_to_adopt\":[\"Multi-step flows that genuinely need crash recovery\",\"Workflows with long-running waits (e.g., approval flows)\",\"Complex saga patterns with compensating transactions\"]}}\n- candidate_workflows: [\"Checkout flow (charge → record → grant entitlements)\",\"Subscription upgrade (charge proration → cancel old → create new)\",\"Dunning/rebill (charge → renew or → escalate failure)\",\"Refund flow (refund at processor → revoke entitlements → update records)\"]\n- when_to_reconsider: [\"After idempotency keys are implemented and we still see issues\",\"When we add complex multi-step flows (e.g., multi-party payouts)\",\"If reconciliation reports show frequent partial-completion issues\"]",
+      "description": "Evaluate and potentially adopt embedded durable workflow execution for critical payment flows\n\n## Metadata\n\n- Category: architecture\n- Status: on_hold\n- Passes: false\n\n## Details\n\n- status_update: {\"date\":\"2025-12-14\",\"decision\":\"On hold - focus on simpler solutions first\",\"reasoning\":[\"Ad-hoc durable workflow system was built and then reverted\",\"Durable workflows don't compensate for faulty code - unit tests do\",\"Idempotency keys on NMI calls solve the double-charge problem more simply\",\"If we need durable workflows later, use a proper library like go-workflows\"],\"prerequisite\":\"Implement wrap-nmi-calls-with-idempotency first, then reassess if durable workflows are still needed\"}\n- candidate_library: {\"go_workflows\":{\"repo\":\"github.com/cschleiden/go-workflows\",\"maturity\":\"Production-ready, supports PostgreSQL\",\"when_to_adopt\":[\"Multi-step flows that genuinely need crash recovery\",\"Workflows with long-running waits (e.g., approval flows)\",\"Complex saga patterns with compensating transactions\"]}}\n- candidate_workflows: [\"Checkout flow (charge \u2192 record \u2192 grant entitlements)\",\"Subscription upgrade (charge proration \u2192 cancel old \u2192 create new)\",\"Dunning/rebill (charge \u2192 renew or \u2192 escalate failure)\",\"Refund flow (refund at processor \u2192 revoke entitlements \u2192 update records)\"]\n- when_to_reconsider: [\"After idempotency keys are implemented and we still see issues\",\"When we add complex multi-step flows (e.g., multi-party payouts)\",\"If reconciliation reports show frequent partial-completion issues\"]",
       "tasks": [
         "ON HOLD - Reassess after implementing idempotency keys",
         "Previous ad-hoc implementation was reverted on 2025-12-14",
@@ -517,6 +517,34 @@
         "[ ] Update frontend to use direct form instead of Mobius iframe"
       ],
       "completed": false
+    },
+    {
+      "name": "embedded-server-mode",
+      "description": "Expose a public embedded-server API so doujins-billing can be used as a library inside another Go app (not just as a standalone binary).\n\n## Metadata\n\n- Category: architecture\n- Status: planned\n- Passes: false\n\n## Details\n\n- goals: [\"Allow embedding as a dependency without importing internal packages\", \"Let host app supply DB/Redis/Auth/Logger\", \"Keep CLI/standalone server intact\"]\n- approach: {\"public_api\":\"pkg/embedded or pkg/server\",\"standalone\":\"main.go uses public API instead of internal directly\",\"dependency_injection\":\"Options struct accepts DB, Redis, Auth provider, Cache, Logger\"}\n- non_goals: [\"Breaking existing CLI flags\", \"Changing billing logic\"]\n\n## Tasks\n\n- [ ] Create public package (e.g., pkg/embedded) exposing New(Options) and Router/Shutdown access\n- [ ] Define Options struct with Config + optional overrides (DB, Redis, Auth, Cache, Logger)\n- [ ] Wire embedded package to internal/app bootstrap and internal/server routing\n- [ ] Return http.Handler for mounting under a prefix in host router\n- [ ] Expose Runtime or lifecycle hooks if host needs background workers\n- [ ] Update main.go to call the new public API (no behavior change)\n- [ ] Add doc snippet in README for embedding usage\n  \n## Notes\n\n- Keep internal/* private; embedding must not import internal packages.\n- Embedded mode should allow host-managed auth (e.g., authkit) and shared DB/Redis.\n",
+      "tasks": [
+        "[x] Add pkg/embedded (or pkg/server) with New(Options) returning Router + Shutdown",
+        "[x] Define Options struct with Config + optional DB/Redis/Auth/Cache/Logger overrides",
+        "[x] Bridge into internal/app + internal/server without exposing internals",
+        "[x] Update main.go to use new public API",
+        "[x] Add README docs + minimal embed example"
+      ],
+      "completed": true,
+      "completed_notes": "Implemented pkg/embedded with Options (config + optional DB/Redis/Auth/Cache), added public authprovider interface, and switched main.go to use embedded server. README updated with embed example."
+    },
+    {
+      "name": "stripe-subscriptions-and-credit-bundles",
+      "description": "Support Stripe subscriptions plus bundled promotional credits, and purchased API credit top-ups with expiry. Billing remains source of truth for entitlements + credits; rate-limits stay in void-tech.\n\n## Metadata\n\n- Category: feature\n- Status: planned\n- Passes: false\n\n## Requirements\n\n- Subscriptions via Stripe (webhooks drive state).\n- Products can grant BOTH subscription entitlements (tiers) AND promotional credits.\n- Promotional credits expire in 90 days.\n- Purchased API credits expire in 1 year.\n- Spend order: promo credits first, then purchased.\n- Entitlements reflect tiers: premium-1/2/3.\n- Rate-limits remain in void-tech (no rate-limit logic in billing).\n\n## Tasks\n\n- [ ] Extend product/price config to include `credits_spec` (amount + expiry + grant cadence)\n- [ ] Implement credits tables per credits plan (balances + expiry batches + ledger)\n- [ ] Add credit grant helpers: promo (90d) + purchased (365d)\n- [ ] Wire Stripe webhook handling: on invoice.paid/subscription updates, sync subscription + entitlements + promo credits\n- [ ] Add one-time Stripe purchase webhook to grant purchased credits (1y)\n- [ ] Enforce spend order FIFO by earliest expiry, then purchased\n- [ ] Add endpoints: /v1/me/credits*, /v1/internal/credits/* (withdraw/hold/capture/release)\n- [ ] Add service endpoint for entitlements (already exists) and credits balance lookup\n- [ ] Add docs + examples for host app integration (void-tech calls billing for credits/entitlements only)\n",
+      "tasks": [
+        "[x] Add product credits_spec (promo amount, expiry, cadence)",
+        "[x] Implement credits storage (balances, ledger, expiry batches)",
+        "[x] Stripe webhook: grant entitlements + promo credits on paid invoices",
+        "[x] Stripe one-time purchase: grant purchased credits (1y)",
+        "[x] Credits API (me + internal) + spend order enforcement",
+        "[x] Document integration contract with void-tech"
+      ],
+      "completed": true,
+      "status": "completed",
+      "completed_notes": "Implemented credits schema + models + service with FIFO spend/holds, added product credits_spec, Stripe webhook handling for invoice.paid and checkout.session.completed (subscriptions + one-time purchases), created credits APIs (public + service), and documented credits endpoints."
     }
   ]
 }

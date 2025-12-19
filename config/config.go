@@ -53,6 +53,7 @@ type Config struct {
 	CCBill      *CCBillConfig     `koanf:"ccbill,omitempty"`
 	Webhooks    *WebhookConfig    `koanf:"webhooks,omitempty"`
 	Solana      *SolanaConfig     `koanf:"solana,omitempty"`
+	Stripe      *StripeConfig     `koanf:"stripe,omitempty"`
 	DB          *DBConfig         `koanf:"db,omitempty"`
 	Redis       *RedisConfig      `koanf:"redis,omitempty"`
 	Auth        *AuthConfig       `koanf:"auth,omitempty"`
@@ -142,6 +143,13 @@ type NMIProviderConfig struct {
 	TestMode        *bool  `koanf:"test_mode"`
 	DirectPostURL   string `koanf:"direct_post_url"`
 	QueryURL        string `koanf:"query_url"`
+}
+
+type StripeConfig struct {
+	SecretKey     string `koanf:"secret_key"`
+	WebhookSecret string `koanf:"webhook_secret"`
+	SuccessURL    string `koanf:"success_url"`
+	CancelURL     string `koanf:"cancel_url"`
 }
 
 type NMIProviderSettings struct {
@@ -317,6 +325,10 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
 
+	if err := validateStripe(cfg.Stripe); err != nil {
+		return fmt.Errorf("stripe config validation failed: %w", err)
+	}
+
 	// Note: Webhook retry config validation removed - webhooks are now synchronous-only
 
 	return nil
@@ -325,6 +337,19 @@ func Validate(cfg *Config) error {
 // validateWebhookConfig is deprecated - webhook retry config is no longer used.
 // Keeping as no-op for backwards compatibility.
 func validateWebhookConfig(cfg *Config) error {
+	return nil
+}
+
+func validateStripe(cfg *StripeConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	if strings.TrimSpace(cfg.SecretKey) == "" {
+		log.Warn("stripe secret key not configured; checkout will be unavailable")
+	}
+	if strings.TrimSpace(cfg.WebhookSecret) == "" {
+		log.Warn("stripe webhook secret not configured; signature verification will be disabled")
+	}
 	return nil
 }
 

@@ -28,7 +28,16 @@ import (
 	"github.com/jonboulle/clockwork"
 )
 
+type runtimeOverrides struct {
+	DB    *db.DB
+	Redis *redis.Client
+}
+
 func buildRuntime(cfg *config.Config) (*Runtime, error) {
+	return buildRuntimeWithOverrides(cfg, nil)
+}
+
+func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
 	// Initialize NMI-backed processors from config BEFORE creating clients
 	// This ensures IsNMIBacked() works correctly for all configured processors
 	processors.InitNMIBackedProcessors(cfg)
@@ -36,14 +45,30 @@ func buildRuntime(cfg *config.Config) (*Runtime, error) {
 	// Create clock early so it can be passed to services
 	clock := clockwork.NewRealClock()
 
-	database, err := createDatabase(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create db: %w", err)
+	var (
+		database    *db.DB
+		redisClient *redis.Client
+		err         error
+	)
+	if overrides != nil && overrides.DB != nil {
+		if err := validateDatabase(cfg, overrides.DB); err != nil {
+			return nil, err
+		}
+		database = overrides.DB
+	} else {
+		database, err = createDatabase(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create db: %w", err)
+		}
 	}
 
-	redisClient, err := createRedisClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create redis client: %w", err)
+	if overrides != nil && overrides.Redis != nil {
+		redisClient = overrides.Redis
+	} else {
+		redisClient, err = createRedisClient(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create redis client: %w", err)
+		}
 	}
 
 	ccbillClient := createCCBillClient(cfg)
@@ -111,6 +136,8 @@ func buildRuntime(cfg *config.Config) (*Runtime, error) {
 
 		CheckoutService:   serviceInstances.CheckoutService,
 		AdminGrantService: serviceInstances.AdminGrantService,
+		CreditsService:    serviceInstances.CreditsService,
+		ProcessorCustomerService: serviceInstances.ProcessorCustomerService,
 	}
 	runtime.WebhookProcessor = &services.WebhookProcessor{
 		Events:     runtime.WebhookEventService,
@@ -172,8 +199,22 @@ func createDatabase(cfg *config.Config) (*db.DB, error) {
 		return nil, err
 	}
 
+	if err := validateDatabase(cfg, database); err != nil {
+		return nil, err
+	}
+	return database, nil
+}
+
+func validateDatabase(cfg *config.Config, database *db.DB) error {
+	if database == nil {
+		return fmt.Errorf("database is nil")
+	}
+
 	// Validate that all migrations have been applied before starting
-	bunDB := database.GetDB().(*bun.DB)
+	bunDB, ok := database.GetDB().(*bun.DB)
+	if !ok || bunDB == nil || bunDB.DB == nil {
+		return fmt.Errorf("database must wrap *bun.DB")
+	}
 	sqlDB := bunDB.DB
 
 	if err := migratekit.ValidatePostgresMigrations(context.Background(), sqlDB,
@@ -181,7 +222,7 @@ func createDatabase(cfg *config.Config) (*db.DB, error) {
 		migratekit.MigrationSource{App: "billing", FS: postgresmigrations.FS},
 	); err != nil {
 		log.WithError(err).Fatal("Postgres migrations validation failed")
-		return nil, err
+		return err
 	}
 
 	// Validate ClickHouse migrations if ClickHouse is configured
@@ -203,7 +244,7 @@ func createDatabase(cfg *config.Config) (*db.DB, error) {
 		}
 	}
 
-	return database, nil
+	return nil
 }
 
 func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
@@ -327,6 +368,8 @@ type servicesInstances struct {
 
 	CheckoutService   *services.CheckoutService
 	AdminGrantService *services.AdminGrantService
+	CreditsService    *services.CreditsService
+	ProcessorCustomerService *services.ProcessorCustomerService
 }
 
 func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock) *servicesInstances {
@@ -339,6 +382,9 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	purchaseService.Clock = clock
 	entitlementService := services.NewEntitlementService(database)
 	entitlementService.Clock = clock
+	creditsService := services.NewCreditsService(database)
+	creditsService.Clock = clock
+	processorCustomerService := services.NewProcessorCustomerService(database)
 	profileRepo := repo.NewProfileRepo(database)
 	solanaPaymentService := services.NewSolanaPaymentService(database, cfg, priceService, purchaseService, productService, entitlementService, nil)
 	solanaPaymentService.Clock = clock
@@ -414,8 +460,10 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		ProfileRepo:                  profileRepo,
 		DeduplicationService:         deduplicationService,
+		ProcessorCustomerService:     processorCustomerService,
 		CCBillRESTClient:             ccbillRESTClient,
 		NMIClients:                   nmiClients,
+		CreditsService:               creditsService,
 	}
 
 	// Create checkout service for unified checkout endpoint
@@ -432,6 +480,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		cfg,
 	)
 	checkoutService.Clock = clock
+	webhookDispatcher.CheckoutService = checkoutService
 
 	// Wire up checkoutService to solanaPayService for eligibility checks
 	solanaPayService.SetCheckoutService(checkoutService)
@@ -477,6 +526,8 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		WebhookDispatcher:            webhookDispatcher,
 		CheckoutService:              checkoutService,
 		AdminGrantService:            adminGrantService,
+		CreditsService:               creditsService,
+		ProcessorCustomerService:     processorCustomerService,
 	}
 }
 

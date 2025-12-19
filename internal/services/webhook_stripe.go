@@ -1,0 +1,366 @@
+package services
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/doujins-org/doujins-billing/internal/db"
+	"github.com/doujins-org/doujins-billing/internal/db/models"
+	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
+)
+
+type StripeWebhookService struct {
+	DB                           *db.DB
+	PriceService                 *PriceService
+	ProductService               *ProductService
+	SubscriptionService          *SubscriptionService
+	SubscriptionLifecycleService *SubscriptionLifecycleService
+	CheckoutService              *CheckoutService
+	PaymentService               *PaymentService
+	CreditsService               *CreditsService
+	DeduplicationService         *DeduplicationService
+	ProcessorCustomerService     *ProcessorCustomerService
+}
+
+type stripeEvent struct {
+	ID      string          `json:"id"`
+	Type    string          `json:"type"`
+	Created int64           `json:"created"`
+	Data    stripeEventData `json:"data"`
+}
+
+type stripeEventData struct {
+	Object json.RawMessage `json:"object"`
+}
+
+type stripeInvoice struct {
+	ID            string            `json:"id"`
+	Subscription  string            `json:"subscription"`
+	Customer      string            `json:"customer"`
+	CustomerEmail string            `json:"customer_email"`
+	AmountPaid    int64             `json:"amount_paid"`
+	Currency      string            `json:"currency"`
+	Metadata      map[string]string `json:"metadata"`
+	Lines         struct {
+		Data []struct {
+			Price struct {
+				ID string `json:"id"`
+			} `json:"price"`
+		} `json:"data"`
+	} `json:"lines"`
+}
+
+type stripeCheckoutSession struct {
+	ID            string            `json:"id"`
+	Mode          string            `json:"mode"`
+	Subscription  string            `json:"subscription"`
+	Customer      string            `json:"customer"`
+	CustomerEmail string            `json:"customer_email"`
+	Metadata      map[string]string `json:"metadata"`
+	AmountTotal   int64             `json:"amount_total"`
+	Currency      string            `json:"currency"`
+}
+
+func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload []byte) error {
+	var evt stripeEvent
+	if err := json.Unmarshal(payload, &evt); err != nil {
+		return fmt.Errorf("parse stripe event: %w", err)
+	}
+
+	eventID := strings.TrimSpace(evt.ID)
+	eventType := strings.TrimSpace(evt.Type)
+	if eventID == "" || eventType == "" {
+		return fmt.Errorf("stripe event missing id or type")
+	}
+
+	if s.DeduplicationService != nil {
+		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.ProcessorStripe, evt, func(ctx context.Context) error {
+			return s.handleEvent(ctx, eventType, evt.Data.Object)
+		})
+	}
+	return s.handleEvent(ctx, eventType, evt.Data.Object)
+}
+
+func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string, obj json.RawMessage) error {
+	switch eventType {
+	case "invoice.paid":
+		return s.handleInvoicePaid(ctx, obj)
+	case "checkout.session.completed":
+		return s.handleCheckoutSessionCompleted(ctx, obj)
+	case "customer.subscription.updated":
+		return s.handleSubscriptionUpdated(ctx, obj)
+	case "customer.subscription.deleted":
+		return s.handleSubscriptionDeleted(ctx, obj)
+	default:
+		log.WithField("event_type", eventType).Info("stripe webhook ignored (not handled)")
+		return nil
+	}
+}
+
+func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.RawMessage) error {
+	var inv stripeInvoice
+	if err := json.Unmarshal(obj, &inv); err != nil {
+		return fmt.Errorf("parse invoice: %w", err)
+	}
+	userID := pickMetadata(inv.Metadata, "user_id", "userId", "uid")
+	if userID == "" {
+		return fmt.Errorf("stripe invoice missing user_id metadata")
+	}
+	if s.ProcessorCustomerService != nil {
+		customerID := strings.TrimSpace(inv.Customer)
+		if customerID != "" {
+			_ = s.ProcessorCustomerService.Upsert(ctx, userID, string(models.ProcessorStripe), customerID)
+		}
+	}
+	priceID, price, err := s.resolvePriceFromMetadata(ctx, inv.Metadata, inv.Lines.Data)
+	if err != nil {
+		return err
+	}
+
+	processorSubID := strings.TrimSpace(inv.Subscription)
+	if processorSubID == "" {
+		return fmt.Errorf("stripe invoice missing subscription id")
+	}
+
+	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), "", processorSubID)
+	if err != nil {
+		sub, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &CreateMembershipParams{
+			UserID:                  userID,
+			UserEmail:               nullableString(inv.CustomerEmail),
+			PriceID:                 priceID,
+			Processor:               models.ProcessorStripe,
+			ProcessorSubscriptionID: &processorSubID,
+			TransactionID:           inv.ID,
+			Amount:                  inv.AmountPaid,
+			Currency:                inv.Currency,
+		})
+		if err != nil {
+			return fmt.Errorf("create membership: %w", err)
+		}
+	} else {
+		if err := s.SubscriptionLifecycleService.RenewMembership(ctx, &RenewMembershipParams{
+			Processor:               models.ProcessorStripe,
+			ProcessorSubscriptionID: processorSubID,
+			TransactionID:           inv.ID,
+			Amount:                  inv.AmountPaid,
+			Currency:                inv.Currency,
+		}); err != nil {
+			return fmt.Errorf("renew membership: %w", err)
+		}
+	}
+
+	if price == nil {
+		price, err = s.PriceService.GetByID(ctx, priceID)
+		if err != nil {
+			return fmt.Errorf("price lookup failed: %w", err)
+		}
+	}
+	product, err := s.ProductService.GetByID(ctx, price.ProductID)
+	if err != nil {
+		return fmt.Errorf("product lookup failed: %w", err)
+	}
+
+	if product.CreditsSpec != nil && product.CreditsSpec.PromoAmountCents > 0 {
+		days := product.CreditsSpec.PromoExpiresDays
+		if days <= 0 {
+			days = 90
+		}
+		expiresAt := time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour)
+		_, err := s.CreditsService.Deposit(ctx, CreditDepositParams{
+			UserID:     userID,
+			CreditType: "api_credits",
+			Amount:     product.CreditsSpec.PromoAmountCents,
+			Source:     "promo",
+			SourceID:   &sub.ID,
+			ExpiresAt:  &expiresAt,
+		})
+		if err != nil {
+			return fmt.Errorf("grant promo credits: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Context, obj json.RawMessage) error {
+	var sess stripeCheckoutSession
+	if err := json.Unmarshal(obj, &sess); err != nil {
+		return fmt.Errorf("parse checkout session: %w", err)
+	}
+	userID := pickMetadata(sess.Metadata, "user_id", "userId", "uid")
+	if userID == "" {
+		return fmt.Errorf("stripe checkout missing user_id metadata")
+	}
+	if s.ProcessorCustomerService != nil {
+		customerID := strings.TrimSpace(sess.Customer)
+		if customerID != "" {
+			_ = s.ProcessorCustomerService.Upsert(ctx, userID, string(models.ProcessorStripe), customerID)
+		}
+	}
+	if sess.Mode != "payment" {
+		return nil
+	}
+	priceID, price, err := s.resolvePriceFromMetadata(ctx, sess.Metadata, nil)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.CheckoutService.RegisterPurchase(ctx, &RegisterPurchaseRequest{
+		UserID:        userID,
+		PriceID:       priceID,
+		Processor:     string(models.ProcessorStripe),
+		TransactionID: sess.ID,
+		Amount:        sess.AmountTotal,
+		Currency:      sess.Currency,
+	})
+	if err != nil {
+		return fmt.Errorf("register purchase: %w", err)
+	}
+
+	// Grant purchased credits (dollar-for-dollar) with 1-year expiry
+	if price == nil {
+		price, err = s.PriceService.GetByID(ctx, priceID)
+		if err != nil {
+			return fmt.Errorf("price lookup failed: %w", err)
+		}
+	}
+	expiresAt := time.Now().UTC().Add(365 * 24 * time.Hour)
+	_, err = s.CreditsService.Deposit(ctx, CreditDepositParams{
+		UserID:     userID,
+		CreditType: "api_credits",
+		Amount:     price.Amount,
+		Source:     "purchase",
+		SourceID:   nil,
+		ExpiresAt:  &expiresAt,
+	})
+	if err != nil {
+		return fmt.Errorf("grant purchased credits: %w", err)
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) handleSubscriptionDeleted(ctx context.Context, obj json.RawMessage) error {
+	var data struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(obj, &data); err != nil {
+		return fmt.Errorf("parse subscription: %w", err)
+	}
+	if data.ID == "" {
+		return nil
+	}
+	return s.SubscriptionLifecycleService.CancelMembership(ctx, &CancelMembershipParams{
+		Processor:               ptrProcessor(models.ProcessorStripe),
+		ProcessorSubscriptionID: &data.ID,
+		CancelType:              models.CancelTypeUser,
+		RevokeAccess:            false,
+	})
+}
+
+func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, obj json.RawMessage) error {
+	var data struct {
+		ID                 string `json:"id"`
+		Status             string `json:"status"`
+		CurrentPeriodStart int64  `json:"current_period_start"`
+		CurrentPeriodEnd   int64  `json:"current_period_end"`
+		Items              struct {
+			Data []struct {
+				Price struct {
+					ID string `json:"id"`
+				} `json:"price"`
+			} `json:"data"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(obj, &data); err != nil {
+		return fmt.Errorf("parse subscription update: %w", err)
+	}
+	subID := strings.TrimSpace(data.ID)
+	if subID == "" {
+		return nil
+	}
+	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), "", subID)
+	if err != nil {
+		return nil
+	}
+
+	if len(data.Items.Data) > 0 {
+		stripePrice := strings.TrimSpace(data.Items.Data[0].Price.ID)
+		if stripePrice != "" {
+			price, err := s.PriceService.GetByStripePriceID(ctx, stripePrice)
+			if err == nil && price != nil {
+				sub.PriceID = price.ID
+				sub.ProductID = price.ProductID
+				sub.ScheduledPriceID = nil
+			} else {
+				log.WithFields(log.Fields{
+					"stripe_price_id": stripePrice,
+					"subscription_id": sub.ID,
+				}).Warn("stripe subscription update price not mapped")
+			}
+		}
+	}
+
+	if data.CurrentPeriodStart > 0 {
+		ts := time.Unix(data.CurrentPeriodStart, 0).UTC()
+		sub.CurrentPeriodStartsAt = &ts
+	}
+	if data.CurrentPeriodEnd > 0 {
+		ts := time.Unix(data.CurrentPeriodEnd, 0).UTC()
+		sub.CurrentPeriodEndsAt = &ts
+	}
+
+	status := strings.TrimSpace(strings.ToLower(data.Status))
+	if status == "active" {
+		sub.Status = models.StatusActive
+	}
+
+	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
+		return fmt.Errorf("update subscription from stripe: %w", err)
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) resolvePriceFromMetadata(ctx context.Context, metadata map[string]string, lines []struct {
+	Price struct {
+		ID string `json:"id"`
+	} `json:"price"`
+}) (uuid.UUID, *models.Price, error) {
+	if idStr := pickMetadata(metadata, "internal_price_id", "price_id"); idStr != "" {
+		priceID, err := uuid.Parse(idStr)
+		if err == nil {
+			return priceID, nil, nil
+		}
+	}
+	if len(lines) > 0 && lines[0].Price.ID != "" {
+		price, err := s.PriceService.GetByStripePriceID(ctx, lines[0].Price.ID)
+		if err != nil {
+			return uuid.Nil, nil, fmt.Errorf("stripe price not mapped")
+		}
+		return price.ID, price, nil
+	}
+	return uuid.Nil, nil, fmt.Errorf("unable to resolve price")
+}
+
+func pickMetadata(meta map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(meta[k]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func nullableString(v string) *string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+func ptrProcessor(p models.Processor) *models.Processor {
+	return &p
+}

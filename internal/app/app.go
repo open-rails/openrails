@@ -2,14 +2,18 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
+	"github.com/uptrace/bun"
 
 	"github.com/doujins-org/doujins-billing/config"
 	"github.com/doujins-org/doujins-billing/internal/auth"
+	"github.com/doujins-org/doujins-billing/internal/db"
+	"github.com/doujins-org/doujins-billing/pkg/authprovider"
 	"github.com/doujins-org/doujins-billing/pkg/cache"
 )
 
@@ -19,13 +23,27 @@ type App struct {
 	Runtime      *Runtime
 	Cache        cache.Cache
 	RedisClient  *redis.Client
-	AuthProvider auth.Provider
+	AuthProvider authprovider.Provider
 
 	stopRedisMonitor context.CancelFunc
 }
 
+// BootstrapOptions controls optional overrides for embedded use.
+type BootstrapOptions struct {
+	DB           *sql.DB
+	BunDB        *bun.DB
+	Redis        *redis.Client
+	AuthProvider authprovider.Provider
+	Cache        cache.Cache
+}
+
 // Bootstrap initialises core services, caches, and auth verifier.
 func Bootstrap(cfg *config.Config) (*App, error) {
+	return BootstrapWithOptions(cfg, nil)
+}
+
+// BootstrapWithOptions initialises core services with optional overrides.
+func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -44,30 +62,67 @@ func Bootstrap(cfg *config.Config) (*App, error) {
 		}
 	}
 
-	authProvider, err := auth.NewProvider(cfg.Auth)
-	if err != nil {
-		return nil, fmt.Errorf("build auth provider: %w", err)
+	authProvider := authprovider.Provider(nil)
+	if opts != nil && opts.AuthProvider != nil {
+		authProvider = opts.AuthProvider
+	} else {
+		ap, err := auth.NewProvider(cfg.Auth)
+		if err != nil {
+			return nil, fmt.Errorf("build auth provider: %w", err)
+		}
+		authProvider = ap
 	}
 
-	runtime, err := buildRuntime(cfg)
+	var dbOverride *db.DB
+	if opts != nil {
+		switch {
+		case opts.BunDB != nil:
+			if dbo, err := db.NewWithBun(opts.BunDB); err != nil {
+				return nil, fmt.Errorf("use bun db: %w", err)
+			} else {
+				dbOverride = dbo
+			}
+		case opts.DB != nil:
+			if dbo, err := db.NewWithSQLDB(opts.DB); err != nil {
+				return nil, fmt.Errorf("use sql db: %w", err)
+			} else {
+				dbOverride = dbo
+			}
+		}
+	}
+
+	runtime, err := buildRuntimeWithOverrides(cfg, &runtimeOverrides{
+		DB: dbOverride,
+		Redis: func() *redis.Client {
+			if opts != nil {
+				return opts.Redis
+			}
+			return nil
+		}(),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("initialise runtime: %w", err)
 	}
 
-	memoryCache := cache.NewMemoryCache()
-	switchable := cache.NewSwitchableCache(memoryCache)
-
+	var appCache cache.Cache
 	var stop context.CancelFunc
-	if runtime.RedisClient != nil {
-		stop = monitorRedis(runtime.RedisClient, switchable, memoryCache)
+	if opts != nil && opts.Cache != nil {
+		appCache = opts.Cache
 	} else {
-		log.Warn("redis not configured; cache operating in-memory only")
+		memoryCache := cache.NewMemoryCache()
+		switchable := cache.NewSwitchableCache(memoryCache)
+		appCache = switchable
+		if runtime.RedisClient != nil {
+			stop = monitorRedis(runtime.RedisClient, switchable, memoryCache)
+		} else {
+			log.Warn("redis not configured; cache operating in-memory only")
+		}
 	}
 
 	return &App{
 		Config:           cfg,
 		Runtime:          runtime,
-		Cache:            switchable,
+		Cache:            appCache,
 		RedisClient:      runtime.RedisClient,
 		AuthProvider:     authProvider,
 		stopRedisMonitor: stop,

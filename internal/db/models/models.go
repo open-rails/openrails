@@ -13,6 +13,7 @@ const (
 	ProcessorMobius Processor = "mobius" // Card payments via NMI gateway
 	ProcessorCCBill Processor = "ccbill" // CCBill processor (self-contained)
 	ProcessorSolana Processor = "solana" // Solana crypto payments (self-contained)
+	ProcessorStripe Processor = "stripe" // Stripe processor (subscriptions + one-time)
 	ProcessorPayPal Processor = "paypal" // PayPal processor (self-contained)
 	ProcessorAdmin  Processor = "admin"  // Admin-initiated payments (comps, manual payments via PayPal/cash/etc.)
 
@@ -33,6 +34,12 @@ var ModelRegistry = []any{
 	(*NotificationQueue)(nil),
 	(*Entitlement)(nil),
 	(*AdminGrant)(nil),
+	(*CreditType)(nil),
+	(*UserCreditBalance)(nil),
+	(*CreditTransaction)(nil),
+	(*CreditExpiryBatch)(nil),
+	(*CreditHold)(nil),
+	(*ProcessorCustomer)(nil),
 }
 
 func RegisterModels(db *bun.DB) {

@@ -28,8 +28,11 @@ type WebhookDispatcher struct {
 	SubscriptionLifecycleService *SubscriptionLifecycleService
 	ProfileRepo                  *repo.ProfileRepo
 	DeduplicationService         *DeduplicationService
+	ProcessorCustomerService     *ProcessorCustomerService
 	CCBillRESTClient             *ccbill.RESTClient
 	NMIClients                   map[string]*nmi.NMIClient
+	CheckoutService              *CheckoutService
+	CreditsService               *CreditsService
 }
 
 // Process executes the processor-specific webhook flow.
@@ -43,6 +46,8 @@ func (d *WebhookDispatcher) Process(ctx context.Context, event *models.WebhookEv
 		return d.processCCBill(ctx, event)
 	case processors.IsNMIBacked(processor):
 		return d.processNMI(ctx, event)
+	case processor == "stripe":
+		return d.processStripe(ctx, event)
 	default:
 		return fmt.Errorf("unsupported webhook processor: %s", processor)
 	}
@@ -104,6 +109,22 @@ func (d *WebhookDispatcher) processNMI(ctx context.Context, event *models.Webhoo
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
 	}
 	return service.HandleNMIWebhook(ctx)
+}
+
+func (d *WebhookDispatcher) processStripe(ctx context.Context, event *models.WebhookEvent) error {
+	service := StripeWebhookService{
+		DB:                           d.DB,
+		PriceService:                 d.PriceService,
+		ProductService:               d.ProductService,
+		SubscriptionService:          d.SubscriptionService,
+		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
+		CheckoutService:              d.CheckoutService,
+		PaymentService:               d.PaymentService,
+		CreditsService:               d.CreditsService,
+		DeduplicationService:         d.DeduplicationService,
+		ProcessorCustomerService:     d.ProcessorCustomerService,
+	}
+	return service.HandleStripeWebhook(ctx, []byte(event.RawPayload))
 }
 
 func extractProcessor(headers map[string]string) string {

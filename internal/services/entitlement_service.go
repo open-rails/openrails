@@ -121,6 +121,12 @@ func (s *EntitlementService) EndActiveBySubscription(ctx context.Context, subscr
 	return s.repo.EndActiveBySubscription(ctx, subscriptionID, endAt, now, reason)
 }
 
+// ResumeBySubscription clears scheduled end_at for a subscription's entitlements.
+func (s *EntitlementService) ResumeBySubscription(ctx context.Context, subscriptionID uuid.UUID) error {
+	now := s.now()
+	return s.repo.ResumeBySubscription(ctx, subscriptionID, now)
+}
+
 // EndActiveByPayment ends active entitlements for a one-off payment at a given time
 func (s *EntitlementService) EndActiveByPayment(ctx context.Context, paymentID uuid.UUID, endAt time.Time, reason *models.EntitlementRevokeReason) error {
 	now := s.now()

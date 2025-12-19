@@ -55,6 +55,37 @@ func NewDB(cfg *config.DBConfig) (_ *DB, err error) {
 	return dbInstance, nil
 }
 
+func NewWithSQLDB(sqlDB *sql.DB) (*DB, error) {
+	if sqlDB == nil {
+		return nil, fmt.Errorf("sql db is nil")
+	}
+	db := bun.NewDB(sqlDB, pgdialect.New())
+	models.RegisterModels(db)
+	if err := db.PingContext(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	db.AddQueryHook(bundebug.NewQueryHook(
+		bundebug.WithVerbose(false),
+		bundebug.WithEnabled(false),
+	))
+	return &DB{db: db}, nil
+}
+
+func NewWithBun(bunDB *bun.DB) (*DB, error) {
+	if bunDB == nil {
+		return nil, fmt.Errorf("bun db is nil")
+	}
+	models.RegisterModels(bunDB)
+	if err := bunDB.PingContext(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	bunDB.AddQueryHook(bundebug.NewQueryHook(
+		bundebug.WithVerbose(false),
+		bundebug.WithEnabled(false),
+	))
+	return &DB{db: bunDB}, nil
+}
+
 func (d *DB) GetDB() bun.IDB {
 	return d.db
 }

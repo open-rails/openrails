@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/doujins-org/doujins-billing/internal/db"
 	"github.com/doujins-org/doujins-billing/internal/db/models"
 	"github.com/google/uuid"
+	"github.com/jackc/pgconn"
 	"github.com/jonboulle/clockwork"
 )
 
@@ -67,6 +70,20 @@ func (s *WebhookEventService) Create(ctx context.Context, params CreateWebhookEv
 	if params.IPAddress == "" {
 		return nil, fmt.Errorf("ip address is required")
 	}
+	if params.EventID != "" {
+		existing := new(models.WebhookEvent)
+		err := s.db.GetDB().NewSelect().
+			Model(existing).
+			Where("processor = ? AND event_id = ?", processor, params.EventID).
+			Limit(1).
+			Scan(ctx)
+		if err == nil {
+			return existing, nil
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("lookup webhook event: %w", err)
+		}
+	}
 
 	event := &models.WebhookEvent{
 		Processor:      processor,
@@ -81,6 +98,19 @@ func (s *WebhookEventService) Create(ctx context.Context, params CreateWebhookEv
 	}
 
 	if _, err := s.db.GetDB().NewInsert().Model(event).Returning("*").Exec(ctx); err != nil {
+		if params.EventID != "" {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				existing := new(models.WebhookEvent)
+				if selErr := s.db.GetDB().NewSelect().
+					Model(existing).
+					Where("processor = ? AND event_id = ?", processor, params.EventID).
+					Limit(1).
+					Scan(ctx); selErr == nil {
+					return existing, nil
+				}
+			}
+		}
 		return nil, fmt.Errorf("insert webhook event: %w", err)
 	}
 	return event, nil

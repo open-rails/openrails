@@ -37,6 +37,25 @@
 - Env vars: common overrides include `DB_URL`, `REDIS_ADDR`, `CLICKHOUSE_HTTP_ADDR`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_USERNAME`, `CLICKHOUSE_PASSWORD`, `AUTH_ISSUER`, `AUTH_AUDIENCE`.
 - If not provided, the service uses the defaults above.
 
+#### Embedding (optional)
+You can embed the billing server inside another Go service:
+
+```go
+emb, err := embedded.New(embedded.Options{Config: cfg})
+if err != nil {
+  return err
+}
+defer emb.Close(ctx)
+
+router.Handle("/billing/", emb.Handler())
+router.Handle("/billing-internal/", emb.PrivateHandler())
+```
+
+If you want background workers in the same process:
+```go
+go emb.RunWorkers(ctx)
+```
+
 Developer tasks
 - Build: `task build` → outputs `bin/billing`
 - Run (binary): `task run` → builds then runs `billing server`

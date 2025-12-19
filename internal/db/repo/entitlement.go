@@ -162,6 +162,22 @@ func (r *EntitlementRepo) EndActiveBySubscription(ctx context.Context, subscript
 	return err
 }
 
+// ResumeBySubscription clears end_at for active entitlements that were scheduled to end.
+// This is used when a user resumes a cancellation before the current period ends.
+func (r *EntitlementRepo) ResumeBySubscription(ctx context.Context, subscriptionID uuid.UUID, now time.Time) error {
+	_, err := r.db.GetDB().NewUpdate().
+		Model((*models.Entitlement)(nil)).
+		Set("end_at = NULL").
+		Set("updated_at = ?", now).
+		Where("ent.source_type = ?", models.EntitlementSourceSubscription).
+		Where("ent.source_id = ?", subscriptionID).
+		Where("ent.revoked_at IS NULL").
+		Where("ent.end_at IS NOT NULL").
+		Where("ent.end_at > ?", now).
+		Exec(ctx)
+	return err
+}
+
 // EndActiveByPayment ends entitlements for a one-off payment.
 // Returns an error if any entitlement would have end_at <= start_at (zero or negative duration).
 // The now parameter is used for updated_at and revoked_at timestamps to support mock clocks in tests.

@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 
@@ -84,6 +86,11 @@ func Checkout(r *Request) {
 		Country:         req.Country,
 		IdempotencyKey:  r.GinCtx.GetHeader("Idempotency-Key"),
 	}
+	baseURL := guessBaseURL(r.Request)
+	if baseURL != "" {
+		checkoutReq.SuccessURL = baseURL + "/account?subscription=success"
+		checkoutReq.CancelURL = baseURL + "/account?subscription=canceled"
+	}
 
 	user := &services.UserIdentity{
 		ID:       cl.UserID,
@@ -113,4 +120,36 @@ func Checkout(r *Request) {
 	}
 
 	r.GinCtx.JSON(httpStatus, resp)
+}
+
+func guessBaseURL(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	if origin := strings.TrimSpace(req.Header.Get("Origin")); origin != "" {
+		if u, err := url.Parse(origin); err == nil && u.Scheme != "" && u.Host != "" {
+			return u.Scheme + "://" + u.Host
+		}
+	}
+	if ref := strings.TrimSpace(req.Header.Get("Referer")); ref != "" {
+		if u, err := url.Parse(ref); err == nil && u.Scheme != "" && u.Host != "" {
+			return u.Scheme + "://" + u.Host
+		}
+	}
+	scheme := strings.TrimSpace(req.Header.Get("X-Forwarded-Proto"))
+	if scheme == "" {
+		if req.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	host := strings.TrimSpace(req.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = req.Host
+	}
+	if host == "" || scheme == "" {
+		return ""
+	}
+	return scheme + "://" + host
 }

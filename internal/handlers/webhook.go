@@ -3,12 +3,17 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -149,6 +154,83 @@ func Webhook(r *Request) {
 
 		r.SuccessJSON(map[string]string{"status": "accepted"})
 		return
+	case services.ProcessorStripe:
+		body, err := readRequestBody(r.Request.Body)
+		if err != nil {
+			deadLetterService.LogInvalidPayload(context.Background(), "stripe", nil, err, headers, clientIP)
+			r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
+			return
+		}
+
+		if r.State == nil || r.State.Config == nil || r.State.WebhookEventService == nil || r.State.WebhookProcessor == nil {
+			log.Error("Webhook components not configured; unable to persist event")
+			r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
+			return
+		}
+
+		isDev := true
+		if r.State.Config != nil {
+			env := strings.TrimSpace(strings.ToLower(r.State.Config.Env))
+			isDev = env == "" || env == "dev" || env == "development"
+		}
+
+		secret := ""
+		if r.State.Config.Stripe != nil {
+			secret = r.State.Config.Stripe.WebhookSecret
+		}
+		sig := r.Request.Header.Get("Stripe-Signature")
+		var signatureValidPtr *bool
+		if secret != "" {
+			if sig == "" {
+				deadLetterService.LogAuthenticationFailure(context.Background(), "stripe", body, fmt.Errorf("missing stripe signature"), headers, clientIP)
+				r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
+				return
+			}
+			if err := verifyStripeSignature(secret, sig, body, 5*time.Minute); err != nil {
+				deadLetterService.LogAuthenticationFailure(context.Background(), "stripe", body, err, headers, clientIP)
+				r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
+				return
+			}
+			truth := true
+			signatureValidPtr = &truth
+		} else {
+			if !isDev {
+				deadLetterService.LogAuthenticationFailure(context.Background(), "stripe", body, fmt.Errorf("missing stripe webhook secret"), headers, clientIP)
+				r.ErrorJSON(http.StatusUnauthorized, "Webhook signature required")
+				return
+			}
+			log.Warn("Stripe webhook secret not configured; signature verification disabled")
+		}
+
+		eventID, eventType, err := parseStripeEventMeta(body)
+		if err != nil {
+			deadLetterService.LogInvalidPayload(context.Background(), "stripe", body, err, headers, clientIP)
+			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+			return
+		}
+
+		ctx := r.Request.Context()
+		event, err := r.State.WebhookEventService.Create(ctx, services.CreateWebhookEventParams{
+			Processor:      services.ProcessorStripe,
+			EventID:        eventID,
+			EventType:      eventType,
+			Payload:        body,
+			Headers:        headers,
+			IPAddress:      clientIP,
+			Signature:      sig,
+			SignatureValid: signatureValidPtr,
+		})
+		if err != nil {
+			log.WithError(err).Error("failed to persist Stripe webhook event")
+			r.ErrorJSON(http.StatusInternalServerError, "Failed to persist webhook event")
+			return
+		}
+		if err := processWebhookSync(ctx, r.State, event.ID); err != nil {
+			log.WithError(err).Error("Stripe webhook processing failed")
+		}
+
+		r.SuccessJSON(map[string]string{"status": "accepted"})
+		return
 	default:
 		webhookBody, readErr := readRequestBody(r.Request.Body)
 		if readErr != nil {
@@ -159,6 +241,62 @@ func Webhook(r *Request) {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid provider")
 		return
 	}
+}
+
+func parseStripeEventMeta(body []byte) (string, string, error) {
+	var payload struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(payload.ID) == "" || strings.TrimSpace(payload.Type) == "" {
+		return "", "", fmt.Errorf("missing event id or type")
+	}
+	return payload.ID, payload.Type, nil
+}
+
+func verifyStripeSignature(secret, header string, body []byte, tolerance time.Duration) error {
+	timestamp, signatures := parseStripeSignatureHeader(header)
+	if timestamp == "" || len(signatures) == 0 {
+		return fmt.Errorf("invalid stripe signature header")
+	}
+	tsInt, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid stripe signature timestamp")
+	}
+	if tolerance > 0 {
+		now := time.Now().Unix()
+		if now-tsInt > int64(tolerance.Seconds()) || tsInt-now > int64(tolerance.Seconds()) {
+			return fmt.Errorf("stripe signature timestamp outside tolerance")
+		}
+	}
+	signedPayload := fmt.Sprintf("%s.%s", timestamp, string(body))
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(signedPayload))
+	expected := hex.EncodeToString(mac.Sum(nil))
+	for _, sig := range signatures {
+		if hmac.Equal([]byte(expected), []byte(sig)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("stripe signature mismatch")
+}
+
+func parseStripeSignatureHeader(header string) (string, []string) {
+	parts := strings.Split(header, ",")
+	var ts string
+	sigs := make([]string, 0)
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "t=") {
+			ts = strings.TrimPrefix(part, "t=")
+		} else if strings.HasPrefix(part, "v1=") {
+			sigs = append(sigs, strings.TrimPrefix(part, "v1="))
+		}
+	}
+	return ts, sigs
 }
 
 func handleNMIWebhook(r *Request, provider string, headers map[string]string, clientIP string) {
@@ -178,6 +316,12 @@ func handleNMIWebhook(r *Request, provider string, headers map[string]string, cl
 	if !ok || client == nil {
 		r.ErrorJSON(http.StatusNotFound, fmt.Sprintf("unknown nmi provider '%s'", providerKey))
 		return
+	}
+
+	isDev := true
+	if r.State != nil && r.State.Config != nil {
+		env := strings.TrimSpace(strings.ToLower(r.State.Config.Env))
+		isDev = env == "" || env == "dev" || env == "development"
 	}
 
 	signature := ""
@@ -203,6 +347,11 @@ func handleNMIWebhook(r *Request, provider string, headers map[string]string, cl
 			}
 			signatureValidated = true
 		} else {
+			if !isDev {
+				log.Error("NMI webhook secret not configured")
+				r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
+				return
+			}
 			log.Warn("NMI webhook secret not configured - skipping signature verification")
 		}
 	} else {

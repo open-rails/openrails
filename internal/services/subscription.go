@@ -91,6 +91,7 @@ type PaymentProcessor = int
 
 const (
 	ProcessorCCBill = "ccbill"
+	ProcessorStripe = "stripe"
 	// Deprecated: ProcessorNMI is deprecated. Use "mobius" or other NMI-backed processor names instead.
 	ProcessorNMI = "nmi"
 

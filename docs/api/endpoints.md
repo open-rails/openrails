@@ -19,7 +19,7 @@ JSON encoded and use the standard error envelope:
 | User routes (`/v1/solana/pay`, `/v1/me/*`) | `Authorization: Bearer <JWT>` issued by AuthKit |
 | Admin routes (`/v1/admin/*`) | Same JWT header, user must have the `admin` role |
 | Service API (private port 8060, `/v1/users/:user_id/entitlements`) | `X-API-KEY` header matching `config.api_key` |
-| Webhooks (`/v1/webhooks/:provider`) | Provider-specific verification (CCBill IP allow-list, NMI HMAC, Solana reference check) |
+| Webhooks (`/v1/webhooks/:provider`) | Provider-specific verification (CCBill IP allow-list, NMI HMAC, Solana reference check, Stripe signature) |
 
 Unless stated otherwise, list endpoints use the Stripe-like envelope defined in `pkg/api.ListResponse`:
 `{ object: "list", data: [...], total, limit, offset, has_more }`.
@@ -57,10 +57,11 @@ Returns the currently enabled Solana tokens from configuration so clients can pr
 (`[{ symbol, name, mint, decimals, enabled }]`).
 
 ### POST /v1/webhooks/{provider}
-Receives processor webhooks. `provider` is `ccbill`, `mobius`, or `solana`.
+Receives processor webhooks. `provider` is `ccbill`, `mobius`, `solana`, or `stripe`.
 - `ccbill`: form-encoded payload, verified via source IP ranges and optional signature.
 - `mobius`/`nmi`: JSON body with `X-Signature`/`X-NMI-Signature` header.
 - `solana`: JSON envelope emitted by the Solana Pay poller when on-chain confirmation occurs.
+- `stripe`: JSON body with `Stripe-Signature` header (if configured).
 Returns 200 on success, 401/403 for auth failures, 400 if the provider path is unknown.
 
 ## Solana Pay (Authenticated)
@@ -114,6 +115,38 @@ Lists one-off payments. Query params: `type` (processor filter), `limit`, `offse
 ### GET /v1/me/payment-methods
 Query params: `limit`, `offset`, `include_inactive`. Response: list of stored payment methods with
 fields `{ id, processor, last_four, brand, exp_month, exp_year, is_active, created_at }`.
+
+### GET /v1/me/credits
+Returns all active credit balances for the current user (promo + purchased). Response is an array of
+`{ type, display_name, unit, decimal_places, balance, held_balance, permanent_balance, expiring_balance, earliest_expiry? }`.
+
+### GET /v1/me/credits/{type}
+Returns the credit balance for a single credit type (e.g. `api_credits`).
+
+### GET /v1/me/credits/{type}/transactions
+Lists credit ledger entries for the credit type. Query params: `limit`, `offset`.
+
+## Service API (Private Port 8060)
+
+All endpoints require `X-API-KEY` and run on the private port.
+
+### GET /v1/users/{user_id}/entitlements
+Returns active entitlements for the user at the current time.
+
+### GET /v1/users/{user_id}/credits
+Returns credit balance summary for a user. Optional query param `type` (defaults to `api_credits`).
+
+### POST /v1/credits/withdraw
+Withdraw credits. Body: `{ user_id, credit_type, amount, source, source_id? }`.
+
+### POST /v1/credits/hold
+Reserve credits for long-running jobs. Body: `{ user_id, credit_type, amount, source, source_id, expires_at }` (epoch seconds).
+
+### POST /v1/credits/hold/{id}/capture
+Capture a hold: `{ amount }` (amount <= hold).
+
+### POST /v1/credits/hold/{id}/release
+Release a hold without spending credits.
 
 ### POST /v1/me/payment-methods
 Body includes `payment_token` (Collect.js token) plus billing details (`first_name`, `last_name`,

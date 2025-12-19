@@ -143,6 +143,17 @@ func (r *PriceRepo) GetByCCBillPriceID(ctx context.Context, ccbillPriceID string
 	return price, nil
 }
 
+func (r *PriceRepo) GetByStripePriceID(ctx context.Context, stripePriceID string) (*models.Price, error) {
+	price := new(models.Price)
+	if err := r.db.GetDB().NewSelect().Model(price).Relation("Product").
+		Where("price.processors->'stripe'->>'price_id' = ?", stripePriceID).
+		Where("price.is_active = ?", true).
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	return price, nil
+}
+
 func (r *PriceRepo) Update(ctx context.Context, price *models.Price) error {
 	res, err := r.db.GetDB().NewUpdate().Model(price).WherePK().Exec(ctx)
 	if err != nil {

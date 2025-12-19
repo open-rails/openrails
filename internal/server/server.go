@@ -11,9 +11,9 @@ import (
 
 	"github.com/doujins-org/doujins-billing/config"
 	"github.com/doujins-org/doujins-billing/internal/app"
-	"github.com/doujins-org/doujins-billing/internal/auth"
 	"github.com/doujins-org/doujins-billing/internal/handlers"
 	"github.com/doujins-org/doujins-billing/internal/middleware"
+	"github.com/doujins-org/doujins-billing/pkg/authprovider"
 	"github.com/doujins-org/doujins-billing/pkg/cache"
 )
 
@@ -22,7 +22,7 @@ type Dependencies struct {
 	Cache        cache.Cache
 	Runtime      *app.Runtime
 	Redis        *redis.Client
-	AuthProvider auth.Provider
+	AuthProvider authprovider.Provider
 }
 
 type Server struct {
@@ -30,7 +30,7 @@ type Server struct {
 	cache        cache.Cache
 	runtime      *app.Runtime
 	rdb          *redis.Client
-	authProvider auth.Provider
+	authProvider authprovider.Provider
 
 	publicHandler  *gin.Engine
 	privateHandler *gin.Engine // Private/service API (X-API-KEY auth)

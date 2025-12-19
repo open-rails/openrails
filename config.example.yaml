@@ -77,6 +77,11 @@ nmi:
       # direct_post_url: "https://secure.mobiusgateway.com/api/transact.php"
       # query_url: "https://secure.mobiusgateway.com/api/query.php"
 
+# Stripe payment processor configuration
+stripe:
+  # secret_key: "sk_test_..."
+  # webhook_secret: "whsec_..."
+
 # Webhook processing configuration
 webhooks:
   retry:

@@ -1,11 +1,12 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 
 	authgin "github.com/PaulFidika/authkit/adapters/gin"
+	riverjobs "github.com/doujins-org/doujins-billing/internal/river"
 	"github.com/doujins-org/doujins-billing/internal/services"
+	"github.com/riverqueue/river"
 )
 
 // CancelSubscription cancels the current user's subscription
@@ -21,25 +22,35 @@ func CancelSubscription(r *Request) {
 		return
 	}
 
-	if err := r.State.UserSubscriptionService.CancelUserSubscription(
-		r.Request.Context(),
-		cl.UserID,
-		req.Feedback,
-	); err != nil {
-		// Check if this is a CCBill cancellation error with support URL
-		var ccbillErr *services.CCBillCancelError
-		if errors.As(err, &ccbillErr) {
-			r.GinCtx.JSON(http.StatusUnprocessableEntity, map[string]any{
-				"error":       ccbillErr.Message,
-				"support_url": ccbillErr.SupportURL,
-				"code":        "ccbill_cancel_required",
-			})
-			return
-		}
-
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+	if r.State.SubscriptionService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
+		return
+	}
+	sub, err := r.State.SubscriptionService.GetActiveSubscription(r.Request.Context(), cl.UserID)
+	if err != nil {
+		r.ErrorJSON(http.StatusNotFound, "active subscription not found")
+		return
+	}
+	if sub.Processor == services.ProcessorCCBill {
+		r.GinCtx.JSON(http.StatusUnprocessableEntity, map[string]any{
+			"error":       "CCBill subscriptions cannot be cancelled through our system. Please visit the CCBill consumer support portal to manage your subscription. You will need the email address you used when subscribing.",
+			"support_url": "https://support.ccbill.com",
+			"code":        "ccbill_cancel_required",
+		})
+		return
+	}
+	if r.State.RiverProducer == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "job queue unavailable")
+		return
+	}
+	_, err = r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.CancelSubscriptionArgs{
+		UserID:   cl.UserID,
+		Feedback: req.Feedback,
+	}, &river.InsertOpts{Queue: riverjobs.QueueBilling})
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to enqueue cancellation")
 		return
 	}
 
-	r.SuccessJSONMessage("subscription cancelled successfully")
+	r.GinCtx.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
 }

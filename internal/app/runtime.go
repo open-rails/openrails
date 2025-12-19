@@ -51,6 +51,8 @@ type Runtime struct {
 	EventLogService    *services.EventLogService
 	EntitlementService *services.EntitlementService
 	AdminGrantService  *services.AdminGrantService
+	CreditsService     *services.CreditsService
+	ProcessorCustomerService *services.ProcessorCustomerService
 
 	SolanaPaymentService *services.SolanaPaymentService
 	SolanaPayService     *services.SolanaPayService

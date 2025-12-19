@@ -5,25 +5,18 @@ import (
 
 	authgin "github.com/PaulFidika/authkit/adapters/gin"
 	"github.com/doujins-org/doujins-billing/config"
+	"github.com/doujins-org/doujins-billing/pkg/authprovider"
 	"github.com/doujins-org/ginapi/response"
 	"github.com/gin-gonic/gin"
 	jwt "github.com/golang-jwt/jwt/v5"
 	log "github.com/sirupsen/logrus"
 )
 
-// Provider is the app-facing auth boundary for verification middleware and typed claims access.
-// Billing is a verifier-only service; it does not mount AuthKit routes or mint tokens.
-type Provider interface {
-	Required() gin.HandlerFunc
-	Optional() gin.HandlerFunc
-	Claims(c *gin.Context) (authgin.Claims, bool)
-}
-
 type authKitProvider struct {
 	verifier Verifier
 }
 
-func NewProvider(cfg *config.AuthConfig) (Provider, error) {
+func NewProvider(cfg *config.AuthConfig) (authprovider.Provider, error) {
 	v, err := NewVerifier(cfg)
 	if err != nil {
 		return nil, err

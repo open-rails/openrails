@@ -38,6 +38,10 @@ func (s *PriceService) GetByCCBillPriceID(ctx context.Context, ccbillPriceID str
 	return s.repo.GetByCCBillPriceID(ctx, ccbillPriceID)
 }
 
+func (s *PriceService) GetByStripePriceID(ctx context.Context, stripePriceID string) (*models.Price, error) {
+	return s.repo.GetByStripePriceID(ctx, stripePriceID)
+}
+
 func (s *PriceService) GetActiveByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
 	return s.repo.GetActiveByProductID(ctx, productID)
 }

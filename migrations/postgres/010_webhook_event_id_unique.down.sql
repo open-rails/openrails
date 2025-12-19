@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS billing.idx_webhook_events_processor_event_id_unique;
