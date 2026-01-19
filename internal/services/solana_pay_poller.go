@@ -8,7 +8,6 @@ import (
 
 	"github.com/doujins-org/doujins-billing/config"
 	"github.com/doujins-org/doujins-billing/internal/db"
-	"github.com/doujins-org/doujins-billing/internal/db/models"
 	solana "github.com/doujins-org/doujins-billing/internal/integrations/solana"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
@@ -47,8 +46,8 @@ func NewSolanaPayPoller(
 	checkoutSessionService *CheckoutSessionService,
 ) *SolanaPayPoller {
 	var rpc *solana.RPCClient
-	if cfg.Solana != nil {
-		rpc = solana.NewRPCClient(cfg.Solana.RPCEndpoint, cfg.Solana.Network)
+	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
+		rpc = solana.NewRPCClient(solanaProc.RPCEndpoint, solanaProc.Network)
 	}
 
 	return &SolanaPayPoller{
@@ -251,40 +250,13 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 		return err
 	}
 
-	// Create SolanaTransaction record for audit trail (Solana-specific metadata)
-	now := time.Now()
-	userID := pending.UserID
-	solTx := &models.SolanaTransaction{
-		ID:          uuid.New(),
-		UserID:      &userID,
-		Signature:   &signature,
-		Status:      "confirmed",
-		Amount:      int64(pending.TokenAmount),
-		Token:       pending.Token,
-		TokenMint:   pending.TokenMint,
-		FromAddress: "unknown", // Transfer Request flow doesn't reveal sender
-		ToAddress:   pending.Recipient,
-		PaymentID:   &result.PaymentID,
-		BlockTime:   &now,
-		ProcessingResult: map[string]interface{}{
-			"reference":    reference,
-			"token_amount": pending.TokenAmount,
-			"token":        pending.Token,
-			"flow":         "transfer_request",
-		},
-		CreatedAt: now,
-	}
-
-	if _, err := p.db.GetDB().NewInsert().Model(solTx).Exec(ctx); err != nil {
-		log.WithError(err).Warn("Failed to create SolanaTransaction audit record")
-		// Don't fail - payment and entitlements were already recorded
-	}
-
 	log.WithFields(log.Fields{
 		"payment_id":   result.PaymentID,
 		"user_id":      pending.UserID,
 		"price_id":     priceID,
 		"signature":    signature,
+		"token":        pending.Token,
+		"reference":    reference,
 		"entitlements": result.Entitlements,
 	}).Info("Processed Solana Pay payment via RegisterPurchase")
 

@@ -839,15 +839,15 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, creditType 
 
 // GetSupportedTokens returns the list of supported Solana tokens with prices.
 func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResult, error) {
-	if s == nil || s.rt == nil || s.rt.Config == nil || s.rt.Config.Solana == nil {
+	solanaProc := s.rt.Config.GetSolanaProcessor()
+	if s == nil || s.rt == nil || s.rt.Config == nil || solanaProc == nil {
 		return nil, fmt.Errorf("solana not configured")
 	}
 
 	// This would need to call the Jupiter price API like the handler does
 	// For now, return configured tokens without live prices
-	cfg := s.rt.Config.Solana
 	tokens := make([]SolanaToken, 0)
-	for _, t := range cfg.SupportedTokens {
+	for _, t := range solanaProc.SupportedTokens {
 		name := t.Name
 		if name == "" {
 			name = t.Symbol

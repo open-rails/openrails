@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/doujins-org/doujins-billing/config"
 	"github.com/doujins-org/doujins-billing/internal/db"
 	"github.com/doujins-org/doujins-billing/internal/db/models"
 	"github.com/doujins-org/doujins-billing/internal/processors"
@@ -21,6 +22,7 @@ import (
 // including membership creation, renewal, cancellation, and expiration
 type SubscriptionLifecycleService struct {
 	DB                  *db.DB
+	Config              *config.Config
 	Clock               clockwork.Clock
 	ProductService      *ProductService
 	PriceService        *PriceService
@@ -78,6 +80,7 @@ func safeString(value *string) string {
 func NewSubscriptionLifecycleService(db *db.DB, productService *ProductService, priceService *PriceService, entitlementService *EntitlementService, notificationService *NotificationService, paymentService *PaymentService, eventLogService *EventLogService) *SubscriptionLifecycleService {
 	return &SubscriptionLifecycleService{
 		DB:                  db,
+		Config:              nil,                      // Set via SetConfig if feature flags are needed
 		Clock:               clockwork.NewRealClock(), // Default to real clock, can be overridden for tests
 		ProductService:      productService,
 		PriceService:        priceService,
@@ -91,6 +94,11 @@ func NewSubscriptionLifecycleService(db *db.DB, productService *ProductService, 
 // SetClock allows replacing the clock for testing
 func (s *SubscriptionLifecycleService) SetClock(c clockwork.Clock) {
 	s.Clock = c
+}
+
+// SetConfig sets the config for feature flag access
+func (s *SubscriptionLifecycleService) SetConfig(cfg *config.Config) {
+	s.Config = cfg
 }
 
 // now returns the current time from the service's clock
@@ -994,7 +1002,11 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 	return nil
 }
 
-// FailMembership marks a subscription as failed due to payment issues
+// FailMembership marks a subscription as failed due to payment issues.
+//
+// Behavior depends on config.FeatureFlags.DunningMode:
+//   - "on" or "dry_run_only": Normal dunning flow - go to past_due, schedule retries
+//   - "off": Immediate cancellation - no grace period, no retries
 func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *FailMembershipParams) error {
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
@@ -1003,11 +1015,18 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	var userID string
 	var finalStatus models.SubscriptionStatus
 
+	// Check dunning mode from feature flags
+	dunningMode := config.DunningModeOn
+	if s.Config != nil {
+		dunningMode = s.Config.GetDunningMode()
+	}
+
 	log.WithContext(ctx).WithFields(log.Fields{
 		"processor":                 params.Processor,
 		"processor_subscription_id": params.ProcessorSubscriptionID,
 		"failure_reason":            safeString(params.FailureReason),
 		"failure_code":              safeString(params.FailureCode),
+		"dunning_mode":              dunningMode,
 	}).Warn("Starting membership failure flow")
 
 	err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
@@ -1038,27 +1057,41 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		subscriptionID = subscription.ID
 		userID = subscription.UserID
 
-		// Update subscription status - Wave 18: failed payment = past_due (still trying to recover)
-		subscription.Status = models.StatusPastDue
-
-		// Dunning policy (Mobius): try every 3 days, up to 5 failures total
-		// Example timeline (D = day of initial failure): D+3, D+6, D+9, D+12, D+15
 		now := s.now()
-		subscription.LastRetryAt = &now
-		if subscription.RetryAttempts == nil {
-			attempts := 1
-			subscription.RetryAttempts = &attempts
-		} else {
-			*subscription.RetryAttempts++
-		}
 
-		// If we've reached MaxDunningFailures, cancel; otherwise schedule next attempt in DunningInterval
-		if *subscription.RetryAttempts >= MaxDunningFailures {
+		// If dunning is off, immediately cancel - no grace period, no retries
+		if dunningMode == config.DunningModeOff {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"user_id":         subscription.UserID,
+			}).Warn("Dunning mode is 'off'; immediately cancelling subscription (no recovery)")
+
 			subscription.Status = models.StatusCancelled
 			subscription.EndedAt = &now
+			// Don't set retry fields - we're not doing dunning
 		} else {
-			nextRetry := now.Add(DunningInterval)
-			subscription.NextRetryAt = &nextRetry
+			// Normal dunning flow (for "on" or "dry_run_only" modes)
+			// Update subscription status - failed payment = past_due (still trying to recover)
+			subscription.Status = models.StatusPastDue
+
+			// Dunning policy (Mobius): try every 3 days, up to 5 failures total
+			// Example timeline (D = day of initial failure): D+3, D+6, D+9, D+12, D+15
+			subscription.LastRetryAt = &now
+			if subscription.RetryAttempts == nil {
+				attempts := 1
+				subscription.RetryAttempts = &attempts
+			} else {
+				*subscription.RetryAttempts++
+			}
+
+			// If we've reached MaxDunningFailures, cancel; otherwise schedule next attempt in DunningInterval
+			if *subscription.RetryAttempts >= MaxDunningFailures {
+				subscription.Status = models.StatusCancelled
+				subscription.EndedAt = &now
+			} else {
+				nextRetry := now.Add(DunningInterval)
+				subscription.NextRetryAt = &nextRetry
+			}
 		}
 
 		if err := subService.Update(ctx, subscription); err != nil {
@@ -1079,8 +1112,13 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		finalStatus = subscription.Status
 
 		// Revoke entitlements if subscription is cancelled (after max retries)
+		// Skip revocation if disable_entitlement_expiration flag is set
 		if subscription.Status == models.StatusCancelled {
-			if entSvc != nil {
+			if s.Config != nil && s.Config.IsEntitlementExpirationDisabled() {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+				}).Warn("Entitlement expiration disabled; skipping entitlement revocation (subscription still cancelled)")
+			} else if entSvc != nil {
 				reason := models.EntitlementRevokeAdmin
 				if err := entSvc.EndActiveBySubscription(ctx, subscription.ID, now, &reason); err != nil {
 					log.WithContext(ctx).WithError(err).Error("failed to revoke entitlements for failed subscription")

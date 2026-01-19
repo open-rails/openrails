@@ -16,14 +16,6 @@ const KindCleanupExpiredData = "billing.cleanup_expired_data"
 
 // CleanupConfig defines retention periods for various data types
 type CleanupConfig struct {
-	// WalletChallengeRetention is how long to keep expired wallet challenges
-	// Default: 0 (challenges expire after 15 minutes, delete immediately after expiry)
-	WalletChallengeRetention time.Duration
-
-	// SolanaTransactionRetention is how long to keep expired/failed Solana transactions
-	// Default: 30 days
-	SolanaTransactionRetention time.Duration
-
 	// NotificationSeenRetention is how long to keep seen notifications
 	// Default: 90 days (matches model's IsExpiredForCleanup)
 	NotificationSeenRetention time.Duration
@@ -36,8 +28,6 @@ type CleanupConfig struct {
 // DefaultCleanupConfig returns sensible default retention periods
 func DefaultCleanupConfig() CleanupConfig {
 	return CleanupConfig{
-		WalletChallengeRetention:    0, // Delete immediately after expiry
-		SolanaTransactionRetention:  30 * 24 * time.Hour,
 		NotificationSeenRetention:   90 * 24 * time.Hour,
 		NotificationUnseenRetention: 180 * 24 * time.Hour,
 	}
@@ -58,8 +48,6 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 
 // CleanupResult holds the count of deleted records per table
 type CleanupResult struct {
-	WalletChallenges        int64
-	SolanaTransactions      int64
 	CheckoutSessionsExpired int64
 	NotificationsSeen       int64
 	NotificationsAll        int64
@@ -87,25 +75,13 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
 	logger.Info("Starting cleanup of expired data")
 
-	// 1. Clean up expired wallet challenges
-	result.WalletChallenges, err = w.cleanupWalletChallenges(ctx, now, config.WalletChallengeRetention)
-	if err != nil {
-		logger.WithError(err).Error("Failed to cleanup wallet challenges")
-	}
-
-	// 2. Clean up expired/failed Solana transactions
-	result.SolanaTransactions, err = w.cleanupSolanaTransactions(ctx, now, config.SolanaTransactionRetention)
-	if err != nil {
-		logger.WithError(err).Error("Failed to cleanup Solana transactions")
-	}
-
-	// 3. Expire checkout sessions that have passed their TTL
+	// 1. Expire checkout sessions that have passed their TTL
 	result.CheckoutSessionsExpired, err = w.expireCheckoutSessions(ctx, now)
 	if err != nil {
 		logger.WithError(err).Error("Failed to expire checkout sessions")
 	}
 
-	// 4. Clean up old notifications (seen ones first with shorter retention)
+	// 2. Clean up old notifications (seen ones first with shorter retention)
 	result.NotificationsSeen, err = w.cleanupSeenNotifications(ctx, now, config.NotificationSeenRetention)
 	if err != nil {
 		logger.WithError(err).Error("Failed to cleanup seen notifications")
@@ -117,50 +93,12 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 	}
 
 	logger.WithFields(log.Fields{
-		"wallet_challenges":         result.WalletChallenges,
-		"solana_transactions":       result.SolanaTransactions,
 		"checkout_sessions_expired": result.CheckoutSessionsExpired,
 		"notifications_seen":        result.NotificationsSeen,
 		"notifications_unseen":      result.NotificationsAll,
 	}).Info("Cleanup completed")
 
 	return nil
-}
-
-// cleanupWalletChallenges deletes wallet challenges that have expired beyond the retention period
-func (w CleanupExpiredDataWorker) cleanupWalletChallenges(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
-	cutoff := now.Add(-retention)
-
-	res, err := w.DB.GetDB().NewDelete().
-		TableExpr("billing.solana_wallet_challenges").
-		Where("expires_at < ?", cutoff).
-		Exec(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("delete wallet challenges: %w", err)
-	}
-
-	rows, _ := res.RowsAffected()
-	return rows, nil
-}
-
-// cleanupSolanaTransactions deletes Solana transactions that are expired or failed beyond the retention period
-func (w CleanupExpiredDataWorker) cleanupSolanaTransactions(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
-	cutoff := now.Add(-retention)
-
-	// Delete transactions that are either:
-	// - expired (expires_at < cutoff)
-	// - failed and older than retention period
-	// - pending and older than retention period (abandoned)
-	res, err := w.DB.GetDB().NewDelete().
-		TableExpr("billing.solana_transactions").
-		Where("(expires_at IS NOT NULL AND expires_at < ?) OR (status IN ('failed', 'pending') AND created_at < ?)", cutoff, cutoff).
-		Exec(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("delete solana transactions: %w", err)
-	}
-
-	rows, _ := res.RowsAffected()
-	return rows, nil
 }
 
 func (w CleanupExpiredDataWorker) expireCheckoutSessions(ctx context.Context, now time.Time) (int64, error) {

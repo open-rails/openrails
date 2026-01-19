@@ -62,6 +62,57 @@ test_mode: false  # Production mode - use real payment endpoints
 
 See `config.example.yaml` and `.env.example` for detailed documentation.
 
+#### Feature Flags (Safety Controls)
+
+Feature flags allow you to quickly disable destructive background operations when bugs are suspected, without requiring a code deployment.
+
+```yaml
+feature_flags:
+  dunning_mode: "on"                      # on | dry_run_only | off
+  disable_entitlement_expiration: false   # true | false
+```
+
+**Dunning Mode** (`feature_flags.dunning_mode`):
+
+Controls retry charging for failed subscription rebills.
+
+| Value | Behavior |
+|-------|----------|
+| `on` (default) | Normal dunning - retry charges every 3 days, up to 5 attempts, then cancel |
+| `dry_run_only` | Workflow runs but no charges - subscriptions stay in `past_due`, retry counts preserved |
+| `off` | No dunning - immediate cancellation on rebill failure, no grace period |
+
+**Use cases:**
+- `dry_run_only`: Bug in charge logic causing incorrect amounts - pause charging while you fix and deploy
+- `off`: Dunning workflow itself is broken, or business decision to not do recovery
+
+**Example scenario (dry_run_only):**
+1. Nov 1: User's rebill fails → subscription goes to `past_due`, `retry_attempts=1`
+2. Nov 3: Dunning disabled (`dry_run_only`) → worker logs but skips charge, state unchanged
+3. Nov 7: Bug fixed, set `dunning_mode=on` → worker processes as retry #2
+
+**Disable Entitlement Expiration** (`feature_flags.disable_entitlement_expiration`):
+
+When `true`, stops all entitlement/credit expiration:
+- CreditExpiryWorker skips (credit batches preserved even if expired)
+- HoldExpiryWorker skips (holds stay active even if expired)
+- FailMembership still cancels subscriptions but doesn't revoke entitlements
+- Users keep premium access even after subscription ends
+
+**Use case:** Bug in expiration logic causing premature credit/entitlement loss
+
+**Example scenario:**
+1. Set `disable_entitlement_expiration: true` when bug discovered
+2. Fix the expiration bug, deploy
+3. Set `disable_entitlement_expiration: false`
+4. All accumulated expirations process at once
+
+**Environment variables:**
+```bash
+FEATURE_FLAGS_DUNNING_MODE=on              # on, dry_run_only, off
+FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=false  # true, false
+```
+
 ---
 
 ## Deployment Modes
@@ -410,32 +461,6 @@ Error types: `invalid_request_error`, `authentication_error`, `authorization_err
 
 ---
 
-#### Solana Wallets
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/v1/me/wallets` | List linked Solana wallets |
-| GET | `/v1/me/wallets/linked` | Get primary linked wallet |
-| POST | `/v1/me/wallets/challenge` | Generate wallet verification challenge |
-| POST | `/v1/me/wallets/verify` | Verify wallet signature |
-| DELETE | `/v1/me/wallets` | Unlink wallet |
-
-**Challenge Request Body:**
-```json
-{ "wallet": "<base58_address>" }
-```
-
-**Verify Request Body:**
-```json
-{
-  "wallet": "<base58_address>",
-  "signature": "<base58_signature>",
-  "message": "<challenge_message>"
-}
-```
-
----
-
 #### Notifications
 
 | Method | Endpoint | Description |
@@ -545,11 +570,6 @@ These endpoints are kept for backwards compatibility but will be removed:
 | `PUT /v1/payment-methods/:id` | `PUT /v1/me/payment-methods/:id` |
 | `DELETE /v1/payment-methods/:id` | `DELETE /v1/me/payment-methods/:id` |
 | `PUT /v1/payment-methods/:id/activate` | `PUT /v1/me/payment-methods/:id/activate` |
-| `GET /v1/wallet/solana` | `GET /v1/me/wallets` |
-| `GET /v1/wallet/solana/linked` | `GET /v1/me/wallets/linked` |
-| `POST /v1/wallet/solana/challenge` | `POST /v1/me/wallets/challenge` |
-| `POST /v1/wallet/solana/verify` | `POST /v1/me/wallets/verify` |
-| `DELETE /v1/wallet/solana` | `DELETE /v1/me/wallets` |
 | `GET /v1/notifications` | `GET /v1/me/notifications` |
 | `GET /v1/notifications/unread-count` | `GET /v1/me/notifications/unread-count` |
 | `POST /v1/notifications/:id/read` | `POST /v1/me/notifications/:id/read` |

@@ -67,16 +67,17 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 		return nil, fmt.Errorf("failed to get price: %w", err)
 	}
 
-	if s.cfg.Solana == nil {
+	solanaProc := s.cfg.GetSolanaProcessor()
+	if solanaProc == nil {
 		return nil, fmt.Errorf("solana configuration not found")
 	}
 
-	tokenCfg, ok := s.cfg.Solana.SupportedTokens[tokenSymbol]
+	tokenCfg, ok := solanaProc.SupportedTokens[tokenSymbol]
 	if !ok || !tokenCfg.Enabled {
 		return nil, fmt.Errorf("token %s not supported", tokenSymbol)
 	}
 
-	merchantWallet := s.cfg.Solana.RecipientWallet
+	merchantWallet := solanaProc.RecipientWallet
 	if merchantWallet == "" {
 		return nil, fmt.Errorf("merchant wallet not configured")
 	}

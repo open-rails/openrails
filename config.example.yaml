@@ -200,11 +200,6 @@ processors:
     # OPTION 2: Custom RPC endpoint (bypasses fallback chain)
     # rpc_endpoint: "https://your-rpc-provider.com"
 
-    # Transaction settings
-    transaction_timeout_seconds: 300  # 5 minutes
-    confirmation_blocks: 1
-    max_transaction_fee: 0.01  # SOL
-
     # -------------------------------------------------------------------------
     # Token Configuration (choose one approach)
     # -------------------------------------------------------------------------
@@ -234,30 +229,6 @@ processors:
     #     name: "USD Coin"
     #     decimals: 6
     #     enabled: true
-
-# =============================================================================
-# LEGACY PROCESSOR CONFIG (DEPRECATED)
-# =============================================================================
-# The configs below are deprecated. Migrate to the "processors" map above.
-# They will continue to work but will log deprecation warnings.
-#
-# # DEPRECATED - use processors.ccbill instead
-# ccbill:
-#   client_acc_num: "..."
-#
-# # DEPRECATED - use processors.mobius (or other NMI names) instead
-# nmi:
-#   providers:
-#     mobius:
-#       security_key: "..."
-#
-# # DEPRECATED - use processors.stripe instead
-# stripe:
-#   secret_key: "..."
-#
-# # DEPRECATED - use processors.solana instead
-# solana:
-#   recipient_wallet: "..."
 
 # =============================================================================
 # ANALYTICS (ClickHouse)
@@ -305,3 +276,58 @@ rate_limits:
   default:
     requests_per_minute: 60  # Default for other endpoints
     burst: 10
+
+# =============================================================================
+# FEATURE FLAGS (Safety Controls)
+# =============================================================================
+# These flags control potentially destructive background operations.
+# Use them to quickly disable operations when bugs are suspected,
+# without requiring a code deployment.
+#
+# Environment variables:
+#   FEATURE_FLAGS_DUNNING_MODE=on|dry_run_only|off
+#   FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true|false
+
+feature_flags:
+  # -------------------------------------------------------------------------
+  # Dunning Mode - Controls retry charging for failed subscription rebills
+  # -------------------------------------------------------------------------
+  # Values:
+  #   "on" (default):     Normal dunning - retry charges, grace period, recovery workflow
+  #   "dry_run_only":     Workflow runs but no charges attempted
+  #                       - Subscriptions stay in past_due state
+  #                       - Retry counts preserved (not incremented)
+  #                       - Use when debugging charge logic bugs
+  #   "off":              No dunning - immediate cancellation on rebill failure
+  #                       - No grace period, no retry attempts
+  #                       - Use when dunning itself is broken or business decision
+  #
+  # Example: If charge logic has a bug causing incorrect amounts:
+  #   1. Set dunning_mode: dry_run_only
+  #   2. Fix the bug, deploy
+  #   3. Set dunning_mode: on
+  #   4. All accumulated past_due subscriptions will be retried
+  #
+  dunning_mode: "on"
+
+  # -------------------------------------------------------------------------
+  # Disable Entitlement Expiration - Stops credits/entitlements from expiring
+  # -------------------------------------------------------------------------
+  # When true:
+  #   - CreditExpiryWorker skips - expired credit batches are preserved
+  #   - HoldExpiryWorker skips - expired holds stay active
+  #   - FailMembership skips entitlement revocation (but still cancels subscription)
+  #   - Users keep premium access even after subscription ends
+  #
+  # When false (default):
+  #   - Normal expiration behavior
+  #
+  # Use case: Bug in expiration logic causing premature credit/entitlement loss
+  #
+  # Example: If credits are expiring too early due to timezone bug:
+  #   1. Set disable_entitlement_expiration: true
+  #   2. Fix the bug, deploy
+  #   3. Set disable_entitlement_expiration: false
+  #   4. All accumulated expirations will process at once
+  #
+  disable_entitlement_expiration: false

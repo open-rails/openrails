@@ -23,7 +23,7 @@ func (r *Runtime) buildRiverWorkers(ctx context.Context) (*river.Workers, error)
 // addBillingWorkersToRegistry adds billing workers to an existing worker registry.
 // This is used both internally (buildRiverWorkers) and externally (AddBillingWorkersTo).
 func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *river.Workers) error {
-	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService}); err != nil {
+	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{DB: r.DB}); err != nil {
@@ -46,14 +46,16 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add cleanup expired data worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CreditExpiryWorker{
-		DB:    r.DB,
-		Clock: clock,
+		DB:     r.DB,
+		Config: r.Config,
+		Clock:  clock,
 	}); err != nil {
 		return fmt.Errorf("add credit expiry worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.HoldExpiryWorker{
-		DB:    r.DB,
-		Clock: clock,
+		DB:     r.DB,
+		Config: r.Config,
+		Clock:  clock,
 	}); err != nil {
 		return fmt.Errorf("add hold expiry worker: %w", err)
 	}

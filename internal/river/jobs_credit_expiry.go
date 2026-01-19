@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/doujins-org/doujins-billing/config"
 	"github.com/doujins-org/doujins-billing/internal/db"
 	"github.com/doujins-org/doujins-billing/internal/db/models"
 	"github.com/google/uuid"
@@ -21,9 +22,12 @@ type CreditExpiryArgs struct{}
 
 func (CreditExpiryArgs) Kind() string { return KindCreditExpiry }
 
+// CreditExpiryWorker expires credit batches that have passed their expiration date.
+// Controlled by config.FeatureFlags.DisableEntitlementExpiration - when true, skips expiration.
 type CreditExpiryWorker struct {
 	river.WorkerDefaults[CreditExpiryArgs]
 	DB        *db.DB
+	Config    *config.Config
 	Clock     clockwork.Clock
 	BatchSize int
 }
@@ -34,6 +38,14 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 	if w.DB == nil {
 		return fmt.Errorf("db is required")
 	}
+
+	// Check if entitlement expiration is disabled via feature flags
+	if w.Config != nil && w.Config.IsEntitlementExpirationDisabled() {
+		log.WithContext(ctx).WithField("worker", KindCreditExpiry).
+			Warn("Entitlement expiration disabled via feature flag; skipping credit expiry")
+		return nil
+	}
+
 	clock := w.Clock
 	if clock == nil {
 		clock = clockwork.NewRealClock()

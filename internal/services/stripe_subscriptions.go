@@ -19,10 +19,12 @@ type StripeSubscriptionService struct {
 }
 
 func (s *StripeSubscriptionService) GetSubscriptionItemID(ctx context.Context, subscriptionID string) (string, error) {
-	if s == nil || s.Config == nil || s.Config.Stripe == nil {
+	stripeProc := s.Config.GetStripeProcessor()
+	if s == nil || s.Config == nil || stripeProc == nil {
 		return "", errors.New("stripe configuration is not available")
 	}
-	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+	secretKey := strings.TrimSpace(stripeProc.SecretKey)
+	if secretKey == "" {
 		return "", errors.New("stripe secret key is not configured")
 	}
 	subscriptionID = strings.TrimSpace(subscriptionID)
@@ -33,7 +35,7 @@ func (s *StripeSubscriptionService) GetSubscriptionItemID(ctx context.Context, s
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.Config.Stripe.SecretKey))
+	req.Header.Set("Authorization", "Bearer "+secretKey)
 
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)
@@ -69,10 +71,12 @@ func (s *StripeSubscriptionService) GetSubscriptionItemID(ctx context.Context, s
 }
 
 func (s *StripeSubscriptionService) UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, prorationBehavior, billingAnchor string) error {
-	if s == nil || s.Config == nil || s.Config.Stripe == nil {
+	stripeProc := s.Config.GetStripeProcessor()
+	if s == nil || s.Config == nil || stripeProc == nil {
 		return errors.New("stripe configuration is not available")
 	}
-	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+	secretKey := strings.TrimSpace(stripeProc.SecretKey)
+	if secretKey == "" {
 		return errors.New("stripe secret key is not configured")
 	}
 	subscriptionID = strings.TrimSpace(subscriptionID)
@@ -95,7 +99,7 @@ func (s *StripeSubscriptionService) UpdateSubscriptionPrice(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.Config.Stripe.SecretKey))
+	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{Timeout: 20 * time.Second}
@@ -116,10 +120,12 @@ func (s *StripeSubscriptionService) UpdateSubscriptionPrice(ctx context.Context,
 }
 
 func (s *StripeSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID string) error {
-	if s == nil || s.Config == nil || s.Config.Stripe == nil {
+	stripeProc := s.Config.GetStripeProcessor()
+	if s == nil || s.Config == nil || stripeProc == nil {
 		return errors.New("stripe configuration is not available")
 	}
-	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+	secretKey := strings.TrimSpace(stripeProc.SecretKey)
+	if secretKey == "" {
 		return errors.New("stripe secret key is not configured")
 	}
 	subscriptionID = strings.TrimSpace(subscriptionID)
@@ -133,7 +139,7 @@ func (s *StripeSubscriptionService) CancelSubscription(ctx context.Context, subs
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.Config.Stripe.SecretKey))
+	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{Timeout: 20 * time.Second}
@@ -154,10 +160,12 @@ func (s *StripeSubscriptionService) CancelSubscription(ctx context.Context, subs
 }
 
 func (s *StripeSubscriptionService) ResumeSubscription(ctx context.Context, subscriptionID string) error {
-	if s == nil || s.Config == nil || s.Config.Stripe == nil {
+	stripeProc := s.Config.GetStripeProcessor()
+	if s == nil || s.Config == nil || stripeProc == nil {
 		return errors.New("stripe configuration is not available")
 	}
-	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+	secretKey := strings.TrimSpace(stripeProc.SecretKey)
+	if secretKey == "" {
 		return errors.New("stripe secret key is not configured")
 	}
 	subscriptionID = strings.TrimSpace(subscriptionID)
@@ -171,7 +179,7 @@ func (s *StripeSubscriptionService) ResumeSubscription(ctx context.Context, subs
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.Config.Stripe.SecretKey))
+	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{Timeout: 20 * time.Second}

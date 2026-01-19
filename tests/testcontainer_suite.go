@@ -195,35 +195,30 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			Issuers:          []string{jwksIssuer},
 			ExpectedAudience: "test-app",
 		},
-		// CCBill config with test_mode enabled to bypass IP verification in webhook tests
-		CCBill: &config.CCBillConfig{
-			TestMode:     true,
-			ClientAccNum: "945280",
-			ClientSubAcc: "0000",
-			Salt:         "test-salt",
-		},
-		// Solana config for testing Solana payment endpoints
-		Solana: &config.SolanaConfig{
-			RPCEndpoint:               "", // Empty for tests (no real RPC calls)
-			Network:                   "devnet",
-			RecipientWallet:           "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-			SupportedTokens:           config.DefaultDevnetTokens(),
-			TransactionTimeoutSeconds: 30,
-			ConfirmationBlocks:        1,
-			MaxTransactionFee:         0.01,
-		},
-		// NMI demo account for real API integration tests
-		// Uses the public NMI demo security key (test mode)
-		// See: https://docs.nmi.com/
-		NMI: &config.NMIConfig{
-			TestMode:      true,
-			DirectPostURL: "https://secure.networkmerchants.com/api/transact.php",
-			QueryURL:      "https://secure.networkmerchants.com/api/query.php",
-			Providers: map[string]*config.NMIProviderConfig{
-				"mobius": {
-					SecurityKey: "6457Thfj624V5r7WUwc5v6a68Zsd6YEm", // NMI demo key
-					TestMode:    boolPtr(true),
-				},
+		// All payment processor configs use the unified Processors map
+		Processors: map[string]*config.ProcessorConfig{
+			// CCBill config with test_mode enabled to bypass IP verification in webhook tests
+			"ccbill": {
+				Type:         config.ProcessorTypeCCBill,
+				ClientAccNum: "945280",
+				ClientSubAcc: "0000",
+				Salt:         "test-salt",
+			},
+			// Solana config for testing Solana payment endpoints
+			"solana": {
+				Type:            config.ProcessorTypeSolana,
+				RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
+				SupportedTokens: config.DefaultDevnetTokens(),
+				// RPCEndpoint and Network are derived from test_mode
+			},
+			// NMI demo account for real API integration tests
+			// Uses the public NMI demo security key (test mode)
+			// See: https://docs.nmi.com/
+			"mobius": {
+				Type:          config.ProcessorTypeNMI,
+				SecurityKey:   "6457Thfj624V5r7WUwc5v6a68Zsd6YEm", // NMI demo key
+				DirectPostURL: "https://secure.networkmerchants.com/api/transact.php",
+				QueryURL:      "https://secure.networkmerchants.com/api/query.php",
 			},
 		},
 	}

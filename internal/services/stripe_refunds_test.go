@@ -42,8 +42,11 @@ func TestStripeRefundService_CreateRefund_Success(t *testing.T) {
 	// Note: In real tests, we'd need to mock the Stripe API endpoint
 	// For now, this test validates the request/response structure
 	cfg := &config.Config{
-		Stripe: &config.StripeConfig{
-			SecretKey: "sk_test_12345",
+		Processors: map[string]*config.ProcessorConfig{
+			"stripe": {
+				Type:      config.ProcessorTypeStripe,
+				SecretKey: "sk_test_12345",
+			},
 		},
 	}
 
@@ -77,7 +80,9 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 		{
 			name: "empty secret key",
 			config: &config.Config{
-				Stripe: &config.StripeConfig{SecretKey: ""},
+				Processors: map[string]*config.ProcessorConfig{
+					"stripe": {Type: config.ProcessorTypeStripe, SecretKey: ""},
+				},
 			},
 			params:    RefundParams{ChargeID: "ch_123"},
 			wantError: "stripe secret key is not configured",
@@ -85,7 +90,9 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 		{
 			name: "empty charge ID",
 			config: &config.Config{
-				Stripe: &config.StripeConfig{SecretKey: "sk_test_123"},
+				Processors: map[string]*config.ProcessorConfig{
+					"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
+				},
 			},
 			params:    RefundParams{ChargeID: ""},
 			wantError: "charge_id or payment_intent_id is required",
@@ -118,7 +125,9 @@ func TestStripeRefundService_GetRefund_ValidationErrors(t *testing.T) {
 		{
 			name: "empty refund ID",
 			config: &config.Config{
-				Stripe: &config.StripeConfig{SecretKey: "sk_test_123"},
+				Processors: map[string]*config.ProcessorConfig{
+					"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
+				},
 			},
 			refundID:  "",
 			wantError: "refund_id is required",

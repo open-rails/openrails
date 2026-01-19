@@ -43,10 +43,12 @@ type RefundResult struct {
 
 // CreateRefund creates a refund for a Stripe charge or payment intent
 func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundParams) (*RefundResult, error) {
-	if s == nil || s.Config == nil || s.Config.Stripe == nil {
+	stripeProc := s.Config.GetStripeProcessor()
+	if s == nil || s.Config == nil || stripeProc == nil {
 		return nil, errors.New("stripe configuration is not available")
 	}
-	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+	secretKey := strings.TrimSpace(stripeProc.SecretKey)
+	if secretKey == "" {
 		return nil, errors.New("stripe secret key is not configured")
 	}
 
@@ -86,7 +88,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.Config.Stripe.SecretKey))
+	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -115,10 +117,12 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 
 // GetRefund retrieves a refund by ID
 func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*RefundResult, error) {
-	if s == nil || s.Config == nil || s.Config.Stripe == nil {
+	stripeProc := s.Config.GetStripeProcessor()
+	if s == nil || s.Config == nil || stripeProc == nil {
 		return nil, errors.New("stripe configuration is not available")
 	}
-	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+	secretKey := strings.TrimSpace(stripeProc.SecretKey)
+	if secretKey == "" {
 		return nil, errors.New("stripe secret key is not configured")
 	}
 
@@ -131,7 +135,7 @@ func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.Config.Stripe.SecretKey))
+	req.Header.Set("Authorization", "Bearer "+secretKey)
 
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)

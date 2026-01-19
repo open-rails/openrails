@@ -34,9 +34,6 @@ func TestEndpointAuthRequirements(t *testing.T) {
 		{"POST", "/v1/me/subscriptions/cancel"},
 		// Payment history
 		{"GET", "/v1/me/payments"},
-		// Wallet endpoints
-		{"GET", "/v1/me/wallets"},
-		{"POST", "/v1/me/wallets/challenge"},
 		// Payment intents
 		{"POST", "/v1/payment-intents"},
 		{"POST", "/v1/payment-intents/qr"},

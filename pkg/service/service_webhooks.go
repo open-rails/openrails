@@ -229,8 +229,8 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 	isTestMode := s.rt.Config.IsTestMode()
 
 	secret := ""
-	if s.rt.Config != nil && s.rt.Config.Stripe != nil {
-		secret = s.rt.Config.Stripe.WebhookSecret
+	if stripeProc := s.rt.Config.GetStripeProcessor(); stripeProc != nil {
+		secret = stripeProc.WebhookSecret
 	}
 
 	sig := req.Headers["Stripe-Signature"]

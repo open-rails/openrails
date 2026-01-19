@@ -547,7 +547,8 @@ func (s *CheckoutService) processCCBillSubscription(
 	price *models.Price,
 ) (*CheckoutResponse, error) {
 	// Validate CCBill configuration
-	if s.Config == nil || s.Config.CCBill == nil {
+	ccbillProc := s.Config.GetCCBillProcessor()
+	if s.Config == nil || ccbillProc == nil {
 		return nil, errors.New("CCBill configuration is not available")
 	}
 
@@ -568,7 +569,7 @@ func (s *CheckoutService) processCCBillSubscription(
 	}
 
 	// Generate FlexForm URL
-	ccbillClient := ccbill.NewClient(s.Config.CCBill, s.Config.IsTestMode())
+	ccbillClient := ccbill.NewClient(ccbillProc.ToCCBillConfig(), s.Config.IsTestMode())
 	flexFormParams := &ccbill.GenerateFlexFormURLParams{
 		Username:      user.Username,
 		Email:         *user.Email,
@@ -610,7 +611,8 @@ func (s *CheckoutService) processCCBillUpgrade(
 	existingSub *models.Subscription,
 ) (*CheckoutResponse, error) {
 	// Validate CCBill configuration
-	if s.Config == nil || s.Config.CCBill == nil {
+	ccbillProc := s.Config.GetCCBillProcessor()
+	if s.Config == nil || ccbillProc == nil {
 		return nil, errors.New("CCBill configuration is not available")
 	}
 
@@ -639,7 +641,7 @@ func (s *CheckoutService) processCCBillUpgrade(
 	}
 
 	// Generate upgrade FlexForm URL
-	ccbillClient := ccbill.NewClient(s.Config.CCBill, s.Config.IsTestMode())
+	ccbillClient := ccbill.NewClient(ccbillProc.ToCCBillConfig(), s.Config.IsTestMode())
 	upgradeParams := &ccbill.GenerateUpgradeFlexFormURLParams{
 		Username:               user.Username,
 		Email:                  *user.Email,
@@ -1055,10 +1057,11 @@ func (s *CheckoutService) processStripeSubscription(
 	price *models.Price,
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
-	if s.Config == nil || s.Config.Stripe == nil {
+	stripeProc := s.Config.GetStripeProcessor()
+	if s.Config == nil || stripeProc == nil {
 		return nil, errors.New("stripe configuration is not available")
 	}
-	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+	if strings.TrimSpace(stripeProc.SecretKey) == "" {
 		return nil, errors.New("stripe secret key is not configured")
 	}
 	stripePriceID, err := getStripePriceID(price)
@@ -1068,10 +1071,10 @@ func (s *CheckoutService) processStripeSubscription(
 	successURL := strings.TrimSpace(req.SuccessURL)
 	cancelURL := strings.TrimSpace(req.CancelURL)
 	if successURL == "" {
-		successURL = strings.TrimSpace(s.Config.Stripe.SuccessURL)
+		successURL = strings.TrimSpace(stripeProc.SuccessURL)
 	}
 	if cancelURL == "" {
-		cancelURL = strings.TrimSpace(s.Config.Stripe.CancelURL)
+		cancelURL = strings.TrimSpace(stripeProc.CancelURL)
 	}
 	if successURL == "" || cancelURL == "" {
 		return nil, errors.New("stripe success/cancel URLs not available")
@@ -1108,10 +1111,11 @@ func (s *CheckoutService) processStripePayment(
 	user *UserIdentity,
 	price *models.Price,
 ) (*CheckoutResponse, error) {
-	if s.Config == nil || s.Config.Stripe == nil {
+	stripeProc := s.Config.GetStripeProcessor()
+	if s.Config == nil || stripeProc == nil {
 		return nil, errors.New("stripe configuration is not available")
 	}
-	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+	if strings.TrimSpace(stripeProc.SecretKey) == "" {
 		return nil, errors.New("stripe secret key is not configured")
 	}
 	stripePriceID, err := getStripePriceID(price)
@@ -1121,10 +1125,10 @@ func (s *CheckoutService) processStripePayment(
 	successURL := strings.TrimSpace(req.SuccessURL)
 	cancelURL := strings.TrimSpace(req.CancelURL)
 	if successURL == "" {
-		successURL = strings.TrimSpace(s.Config.Stripe.SuccessURL)
+		successURL = strings.TrimSpace(stripeProc.SuccessURL)
 	}
 	if cancelURL == "" {
-		cancelURL = strings.TrimSpace(s.Config.Stripe.CancelURL)
+		cancelURL = strings.TrimSpace(stripeProc.CancelURL)
 	}
 	if successURL == "" || cancelURL == "" {
 		return nil, errors.New("stripe success/cancel URLs not available")
@@ -1177,7 +1181,8 @@ type stripeCheckoutParams struct {
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
-	if s.Config == nil || s.Config.Stripe == nil {
+	stripeProc := s.Config.GetStripeProcessor()
+	if s.Config == nil || stripeProc == nil {
 		return "", errors.New("stripe configuration is not available")
 	}
 	values := url.Values{}
@@ -1207,7 +1212,7 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.Config.Stripe.SecretKey))
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(stripeProc.SecretKey))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{Timeout: 20 * time.Second}

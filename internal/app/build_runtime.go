@@ -82,18 +82,18 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 
 	// Initialize Solana token registry (must be done here since createServices doesn't return errors)
 	var solanaTokenRegistry *jupiter.TokenRegistry
-	if cfg != nil && cfg.Solana != nil {
+	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
 		solanaTokenRegistry = jupiter.NewTokenRegistry()
-		if len(cfg.Solana.EnabledTokens) > 0 {
+		if len(solanaProc.EnabledTokens) > 0 {
 			// Use new enabled_tokens approach with Jupiter lookup
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			if err := solanaTokenRegistry.LoadFromJupiter(ctx, cfg.Solana.EnabledTokens); err != nil {
+			if err := solanaTokenRegistry.LoadFromJupiter(ctx, solanaProc.EnabledTokens); err != nil {
 				cancel()
 				return nil, fmt.Errorf("failed to initialize Solana token registry: %w", err)
 			}
 			cancel()
-		} else if len(cfg.Solana.SupportedTokens) > 0 {
-			// Use legacy supported_tokens config (backwards compatibility)
+		} else if len(solanaProc.SupportedTokens) > 0 {
+			// Use supported_tokens config (backwards compatibility)
 			legacyTokens := make(map[string]struct {
 				Symbol      string
 				Name        string
@@ -102,7 +102,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 				Decimals    int
 				Enabled     bool
 			})
-			for symbol, t := range cfg.Solana.SupportedTokens {
+			for symbol, t := range solanaProc.SupportedTokens {
 				legacyTokens[symbol] = struct {
 					Symbol      string
 					Name        string
@@ -364,31 +364,34 @@ func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 }
 
 func createCCBillClient(cfg *config.Config) *ccbill.CCBillClient {
-	if cfg.CCBill == nil {
+	ccbillProc := cfg.GetCCBillProcessor()
+	if ccbillProc == nil {
 		log.Info("CCBill config missing; CCBill integration disabled")
 		return nil
 	}
 
-	return ccbill.NewClient(cfg.CCBill, cfg.IsTestMode())
+	return ccbill.NewClient(ccbillProc.ToCCBillConfig(), cfg.IsTestMode())
 }
 
 func createCCBillRESTClient(cfg *config.Config) *ccbill.RESTClient {
-	if cfg.CCBill == nil {
+	ccbillProc := cfg.GetCCBillProcessor()
+	if ccbillProc == nil {
 		return nil
 	}
-	return ccbill.NewRESTClient(cfg.CCBill)
+	return ccbill.NewRESTClient(ccbillProc.ToCCBillConfig())
 }
 
 func createCCBillDataLinkClient(cfg *config.Config) *ccbill.DataLinkClient {
-	if cfg.CCBill == nil {
+	ccbillProc := cfg.GetCCBillProcessor()
+	if ccbillProc == nil {
 		return nil
 	}
-	if cfg.CCBill.DataLinkUsername == "" || cfg.CCBill.DataLinkPassword == "" || cfg.CCBill.ClientAccNum == "" {
+	if ccbillProc.DataLinkUsername == "" || ccbillProc.DataLinkPassword == "" || ccbillProc.ClientAccNum == "" {
 		log.Info("CCBill DataLink credentials missing; DataLink worker disabled")
 		return nil
 	}
 
-	client := ccbill.NewDataLinkClient(cfg.CCBill)
+	client := ccbill.NewDataLinkClient(ccbillProc.ToCCBillConfig())
 	if err := client.ValidateConfig(); err != nil {
 		log.WithError(err).Warn("Invalid CCBill DataLink configuration; worker disabled")
 		return nil
@@ -451,15 +454,15 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	solanaPayService := services.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider)
 	solanaPayService.Clock = clock
 	var solanaRPC *solana.RPCClient
-	if cfg != nil && cfg.Solana != nil {
+	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
 		// Derive network from test_mode: devnet when true, mainnet when false
 		solanaNetwork := "mainnet"
 		if cfg.IsTestMode() {
 			solanaNetwork = "devnet"
 		}
 		solanaRPC = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
-			Endpoint:     cfg.Solana.RPCEndpoint,
-			HeliusAPIKey: cfg.Solana.HeliusAPIKey,
+			Endpoint:     solanaProc.RPCEndpoint,
+			HeliusAPIKey: solanaProc.HeliusAPIKey,
 			Network:      solanaNetwork,
 		})
 	}
@@ -476,6 +479,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		nil,             // EventLogService - set later in buildRuntime after ClickHouse init
 	)
 	subscriptionLifecycleService.Clock = clock
+	subscriptionLifecycleService.SetConfig(cfg) // For feature flag access (dunning_mode, etc.)
 
 	subscriptionService := services.NewSubscriptionService(
 		database,

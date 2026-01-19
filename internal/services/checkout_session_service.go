@@ -462,7 +462,8 @@ func (s *CheckoutSessionService) initializeSession(ctx context.Context, session 
 }
 
 func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest) error {
-	if s.config == nil || s.config.Solana == nil {
+	solanaProc := s.config.GetSolanaProcessor()
+	if s.config == nil || solanaProc == nil {
 		return fmt.Errorf("%w: solana not configured", ErrCheckoutSessionValidation)
 	}
 
@@ -476,12 +477,12 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		flow = "transfer_request"
 	}
 
-	tokenCfg, ok := s.config.Solana.SupportedTokens[tokenSymbol]
+	tokenCfg, ok := solanaProc.SupportedTokens[tokenSymbol]
 	if !ok || !tokenCfg.Enabled {
 		return fmt.Errorf("%w: unsupported token", ErrCheckoutSessionValidation)
 	}
 	tokenMint := tokenCfg.Mint
-	if strings.EqualFold(s.config.Solana.Network, "mainnet") && tokenCfg.MainnetMint != "" {
+	if strings.EqualFold(solanaProc.Network, "mainnet") && tokenCfg.MainnetMint != "" {
 		tokenMint = tokenCfg.MainnetMint
 	}
 
@@ -534,7 +535,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		session.ProcessorState["flow"] = flow
 		session.ProcessorState["token_symbol"] = tokenSymbol
 		session.ProcessorState["token_mint"] = tokenMint
-		session.ProcessorState["recipient"] = strings.TrimSpace(s.config.Solana.RecipientWallet)
+		session.ProcessorState["recipient"] = strings.TrimSpace(solanaProc.RecipientWallet)
 		// Calculate quote for display purposes
 		if quote, err := CalculateTokenQuote(ctx, tokenCfg, session.Amount, session.Currency, s.fxProvider); err == nil {
 			session.ProcessorState["token_amount"] = quote.Units
@@ -842,7 +843,8 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if s.checkoutService == nil {
 		return nil, fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
-	if s.config == nil || s.config.Solana == nil {
+	solanaProc := s.config.GetSolanaProcessor()
+	if s.config == nil || solanaProc == nil {
 		return nil, fmt.Errorf("%w: solana not configured", ErrCheckoutSessionValidation)
 	}
 
@@ -852,17 +854,17 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		return nil, fmt.Errorf("%w: token_symbol missing", ErrCheckoutSessionValidation)
 	}
 
-	tokenCfg, ok := s.config.Solana.SupportedTokens[tokenSymbol]
+	tokenCfg, ok := solanaProc.SupportedTokens[tokenSymbol]
 	if !ok || !tokenCfg.Enabled {
 		return nil, fmt.Errorf("%w: unsupported token", ErrCheckoutSessionValidation)
 	}
 	tokenMint := tokenCfg.Mint
-	if strings.EqualFold(s.config.Solana.Network, "mainnet") && tokenCfg.MainnetMint != "" {
+	if strings.EqualFold(solanaProc.Network, "mainnet") && tokenCfg.MainnetMint != "" {
 		tokenMint = tokenCfg.MainnetMint
 	}
 
 	expectedAmount := getUint64Field(session.ProcessorState, "token_amount")
-	expectedRecipient := strings.TrimSpace(s.config.Solana.RecipientWallet)
+	expectedRecipient := strings.TrimSpace(solanaProc.RecipientWallet)
 	// Get payer from ProcessorState (set by BuildSolanaPayTransaction)
 	expectedPayer := strings.TrimSpace(getStringField(session.ProcessorState, "payer"))
 	if reqWallet := strings.TrimSpace(req.Payment.Wallet); reqWallet != "" {
@@ -1170,6 +1172,10 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 	if s.solanaTransactionService == nil {
 		return nil, fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutSessionValidation)
 	}
+	solanaProc := s.config.GetSolanaProcessor()
+	if solanaProc == nil {
+		return nil, fmt.Errorf("%w: solana not configured", ErrCheckoutSessionValidation)
+	}
 
 	account = strings.TrimSpace(account)
 	if account == "" {
@@ -1237,7 +1243,7 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 	}
 	session.ProcessorState["payer"] = account
 	session.ProcessorState["token_amount"] = txResp.TokenAmount
-	session.ProcessorState["recipient"] = s.config.Solana.RecipientWallet
+	session.ProcessorState["recipient"] = solanaProc.RecipientWallet
 	session.ExpiresAt = &txResp.ExpiresAt
 
 	if err := s.repo.Update(ctx, session); err != nil {

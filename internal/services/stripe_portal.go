@@ -19,10 +19,12 @@ type StripePortalService struct {
 }
 
 func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {
-	if s == nil || s.Config == nil || s.Config.Stripe == nil {
+	stripeProc := s.Config.GetStripeProcessor()
+	if s == nil || s.Config == nil || stripeProc == nil {
 		return "", errors.New("stripe configuration is not available")
 	}
-	if strings.TrimSpace(s.Config.Stripe.SecretKey) == "" {
+	secretKey := strings.TrimSpace(stripeProc.SecretKey)
+	if secretKey == "" {
 		return "", errors.New("stripe secret key is not configured")
 	}
 	customerID = strings.TrimSpace(customerID)
@@ -39,7 +41,7 @@ func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerI
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.Config.Stripe.SecretKey))
+	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{Timeout: 20 * time.Second}

@@ -164,9 +164,7 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		assert.True(t, completed, "Cleanup job should complete within timeout")
 	})
 
-	// NOTE: Tests for expired wallet challenges and payment intents were removed
-	// as those models (SolanaWalletChallenge, SolanaPaymentIntent) no longer exist.
-	// The cleanup worker may still have the code paths, but the tables don't exist.
+	// NOTE: Wallet challenge cleanup was removed - wallet auth belongs in authkit, not billing.
 
 	t.Run("cleans up old seen notifications", func(t *testing.T) {
 		// Set up a mock clock 100 days in the future

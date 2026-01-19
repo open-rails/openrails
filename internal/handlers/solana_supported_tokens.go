@@ -36,7 +36,8 @@ type SupportedTokensQuery struct {
 //   - wallet: Fetch on-chain balances for a wallet address
 func GetSupportedTokens(r *Request) {
 	cfg := r.State.Config
-	if cfg == nil || cfg.Solana == nil {
+	solanaProc := cfg.GetSolanaProcessor()
+	if cfg == nil || solanaProc == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return
 	}
@@ -49,7 +50,7 @@ func GetSupportedTokens(r *Request) {
 
 	// Get tokens from registry (preferred) or fall back to legacy config
 	var tokenMap map[string]config.SolanaToken
-	isDevnet := strings.ToLower(cfg.Solana.Network) == "devnet"
+	isDevnet := strings.ToLower(solanaProc.Network) == "devnet"
 
 	if r.State.SolanaTokenRegistry != nil && r.State.SolanaTokenRegistry.Count() > 0 {
 		// Use token registry (new approach)
@@ -70,10 +71,10 @@ func GetSupportedTokens(r *Request) {
 			}
 		}
 	} else {
-		// Fall back to legacy config
-		tokenMap = cfg.Solana.SupportedTokens
+		// Fall back to ProcessorConfig tokens
+		tokenMap = solanaProc.SupportedTokens
 		if len(tokenMap) == 0 {
-			tokenMap = config.TokensForNetwork(cfg.Solana.Network)
+			tokenMap = config.TokensForNetwork(solanaProc.Network)
 		}
 	}
 

@@ -59,15 +59,15 @@ func TestSolanaTokensNoAuth(t *testing.T) {
 func setupTestSuiteWithSolana(t *testing.T) (*TestContainerSuite, string, string) {
 	suite, token, userID := setupTestSuiteWithAuth(t)
 
-	// Add Solana configuration
-	suite.Config.Solana = &config.SolanaConfig{
-		RPCEndpoint:               "",
-		Network:                   "devnet",
-		RecipientWallet:           "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-		SupportedTokens:           config.DefaultDevnetTokens(),
-		TransactionTimeoutSeconds: 30,
-		ConfirmationBlocks:        1,
-		MaxTransactionFee:         0.01,
+	// Add Solana configuration to the Processors map
+	if suite.Config.Processors == nil {
+		suite.Config.Processors = make(map[string]*config.ProcessorConfig)
+	}
+	suite.Config.Processors["solana"] = &config.ProcessorConfig{
+		Type:            config.ProcessorTypeSolana,
+		RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
+		SupportedTokens: config.DefaultDevnetTokens(),
+		// RPCEndpoint and Network are derived from test_mode
 	}
 
 	return suite, token, userID

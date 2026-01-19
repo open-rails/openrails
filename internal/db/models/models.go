@@ -32,7 +32,6 @@ var ModelRegistry = []any{
 	(*Purchase)(nil),
 	(*Subscription)(nil),
 	(*PaymentMethod)(nil),
-	(*SolanaTransaction)(nil),
 	(*NotificationQueue)(nil),
 	(*Entitlement)(nil),
 	(*AdminGrant)(nil),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/doujins-org/doujins-billing/config"
 	"github.com/doujins-org/doujins-billing/internal/db"
 	"github.com/doujins-org/doujins-billing/internal/db/models"
 	"github.com/google/uuid"
@@ -22,9 +23,11 @@ func (HoldExpiryArgs) Kind() string { return KindHoldExpiry }
 // HoldExpiryWorker expires credit holds that have passed their expires_at time.
 // When a hold expires, the held credits become available again (no transaction created).
 // This handles cases where a job crashes without calling capture/release.
+// Controlled by config.FeatureFlags.DisableEntitlementExpiration - when true, skips expiration.
 type HoldExpiryWorker struct {
 	river.WorkerDefaults[HoldExpiryArgs]
 	DB        *db.DB
+	Config    *config.Config
 	Clock     clockwork.Clock
 	BatchSize int
 }
@@ -35,6 +38,14 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 	if w.DB == nil {
 		return fmt.Errorf("db is required")
 	}
+
+	// Check if entitlement expiration is disabled via feature flags
+	if w.Config != nil && w.Config.IsEntitlementExpirationDisabled() {
+		log.WithContext(ctx).WithField("worker", KindHoldExpiry).
+			Warn("Entitlement expiration disabled via feature flag; skipping hold expiry")
+		return nil
+	}
+
 	clock := w.Clock
 	if clock == nil {
 		clock = clockwork.NewRealClock()

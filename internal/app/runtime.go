@@ -168,7 +168,7 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 	}
 
 	// Start Solana Pay poller if configured (regardless of River setup).
-	if r.SolanaPayPoller != nil && r.Config != nil && r.Config.Solana != nil {
+	if r.SolanaPayPoller != nil && r.Config != nil && r.Config.GetSolanaProcessor() != nil {
 		go r.SolanaPayPoller.Start(ctx)
 	}
 

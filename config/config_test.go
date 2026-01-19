@@ -97,3 +97,125 @@ func TestStripeKeyModeCompatibility(t *testing.T) {
 		assert.True(t, isLiveKey)
 	})
 }
+
+// =============================================================================
+// Feature Flags Tests
+// =============================================================================
+
+func TestFeatureFlags_DunningMode(t *testing.T) {
+	t.Run("defaults to 'on' when nil", func(t *testing.T) {
+		var flags *FeatureFlags
+		assert.Equal(t, DunningModeOn, flags.GetDunningMode())
+	})
+
+	t.Run("defaults to 'on' when empty", func(t *testing.T) {
+		flags := &FeatureFlags{DunningMode: ""}
+		assert.Equal(t, DunningModeOn, flags.GetDunningMode())
+	})
+
+	t.Run("returns 'on' for explicit 'on'", func(t *testing.T) {
+		flags := &FeatureFlags{DunningMode: "on"}
+		assert.Equal(t, DunningModeOn, flags.GetDunningMode())
+		assert.True(t, flags.IsDunningEnabled())
+		assert.False(t, flags.IsDunningDryRun())
+		assert.False(t, flags.IsDunningOff())
+	})
+
+	t.Run("returns 'dry_run_only' for explicit 'dry_run_only'", func(t *testing.T) {
+		flags := &FeatureFlags{DunningMode: "dry_run_only"}
+		assert.Equal(t, DunningModeDryRunOnly, flags.GetDunningMode())
+		assert.False(t, flags.IsDunningEnabled())
+		assert.True(t, flags.IsDunningDryRun())
+		assert.False(t, flags.IsDunningOff())
+	})
+
+	t.Run("returns 'off' for explicit 'off'", func(t *testing.T) {
+		flags := &FeatureFlags{DunningMode: "off"}
+		assert.Equal(t, DunningModeOff, flags.GetDunningMode())
+		assert.False(t, flags.IsDunningEnabled())
+		assert.False(t, flags.IsDunningDryRun())
+		assert.True(t, flags.IsDunningOff())
+	})
+
+	t.Run("invalid mode defaults to 'on'", func(t *testing.T) {
+		flags := &FeatureFlags{DunningMode: "invalid_mode"}
+		assert.Equal(t, DunningModeOn, flags.GetDunningMode())
+	})
+
+	t.Run("handles case insensitivity", func(t *testing.T) {
+		flags := &FeatureFlags{DunningMode: "DRY_RUN_ONLY"}
+		assert.Equal(t, DunningModeDryRunOnly, flags.GetDunningMode())
+	})
+
+	t.Run("trims whitespace", func(t *testing.T) {
+		flags := &FeatureFlags{DunningMode: "  off  "}
+		assert.Equal(t, DunningModeOff, flags.GetDunningMode())
+	})
+}
+
+func TestFeatureFlags_DisableEntitlementExpiration(t *testing.T) {
+	t.Run("defaults to false when nil", func(t *testing.T) {
+		cfg := &Config{FeatureFlags: nil}
+		assert.False(t, cfg.IsEntitlementExpirationDisabled())
+	})
+
+	t.Run("returns false when explicitly false", func(t *testing.T) {
+		cfg := &Config{
+			FeatureFlags: &FeatureFlags{DisableEntitlementExpiration: false},
+		}
+		assert.False(t, cfg.IsEntitlementExpirationDisabled())
+	})
+
+	t.Run("returns true when explicitly true", func(t *testing.T) {
+		cfg := &Config{
+			FeatureFlags: &FeatureFlags{DisableEntitlementExpiration: true},
+		}
+		assert.True(t, cfg.IsEntitlementExpirationDisabled())
+	})
+}
+
+func TestConfig_DunningMode(t *testing.T) {
+	t.Run("GetDunningMode defaults to 'on' when no feature flags", func(t *testing.T) {
+		cfg := &Config{FeatureFlags: nil}
+		assert.Equal(t, DunningModeOn, cfg.GetDunningMode())
+	})
+
+	t.Run("IsDunningEnabled returns true by default", func(t *testing.T) {
+		cfg := &Config{FeatureFlags: nil}
+		assert.True(t, cfg.IsDunningEnabled())
+	})
+
+	t.Run("IsDunningOff returns true when mode is off", func(t *testing.T) {
+		cfg := &Config{
+			FeatureFlags: &FeatureFlags{DunningMode: "off"},
+		}
+		assert.True(t, cfg.IsDunningOff())
+		assert.False(t, cfg.IsDunningEnabled())
+	})
+
+	t.Run("IsDunningDryRun returns true when mode is dry_run_only", func(t *testing.T) {
+		cfg := &Config{
+			FeatureFlags: &FeatureFlags{DunningMode: "dry_run_only"},
+		}
+		assert.True(t, cfg.IsDunningDryRun())
+		assert.False(t, cfg.IsDunningEnabled())
+	})
+}
+
+func TestGetDefaultBillingConfig_FeatureFlags(t *testing.T) {
+	cfg := GetDefaultBillingConfig()
+
+	t.Run("has feature flags initialized", func(t *testing.T) {
+		assert.NotNil(t, cfg.FeatureFlags)
+	})
+
+	t.Run("dunning_mode defaults to 'on'", func(t *testing.T) {
+		assert.Equal(t, DunningModeOn, cfg.FeatureFlags.DunningMode)
+		assert.True(t, cfg.IsDunningEnabled())
+	})
+
+	t.Run("disable_entitlement_expiration defaults to false", func(t *testing.T) {
+		assert.False(t, cfg.FeatureFlags.DisableEntitlementExpiration)
+		assert.False(t, cfg.IsEntitlementExpirationDisabled())
+	})
+}

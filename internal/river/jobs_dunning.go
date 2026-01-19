@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/doujins-org/doujins-billing/config"
 	"github.com/doujins-org/doujins-billing/internal/db"
 	"github.com/doujins-org/doujins-billing/internal/db/models"
 	"github.com/doujins-org/doujins-billing/internal/integrations/nmi"
@@ -35,9 +36,15 @@ func (DunningArgs) Kind() string { return KindDunning }
 // DunningWorker queries all past_due subscriptions where next_retry_at is in the past
 // and attempts to rebill them via NMI. It processes each subscription inline and
 // updates the database after each attempt for idempotency.
+//
+// Behavior is controlled by config.FeatureFlags.DunningMode:
+//   - "on": Normal dunning - query due subscriptions and attempt charges
+//   - "dry_run_only": Query due subscriptions but skip charges (preserves state)
+//   - "off": Skip entirely (FailMembership handles immediate cancellation)
 type DunningWorker struct {
 	river.WorkerDefaults[DunningArgs]
 	DB                 *db.DB
+	Config             *config.Config
 	Clock              clockwork.Clock
 	NMIClients         map[string]*nmi.NMIClient
 	EventLogService    *services.EventLogService
@@ -64,6 +71,19 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	if w.DB == nil {
 		return fmt.Errorf("db is required")
 	}
+
+	// Check dunning mode from feature flags
+	dunningMode := config.DunningModeOn
+	if w.Config != nil {
+		dunningMode = w.Config.GetDunningMode()
+	}
+
+	// If dunning is completely off, skip - FailMembership handles immediate cancellation
+	if dunningMode == config.DunningModeOff {
+		log.WithContext(ctx).Info("Dunning mode is 'off'; skipping dunning run (FailMembership handles immediate cancellation)")
+		return nil
+	}
+
 	if w.NMIClients == nil {
 		log.WithContext(ctx).Warn("NMI clients not configured; skipping dunning run")
 		return nil
@@ -89,6 +109,16 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		return nil
 	}
 
+	// If dry_run_only mode, log the subscriptions but don't process them
+	// This preserves retry counts and next_retry_at for when dunning is re-enabled
+	if dunningMode == config.DunningModeDryRunOnly {
+		log.WithContext(ctx).WithField("count", len(dueSubscriptions)).
+			Warn("Dunning mode is 'dry_run_only'; found due subscriptions but skipping charges")
+		log.WithContext(ctx).Info("   Subscriptions remain in past_due state with retry counts preserved")
+		log.WithContext(ctx).Info("   Set feature_flags.dunning_mode=on to resume charging")
+		return nil
+	}
+
 	log.WithContext(ctx).WithField("count", len(dueSubscriptions)).Info("Dunning: processing due subscriptions")
 
 	// Build services once for all attempts
@@ -98,6 +128,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	notifSvc := services.NewNotificationService(w.DB, nil)
 	paymentSvc := services.NewPaymentService(w.DB)
 	lifecycle := services.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService)
+	lifecycle.SetConfig(w.Config) // For feature flag access
 
 	successCount := 0
 	failCount := 0

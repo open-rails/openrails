@@ -211,8 +211,8 @@ func enqueueStripeWebhook(r *Request, clientIP string) bool {
 	}
 
 	secret := ""
-	if r.State.Config.Stripe != nil {
-		secret = r.State.Config.Stripe.WebhookSecret
+	if stripeProc := r.State.Config.GetStripeProcessor(); stripeProc != nil {
+		secret = stripeProc.WebhookSecret
 	}
 	sig := r.Request.Header.Get("Stripe-Signature")
 	var signatureValidPtr *bool
