@@ -255,8 +255,8 @@ github.com/muhlemmer/httpforwarded v0.1.0 h1:x4DLrzXdliq8mprgUMR0olDvHGkou5BJsK/
 github.com/muhlemmer/httpforwarded v0.1.0/go.mod h1:yo9czKedo2pdZhoXe+yDkGVbU0TJ0q9oQ90BVoDEtw0=
 github.com/onsi/gomega v1.38.2 h1:eZCjf2xjZAqe+LeWvKb5weQ+NcPwX84kqJ0cZNxok2A=
 github.com/onsi/gomega v1.38.2/go.mod h1:W2MJcYxRGV63b418Ai34Ud0hEdTVXq9NW9+Sx6uXf3k=
-github.com/open-rails/authkit v0.4.1 h1:YdmIgSajcUM1FdU2tRG9reorzKkFcv8leRdXu1Yiv2o=
-github.com/open-rails/authkit v0.4.1/go.mod h1:+BZudy5CRBE9VOTaei+cca3LoOPb1Zj+U704AUqxyU0=
+github.com/open-rails/authkit v0.4.4 h1:FcZrvxycFux5YiliCv3HU5/0Cxxi/OKio05oJU1naqk=
+github.com/open-rails/authkit v0.4.4/go.mod h1:+BZudy5CRBE9VOTaei+cca3LoOPb1Zj+U704AUqxyU0=
 github.com/open-rails/migratekit v0.7.15 h1:x0cr4GelJ1OLCIlnCKWmSL8E+VWnddhKob2dwshbw6w=
 github.com/open-rails/migratekit v0.7.15/go.mod h1:WCWLpdnK1whiQ6ZbCcEh7ZOEFtJoXTVm15CnU6qXnFU=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=

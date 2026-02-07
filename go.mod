@@ -17,7 +17,7 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/lib/pq v1.10.9
-	github.com/open-rails/authkit v0.4.1
+	github.com/open-rails/authkit v0.4.4
 	github.com/open-rails/migratekit v0.7.15
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/riverqueue/river v0.26.0
