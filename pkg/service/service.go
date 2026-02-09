@@ -36,6 +36,8 @@ func New(rt *app.Runtime) (*Service, error) {
 
 var ErrInsufficientCredits = services.ErrInsufficientCredits
 var ErrCreditTypeInactive = services.ErrCreditTypeInactive
+var ErrInvalidNegativePolicy = services.ErrInvalidNegativePolicy
+var ErrNegativeBalanceLimitExceeded = services.ErrNegativeBalanceLimitExceeded
 
 type HoldCreditsRequest struct {
 	UserID     string
@@ -117,8 +119,10 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 }
 
 type CaptureHoldRequest struct {
-	HoldID uuid.UUID
-	Amount int64
+	HoldID        uuid.UUID
+	Amount        int64
+	AllowNegative bool
+	MaxNegative   int64
 }
 
 type CreditTransaction struct {
@@ -140,11 +144,13 @@ type CreditTransaction struct {
 }
 
 type WithdrawCreditsRequest struct {
-	UserID     string
-	CreditType string
-	Amount     int64
-	Source     string
-	SourceID   *uuid.UUID
+	UserID        string
+	CreditType    string
+	Amount        int64
+	Source        string
+	SourceID      *uuid.UUID
+	AllowNegative bool
+	MaxNegative   int64
 }
 
 func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
@@ -167,11 +173,13 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 		return nil, fmt.Errorf("source required")
 	}
 	trx, err := s.rt.CreditsService.Withdraw(ctx, services.CreditWithdrawParams{
-		UserID:     req.UserID,
-		CreditType: req.CreditType,
-		Amount:     req.Amount,
-		Source:     req.Source,
-		SourceID:   req.SourceID,
+		UserID:        req.UserID,
+		CreditType:    req.CreditType,
+		Amount:        req.Amount,
+		Source:        req.Source,
+		SourceID:      req.SourceID,
+		AllowNegative: req.AllowNegative,
+		MaxNegative:   req.MaxNegative,
 	})
 	if err != nil {
 		return nil, err
@@ -265,7 +273,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
-	trx, err := s.rt.CreditsService.CaptureHold(ctx, req.HoldID, req.Amount)
+	trx, err := s.rt.CreditsService.CaptureHoldWithPolicy(ctx, req.HoldID, req.Amount, req.AllowNegative, req.MaxNegative)
 	if err != nil {
 		return nil, err
 	}

@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin/binding"
 	"github.com/google/uuid"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -138,6 +140,9 @@ type serviceWithdrawRequest struct {
 	Amount     int64      `json:"amount" binding:"required"`
 	Source     string     `json:"source" binding:"required"`
 	SourceID   *uuid.UUID `json:"source_id"`
+	// Internal-only escape hatch (trusted callers): allow a bounded negative balance for api_credits.
+	AllowNegative *bool  `json:"allow_negative"`
+	MaxNegative   *int64 `json:"max_negative"` // absolute units, e.g. 100 => allow down to -100
 }
 
 type serviceDepositRequest struct {
@@ -191,36 +196,102 @@ func ServiceDepositCredits(r *Request) {
 }
 
 func ServiceWithdrawCredits(r *Request) {
-	var req serviceWithdrawRequest
-	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request")
-		return
-	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
-		UserID:     req.UserID,
-		CreditType: req.CreditType,
-		Amount:     req.Amount,
-		Source:     req.Source,
-		SourceID:   req.SourceID,
-	})
-	if err == billingservice.ErrInsufficientCredits {
-		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
-		return
+
+	type itemResult struct {
+		Ok     bool                              `json:"ok"`
+		Status int                               `json:"status"`
+		Result *billingservice.CreditTransaction `json:"result,omitempty"`
+		Error  string                            `json:"error,omitempty"`
 	}
-	if err == billingservice.ErrCreditTypeInactive {
-		r.ErrorJSON(http.StatusBadRequest, "credit_type_inactive")
-		return
-	}
+	raws, isBatch, err := readJSONSingleOrArrayRaw(r)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "withdraw failed")
+		r.ErrorJSON(http.StatusBadRequest, "invalid request")
 		return
 	}
-	r.SuccessJSON(trx)
+	if !isBatch {
+		var req serviceWithdrawRequest
+		if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid request")
+			return
+		}
+		allowNeg := req.AllowNegative != nil && *req.AllowNegative
+		trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
+			UserID:        req.UserID,
+			CreditType:    req.CreditType,
+			Amount:        req.Amount,
+			Source:        req.Source,
+			SourceID:      req.SourceID,
+			AllowNegative: allowNeg,
+			MaxNegative:   derefInt64(req.MaxNegative),
+		})
+		if err == billingservice.ErrInsufficientCredits {
+			r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
+			return
+		}
+		if err == billingservice.ErrCreditTypeInactive {
+			r.ErrorJSON(http.StatusBadRequest, "credit_type_inactive")
+			return
+		}
+		if err == billingservice.ErrInvalidNegativePolicy {
+			r.ErrorJSON(http.StatusBadRequest, "invalid_negative_policy")
+			return
+		}
+		if err == billingservice.ErrNegativeBalanceLimitExceeded {
+			r.ErrorJSON(http.StatusPaymentRequired, "negative_balance_limit_exceeded")
+			return
+		}
+		if err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "withdraw failed")
+			return
+		}
+		r.SuccessJSON(trx)
+		return
+	}
+
+	results := make([]itemResult, 0, len(raws))
+	for i := range raws {
+		var req serviceWithdrawRequest
+		if err := json.Unmarshal(raws[i], &req); err != nil {
+			results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "invalid_request"})
+			continue
+		}
+		if err := binding.Validator.ValidateStruct(&req); err != nil {
+			results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "invalid_request"})
+			continue
+		}
+		allowNeg := req.AllowNegative != nil && *req.AllowNegative
+		trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
+			UserID:        req.UserID,
+			CreditType:    req.CreditType,
+			Amount:        req.Amount,
+			Source:        req.Source,
+			SourceID:      req.SourceID,
+			AllowNegative: allowNeg,
+			MaxNegative:   derefInt64(req.MaxNegative),
+		})
+		if err == nil {
+			results = append(results, itemResult{Ok: true, Status: http.StatusOK, Result: trx})
+			continue
+		}
+		switch err {
+		case billingservice.ErrInsufficientCredits:
+			results = append(results, itemResult{Ok: false, Status: http.StatusPaymentRequired, Error: "insufficient_credits"})
+		case billingservice.ErrCreditTypeInactive:
+			results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "credit_type_inactive"})
+		case billingservice.ErrInvalidNegativePolicy:
+			results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "invalid_negative_policy"})
+		case billingservice.ErrNegativeBalanceLimitExceeded:
+			results = append(results, itemResult{Ok: false, Status: http.StatusPaymentRequired, Error: "negative_balance_limit_exceeded"})
+		default:
+			results = append(results, itemResult{Ok: false, Status: http.StatusInternalServerError, Error: "withdraw_failed"})
+		}
+	}
+	r.SuccessJSON(map[string]any{"results": results})
 }
 
 type serviceHoldRequest struct {
@@ -233,45 +304,158 @@ type serviceHoldRequest struct {
 }
 
 func ServiceHoldCredits(r *Request) {
-	var req serviceHoldRequest
-	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request")
-		return
-	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
-		UserID:     req.UserID,
-		CreditType: req.CreditType,
-		Amount:     req.Amount,
-		Source:     req.Source,
-		SourceID:   req.SourceID,
-		ExpiresAt:  time.Unix(req.ExpiresAt, 0).UTC(),
-	})
-	if err == billingservice.ErrInsufficientCredits {
-		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
-		return
+
+	type itemResult struct {
+		Ok     bool                       `json:"ok"`
+		Status int                        `json:"status"`
+		Result *billingservice.CreditHold `json:"result,omitempty"`
+		Error  string                     `json:"error,omitempty"`
 	}
-	if err == billingservice.ErrCreditTypeInactive {
-		r.ErrorJSON(http.StatusBadRequest, "credit_type_inactive")
-		return
-	}
+	raws, isBatch, err := readJSONSingleOrArrayRaw(r)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "hold failed")
+		r.ErrorJSON(http.StatusBadRequest, "invalid request")
 		return
 	}
-	r.SuccessJSON(hold)
+	if !isBatch {
+		var req serviceHoldRequest
+		if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid request")
+			return
+		}
+		hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
+			UserID:     req.UserID,
+			CreditType: req.CreditType,
+			Amount:     req.Amount,
+			Source:     req.Source,
+			SourceID:   req.SourceID,
+			ExpiresAt:  time.Unix(req.ExpiresAt, 0).UTC(),
+		})
+		if err == billingservice.ErrInsufficientCredits {
+			r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
+			return
+		}
+		if err == billingservice.ErrCreditTypeInactive {
+			r.ErrorJSON(http.StatusBadRequest, "credit_type_inactive")
+			return
+		}
+		if err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "hold failed")
+			return
+		}
+		r.SuccessJSON(hold)
+		return
+	}
+
+	results := make([]itemResult, 0, len(raws))
+	for i := range raws {
+		var req serviceHoldRequest
+		if err := json.Unmarshal(raws[i], &req); err != nil {
+			results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "invalid_request"})
+			continue
+		}
+		if err := binding.Validator.ValidateStruct(&req); err != nil {
+			results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "invalid_request"})
+			continue
+		}
+		hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
+			UserID:     req.UserID,
+			CreditType: req.CreditType,
+			Amount:     req.Amount,
+			Source:     req.Source,
+			SourceID:   req.SourceID,
+			ExpiresAt:  time.Unix(req.ExpiresAt, 0).UTC(),
+		})
+		if err == nil {
+			results = append(results, itemResult{Ok: true, Status: http.StatusOK, Result: hold})
+			continue
+		}
+		switch err {
+		case billingservice.ErrInsufficientCredits:
+			results = append(results, itemResult{Ok: false, Status: http.StatusPaymentRequired, Error: "insufficient_credits"})
+		case billingservice.ErrCreditTypeInactive:
+			results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "credit_type_inactive"})
+		default:
+			results = append(results, itemResult{Ok: false, Status: http.StatusInternalServerError, Error: "hold_failed"})
+		}
+	}
+	r.SuccessJSON(map[string]any{"results": results})
 }
 
 type serviceCaptureRequest struct {
 	Amount int64 `json:"amount" binding:"required"`
+	// Internal-only escape hatch (trusted callers): allow a bounded negative balance for api_credits.
+	AllowNegative *bool  `json:"allow_negative"`
+	MaxNegative   *int64 `json:"max_negative"` // absolute units
 }
 
 func ServiceCaptureHold(r *Request) {
-	holdID, err := uuid.Parse(r.GinCtx.Param("id"))
+	idParam := strings.TrimSpace(r.GinCtx.Param("id"))
+	if strings.EqualFold(idParam, "batch") {
+		type captureBatchItem struct {
+			HoldID        uuid.UUID `json:"hold_id" binding:"required"`
+			Amount        int64     `json:"amount" binding:"required"`
+			AllowNegative *bool     `json:"allow_negative"`
+			MaxNegative   *int64    `json:"max_negative"`
+		}
+		raws, isBatch, err := readJSONSingleOrArrayRaw(r)
+		if err != nil || !isBatch {
+			r.ErrorJSON(http.StatusBadRequest, "invalid request")
+			return
+		}
+		svc, err := billingservice.New(r.State)
+		if err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+			return
+		}
+		type itemResult struct {
+			Ok     bool                              `json:"ok"`
+			Status int                               `json:"status"`
+			Result *billingservice.CreditTransaction `json:"result,omitempty"`
+			Error  string                            `json:"error,omitempty"`
+		}
+		results := make([]itemResult, 0, len(raws))
+		for i := range raws {
+			var it captureBatchItem
+			if err := json.Unmarshal(raws[i], &it); err != nil {
+				results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "invalid_request"})
+				continue
+			}
+			if err := binding.Validator.ValidateStruct(&it); err != nil {
+				results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "invalid_request"})
+				continue
+			}
+			allowNeg := it.AllowNegative != nil && *it.AllowNegative
+			trx, err := svc.CaptureHold(r.Request.Context(), billingservice.CaptureHoldRequest{
+				HoldID:        it.HoldID,
+				Amount:        it.Amount,
+				AllowNegative: allowNeg,
+				MaxNegative:   derefInt64(it.MaxNegative),
+			})
+			if err == nil {
+				results = append(results, itemResult{Ok: true, Status: http.StatusOK, Result: trx})
+				continue
+			}
+			switch err {
+			case billingservice.ErrInsufficientCredits:
+				results = append(results, itemResult{Ok: false, Status: http.StatusPaymentRequired, Error: "insufficient_credits"})
+			case billingservice.ErrInvalidNegativePolicy:
+				results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "invalid_negative_policy"})
+			case billingservice.ErrNegativeBalanceLimitExceeded:
+				results = append(results, itemResult{Ok: false, Status: http.StatusPaymentRequired, Error: "negative_balance_limit_exceeded"})
+			default:
+				results = append(results, itemResult{Ok: false, Status: http.StatusInternalServerError, Error: "capture_failed"})
+			}
+		}
+		r.SuccessJSON(map[string]any{"results": results})
+		return
+	}
+
+	holdID, err := uuid.Parse(idParam)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid hold id")
 		return
@@ -286,9 +470,23 @@ func ServiceCaptureHold(r *Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	trx, err := svc.CaptureHold(r.Request.Context(), billingservice.CaptureHoldRequest{HoldID: holdID, Amount: req.Amount})
+	allowNeg := req.AllowNegative != nil && *req.AllowNegative
+	trx, err := svc.CaptureHold(r.Request.Context(), billingservice.CaptureHoldRequest{
+		HoldID:        holdID,
+		Amount:        req.Amount,
+		AllowNegative: allowNeg,
+		MaxNegative:   derefInt64(req.MaxNegative),
+	})
 	if err == billingservice.ErrInsufficientCredits {
 		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
+		return
+	}
+	if err == billingservice.ErrInvalidNegativePolicy {
+		r.ErrorJSON(http.StatusBadRequest, "invalid_negative_policy")
+		return
+	}
+	if err == billingservice.ErrNegativeBalanceLimitExceeded {
+		r.ErrorJSON(http.StatusPaymentRequired, "negative_balance_limit_exceeded")
 		return
 	}
 	if err != nil {
@@ -299,7 +497,48 @@ func ServiceCaptureHold(r *Request) {
 }
 
 func ServiceReleaseHold(r *Request) {
-	holdID, err := uuid.Parse(r.GinCtx.Param("id"))
+	idParam := strings.TrimSpace(r.GinCtx.Param("id"))
+	if strings.EqualFold(idParam, "batch") {
+		type releaseBatchItem struct {
+			HoldID uuid.UUID `json:"hold_id" binding:"required"`
+		}
+		raws, isBatch, err := readJSONSingleOrArrayRaw(r)
+		if err != nil || !isBatch {
+			r.ErrorJSON(http.StatusBadRequest, "invalid request")
+			return
+		}
+		svc, err := billingservice.New(r.State)
+		if err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+			return
+		}
+		type itemResult struct {
+			Ok     bool   `json:"ok"`
+			Status int    `json:"status"`
+			Error  string `json:"error,omitempty"`
+		}
+		results := make([]itemResult, 0, len(raws))
+		for i := range raws {
+			var it releaseBatchItem
+			if err := json.Unmarshal(raws[i], &it); err != nil {
+				results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "invalid_request"})
+				continue
+			}
+			if err := binding.Validator.ValidateStruct(&it); err != nil {
+				results = append(results, itemResult{Ok: false, Status: http.StatusBadRequest, Error: "invalid_request"})
+				continue
+			}
+			if err := svc.ReleaseHold(r.Request.Context(), it.HoldID); err != nil {
+				results = append(results, itemResult{Ok: false, Status: http.StatusInternalServerError, Error: "release_failed"})
+				continue
+			}
+			results = append(results, itemResult{Ok: true, Status: http.StatusOK})
+		}
+		r.SuccessJSON(map[string]any{"results": results})
+		return
+	}
+
+	holdID, err := uuid.Parse(idParam)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid hold id")
 		return

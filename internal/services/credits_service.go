@@ -16,7 +16,10 @@ import (
 )
 
 var (
-	ErrInsufficientCredits = errors.New("insufficient_credits")
+	ErrInsufficientCredits   = errors.New("insufficient_credits")
+	ErrInvalidNegativePolicy = errors.New("invalid_negative_policy")
+	// ErrNegativeBalanceLimitExceeded indicates the request would exceed the caller-provided max_negative bound.
+	ErrNegativeBalanceLimitExceeded = errors.New("negative_balance_limit_exceeded")
 )
 
 type CreditsService struct {
@@ -275,11 +278,13 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 }
 
 type CreditWithdrawParams struct {
-	UserID     string
-	CreditType string
-	Amount     int64
-	Source     string
-	SourceID   *uuid.UUID
+	UserID        string
+	CreditType    string
+	Amount        int64
+	Source        string
+	SourceID      *uuid.UUID
+	AllowNegative bool
+	MaxNegative   int64
 }
 
 func (s *CreditsService) Withdraw(ctx context.Context, params CreditWithdrawParams) (*models.CreditTransaction, error) {
@@ -295,6 +300,15 @@ func (s *CreditsService) Withdraw(ctx context.Context, params CreditWithdrawPara
 	}
 	if !ct.IsActive {
 		return nil, ErrCreditTypeInactive
+	}
+	if params.AllowNegative {
+		// Keep this intentionally narrow: only api_credits supports bounded negative in internal mode.
+		if strings.TrimSpace(ct.Name) != "api_credits" {
+			return nil, ErrInvalidNegativePolicy
+		}
+		if params.MaxNegative <= 0 {
+			return nil, ErrInvalidNegativePolicy
+		}
 	}
 
 	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
@@ -398,8 +412,15 @@ func (s *CreditsService) Hold(ctx context.Context, userID string, creditType str
 }
 
 func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actualAmount int64) (*models.CreditTransaction, error) {
+	return s.CaptureHoldWithPolicy(ctx, holdID, actualAmount, false, 0)
+}
+
+func (s *CreditsService) CaptureHoldWithPolicy(ctx context.Context, holdID uuid.UUID, actualAmount int64, allowNegative bool, maxNegative int64) (*models.CreditTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
+	}
+	if allowNegative && maxNegative <= 0 {
+		return nil, ErrInvalidNegativePolicy
 	}
 	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
 	if err != nil {
@@ -439,7 +460,17 @@ func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actu
 	}
 
 	// Apply the actual withdrawal and update the existing hold transaction row to reflect capture.
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, tx, hold.UserID, hold.CreditTypeID, actualAmount)
+	if allowNegative {
+		// Resolve credit type name for policy enforcement.
+		ct := new(models.CreditType)
+		if err := tx.NewSelect().Model(ct).Where("id = ?", hold.CreditTypeID).Limit(1).Scan(ctx); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(ct.Name) != "api_credits" {
+			return nil, ErrInvalidNegativePolicy
+		}
+	}
+	newBal, debt, err := s.withdrawBalanceAndBlocksWithPolicy(ctx, tx, hold.UserID, hold.CreditTypeID, actualAmount, allowNegative, maxNegative)
 	if err != nil {
 		return nil, err
 	}
@@ -453,6 +484,21 @@ func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actu
 		WherePK().
 		Exec(ctx); err != nil {
 		return nil, err
+	}
+	if debt > 0 {
+		debt := &models.CreditBlock{
+			ID:                  uuid.New(),
+			UserID:              hold.UserID,
+			CreditTypeID:        hold.CreditTypeID,
+			OriginalAmount:      -debt,
+			RemainingAmount:     -debt,
+			ExpiresAt:           nil,
+			SourceTransactionID: &hold.ID,
+			CreatedAt:           now,
+		}
+		if _, err := tx.NewInsert().Model(debt).Exec(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -512,14 +558,28 @@ func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) erro
 }
 
 func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx, userID string, creditTypeID uuid.UUID, amount int64) (int64, error) {
+	newBal, _, err := s.withdrawBalanceAndBlocksWithPolicy(ctx, tx, userID, creditTypeID, amount, false, 0)
+	return newBal, err
+}
+
+func (s *CreditsService) withdrawBalanceAndBlocksWithPolicy(ctx context.Context, tx bun.Tx, userID string, creditTypeID uuid.UUID, amount int64, allowNegative bool, maxNegative int64) (newBal int64, debt int64, err error) {
 	now := s.now()
 	bal, err := s.lockBalance(ctx, tx, userID, creditTypeID)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	available := bal.Balance - bal.HeldBalance
 	if available < amount {
-		return 0, ErrInsufficientCredits
+		if !allowNegative {
+			return 0, 0, ErrInsufficientCredits
+		}
+		if maxNegative <= 0 {
+			return 0, 0, ErrInvalidNegativePolicy
+		}
+		// Guardrail: resulting balance must not go below -maxNegative.
+		if bal.Balance-amount < -maxNegative {
+			return 0, 0, ErrNegativeBalanceLimitExceeded
+		}
 	}
 
 	remaining := amount
@@ -529,7 +589,7 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 		OrderExpr("expires_at ASC NULLS LAST, created_at ASC").
 		For("UPDATE").
 		Scan(ctx); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	for i := range blocks {
 		if remaining == 0 {
@@ -548,19 +608,26 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 			Column("remaining_amount").
 			WherePK().
 			Exec(ctx); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 	}
 
-	newBal := bal.Balance - amount
+	newBal = bal.Balance - amount
 	if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 		Set("balance = ?", newBal).
 		Set("updated_at = ?", now).
 		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
 		Exec(ctx); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return newBal, nil
+	if remaining > 0 {
+		// We only allow this when allowNegative=true (overspend "debt").
+		if !allowNegative {
+			return 0, 0, fmt.Errorf("credit blocks out of sync")
+		}
+		debt = remaining
+	}
+	return newBal, debt, nil
 }
 
 func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, userID string, creditTypeID uuid.UUID) (*models.UserCreditBalance, error) {
@@ -599,13 +666,14 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 		v := params.SourceID.String()
 		sourceIDText = &v
 	}
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, tx, params.UserID, creditTypeID, params.Amount)
+	trxID := uuid.New()
+	newBal, debt, err := s.withdrawBalanceAndBlocksWithPolicy(ctx, tx, params.UserID, creditTypeID, params.Amount, params.AllowNegative, params.MaxNegative)
 	if err != nil {
 		return nil, err
 	}
 
 	trx := &models.CreditTransaction{
-		ID:              uuid.New(),
+		ID:              trxID,
 		UserID:          params.UserID,
 		CreditTypeID:    creditTypeID,
 		Amount:          -params.Amount,
@@ -619,6 +687,21 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 	}
 	if _, err := tx.NewInsert().Model(trx).Exec(ctx); err != nil {
 		return nil, err
+	}
+	if debt > 0 {
+		debtBlock := &models.CreditBlock{
+			ID:                  uuid.New(),
+			UserID:              params.UserID,
+			CreditTypeID:        creditTypeID,
+			OriginalAmount:      -debt,
+			RemainingAmount:     -debt,
+			ExpiresAt:           nil,
+			SourceTransactionID: &trx.ID,
+			CreatedAt:           now,
+		}
+		if _, err := tx.NewInsert().Model(debtBlock).Exec(ctx); err != nil {
+			return nil, err
+		}
 	}
 	return trx, nil
 }

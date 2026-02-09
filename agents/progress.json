@@ -1011,6 +1011,19 @@
         "[ ] Race tests: capture vs release, capture vs expiry worker"
       ],
       "completed": false
+    },
+    {
+      "id": 204,
+      "name": "batch-credits-mutations-for-internal-callers",
+      "description": "High-throughput internal callers (notably Cozy Hub hosts like gen-orchestrator) need to apply credit mutations in batches for efficiency. OpenRails should support batching without adding new endpoints by extending existing endpoints to accept either a single object (current behavior) or an array of objects.\n\nEventual consistency is acceptable for API credits: minor negative balances can occur under concurrency/stale caches. This path should allow bounded negative balances for `api_credits` for trusted internal callers to avoid failing batches for small overspend.\n\nConstraints:\n- Do not add new HTTP endpoints if avoidable.\n- Preserve idempotency per item (same guarantees as single-item calls).\n- No cross-item transaction semantics (partial failures are allowed and must be explicit).",
+      "tasks": [
+        "[x] Extend endpoints to accept batch payloads (single object OR array) for:\n    - POST /v1/credits/hold\n    - POST /v1/credits/withdraw",
+        "[x] Batch capture/release without new endpoints\n    - Reuse existing routes by supporting a sentinel id: `POST /v1/credits/holds/batch/capture` and `/v1/credits/holds/batch/release`\n    - Keep per-item results and stable ordering",
+        "[x] Define response + error semantics\n    - Batch requests return HTTP 200 with `{ results: [{ ok, status, result?, error? }, ...] }`\n    - Single-object requests preserve existing status codes and response shapes",
+        "[x] Allow bounded negative balances for `api_credits` in internal mode\n    - Request fields: `allow_negative=true` and `max_negative` (absolute units)\n    - Restricted to `credit_type=api_credits` and guardrailed by `max_negative`",
+        "[x] Tests\n    - Integration tests: batch hold/withdraw/capture/release + mixed success\n    - Integration tests: allow_negative happy path + limit exceeded + policy restriction"
+      ],
+      "completed": true
     }
   ]
 }

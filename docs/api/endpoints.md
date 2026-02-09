@@ -259,21 +259,69 @@ Deposit/grant credits. Body: `{ user_id, credit_type, amount, source, source_id?
 Returns a `CreditTransaction`. If `source_id` is provided, deposits are idempotent per `(user_id, credit_type, source, source_id)`.
 
 ### POST /v1/credits/withdraw
-Withdraw credits. Body: `{ user_id, credit_type, amount, source, source_id? }`.
-Returns a `CreditTransaction`. On insufficient credits, returns 402 with `insufficient_credits`.
+Withdraw credits.
+
+Body (single):
+`{ user_id, credit_type, amount, source, source_id?, allow_negative?, max_negative? }`
+
+Body (batch):
+`[{ user_id, credit_type, amount, source, source_id?, allow_negative?, max_negative? }, ...]`
+
+Response (single): a `CreditTransaction`.
+
+Response (batch): HTTP 200 with:
+`{ results: [{ ok, status, result?, error? }, ...] }` (stable order, per-item status).
+
+Errors (single):
+- 402 `insufficient_credits`
+- 402 `negative_balance_limit_exceeded` (when `allow_negative=true` but the spend would exceed `max_negative`)
+- 400 `invalid_negative_policy` (only `credit_type=api_credits` supports this, and `max_negative` must be > 0)
+
+Notes:
+- `allow_negative` is an internal-only escape hatch for trusted callers. It is only supported for `credit_type=api_credits`.
 
 ### POST /v1/credits/hold
-Reserve credits for long-running jobs. Body: `{ user_id, credit_type, amount, source, source_id, expires_at }` (epoch seconds).
-Returns a `CreditTransaction` with `transaction_type='hold'` and `status='active'`. The returned `id` is the durable identifier you later use to capture or release the hold. On insufficient credits, returns 402.
+Reserve credits for long-running jobs.
+
+Body (single):
+`{ user_id, credit_type, amount, source, source_id, expires_at }` (epoch seconds).
+
+Body (batch):
+`[{ user_id, credit_type, amount, source, source_id, expires_at }, ...]`
+
+Response (single): a `CreditTransaction` with `transaction_type='hold'` and `status='active'`.
+
+Response (batch): HTTP 200 with:
+`{ results: [{ ok, status, result?, error? }, ...] }` (stable order, per-item status).
+
+On insufficient credits (single), returns 402.
 
 Idempotency:
 - Hold creation is idempotent per `(user_id, credit_type, source, source_id)`; retries return the existing hold transaction.
 
 ### POST /v1/credits/holds/{id}/capture
-Capture a hold: `{ amount }` (amount <= hold). Updates the same `CreditTransaction` row to `status='captured'`, setting `captured_amount` and `amount` (negative).
+Capture a hold.
+
+Body (single):
+`{ amount, allow_negative?, max_negative? }` (amount <= hold).
+
+Response (single): updates the same `CreditTransaction` row to `status='captured'`, setting `captured_amount` and `amount` (negative).
+
+Batch capture (no new endpoint):
+- Use the sentinel id `batch`: `POST /v1/credits/holds/batch/capture`
+- Body: `[{ hold_id, amount, allow_negative?, max_negative? }, ...]`
+- Response: HTTP 200 with `{ results: [{ ok, status, result?, error? }, ...] }`
+
+Notes:
+- `allow_negative` is only supported for `credit_type=api_credits` and requires `max_negative > 0`.
 
 ### POST /v1/credits/holds/{id}/release
 Release a hold without spending credits. Response `{ ok: true }`.
+
+Batch release (no new endpoint):
+- Use the sentinel id `batch`: `POST /v1/credits/holds/batch/release`
+- Body: `[{ hold_id }, ...]`
+- Response: HTTP 200 with `{ results: [{ ok, status, error? }, ...] }`
 
 ### GET /v1/credits/transactions/lookup
 Lookup a single credit transaction by its idempotency key.
