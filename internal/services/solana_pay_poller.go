@@ -2,6 +2,9 @@ package services
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -9,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
@@ -294,6 +298,25 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 		return err
 	}
 
+	if p.checkoutService == nil || p.checkoutService.PaymentService == nil {
+		return fmt.Errorf("checkout payment service is not configured")
+	}
+
+	// Fast idempotency guard: skip processing if this signature is already recorded.
+	existingPayment, err := p.checkoutService.PaymentService.GetByTransactionID(ctx, models.ProcessorSolana, signature)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("failed checking existing payment for signature %s: %w", signature, err)
+	}
+	if err == nil && existingPayment != nil {
+		log.WithFields(log.Fields{
+			"payment_id": existingPayment.ID,
+			"reference":  reference,
+			"signature":  signature,
+		}).Info("Solana payment already processed, skipping duplicate")
+		p.markCheckoutSessionSucceeded(ctx, pending, existingPayment.ID, signature)
+		return nil
+	}
+
 	// Use the unified RegisterPurchase to record payment and grant entitlements
 	result, err := p.checkoutService.RegisterPurchase(ctx, &RegisterPurchaseRequest{
 		UserID:         pending.UserID,
@@ -306,6 +329,19 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 	})
 
 	if err != nil {
+		// Race-safe idempotency: if another worker inserted first, treat as success.
+		if isDuplicatePaymentTransactionIDError(err) {
+			existingPayment, getErr := p.checkoutService.PaymentService.GetByTransactionID(ctx, models.ProcessorSolana, signature)
+			if getErr == nil && existingPayment != nil {
+				log.WithFields(log.Fields{
+					"payment_id": existingPayment.ID,
+					"reference":  reference,
+					"signature":  signature,
+				}).Info("Solana payment already processed by concurrent worker, skipping duplicate")
+				p.markCheckoutSessionSucceeded(ctx, pending, existingPayment.ID, signature)
+				return nil
+			}
+		}
 		return err
 	}
 
@@ -319,15 +355,30 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 		"entitlements": result.Entitlements,
 	}).Info("Processed Solana Pay payment via RegisterPurchase")
 
-	if pending.SessionID != "" && p.checkoutSessionService != nil {
-		if sessionID, err := uuid.Parse(pending.SessionID); err == nil {
-			if err := p.checkoutSessionService.MarkSucceeded(ctx, sessionID, result.PaymentID, signature); err != nil {
-				log.WithError(err).WithField("session_id", pending.SessionID).Warn("Failed to update checkout session for Solana payment")
-			}
-		} else {
-			log.WithError(err).WithField("session_id", pending.SessionID).Warn("Invalid checkout session ID on pending Solana payment")
-		}
-	}
+	p.markCheckoutSessionSucceeded(ctx, pending, result.PaymentID, signature)
 
 	return nil
+}
+
+func (p *SolanaPayPoller) markCheckoutSessionSucceeded(ctx context.Context, pending *PendingSolanaPayment, paymentID uuid.UUID, signature string) {
+	if pending == nil || pending.SessionID == "" || p.checkoutSessionService == nil {
+		return
+	}
+	sessionID, err := uuid.Parse(pending.SessionID)
+	if err != nil {
+		log.WithError(err).WithField("session_id", pending.SessionID).Warn("Invalid checkout session ID on pending Solana payment")
+		return
+	}
+	if err := p.checkoutSessionService.MarkSucceeded(ctx, sessionID, paymentID, signature); err != nil {
+		log.WithError(err).WithField("session_id", pending.SessionID).Warn("Failed to update checkout session for Solana payment")
+	}
+}
+
+func isDuplicatePaymentTransactionIDError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "payments_processor_transaction_id_key") ||
+		(strings.Contains(msg, "duplicate key value") && strings.Contains(msg, "sqlstate=23505"))
 }
