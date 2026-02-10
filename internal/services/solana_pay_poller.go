@@ -21,6 +21,10 @@ import (
 const (
 	// Poll interval for checking pending payments
 	solanaPayPollInterval = 500 * time.Millisecond
+	// Per-reference backoff when no matching transaction is found yet.
+	solanaNoTxRetryInterval = 3 * time.Second
+	// Per-reference backoff when signatures exist but none can be processed yet.
+	solanaUnmatchedTxRetryInterval = 5 * time.Second
 )
 
 // SolanaPayPoller polls the blockchain for confirmed Solana Pay payments
@@ -179,6 +183,7 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 	p.clearRetry(reference)
 
 	if len(sigs) == 0 {
+		p.deferRetryFor(reference, solanaNoTxRetryInterval)
 		return // No transactions yet
 	}
 
@@ -186,6 +191,28 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 	for _, sig := range sigs {
 		if sig.HasError {
 			continue // Skip failed transactions
+		}
+
+		// Idempotency short-circuit: if this signature is already recorded, stop polling this reference.
+		if p.checkoutService != nil && p.checkoutService.PaymentService != nil {
+			existingPayment, getErr := p.checkoutService.PaymentService.GetByTransactionID(ctx, models.ProcessorSolana, sig.Signature)
+			if getErr == nil && existingPayment != nil {
+				log.WithFields(log.Fields{
+					"reference":  reference,
+					"signature":  sig.Signature,
+					"payment_id": existingPayment.ID,
+				}).Info("Solana reference already has a recorded payment; removing pending payment")
+				p.markCheckoutSessionSucceeded(ctx, pending, existingPayment.ID, sig.Signature)
+				p.solanaPayService.RemovePendingPayment(ctx, reference)
+				p.clearRetry(reference)
+				return
+			}
+			if getErr != nil && !errors.Is(getErr, sql.ErrNoRows) {
+				log.WithError(getErr).WithFields(log.Fields{
+					"reference": reference,
+					"signature": sig.Signature,
+				}).Warn("Failed to check existing payment by signature")
+			}
 		}
 
 		// Verify the transaction matches our expected payment
@@ -209,6 +236,9 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 			return
 		}
 	}
+
+	// Signatures exist, but none were usable for this pending record yet; avoid hot-looping.
+	p.deferRetryFor(reference, solanaUnmatchedTxRetryInterval)
 }
 
 func (p *SolanaPayPoller) shouldAttempt(reference string) bool {
@@ -244,6 +274,18 @@ func (p *SolanaPayPoller) deferRetry(reference string, err error) {
 		}
 	}
 
+	p.retryMu.Lock()
+	p.retryAfter[reference] = time.Now().Add(backoff)
+	p.retryMu.Unlock()
+}
+
+func (p *SolanaPayPoller) deferRetryFor(reference string, backoff time.Duration) {
+	if reference == "" {
+		return
+	}
+	if backoff <= 0 {
+		backoff = time.Second
+	}
 	p.retryMu.Lock()
 	p.retryAfter[reference] = time.Now().Add(backoff)
 	p.retryMu.Unlock()
