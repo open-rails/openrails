@@ -1251,6 +1251,13 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		CurrentPeriodEndsAt:     renewalDate,
 	})
 	if err != nil {
+		if IsTerminalTransitionBlocked(err) {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"processor_subscription_id": pSubscriptionID,
+				"transaction_id":            transactionID,
+			}).Warn("Blocked terminal -> active transition for CCBill UserReactivation")
+			return nil
+		}
 		return fmt.Errorf("failed to reactivate membership: %w", err)
 	}
 
@@ -1740,8 +1747,8 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			return err
 		}
 
-		// Mark as merchant cancellation due to chargeback
-		cancelType := models.CancelTypeMerchant
+		// Chargebacks are terminal cancellations.
+		cancelType := models.CancelTypeChargeback
 		sub.Status = models.StatusCancelled
 		sub.CancelType = &cancelType
 		sub.CancelledAt = &now
@@ -1916,6 +1923,13 @@ func (s *CCBillWebhookService) handleRenewalSuccess(ctx context.Context) error {
 		Amount:                  billedAmountCents,
 		Currency:                currencyValue,
 	}); err != nil {
+		if IsTerminalTransitionBlocked(err) {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"processor_subscription_id": ccBillSubID,
+				"transaction_id":            transactionID,
+			}).Warn("Blocked terminal -> active transition for delayed CCBill RenewalSuccess")
+			return nil
+		}
 		return fmt.Errorf("failed to renew membership: %w", err)
 	}
 

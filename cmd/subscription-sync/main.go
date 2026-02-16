@@ -50,6 +50,7 @@ func main() {
 	cmd.Flags().Bool("apply", false, "Apply cancellation for local-only subscriptions")
 	cmd.Flags().Bool("revoke-access", false, "Revoke entitlements immediately when applying cancellations")
 	cmd.Flags().Bool("add-remote", false, "Create memberships for remote-only subscriptions (CCBill only)")
+	cmd.Flags().Bool("allow-terminal-reactivation", false, "Allow terminal-to-active lifecycle transitions during reconciliation")
 	cmd.Flags().String("ccbill-price-id", "", "Price ID to use when adding remote-only CCBill subscriptions")
 
 	if err := loadDotEnv(); err != nil {
@@ -86,6 +87,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	apply := viper.GetBool("apply")
 	revokeAccess := viper.GetBool("revoke-access")
 	addRemote := viper.GetBool("add-remote")
+	allowTerminalReactivation := viper.GetBool("allow-terminal-reactivation")
 	ccbillPriceID := viper.GetString("ccbill-price-id")
 
 	cfg, err := config.Load(configPath)
@@ -110,13 +112,14 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	for _, name := range processorList {
 		if err := reconcileProcessor(ctx, application, cfg, name, reconcileOptions{
-			resultLimit:   resultLimit,
-			resultOrder:   resultOrder,
-			maxPages:      maxPages,
-			apply:         apply,
-			revokeAccess:  revokeAccess,
-			addRemote:     addRemote,
-			ccbillPriceID: ccbillPriceID,
+			resultLimit:               resultLimit,
+			resultOrder:               resultOrder,
+			maxPages:                  maxPages,
+			apply:                     apply,
+			revokeAccess:              revokeAccess,
+			addRemote:                 addRemote,
+			allowTerminalReactivation: allowTerminalReactivation,
+			ccbillPriceID:             ccbillPriceID,
 		}); err != nil {
 			return err
 		}
@@ -164,13 +167,14 @@ func fetchCCBillSubscriptions(ctx context.Context, cfg *config.Config) ([]ccbill
 }
 
 type reconcileOptions struct {
-	resultLimit   int
-	resultOrder   string
-	maxPages      int
-	apply         bool
-	revokeAccess  bool
-	addRemote     bool
-	ccbillPriceID string
+	resultLimit               int
+	resultOrder               string
+	maxPages                  int
+	apply                     bool
+	revokeAccess              bool
+	addRemote                 bool
+	allowTerminalReactivation bool
+	ccbillPriceID             string
 }
 
 func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.Config, processorName string, opts reconcileOptions) error {
@@ -346,11 +350,12 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 					}
 
 					err = application.Runtime.SubscriptionLifecycleService.RenewMembership(ctx, &services.RenewMembershipParams{
-						Processor:               models.ProcessorCCBill,
-						ProcessorSubscriptionID: id,
-						TransactionID:           fmt.Sprintf("ccbill-cmd-renew-%s", id),
-						Amount:                  renewPrice.Amount,
-						Currency:                renewPrice.Currency,
+						Processor:                 models.ProcessorCCBill,
+						ProcessorSubscriptionID:   id,
+						TransactionID:             fmt.Sprintf("ccbill-cmd-renew-%s", id),
+						Amount:                    renewPrice.Amount,
+						Currency:                  renewPrice.Currency,
+						AllowTerminalReactivation: opts.allowTerminalReactivation,
 					})
 					if err != nil {
 						fmt.Fprintf(os.Stderr, "failed to renew membership for %s: %v\n", id, err)

@@ -57,6 +57,9 @@ type RenewMembershipParams struct {
 	TransactionID string // Processor's transaction ID for this renewal
 	Amount        int64  // Amount charged in smallest unit (cents for USD)
 	Currency      string // Currency code (e.g., "usd")
+	// AllowTerminalReactivation bypasses policy and permits terminal -> active transitions.
+	// This should only be set by explicit manual operator workflows.
+	AllowTerminalReactivation bool
 }
 
 type ReactivateMembershipParams struct {
@@ -65,6 +68,52 @@ type ReactivateMembershipParams struct {
 	// CurrentPeriodEndsAt is an optional override for the subscription paid-term end.
 	// Used for processors like CCBill that provide an authoritative nextRenewalDate.
 	CurrentPeriodEndsAt *time.Time
+	// AllowTerminalReactivation bypasses policy and permits terminal -> active transitions.
+	// This should only be set by explicit manual operator workflows.
+	AllowTerminalReactivation bool
+}
+
+var ErrTerminalTransitionBlocked = errors.New("terminal-to-active transition blocked by lifecycle policy")
+
+type TerminalTransitionBlockedError struct {
+	SubscriptionID uuid.UUID
+	Processor      models.Processor
+	FromStatus     models.SubscriptionStatus
+	ToStatus       models.SubscriptionStatus
+	CancelType     string
+	Trigger        string
+	Reason         string
+}
+
+func (e *TerminalTransitionBlockedError) Error() string {
+	if e == nil {
+		return ErrTerminalTransitionBlocked.Error()
+	}
+	return fmt.Sprintf("%v: trigger=%s subscription_id=%s processor=%s from=%s to=%s cancel_type=%s reason=%s",
+		ErrTerminalTransitionBlocked,
+		e.Trigger,
+		e.SubscriptionID,
+		e.Processor,
+		e.FromStatus,
+		e.ToStatus,
+		e.CancelType,
+		e.Reason,
+	)
+}
+
+func (e *TerminalTransitionBlockedError) Unwrap() error {
+	return ErrTerminalTransitionBlocked
+}
+
+func IsTerminalTransitionBlocked(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrTerminalTransitionBlocked) {
+		return true
+	}
+	var blockedErr *TerminalTransitionBlockedError
+	return errors.As(err, &blockedErr)
 }
 
 type CancelMembershipParams struct {
@@ -88,6 +137,57 @@ func safeString(value *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*value)
+}
+
+func normalizeCancelType(cancelType *models.CancelType) string {
+	if cancelType == nil {
+		return ""
+	}
+	return string(*cancelType)
+}
+
+func terminalCancelReason(subscription *models.Subscription) (string, bool) {
+	if subscription == nil {
+		return "", false
+	}
+	if subscription.Status != models.StatusCancelled {
+		return "", false
+	}
+	if subscription.CancelType != nil && *subscription.CancelType == models.CancelTypeChargeback {
+		return "cancel_type=chargeback", true
+	}
+	feedback := strings.TrimSpace(safeString(subscription.CancelFeedback))
+	if feedback != "" && strings.Contains(strings.ToUpper(feedback), "CHARGEBACK") {
+		return "legacy_chargeback_feedback", true
+	}
+	return "", false
+}
+
+func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context.Context, subscription *models.Subscription, trigger string, allowOverride bool) error {
+	reason, terminal := terminalCancelReason(subscription)
+	if !terminal {
+		return nil
+	}
+
+	if allowOverride {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id": subscription.ID,
+			"processor":       subscription.Processor,
+			"trigger":         trigger,
+			"reason":          reason,
+		}).Warn("Bypassing terminal transition guard via explicit manual override")
+		return nil
+	}
+
+	return &TerminalTransitionBlockedError{
+		SubscriptionID: subscription.ID,
+		Processor:      subscription.Processor,
+		FromStatus:     subscription.Status,
+		ToStatus:       models.StatusActive,
+		CancelType:     normalizeCancelType(subscription.CancelType),
+		Trigger:        trigger,
+		Reason:         reason,
+	}
 }
 
 // NewSubscriptionLifecycleService creates a new instance of SubscriptionLifecycleService
@@ -479,6 +579,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		"transaction_id":            params.TransactionID,
 		"amount_cents":              params.Amount,
 		"currency":                  params.Currency,
+		"allow_terminal_reactivate": params.AllowTerminalReactivation,
 	}).Info("Starting membership renewal flow")
 
 	err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
@@ -518,6 +619,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				}).WithError(err).Error("Failed to load subscription for renewal (both lookups)")
 				return fmt.Errorf("subscription not found: %w", err)
 			}
+		}
+
+		if err := s.assertActiveTransitionAllowed(ctx, subscription, "renewal", params.AllowTerminalReactivation); err != nil {
+			return err
 		}
 
 		// Capture values for Payment creation after transaction
@@ -824,6 +929,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		"processor":                 params.Processor,
 		"processor_subscription_id": processorSubID,
 		"has_period_override":       params.CurrentPeriodEndsAt != nil,
+		"allow_terminal_reactivate": params.AllowTerminalReactivation,
 	}).Info("Starting membership reactivation flow")
 
 	var reactivated *models.Subscription
@@ -848,6 +954,10 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), provider, processorSubID)
 		if err != nil {
 			return fmt.Errorf("failed to get subscription for reactivation: %w", err)
+		}
+
+		if err := s.assertActiveTransitionAllowed(ctx, subscription, "reactivation", params.AllowTerminalReactivation); err != nil {
+			return err
 		}
 
 		price, err := priceService.GetByID(ctx, subscription.PriceID)

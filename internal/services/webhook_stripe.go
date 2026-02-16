@@ -161,6 +161,13 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			Amount:                  inv.AmountPaid,
 			Currency:                inv.Currency,
 		}); err != nil {
+			if IsTerminalTransitionBlocked(err) {
+				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+					"processor_subscription_id": processorSubID,
+					"transaction_id":            inv.ID,
+				}).Warn("Blocked terminal -> active transition for delayed Stripe renewal")
+				return nil
+			}
 			return fmt.Errorf("renew membership: %w", err)
 		}
 	}

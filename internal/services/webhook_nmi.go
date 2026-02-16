@@ -852,6 +852,15 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			Amount:                  amountCents,
 			Currency:                currencyValue,
 		}); err != nil {
+			if IsTerminalTransitionBlocked(err) {
+				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+					"subscription_id":             subscription.ID,
+					"processor_subscription_id":   subscription.ProcessorSubscriptionID,
+					"transaction_id":              txnID,
+					"subscription_lifecycle_step": "renew_membership",
+				}).Warn("Blocked terminal -> active transition for delayed NMI success event")
+				return nil
+			}
 			return fmt.Errorf("failed to renew subscription: %w", err)
 		}
 
