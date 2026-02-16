@@ -59,6 +59,14 @@ type RenewMembershipParams struct {
 	Currency      string // Currency code (e.g., "usd")
 }
 
+type ReactivateMembershipParams struct {
+	Processor               models.Processor
+	ProcessorSubscriptionID string
+	// CurrentPeriodEndsAt is an optional override for the subscription paid-term end.
+	// Used for processors like CCBill that provide an authoritative nextRenewalDate.
+	CurrentPeriodEndsAt *time.Time
+}
+
 type CancelMembershipParams struct {
 	SubscriptionID          *uuid.UUID
 	Processor               *models.Processor
@@ -798,6 +806,142 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	}
 
 	return nil
+}
+
+// ReactivateMembership reactivates a previously cancelled subscription and restores
+// its paid entitlement windows for the current product tier.
+func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context, params *ReactivateMembershipParams) (*models.Subscription, error) {
+	if params == nil {
+		return nil, fmt.Errorf("reactivation params are required")
+	}
+
+	processorSubID := strings.TrimSpace(params.ProcessorSubscriptionID)
+	if processorSubID == "" {
+		return nil, fmt.Errorf("processor subscription id is required")
+	}
+
+	log.WithContext(ctx).WithFields(log.Fields{
+		"processor":                 params.Processor,
+		"processor_subscription_id": processorSubID,
+		"has_period_override":       params.CurrentPeriodEndsAt != nil,
+	}).Info("Starting membership reactivation flow")
+
+	var reactivated *models.Subscription
+
+	err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		txdb := db.NewWithTx(tx)
+		priceService := NewPriceService(txdb)
+		productService := NewProductService(txdb)
+		notificationService := NewNotificationService(txdb, nil)
+		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, nil, nil, nil)
+		entitlementService := NewEntitlementService(txdb)
+		entitlementService.SetClock(s.Clock)
+
+		provider := ""
+		if processors.IsNMIBackedProcessor(params.Processor) {
+			provider = strings.ToLower(string(params.Processor))
+			if provider == "nmi" {
+				provider = "mobius"
+			}
+		}
+
+		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), provider, processorSubID)
+		if err != nil {
+			return fmt.Errorf("failed to get subscription for reactivation: %w", err)
+		}
+
+		price, err := priceService.GetByID(ctx, subscription.PriceID)
+		if err != nil {
+			return fmt.Errorf("failed to load subscription price: %w", err)
+		}
+
+		product, err := productService.GetByID(ctx, price.ProductID)
+		if err != nil {
+			return fmt.Errorf("failed to load subscription product: %w", err)
+		}
+
+		now := s.now().UTC()
+		periodStartsAt := now
+		var periodEndsAt time.Time
+		if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
+			periodEndsAt = params.CurrentPeriodEndsAt.UTC()
+		} else if price.BillingCycleDays != nil && *price.BillingCycleDays > 0 {
+			periodEndsAt = now.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+		} else {
+			periodEndsAt = now.Add(30 * 24 * time.Hour)
+		}
+
+		subscription.Status = models.StatusActive
+		subscription.CurrentPeriodStartsAt = &periodStartsAt
+		subscription.CurrentPeriodEndsAt = &periodEndsAt
+		subscription.CancelledAt = nil
+		subscription.CancelType = nil
+		subscription.CancelFeedback = nil
+		subscription.EndedAt = nil
+		subscription.LastRetryAt = nil
+		subscription.RetryAttempts = nil
+		subscription.NextRetryAt = nil
+		subscription.GraceEndsAt = nil
+
+		if err := subService.Update(ctx, subscription); err != nil {
+			return fmt.Errorf("failed to update reactivated subscription: %w", err)
+		}
+
+		entNames := make([]string, 0)
+		if product.EntitlementsSpec != nil && len(product.EntitlementsSpec) > 0 {
+			entNames = make([]string, 0, len(product.EntitlementsSpec))
+			for name := range product.EntitlementsSpec {
+				entNames = append(entNames, name)
+			}
+		} else {
+			entNames = append(entNames, "premium")
+		}
+
+		notBefore := periodStartsAt.UTC()
+		endAt := periodEndsAt.UTC()
+		graceSource := models.EntitlementSourceGrace
+		subSource := models.EntitlementSourceSubscription
+		subID := subscription.ID
+
+		for _, entName := range entNames {
+			if err := entitlementService.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+				UserID:      subscription.UserID,
+				Entitlement: entName,
+				SourceType:  &graceSource,
+				SourceID:    &subID,
+				Reason:      models.EntitlementRevokeSuperseded,
+			}); err != nil {
+				return fmt.Errorf("failed to clear grace entitlement %s on reactivation: %w", entName, err)
+			}
+
+			if _, err := entitlementService.PushNewEntitlement(ctx, PushNewEntitlementParams{
+				UserID:      subscription.UserID,
+				Entitlement: entName,
+				NotBefore:   &notBefore,
+				EndAt:       &endAt,
+				SourceType:  subSource,
+				SourceID:    subID,
+			}); err != nil {
+				return fmt.Errorf("failed to restore entitlement %s on reactivation: %w", entName, err)
+			}
+		}
+
+		reactivated = subscription
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	log.WithContext(ctx).WithFields(log.Fields{
+		"subscription_id":           reactivated.ID,
+		"user_id":                   reactivated.UserID,
+		"processor":                 reactivated.Processor,
+		"processor_subscription_id": reactivated.ProcessorSubscriptionID,
+		"current_period_ends_at":    reactivated.CurrentPeriodEndsAt,
+	}).Info("Membership reactivation flow completed")
+
+	return reactivated, nil
 }
 
 // CancelMembership cancels a subscription and revokes associated roles

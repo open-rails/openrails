@@ -1214,147 +1214,118 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		return err
 	}
 
-	pSubscriptionID := data.SubscriptionID
-	transactionID := data.TransactionID
-	email := data.Email
-	priceStr := data.Price
-	nextRenewalDate := data.NextRenewalDate
+	pSubscriptionID := strings.TrimSpace(data.SubscriptionID)
+	transactionID := strings.TrimSpace(data.TransactionID)
+	email := strings.TrimSpace(data.Email)
+	priceStr := strings.TrimSpace(data.Price)
+	nextRenewalDate := strings.TrimSpace(data.NextRenewalDate)
 
-	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		txdb := db.NewWithTx(tx)
-		priceService := NewPriceService(txdb)
-		productService := NewProductService(txdb)
-		notificationService := NewNotificationService(txdb, nil)
-		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
-
-		// Note: We could validate that the email matches the subscription's user email here
-		// but for now we'll rely on the subscription lookup
-
-		// Find subscription by processor subscription ID
-		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), "", pSubscriptionID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("subscription not found for processor subscription ID: %s", pSubscriptionID)
-			}
-			return fmt.Errorf("failed to get subscription: %w", err)
-		}
-
-		// Parse next renewal date if provided
-		var renewalDate *time.Time
-		if nextRenewalDate != "" {
-			var parsed time.Time
-			parsed, err = time.Parse("2006-01-02", nextRenewalDate)
-			if err != nil {
-				log.WithContext(ctx).WithError(err).Warn("Failed to parse nextRenewalDate for reactivation")
-			} else {
-				renewalDate = &parsed
-			}
-		}
-
-		// Reactivate subscription
-		now := s.now()
-		sub.Status = models.StatusActive
-		sub.CancelledAt = nil
-		sub.CancelType = nil
-		sub.CancelFeedback = nil
-		sub.EndedAt = nil
-
-		if renewalDate != nil {
-			sub.CurrentPeriodEndsAt = renewalDate
-			sub.CurrentPeriodStartsAt = &now
-		}
-
-		if err = subService.Update(ctx, sub); err != nil {
-			return fmt.Errorf("failed to reactivate subscription: %w", err)
-		}
-
-		// Log reactivation event to ClickHouse
-		if s.EventLogService != nil {
-			metadata := map[string]interface{}{
-				"transaction_id":            transactionID,
-				"processor_subscription_id": pSubscriptionID,
-				"processor":                 "ccbill",
-				"event_source":              "webhook",
-				"price_description":         priceStr,
-				"next_renewal_date":         nextRenewalDate,
-				"reactivation_type":         "user_initiated",
-			}
-
-			uid3 := sub.UserID
-			subscriptionEventData := SubscriptionEventData{
-				EventID:        uuid.New(),
-				SubscriptionID: sub.ID,
-				UserID:         uid3,
-				EventType:      PaymentEventSubscriptionReactivated,
-				Status:         string(sub.Status),
-				CancelType: func() string {
-					if sub.CancelType != nil {
-						return string(*sub.CancelType)
-					}
-					return ""
-				}(),
-				PriceAmount: float64(sub.Price.Amount) / 100.0,
-				PriceCurrency: func() string {
-					if sub.Price != nil {
-						return sub.Price.Currency
-					}
-					return "usd"
-				}(),
-				BillingCycleDays: func() uint32 {
-					if sub.Price != nil && sub.Price.BillingCycleDays != nil {
-						return uint32(*sub.Price.BillingCycleDays)
-					}
-					return 0
-				}(),
-				ProductID: func() *uuid.UUID {
-					if sub.Price != nil {
-						return &sub.Price.ProductID
-					}
-					return nil
-				}(),
-				PriceID: func() *uuid.UUID {
-					if sub.Price != nil {
-						return &sub.Price.ID
-					}
-					return nil
-				}(),
-				Processor:               "ccbill",
-				ProcessorSubscriptionID: &pSubscriptionID,
-				Metadata:                CreateMetadataJSON(metadata),
-				Timestamp:               s.now(),
-			}
-
-			if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
-				log.WithError(err).Error("Failed to log reactivation event to ClickHouse")
-			}
-		}
-
-		// Add notification to queue for user about reactivation and send immediate email
-		if s.NotificationService != nil {
-			notification := &models.NotificationQueue{
-				ID:        uuid.New(),
-				UserID:    sub.UserID,
-				EventType: models.NotificationPremiumStarted, // Use started for reactivations
-			}
-			if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to create and deliver reactivation notification")
-			}
-		}
-
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscriptionID":          sub.ID,
-			"userID":                  sub.UserID,
-			"transactionID":           transactionID,
-			"processorSubscriptionID": pSubscriptionID,
-			"email":                   email,
-			"priceDescription":        priceStr,
-			"nextRenewalDate":         nextRenewalDate,
-		}).Info("Processed user reactivation successfully")
-
-		return nil
-	}); err != nil {
-		return err
+	if pSubscriptionID == "" {
+		return fmt.Errorf("missing required field: subscriptionId")
 	}
+	if transactionID == "" {
+		return fmt.Errorf("missing required field: transactionId")
+	}
+	if s.SubscriptionLifecycleService == nil {
+		return fmt.Errorf("subscription lifecycle service not configured")
+	}
+
+	if s.DeduplicationService != nil {
+		isDupe, err := s.DeduplicationService.IsDuplicate(ctx, "ccbill", transactionID)
+		if err != nil {
+			log.WithContext(ctx).WithError(err).Warn("deduplication check failed, proceeding with webhook")
+		} else if isDupe {
+			log.WithContext(ctx).WithField("transaction_id", transactionID).Info("Duplicate CCBill UserReactivation webhook, skipping")
+			return nil
+		}
+	}
+
+	renewalDate, err := parseCCBillDateUsingTimestamp(nextRenewalDate, "")
+	if err != nil {
+		return fmt.Errorf("failed to parse nextRenewalDate '%s': %w", nextRenewalDate, err)
+	}
+
+	sub, err := s.SubscriptionLifecycleService.ReactivateMembership(ctx, &ReactivateMembershipParams{
+		Processor:               models.ProcessorCCBill,
+		ProcessorSubscriptionID: pSubscriptionID,
+		CurrentPeriodEndsAt:     renewalDate,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to reactivate membership: %w", err)
+	}
+
+	if s.EventLogService != nil {
+		metadata := map[string]interface{}{
+			"transaction_id":            transactionID,
+			"processor_subscription_id": pSubscriptionID,
+			"processor":                 "ccbill",
+			"event_source":              "webhook",
+			"price_description":         priceStr,
+			"next_renewal_date":         nextRenewalDate,
+			"reactivation_type":         "user_initiated",
+		}
+
+		priceAmount := 0.0
+		priceCurrency := "usd"
+		billingCycleDays := uint32(0)
+		var productID *uuid.UUID
+		var priceID *uuid.UUID
+		if sub.Price != nil {
+			priceAmount = float64(sub.Price.Amount) / 100.0
+			priceCurrency = sub.Price.Currency
+			if sub.Price.BillingCycleDays != nil {
+				billingCycleDays = uint32(*sub.Price.BillingCycleDays)
+			}
+			productID = &sub.Price.ProductID
+			priceID = &sub.Price.ID
+		}
+
+		subscriptionEventData := SubscriptionEventData{
+			EventID:                 uuid.New(),
+			SubscriptionID:          sub.ID,
+			UserID:                  sub.UserID,
+			EventType:               PaymentEventSubscriptionReactivated,
+			Status:                  string(sub.Status),
+			CancelType:              "",
+			PriceAmount:             priceAmount,
+			PriceCurrency:           priceCurrency,
+			BillingCycleDays:        billingCycleDays,
+			ProductID:               productID,
+			PriceID:                 priceID,
+			Processor:               "ccbill",
+			ProcessorSubscriptionID: &pSubscriptionID,
+			ProcessorTransactionID:  &transactionID,
+			Metadata:                CreateMetadataJSON(metadata),
+			Timestamp:               s.now(),
+		}
+
+		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
+			log.WithError(err).Error("Failed to log reactivation event to ClickHouse")
+		}
+	}
+
+	// Add notification to queue for user about reactivation and send immediate email
+	if s.NotificationService != nil {
+		notification := &models.NotificationQueue{
+			ID:        uuid.New(),
+			UserID:    sub.UserID,
+			EventType: models.NotificationPremiumStarted, // Use started for reactivations
+		}
+		if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
+			log.WithContext(ctx).WithError(err).Error("failed to create and deliver reactivation notification")
+		}
+	}
+
+	log.WithContext(ctx).WithFields(log.Fields{
+		"subscriptionID":          sub.ID,
+		"userID":                  sub.UserID,
+		"transactionID":           transactionID,
+		"processorSubscriptionID": pSubscriptionID,
+		"email":                   email,
+		"priceDescription":        priceStr,
+		"nextRenewalDate":         nextRenewalDate,
+		"periodEndsAt":            sub.CurrentPeriodEndsAt,
+	}).Info("Processed user reactivation successfully")
 
 	return nil
 }
