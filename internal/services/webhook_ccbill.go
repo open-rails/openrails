@@ -118,6 +118,16 @@ func (s *CCBillWebhookService) resolveUserID(ctx context.Context, username strin
 	return userID, nil
 }
 
+func (s *CCBillWebhookService) paymentService() *PaymentService {
+	if s.PaymentService != nil {
+		return s.PaymentService
+	}
+	if s.DB != nil {
+		return NewPaymentService(s.DB)
+	}
+	return nil
+}
+
 type CCBillWebhookEventType = string
 
 const CCBillProcessorType models.Processor = "ccbill"
@@ -551,10 +561,10 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		return err
 	}
 
-	flexID := data.FlexID
-	formName := data.FormName
-	ccBillSubID := data.SubscriptionID
-	transactionID := data.TransactionID
+	flexID := strings.TrimSpace(data.FlexID)
+	formName := strings.TrimSpace(data.FormName)
+	ccBillSubID := strings.TrimSpace(data.SubscriptionID)
+	transactionID := strings.TrimSpace(data.TransactionID)
 	originalSubscriptionID := strings.TrimSpace(data.OriginalSubscriptionID)
 	billedAmountStr := strings.TrimSpace(data.BilledInitialPrice)
 
@@ -575,8 +585,27 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		return fmt.Errorf("missing required field: originalSubscriptionId")
 	}
 
+	if transactionID == "" {
+		return fmt.Errorf("missing required field: transactionId")
+	}
+
 	if billedAmount <= 0 {
 		return fmt.Errorf("invalid billedAmount: %f - must be greater than 0", billedAmount)
+	}
+
+	paymentService := s.paymentService()
+	if paymentService != nil {
+		existingPayment, err := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, transactionID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("failed to check existing upgrade payment: %w", err)
+		}
+		if err == nil && existingPayment != nil {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"transaction_id": transactionID,
+				"payment_id":     existingPayment.ID,
+			}).Info("Duplicate CCBill UpgradeSuccess webhook, skipping")
+			return nil
+		}
 	}
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
@@ -585,6 +614,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		productService := NewProductService(txdb)
 		notificationService := NewNotificationService(txdb, nil)
 		entitlementService := NewEntitlementService(txdb)
+		paymentService := NewPaymentService(txdb)
 		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
 
 		// Find subscription by the original processor subscription ID and then transition it.
@@ -630,6 +660,33 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 				"subscription_id": subscription.ID,
 			})
 			return billingErr
+		}
+
+		now := s.now().UTC()
+		payment := &models.Payment{
+			ID:             uuid.New(),
+			UserID:         subscription.UserID,
+			PriceID:        newPrice.ID,
+			SubscriptionID: &subscription.ID,
+			Processor:      models.ProcessorCCBill,
+			TransactionID:  transactionID,
+			Amount:         billedAmountCents,
+			ListAmount:     newPrice.Amount,
+			Currency:       normalizeCurrency(data.BilledCurrencyCode),
+			PurchasedAt:    now,
+			CreatedAt:      now,
+		}
+
+		created, err := paymentService.CreateIfNotExists(ctx, payment)
+		if err != nil {
+			return fmt.Errorf("failed to create upgrade payment: %w", err)
+		}
+		if !created {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"transaction_id":  transactionID,
+				"subscription_id": subscription.ID,
+			}).Info("Duplicate CCBill UpgradeSuccess transaction detected in transaction, skipping")
+			return nil
 		}
 
 		if err = subscription.ActivateWithPrice(newPrice); err != nil {

@@ -51,6 +51,24 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 	return nil
 }
 
+func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
+	res, err := r.db.GetDB().
+		NewInsert().
+		Model(payment).
+		On("CONFLICT (processor, transaction_id) DO NOTHING").
+		Exec(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	return rows > 0, nil
+}
+
 func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Payment, error) {
 	payment := new(models.Payment)
 	if err := r.db.GetDB().NewSelect().Model(payment).Where("purch.id = ?", id).Scan(ctx); err != nil {

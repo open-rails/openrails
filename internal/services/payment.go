@@ -38,6 +38,10 @@ func (s *PaymentService) Create(ctx context.Context, payment *models.Payment) er
 	return s.repo.Create(ctx, payment)
 }
 
+func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
+	return s.repo.CreateIfNotExists(ctx, payment)
+}
+
 func (s *PaymentService) GetByID(ctx context.Context, id uuid.UUID) (*models.Payment, error) {
 	return s.repo.GetByID(ctx, id)
 }

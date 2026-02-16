@@ -3,6 +3,7 @@
 package tests
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -50,6 +51,9 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	payload["subscriptionInitialPrice"] = "24.99"
 	payload["subscriptionRecurringPrice"] = "24.99"
 	delete(payload, "amount")
+	transactionID, ok := payload["transactionId"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, transactionID)
 
 	postCCBillWebhook(t, suite.ServerURL, "UpgradeSuccess", payload)
 
@@ -63,6 +67,37 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	require.Equal(t, models.StatusActive, updated.Status)
 	require.Equal(t, newPrice.ID, updated.PriceID)
 
+	ctx := context.Background()
+	var payment models.Payment
+	err := suite.BunDB.NewSelect().
+		Model(&payment).
+		Where("purch.processor = ?", models.ProcessorCCBill).
+		Where("purch.transaction_id = ?", transactionID).
+		Scan(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, payment.SubscriptionID)
+	require.Equal(t, updated.ID, *payment.SubscriptionID)
+	require.Equal(t, newPrice.ID, payment.PriceID)
+	require.Equal(t, newPrice.Amount, payment.Amount)
+	require.Equal(t, newPrice.Amount, payment.ListAmount)
+	require.Equal(t, "840", payment.Currency)
+
 	oldLookup := suite.GetSubscriptionByProcessorID(originalProcessorSubID)
 	require.Nil(t, oldLookup)
+
+	payload["timestamp"] = time.Now().UTC().Add(2 * time.Second).Format("2006-01-02 15:04:05")
+	postCCBillWebhook(t, suite.ServerURL, "UpgradeSuccess", payload)
+
+	count, err := suite.BunDB.NewSelect().
+		Model((*models.Payment)(nil)).
+		Where("purch.processor = ?", models.ProcessorCCBill).
+		Where("purch.transaction_id = ?", transactionID).
+		Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+
+	updatedAfterDupe := suite.GetSubscriptionByProcessorID(newProcessorSubID)
+	require.NotNil(t, updatedAfterDupe)
+	require.Equal(t, updated.ID, updatedAfterDupe.ID)
+	require.Equal(t, newPrice.ID, updatedAfterDupe.PriceID)
 }
