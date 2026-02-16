@@ -47,6 +47,7 @@ func (s *CCBillWebhookService) now() time.Time {
 	return time.Now()
 }
 
+/*
 func parseCCBillTimestamp(ts string) (time.Time, error) {
 	ts = strings.TrimSpace(ts)
 	if ts == "" {
@@ -55,7 +56,7 @@ func parseCCBillTimestamp(ts string) (time.Time, error) {
 	// CCBill webhooks use "YYYY-MM-DD HH:MM:SS" without timezone.
 	// Treat as UTC for deterministic behavior.
 	return time.ParseInLocation("2006-01-02 15:04:05", ts, time.UTC)
-}
+}*/
 
 func parseCCBillDate(dateStr string) (time.Time, error) {
 	dateStr = strings.TrimSpace(dateStr)
@@ -177,6 +178,50 @@ const (
 	ErrorTypeNotFound      = "not_found"
 )
 
+func shouldTreatCCBillErrorAsNonRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var billingErr *BillingError
+	if errors.As(err, &billingErr) {
+		switch billingErr.Type {
+		case ErrorTypeValidation, ErrorTypeAmount, ErrorTypeDuplicate, ErrorTypeStatusChange:
+			return true
+		case ErrorTypeBusinessLogic, ErrorTypeDatabase, ErrorTypeNotFound:
+			return false
+		}
+	}
+
+	// Subscription lookups can fail due to out-of-order webhook delivery.
+	// Keep these retryable.
+	if errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "failed to parse billedinitialprice") ||
+		strings.Contains(msg, "failed to parse billedamount") ||
+		strings.Contains(msg, "invalid billedamount") ||
+		strings.Contains(msg, "failed to parse nextrenewaldate") ||
+		strings.Contains(msg, "payment form id mismatch") ||
+		strings.Contains(msg, "payment form name mismatch") {
+		return true
+	}
+
+	return false
+}
+
+func wrapCCBillWebhookErrorForRetry(err error) error {
+	if err == nil {
+		return nil
+	}
+	if shouldTreatCCBillErrorAsNonRetryable(err) {
+		return MarkWebhookErrorNonRetryable(err)
+	}
+	return err
+}
+
 func (s *CCBillWebhookService) HandleCCBillWebhook(ctx context.Context) error {
 	switch s.Data.EventType {
 	case EventTypeNewSaleSuccess:
@@ -226,17 +271,25 @@ func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 		return err
 	}
 
-	// Deduplication check - prevent duplicate webhook processing
-	if s.DeduplicationService != nil && data.TransactionID != "" {
-		isDupe, err := s.DeduplicationService.IsDuplicate(ctx, "ccbill", data.TransactionID)
-		if err != nil {
-			log.WithContext(ctx).WithError(err).Warn("deduplication check failed, proceeding with webhook")
-		} else if isDupe {
-			log.WithContext(ctx).WithField("transaction_id", data.TransactionID).Info("Duplicate CCBill NewSaleSuccess webhook, skipping")
-			return nil
-		}
+	process := func(ctx context.Context) error {
+		return wrapCCBillWebhookErrorForRetry(s.handleNewSaleSuccessInternal(ctx, &data))
 	}
 
+	if s.DeduplicationService != nil && strings.TrimSpace(data.TransactionID) != "" {
+		return s.DeduplicationService.ProcessWebhook(
+			ctx,
+			data.TransactionID,
+			string(s.Data.EventType),
+			models.ProcessorCCBill,
+			data,
+			process,
+		)
+	}
+
+	return process(ctx)
+}
+
+func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context, data *CCBillNewSaleSuccessEvent) error {
 	email := data.Email
 	formID := data.FlexID
 	userID, err := s.resolveUserID(ctx, data.Username)
@@ -1875,24 +1928,32 @@ func (s *CCBillWebhookService) handleRenewalSuccess(ctx context.Context) error {
 		return err
 	}
 
-	// Deduplication check - prevent duplicate webhook processing
-	if s.DeduplicationService != nil && data.TransactionID != "" {
-		isDupe, err := s.DeduplicationService.IsDuplicate(ctx, "ccbill", data.TransactionID)
-		if err != nil {
-			log.WithContext(ctx).WithError(err).Warn("deduplication check failed, proceeding with webhook")
-		} else if isDupe {
-			log.WithContext(ctx).WithField("transaction_id", data.TransactionID).Info("Duplicate CCBill RenewalSuccess webhook, skipping")
-			return nil
-		}
+	process := func(ctx context.Context) error {
+		return wrapCCBillWebhookErrorForRetry(s.handleRenewalSuccessInternal(ctx, &data))
 	}
 
+	if s.DeduplicationService != nil && strings.TrimSpace(data.TransactionID) != "" {
+		return s.DeduplicationService.ProcessWebhook(
+			ctx,
+			data.TransactionID,
+			string(s.Data.EventType),
+			models.ProcessorCCBill,
+			data,
+			process,
+		)
+	}
+
+	return process(ctx)
+}
+
+func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context, data *CCBillRenewalSuccessEvent) error {
 	ccBillSubID := data.SubscriptionID
 	transactionID := data.TransactionID
 	billedAmountStr := data.BilledAmount
 
 	billedAmount, err := strconv.ParseFloat(billedAmountStr, 64)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse billedAmount '%s': %w", data.BilledAmount, err)
 	}
 
 	if billedAmount <= 0 {
