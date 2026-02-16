@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/open-rails/openrails/internal/db/models"
 
@@ -1239,10 +1240,183 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 	return nil
 }
 
+type nmiChargebackMatch struct {
+	PaymentID               uuid.UUID
+	PaymentTransactionID    string
+	SubscriptionID          uuid.UUID
+	ProcessorSubscriptionID string
+	UserID                  string
+	AmountCents             int64
+	Currency                string
+	PurchasedAt             time.Time
+	CardLast4               string
+}
+
+func normalizeNMIChargebackLast4(raw string) string {
+	digits := strings.Builder{}
+	for _, r := range raw {
+		if unicode.IsDigit(r) {
+			digits.WriteRune(r)
+		}
+	}
+	value := digits.String()
+	if len(value) < 4 {
+		return ""
+	}
+	return value[len(value)-4:]
+}
+
+func parseNMIChargebackAmountCents(raw string) (int64, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, fmt.Errorf("amount is empty")
+	}
+	amount, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil {
+		return 0, err
+	}
+	if amount <= 0 {
+		return 0, fmt.Errorf("amount must be positive")
+	}
+	return int64(math.Round(amount * 100)), nil
+}
+
+func parseNMIChargebackDate(raw string) (time.Time, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		"2006-01-02",
+		"2006/01/02",
+		"20060102",
+		"1/2/2006",
+		"01/02/2006",
+		"1-2-2006",
+		"01-02-2006",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05Z07:00",
+		time.RFC3339,
+	}
+	for _, layout := range layouts {
+		if ts, err := time.Parse(layout, trimmed); err == nil {
+			return ts.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func splitNMIChargebackReason(rawReason, rawReasonCode string) (string, string) {
+	reasonCode := strings.TrimSpace(rawReasonCode)
+	reason := strings.TrimSpace(rawReason)
+
+	if reasonCode == "" {
+		if idx := strings.Index(reason, ":"); idx > 0 {
+			candidate := strings.TrimSpace(reason[:idx])
+			allDigits := candidate != ""
+			for _, r := range candidate {
+				if !unicode.IsDigit(r) {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				reasonCode = candidate
+				reason = strings.TrimSpace(reason[idx+1:])
+			}
+		}
+	}
+
+	return reasonCode, reason
+}
+
+func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, processor string, cb NMIChargebackEntry) (*nmiChargebackMatch, map[string]interface{}, error) {
+	meta := map[string]interface{}{
+		"reconciliation_status": "unmatched",
+	}
+	if s == nil || s.DB == nil || s.DB.GetDB() == nil {
+		meta["reconciliation_error"] = "database unavailable"
+		return nil, meta, nil
+	}
+
+	last4 := normalizeNMIChargebackLast4(cb.CCNumber)
+	if last4 != "" {
+		meta["cc_last4_normalized"] = last4
+	}
+
+	var (
+		amountCents int64
+		amountErr   error
+	)
+	if amountCents, amountErr = parseNMIChargebackAmountCents(cb.Amount); amountErr == nil {
+		meta["amount_cents"] = amountCents
+	} else {
+		meta["amount_parse_error"] = amountErr.Error()
+	}
+
+	targetTs, dateParsed := parseNMIChargebackDate(cb.Date)
+	if dateParsed {
+		meta["chargeback_date_parsed"] = targetTs.Format(time.RFC3339)
+	} else {
+		meta["chargeback_date_parse_error"] = cb.Date
+	}
+
+	query := s.DB.GetDB().
+		NewSelect().
+		TableExpr("billing.payments AS p").
+		ColumnExpr("p.id AS payment_id").
+		ColumnExpr("p.transaction_id AS payment_transaction_id").
+		ColumnExpr("p.subscription_id AS subscription_id").
+		ColumnExpr("sub.processor_subscription_id AS processor_subscription_id").
+		ColumnExpr("p.user_id AS user_id").
+		ColumnExpr("p.amount AS amount_cents").
+		ColumnExpr("p.currency AS currency").
+		ColumnExpr("p.purchased_at AS purchased_at").
+		ColumnExpr("pm.last_four AS card_last4").
+		Join("JOIN billing.subscriptions AS sub ON sub.id = p.subscription_id").
+		Join("LEFT JOIN billing.payment_methods AS pm ON pm.id = sub.payment_method_id").
+		Where("p.subscription_id IS NOT NULL").
+		Where("p.processor = ?", models.Processor(processor)).
+		Where("sub.processor = ?", models.Processor(processor)).
+		Where("p.amount > 0").
+		Limit(1)
+
+	if amountErr == nil {
+		query = query.Where("p.amount = ?", amountCents)
+	}
+	if last4 != "" {
+		query = query.Where("RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = ?", last4)
+	}
+	if dateParsed {
+		query = query.OrderExpr("ABS(EXTRACT(EPOCH FROM (p.purchased_at - ?::timestamptz))) ASC", targetTs)
+	}
+
+	query = query.OrderExpr("p.purchased_at DESC")
+
+	match := new(nmiChargebackMatch)
+	if err := query.Scan(ctx, match); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, meta, nil
+		}
+		return nil, meta, err
+	}
+
+	meta["reconciliation_status"] = "matched"
+	meta["matched_payment_id"] = match.PaymentID.String()
+	meta["matched_transaction_id"] = match.PaymentTransactionID
+	meta["matched_subscription_id"] = match.SubscriptionID.String()
+	meta["matched_processor_subscription_id"] = match.ProcessorSubscriptionID
+	meta["matched_user_id"] = match.UserID
+	meta["matched_payment_purchased_at"] = match.PurchasedAt.Format(time.RFC3339)
+	meta["matched_amount_cents"] = match.AmountCents
+	if strings.TrimSpace(match.CardLast4) != "" {
+		meta["matched_card_last4"] = strings.TrimSpace(match.CardLast4)
+	}
+
+	return match, meta, nil
+}
+
 func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error {
-	// NMI chargeback events are batch operations containing multiple disputes
-	// IMPORTANT: NMI chargebacks do NOT include transaction_id or subscription info,
-	// so automatic subscription termination is not possible. Manual intervention required.
 	log.WithContext(ctx).
 		WithField("eventType", s.Data.EventType).
 		Info("Processing NMI chargeback batch notification")
@@ -1270,81 +1444,166 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 
 	now := s.now()
 	batchID := s.Data.EventID
+	processor := strings.TrimSpace(strings.ToLower(s.Processor))
+	if processor == "" {
+		processor = "mobius"
+	}
 
-	// Log batch-level summary first
-	if s.EventLogService != nil {
-		var totalAmount string
-		var chargebackCount int
-		if body.Batch != nil {
-			totalAmount = body.Batch.TotalAmount
-			chargebackCount = body.Batch.Count
+	chargebackCount := len(body.Chargebacks)
+	if body.Batch != nil && body.Batch.Count > 0 {
+		chargebackCount = body.Batch.Count
+	} else if body.Count > 0 {
+		chargebackCount = body.Count
+	}
+
+	var (
+		reconciledCount  int
+		cancelledCount   int
+		unmatchedCount   int
+		reconcileErrors  int
+		alreadyCancelled int
+	)
+	processedSubs := make(map[uuid.UUID]struct{})
+
+	for i, cb := range body.Chargebacks {
+		cbMetadata := map[string]interface{}{
+			"batch_id":      batchID,
+			"batch_index":   i,
+			"chargeback_id": cb.ID.Trimmed(),
+			"date":          cb.Date,
+			"customer_name": cb.CustomerName,
+			"cc_last4":      cb.CCNumber,
+		}
+		reasonCode, reasonText := splitNMIChargebackReason(cb.Reason, cb.ReasonCode)
+		if reasonCode != "" {
+			cbMetadata["reason_code"] = reasonCode
+		}
+		cbMetadata["reason"] = reasonText
+
+		var amountPtr *float64
+		if cbAmount, err := strconv.ParseFloat(strings.TrimSpace(cb.Amount), 64); err == nil {
+			amountPtr = &cbAmount
+		}
+
+		match, reconcileMeta, reconcileErr := s.reconcileNMIChargebackEntry(ctx, processor, cb)
+		if reconcileErr != nil {
+			reconcileErrors++
+			cbMetadata["reconciliation_status"] = "error"
+			cbMetadata["reconciliation_error"] = reconcileErr.Error()
 		} else {
-			chargebackCount = len(body.Chargebacks)
+			for key, value := range reconcileMeta {
+				cbMetadata[key] = value
+			}
 		}
 
-		batchMetadata := map[string]interface{}{
-			"batch_type":       "chargeback",
-			"event_source":     s.Processor,
-			"batch_status":     "completed",
-			"chargeback_count": chargebackCount,
-		}
-		if totalAmount != "" {
-			batchMetadata["total_amount"] = totalAmount
-		}
-		if body.Processor != nil {
-			batchMetadata["processor_id"] = body.Processor.ID.Trimmed()
-			batchMetadata["processor_name"] = body.Processor.Name.Trimmed()
+		cbStatus := "received"
+		var (
+			subscriptionID         *uuid.UUID
+			userID                 *string
+			processorTransactionID *string
+		)
+
+		if reconcileErr == nil && match == nil {
+			unmatchedCount++
+			cbMetadata["requires_manual_review"] = true
 		}
 
-		chargebackEventData := ChargebackEventData{
-			EventID:   uuid.New(),
-			EventType: PaymentEventBatchProcessed,
-			Processor: s.Processor,
-			BatchID:   batchID,
-			Status:    "completed",
-			Metadata:  CreateMetadataJSON(batchMetadata),
-			Timestamp: now,
-		}
-
-		if err := s.EventLogService.LogChargebackEvent(ctx, chargebackEventData); err != nil {
-			log.WithError(err).Error("Failed to log chargeback batch event to ClickHouse")
-		}
-
-		// Log each individual chargeback for audit purposes
-		for i, cb := range body.Chargebacks {
-			cbMetadata := map[string]interface{}{
-				"batch_id":      batchID,
-				"chargeback_id": cb.ID.Trimmed(),
-				"date":          cb.Date,
-				"customer_name": cb.CustomerName,
-				"cc_last4":      cb.CCNumber, // Already masked by NMI
-				"reason_code":   cb.ReasonCode,
-				"reason":        cb.Reason,
-				"batch_index":   i,
-				// Note: No transaction_id or subscription_id available from NMI
-				"requires_manual_review": true,
+		if reconcileErr == nil && match != nil {
+			reconciledCount++
+			cbMetadata["requires_manual_review"] = false
+			subscriptionID = &match.SubscriptionID
+			if match.UserID != "" {
+				uid := match.UserID
+				userID = &uid
+			}
+			if match.PaymentTransactionID != "" {
+				txn := match.PaymentTransactionID
+				processorTransactionID = &txn
 			}
 
-			// Parse amount if available
-			var amountPtr *float64
-			if cb.Amount != "" {
-				var amt float64
-				if _, parseErr := fmt.Sscanf(cb.Amount, "%f", &amt); parseErr == nil {
-					amountPtr = &amt
+			if _, seen := processedSubs[match.SubscriptionID]; seen {
+				cbMetadata["termination_status"] = "already_processed_in_batch"
+			} else {
+				processedSubs[match.SubscriptionID] = struct{}{}
+				if s.SubscriptionLifecycleService == nil {
+					reconcileErrors++
+					cbMetadata["termination_status"] = "failed"
+					cbMetadata["termination_error"] = "subscription lifecycle service unavailable"
+				} else if s.SubscriptionService == nil {
+					reconcileErrors++
+					cbMetadata["termination_status"] = "failed"
+					cbMetadata["termination_error"] = "subscription service unavailable"
+				} else {
+
+					subscription, subErr := s.SubscriptionService.GetByID(ctx, match.SubscriptionID)
+					if subErr != nil {
+						reconcileErrors++
+						cbMetadata["termination_status"] = "failed"
+						cbMetadata["termination_error"] = fmt.Sprintf("failed to load subscription: %v", subErr)
+					} else {
+						reasonCodeDisplay := reasonCode
+						if reasonCodeDisplay == "" {
+							reasonCodeDisplay = "unknown"
+						}
+						reasonDisplay := reasonText
+						if reasonDisplay == "" {
+							reasonDisplay = strings.TrimSpace(cb.Reason)
+						}
+						feedback := fmt.Sprintf(
+							"CHARGEBACK: %s (Code: %s, Dispute: %s)",
+							reasonDisplay,
+							reasonCodeDisplay,
+							strings.TrimSpace(cb.ID.Trimmed()),
+						)
+						proc := models.Processor(processor)
+						subProcID := strings.TrimSpace(match.ProcessorSubscriptionID)
+						params := &CancelMembershipParams{
+							RevokeAccess:   true,
+							Processor:      &proc,
+							SubscriptionID: &match.SubscriptionID,
+							CancelType:     models.CancelTypeChargeback,
+							CancelFeedback: &feedback,
+						}
+						if subProcID != "" {
+							params.ProcessorSubscriptionID = &subProcID
+						}
+						if err := s.SubscriptionLifecycleService.CancelMembership(ctx, params); err != nil {
+							reconcileErrors++
+							cbMetadata["termination_status"] = "failed"
+							cbMetadata["termination_error"] = err.Error()
+						} else {
+							if subscription.Status == models.StatusCancelled {
+								alreadyCancelled++
+								cbMetadata["termination_status"] = "already_cancelled"
+							} else {
+								cancelledCount++
+								cbMetadata["termination_status"] = "cancelled_immediate"
+							}
+							cbStatus = "completed"
+						}
+					}
 				}
 			}
+		}
 
+		if s.EventLogService != nil {
 			cbEventData := ChargebackEventData{
-				EventID:   uuid.New(),
-				EventType: PaymentEventChargeback,
-				Processor: s.Processor,
-				BatchID:   batchID,
-				Status:    "received",
-				Amount:    amountPtr,
-				Metadata:  CreateMetadataJSON(cbMetadata),
-				Timestamp: now,
+				EventID:                uuid.New(),
+				ChargebackID:           cb.ID.Trimmed(),
+				BatchID:                batchID,
+				SubscriptionID:         subscriptionID,
+				UserID:                 userID,
+				EventType:              PaymentEventChargeback,
+				Processor:              s.Processor,
+				ProcessorTransactionID: processorTransactionID,
+				Amount:                 amountPtr,
+				Currency:               "",
+				ChargebackType:         "chargeback",
+				Reason:                 reasonText,
+				Status:                 cbStatus,
+				Metadata:               CreateMetadataJSON(cbMetadata),
+				Timestamp:              now,
 			}
-
 			if err := s.EventLogService.LogChargebackEvent(ctx, cbEventData); err != nil {
 				log.WithContext(ctx).
 					WithError(err).
@@ -1354,16 +1613,51 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		}
 	}
 
-	chargebackCount := len(body.Chargebacks)
-	if body.Batch != nil {
-		chargebackCount = body.Batch.Count
+	if s.EventLogService != nil {
+		batchMetadata := map[string]interface{}{
+			"batch_type":         "chargeback",
+			"event_source":       s.Processor,
+			"batch_status":       "completed",
+			"chargeback_count":   chargebackCount,
+			"reconciled_count":   reconciledCount,
+			"cancelled_count":    cancelledCount,
+			"already_cancelled":  alreadyCancelled,
+			"unmatched_count":    unmatchedCount,
+			"reconcile_failures": reconcileErrors,
+		}
+		if body.Batch != nil && strings.TrimSpace(body.Batch.TotalAmount) != "" {
+			batchMetadata["total_amount"] = body.Batch.TotalAmount
+		} else if strings.TrimSpace(body.ChargebackAmount) != "" {
+			batchMetadata["total_amount"] = strings.TrimSpace(body.ChargebackAmount)
+		}
+		if body.Processor != nil {
+			batchMetadata["processor_id"] = body.Processor.ID.Trimmed()
+			batchMetadata["processor_name"] = body.Processor.Name.Trimmed()
+		}
+		chargebackEventData := ChargebackEventData{
+			EventID:   uuid.New(),
+			EventType: PaymentEventBatchProcessed,
+			Processor: s.Processor,
+			BatchID:   batchID,
+			Status:    "completed",
+			Metadata:  CreateMetadataJSON(batchMetadata),
+			Timestamp: now,
+		}
+		if err := s.EventLogService.LogChargebackEvent(ctx, chargebackEventData); err != nil {
+			log.WithError(err).Error("Failed to log chargeback batch event to ClickHouse")
+		}
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"eventID":          s.Data.EventID,
-		"eventType":        s.Data.EventType,
-		"chargeback_count": chargebackCount,
-	}).Warn("NMI chargeback batch processed - manual review required for subscription termination")
+		"eventID":            s.Data.EventID,
+		"eventType":          s.Data.EventType,
+		"chargeback_count":   chargebackCount,
+		"reconciled_count":   reconciledCount,
+		"cancelled_count":    cancelledCount,
+		"already_cancelled":  alreadyCancelled,
+		"unmatched_count":    unmatchedCount,
+		"reconcile_failures": reconcileErrors,
+	}).Warn("NMI chargeback batch processed with automated reconciliation")
 
 	return nil
 }
