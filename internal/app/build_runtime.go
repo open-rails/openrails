@@ -539,7 +539,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		nmiClients,
 	)
 
-	deduplicationService := services.NewDeduplicationService(idempotencyService)
+	deduplicationService := services.NewDeduplicationService(idempotencyService, database)
 	webhookDispatcher := &services.WebhookDispatcher{
 		DB:                           database,
 		Clock:                        clock,

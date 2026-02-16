@@ -12,7 +12,7 @@ import (
 func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 	ctx := context.Background()
 	idem := NewIdempotencyService(nil)
-	svc := NewDeduplicationService(idem)
+	svc := NewDeduplicationService(idem, nil)
 
 	attempts := 0
 	err := svc.ProcessWebhook(
@@ -55,7 +55,7 @@ func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testing.T) {
 	ctx := context.Background()
 	idem := NewIdempotencyService(nil)
-	svc := NewDeduplicationService(idem)
+	svc := NewDeduplicationService(idem, nil)
 
 	attempts := 0
 	err := svc.ProcessWebhook(
@@ -95,7 +95,7 @@ func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testi
 func TestIsDuplicate_DoesNotAutoCompletePendingClaim(t *testing.T) {
 	ctx := context.Background()
 	idem := NewIdempotencyService(nil)
-	svc := NewDeduplicationService(idem)
+	svc := NewDeduplicationService(idem, nil)
 
 	isDupe, err := svc.IsDuplicate(ctx, "ccbill", "evt-1")
 	require.NoError(t, err)

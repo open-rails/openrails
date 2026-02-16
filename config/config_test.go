@@ -48,6 +48,14 @@ func TestLoad_APIKeyFromEnv(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, []string{"http://a.test", "http://b.test"}, cfg.Auth.Issuers)
 	})
+
+	t.Run("loads idempotency retention from env", func(t *testing.T) {
+		t.Setenv("IDEMPOTENCY_WEBHOOK_DEDUPE_RETENTION_DAYS", "365")
+
+		cfg, err := Load("nonexistent-config.yaml")
+		assert.NoError(t, err)
+		assert.Equal(t, 365, cfg.GetWebhookDedupeRetentionDays())
+	})
 }
 
 func TestLoad_ConfigFileAndEnvPrecedence(t *testing.T) {
@@ -313,5 +321,27 @@ func TestGetDefaultBillingConfig_FeatureFlags(t *testing.T) {
 	t.Run("disable_entitlement_expiration defaults to false", func(t *testing.T) {
 		assert.False(t, cfg.FeatureFlags.DisableEntitlementExpiration)
 		assert.False(t, cfg.IsEntitlementExpirationDisabled())
+	})
+}
+
+func TestConfig_WebhookDedupeRetentionDays(t *testing.T) {
+	t.Run("defaults to 90 when config is nil", func(t *testing.T) {
+		var cfg *Config
+		assert.Equal(t, 90, cfg.GetWebhookDedupeRetentionDays())
+	})
+
+	t.Run("defaults to 90 when idempotency config is nil", func(t *testing.T) {
+		cfg := &Config{}
+		assert.Equal(t, 90, cfg.GetWebhookDedupeRetentionDays())
+	})
+
+	t.Run("defaults to 90 when value is invalid", func(t *testing.T) {
+		cfg := &Config{Idempotency: &IdempotencyConfig{WebhookDedupeRetentionDays: 0}}
+		assert.Equal(t, 90, cfg.GetWebhookDedupeRetentionDays())
+	})
+
+	t.Run("returns configured positive value", func(t *testing.T) {
+		cfg := &Config{Idempotency: &IdempotencyConfig{WebhookDedupeRetentionDays: 45}}
+		assert.Equal(t, 45, cfg.GetWebhookDedupeRetentionDays())
 	})
 }

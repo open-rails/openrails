@@ -116,17 +116,24 @@ type Config struct {
 	//       recipient_wallet: "..."
 	Processors map[string]*ProcessorConfig `koanf:"processors,omitempty"`
 
-	Webhooks     *WebhookConfig    `koanf:"webhooks,omitempty"`
-	DB           *DBConfig         `koanf:"db,omitempty"`
-	Redis        *RedisConfig      `koanf:"redis,omitempty"`
-	Auth         *AuthConfig       `koanf:"auth,omitempty"`
-	ClickHouse   *ClickHouseConfig `koanf:"clickhouse,omitempty"`
-	Logger       *LoggerConfig     `koanf:"logger,omitempty"`
-	SendGrid     *SendGridConfig   `koanf:"sendgrid,omitempty"`
-	Jupiter      *JupiterConfig    `koanf:"jupiter,omitempty"`
-	CorsOrigins  []string          `koanf:"cors_origins,omitempty"`
-	RateLimits   *RateLimitsConfig `koanf:"rate_limits,omitempty"`
-	FeatureFlags *FeatureFlags     `koanf:"feature_flags,omitempty"`
+	Webhooks     *WebhookConfig     `koanf:"webhooks,omitempty"`
+	Idempotency  *IdempotencyConfig `koanf:"idempotency,omitempty"`
+	DB           *DBConfig          `koanf:"db,omitempty"`
+	Redis        *RedisConfig       `koanf:"redis,omitempty"`
+	Auth         *AuthConfig        `koanf:"auth,omitempty"`
+	ClickHouse   *ClickHouseConfig  `koanf:"clickhouse,omitempty"`
+	Logger       *LoggerConfig      `koanf:"logger,omitempty"`
+	SendGrid     *SendGridConfig    `koanf:"sendgrid,omitempty"`
+	Jupiter      *JupiterConfig     `koanf:"jupiter,omitempty"`
+	CorsOrigins  []string           `koanf:"cors_origins,omitempty"`
+	RateLimits   *RateLimitsConfig  `koanf:"rate_limits,omitempty"`
+	FeatureFlags *FeatureFlags      `koanf:"feature_flags,omitempty"`
+}
+
+type IdempotencyConfig struct {
+	// WebhookDedupeRetentionDays controls how long to keep durable webhook dedupe records.
+	// Records older than this are deleted by the daily idempotency cleanup worker.
+	WebhookDedupeRetentionDays int `koanf:"webhook_dedupe_retention_days"`
 }
 
 // DBConfig holds database configuration.
@@ -852,6 +859,16 @@ func (cfg *Config) IsEntitlementExpirationDisabled() bool {
 	return cfg.GetFeatureFlags().DisableEntitlementExpiration
 }
 
+// GetWebhookDedupeRetentionDays returns the durable webhook dedupe retention in days.
+// Values <= 0 are treated as invalid and fall back to the default.
+func (cfg *Config) GetWebhookDedupeRetentionDays() int {
+	const defaultRetentionDays = 90
+	if cfg == nil || cfg.Idempotency == nil || cfg.Idempotency.WebhookDedupeRetentionDays <= 0 {
+		return defaultRetentionDays
+	}
+	return cfg.Idempotency.WebhookDedupeRetentionDays
+}
+
 // assembleDBURL builds the database URL from atomic parameters if not explicitly set
 func assembleDBURL(cfg *Config) {
 	if cfg.DB == nil {
@@ -977,6 +994,9 @@ func GetDefaultBillingConfig() *Config {
 		FeatureFlags: &FeatureFlags{
 			DunningMode:                  DunningModeOn,
 			DisableEntitlementExpiration: false,
+		},
+		Idempotency: &IdempotencyConfig{
+			WebhookDedupeRetentionDays: 90,
 		},
 	}
 }

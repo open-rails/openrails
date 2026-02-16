@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/services"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -21,7 +23,8 @@ func (IdempotencyCleanupArgs) Kind() string { return KindIdempotencyCleanup }
 
 type IdempotencyCleanupWorker struct {
 	river.WorkerDefaults[IdempotencyCleanupArgs]
-	DB *db.DB
+	DB     *db.DB
+	Config *config.Config
 }
 
 func (IdempotencyCleanupWorker) Kind() string { return KindIdempotencyCleanup }
@@ -30,8 +33,22 @@ func (w IdempotencyCleanupWorker) Work(ctx context.Context, job *river.Job[Idemp
 	if w.DB == nil {
 		return fmt.Errorf("db is required")
 	}
-	// Placeholder: implement actual cleanup when retention policy is defined.
-	log.WithContext(ctx).Info("IdempotencyCleanup: completed (no-op)")
+
+	retentionDays := 90
+	if w.Config != nil {
+		retentionDays = w.Config.GetWebhookDedupeRetentionDays()
+	}
+
+	dedupeService := services.NewDeduplicationService(nil, w.DB)
+	deletedRows, err := dedupeService.CleanupOldWebhooks(ctx, retentionDays)
+	if err != nil {
+		return fmt.Errorf("cleanup durable webhook dedupe records: %w", err)
+	}
+
+	log.WithContext(ctx).WithFields(log.Fields{
+		"retention_days": retentionDays,
+		"deleted_rows":   deletedRows,
+	}).Info("IdempotencyCleanup: completed")
 	return nil
 }
 
