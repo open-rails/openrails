@@ -21,15 +21,12 @@
   "ipAddress": "192.168.1.100",
   "accountingInitialPrice": 39.99,
   "accountingRecurringPrice": 39.99,
-  "accountingCurrency": "USD",
   "accountingCurrencyCode": 840,
   "billedInitialPrice": "39.99",
   "billedRecurringPrice": "39.99",
-  "billedCurrency": "USD",
   "billedCurrencyCode": 840,
   "subscriptionInitialPrice": "39.99",
   "subscriptionRecurringPrice": "39.99",
-  "subscriptionCurrency": "USD",
   "subscriptionCurrencyCode": 840,
   "initialPeriod": 30,
   "recurringPeriod": 30,
@@ -49,6 +46,5 @@
   "formName": "HMovie-Premium",
   "nextRenewalDate": "2025-09-04",
   "referringUrl": "https://example.com/upgrade",
-  "flexId": "75383d6a-41d4-4bd0-ac12-6c8c37fde5e6",
-  "X-language": "en"
+  "flexId": "75383d6a-41d4-4bd0-ac12-6c8c37fde5e6"
 }

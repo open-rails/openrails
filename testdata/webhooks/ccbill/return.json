@@ -1,0 +1,15 @@
+{
+  "transactionId": "0125217202000000032",
+  "subscriptionId": "0125217202000000017",
+  "clientAccnum": "945280",
+  "clientSubacc": "0000",
+  "timestamp": "2025-08-22 15:05:12",
+  "amount": "23.00",
+  "currencyCode": 840,
+  "reason": "ACH return - insufficient funds",
+  "accountingAmount": "23.00",
+  "accountingCurrencyCode": 840,
+  "paymentType": "CHECK",
+  "paymentAccount": "693a3b8d0d888c3d04800000004bacd",
+  "last4": "1111"
+}

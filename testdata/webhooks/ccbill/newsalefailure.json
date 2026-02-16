@@ -1,12 +1,11 @@
 {
-    "clientAccnum": "945280",
-    "clientSubacc": "0000",
-    "subscriptionId": "0125217202000000017",
-    "timestamp": "2025-08-05 06:49:08",
-    "transactionId": "0125217202000000017",
-    "email": "testuser@example.com",
-    "flexId": "75383d6a-41d4-4bd0-ac12-6c8c37fde5e5",
-    "formName": "211cc",
-    "failureCode": "D01",
-    "failureReason": "Declined - Insufficient Funds"
+  "clientAccnum": "945280",
+  "clientSubacc": "0000",
+  "timestamp": "2025-08-05 06:49:08",
+  "transactionId": "0125217202000000017",
+  "email": "testuser@example.com",
+  "flexId": "75383d6a-41d4-4bd0-ac12-6c8c37fde5e5",
+  "formName": "211cc",
+  "failureCode": "D01",
+  "failureReason": "Declined - Insufficient Funds"
 }

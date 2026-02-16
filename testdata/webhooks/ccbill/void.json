@@ -1,13 +1,19 @@
 {
-  "clientAccnum": 945280,
-  "clientSubacc": "0000",
+  "transactionId": "0125217202000000021",
   "subscriptionId": "0125217202000000020",
+  "clientAccnum": "945280",
+  "clientSubacc": "0000",
   "timestamp": "2025-08-05 08:45:33",
-  "voidAmount": 23.0,
-  "voidCurrency": "USD",
-  "voidCurrencyCode": 840,
-  "voidTransactionId": "0125217202000000021",
-  "originalTransactionId": "0125217202000000020",
-  "voidReason": "Transaction cancelled before settlement",
-  "voidDate": "2025-08-05"
+  "amount": "23.00",
+  "currency": "USD",
+  "currencyCode": 840,
+  "reason": "Transaction cancelled before settlement",
+  "accountingAmount": "23.00",
+  "accountingCurrency": "USD",
+  "accountingCurrencyCode": 840,
+  "cardType": "VISA",
+  "paymentAccount": "693a3b8d0d888c3d04800000004bacd",
+  "paymentType": "CREDIT",
+  "last4": "1111",
+  "expDate": "0127"
 }
