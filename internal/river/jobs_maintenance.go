@@ -59,10 +59,7 @@ func (w IdempotencyCleanupWorker) Work(ctx context.Context, job *river.Job[Idemp
 		cancel()
 	}
 
-	retentionDays := 90
-	if w.Config != nil {
-		retentionDays = w.Config.GetWebhookDedupeRetentionDays()
-	}
+	const retentionDays = 90
 
 	idempotencyService := services.NewIdempotencyService(redisClient)
 	dedupeService := services.NewDeduplicationService(idempotencyService)

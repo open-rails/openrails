@@ -121,14 +121,6 @@ redis:
   db: 0                 # Redis database number (default: 0)
 
 # =============================================================================
-# IDEMPOTENCY / DEDUPLICATION
-# =============================================================================
-# Durable SQL dedupe records are cleaned up by a daily maintenance job.
-# Keep this long enough to cover webhook replay windows and manual replays.
-idempotency:
-  webhook_dedupe_retention_days: 90
-
-# =============================================================================
 # AUTHENTICATION (JWT Verifier)
 # =============================================================================
 # Billing is a JWT verifier (not issuer). It verifies tokens from your IdP.
