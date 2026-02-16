@@ -1128,6 +1128,12 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		if params.RevokeAccess {
 			// Immediate revocation
 			subscription.CurrentPeriodEndsAt = &now
+			// Keep period bounds valid when revoking a future-dated window.
+			// Some records may have CurrentPeriodStartsAt in the future due to precomputed renewals.
+			if subscription.CurrentPeriodStartsAt != nil && !subscription.CurrentPeriodStartsAt.Before(now) {
+				adjustedStart := now.Add(-time.Second)
+				subscription.CurrentPeriodStartsAt = &adjustedStart
+			}
 		} else if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
 			// Period-end cancellation: keep access until paid term ends.
 			endAt = *subscription.CurrentPeriodEndsAt
@@ -1156,6 +1162,11 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		// Entitlement windows are immutable; period-end cancellations require no entitlement mutation.
 		// Only immediate cancellations/revocations remove access now by revoking the subscription's entitlement windows.
 		if entSvc != nil && (params.RevokeAccess || subscription.CurrentPeriodEndsAt == nil || !subscription.CurrentPeriodEndsAt.After(now)) {
+			revokeReason := models.EntitlementRevokeAdmin
+			if params.CancelType == models.CancelTypeChargeback {
+				revokeReason = models.EntitlementRevokeChargeback
+			}
+
 			names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).Error("failed to list entitlements for cancelled subscription")
@@ -1168,7 +1179,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 						Entitlement: entName,
 						SourceType:  &st,
 						SourceID:    &sid,
-						Reason:      models.EntitlementRevokeAdmin,
+						Reason:      revokeReason,
 					}); err != nil {
 						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 							"subscription_id": subscription.ID,

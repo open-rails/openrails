@@ -695,11 +695,11 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 		data.EventID,
 		data.ChargebackID,
 		data.BatchID,
-		data.SubscriptionID,
-		data.UserID,
+		nullableUUID(data.SubscriptionID),
+		nullableString2(data.UserID),
 		data.EventType,
 		data.Processor,
-		data.ProcessorTransactionID,
+		nullableString2(data.ProcessorTransactionID),
 		data.Amount,
 		data.Currency,
 		data.ChargebackType,
@@ -872,7 +872,7 @@ func (s *EventLogService) insertChargebackBatch(ctx context.Context, rows []Char
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.ChargebackID, d.BatchID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorTransactionID, d.Amount, d.Currency, d.ChargebackType, d.Reason, d.Status, d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.ChargebackID, d.BatchID, nullableUUID(d.SubscriptionID), nullableString2(d.UserID), d.EventType, d.Processor, nullableString2(d.ProcessorTransactionID), d.Amount, d.Currency, d.ChargebackType, d.Reason, d.Status, d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
