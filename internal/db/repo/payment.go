@@ -268,6 +268,22 @@ func (r *PaymentRepo) GetLatestBySubscriptionID(ctx context.Context, subscriptio
 	return payment, nil
 }
 
+func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
+	payment := new(models.Payment)
+	err := r.db.GetDB().
+		NewSelect().
+		Model(payment).
+		Where("purch.subscription_id = ?", subscriptionID).
+		Where("purch.amount > 0").
+		OrderExpr("purch.purchased_at DESC").
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return payment, nil
+}
+
 func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (successful int, failed int, err error) {
 	if userID == "" {
 		return 0, 0, fmt.Errorf("user_id is required")

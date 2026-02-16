@@ -233,6 +233,13 @@ func transactionCurrency(body *NMITransactionEventBody) string {
 	return ""
 }
 
+func getOriginalTransactionID(body *NMITransactionEventBody) string {
+	if body == nil || body.TransactionDetail == nil {
+		return ""
+	}
+	return strings.TrimSpace(body.TransactionDetail.TransactionID.Trimmed())
+}
+
 func parseTransactionAmount(body *NMITransactionEventBody) (float64, error) {
 	if body == nil {
 		return 0, fmt.Errorf("nil transaction body")
@@ -1676,6 +1683,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 
 	txnID := body.TransactionID.Trimmed()
 	nmiSubID := transactionSubscriptionID(body)
+	originalTxnID := getOriginalTransactionID(body)
 
 	// Parse refund amount
 	refundAmount, err := parseTransactionAmount(body)
@@ -1717,11 +1725,72 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 
 	// Determine if we should terminate subscription based on refund amount
 	shouldTerminate := false
+	refundAmountCents := int64(math.Round(math.Abs(refundAmount) * 100))
 	if subscription != nil && subscription.Price != nil && subscription.Price.Amount > 0 {
-		refundAmountCents := int64(math.Abs(refundAmount) * 100)
 		refundPercentage := (refundAmountCents * 100) / subscription.Price.Amount
 		if refundPercentage >= 80 {
 			shouldTerminate = true
+		}
+	}
+
+	// Persist refund in the payments ledger as a negative payment linked to the original payment.
+	// This complements analytics/event logging and keeps reconciliation/auditing consistent.
+	if s.PaymentService != nil && subscription != nil && txnID != "" && refundAmountCents > 0 {
+		processor := models.Processor(s.Processor)
+		existingRefund, lookupErr := s.PaymentService.GetByTransactionID(ctx, processor, txnID)
+		switch {
+		case lookupErr == nil && existingRefund != nil:
+			log.WithContext(ctx).WithFields(log.Fields{
+				"refund_transaction_id": txnID,
+				"payment_id":            existingRefund.ID,
+			}).Info("Refund payment already exists; skipping duplicate ledger insert")
+		case lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows):
+			log.WithContext(ctx).WithError(lookupErr).WithField("refund_transaction_id", txnID).
+				Warn("Failed to check existing refund payment by transaction ID")
+		default:
+			var originalPayment *models.Payment
+			var originalLookupErr error
+
+			if originalTxnID != "" && originalTxnID != txnID {
+				originalPayment, originalLookupErr = s.PaymentService.GetByTransactionID(ctx, processor, originalTxnID)
+				if originalLookupErr != nil && !errors.Is(originalLookupErr, sql.ErrNoRows) {
+					log.WithContext(ctx).WithError(originalLookupErr).WithField("original_transaction_id", originalTxnID).
+						Warn("Failed to resolve original payment by transaction ID for refund")
+					originalPayment = nil
+				}
+			}
+
+			if originalPayment == nil {
+				originalPayment, originalLookupErr = s.PaymentService.GetLatestChargeBySubscriptionID(ctx, subscription.ID)
+				if originalLookupErr != nil && !errors.Is(originalLookupErr, sql.ErrNoRows) {
+					log.WithContext(ctx).WithError(originalLookupErr).WithField("subscription_id", subscription.ID).
+						Warn("Failed to resolve original payment by subscription fallback for refund")
+					originalPayment = nil
+				}
+			}
+
+			if originalPayment == nil {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"refund_transaction_id": txnID,
+					"subscription_id":       subscription.ID,
+				}).Warn("Unable to resolve original payment for refund ledger linkage; skipping payment insert")
+			} else {
+				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, txnID, refundAmountCents); refundErr != nil {
+					log.WithContext(ctx).WithError(refundErr).WithFields(log.Fields{
+						"refund_transaction_id":   txnID,
+						"original_payment_id":     originalPayment.ID,
+						"original_transaction_id": originalTxnID,
+						"refund_amount_cents":     refundAmountCents,
+					}).Warn("Failed to persist refund payment record")
+				} else {
+					log.WithContext(ctx).WithFields(log.Fields{
+						"refund_transaction_id": txnID,
+						"original_payment_id":   originalPayment.ID,
+						"subscription_id":       subscription.ID,
+						"refund_amount_cents":   refundAmountCents,
+					}).Info("Persisted refund payment record")
+				}
+			}
 		}
 	}
 
