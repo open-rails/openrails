@@ -888,28 +888,26 @@ func (s *CheckoutService) processNMISubscription(
 		message = fmt.Sprintf("Subscription scheduled to start on %s", delayedStart.Format("2006-01-02"))
 	}
 
-	if delayedStart == nil {
-		// Leaving RegisterPurchase for immediate starts only,
-		// TODO - Test in production to see when NMI charges the card.
-		_, err = s.RegisterPurchase(ctx, &RegisterPurchaseRequest{
-			UserID:         user.ID,
-			PriceID:        price.ID,
-			Processor:      "mobius",
-			TransactionID:  resp.TransactionID,
-			Amount:         price.Amount,
-			Currency:       price.Currency,
-			SubscriptionID: &subscriptionID,
-			Metadata: func() map[string]any {
-				if req.Metadata == nil {
-					return nil
-				}
-				if runID := strings.TrimSpace(req.Metadata["e2e_run_id"]); runID != "" {
-					return map[string]any{"e2e_run_id": runID, "order_id": orderID}
-				}
+	// Leaving RegisterPurchase for immediate starts only,
+	// TODO - Test in production to see when NMI charges the card.
+	_, err = s.RegisterPurchase(ctx, &RegisterPurchaseRequest{
+		UserID:         user.ID,
+		PriceID:        price.ID,
+		Processor:      "mobius",
+		TransactionID:  resp.TransactionID,
+		Amount:         price.Amount,
+		Currency:       price.Currency,
+		SubscriptionID: &subscriptionID,
+		Metadata: func() map[string]any {
+			if req.Metadata == nil {
 				return nil
-			}(),
-		})
-	}
+			}
+			if runID := strings.TrimSpace(req.Metadata["e2e_run_id"]); runID != "" {
+				return map[string]any{"e2e_run_id": runID, "order_id": orderID}
+			}
+			return nil
+		}(),
+	})
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to register purchase: %w", err)
