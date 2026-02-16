@@ -26,7 +26,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{DB: r.DB, Config: r.Config}); err != nil {
+	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{}); err != nil {
 		return fmt.Errorf("add idempotency cleanup worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CCBillReconcileWorker{DB: r.DB, DataLink: r.CCBillDataLink}); err != nil {

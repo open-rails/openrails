@@ -25,17 +25,12 @@ func (IdempotencyCleanupArgs) Kind() string { return KindIdempotencyCleanup }
 
 type IdempotencyCleanupWorker struct {
 	river.WorkerDefaults[IdempotencyCleanupArgs]
-	DB     *db.DB
 	Config *config.Config
 }
 
 func (IdempotencyCleanupWorker) Kind() string { return KindIdempotencyCleanup }
 
 func (w IdempotencyCleanupWorker) Work(ctx context.Context, job *river.Job[IdempotencyCleanupArgs]) error {
-	if w.DB == nil {
-		return fmt.Errorf("db is required")
-	}
-
 	var redisClient *redis.Client
 	if w.Config != nil && w.Config.Redis != nil && w.Config.Redis.Addr != "" {
 		redisOpts := &redis.Options{
