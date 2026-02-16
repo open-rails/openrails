@@ -502,8 +502,8 @@ type CCBillUpgradeSuccessEvent struct {
 	SubscriptionCurrencyCode   Stringish `json:"subscriptionCurrencyCode"`
 
 	// Accounting information
-	AccountingInitialPrice   string    `json:"accountingInitialPrice"`
-	AccountingRecurringPrice string    `json:"accountingRecurringPrice"`
+	AccountingInitialPrice   Stringish `json:"accountingInitialPrice"`
+	AccountingRecurringPrice Stringish `json:"accountingRecurringPrice"`
 	AccountingCurrencyCode   Stringish `json:"accountingCurrencyCode"`
 
 	// Subscription terms
@@ -536,14 +536,12 @@ type CCBillUpgradeSuccessEvent struct {
 	LifeTimePrice        string    `json:"lifeTimePrice"`
 
 	// -------- UpgradeSuccess-only fields (v5) --------
-	OriginalSubscriptionID string `json:"originalSubscriptionId"`
-	OriginalClientAccnum   string `json:"originalClientAccnum"`
-	OriginalClientSubacc   string `json:"originalClientSubacc"`
-	Source                 string `json:"source"`            // FORM | API | PHONE
-	SCAResponseStatus      string `json:"scaResponseStatus"` // E | Y | N | A | U | R
+	OriginalSubscriptionID string    `json:"originalSubscriptionId"`
+	OriginalClientAccnum   Stringish `json:"originalClientAccnum"`
+	OriginalClientSubacc   string    `json:"originalClientSubacc"`
+	Source                 string    `json:"source"`            // FORM | API | PHONE
+	SCAResponseStatus      string    `json:"scaResponseStatus"` // E | Y | N | A | U | R
 
-	// Convenience field for unified amount access (derived from billedInitialPrice for upgrades)
-	Amount float64 `json:"-"` // Not marshaled, populated during processing
 }
 
 // Implement CCBillVersionedPayload interface

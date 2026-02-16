@@ -553,10 +553,27 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 
 	flexID := data.FlexID
 	formName := data.FormName
-	billedAmount := data.Amount
 	ccBillSubID := data.SubscriptionID
 	transactionID := data.TransactionID
-	originalSubscriptionID := data.OriginalSubscriptionID
+	originalSubscriptionID := strings.TrimSpace(data.OriginalSubscriptionID)
+	billedAmountStr := strings.TrimSpace(data.BilledInitialPrice)
+
+	if billedAmountStr == "" {
+		return fmt.Errorf("missing required field: billedInitialPrice")
+	}
+
+	billedAmount, err := strconv.ParseFloat(billedAmountStr, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse billedInitialPrice '%s': %w", data.BilledInitialPrice, err)
+	}
+
+	if strings.TrimSpace(ccBillSubID) == "" {
+		return fmt.Errorf("missing required field: subscriptionId")
+	}
+
+	if originalSubscriptionID == "" {
+		return fmt.Errorf("missing required field: originalSubscriptionId")
+	}
 
 	if billedAmount <= 0 {
 		return fmt.Errorf("invalid billedAmount: %f - must be greater than 0", billedAmount)
@@ -570,11 +587,11 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		entitlementService := NewEntitlementService(txdb)
 		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
 
-		// Find subscription by processor subscription ID
+		// Find subscription by the original processor subscription ID and then transition it.
 		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), "", originalSubscriptionID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("subscription not found for processor subscription ID: %s", originalSubscriptionID)
+				return fmt.Errorf("subscription not found for original processor subscription ID: %s", originalSubscriptionID)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
@@ -605,6 +622,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 					"new_price_id":             newPrice.ID.String(),
 					"new_flex_id":              flexID,
 					"original_subscription_id": originalSubscriptionID,
+					"new_subscription_id":      ccBillSubID,
 				}, nil)
 
 			s.logBillingError(ctx, billingErr, log.Fields{
@@ -645,6 +663,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 				"new_flex_id":              data.FlexID,
 				"new_form_name":            formName,
 				"original_subscription_id": originalSubscriptionID,
+				"new_subscription_id":      ccBillSubID,
 				"previous_price_id":        oldPriceID.String(),
 				"new_price_id":             newPrice.ID.String(),
 				// Card information for fraud monitoring and audit
@@ -669,7 +688,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 				// Additional transaction metadata for business intelligence
 				"affiliate_system":      data.AffiliateSystem,
 				"lifetime_subscription": data.LifeTimeSubscription.Trimmed(),
-				"sca_response_status":   data.SCAResponseStatus, // 3D Secure compliance: E|Y|N|A|U|R
+				"sca_response_status":   data.SCAResponseStatus,
 			}
 
 			// Capture billing/card info for the event
@@ -723,6 +742,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			"transactionID":          transactionID,
 			"newFlexID":              flexID,
 			"originalSubscriptionID": originalSubscriptionID,
+			"newSubscriptionID":      ccBillSubID,
 		}).Info("Processed subscription upgrade successfully")
 
 		return nil
