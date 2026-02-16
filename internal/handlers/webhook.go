@@ -178,6 +178,46 @@ func parseStripeSignatureHeader(header string) (string, []string) {
 	return ts, sigs
 }
 
+func verifyNMIWebhookSignature(secret, header string, body []byte) error {
+	timestamp, signature, err := parseNMIWebhookSignatureHeader(header)
+	if err != nil {
+		return err
+	}
+
+	mac := hmac.New(sha256.New, []byte(secret))
+	dataToSign := timestamp + "." + string(body)
+	_, _ = mac.Write([]byte(dataToSign))
+	expectedSig := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(signature), []byte(expectedSig)) {
+		return fmt.Errorf("invalid webhook signature")
+	}
+	return nil
+}
+
+func parseNMIWebhookSignatureHeader(header string) (string, string, error) {
+	var ts string
+	var sig string
+
+	parts := strings.Split(header, ",")
+	for _, part := range parts {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		switch strings.TrimSpace(kv[0]) {
+		case "t":
+			ts = strings.TrimSpace(kv[1])
+		case "s":
+			sig = strings.TrimSpace(kv[1])
+		}
+	}
+
+	if ts == "" || sig == "" {
+		return "", "", fmt.Errorf("unrecognized webhook signature format")
+	}
+	return ts, sig, nil
+}
+
 func enqueueCCBillWebhook(r *Request, clientIP string) bool {
 	body, err := readRequestBody(r.Request.Body)
 	if err != nil {
@@ -350,38 +390,9 @@ func enqueueNMIWebhook(r *Request, provider string, clientIP string) bool {
 	sigHeader := r.Request.Header.Get("Webhook-Signature")
 	signature := sigHeader
 	if sigHeader != "" {
-		// TODO - Move to utility function or merge with VerifyWebhookSignature?
-		// Expect format: t=nonce,s=signature
-		var nonce, signature string
-		parts := strings.Split(sigHeader, ",")
-
-		if len(parts) == 2 {
-			for _, part := range parts {
-				kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
-				log.WithField("kv", kv).Info("Split part into key-value")
-				if len(kv) == 2 {
-					switch kv[0] {
-					case "t":
-						nonce = kv[1]
-					case "s":
-						signature = kv[1]
-					}
-				}
-			}
-		}
-
-		if nonce == "" || signature == "" {
-			log.Error("unrecognized webhook signature format")
-			r.ErrorJSON(http.StatusUnauthorized, "unrecognized webhook signature format")
-			return false
-		}
-		mac := hmac.New(sha256.New, []byte(signingKey))
-		dataToSign := nonce + "." + string(body)
-		mac.Write([]byte(dataToSign))
-		expectedSig := hex.EncodeToString(mac.Sum(nil))
-		if signature != expectedSig {
-			log.Error("invalid webhook - invalid signature, cannot verify sender")
-			r.ErrorJSON(http.StatusUnauthorized, "invalid webhook signature")
+		if err := verifyNMIWebhookSignature(signingKey, sigHeader, body); err != nil {
+			log.WithError(err).Error("NMI webhook signature verification failed")
+			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
 			return false
 		}
 		log.Info("Webhook signature verified successfully")
