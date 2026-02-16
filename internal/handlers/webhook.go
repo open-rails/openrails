@@ -49,9 +49,11 @@ func Webhook(r *Request) {
 	}).Debug("Received webhook")
 
 	// Use global test_mode for CCBill IP allowlist bypass.
-	isTestMode := true
+	isTestMode := false
 	if r.State != nil && r.State.Config != nil {
 		isTestMode = r.State.Config.IsTestMode()
+	} else if r.State == nil || r.State.Config == nil {
+		log.Warn("State or Config is nil - defaulting to non-test mode for webhook processing")
 	}
 
 	// Route based on provider - NMI-backed processors go to handleNMIWebhook
