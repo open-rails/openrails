@@ -133,3 +133,46 @@ func TestParseNMIChargebackAmountCents(t *testing.T) {
 	_, err = parseNMIChargebackAmountCents("")
 	require.Error(t, err)
 }
+
+func TestParseAmountToCentsExact(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    int64
+		wantErr bool
+	}{
+		{name: "whole dollars", raw: "10", want: 1000},
+		{name: "two decimals", raw: "10.01", want: 1001},
+		{name: "three decimals rounds up", raw: "10.015", want: 1002},
+		{name: "three decimals rounds down", raw: "10.014", want: 1001},
+		{name: "exact half up", raw: "1.005", want: 101},
+		{name: "negative rounds away from zero", raw: "-1.005", want: -101},
+		{name: "invalid", raw: "abc", wantErr: true},
+		{name: "empty", raw: "", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseAmountToCentsExact(tc.raw)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestTransactionAmountCents_UsesFallbackFields(t *testing.T) {
+	body := &NMITransactionEventBody{
+		Amount: "",
+		TransactionDetail: &NMITransactionDetail{
+			Amount: "7.255",
+		},
+	}
+
+	amount, err := transactionAmountCents(body)
+	require.NoError(t, err)
+	require.EqualValues(t, 726, amount)
+}

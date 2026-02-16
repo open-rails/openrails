@@ -6,8 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
-	"strconv"
+	"math/big"
 	"strings"
 	"time"
 	"unicode"
@@ -205,19 +204,28 @@ func transactionPlanID(body *NMITransactionEventBody) string {
 	return ""
 }
 
-func transactionAmount(body *NMITransactionEventBody) (float64, error) {
+func transactionAmountRaw(body *NMITransactionEventBody) (string, error) {
 	if body == nil {
-		return 0, fmt.Errorf("transaction body is nil")
+		return "", fmt.Errorf("transaction body is nil")
 	}
-	if amt, err := body.Amount.Float64(); err == nil {
-		return amt, nil
-	}
+	candidates := []string{body.Amount.Trimmed()}
 	if body.TransactionDetail != nil {
-		if amt, err := body.TransactionDetail.Amount.Float64(); err == nil {
-			return amt, nil
+		candidates = append(candidates, body.TransactionDetail.Amount.Trimmed())
+	}
+	if body.Action != nil {
+		candidates = append(candidates, body.Action.Amount.Trimmed())
+	}
+	if body.TransactionDetail != nil && body.TransactionDetail.Action != nil {
+		candidates = append(candidates, body.TransactionDetail.Action.Amount.Trimmed())
+	}
+
+	for _, value := range candidates {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value), nil
 		}
 	}
-	return 0, fmt.Errorf("amount not provided")
+
+	return "", fmt.Errorf("amount not provided")
 }
 
 func transactionCurrency(body *NMITransactionEventBody) string {
@@ -233,6 +241,17 @@ func transactionCurrency(body *NMITransactionEventBody) string {
 	return ""
 }
 
+func normalizeNMICurrencyValue(primary string, fallbacks ...string) string {
+	allValues := append([]string{primary}, fallbacks...)
+	for _, value := range allValues {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if normalized != "" {
+			return normalized
+		}
+	}
+	return "usd"
+}
+
 func getOriginalTransactionID(body *NMITransactionEventBody) string {
 	if body == nil || body.TransactionDetail == nil {
 		return ""
@@ -240,27 +259,62 @@ func getOriginalTransactionID(body *NMITransactionEventBody) string {
 	return strings.TrimSpace(body.TransactionDetail.TransactionID.Trimmed())
 }
 
-func parseTransactionAmount(body *NMITransactionEventBody) (float64, error) {
-	if body == nil {
-		return 0, fmt.Errorf("nil transaction body")
-	}
-	amountStr := body.Amount.Trimmed()
-	if amountStr == "" && body.TransactionDetail != nil {
-		amountStr = body.TransactionDetail.Amount.Trimmed()
+func parseAmountToCentsExact(raw string) (int64, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, fmt.Errorf("amount is empty")
 	}
 
-	if amountStr == "" && body.Action != nil {
-		amountStr = body.Action.Amount.Trimmed()
-	}
-	if amountStr == "" {
-		return 0, fmt.Errorf("no amount in transaction body")
+	parsed, ok := new(big.Rat).SetString(trimmed)
+	if !ok {
+		return 0, fmt.Errorf("invalid decimal amount %q", trimmed)
 	}
 
-	var amount float64
-	if _, err := fmt.Sscanf(amountStr, "%f", &amount); err != nil {
-		return 0, fmt.Errorf("failed to parse amount '%s': %w", amountStr, err)
+	scaled := new(big.Rat).Mul(parsed, big.NewRat(100, 1))
+	return roundRatHalfAwayFromZero(scaled)
+}
+
+func roundRatHalfAwayFromZero(value *big.Rat) (int64, error) {
+	if value == nil {
+		return 0, fmt.Errorf("value is nil")
 	}
-	return amount, nil
+	if value.Sign() == 0 {
+		return 0, nil
+	}
+
+	sign := value.Sign()
+	num := new(big.Int).Abs(value.Num())
+	den := new(big.Int).Set(value.Denom())
+
+	quotient, remainder := new(big.Int), new(big.Int)
+	quotient.QuoRem(num, den, remainder)
+
+	twiceRemainder := new(big.Int).Lsh(remainder, 1)
+	if twiceRemainder.Cmp(den) >= 0 {
+		quotient.Add(quotient, big.NewInt(1))
+	}
+
+	if !quotient.IsInt64() {
+		return 0, fmt.Errorf("amount is out of int64 range")
+	}
+
+	rounded := quotient.Int64()
+	if sign < 0 {
+		rounded = -rounded
+	}
+	return rounded, nil
+}
+
+func transactionAmountCents(body *NMITransactionEventBody) (int64, error) {
+	raw, err := transactionAmountRaw(body)
+	if err != nil {
+		return 0, err
+	}
+	return parseAmountToCentsExact(raw)
+}
+
+func amountFloatFromCents(cents int64) float64 {
+	return float64(cents) / 100.0
 }
 
 type NMIBillingError struct {
@@ -503,14 +557,14 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 
 	// Get amount from plan (in dollars as string, e.g., "19.00")
 	if body.Plan != nil && body.Plan.Amount.Trimmed() != "" {
-		amountFloat, err := strconv.ParseFloat(body.Plan.Amount.Trimmed(), 64)
-		if err != nil {
+		parsedAmountCents, amountErr := parseAmountToCentsExact(body.Plan.Amount.Trimmed())
+		if amountErr != nil {
 			log.WithContext(ctx).
-				WithError(err).
+				WithError(amountErr).
 				WithField("plan_amount", body.Plan.Amount.Trimmed()).
 				Warn("Failed to parse plan amount; falling back to price amount")
 		} else {
-			amountCents = int64(amountFloat * 100)
+			amountCents = parsedAmountCents
 		}
 	}
 
@@ -754,7 +808,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 	}
 	prevStatus := subscription.Status
 
-	amount, amountErr := transactionAmount(body)
+	parsedAmountCents, amountErr := transactionAmountCents(body)
 	currency := transactionCurrency(body)
 	txnID := body.TransactionID.Trimmed()
 	if txnID == "" && body.TransactionDetail != nil {
@@ -772,18 +826,14 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			amountCents = subscription.Price.Amount
 		}
 	} else {
-		amountCents = int64(amount * 100) // Convert dollars to cents
+		amountCents = parsedAmountCents
 	}
 
-	// Normalize currency
-	currencyValue := strings.ToLower(strings.TrimSpace(currency))
-	if currencyValue == "" {
-		if subscription.Price != nil && strings.TrimSpace(subscription.Price.Currency) != "" {
-			currencyValue = subscription.Price.Currency
-		} else {
-			currencyValue = "usd"
-		}
+	fallbackCurrency := ""
+	if subscription.Price != nil {
+		fallbackCurrency = subscription.Price.Currency
 	}
+	currencyValue := normalizeNMICurrencyValue(currency, fallbackCurrency)
 
 	processed := false
 
@@ -958,7 +1008,8 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 
 		var amountPtr *float64
 		if amountErr == nil {
-			amountPtr = &amount
+			amountValue := amountFloatFromCents(parsedAmountCents)
+			amountPtr = &amountValue
 		}
 
 		paymentEvent := PaymentEventData{
@@ -968,7 +1019,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			EventType:      PaymentEventChargeSuccess,
 			Processor:      s.Processor,
 			Amount:         amountPtr,
-			Currency:       currency,
+			Currency:       currencyValue,
 			BillingInfo:    CreateMetadataJSON(map[string]interface{}{}),
 			WebhookSource:  "webhook",
 			Metadata:       CreateMetadataJSON(metadata),
@@ -1088,7 +1139,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 				return fmt.Errorf("failed to mark payment as failed: %w", err)
 			}
 		} else {
-			amount, amountErr := transactionAmount(body)
+			parsedAmountCents, amountErr := transactionAmountCents(body)
 			currency := transactionCurrency(body)
 
 			var amountCents int64
@@ -1097,17 +1148,14 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 					amountCents = subscription.Price.Amount
 				}
 			} else {
-				amountCents = int64(amount * 100)
+				amountCents = parsedAmountCents
 			}
 
-			currencyValue := strings.ToLower(strings.TrimSpace(currency))
-			if currencyValue == "" {
-				if subscription.Price != nil && strings.TrimSpace(subscription.Price.Currency) != "" {
-					currencyValue = subscription.Price.Currency
-				} else {
-					currencyValue = "usd"
-				}
+			fallbackCurrency := ""
+			if subscription.Price != nil {
+				fallbackCurrency = subscription.Price.Currency
 			}
+			currencyValue := normalizeNMICurrencyValue(currency, fallbackCurrency)
 
 			listAmount := amountCents
 			if subscription.Price != nil && subscription.Price.Amount > 0 {
@@ -1173,11 +1221,16 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 		}
 
 		var amountPtr *float64
-		if amt, amtErr := transactionAmount(body); amtErr == nil {
+		if amtCents, amtErr := transactionAmountCents(body); amtErr == nil {
+			amt := amountFloatFromCents(amtCents)
 			amountPtr = &amt
 		}
 
-		currency := transactionCurrency(body)
+		fallbackCurrency := ""
+		if subscription.Price != nil {
+			fallbackCurrency = subscription.Price.Currency
+		}
+		currency := normalizeNMICurrencyValue(transactionCurrency(body), fallbackCurrency)
 		paymentEvent := PaymentEventData{
 			EventID:        uuid.New(),
 			SubscriptionID: &subscription.ID,
@@ -1274,18 +1327,14 @@ func normalizeNMIChargebackLast4(raw string) string {
 }
 
 func parseNMIChargebackAmountCents(raw string) (int64, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return 0, fmt.Errorf("amount is empty")
-	}
-	amount, err := strconv.ParseFloat(trimmed, 64)
+	amountCents, err := parseAmountToCentsExact(raw)
 	if err != nil {
 		return 0, err
 	}
-	if amount <= 0 {
+	if amountCents <= 0 {
 		return 0, fmt.Errorf("amount must be positive")
 	}
-	return int64(math.Round(amount * 100)), nil
+	return amountCents, nil
 }
 
 func parseNMIChargebackDate(raw string) (time.Time, bool) {
@@ -1488,7 +1537,8 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		cbMetadata["reason"] = reasonText
 
 		var amountPtr *float64
-		if cbAmount, err := strconv.ParseFloat(strings.TrimSpace(cb.Amount), 64); err == nil {
+		if cbAmountCents, err := parseNMIChargebackAmountCents(cb.Amount); err == nil {
+			cbAmount := amountFloatFromCents(cbAmountCents)
 			amountPtr = &cbAmount
 		}
 
@@ -1685,12 +1735,16 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	nmiSubID := transactionSubscriptionID(body)
 	originalTxnID := getOriginalTransactionID(body)
 
-	// Parse refund amount
-	refundAmount, err := parseTransactionAmount(body)
+	// Parse refund amount exactly in cents (avoid float drift), then derive display float.
+	refundAmountCents, err := transactionAmountCents(body)
 	if err != nil {
 		log.WithContext(ctx).WithError(err).Warn("Failed to parse refund amount")
-		refundAmount = 0
+		refundAmountCents = 0
 	}
+	if refundAmountCents < 0 {
+		refundAmountCents = -refundAmountCents
+	}
+	refundAmount := amountFloatFromCents(refundAmountCents)
 
 	provider := strings.TrimSpace(strings.ToLower(s.Processor))
 	if provider == "" {
@@ -1725,7 +1779,6 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 
 	// Determine if we should terminate subscription based on refund amount
 	shouldTerminate := false
-	refundAmountCents := int64(math.Round(math.Abs(refundAmount) * 100))
 	if subscription != nil && subscription.Price != nil && subscription.Price.Amount > 0 {
 		refundPercentage := (refundAmountCents * 100) / subscription.Price.Amount
 		if refundPercentage >= 80 {
@@ -1842,6 +1895,11 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 
 	// Log refund event to ClickHouse
 	if s.EventLogService != nil && subscription != nil {
+		fallbackCurrency := ""
+		if subscription.Price != nil {
+			fallbackCurrency = subscription.Price.Currency
+		}
+		currencyValue := normalizeNMICurrencyValue(transactionCurrency(body), fallbackCurrency)
 		metadata := map[string]interface{}{
 			"transaction_id":          txnID,
 			"processor":               s.Processor,
@@ -1858,7 +1916,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			EventType:      PaymentEventRefund,
 			Processor:      s.Processor,
 			Amount:         &negativeAmount,
-			Currency:       transactionCurrency(body),
+			Currency:       currencyValue,
 			BillingInfo:    CreateMetadataJSON(map[string]interface{}{"refund": true}),
 			WebhookSource:  "webhook",
 			Metadata:       CreateMetadataJSON(metadata),
