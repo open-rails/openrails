@@ -3,11 +3,13 @@ package riverjobs
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/services"
+	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -34,12 +36,36 @@ func (w IdempotencyCleanupWorker) Work(ctx context.Context, job *river.Job[Idemp
 		return fmt.Errorf("db is required")
 	}
 
+	var redisClient *redis.Client
+	if w.Config != nil && w.Config.Redis != nil && w.Config.Redis.Addr != "" {
+		redisOpts := &redis.Options{
+			Addr: w.Config.Redis.Addr,
+			DB:   w.Config.Redis.DB,
+		}
+		if w.Config.Redis.Password != "" {
+			redisOpts.Password = w.Config.Redis.Password
+		}
+		redisClient = redis.NewClient(redisOpts)
+		defer func() {
+			if err := redisClient.Close(); err != nil {
+				log.WithContext(ctx).WithError(err).Warn("IdempotencyCleanup: failed to close redis client")
+			}
+		}()
+
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		if _, err := redisClient.Ping(pingCtx).Result(); err != nil {
+			log.WithContext(ctx).WithError(err).Warn("IdempotencyCleanup: Redis ping failed, idempotency will use in-memory fallback")
+		}
+		cancel()
+	}
+
 	retentionDays := 90
 	if w.Config != nil {
 		retentionDays = w.Config.GetWebhookDedupeRetentionDays()
 	}
 
-	dedupeService := services.NewDeduplicationService(nil, w.DB)
+	idempotencyService := services.NewIdempotencyService(redisClient)
+	dedupeService := services.NewDeduplicationService(idempotencyService)
 	deletedRows, err := dedupeService.CleanupOldWebhooks(ctx, retentionDays)
 	if err != nil {
 		return fmt.Errorf("cleanup durable webhook dedupe records: %w", err)

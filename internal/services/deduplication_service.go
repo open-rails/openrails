@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	log "github.com/sirupsen/logrus"
 )
@@ -15,7 +14,6 @@ import (
 // DeduplicationService provides robust webhook deduplication using the unified IdempotencyService
 type DeduplicationService struct {
 	idem *IdempotencyService
-	db   *db.DB
 }
 
 // NonRetryableWebhookError marks a processing failure as terminal.
@@ -56,8 +54,8 @@ func isWebhookErrorNonRetryable(err error) bool {
 }
 
 // NewDeduplicationService creates a new webhook deduplication service
-func NewDeduplicationService(idem *IdempotencyService, database *db.DB) *DeduplicationService {
-	return &DeduplicationService{idem: idem, db: database}
+func NewDeduplicationService(idem *IdempotencyService) *DeduplicationService {
+	return &DeduplicationService{idem: idem}
 }
 
 // IsDuplicate checks if a webhook with this eventID has already been processed successfully.
@@ -70,14 +68,11 @@ func (s *DeduplicationService) IsDuplicate(ctx context.Context, processor string
 
 	op := fmt.Sprintf("webhook.%s.event", processor)
 
-	if s.hasDurableStore() {
-		status, exists, err := s.beginDurable(ctx, op, trimmedEventID)
-		if err != nil {
-			return false, fmt.Errorf("failed to check durable webhook idempotency: %w", err)
-		}
-		if exists && status == IdempotencyStatusSuccess {
-			return true, nil
-		}
+	if s == nil || s.idem == nil {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"eventID":   trimmedEventID,
+			"processor": processor,
+		}).Warn("IdempotencyService is not configured; dedupe check skipped")
 		return false, nil
 	}
 
@@ -111,20 +106,12 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 
 	var shouldRecordOutcome bool
 	if trimmedEventID != "" {
-		if s.hasDurableStore() {
-			status, alreadyExists, err := s.beginDurable(ctx, op, trimmedEventID)
-			if err != nil {
-				return fmt.Errorf("failed to begin durable webhook idempotency: %w", err)
-			}
-			if alreadyExists && status == IdempotencyStatusSuccess {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"eventID":   trimmedEventID,
-					"eventType": eventType,
-					"processor": processor,
-				}).Info("Webhook already processed successfully, skipping")
-				return nil
-			}
-			shouldRecordOutcome = true
+		if s == nil || s.idem == nil {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"eventID":   trimmedEventID,
+				"eventType": eventType,
+				"processor": processor,
+			}).Warn("IdempotencyService is not configured; processing webhook without dedupe protection")
 		} else {
 			rec, alreadyExists, err := s.idem.Begin(ctx, op, trimmedEventID)
 			if err != nil {
@@ -155,19 +142,11 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 
 		if shouldRecordOutcome && trimmedEventID != "" {
 			if nonRetryable {
-				if s.hasDurableStore() {
-					if err := s.completeDurable(ctx, op, trimmedEventID, payloadBytes); err != nil {
-						log.WithContext(ctx).WithError(err).Warn("failed to mark non-retryable durable webhook idempotency as complete")
-					}
-				} else if err := s.idem.Complete(ctx, op, trimmedEventID, payloadBytes); err != nil {
+				if err := s.idem.Complete(ctx, op, trimmedEventID, payloadBytes); err != nil {
 					log.WithContext(ctx).WithError(err).Warn("failed to mark non-retryable webhook idempotency as complete")
 				}
 			} else {
-				if s.hasDurableStore() {
-					if err := s.failDurable(ctx, op, trimmedEventID, processingErr); err != nil {
-						log.WithContext(ctx).WithError(err).Warn("failed to mark durable webhook idempotency as failed")
-					}
-				} else if err := s.idem.Fail(ctx, op, trimmedEventID, processingErr); err != nil {
+				if err := s.idem.Fail(ctx, op, trimmedEventID, processingErr); err != nil {
 					log.WithContext(ctx).WithError(err).Warn("failed to mark webhook idempotency as failed")
 				}
 			}
@@ -186,11 +165,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	}
 
 	if shouldRecordOutcome && trimmedEventID != "" {
-		if s.hasDurableStore() {
-			if err := s.completeDurable(ctx, op, trimmedEventID, payloadBytes); err != nil {
-				log.WithContext(ctx).WithError(err).Warn("failed to mark durable webhook idempotency as complete")
-			}
-		} else if err := s.idem.Complete(ctx, op, trimmedEventID, payloadBytes); err != nil {
+		if err := s.idem.Complete(ctx, op, trimmedEventID, payloadBytes); err != nil {
 			log.WithContext(ctx).WithError(err).Warn("failed to mark webhook idempotency as complete")
 		}
 	}
@@ -215,101 +190,9 @@ func (s *DeduplicationService) CleanupOldWebhooks(ctx context.Context, retention
 		return 0, fmt.Errorf("retentionDays must be > 0")
 	}
 
-	if !s.hasDurableStore() {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"retentionDays": retentionDays,
-		}).Debug("No durable dedupe store configured; skipping webhook cleanup")
-		return 0, nil
-	}
-
-	query := `
-DELETE FROM billing.webhook_idempotency_backup
-WHERE last_seen_at < (NOW() - (? * INTERVAL '1 day'))
-`
-	res, err := s.db.GetDB().NewRaw(query, retentionDays).Exec(ctx)
-	if err != nil {
-		return 0, err
-	}
-	rows, _ := res.RowsAffected()
-
 	log.WithContext(ctx).WithFields(log.Fields{
 		"retentionDays": retentionDays,
-		"deletedRows":   rows,
-	}).Info("Cleaned up old durable webhook dedupe records")
-	return rows, nil
-}
-
-func (s *DeduplicationService) hasDurableStore() bool {
-	return s != nil && s.db != nil && s.db.GetDB() != nil
-}
-
-type durableIdempotencyRow struct {
-	Status   string `bun:"status"`
-	Inserted bool   `bun:"inserted"`
-}
-
-func (s *DeduplicationService) beginDurable(ctx context.Context, operation, key string) (IdempotencyStatus, bool, error) {
-	var row durableIdempotencyRow
-	query := `
-WITH inserted AS (
-	INSERT INTO billing.webhook_idempotency_backup (
-		operation, idempotency_key, status, first_seen_at, last_seen_at, created_at, updated_at
-	)
-	VALUES (?, ?, ?, NOW(), NOW(), NOW(), NOW())
-	ON CONFLICT (operation, idempotency_key) DO NOTHING
-	RETURNING status, true AS inserted
-)
-SELECT status, inserted FROM inserted
-UNION ALL
-SELECT status, false AS inserted
-FROM billing.webhook_idempotency_backup
-WHERE operation = ? AND idempotency_key = ?
-  AND NOT EXISTS (SELECT 1 FROM inserted)
-LIMIT 1
-`
-	if err := s.db.GetDB().NewRaw(query, operation, key, string(IdempotencyStatusPending), operation, key).Scan(ctx, &row); err != nil {
-		return "", false, err
-	}
-	return IdempotencyStatus(strings.TrimSpace(row.Status)), !row.Inserted, nil
-}
-
-func (s *DeduplicationService) completeDurable(ctx context.Context, operation, key string, result json.RawMessage) error {
-	query := `
-INSERT INTO billing.webhook_idempotency_backup (
-	operation, idempotency_key, status, payload, error, first_seen_at, last_seen_at, created_at, updated_at
-)
-VALUES (?, ?, ?, ?::jsonb, NULL, NOW(), NOW(), NOW(), NOW())
-ON CONFLICT (operation, idempotency_key) DO UPDATE
-SET status = EXCLUDED.status,
-	payload = EXCLUDED.payload,
-	error = NULL,
-	last_seen_at = NOW(),
-	updated_at = NOW()
-`
-	payload := "null"
-	if len(result) > 0 {
-		payload = string(result)
-	}
-	_, err := s.db.GetDB().NewRaw(query, operation, key, string(IdempotencyStatusSuccess), payload).Exec(ctx)
-	return err
-}
-
-func (s *DeduplicationService) failDurable(ctx context.Context, operation, key string, failure error) error {
-	errMsg := ""
-	if failure != nil {
-		errMsg = failure.Error()
-	}
-	query := `
-INSERT INTO billing.webhook_idempotency_backup (
-	operation, idempotency_key, status, payload, error, first_seen_at, last_seen_at, created_at, updated_at
-)
-VALUES (?, ?, ?, NULL, ?, NOW(), NOW(), NOW(), NOW())
-ON CONFLICT (operation, idempotency_key) DO UPDATE
-SET status = EXCLUDED.status,
-	error = EXCLUDED.error,
-	last_seen_at = NOW(),
-	updated_at = NOW()
-`
-	_, err := s.db.GetDB().NewRaw(query, operation, key, string(IdempotencyStatusFailed), errMsg).Exec(ctx)
-	return err
+		"deletedRows":   0,
+	}).Info("Durable webhook dedupe cleanup skipped (Postgres backup removed)")
+	return 0, nil
 }
