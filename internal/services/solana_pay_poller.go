@@ -152,6 +152,20 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 		return
 	}
 
+	consumed, err := p.solanaPayService.IsReferenceConsumed(ctx, reference)
+	if err != nil {
+		log.WithError(err).WithField("reference", reference).Warn("Failed to check consumed Solana reference")
+		p.deferRetry(reference, err)
+		return
+	}
+	if consumed {
+		if err := p.clearConsumedPendingReference(ctx, reference); err != nil {
+			log.WithError(err).WithField("reference", reference).Warn("Failed to clear consumed Solana pending reference")
+			p.deferRetry(reference, err)
+		}
+		return
+	}
+
 	// Get the pending payment details from Redis
 	pending, err := p.solanaPayService.GetPendingPayment(ctx, reference)
 	if err != nil {
@@ -161,7 +175,11 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 	}
 	if pending == nil {
 		// Payment expired, clean up the set
-		p.solanaPayService.RemovePendingPayment(ctx, reference)
+		if err := p.solanaPayService.RemovePendingPayment(ctx, reference); err != nil {
+			log.WithError(err).WithField("reference", reference).Warn("Failed to remove expired pending payment")
+			p.deferRetry(reference, err)
+			return
+		}
 		p.clearRetry(reference)
 		return
 	}
@@ -169,7 +187,11 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 	// Query blockchain for transactions with this reference
 	if err := solana.ValidateAddress(reference); err != nil {
 		log.WithError(err).WithField("reference", reference).Warn("Invalid Solana reference; removing pending payment")
-		p.solanaPayService.RemovePendingPayment(ctx, reference)
+		if removeErr := p.solanaPayService.RemovePendingPayment(ctx, reference); removeErr != nil {
+			log.WithError(removeErr).WithField("reference", reference).Warn("Failed to remove invalid Solana pending payment")
+			p.deferRetry(reference, removeErr)
+			return
+		}
 		return
 	}
 
@@ -193,6 +215,20 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 			continue // Skip failed transactions
 		}
 
+		consumed, consumedErr := p.solanaPayService.IsReferenceConsumed(ctx, reference)
+		if consumedErr != nil {
+			log.WithError(consumedErr).WithField("reference", reference).Warn("Failed to re-check consumed Solana reference")
+			p.deferRetry(reference, consumedErr)
+			return
+		}
+		if consumed {
+			if err := p.clearConsumedPendingReference(ctx, reference); err != nil {
+				log.WithError(err).WithField("reference", reference).Warn("Failed to clear consumed Solana pending reference")
+				p.deferRetry(reference, err)
+			}
+			return
+		}
+
 		// Idempotency short-circuit: if this signature is already recorded, stop polling this reference.
 		if p.checkoutService != nil && p.checkoutService.PaymentService != nil {
 			existingPayment, getErr := p.checkoutService.PaymentService.GetByTransactionID(ctx, models.ProcessorSolana, sig.Signature)
@@ -203,8 +239,11 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 					"payment_id": existingPayment.ID,
 				}).Info("Solana reference already has a recorded payment; removing pending payment")
 				p.markCheckoutSessionSucceeded(ctx, pending, existingPayment.ID, sig.Signature)
-				p.solanaPayService.RemovePendingPayment(ctx, reference)
-				p.clearRetry(reference)
+				if err := p.finalizeProcessedReference(ctx, reference, sig.Signature); err != nil {
+					log.WithError(err).WithField("reference", reference).Warn("Failed to finalize existing Solana payment reference")
+					p.deferRetry(reference, err)
+					return
+				}
 				return
 			}
 			if getErr != nil && !errors.Is(getErr, sql.ErrNoRows) {
@@ -230,9 +269,11 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 				continue
 			}
 
-			// Remove from pending set
-			p.solanaPayService.RemovePendingPayment(ctx, reference)
-			p.clearRetry(reference)
+			if err := p.finalizeProcessedReference(ctx, reference, sig.Signature); err != nil {
+				log.WithError(err).WithField("reference", reference).Warn("Failed to finalize processed Solana payment reference")
+				p.deferRetry(reference, err)
+				return
+			}
 			return
 		}
 	}
@@ -423,4 +464,26 @@ func isDuplicatePaymentTransactionIDError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "payments_processor_transaction_id_key") ||
 		(strings.Contains(msg, "duplicate key value") && strings.Contains(msg, "sqlstate=23505"))
+}
+
+func (p *SolanaPayPoller) finalizeProcessedReference(ctx context.Context, reference, transactionID string) error {
+	if p.solanaPayService == nil {
+		return nil
+	}
+	if err := p.solanaPayService.ConsumeAndRemovePending(ctx, reference, transactionID); err != nil {
+		return err
+	}
+	p.clearRetry(reference)
+	return nil
+}
+
+func (p *SolanaPayPoller) clearConsumedPendingReference(ctx context.Context, reference string) error {
+	if p.solanaPayService == nil {
+		return nil
+	}
+	if err := p.solanaPayService.RemovePendingPayment(ctx, reference); err != nil {
+		return err
+	}
+	p.clearRetry(reference)
+	return nil
 }

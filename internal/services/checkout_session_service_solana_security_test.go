@@ -149,6 +149,50 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 	})
 }
 
+func TestIsSolanaTransferRequestFlow(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		session *models.CheckoutSession
+		want    bool
+	}{
+		{
+			name: "legacy session defaults to transfer request",
+			session: &models.CheckoutSession{
+				ProcessorState: map[string]any{},
+			},
+			want: true,
+		},
+		{
+			name: "explicit transfer request",
+			session: &models.CheckoutSession{
+				ProcessorState: map[string]any{"flow": "transfer_request"},
+			},
+			want: true,
+		},
+		{
+			name: "transaction request is false",
+			session: &models.CheckoutSession{
+				ProcessorState: map[string]any{"flow": "transaction_request"},
+			},
+			want: false,
+		},
+		{
+			name: "nil session is false",
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, isSolanaTransferRequestFlow(tc.session))
+		})
+	}
+}
+
 const (
 	devnetUSDCMint      = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
 	testRecipientWallet = "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh"

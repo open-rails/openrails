@@ -326,6 +326,11 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 
 	if s.isTerminal(session.Status) {
 		if session.Status == models.CheckoutSessionStatusSucceeded {
+			transactionID := ""
+			if session.TransactionID != nil {
+				transactionID = strings.TrimSpace(*session.TransactionID)
+			}
+			_ = s.finalizeSolanaTransferReference(ctx, session, transactionID)
 			return s.sessionToResponse(session), nil
 		}
 		if session.Status != models.CheckoutSessionStatusExpired {
@@ -950,6 +955,9 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if err := s.MarkSucceeded(ctx, session.ID, result.PaymentID, strings.TrimSpace(req.Payment.Signature)); err != nil {
 		return nil, err
 	}
+	if err := s.finalizeSolanaTransferReference(ctx, session, strings.TrimSpace(req.Payment.Signature)); err != nil {
+		return nil, err
+	}
 
 	updated, err := s.repo.GetByID(ctx, session.ID)
 	if err != nil {
@@ -1133,6 +1141,43 @@ func getUint64Field(fields map[string]any, key string) uint64 {
 		}
 	}
 	return 0
+}
+
+func isSolanaTransferRequestFlow(session *models.CheckoutSession) bool {
+	if session == nil {
+		return false
+	}
+	flow := strings.ToLower(strings.TrimSpace(getStringField(session.ProcessorState, "flow")))
+	if flow == "" {
+		// Legacy default for Solana checkout sessions.
+		return true
+	}
+	return flow == "transfer_request"
+}
+
+func (s *CheckoutSessionService) finalizeSolanaTransferReference(ctx context.Context, session *models.CheckoutSession, transactionID string) error {
+	if session == nil || session.Processor != models.ProcessorSolana {
+		return nil
+	}
+	if !isSolanaTransferRequestFlow(session) {
+		return nil
+	}
+	if session.Reference == nil {
+		return nil
+	}
+	reference := strings.TrimSpace(*session.Reference)
+	if reference == "" {
+		return nil
+	}
+	if s.solanaPayService == nil {
+		return nil
+	}
+
+	if err := s.solanaPayService.ConsumeAndRemovePending(ctx, reference, strings.TrimSpace(transactionID)); err != nil {
+		return fmt.Errorf("failed to finalize solana reference %s: %w", reference, err)
+	}
+
+	return nil
 }
 
 func setSolanaQuoteState(processorState map[string]any, tokenAmount uint64, tokenPriceUSD, fxRate float64, fxCurrency string, quotedAt, quoteExpiresAt time.Time) error {
