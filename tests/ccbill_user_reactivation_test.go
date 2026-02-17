@@ -144,6 +144,41 @@ func TestCCBillRenewalSuccess_BlocksTerminalChargebackTransition(t *testing.T) {
 	require.Equal(t, 0, count)
 }
 
+func TestCCBillChargeback_DedupesDuplicateDelivery(t *testing.T) {
+	suite, userID, processorSubID, _, now := seedCCBillActiveSubscriptionWithEntitlement(t)
+	ctx := context.Background()
+
+	payload := mustLoadJSONMap(t, "testdata/webhooks/ccbill/chargeback.json")
+	txID := "ccbill_chargeback_dupe_" + uuid.New().String()
+	payload["subscriptionId"] = processorSubID
+	payload["transactionId"] = txID
+	payload["timestamp"] = now.Format("2006-01-02 15:04:05")
+
+	postCCBillWebhook(t, suite.ServerURL, "Chargeback", payload)
+	postCCBillWebhook(t, suite.ServerURL, "Chargeback", payload)
+
+	require.Eventually(t, func() bool {
+		sub := suite.GetSubscriptionByProcessorID(processorSubID)
+		return sub != nil && sub.Status == models.StatusCancelled && sub.CancelType != nil && *sub.CancelType == models.CancelTypeChargeback
+	}, 10*time.Second, 200*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		count, err := suite.BunDB.NewSelect().
+			Model((*models.NotificationQueue)(nil)).
+			Where("user_id = ?", userID).
+			Where("event_type = ?", models.NotificationPremiumEnded).
+			Count(ctx)
+		if err != nil {
+			return false
+		}
+		return count == 1
+	}, 10*time.Second, 200*time.Millisecond)
+
+	entitled, err := suite.App.Runtime.EntitlementService.IsEntitled(ctx, userID, "premium", time.Now().UTC().Add(time.Second))
+	require.NoError(t, err)
+	require.False(t, entitled)
+}
+
 func seedCCBillActiveSubscriptionWithEntitlement(t *testing.T) (*TestContainerSuite, string, string, uuid.UUID, time.Time) {
 	t.Helper()
 

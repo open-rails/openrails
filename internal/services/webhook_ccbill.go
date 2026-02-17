@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -127,6 +129,44 @@ func (s *CCBillWebhookService) paymentService() *PaymentService {
 		return NewPaymentService(s.DB)
 	}
 	return nil
+}
+
+func ccbillPayloadStringField(payload map[string]interface{}, key string) string {
+	if payload == nil {
+		return ""
+	}
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func (s *CCBillWebhookService) stableDedupeEventKey() string {
+	body := json.RawMessage(s.Data.EventBody)
+	if len(body) == 0 {
+		sum := sha256.Sum256([]byte(strings.TrimSpace(string(s.Data.EventType))))
+		return "ccbill:empty:" + hex.EncodeToString(sum[:8])
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		sum := sha256.Sum256(body)
+		return "ccbill:raw:" + hex.EncodeToString(sum[:8])
+	}
+
+	if txID := ccbillPayloadStringField(payload, "transactionId"); txID != "" {
+		return "tx:" + txID
+	}
+
+	canonical, err := json.Marshal(payload)
+	if err != nil {
+		sum := sha256.Sum256(body)
+		return "ccbill:raw:" + hex.EncodeToString(sum[:8])
+	}
+
+	sum := sha256.Sum256(canonical)
+	return "ccbill:event:" + hex.EncodeToString(sum[:8])
 }
 
 type CCBillWebhookEventType = string
@@ -1281,16 +1321,6 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 	}
 	if s.SubscriptionLifecycleService == nil {
 		return fmt.Errorf("subscription lifecycle service not configured")
-	}
-
-	if s.DeduplicationService != nil {
-		isDupe, err := s.DeduplicationService.IsDuplicate(ctx, "ccbill", transactionID)
-		if err != nil {
-			log.WithContext(ctx).WithError(err).Warn("deduplication check failed, proceeding with webhook")
-		} else if isDupe {
-			log.WithContext(ctx).WithField("transaction_id", transactionID).Info("Duplicate CCBill UserReactivation webhook, skipping")
-			return nil
-		}
 	}
 
 	renewalDate, err := parseCCBillDateUsingTimestamp(nextRenewalDate, "")
