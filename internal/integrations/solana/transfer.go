@@ -132,19 +132,26 @@ func (c *RPCClient) BuildTransferTransaction(ctx context.Context, req TransferRe
 
 // VerifyTransfer confirms the transaction and validates that it matches expected values.
 func (c *RPCClient) VerifyTransfer(ctx context.Context, req VerifyTransferRequest) error {
+	if req.ExpectedAmount == 0 {
+		return fmt.Errorf("expected amount must be greater than 0")
+	}
+	expectedRecipient := strings.TrimSpace(req.ExpectedRecipient)
+	if expectedRecipient == "" {
+		return fmt.Errorf("expected recipient is required")
+	}
+	expectedReference := strings.TrimSpace(req.ExpectedReference)
+	if expectedReference == "" {
+		return fmt.Errorf("expected reference is required")
+	}
+
 	txResult, err := c.fetchConfirmedTransaction(ctx, req.Signature)
 	if err != nil {
 		return err
 	}
 
-	if req.ExpectedAmount > 0 && strings.TrimSpace(req.ExpectedRecipient) != "" {
-		var reference *string
-		if trimmed := strings.TrimSpace(req.ExpectedReference); trimmed != "" {
-			reference = &trimmed
-		}
-		if err := validateTransactionContent(txResult, req.ExpectedAmount, req.ExpectedRecipient, req.ExpectedTokenMint, req.ExpectedPayer, reference); err != nil {
-			return fmt.Errorf("transaction content validation failed: %w", err)
-		}
+	reference := expectedReference
+	if err := validateTransactionContent(txResult, req.ExpectedAmount, expectedRecipient, req.ExpectedTokenMint, req.ExpectedPayer, &reference); err != nil {
+		return fmt.Errorf("transaction content validation failed: %w", err)
 	}
 
 	log.WithFields(log.Fields{

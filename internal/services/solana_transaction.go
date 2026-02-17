@@ -131,15 +131,24 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 	}, nil
 }
 
-// VerifyTransactionWithContent verifies a transaction against expected recipient, payer, and optional reference.
+// VerifyTransactionWithContent verifies a transaction against expected recipient, amount, and reference.
 func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string) error {
 	if s.rpc == nil {
 		return fmt.Errorf("solana rpc client unavailable")
+	}
+	if expectedAmount == 0 {
+		return fmt.Errorf("expected amount must be greater than 0")
+	}
+	if strings.TrimSpace(expectedRecipient) == "" {
+		return fmt.Errorf("expected recipient is required")
 	}
 
 	reference := ""
 	if expectedReference != nil {
 		reference = strings.TrimSpace(*expectedReference)
+	}
+	if reference == "" {
+		return fmt.Errorf("expected reference is required")
 	}
 
 	return s.rpc.VerifyTransfer(ctx, solana.VerifyTransferRequest{

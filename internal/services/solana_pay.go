@@ -44,13 +44,21 @@ type PendingSolanaPayment struct {
 
 // SolanaPayResult is returned when creating a new Solana Pay URL
 type SolanaPayResult struct {
-	URL         string
-	Reference   string
-	Amount      int64 // cents
-	Currency    string
-	TokenAmount string // formatted token amount (e.g., "9.99")
-	Token       string
-	ExpiresAt   time.Time
+	URL            string
+	Reference      string
+	Amount         int64 // cents
+	Currency       string
+	TokenAmount    string // formatted token amount (e.g., "9.99")
+	TokenUnits     uint64 // token amount in base units
+	TokenMint      string // token mint used for this quote/payment
+	Recipient      string // merchant wallet for this quote/payment
+	TokenPriceUSD  float64
+	FXRate         float64
+	FXCurrency     string
+	QuotedAt       time.Time
+	QuoteExpiresAt time.Time
+	Token          string
+	ExpiresAt      time.Time
 }
 
 // SolanaPayService handles Solana Pay Transfer Request flow
@@ -155,6 +163,9 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("failed to calculate token quote: %w", err)
 	}
 	tokenUnits := quote.Units
+	if tokenUnits == 0 {
+		return nil, fmt.Errorf("calculated token amount is zero")
+	}
 
 	// Generate reference for Solana Pay
 	reference, err := solana.GenerateReference()
@@ -201,13 +212,21 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	url := s.buildTransferRequestURL(recipient, tokenUnits, tokenMint, tokenSymbol, reference)
 
 	return &SolanaPayResult{
-		URL:         url,
-		Reference:   reference,
-		Amount:      price.Amount,
-		Currency:    price.Currency,
-		TokenAmount: formatTokenAmount(tokenUnits, tokenCfg.Decimals),
-		Token:       tokenSymbol,
-		ExpiresAt:   expiresAt,
+		URL:            url,
+		Reference:      reference,
+		Amount:         price.Amount,
+		Currency:       price.Currency,
+		TokenAmount:    formatTokenAmount(tokenUnits, tokenCfg.Decimals),
+		TokenUnits:     tokenUnits,
+		TokenMint:      tokenMint,
+		Recipient:      recipient,
+		TokenPriceUSD:  quote.TokenPriceUSD,
+		FXRate:         quote.FXRate,
+		FXCurrency:     quote.FXCurrency,
+		QuotedAt:       quote.QuotedAt,
+		QuoteExpiresAt: expiresAt,
+		Token:          tokenSymbol,
+		ExpiresAt:      expiresAt,
 	}, nil
 }
 
