@@ -890,7 +890,7 @@ func (s *CheckoutService) processNMISubscription(
 
 	// Leaving RegisterPurchase for immediate starts only,
 	// TODO - Test in production to see when NMI charges the card.
-	_, err = s.RegisterPurchase(ctx, &RegisterPurchaseRequest{
+	/*_, err = s.RegisterPurchase(ctx, &RegisterPurchaseRequest{
 		UserID:         user.ID,
 		PriceID:        price.ID,
 		Processor:      "mobius",
@@ -911,7 +911,7 @@ func (s *CheckoutService) processNMISubscription(
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to register purchase: %w", err)
-	}
+	}*/
 
 	return &CheckoutResponse{
 		Status:         statusMsg,
