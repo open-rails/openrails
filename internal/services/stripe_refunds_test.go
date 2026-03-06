@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -137,5 +139,68 @@ func TestRefundParams_ReasonValidation(t *testing.T) {
 			Reason:   reason,
 		}
 		assert.Equal(t, reason, params.Reason)
+	}
+}
+
+func TestResolveStripeRefundTarget(t *testing.T) {
+	tests := []struct {
+		name       string
+		payment    *models.Payment
+		wantTarget string
+		wantErr    string
+	}{
+		{
+			name: "prefers charge id from metadata",
+			payment: &models.Payment{
+				ID:            uuid.New(),
+				TransactionID: "pi_should_not_win",
+				Metadata: map[string]any{
+					"stripe_charge_id":         "ch_123",
+					"stripe_payment_intent_id": "pi_123",
+				},
+			},
+			wantTarget: "ch_123",
+		},
+		{
+			name: "uses payment intent from metadata",
+			payment: &models.Payment{
+				ID:            uuid.New(),
+				TransactionID: "in_old",
+				Metadata: map[string]any{
+					"stripe_payment_intent_id": "pi_123",
+				},
+			},
+			wantTarget: "pi_123",
+		},
+		{
+			name: "falls back to transaction id when already refundable",
+			payment: &models.Payment{
+				ID:            uuid.New(),
+				TransactionID: "ch_456",
+			},
+			wantTarget: "ch_456",
+		},
+		{
+			name: "errors when no refundable stripe id is available",
+			payment: &models.Payment{
+				ID:            uuid.New(),
+				TransactionID: "cs_legacy",
+			},
+			wantErr: "requires Stripe charge/payment_intent id",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target, err := ResolveStripeRefundTarget(tt.payment)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTarget, target)
+		})
 	}
 }

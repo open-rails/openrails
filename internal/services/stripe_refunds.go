@@ -13,7 +13,10 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 )
+
+var ErrStripeRefundTargetMissing = errors.New("stripe refundable transaction id is missing")
 
 // StripeRefundService handles Stripe refund operations
 type StripeRefundService struct {
@@ -116,6 +119,37 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	}
 
 	return &result, nil
+}
+
+func ResolveStripeRefundTarget(payment *models.Payment) (string, error) {
+	if chargeID := strings.TrimSpace(metadataStringValue(payment.Metadata, "stripe_charge_id")); strings.HasPrefix(chargeID, "ch_") {
+		return chargeID, nil
+	}
+
+	if paymentIntentID := strings.TrimSpace(metadataStringValue(payment.Metadata, "stripe_payment_intent_id")); strings.HasPrefix(paymentIntentID, "pi_") {
+		return paymentIntentID, nil
+	}
+
+	transactionID := strings.TrimSpace(payment.TransactionID)
+	if strings.HasPrefix(transactionID, "ch_") || strings.HasPrefix(transactionID, "pi_") {
+		return transactionID, nil
+	}
+
+	return "", fmt.Errorf("%w: payment %s requires Stripe charge/payment_intent id (ch_... or pi_...) in metadata or transaction_id", ErrStripeRefundTargetMissing, payment.ID)
+}
+
+func metadataStringValue(metadata map[string]any, key string) string {
+	v, ok := metadata[key]
+	if !ok {
+		return ""
+	}
+
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+
+	return s
 }
 
 // GetRefund retrieves a refund by ID

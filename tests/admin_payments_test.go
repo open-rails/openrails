@@ -581,6 +581,34 @@ func TestAdminRefundPayment(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for zero amount")
 	})
 
+	t.Run("returns actionable 400 for stripe historical non-refundable id", func(t *testing.T) {
+		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
+			UserID:        userID,
+			PriceID:       priceID,
+			Processor:     models.ProcessorStripe,
+			TransactionID: "cs_test_legacy",
+			Amount:        1000,
+		})
+
+		w := httptest.NewRecorder()
+		body := `{"amount": 500}`
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+
+		suite.Server.Handler().ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return actionable 400 for unsupported Stripe transaction ID")
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		errorObj := response["error"].(map[string]interface{})
+		message := errorObj["message"].(string)
+		assert.Contains(t, message, "charge/payment_intent")
+	})
+
 	t.Run("returns 400 for CCBill payments with helpful message", func(t *testing.T) {
 		payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
 			UserID:    userID,

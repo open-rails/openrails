@@ -54,6 +54,8 @@ type stripeInvoice struct {
 	Subscription  string            `json:"subscription"`
 	Customer      string            `json:"customer"`
 	CustomerEmail string            `json:"customer_email"`
+	PaymentIntent string            `json:"payment_intent"`
+	Charge        string            `json:"charge"`
 	AmountPaid    int64             `json:"amount_paid"`
 	Currency      string            `json:"currency"`
 	Metadata      map[string]string `json:"metadata"`
@@ -68,6 +70,7 @@ type stripeCheckoutSession struct {
 	Subscription  string            `json:"subscription"`
 	Customer      string            `json:"customer"`
 	CustomerEmail string            `json:"customer_email"`
+	PaymentIntent string            `json:"payment_intent"`
 	Metadata      map[string]string `json:"metadata"`
 	AmountTotal   int64             `json:"amount_total"`
 	Currency      string            `json:"currency"`
@@ -130,6 +133,11 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	if err != nil {
 		return err
 	}
+	paymentTransactionID := stripeRefundableTransactionID(inv.Charge, inv.PaymentIntent)
+	if paymentTransactionID == "" {
+		return fmt.Errorf("stripe invoice missing refundable transaction id (charge/payment_intent)")
+	}
+	paymentMetadata := stripeInvoicePaymentMetadata(inv)
 
 	processorSubID := strings.TrimSpace(inv.Subscription)
 	if processorSubID == "" {
@@ -145,9 +153,10 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			PriceID:                 priceID,
 			Processor:               models.ProcessorStripe,
 			ProcessorSubscriptionID: &processorSubID,
-			TransactionID:           inv.ID,
+			TransactionID:           paymentTransactionID,
 			Amount:                  inv.AmountPaid,
 			Currency:                inv.Currency,
+			PaymentMetadata:         paymentMetadata,
 		})
 		if err != nil {
 			return fmt.Errorf("create membership: %w", err)
@@ -157,14 +166,15 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		if err := s.SubscriptionLifecycleService.RenewMembership(ctx, &RenewMembershipParams{
 			Processor:               models.ProcessorStripe,
 			ProcessorSubscriptionID: processorSubID,
-			TransactionID:           inv.ID,
+			TransactionID:           paymentTransactionID,
 			Amount:                  inv.AmountPaid,
 			Currency:                inv.Currency,
+			PaymentMetadata:         paymentMetadata,
 		}); err != nil {
 			if IsTerminalTransitionBlocked(err) {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 					"processor_subscription_id": processorSubID,
-					"transaction_id":            inv.ID,
+					"transaction_id":            paymentTransactionID,
 				}).Warn("Blocked terminal -> active transition for delayed Stripe renewal")
 				return nil
 			}
@@ -219,15 +229,15 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		}
 		if sessionID != uuid.Nil {
 			paymentID := uuid.Nil
-			if s.PaymentService != nil && strings.TrimSpace(inv.ID) != "" {
-				if payment, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, inv.ID); err == nil && payment != nil {
+			if s.PaymentService != nil {
+				if payment, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, paymentTransactionID); err == nil && payment != nil {
 					paymentID = payment.ID
 				}
 			}
-			if err := s.CheckoutSessionService.MarkSucceededWithSubscription(ctx, sessionID, paymentID, inv.ID, sub.ID); err != nil {
+			if err := s.CheckoutSessionService.MarkSucceededWithSubscription(ctx, sessionID, paymentID, paymentTransactionID, sub.ID); err != nil {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 					"checkout_session_id": sessionID,
-					"transaction_id":      inv.ID,
+					"transaction_id":      paymentTransactionID,
 				}).Warn("failed to update checkout session from stripe invoice")
 			}
 		}
@@ -307,14 +317,19 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	if err != nil {
 		return err
 	}
+	paymentTransactionID := stripeRefundableTransactionID("", sess.PaymentIntent)
+	if paymentTransactionID == "" {
+		return fmt.Errorf("stripe checkout session missing payment_intent")
+	}
 
 	result, err := s.CheckoutService.RegisterPurchase(ctx, &RegisterPurchaseRequest{
 		UserID:        userID,
 		PriceID:       priceID,
 		Processor:     string(models.ProcessorStripe),
-		TransactionID: sess.ID,
+		TransactionID: paymentTransactionID,
 		Amount:        sess.AmountTotal,
 		Currency:      sess.Currency,
+		Metadata:      stripeCheckoutPaymentMetadata(sess),
 	})
 	if err != nil {
 		return fmt.Errorf("register purchase: %w", err)
@@ -328,10 +343,10 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 			}
 		}
 		if sessionID != uuid.Nil {
-			if err := s.CheckoutSessionService.MarkSucceeded(ctx, sessionID, result.PaymentID, sess.ID); err != nil {
+			if err := s.CheckoutSessionService.MarkSucceeded(ctx, sessionID, result.PaymentID, paymentTransactionID); err != nil {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 					"checkout_session_id": sessionID,
-					"transaction_id":      sess.ID,
+					"transaction_id":      paymentTransactionID,
 				}).Warn("failed to update checkout session from stripe checkout")
 			}
 		}
@@ -513,4 +528,34 @@ func nullableString(v string) *string {
 
 func ptrProcessor(p models.Processor) *models.Processor {
 	return &p
+}
+
+func stripeRefundableTransactionID(chargeID, paymentIntentID string) string {
+	if chargeID = strings.TrimSpace(chargeID); chargeID != "" {
+		return chargeID
+	}
+	return strings.TrimSpace(paymentIntentID)
+}
+
+func stripeInvoicePaymentMetadata(inv stripeInvoice) map[string]any {
+	metadata := map[string]any{
+		"stripe_invoice_id": strings.TrimSpace(inv.ID),
+	}
+	if chargeID := strings.TrimSpace(inv.Charge); chargeID != "" {
+		metadata["stripe_charge_id"] = chargeID
+	}
+	if paymentIntentID := strings.TrimSpace(inv.PaymentIntent); paymentIntentID != "" {
+		metadata["stripe_payment_intent_id"] = paymentIntentID
+	}
+	return metadata
+}
+
+func stripeCheckoutPaymentMetadata(sess stripeCheckoutSession) map[string]any {
+	metadata := map[string]any{
+		"stripe_checkout_session_id": strings.TrimSpace(sess.ID),
+	}
+	if paymentIntentID := strings.TrimSpace(sess.PaymentIntent); paymentIntentID != "" {
+		metadata["stripe_payment_intent_id"] = paymentIntentID
+	}
+	return metadata
 }

@@ -42,9 +42,10 @@ type CreateMembershipParams struct {
 	// Used for processors like CCBill that provide an authoritative nextRenewalDate.
 	CurrentPeriodEndsAt *time.Time
 	// Payment fields - required for creating Payment record
-	TransactionID string // Processor's transaction ID for this purchase
-	Amount        int64  // Amount charged in smallest unit (cents for USD)
-	Currency      string // Currency code (e.g., "usd")
+	TransactionID   string // Processor's transaction ID for this purchase
+	Amount          int64  // Amount charged in smallest unit (cents for USD)
+	Currency        string // Currency code (e.g., "usd")
+	PaymentMetadata map[string]any
 }
 
 type RenewMembershipParams struct {
@@ -54,9 +55,10 @@ type RenewMembershipParams struct {
 	// Used for processors like CCBill that provide an authoritative nextRenewalDate.
 	CurrentPeriodEndsAt *time.Time
 	// Payment fields - required for creating Payment record
-	TransactionID string // Processor's transaction ID for this renewal
-	Amount        int64  // Amount charged in smallest unit (cents for USD)
-	Currency      string // Currency code (e.g., "usd")
+	TransactionID   string // Processor's transaction ID for this renewal
+	Amount          int64  // Amount charged in smallest unit (cents for USD)
+	Currency        string // Currency code (e.g., "usd")
+	PaymentMetadata map[string]any
 	// AllowTerminalReactivation bypasses policy and permits terminal -> active transitions.
 	// This should only be set by explicit manual operator workflows.
 	AllowTerminalReactivation bool
@@ -538,6 +540,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			Amount:         amount,
 			ListAmount:     price.Amount,
 			Currency:       currency,
+			Metadata:       params.PaymentMetadata,
 			PurchasedAt:    now,
 			CreatedAt:      now,
 		}
@@ -855,6 +858,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				Amount:         params.Amount,
 				ListAmount:     params.Amount,
 				Currency:       params.Currency,
+				Metadata:       params.PaymentMetadata,
 				PurchasedAt:    now.UTC(),
 				CreatedAt:      now.UTC(),
 			}

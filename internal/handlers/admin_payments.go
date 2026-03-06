@@ -73,10 +73,16 @@ func AdminRefundPayment(r *Request) {
 		return
 
 	case payment.Processor == models.ProcessorStripe:
+		refundTargetID, err := services.ResolveStripeRefundTarget(payment)
+		if err != nil {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
+
 		// Issue refund through Stripe
 		stripeService := &services.StripeRefundService{Config: r.State.Config}
 		result, err := stripeService.CreateRefund(ctx, services.RefundParams{
-			ChargeID: payment.TransactionID,
+			ChargeID: refundTargetID,
 			Amount:   req.Amount,
 			Reason:   req.Reason,
 		})
