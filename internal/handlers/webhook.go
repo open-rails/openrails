@@ -13,8 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/processors"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/services"
-	"github.com/open-rails/openrails/internal/shared/webhookpayload"
-	"github.com/open-rails/openrails/internal/shared/webhooksig"
+	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	ipverify "github.com/open-rails/openrails/internal/utils"
 	"github.com/riverqueue/river"
 )
@@ -23,7 +22,7 @@ func Webhook(r *Request) {
 	// Single path segment: /v1/webhooks/:provider
 	// Provider can be: mobius, ccbill, solana
 	// NMI is the gateway used by mobius, not a provider itself
-	provider := webhookpayload.CanonicalProvider(r.Param("provider"))
+	provider := webhookutil.CanonicalProvider(r.Param("provider"))
 
 	// Note: CCBill webhook IP allowlist checks are bypassed in test mode for developer ergonomics.
 	// NMI/Mobius and Stripe signatures are still verified when secrets are configured.
@@ -98,7 +97,7 @@ func enqueueCCBillWebhook(r *Request, clientIP string) bool {
 		return false
 	}
 
-	body, err = webhookpayload.NormalizeCCBillPayload(body)
+	body, err = webhookutil.NormalizeCCBillPayload(body)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
 		return false
@@ -110,7 +109,7 @@ func enqueueCCBillWebhook(r *Request, clientIP string) bool {
 		return false
 	}
 
-	uniqueKey := webhookpayload.ComputeUniqueKey(services.ProcessorCCBill, "", eventType, body)
+	uniqueKey := webhookutil.ComputeUniqueKey(services.ProcessorCCBill, "", eventType, body)
 
 	args := riverjobs.WebhookProcessArgs{
 		Provider:  services.ProcessorCCBill,
@@ -155,20 +154,20 @@ func enqueueStripeWebhook(r *Request, clientIP string) bool {
 		r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
 		return false
 	}
-	if err = webhooksig.VerifyStripeSignature(secret, sig, body, 5*time.Minute); err != nil {
+	if err = webhookutil.VerifyStripeSignature(secret, sig, body, 5*time.Minute); err != nil {
 		r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
 		return false
 	}
 	truth := true
 	signatureValidPtr = &truth
 
-	eventID, eventType, err := webhookpayload.ParseStripeEventMeta(body)
+	eventID, eventType, err := webhookutil.ParseStripeEventMeta(body)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
 		return false
 	}
 
-	uniqueKey := webhookpayload.ComputeUniqueKey(services.ProcessorStripe, eventID, eventType, body)
+	uniqueKey := webhookutil.ComputeUniqueKey(services.ProcessorStripe, eventID, eventType, body)
 
 	args := riverjobs.WebhookProcessArgs{
 		Provider:       services.ProcessorStripe,
@@ -215,7 +214,7 @@ func enqueueNMIWebhook(r *Request, provider string, clientIP string) bool {
 		return false
 	}
 
-	providerKey := webhookpayload.CanonicalProvider(provider)
+	providerKey := webhookutil.CanonicalProvider(provider)
 
 	client, ok := r.State.NMIClients[providerKey]
 	if !ok || client == nil {
@@ -232,7 +231,7 @@ func enqueueNMIWebhook(r *Request, provider string, clientIP string) bool {
 		return false
 	}
 
-	signature, err := webhooksig.ValidateNMISignature(
+	signature, err := webhookutil.ValidateNMISignature(
 		signingKey,
 		body,
 		r.Request.Header.Get("Webhook-Signature"),
@@ -244,7 +243,7 @@ func enqueueNMIWebhook(r *Request, provider string, clientIP string) bool {
 		func(signature string) error { return client.VerifyWebhookSignature(body, signature) },
 	)
 	if err != nil {
-		if err == webhooksig.ErrNMIWebhookSecretMissing || err == webhooksig.ErrNMIWebhookSignatureMissing {
+		if err == webhookutil.ErrNMIWebhookSecretMissing || err == webhookutil.ErrNMIWebhookSignatureMissing {
 			log.WithError(err).Error("Missing webhook signature for NMI webhook")
 			r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
 			return false
@@ -272,7 +271,7 @@ func enqueueNMIWebhook(r *Request, provider string, clientIP string) bool {
 		signatureValidPtr = &truth
 	}
 
-	uniqueKey := webhookpayload.ComputeUniqueKey(providerKey, data.EventID, string(data.EventType), body)
+	uniqueKey := webhookutil.ComputeUniqueKey(providerKey, data.EventID, string(data.EventType), body)
 
 	args := riverjobs.WebhookProcessArgs{
 		Provider:       providerKey,
