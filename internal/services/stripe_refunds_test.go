@@ -184,7 +184,7 @@ func TestResolveStripeRefundTarget(t *testing.T) {
 			name: "errors when no refundable stripe id is available",
 			payment: &models.Payment{
 				ID:            uuid.New(),
-				TransactionID: "cs_legacy",
+				TransactionID: "cs_old_checkout",
 			},
 			wantErr: "requires Stripe charge/payment_intent id",
 		},

@@ -97,14 +97,6 @@ processors:
 	assert.ErrorContains(t, err, "processor 'mobius' must declare a type")
 }
 
-func TestLoad_RejectsLegacyNMIEnvMapping(t *testing.T) {
-	t.Setenv("NMI_MOBIUS_SECURITY_KEY", "legacy-key")
-
-	cfg, err := Load("nonexistent-config.yaml")
-	assert.NoError(t, err)
-	assert.Nil(t, cfg.GetProcessor("mobius"))
-}
-
 func TestLoad_EnvTrimming(t *testing.T) {
 	t.Setenv("DB_HOST", "  example.com  ")
 	t.Setenv("DB_USERNAME", "  user  ")

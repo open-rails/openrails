@@ -586,7 +586,7 @@ func TestAdminRefundPayment(t *testing.T) {
 			UserID:        userID,
 			PriceID:       priceID,
 			Processor:     models.ProcessorStripe,
-			TransactionID: "cs_test_legacy",
+			TransactionID: "cs_test_old_checkout",
 			Amount:        1000,
 		})
 

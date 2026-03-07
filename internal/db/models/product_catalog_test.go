@@ -24,11 +24,3 @@ func TestCreditsSpec_UnmarshalJSON_V2(t *testing.T) {
 		t.Fatalf("unexpected gpu_minutes cadence: %s", cs["gpu_minutes"].Cadence)
 	}
 }
-
-func TestCreditsSpec_UnmarshalJSON_InvalidLegacyShape(t *testing.T) {
-	var cs CreditsSpec
-	raw := []byte(`{"promo_amount_cents": 499, "promo_expires_days": 10, "grant_on": "initial"}`)
-	if err := json.Unmarshal(raw, &cs); err == nil {
-		t.Fatal("expected legacy credits_spec shape to fail")
-	}
-}

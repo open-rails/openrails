@@ -158,7 +158,7 @@ func TestIsSolanaTransferRequestFlow(t *testing.T) {
 		want    bool
 	}{
 		{
-			name: "legacy session defaults to transfer request",
+			name: "empty session defaults to transfer request",
 			session: &models.CheckoutSession{
 				ProcessorState: map[string]any{},
 			},
