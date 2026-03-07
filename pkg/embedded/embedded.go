@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/server"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -38,7 +39,7 @@ func New(opts Options) (*Embedded, error) {
 		return nil, fmt.Errorf("config is required")
 	}
 
-	application, err := app.BootstrapWithOptions(opts.Config, &app.BootstrapOptions{
+	assembled, err := bootstrap.NewServer(opts.Config, &bootstrap.Options{
 		DB:           opts.DB,
 		PGXPool:      opts.PGXPool,
 		Redis:        opts.Redis,
@@ -46,35 +47,12 @@ func New(opts Options) (*Embedded, error) {
 		Cache:        opts.Cache,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("bootstrap application: %w", err)
+		return nil, err
 	}
-	cleanupOnError := true
-	defer func() {
-		if cleanupOnError {
-			_ = application.Close(context.Background())
-		}
-	}()
-
-	authProvider := application.AuthProvider
-	if opts.AuthProvider != nil {
-		authProvider = opts.AuthProvider
-	}
-
-	billingServer, err := server.New(server.Dependencies{
-		Config:       application.Config,
-		Cache:        application.Cache,
-		Runtime:      application.Runtime,
-		Redis:        application.RedisClient,
-		AuthProvider: authProvider,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create billing server: %w", err)
-	}
-	cleanupOnError = false
 
 	return &Embedded{
-		app:    application,
-		server: billingServer,
+		app:    assembled.App,
+		server: assembled.Server,
 	}, nil
 }
 

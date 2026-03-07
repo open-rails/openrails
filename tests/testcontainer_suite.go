@@ -12,9 +12,9 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/migrate"
-	"github.com/open-rails/openrails/internal/server"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -306,24 +306,13 @@ func (suite *TestContainerSuite) initializeServer() {
 	suite.t.Helper()
 
 	// Bootstrap the application (creates runtime, cache, auth verifier, etc.)
-	application, err := app.Bootstrap(suite.Config)
+	assembled, err := bootstrap.NewServer(suite.Config, nil)
 	require.NoError(suite.t, err)
-	suite.App = application
+	suite.App = assembled.App
 
 	// Get the BunDB from the app runtime
-	suite.BunDB = application.Runtime.DB.GetDB().(*bun.DB)
-
-	// Create server with dependencies
-	billingServer, err := server.New(server.Dependencies{
-		Config:       suite.Config,
-		Cache:        application.Cache,
-		Runtime:      application.Runtime,
-		Redis:        application.RedisClient,
-		AuthProvider: application.AuthProvider,
-	})
-	require.NoError(suite.t, err)
-
-	suite.Server = billingServer
+	suite.BunDB = assembled.App.Runtime.DB.GetDB().(*bun.DB)
+	suite.Server = assembled.Server
 
 	// Start workers in-process for the integration suite (separate from HTTP server).
 	workersCtx, cancel := context.WithCancel(context.Background())

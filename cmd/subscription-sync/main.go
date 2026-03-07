@@ -14,6 +14,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
@@ -98,7 +99,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 
-	application, err := app.Bootstrap(cfg)
+	application, err := bootstrap.NewApp(cfg, nil)
 	if err != nil {
 		return fmt.Errorf("bootstrap failed: %w", err)
 	}
