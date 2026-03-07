@@ -132,9 +132,8 @@ func (r *PriceRepo) GetByNMIPlan(ctx context.Context, provider, nmiPlanID string
 
 func (r *PriceRepo) GetByCCBillPriceID(ctx context.Context, ccbillPriceID string) (*models.Price, error) {
 	price := new(models.Price)
-	// Query using JSONB: processors->'ccbill'->>'flex_id' (or legacy price_id) = priceID
 	if err := r.db.GetDB().NewSelect().Model(price).Relation("Product").
-		Where("(price.processors->'ccbill'->>'flex_id' = ? OR price.processors->'ccbill'->>'price_id' = ?)", ccbillPriceID, ccbillPriceID).
+		Where("price.processors->'ccbill'->>'flex_id' = ?", ccbillPriceID).
 		Where("price.is_active = ?", true).
 		Scan(ctx); err != nil {
 		return nil, err
