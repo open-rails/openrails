@@ -1087,20 +1087,6 @@ func Load(configPath string) (*Config, error) {
 			return "processors.mobius." + strings.TrimPrefix(s, "mobius_")
 		}
 
-		// Legacy (avoid ad-hoc os.Getenv in integrations):
-		// - NMI_<PROVIDER>_<FIELD> -> processors.<provider>.<field>
-		// - NMI_WEBHOOK_SECRET -> apply as default for all NMI processors (handled later)
-		if strings.HasPrefix(s, "nmi_") {
-			rest := strings.TrimPrefix(s, "nmi_")
-			if rest == "webhook_secret" {
-				return "legacy.nmi_webhook_secret"
-			}
-			parts := strings.SplitN(rest, "_", 2)
-			if len(parts) == 2 {
-				return fmt.Sprintf("processors.%s.%s", parts[0], parts[1])
-			}
-		}
-
 		// FEATURE_FLAGS_* -> feature_flags.*
 		if strings.HasPrefix(s, "feature_flags_") {
 			return "feature_flags." + strings.TrimPrefix(s, "feature_flags_")
@@ -1112,14 +1098,6 @@ func Load(configPath string) (*Config, error) {
 			parts := strings.SplitN(s, "_", 3)
 			if len(parts) == 3 {
 				return fmt.Sprintf("processors.%s.%s", parts[1], parts[2])
-			}
-		}
-
-		// Legacy NMI_PROVIDERS_* still supported for backwards compatibility.
-		if strings.HasPrefix(s, "nmi_providers_") {
-			parts := strings.SplitN(s, "_", 4)
-			if len(parts) == 4 {
-				return fmt.Sprintf("nmi.providers.%s.%s", parts[2], parts[3])
 			}
 		}
 
@@ -1179,8 +1157,6 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("loading environment variables: %w", err)
 	}
 
-	legacyNMIWebhookSecret := strings.TrimSpace(k.String("legacy.nmi_webhook_secret"))
-
 	// Unmarshal into config struct (overlay onto defaults)
 	if err := k.Unmarshal("", cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
@@ -1218,11 +1194,10 @@ func Load(configPath string) (*Config, error) {
 				log.Warnf("duplicate processor configuration detected for key '%s'; overriding previous value", key)
 			}
 
-			// Validate type for non-reserved names
+			// Non-reserved processor names must declare an explicit type.
 			effectiveType := proc.GetEffectiveType(key)
 			if effectiveType == "" {
-				log.Warnf("processor '%s' has no type specified and is not a reserved name (ccbill, stripe, solana); assuming 'nmi'", key)
-				proc.Type = ProcessorTypeNMI
+				return nil, fmt.Errorf("processor '%s' must declare a type", key)
 			}
 
 			// Warn if reserved name has conflicting type
@@ -1235,19 +1210,6 @@ func Load(configPath string) (*Config, error) {
 			normalized[key] = proc
 		}
 		cfg.Processors = normalized
-	}
-
-	// Apply global legacy NMI webhook secret if provided (back-compat with NMI_WEBHOOK_SECRET).
-	// This prevents needing ad-hoc env reads in the NMI integration.
-	if legacyNMIWebhookSecret != "" {
-		for name, proc := range cfg.Processors {
-			if proc == nil {
-				continue
-			}
-			if proc.IsNMI(name) && strings.TrimSpace(proc.WebhookSecret) == "" {
-				proc.WebhookSecret = legacyNMIWebhookSecret
-			}
-		}
 	}
 
 	// Assemble DB URL from pieces if not explicitly set

@@ -315,7 +315,6 @@ func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
 		return clients, nil
 	}
 
-	// Use the new unified config helper that checks both Processors map and legacy NMI config
 	nmiProcessors := cfg.GetNMIProcessors()
 	if len(nmiProcessors) == 0 {
 		return clients, nil

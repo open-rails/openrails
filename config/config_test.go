@@ -90,6 +90,29 @@ clickhouse:
 	assert.Equal(t, "envclickhouse:9000", cfg.ClickHouse.ClientAddr)
 }
 
+func TestLoad_RequiresExplicitTypeForCustomProcessors(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	err := os.WriteFile(cfgPath, []byte(`
+processors:
+  mobius:
+    security_key: test-key
+`), 0o600)
+	assert.NoError(t, err)
+
+	_, err = Load(cfgPath)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "processor 'mobius' must declare a type")
+}
+
+func TestLoad_RejectsLegacyNMIEnvMapping(t *testing.T) {
+	t.Setenv("NMI_MOBIUS_SECURITY_KEY", "legacy-key")
+
+	cfg, err := Load("nonexistent-config.yaml")
+	assert.NoError(t, err)
+	assert.Nil(t, cfg.GetProcessor("mobius"))
+}
+
 func TestLoad_EnvTrimming(t *testing.T) {
 	t.Setenv("DB_HOST", "  example.com  ")
 	t.Setenv("DB_USERNAME", "  user  ")

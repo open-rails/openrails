@@ -16,7 +16,6 @@ var NMIBackedProcessors = map[string]bool{
 
 // InitNMIBackedProcessors initializes the NMI-backed processors set from configuration.
 // Call this at application startup after loading config.
-// Works with both the new Processors map and legacy NMI config.
 func InitNMIBackedProcessors(cfg *config.Config) {
 	if cfg == nil {
 		return
@@ -25,7 +24,6 @@ func InitNMIBackedProcessors(cfg *config.Config) {
 	// Clear and rebuild from config
 	NMIBackedProcessors = make(map[string]bool)
 
-	// Use the new unified config helper that checks both Processors map and legacy NMI config
 	nmiProcessors := cfg.GetNMIProcessors()
 	for name := range nmiProcessors {
 		key := strings.TrimSpace(strings.ToLower(name))
