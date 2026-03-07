@@ -235,12 +235,6 @@ func enqueueNMIWebhook(r *Request, provider string, clientIP string) bool {
 		signingKey,
 		body,
 		r.Request.Header.Get("Webhook-Signature"),
-		[]string{
-			r.Request.Header.Get("X-Signature"),
-			r.Request.Header.Get("X-NMI-Signature"),
-			r.Request.Header.Get("X-Mobius-Signature"),
-		},
-		func(signature string) error { return client.VerifyWebhookSignature(body, signature) },
 	)
 	if err != nil {
 		if err == webhookutil.ErrNMIWebhookSecretMissing || err == webhookutil.ErrNMIWebhookSignatureMissing {

@@ -1,9 +1,6 @@
 package nmi
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -1143,33 +1140,6 @@ func (c *NMIClient) sendQueryRequest(data url.Values) (_ string, err error) {
 	return string(body), nil
 }
 
-func (c *NMIClient) VerifyWebhookSignature(body []byte, signature string) error {
-	if c.WebhookSecret == "" {
-		return errors.New("webhook secret not configured")
-	}
-
-	signature = strings.TrimPrefix(signature, "sha256=")
-
-	mac := hmac.New(sha256.New, []byte(c.WebhookSecret))
-	mac.Write(body)
-	expectedSignature := hex.EncodeToString(mac.Sum(nil))
-
-	if !hmac.Equal([]byte(signature), []byte(expectedSignature)) {
-		return errors.New("webhook signature verification failed")
-	}
-
-	return nil
-}
-
 func (c *NMIClient) GetWebhookSecret() string {
 	return c.WebhookSecret
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }

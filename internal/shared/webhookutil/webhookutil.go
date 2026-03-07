@@ -159,7 +159,7 @@ func ParseNMISignatureHeader(header string) (string, string, error) {
 	return ts, sig, nil
 }
 
-func ValidateNMISignature(secret string, body []byte, phpHeader string, legacyHeaders []string, verifyLegacy func(string) error) (string, error) {
+func ValidateNMISignature(secret string, body []byte, phpHeader string) (string, error) {
 	if strings.TrimSpace(secret) == "" {
 		return "", ErrNMIWebhookSecretMissing
 	}
@@ -170,17 +170,6 @@ func ValidateNMISignature(secret string, body []byte, phpHeader string, legacyHe
 			return "", fmt.Errorf("%w: %v", ErrNMIWebhookSignatureInvalid, err)
 		}
 		return phpHeader, nil
-	}
-
-	for _, header := range legacyHeaders {
-		header = strings.TrimSpace(header)
-		if header == "" {
-			continue
-		}
-		if err := verifyLegacy(header); err != nil {
-			return "", fmt.Errorf("%w: %v", ErrNMIWebhookSignatureInvalid, err)
-		}
-		return header, nil
 	}
 
 	return "", ErrNMIWebhookSignatureMissing

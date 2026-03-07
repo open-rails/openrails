@@ -90,50 +90,27 @@ func TestValidateNMISignature(t *testing.T) {
 	t.Run("uses php signature when present", func(t *testing.T) {
 		ts := "1700000000"
 		phpSig := fmt.Sprintf("t=%s,s=%s", ts, signNMIHeader(secret, ts, body))
-		legacyCalled := false
 
-		sig, err := ValidateNMISignature(secret, body, phpSig, []string{"legacy"}, func(signature string) error {
-			legacyCalled = true
-			return nil
-		})
+		sig, err := ValidateNMISignature(secret, body, phpSig)
 
 		require.NoError(t, err)
 		require.Equal(t, phpSig, sig)
-		require.False(t, legacyCalled)
 	})
 
-	t.Run("does not fallback on invalid php signature", func(t *testing.T) {
-		legacyCalled := false
-		_, err := ValidateNMISignature(secret, body, "t=1700000000,s=invalid", []string{"legacy"}, func(signature string) error {
-			legacyCalled = true
-			return nil
-		})
+	t.Run("rejects invalid php signature", func(t *testing.T) {
+		_, err := ValidateNMISignature(secret, body, "t=1700000000,s=invalid")
 
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrNMIWebhookSignatureInvalid)
-		require.False(t, legacyCalled)
-	})
-
-	t.Run("uses legacy signature when php header missing", func(t *testing.T) {
-		legacyCalled := false
-		sig, err := ValidateNMISignature(secret, body, "", []string{"", "legacy"}, func(signature string) error {
-			legacyCalled = true
-			require.Equal(t, "legacy", signature)
-			return nil
-		})
-
-		require.NoError(t, err)
-		require.Equal(t, "legacy", sig)
-		require.True(t, legacyCalled)
 	})
 
 	t.Run("returns missing secret", func(t *testing.T) {
-		_, err := ValidateNMISignature("", body, "", []string{"legacy"}, func(signature string) error { return nil })
+		_, err := ValidateNMISignature("", body, "")
 		require.ErrorIs(t, err, ErrNMIWebhookSecretMissing)
 	})
 
 	t.Run("returns missing signature", func(t *testing.T) {
-		_, err := ValidateNMISignature(secret, body, "", nil, func(signature string) error { return nil })
+		_, err := ValidateNMISignature(secret, body, "")
 		require.ErrorIs(t, err, ErrNMIWebhookSignatureMissing)
 	})
 }

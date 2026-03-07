@@ -65,13 +65,7 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 		}, nil
 	}
 
-	signature, err := webhookutil.ValidateNMISignature(client.GetWebhookSecret(), req.Body, getHeaderValue(req.Headers, "Webhook-Signature"), []string{
-		getHeaderValue(req.Headers, "X-Signature"),
-		getHeaderValue(req.Headers, "X-NMI-Signature"),
-		getHeaderValue(req.Headers, "X-Mobius-Signature"),
-	}, func(signature string) error {
-		return client.VerifyWebhookSignature(req.Body, signature)
-	})
+	signature, err := webhookutil.ValidateNMISignature(client.GetWebhookSecret(), req.Body, getHeaderValue(req.Headers, "Webhook-Signature"))
 	if err != nil {
 		if errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing) || errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing) {
 			log.WithError(err).Error("Missing webhook signature for NMI webhook")
