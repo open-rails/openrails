@@ -595,12 +595,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		entitlementService.SetClock(s.Clock)
 
 		// Find subscription - use processor name for gateway lookup
-		provider := ""
-		if processors.IsNMIBackedProcessor(params.Processor) {
-			provider = strings.ToLower(string(params.Processor))
-		}
-
-		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), provider, params.ProcessorSubscriptionID)
+		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), params.ProcessorSubscriptionID)
 		if err != nil {
 			// Try fallback: look up by SubscriptionID using ProcessorSubscriptionID as UUID
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -944,12 +939,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		entitlementService := NewEntitlementService(txdb)
 		entitlementService.SetClock(s.Clock)
 
-		provider := ""
-		if processors.IsNMIBackedProcessor(params.Processor) {
-			provider = strings.ToLower(string(params.Processor))
-		}
-
-		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), provider, processorSubID)
+		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), processorSubID)
 		if err != nil {
 			return fmt.Errorf("failed to get subscription for reactivation: %w", err)
 		}
@@ -1090,11 +1080,6 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		entSvc.SetClock(s.Clock) // Propagate clock for testing
 
 		// Use processor name for gateway lookup
-		provider := ""
-		if params.Processor != nil && processors.IsNMIBackedProcessor(*params.Processor) {
-			provider = strings.ToLower(string(*params.Processor))
-		}
-
 		// Find subscription
 		var subscription *models.Subscription
 		var err error
@@ -1102,7 +1087,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		if params.SubscriptionID != nil {
 			subscription, err = subService.GetByID(ctx, *params.SubscriptionID)
 		} else if params.ProcessorSubscriptionID != nil && params.Processor != nil {
-			subscription, err = subService.GetByProcessorSubscriptionID(ctx, string(*params.Processor), provider, *params.ProcessorSubscriptionID)
+			subscription, err = subService.GetByProcessorSubscriptionID(ctx, string(*params.Processor), *params.ProcessorSubscriptionID)
 		} else {
 			return fmt.Errorf("either subscription_id or processor details must be provided")
 		}

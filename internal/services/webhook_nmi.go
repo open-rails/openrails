@@ -154,7 +154,7 @@ func (s *NMIWebhookService) resolveSubscriptionFromReference(ctx context.Context
 	}
 
 	// Primary lookup: provider/external subscription ID as sent by NMI.
-	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, provider, ref)
+	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, ref)
 	if err == nil {
 		return subscription, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -534,7 +534,7 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		return fmt.Errorf("failed to find price for NMI plan ID %s: %w", nmiPlanID, err)
 	}
 
-	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, provider, nmiSubID)
+	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
 	if err != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_reference": nmiSubID,
@@ -701,7 +701,7 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 		return newNMIBillingError(ErrorTypeNMIValidation, "Missing subscription ID", map[string]interface{}{}, nil)
 	}
 
-	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, provider, nmiSubID)
+	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			log.WithContext(ctx).
@@ -880,7 +880,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}
 
 		if s.CreditsService != nil && s.SubscriptionService != nil {
-			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorMobius), provider, nmiSubID)
+			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorMobius), nmiSubID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).Warn("failed to load subscription for initial credit grants (NMI)")
 			} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
@@ -938,7 +938,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}
 
 		if s.CreditsService != nil && s.SubscriptionService != nil {
-			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorMobius), provider, nmiSubID)
+			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorMobius), nmiSubID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).Warn("failed to load subscription for renewal credit grants (NMI)")
 			} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
@@ -1765,7 +1765,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 					Warn("Received refund for unknown subscription (by UUID); continuing without lifecycle actions")
 			}
 		} else {
-			subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, provider, nmiSubID)
+			subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
 					Warn("Failed to look up subscription for refund (by processor_subscription_id)")
@@ -2005,7 +2005,7 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	// Try to find subscription
 	var subscription *models.Subscription
 	if nmiSubID != "" {
-		subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, provider, nmiSubID)
+		subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
 				Warn("Failed to look up subscription for void")

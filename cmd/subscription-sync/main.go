@@ -258,7 +258,7 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 		}
 
 		for _, id := range localOnly {
-			sub, err := subService.GetByProcessorSubscriptionID(ctx, processorName, "", id)
+			sub, err := subService.GetByProcessorSubscriptionID(ctx, processorName, id)
 			if err != nil || sub == nil {
 				fmt.Fprintf(os.Stderr, "skip %s: failed to load subscription: %v\n", id, err)
 				continue
@@ -328,7 +328,7 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 				emailPtr = &emailCopy
 			}
 
-			existingSub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), "", id)
+			existingSub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), id)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				fmt.Fprintf(os.Stderr, "skip %s: failed to load existing subscription: %v\n", id, err)
 				continue

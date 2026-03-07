@@ -180,9 +180,7 @@ func (r *SubscriptionRepo) GetActiveSubscription(ctx context.Context, userID str
 }
 
 // GetByProcessorSubscriptionID finds a subscription by processor and processor_subscription_id.
-// The provider parameter is kept for backwards compatibility but is no longer used for filtering
-// since the processor field already identifies the payment provider (mobius, ccbill, etc.).
-func (r *SubscriptionRepo) GetByProcessorSubscriptionID(ctx context.Context, processor, provider, processorSubscriptionID string) (*models.Subscription, error) {
+func (r *SubscriptionRepo) GetByProcessorSubscriptionID(ctx context.Context, processor, processorSubscriptionID string) (*models.Subscription, error) {
 	sub := new(models.Subscription)
 	query := r.selectWithDetails(sub).
 		Where("sub.processor = ?", processor).

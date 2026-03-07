@@ -144,7 +144,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		return fmt.Errorf("stripe invoice missing subscription id")
 	}
 
-	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), "", processorSubID)
+	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), processorSubID)
 	createdSubscription := false
 	if err != nil {
 		sub, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &CreateMembershipParams{
@@ -450,7 +450,7 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 	if subID == "" {
 		return nil
 	}
-	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), "", subID)
+	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), subID)
 	if err != nil {
 		return nil
 	}

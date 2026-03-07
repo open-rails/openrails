@@ -264,9 +264,9 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID 
 	return s.subscriptionRepo.GetActiveSubscription(ctx, userID)
 }
 
-// GetByProcessorSubscriptionID finds a subscription by processor, gateway (optional), and processor_subscription_id
-func (s *SubscriptionService) GetByProcessorSubscriptionID(ctx context.Context, processor, gateway, processorSubscriptionID string) (*models.Subscription, error) {
-	return s.subscriptionRepo.GetByProcessorSubscriptionID(ctx, processor, gateway, processorSubscriptionID)
+// GetByProcessorSubscriptionID finds a subscription by processor and processor_subscription_id.
+func (s *SubscriptionService) GetByProcessorSubscriptionID(ctx context.Context, processor, processorSubscriptionID string) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetByProcessorSubscriptionID(ctx, processor, processorSubscriptionID)
 }
 
 // GetActiveSubscriptionsByProcessor gets all active subscriptions for a processor
