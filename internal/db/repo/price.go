@@ -119,12 +119,9 @@ func (r *PriceRepo) GetByNMIPlan(ctx context.Context, provider, nmiPlanID string
 		provider = "mobius"
 	}
 
-	// Query using JSONB operators. Look for plan_id in either:
-	// 1. processors->'mobius'->>'plan_id' (new format)
-	// 2. processors->'nmi'->>'plan_id' (legacy format)
-	// The provider parameter determines which processor key to look up directly (e.g., "mobius", "acme")
+	// The provider parameter determines which processor key to look up directly (e.g., "mobius", "acme").
 	query := r.db.GetDB().NewSelect().Model(price).
-		Where("(price.processors->'"+provider+"'->>'plan_id' = ? OR price.processors->'nmi'->>'plan_id' = ?)", nmiPlanID, nmiPlanID).
+		Where("price.processors->'"+provider+"'->>'plan_id' = ?", nmiPlanID).
 		Where("price.is_active = ?", true)
 
 	if err := query.Scan(ctx); err != nil {
