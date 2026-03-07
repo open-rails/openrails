@@ -113,22 +113,15 @@ func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 
 // UserHandler exposes user/public billing APIs (and health endpoints).
 // Mount this under a prefix like `/billing`.
-// AdminHandler exposes admin billing APIs (JWT + admin role required).
-// Embedded hosts should mount this only if they have an admin UI/tooling.
-// WebhookHandler exposes billing processor webhooks (e.g. Stripe callbacks).
-// PrivateHandler is the internal service-to-service HTTP API (X-API-KEY protected).
-//
-// Deprecated: Embedded hosts should not mount this in most cases. Prefer using the in-process
-// Go API returned by `Embedded.Service()` for holds/capture/release/credits/entitlements.
-func (e *Embedded) PrivateHandler() http.Handler {
+// ServiceHandler returns the internal service-to-service HTTP API (X-API-KEY protected).
+// Embedded hosts should typically NOT mount this; use `Embedded.Service()` instead.
+func (e *Embedded) ServiceHandler() http.Handler {
 	if e == nil || e.server == nil {
 		return nil
 	}
 	return e.server.PrivateHandler()
 }
 
-// ServiceHandler returns the internal service-to-service HTTP API (X-API-KEY protected).
-// Embedded hosts should typically NOT mount this; use `Embedded.Service()` instead.
 // Service returns the in-process billing API for embedded hosts.
 func (e *Embedded) Service() (*service.Service, error) {
 	if e == nil || e.app == nil {

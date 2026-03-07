@@ -161,7 +161,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	var privateSrv *http.Server
 	if cfg.PrivatePort > 0 {
 		privateSrv = &http.Server{
-			Handler: embeddedApp.PrivateHandler(),
+			Handler: embeddedApp.ServiceHandler(),
 			Addr:    fmt.Sprintf("%s:%d", cfg.Host, cfg.PrivatePort),
 		}
 	}
