@@ -1,13 +1,12 @@
 package handlers
 
 import (
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/doujins-org/ginapi/response"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/services"
+	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -112,7 +111,7 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 func PriceToAPI(p *models.Price) api.PriceObject {
 	var recurring *api.RecurringInfo
 	if p.BillingCycleDays != nil && *p.BillingCycleDays > 0 {
-		interval, intervalCount := billingCycleDaysToInterval(*p.BillingCycleDays)
+		interval, intervalCount := sharedformat.BillingCycleDaysToInterval(*p.BillingCycleDays)
 		recurring = &api.RecurringInfo{
 			Interval:      interval,
 			IntervalCount: intervalCount,
@@ -137,28 +136,6 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 		Livemode:  false,
 		Metadata:  map[string]string{},
 		Created:   api.ToUnix(p.CreatedAt),
-	}
-}
-
-// billingCycleDaysToInterval converts billing cycle days to Stripe-style interval
-func billingCycleDaysToInterval(days int) (string, int) {
-	switch {
-	case days == 1:
-		return "day", 1
-	case days == 7:
-		return "week", 1
-	case days >= 28 && days <= 31:
-		return "month", 1
-	case days >= 365 && days <= 366:
-		return "year", 1
-	case days%365 == 0:
-		return "year", days / 365
-	case days%30 == 0:
-		return "month", days / 30
-	case days%7 == 0:
-		return "week", days / 7
-	default:
-		return "day", days
 	}
 }
 
@@ -359,7 +336,7 @@ func PaymentMethodToAPI(pm *models.PaymentMethod) PaymentMethodResponse {
 		Last4: pm.LastFour,
 	}
 	if pm.ExpiryDate != nil {
-		if month, year, ok := parseExpiry(*pm.ExpiryDate); ok {
+		if month, year, ok := sharedformat.ParseExpiry(*pm.ExpiryDate); ok {
 			card.ExpMonth = &month
 			card.ExpYear = &year
 		}
@@ -399,29 +376,4 @@ func PaymentMethodsToAPI(methods []*models.PaymentMethod) []PaymentMethodRespons
 		result[i] = PaymentMethodToAPI(pm)
 	}
 	return result
-}
-
-// parseExpiry converts "MM/YY" or "MM-YY" to month/year integers.
-func parseExpiry(exp string) (int, int, bool) {
-	exp = strings.TrimSpace(exp)
-	if exp == "" {
-		return 0, 0, false
-	}
-	sep := "/"
-	if strings.Contains(exp, "-") {
-		sep = "-"
-	}
-	parts := strings.Split(exp, sep)
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-	month, err1 := strconv.Atoi(parts[0])
-	year, err2 := strconv.Atoi(parts[1])
-	if err1 != nil || err2 != nil {
-		return 0, 0, false
-	}
-	if year < 100 {
-		year += 2000
-	}
-	return month, year, true
 }
