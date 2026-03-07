@@ -85,8 +85,8 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		solanaTokenRegistry = jupiter.NewTokenRegistry()
 		jupiterAPIKey := cfg.GetJupiterAPIKey()
 
-		loadLegacyTokens := func(tokens map[string]config.TokenConfig) {
-			legacyTokens := make(map[string]struct {
+		loadStaticTokens := func(tokens map[string]config.TokenConfig) {
+			resolved := make(map[string]struct {
 				Symbol      string
 				Name        string
 				Mint        string
@@ -95,7 +95,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 				Enabled     bool
 			}, len(tokens))
 			for symbol, t := range tokens {
-				legacyTokens[symbol] = struct {
+				resolved[symbol] = struct {
 					Symbol      string
 					Name        string
 					Mint        string
@@ -111,35 +111,48 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 					Enabled:     t.Enabled,
 				}
 			}
-			solanaTokenRegistry.LoadFromConfig(legacyTokens)
+			solanaTokenRegistry.LoadTokens(resolved)
+		}
+
+		registryToSupportedTokens := func(tokens map[string]jupiter.ResolvedToken) map[string]config.TokenConfig {
+			isDevnet := strings.EqualFold(solanaProc.Network, "devnet")
+			result := make(map[string]config.TokenConfig, len(tokens))
+			for symbol, token := range tokens {
+				mint := token.MainnetMint
+				if isDevnet && token.DevnetMint != "" {
+					mint = token.DevnetMint
+				}
+				result[symbol] = config.TokenConfig{
+					Mint:        mint,
+					MainnetMint: token.MainnetMint,
+					Symbol:      token.Symbol,
+					Name:        token.Name,
+					Decimals:    token.Decimals,
+					Enabled:     true,
+				}
+			}
+			return result
 		}
 
 		if len(solanaProc.EnabledTokens) > 0 {
-			// Use new enabled_tokens approach with Jupiter lookup
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			err := solanaTokenRegistry.LoadFromJupiter(ctx, jupiterAPIKey, solanaProc.EnabledTokens)
 			cancel()
 			if err != nil {
-				log.WithError(err).Warn("Failed to load tokens from Jupiter; falling back to legacy/default tokens")
-				if len(solanaProc.SupportedTokens) > 0 {
-					loadLegacyTokens(solanaProc.SupportedTokens)
-				} else {
-					loadLegacyTokens(config.TokensForNetwork(solanaProc.Network))
-				}
+				log.WithError(err).Warn("Failed to load tokens from Jupiter; using default token set")
+				loadStaticTokens(config.TokensForNetwork(solanaProc.Network))
 			}
-		} else if len(solanaProc.SupportedTokens) > 0 {
-			// Use supported_tokens config (backwards compatibility)
-			loadLegacyTokens(solanaProc.SupportedTokens)
 		} else {
-			// No tokens configured - use default enabled_tokens with Jupiter lookup
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			err := solanaTokenRegistry.LoadFromJupiter(ctx, jupiterAPIKey, nil)
 			cancel()
 			if err != nil {
 				log.WithError(err).Warn("Failed to load default tokens from Jupiter - using default token set")
-				loadLegacyTokens(config.TokensForNetwork(solanaProc.Network))
+				loadStaticTokens(config.TokensForNetwork(solanaProc.Network))
 			}
 		}
+
+		solanaProc.SupportedTokens = registryToSupportedTokens(solanaTokenRegistry.All())
 	}
 
 	var emailService *services.EmailService

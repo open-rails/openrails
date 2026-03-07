@@ -174,9 +174,8 @@ func (r *TokenRegistry) LoadFromJupiter(ctx context.Context, apiKey string, enab
 	return nil
 }
 
-// LoadFromConfig loads tokens from the legacy SupportedTokens config format.
-// This is used for backwards compatibility when enabled_tokens is not set.
-func (r *TokenRegistry) LoadFromConfig(tokens map[string]struct {
+// LoadTokens loads token metadata directly into the registry.
+func (r *TokenRegistry) LoadTokens(tokens map[string]struct {
 	Symbol      string
 	Name        string
 	Mint        string
@@ -212,7 +211,7 @@ func (r *TokenRegistry) LoadFromConfig(tokens map[string]struct {
 		}
 	}
 
-	log.WithField("count", len(r.tokens)).Info("Token registry loaded from config")
+	log.WithField("count", len(r.tokens)).Info("Token registry initialized from static token metadata")
 }
 
 // Get returns a token by symbol. Returns (token, true) if found.

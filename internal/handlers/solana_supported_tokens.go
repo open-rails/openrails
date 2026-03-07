@@ -48,12 +48,10 @@ func GetSupportedTokens(r *Request) {
 		return
 	}
 
-	// Get tokens from registry (preferred) or fall back to legacy config
 	var tokenMap map[string]config.SolanaToken
 	isDevnet := strings.ToLower(solanaProc.Network) == "devnet"
 
 	if r.State.SolanaTokenRegistry != nil && r.State.SolanaTokenRegistry.Count() > 0 {
-		// Use token registry (new approach)
 		registryTokens := r.State.SolanaTokenRegistry.All()
 		tokenMap = make(map[string]config.SolanaToken, len(registryTokens))
 		for symbol, rt := range registryTokens {
@@ -71,11 +69,7 @@ func GetSupportedTokens(r *Request) {
 			}
 		}
 	} else {
-		// Fall back to ProcessorConfig tokens
-		tokenMap = solanaProc.SupportedTokens
-		if len(tokenMap) == 0 {
-			tokenMap = config.TokensForNetwork(solanaProc.Network)
-		}
+		tokenMap = config.TokensForNetwork(solanaProc.Network)
 	}
 
 	mainnetMintSet := make(map[string]struct{})
