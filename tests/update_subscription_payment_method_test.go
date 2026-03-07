@@ -109,7 +109,7 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 		assert.Contains(t, mock.LastRequest["customer_vault_id"], "new-vault-456", "Should send new vault ID")
 
 		// Verify subscription was updated in database
-		updatedSub := suite.GetSubscriptionByID(sub.ID)
+		updatedSub := suite.GetSubscription(sub.ID)
 		require.NotNil(t, updatedSub.PaymentMethodID, "Subscription should have payment method")
 		assert.Equal(t, newPM.ID, *updatedSub.PaymentMethodID, "Subscription should have new payment method")
 	})

@@ -361,11 +361,6 @@ func (suite *TestContainerSuite) SeedProducts() []TestProduct {
 	return testProducts
 }
 
-// SeedProductsWithPrices is an alias for SeedProducts for clarity
-func (suite *TestContainerSuite) SeedProductsWithPrices() []TestProduct {
-	return suite.SeedProducts()
-}
-
 // TieredTestProducts returns test products with tier groups for upgrade/downgrade testing
 // Premium (tier_group="premium", rank=1) and Premium+ (tier_group="premium", rank=2)
 func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
@@ -880,11 +875,6 @@ func (suite *TestContainerSuite) GetSubscription(id uuid.UUID) *models.Subscript
 	require.NoError(suite.t, err, "Failed to get subscription %s", id)
 
 	return &sub
-}
-
-// GetSubscriptionByID is an alias for GetSubscription for clearer test readability
-func (suite *TestContainerSuite) GetSubscriptionByID(id uuid.UUID) *models.Subscription {
-	return suite.GetSubscription(id)
 }
 
 // GetSubscriptionByUserID retrieves the active subscription for a user
