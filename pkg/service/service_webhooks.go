@@ -2,16 +2,10 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,25 +14,16 @@ import (
 	"github.com/open-rails/openrails/internal/processors"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/shared/webhookpayload"
+	"github.com/open-rails/openrails/internal/shared/webhooksig"
 	ipverify "github.com/open-rails/openrails/internal/utils"
 	"github.com/riverqueue/river"
-)
-
-var (
-	errNMIWebhookSecretMissing    = errors.New("nmi webhook secret not configured")
-	errNMIWebhookSignatureMissing = errors.New("missing webhook signature")
-	errNMIWebhookSignatureInvalid = errors.New("invalid webhook signature")
 )
 
 // HandleWebhook processes an incoming webhook from a payment processor.
 // It validates the signature, parses the payload, and enqueues a job for async processing.
 func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (*WebhookResult, error) {
-	provider := strings.Trim(strings.ToLower(req.Provider), " /")
-
-	// Normalize legacy "nmi" provider to "mobius"
-	if provider == "nmi" {
-		provider = "mobius"
-	}
+	provider := webhookpayload.CanonicalProvider(req.Provider)
 
 	if s.rt == nil || s.rt.RiverProducer == nil {
 		return nil, fmt.Errorf("job queue unavailable")
@@ -81,11 +66,15 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 		}, nil
 	}
 
-	signature, err := validateNMIWebhookSignature(client.GetWebhookSecret(), req.Body, req.Headers, func(signature string) error {
+	signature, err := webhooksig.ValidateNMISignature(client.GetWebhookSecret(), req.Body, getHeaderValue(req.Headers, "Webhook-Signature"), []string{
+		getHeaderValue(req.Headers, "X-Signature"),
+		getHeaderValue(req.Headers, "X-NMI-Signature"),
+		getHeaderValue(req.Headers, "X-Mobius-Signature"),
+	}, func(signature string) error {
 		return client.VerifyWebhookSignature(req.Body, signature)
 	})
 	if err != nil {
-		if errors.Is(err, errNMIWebhookSecretMissing) || errors.Is(err, errNMIWebhookSignatureMissing) {
+		if errors.Is(err, webhooksig.ErrNMIWebhookSecretMissing) || errors.Is(err, webhooksig.ErrNMIWebhookSignatureMissing) {
 			log.WithError(err).Error("Missing webhook signature for NMI webhook")
 			return &WebhookResult{
 				Accepted: false,
@@ -118,7 +107,7 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 	truth := true
 	signatureValidPtr := &truth
 
-	uniqueKey := computeWebhookUniqueKey(providerKey, data.EventID, string(data.EventType), req.Body)
+	uniqueKey := webhookpayload.ComputeUniqueKey(providerKey, data.EventID, string(data.EventType), req.Body)
 
 	args := riverjobs.WebhookProcessArgs{
 		Provider:       providerKey,
@@ -141,39 +130,6 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 		EventID:   data.EventID,
 		EventType: string(data.EventType),
 	}, nil
-}
-
-func validateNMIWebhookSignature(secret string, body []byte, headers map[string]string, verifyLegacy func(signature string) error) (string, error) {
-	if strings.TrimSpace(secret) == "" {
-		return "", errNMIWebhookSecretMissing
-	}
-
-	signature, phpStyle := extractNMIWebhookSignature(headers)
-	if signature == "" {
-		return "", errNMIWebhookSignatureMissing
-	}
-
-	if phpStyle {
-		if err := verifyNMIWebhookSignature(secret, signature, body); err != nil {
-			return "", fmt.Errorf("%w: %v", errNMIWebhookSignatureInvalid, err)
-		}
-		return signature, nil
-	}
-
-	if err := verifyLegacy(signature); err != nil {
-		return "", fmt.Errorf("%w: %v", errNMIWebhookSignatureInvalid, err)
-	}
-
-	return signature, nil
-}
-
-func extractNMIWebhookSignature(headers map[string]string) (string, bool) {
-	signature := getHeaderValue(headers, "Webhook-Signature")
-	if signature != "" {
-		return signature, true
-	}
-
-	return getHeaderValue(headers, "X-Signature", "X-NMI-Signature", "X-Mobius-Signature"), false
 }
 
 func getHeaderValue(headers map[string]string, keys ...string) string {
@@ -215,7 +171,7 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 		log.WithField("client_ip", req.ClientIP).Debug("CCBill webhook authentication bypassed - test mode enabled")
 	}
 
-	body, err := normalizeCCBillPayload(req.Body)
+	body, err := webhookpayload.NormalizeCCBillPayload(req.Body)
 	if err != nil {
 		return &WebhookResult{
 			Accepted: false,
@@ -231,7 +187,7 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 		}, nil
 	}
 
-	uniqueKey := computeWebhookUniqueKey(services.ProcessorCCBill, "", eventType, body)
+	uniqueKey := webhookpayload.ComputeUniqueKey(services.ProcessorCCBill, "", eventType, body)
 
 	args := riverjobs.WebhookProcessArgs{
 		Provider:  services.ProcessorCCBill,
@@ -272,7 +228,7 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 			Error:    "missing webhook signature",
 		}, nil
 	}
-	if err := verifyStripeSignature(secret, sig, req.Body, 5*time.Minute); err != nil {
+	if err := webhooksig.VerifyStripeSignature(secret, sig, req.Body, 5*time.Minute); err != nil {
 		return &WebhookResult{
 			Accepted: false,
 			Error:    "invalid webhook signature",
@@ -281,7 +237,7 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 	truth := true
 	signatureValidPtr = &truth
 
-	eventID, eventType, err := parseStripeEventMeta(req.Body)
+	eventID, eventType, err := webhookpayload.ParseStripeEventMeta(req.Body)
 	if err != nil {
 		return &WebhookResult{
 			Accepted: false,
@@ -289,7 +245,7 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 		}, nil
 	}
 
-	uniqueKey := computeWebhookUniqueKey(services.ProcessorStripe, eventID, eventType, req.Body)
+	uniqueKey := webhookpayload.ComputeUniqueKey(services.ProcessorStripe, eventID, eventType, req.Body)
 
 	args := riverjobs.WebhookProcessArgs{
 		Provider:       services.ProcessorStripe,
@@ -329,136 +285,4 @@ func (s *Service) enqueueWebhookJob(ctx context.Context, args riverjobs.WebhookP
 
 	_, err := s.rt.RiverProducer.Insert(ctx, args, opts)
 	return err
-}
-
-// Helper functions (duplicated from handlers to avoid import cycles)
-
-func parseStripeEventMeta(body []byte) (string, string, error) {
-	var payload struct {
-		ID   string `json:"id"`
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", "", err
-	}
-	if strings.TrimSpace(payload.ID) == "" || strings.TrimSpace(payload.Type) == "" {
-		return "", "", fmt.Errorf("missing event id or type")
-	}
-	return payload.ID, payload.Type, nil
-}
-
-func verifyStripeSignature(secret, header string, body []byte, tolerance time.Duration) error {
-	timestamp, signatures := parseStripeSignatureHeader(header)
-	if timestamp == "" || len(signatures) == 0 {
-		return fmt.Errorf("invalid stripe signature header")
-	}
-	tsInt, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid stripe signature timestamp")
-	}
-	if tolerance > 0 {
-		now := time.Now().Unix()
-		if now-tsInt > int64(tolerance.Seconds()) || tsInt-now > int64(tolerance.Seconds()) {
-			return fmt.Errorf("stripe signature timestamp outside tolerance")
-		}
-	}
-	signedPayload := fmt.Sprintf("%s.%s", timestamp, string(body))
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(signedPayload))
-	expected := hex.EncodeToString(mac.Sum(nil))
-	for _, sig := range signatures {
-		if hmac.Equal([]byte(expected), []byte(sig)) {
-			return nil
-		}
-	}
-	return fmt.Errorf("stripe signature mismatch")
-}
-
-func parseStripeSignatureHeader(header string) (string, []string) {
-	parts := strings.Split(header, ",")
-	var ts string
-	sigs := make([]string, 0)
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "t=") {
-			ts = strings.TrimPrefix(part, "t=")
-		} else if strings.HasPrefix(part, "v1=") {
-			sigs = append(sigs, strings.TrimPrefix(part, "v1="))
-		}
-	}
-	return ts, sigs
-}
-
-func verifyNMIWebhookSignature(secret, header string, body []byte) error {
-	timestamp, signature, err := parseNMIWebhookSignatureHeader(header)
-	if err != nil {
-		return err
-	}
-
-	mac := hmac.New(sha256.New, []byte(secret))
-	dataToSign := timestamp + "." + string(body)
-	_, _ = mac.Write([]byte(dataToSign))
-	expectedSig := hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(signature), []byte(expectedSig)) {
-		return fmt.Errorf("invalid webhook signature")
-	}
-
-	return nil
-}
-
-func parseNMIWebhookSignatureHeader(header string) (string, string, error) {
-	var ts string
-	var sig string
-
-	parts := strings.Split(header, ",")
-	for _, part := range parts {
-		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-
-		switch strings.TrimSpace(kv[0]) {
-		case "t":
-			ts = strings.TrimSpace(kv[1])
-		case "s":
-			sig = strings.TrimSpace(kv[1])
-		}
-	}
-
-	if ts == "" || sig == "" {
-		return "", "", fmt.Errorf("unrecognized webhook signature format")
-	}
-
-	return ts, sig, nil
-}
-
-func computeWebhookUniqueKey(provider, eventID, eventType string, body []byte) string {
-	provider = strings.TrimSpace(strings.ToLower(provider))
-	eventID = strings.TrimSpace(eventID)
-	if eventID != "" {
-		return fmt.Sprintf("webhook:%s:%s", provider, eventID)
-	}
-	hash := sha256.Sum256(append([]byte(provider+"|"+eventType+"|"), body...))
-	return fmt.Sprintf("webhook:%s:%s", provider, hex.EncodeToString(hash[:8]))
-}
-
-func normalizeCCBillPayload(body []byte) ([]byte, error) {
-	body = bytes.TrimSpace(body)
-	if len(body) == 0 {
-		return body, nil
-	}
-	if body[0] == '{' || body[0] == '[' {
-		return body, nil
-	}
-	values, err := url.ParseQuery(string(body))
-	if err != nil {
-		return nil, err
-	}
-	payload := make(map[string]string, len(values))
-	for key, val := range values {
-		if len(val) > 0 {
-			payload[key] = val[0]
-		}
-	}
-	return json.Marshal(payload)
 }
