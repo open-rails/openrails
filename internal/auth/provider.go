@@ -118,10 +118,7 @@ func userContextFromMap(raw jwt.MapClaims) authprovider.UserContext {
 		uc.DiscordUsername = v
 	}
 
-	// Session ID: accept both sid (authkit) and session_id (legacy)
 	if v, _ := raw["sid"].(string); v != "" {
-		uc.SessionID = v
-	} else if v, _ := raw["session_id"].(string); v != "" {
 		uc.SessionID = v
 	}
 
