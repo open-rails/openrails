@@ -25,41 +25,10 @@ func TestCreditsSpec_UnmarshalJSON_V2(t *testing.T) {
 	}
 }
 
-func TestCreditsSpec_UnmarshalJSON_LegacyPromo(t *testing.T) {
+func TestCreditsSpec_UnmarshalJSON_InvalidLegacyShape(t *testing.T) {
 	var cs CreditsSpec
 	raw := []byte(`{"promo_amount_cents": 499, "promo_expires_days": 10, "grant_on": "initial"}`)
-	if err := json.Unmarshal(raw, &cs); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(cs) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(cs))
-	}
-	spec, ok := cs["api_credits"]
-	if !ok {
-		t.Fatalf("expected api_credits entry")
-	}
-	if spec.Amount != 499 {
-		t.Fatalf("unexpected amount: %d", spec.Amount)
-	}
-	if spec.ExpiresDays == nil || *spec.ExpiresDays != 10 {
-		t.Fatalf("unexpected expires_days: %v", spec.ExpiresDays)
-	}
-	if spec.Cadence != CreditGrantCadenceOnce {
-		t.Fatalf("unexpected cadence: %s", spec.Cadence)
-	}
-}
-
-func TestCreditsSpec_UnmarshalJSON_LegacyPromo_Defaults(t *testing.T) {
-	var cs CreditsSpec
-	raw := []byte(`{"promo_amount_cents": 100, "promo_expires_days": 0, "grant_on": "renewal"}`)
-	if err := json.Unmarshal(raw, &cs); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	spec := cs["api_credits"]
-	if spec.ExpiresDays == nil || *spec.ExpiresDays != 90 {
-		t.Fatalf("expected default expires_days=90, got %v", spec.ExpiresDays)
-	}
-	if spec.Cadence != CreditGrantCadencePerRenewal {
-		t.Fatalf("expected cadence=per_renewal, got %s", spec.Cadence)
+	if err := json.Unmarshal(raw, &cs); err == nil {
+		t.Fatal("expected legacy credits_spec shape to fail")
 	}
 }

@@ -46,9 +46,7 @@ type Product struct {
 // credit type's base units (unit-agnostic), not USD cents.
 type CreditsSpec map[string]CreditGrantSpec
 
-// UnmarshalJSON supports both the current map-based credits_spec and the legacy promo-style
-// credits_spec ({promo_amount_cents, promo_expires_days, grant_on}). The legacy format is
-// translated into a single credit type entry keyed by "api_credits" for backwards compatibility.
+// UnmarshalJSON decodes the current map-based credits_spec schema.
 func (c *CreditsSpec) UnmarshalJSON(b []byte) error {
 	if c == nil {
 		return nil
@@ -58,45 +56,11 @@ func (c *CreditsSpec) UnmarshalJSON(b []byte) error {
 		return nil
 	}
 
-	// First try the v2 schema.
 	var v2 map[string]CreditGrantSpec
-	if err := json.Unmarshal(b, &v2); err == nil {
-		*c = v2
-		return nil
-	}
-
-	// Fall back to legacy schema.
-	var legacy struct {
-		PromoAmountCents int64  `json:"promo_amount_cents"`
-		PromoExpiresDays int    `json:"promo_expires_days"`
-		GrantOn          string `json:"grant_on"` // initial|renewal
-	}
-	if err := json.Unmarshal(b, &legacy); err != nil {
+	if err := json.Unmarshal(b, &v2); err != nil {
 		return err
 	}
-	if legacy.PromoAmountCents <= 0 {
-		*c = nil
-		return nil
-	}
-
-	days := legacy.PromoExpiresDays
-	if days <= 0 {
-		days = 90
-	}
-	expiresDays := &days
-
-	cadence := CreditGrantCadenceOnce
-	if strings.EqualFold(strings.TrimSpace(legacy.GrantOn), "renewal") {
-		cadence = CreditGrantCadencePerRenewal
-	}
-
-	*c = CreditsSpec{
-		"api_credits": {
-			Amount:      legacy.PromoAmountCents,
-			ExpiresDays: expiresDays,
-			Cadence:     cadence,
-		},
-	}
+	*c = v2
 	return nil
 }
 
