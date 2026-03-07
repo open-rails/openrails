@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/knadh/koanf/parsers/yaml"
@@ -116,7 +115,6 @@ type Config struct {
 	//       recipient_wallet: "..."
 	Processors map[string]*ProcessorConfig `koanf:"processors,omitempty"`
 
-	Webhooks     *WebhookConfig    `koanf:"webhooks,omitempty"`
 	DB           *DBConfig         `koanf:"db,omitempty"`
 	Redis        *RedisConfig      `koanf:"redis,omitempty"`
 	Auth         *AuthConfig       `koanf:"auth,omitempty"`
@@ -536,22 +534,6 @@ type RateLimit struct {
 	Burst int `koanf:"burst"`
 }
 
-// WebhookConfig is kept for backwards compatibility but webhook retry is no longer used.
-// Webhook processing is now synchronous-only - payment processors retry on their end.
-type WebhookConfig struct {
-	// Deprecated: Retry config is no longer used. Webhooks are processed synchronously.
-	Retry WebhookRetryConfig `koanf:"retry"`
-}
-
-// WebhookRetryConfig is deprecated - webhook retry mechanism has been removed.
-// Keeping the struct for backwards compatibility with existing config files.
-type WebhookRetryConfig struct {
-	MaxAttempts    int           `koanf:"max_attempts"`
-	InitialBackoff time.Duration `koanf:"initial_backoff"`
-	MaxBackoff     time.Duration `koanf:"max_backoff"`
-	BatchSize      int           `koanf:"batch_size"`
-}
-
 // Validate validates the billing configuration
 func Validate(cfg *Config) error {
 	// Skip strict validation in development environments
@@ -709,12 +691,6 @@ func validateSolanaProcessor(name string, proc *ProcessorConfig, isDev bool) err
 	}
 
 	return nil
-}
-
-// GetWebhookRetryConfig is deprecated - webhook retry mechanism has been removed.
-// Returns empty config. Kept for backwards compatibility.
-func (cfg *Config) GetWebhookRetryConfig() WebhookRetryConfig {
-	return WebhookRetryConfig{}
 }
 
 // GetNMIProcessors returns all NMI-backed processor configs from the Processors map.
