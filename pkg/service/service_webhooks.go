@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -21,6 +22,12 @@ import (
 	"github.com/open-rails/openrails/internal/services"
 	ipverify "github.com/open-rails/openrails/internal/utils"
 	"github.com/riverqueue/river"
+)
+
+var (
+	errNMIWebhookSecretMissing    = errors.New("nmi webhook secret not configured")
+	errNMIWebhookSignatureMissing = errors.New("missing webhook signature")
+	errNMIWebhookSignatureInvalid = errors.New("invalid webhook signature")
 )
 
 // HandleWebhook processes an incoming webhook from a payment processor.
@@ -74,41 +81,24 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 		}, nil
 	}
 
-	signature := ""
-	signatureValidated := false
+	signature, err := validateNMIWebhookSignature(client.GetWebhookSecret(), req.Body, req.Headers, func(signature string) error {
+		return client.VerifyWebhookSignature(req.Body, signature)
+	})
+	if err != nil {
+		if errors.Is(err, errNMIWebhookSecretMissing) || errors.Is(err, errNMIWebhookSignatureMissing) {
+			log.WithError(err).Error("Missing webhook signature for NMI webhook")
+			return &WebhookResult{
+				Accepted: false,
+				Error:    "missing webhook signature",
+			}, nil
+		}
 
-	if client.GetWebhookSecret() == "" {
-		log.Error("NMI webhook secret not configured")
-		return &WebhookResult{
-			Accepted: false,
-			Error:    "missing webhook signature",
-		}, nil
-	}
-
-	// Try multiple signature header names
-	signature = req.Headers["X-Signature"]
-	if signature == "" {
-		signature = req.Headers["X-NMI-Signature"]
-	}
-	if signature == "" {
-		signature = req.Headers["X-Mobius-Signature"]
-	}
-
-	if signature == "" {
-		log.Error("Missing webhook signature for NMI webhook")
-		return &WebhookResult{
-			Accepted: false,
-			Error:    "missing webhook signature",
-		}, nil
-	}
-	if err := client.VerifyWebhookSignature(req.Body, signature); err != nil {
 		log.WithError(err).Error("NMI webhook signature verification failed")
 		return &WebhookResult{
 			Accepted: false,
 			Error:    "invalid webhook signature",
 		}, nil
 	}
-	signatureValidated = true
 
 	var data services.NMIWebhookEvent
 	if err := json.Unmarshal(req.Body, &data); err != nil {
@@ -125,11 +115,8 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 		}, nil
 	}
 
-	var signatureValidPtr *bool
-	if signatureValidated {
-		truth := true
-		signatureValidPtr = &truth
-	}
+	truth := true
+	signatureValidPtr := &truth
 
 	uniqueKey := computeWebhookUniqueKey(providerKey, data.EventID, string(data.EventType), req.Body)
 
@@ -154,6 +141,55 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 		EventID:   data.EventID,
 		EventType: string(data.EventType),
 	}, nil
+}
+
+func validateNMIWebhookSignature(secret string, body []byte, headers map[string]string, verifyLegacy func(signature string) error) (string, error) {
+	if strings.TrimSpace(secret) == "" {
+		return "", errNMIWebhookSecretMissing
+	}
+
+	signature, phpStyle := extractNMIWebhookSignature(headers)
+	if signature == "" {
+		return "", errNMIWebhookSignatureMissing
+	}
+
+	if phpStyle {
+		if err := verifyNMIWebhookSignature(secret, signature, body); err != nil {
+			return "", fmt.Errorf("%w: %v", errNMIWebhookSignatureInvalid, err)
+		}
+		return signature, nil
+	}
+
+	if err := verifyLegacy(signature); err != nil {
+		return "", fmt.Errorf("%w: %v", errNMIWebhookSignatureInvalid, err)
+	}
+
+	return signature, nil
+}
+
+func extractNMIWebhookSignature(headers map[string]string) (string, bool) {
+	signature := getHeaderValue(headers, "Webhook-Signature")
+	if signature != "" {
+		return signature, true
+	}
+
+	return getHeaderValue(headers, "X-Signature", "X-NMI-Signature", "X-Mobius-Signature"), false
+}
+
+func getHeaderValue(headers map[string]string, keys ...string) string {
+	for _, key := range keys {
+		for headerName, value := range headers {
+			if !strings.EqualFold(strings.TrimSpace(headerName), key) {
+				continue
+			}
+			trimmed := strings.TrimSpace(value)
+			if trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+
+	return ""
 }
 
 func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequest) (*WebhookResult, error) {
@@ -351,6 +387,49 @@ func parseStripeSignatureHeader(header string) (string, []string) {
 		}
 	}
 	return ts, sigs
+}
+
+func verifyNMIWebhookSignature(secret, header string, body []byte) error {
+	timestamp, signature, err := parseNMIWebhookSignatureHeader(header)
+	if err != nil {
+		return err
+	}
+
+	mac := hmac.New(sha256.New, []byte(secret))
+	dataToSign := timestamp + "." + string(body)
+	_, _ = mac.Write([]byte(dataToSign))
+	expectedSig := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(signature), []byte(expectedSig)) {
+		return fmt.Errorf("invalid webhook signature")
+	}
+
+	return nil
+}
+
+func parseNMIWebhookSignatureHeader(header string) (string, string, error) {
+	var ts string
+	var sig string
+
+	parts := strings.Split(header, ",")
+	for _, part := range parts {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+
+		switch strings.TrimSpace(kv[0]) {
+		case "t":
+			ts = strings.TrimSpace(kv[1])
+		case "s":
+			sig = strings.TrimSpace(kv[1])
+		}
+	}
+
+	if ts == "" || sig == "" {
+		return "", "", fmt.Errorf("unrecognized webhook signature format")
+	}
+
+	return ts, sig, nil
 }
 
 func computeWebhookUniqueKey(provider, eventID, eventType string, body []byte) string {
