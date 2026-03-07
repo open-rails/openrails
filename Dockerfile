@@ -52,7 +52,7 @@ COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     mkdir -p bin && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -o bin/billing ./
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -o bin/billing ./cmd/billing
 
 
 # Stage 2: production

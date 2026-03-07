@@ -283,7 +283,7 @@ result, _ := svc.HandleWebhook(ctx, service.HandleWebhookRequest{
 Developer tasks
 - Build: `task build` → outputs `bin/billing`
 - Run (binary): `task run` → builds then runs `billing server`
-- Dev (no build): `task dev` → `go run ./ server`
+- Dev (no build): `task dev` → `go run ./cmd/billing server`
 - Test: `task test`
 - Format: `task fmt`
 - Clean: `task clean`

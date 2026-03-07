@@ -19,7 +19,7 @@ tasks:
     cmds:
       - echo "Building {{.BINARY_NAME}}..."
       - mkdir -p {{.BIN_DIR}}
-      - go build -ldflags "{{.LDFLAGS}}" -o {{.BIN_DIR}}/{{.BINARY_NAME}} ./
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.BIN_DIR}}/{{.BINARY_NAME}} ./cmd/billing
 
   run:
     desc: Build and run the application server

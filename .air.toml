@@ -6,7 +6,7 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -buildvcs=false -o ./tmp/main.exe ."
+cmd = "go build -buildvcs=false -o ./tmp/main.exe ./cmd/billing"
 entrypoint = "tmp/main.exe"
 args_bin = ["run-server"]
 
