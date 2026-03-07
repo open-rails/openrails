@@ -73,19 +73,6 @@ func (s *PaymentMethodService) GetByVaultID(ctx context.Context, provider, vault
 	return pm, nil
 }
 
-// GetByBillingID is no longer needed since payment methods only support NMI
-// Keeping for backwards compatibility, but always filters for NMI processor
-func (s *PaymentMethodService) GetByBillingID(ctx context.Context, provider, billingID string) (*models.PaymentMethod, error) {
-	pm, err := s.repo.GetByBillingID(ctx, provider, billingID)
-	if err != nil {
-		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
-			return nil, ErrPaymentMethodNotFound
-		}
-		return nil, err
-	}
-	return pm, nil
-}
-
 // GetByInitialTransactionID finds a NMI payment method by initial transaction ID
 func (s *PaymentMethodService) GetByInitialTransactionID(ctx context.Context, provider, initialTransactionID string) (*models.PaymentMethod, error) {
 	pm, err := s.repo.GetByInitialTransactionID(ctx, provider, initialTransactionID)
@@ -116,22 +103,6 @@ func (s *PaymentMethodService) Delete(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	return nil
-}
-
-// GetAllNMI returns all NMI-backed payment methods
-func (s *PaymentMethodService) GetAllNMI(ctx context.Context) ([]*models.PaymentMethod, error) {
-	return s.repo.GetAllNMIBacked(ctx)
-}
-
-// GetNMIByUserID returns NMI-backed payment methods for a specific user
-func (s *PaymentMethodService) GetNMIByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	return s.repo.GetNMIBackedByUserID(ctx, userID)
-}
-
-// GetACUPendingMethods is deprecated since payment methods only support NMI
-// ACU fields were removed from the model, so this returns empty
-func (s *PaymentMethodService) GetACUPendingMethods(ctx context.Context) ([]*models.PaymentMethod, error) {
-	return []*models.PaymentMethod{}, nil
 }
 
 // ValidateOwnership verifies that a payment method belongs to the specified user

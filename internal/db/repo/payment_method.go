@@ -136,24 +136,6 @@ func (r *PaymentMethodRepo) GetByVaultID(ctx context.Context, processor, vaultID
 	return pm, nil
 }
 
-func (r *PaymentMethodRepo) GetByBillingID(ctx context.Context, processor, billingID string) (*models.PaymentMethod, error) {
-	pm := new(models.PaymentMethod)
-	processor = strings.TrimSpace(strings.ToLower(processor))
-
-	query := r.db.GetDB().NewSelect().Model(pm).
-		Where("pm.processor = ?", processor).
-		Where("pm.billing_id = ?", billingID)
-
-	err := query.Scan(ctx)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrPaymentMethodNotFound
-		}
-		return nil, err
-	}
-	return pm, nil
-}
-
 func (r *PaymentMethodRepo) GetByInitialTransactionID(ctx context.Context, processor, initialTransactionID string) (*models.PaymentMethod, error) {
 	pm := new(models.PaymentMethod)
 	processor = strings.TrimSpace(strings.ToLower(processor))
@@ -216,16 +198,6 @@ func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID str
 		return nil, err
 	}
 	return methods, nil
-}
-
-// Deprecated: GetAllNMI is deprecated. Use GetAllNMIBacked instead.
-func (r *PaymentMethodRepo) GetAllNMI(ctx context.Context) ([]*models.PaymentMethod, error) {
-	return r.GetAllNMIBacked(ctx)
-}
-
-// Deprecated: GetNMIByUserID is deprecated. Use GetNMIBackedByUserID instead.
-func (r *PaymentMethodRepo) GetNMIByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	return r.GetNMIBackedByUserID(ctx, userID)
 }
 
 func (r *PaymentMethodRepo) ExistsForUser(ctx context.Context, id uuid.UUID, userID string) (bool, error) {
