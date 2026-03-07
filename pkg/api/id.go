@@ -141,33 +141,3 @@ func parseID(id, prefix, resourceType string) (uuid.UUID, error) {
 
 	return uuid.Nil, fmt.Errorf("invalid %s ID: expected prefix '%s' or valid UUID", resourceType, prefix)
 }
-
-// TryParseID attempts to parse an ID that may or may not have a prefix.
-// This is useful for backwards compatibility during migration.
-// Returns the UUID and whether a prefix was found.
-func TryParseID(id string) (uuid.UUID, bool, error) {
-	// Check for known prefixes
-	prefixes := []string{
-		PrefixProduct, PrefixPrice, PrefixSubscription,
-		PrefixPayment, PrefixPaymentMethod,
-		PrefixInvoice, PrefixCheckoutSession, PrefixUser, PrefixEvent, PrefixAdminGrant,
-	}
-
-	for _, prefix := range prefixes {
-		if after, ok := strings.CutPrefix(id, prefix); ok {
-			rawID := after
-			parsed, err := uuid.Parse(rawID)
-			if err != nil {
-				return uuid.Nil, true, fmt.Errorf("invalid ID after prefix '%s': %w", prefix, err)
-			}
-			return parsed, true, nil
-		}
-	}
-
-	// No prefix found, try to parse as raw UUID
-	parsed, err := uuid.Parse(id)
-	if err != nil {
-		return uuid.Nil, false, fmt.Errorf("invalid ID: %w", err)
-	}
-	return parsed, false, nil
-}

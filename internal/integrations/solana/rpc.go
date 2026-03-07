@@ -30,15 +30,6 @@ type RPCClientConfig struct {
 	Network string
 }
 
-// NewRPCClient creates a new Solana RPC client with the legacy single-endpoint behavior.
-// For fallback support, use NewRPCClientWithConfig instead.
-func NewRPCClient(endpoint, network string) *RPCClient {
-	return NewRPCClientWithConfig(RPCClientConfig{
-		Endpoint: endpoint,
-		Network:  network,
-	})
-}
-
 // NewRPCClientWithConfig creates a new Solana RPC client with fallback support.
 func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 	network := strings.ToLower(cfg.Network)

@@ -58,7 +58,10 @@ func NewSolanaPayPoller(
 ) *SolanaPayPoller {
 	var rpc *solana.RPCClient
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
-		rpc = solana.NewRPCClient(solanaProc.RPCEndpoint, solanaProc.Network)
+		rpc = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
+			Endpoint: solanaProc.RPCEndpoint,
+			Network:  solanaProc.Network,
+		})
 	}
 
 	return &SolanaPayPoller{
