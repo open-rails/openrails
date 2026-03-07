@@ -128,15 +128,13 @@ type Config struct {
 }
 
 // DBConfig holds database configuration.
-// Supports both legacy connection string (URL) and atomic parameters.
-// If URL is provided, it takes precedence. Otherwise, connection string
-// is built from individual parameters (Host, Port, Username, etc.).
-// Database is always PostgreSQL.
+// If URL is provided, it takes precedence. Otherwise, a PostgreSQL connection
+// string is built from the individual parameters.
 type DBConfig struct {
-	// Legacy: Full connection string (optional)
+	// Full connection string (optional)
 	URL string `koanf:"url"`
 
-	// Atomic parameters (preferred for template-based configuration)
+	// Individual connection parameters.
 	Host     string `koanf:"host"`
 	Port     string `koanf:"port"`
 	Database string `koanf:"database"`
@@ -151,7 +149,7 @@ type DBConfig struct {
 // 2. If all atomic parameters are present, build connection string from them
 // 3. Return empty string (caller should use defaults or error based on environment)
 func (c *DBConfig) GetConnectionString() string {
-	// 1. If legacy URL is provided, use it
+	// 1. If URL is provided, use it
 	if c.URL != "" {
 		return c.URL
 	}
@@ -1027,14 +1025,14 @@ func Load(configPath string) (*Config, error) {
 			return "api_url"
 		}
 
-		// Special case: API_KEY/OPENRAILS_API_KEY/BILLING_API_KEY -> api_key (top-level, not api.key)
+		// Special case: API_KEY/OPENRAILS_API_KEY -> api_key (top-level, not api.key)
 		// Used for private/service API auth (X-API-KEY header).
-		if s == "api_key" || s == "openrails_api_key" || s == "billing_api_key" {
+		if s == "api_key" || s == "openrails_api_key" {
 			return "api_key"
 		}
 
-		// Special case: TEST_MODE/OPENRAILS_TEST_MODE/BILLING_TEST_MODE -> test_mode (top-level)
-		if s == "test_mode" || s == "openrails_test_mode" || s == "billing_test_mode" {
+		// Special case: TEST_MODE/OPENRAILS_TEST_MODE -> test_mode (top-level)
+		if s == "test_mode" || s == "openrails_test_mode" {
 			return "test_mode"
 		}
 
