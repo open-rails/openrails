@@ -193,6 +193,58 @@ func TestIsSolanaTransferRequestFlow(t *testing.T) {
 	}
 }
 
+func TestSessionToResponse_TransactionRequestSolanaPayURLUsesCanonicalV1Path(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		apiURL         string
+		expectedPrefix string
+	}{
+		{
+			name:           "standalone api url",
+			apiURL:         "https://api.test.com",
+			expectedPrefix: "solana:https://api.test.com/v1/checkout/",
+		},
+		{
+			name:           "embedded api url",
+			apiURL:         "https://api.test.com/billing",
+			expectedPrefix: "solana:https://api.test.com/billing/v1/checkout/",
+		},
+		{
+			name:           "api url with trailing slash",
+			apiURL:         "https://api.test.com/",
+			expectedPrefix: "solana:https://api.test.com/v1/checkout/",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := testSolanaCheckoutConfig()
+			cfg.APIURL = tc.apiURL
+
+			svc := &CheckoutSessionService{config: cfg}
+			session := &models.CheckoutSession{
+				ID:        uuid.New(),
+				Status:    models.CheckoutSessionStatusRequiresAction,
+				Processor: models.ProcessorSolana,
+				ProcessorState: map[string]any{
+					"flow": "transaction_request",
+				},
+			}
+
+			resp := svc.sessionToResponse(session)
+			require.NotNil(t, resp)
+			require.Contains(t, resp.Payment.SolanaPayURL, tc.expectedPrefix)
+			require.Contains(t, resp.Payment.SolanaPayURL, "/solana-pay")
+			require.NotContains(t, resp.Payment.SolanaPayURL, "/v/1/")
+		})
+	}
+}
+
 const (
 	devnetUSDCMint      = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
 	testRecipientWallet = "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh"
