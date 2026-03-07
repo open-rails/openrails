@@ -1082,11 +1082,16 @@ func (c *NMIClient) SearchTransactions(filter QueryFilter) (string, error) {
 	return response, nil
 }
 func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
-	fmt.Println("data", data)
-	fmt.Println("DirectPostURL", c.DirectPostURL)
+	action := strings.TrimSpace(data.Get("action"))
+	requestType := strings.TrimSpace(data.Get("type"))
 
 	resp, err := http.PostForm(c.DirectPostURL, data)
 	if err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"provider":     c.providerName,
+			"request_type": requestType,
+			"action":       action,
+		}).Warn("NMI direct request failed")
 		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 	defer func() {
@@ -1097,6 +1102,12 @@ func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
+		log.WithFields(log.Fields{
+			"provider":     c.providerName,
+			"request_type": requestType,
+			"action":       action,
+			"status_code":  resp.StatusCode,
+		}).Warn("NMI direct request returned non-200 status")
 		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 

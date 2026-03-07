@@ -147,12 +147,12 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 			strings.HasPrefix(strings.ToLower(content), "invalid") ||
 			strings.Contains(strings.ToLower(content), "authentication failed") ||
 			strings.Contains(strings.ToLower(content), "access denied")) {
-		log.WithContext(ctx).WithField("response", content).Error("Error response from CCBill")
-		return nil, fmt.Errorf("CCBill API error: %s", content)
+		log.WithContext(ctx).WithField("response_length", len(content)).Error("Error response from CCBill")
+		return nil, fmt.Errorf("ccbill api returned an error payload")
 	}
 
 	if !strings.HasPrefix(content, `"ACTIVEMEMBERS"`) {
-		log.WithContext(ctx).WithField("response", content).Error("Invalid response format from CCBill")
+		log.WithContext(ctx).WithField("response_length", len(content)).Error("Invalid response format from CCBill")
 		return nil, fmt.Errorf("invalid response format from CCBill: expected ACTIVEMEMBERS data")
 	}
 

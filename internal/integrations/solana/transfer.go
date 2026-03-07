@@ -155,9 +155,8 @@ func (c *RPCClient) VerifyTransfer(ctx context.Context, req VerifyTransferReques
 	}
 
 	log.WithFields(log.Fields{
-		"signature": req.Signature,
-		"slot":      txResult.Slot,
-		"fee":       txResult.Meta.Fee,
+		"slot": txResult.Slot,
+		"fee":  txResult.Meta.Fee,
 	}).Info("Transaction verified on-chain")
 
 	return nil

@@ -146,9 +146,6 @@ func BillingAuditLog() gin.HandlerFunc {
 			// Add user information if available
 			if uc, ok := authprovider.UserContextFromGin(c); ok && uc.UserID != "" {
 				fields["user_id"] = uc.UserID
-				if uc.Email != "" {
-					fields["user_email"] = uc.Email
-				}
 			}
 
 			// Add processor information if present in path

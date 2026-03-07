@@ -243,15 +243,12 @@ func (rs *ReplayService) replayWebhookEvent(ctx context.Context, filePath string
 
 	result.StatusCode = resp.StatusCode
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err == nil && rs.Verbose {
-		fmt.Printf("    Response: %s\n", string(respBody))
-	}
+	_, _ = io.ReadAll(resp.Body)
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		result.Success = true
 	} else {
-		result.Error = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))
+		result.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
 	}
 
 	return result, nil

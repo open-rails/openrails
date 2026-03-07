@@ -108,26 +108,20 @@ func (s *EmailService) IsEnabled() bool {
 // SendEmail sends a basic email using the configured provider.
 func (s *EmailService) SendEmail(ctx context.Context, to, subject, htmlContent, plainContent string) error {
 	if !s.IsEnabled() {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"to":      to,
-			"subject": subject,
-		}).Debug("email service disabled - skipping send")
+		log.WithContext(ctx).Debug("email service disabled - skipping send")
 		return nil
 	}
 
 	toMail := mail.NewEmail("", to)
 	msg := mail.NewSingleEmail(s.from, subject, toMail, plainContent, htmlContent)
 
-	return s.send(ctx, msg, to)
+	return s.send(ctx, msg)
 }
 
 // SendTemplatedEmail sends a template-based email using the configured provider.
 func (s *EmailService) SendTemplatedEmail(ctx context.Context, to, templateID string, templateData map[string]any) error {
 	if !s.IsEnabled() {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"to":          to,
-			"template_id": templateID,
-		}).Debug("email service disabled - skipping templated send")
+		log.WithContext(ctx).WithField("template_id", templateID).Debug("email service disabled - skipping templated send")
 		return nil
 	}
 
@@ -142,13 +136,13 @@ func (s *EmailService) SendTemplatedEmail(ctx context.Context, to, templateID st
 	}
 	msg.AddPersonalizations(personalization)
 
-	return s.send(ctx, msg, to)
+	return s.send(ctx, msg)
 }
 
 // SendOneOffPurchaseReceipt sends a receipt for a one-off purchase (e.g., Solana payment).
 func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOffPurchaseEmailData) error {
 	if !s.IsEnabled() {
-		log.WithContext(ctx).WithField("user_email", data.UserEmail).Debug("email service disabled - skipping one-off receipt send")
+		log.WithContext(ctx).Debug("email service disabled - skipping one-off receipt send")
 		return nil
 	}
 
@@ -239,7 +233,7 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 	return s.SendEmail(ctx, data.UserEmail, subject, htmlContent, plainContent)
 }
 
-func (s *EmailService) send(ctx context.Context, msg *mail.SGMailV3, to string) error {
+func (s *EmailService) send(ctx context.Context, msg *mail.SGMailV3) error {
 	res, err := s.client.SendWithContext(ctx, msg)
 	if err != nil {
 		return fmt.Errorf("sendgrid email send failed: %w", err)
@@ -248,10 +242,7 @@ func (s *EmailService) send(ctx context.Context, msg *mail.SGMailV3, to string) 
 		return fmt.Errorf("sendgrid api error: status %d, body: %s", res.StatusCode, res.Body)
 	}
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"to":     to,
-		"status": res.StatusCode,
-	}).Debug("email sent successfully via sendgrid")
+	log.WithContext(ctx).WithField("status", res.StatusCode).Debug("email sent successfully via sendgrid")
 	return nil
 }
 
@@ -262,14 +253,14 @@ func (s *EmailService) send(ctx context.Context, msg *mail.SGMailV3, to string) 
 // SendSubscriptionConfirmed sends a subscription confirmation email
 func (s *EmailService) SendSubscriptionConfirmed(ctx context.Context, userID string) error {
 	if !s.IsEnabled() {
-		log.Println("Email service not available - skipping subscription confirmation email")
+		log.WithContext(ctx).Debug("email service not available - skipping subscription confirmation email")
 		return nil
 	}
 
 	emailData, err := s.getEmailData(ctx, userID)
 	if err != nil {
 		if errors.Is(err, errUserEmailUnavailable) {
-			log.Printf("Email unavailable for user %s - skipping subscription confirmation email", userID)
+			log.WithContext(ctx).Debug("email unavailable - skipping subscription confirmation email")
 			return nil
 		}
 		return fmt.Errorf("failed to get email data: %w", err)
@@ -281,14 +272,14 @@ func (s *EmailService) SendSubscriptionConfirmed(ctx context.Context, userID str
 // SendSubscriptionRenewed sends a subscription renewal email
 func (s *EmailService) SendSubscriptionRenewed(ctx context.Context, userID string) error {
 	if !s.IsEnabled() {
-		log.Println("Email service not available - skipping subscription renewal email")
+		log.WithContext(ctx).Debug("email service not available - skipping subscription renewal email")
 		return nil
 	}
 
 	emailData, err := s.getEmailData(ctx, userID)
 	if err != nil {
 		if errors.Is(err, errUserEmailUnavailable) {
-			log.Printf("Email unavailable for user %s - skipping subscription renewal email", userID)
+			log.WithContext(ctx).Debug("email unavailable - skipping subscription renewal email")
 			return nil
 		}
 		return fmt.Errorf("failed to get email data: %w", err)
@@ -300,14 +291,14 @@ func (s *EmailService) SendSubscriptionRenewed(ctx context.Context, userID strin
 // SendPremiumEnded sends the appropriate email when a premium entitlement ends.
 func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reason PremiumEndReason) error {
 	if !s.IsEnabled() {
-		log.Println("Email service not available - skipping premium-ended email")
+		log.WithContext(ctx).Debug("email service not available - skipping premium-ended email")
 		return nil
 	}
 
 	emailData, err := s.getEmailData(ctx, userID)
 	if err != nil {
 		if errors.Is(err, errUserEmailUnavailable) {
-			log.Printf("Email unavailable for user %s - skipping premium-ended email", userID)
+			log.WithContext(ctx).Debug("email unavailable - skipping premium-ended email")
 			return nil
 		}
 		return fmt.Errorf("failed to get email data: %w", err)
@@ -330,14 +321,14 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 // SendPaymentFailed sends a payment failure email
 func (s *EmailService) SendPaymentFailed(ctx context.Context, userID string) error {
 	if !s.IsEnabled() {
-		log.Println("Email service not available - skipping payment failure email")
+		log.WithContext(ctx).Debug("email service not available - skipping payment failure email")
 		return nil
 	}
 
 	emailData, err := s.getEmailData(ctx, userID)
 	if err != nil {
 		if errors.Is(err, errUserEmailUnavailable) {
-			log.Printf("Email unavailable for user %s - skipping payment failure email", userID)
+			log.WithContext(ctx).Debug("email unavailable - skipping payment failure email")
 			return nil
 		}
 		return fmt.Errorf("failed to get email data: %w", err)
@@ -349,14 +340,14 @@ func (s *EmailService) SendPaymentFailed(ctx context.Context, userID string) err
 // SendEntitlementExpired sends an entitlement expiration email
 func (s *EmailService) SendEntitlementExpired(ctx context.Context, userID string, entitlementName string, expiresAt time.Time) error {
 	if !s.IsEnabled() {
-		log.Println("Email service not available - skipping entitlement expiration email")
+		log.WithContext(ctx).Debug("email service not available - skipping entitlement expiration email")
 		return nil
 	}
 
 	username, email, err := s.getUserEmail(ctx, userID)
 	if err != nil {
 		if errors.Is(err, errUserEmailUnavailable) {
-			log.Printf("Email unavailable for user %s - skipping entitlement expiration email", userID)
+			log.WithContext(ctx).Debug("email unavailable - skipping entitlement expiration email")
 			return nil
 		}
 		return fmt.Errorf("failed to get user profile: %w", err)

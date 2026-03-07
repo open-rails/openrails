@@ -333,8 +333,7 @@ func (c *RPCFallbackClient) SendTransaction(ctx context.Context, tx *solanago.Tr
 	})
 	if err == nil {
 		log.WithFields(log.Fields{
-			"signature": sig.String(),
-			"network":   c.network,
+			"network": c.network,
 		}).Info("Transaction sent to Solana")
 	}
 	return sig, err

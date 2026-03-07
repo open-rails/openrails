@@ -235,7 +235,6 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 			if getErr == nil && existingPayment != nil {
 				log.WithFields(log.Fields{
 					"reference":  reference,
-					"signature":  sig.Signature,
 					"payment_id": existingPayment.ID,
 				}).Info("Solana reference already has a recorded payment; removing pending payment")
 				p.markCheckoutSessionSucceeded(ctx, pending, existingPayment.ID, sig.Signature)
@@ -249,7 +248,6 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 			if getErr != nil && !errors.Is(getErr, sql.ErrNoRows) {
 				log.WithError(getErr).WithFields(log.Fields{
 					"reference": reference,
-					"signature": sig.Signature,
 				}).Warn("Failed to check existing payment by signature")
 			}
 		}
@@ -258,7 +256,6 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 		if p.verifyPayment(ctx, reference, sig.Signature, pending) {
 			log.WithFields(log.Fields{
 				"reference": reference,
-				"signature": sig.Signature,
 				"user_id":   pending.UserID,
 				"amount":    pending.Amount,
 			}).Info("Solana payment confirmed")
@@ -365,7 +362,6 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, reference string, s
 	); err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"reference": reference,
-			"signature": signature,
 			"user_id":   pending.UserID,
 		}).Warn("solana pay verification failed")
 		return false
@@ -388,13 +384,12 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 	// Fast idempotency guard: skip processing if this signature is already recorded.
 	existingPayment, err := p.checkoutService.PaymentService.GetByTransactionID(ctx, models.ProcessorSolana, signature)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("failed checking existing payment for signature %s: %w", signature, err)
+		return fmt.Errorf("failed checking existing payment by transaction id: %w", err)
 	}
 	if err == nil && existingPayment != nil {
 		log.WithFields(log.Fields{
 			"payment_id": existingPayment.ID,
 			"reference":  reference,
-			"signature":  signature,
 		}).Info("Solana payment already processed, skipping duplicate")
 		p.markCheckoutSessionSucceeded(ctx, pending, existingPayment.ID, signature)
 		return nil
@@ -419,7 +414,6 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 				log.WithFields(log.Fields{
 					"payment_id": existingPayment.ID,
 					"reference":  reference,
-					"signature":  signature,
 				}).Info("Solana payment already processed by concurrent worker, skipping duplicate")
 				p.markCheckoutSessionSucceeded(ctx, pending, existingPayment.ID, signature)
 				return nil
@@ -432,7 +426,6 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 		"payment_id":   result.PaymentID,
 		"user_id":      pending.UserID,
 		"price_id":     priceID,
-		"signature":    signature,
 		"token":        pending.Token,
 		"reference":    reference,
 		"entitlements": result.Entitlements,

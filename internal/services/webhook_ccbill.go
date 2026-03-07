@@ -388,7 +388,6 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 
 		s.logBillingError(ctx, billingErr, log.Fields{
 			"transaction_id": transactionID,
-			"email":          email,
 		})
 		return billingErr
 	}
@@ -554,7 +553,6 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 		return err
 	}
 
-	email := data.Email
 	formID := data.FlexID
 	formName := data.FormName
 	failureCode := data.FailureCode
@@ -575,12 +573,10 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 		if priceLookupErr != nil {
 			log.WithContext(ctx).WithError(priceLookupErr).WithFields(log.Fields{
 				"flex_id": formID,
-				"email":   email,
 			}).Warn("Unable to validate CCBill form for new sale failure")
 		} else if err := s.ensureFlexFormMatches(price, formID, formName); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"flex_id": formID,
-				"email":   email,
 			}).Warn("Payment form mismatch in new sale failure")
 		}
 
@@ -648,7 +644,6 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"userID":        userID,
-			"email":         email,
 			"failureCode":   failureCode,
 			"failureReason": failureReason,
 			"transactionID": transactionID,
@@ -1067,7 +1062,6 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 	}
 
 	transactionID := data.TransactionID
-	email := data.Email
 	failureCode := data.FailureCode
 	failureReason := data.FailureReason
 	originalSubscriptionID := data.OriginalSubscriptionID
@@ -1131,7 +1125,6 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"userID":                 userID,
-			"email":                  email,
 			"failureCode":            failureCode,
 			"failureReason":          failureReason,
 			"transactionID":          transactionID,
@@ -1244,7 +1237,6 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 	}
 
 	pSubscriptionID := data.SubscriptionID
-	email := data.Email
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		txdb := db.NewWithTx(tx)
@@ -1268,21 +1260,21 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 				"processor_subscription_id": pSubscriptionID,
 				"processor":                 "ccbill",
 				"event_source":              "webhook",
-				"updated_email":             email,
-				"payment_account":           data.PaymentAccount,
-				"card_type":                 data.CardType,
-				"payment_type":              data.PaymentType,
-				"bin":                       data.Bin,
-				"exp_date":                  data.ExpDate,
-				"updated_fields": map[string]interface{}{
-					"firstName":   data.FirstName,
-					"lastName":    data.LastName,
-					"address1":    data.Address1,
-					"city":        data.City,
-					"state":       data.State,
-					"country":     data.Country,
-					"postalCode":  data.PostalCode,
-					"phoneNumber": data.PhoneNumber,
+				"updated_fields": []string{
+					"firstName",
+					"lastName",
+					"address1",
+					"city",
+					"state",
+					"country",
+					"postalCode",
+					"phoneNumber",
+					"email",
+					"paymentAccount",
+					"cardType",
+					"paymentType",
+					"bin",
+					"expDate",
 				},
 			}
 
@@ -1307,8 +1299,6 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 			"subscriptionID":          sub.ID,
 			"userID":                  sub.UserID,
 			"processorSubscriptionID": pSubscriptionID,
-			"updatedEmail":            email,
-			"paymentAccount":          data.PaymentAccount,
 		}).Info("Processed customer data update successfully")
 
 		return nil
@@ -1331,7 +1321,6 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 
 	pSubscriptionID := strings.TrimSpace(data.SubscriptionID)
 	transactionID := strings.TrimSpace(data.TransactionID)
-	email := strings.TrimSpace(data.Email)
 	priceStr := strings.TrimSpace(data.Price)
 	nextRenewalDate := strings.TrimSpace(data.NextRenewalDate)
 
@@ -1433,7 +1422,6 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		"userID":                  sub.UserID,
 		"transactionID":           transactionID,
 		"processorSubscriptionID": pSubscriptionID,
-		"email":                   email,
 		"priceDescription":        priceStr,
 		"nextRenewalDate":         nextRenewalDate,
 		"periodEndsAt":            sub.CurrentPeriodEndsAt,

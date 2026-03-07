@@ -1755,7 +1755,6 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	var subscription *models.Subscription
 	if nmiSubID != "" {
 		subID, parseErr := uuid.Parse(nmiSubID)
-		log.Println("NMI Refund - Parsed Subscription ID:", subID, "Error:", parseErr)
 		if parseErr == nil {
 			subscription, err = s.SubscriptionService.GetByID(ctx, subID)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
