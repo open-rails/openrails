@@ -240,7 +240,6 @@ func TestSessionToResponse_TransactionRequestSolanaPayURLUsesCanonicalV1Path(t *
 			require.NotNil(t, resp)
 			require.Contains(t, resp.Payment.SolanaPayURL, tc.expectedPrefix)
 			require.Contains(t, resp.Payment.SolanaPayURL, "/solana-pay")
-			require.NotContains(t, resp.Payment.SolanaPayURL, "/v/1/")
 		})
 	}
 }

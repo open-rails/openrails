@@ -78,10 +78,5 @@ func (s *Server) registerServiceRoutes() {
 	v1.Use(middleware.APIKeyRequired(apiKey))
 	s.registerServiceRoutesAt(v1)
 
-	// Legacy alias: /v1/*
-	legacy := s.privateHandler.Group(LegacyV1Prefix)
-	legacy.Use(middleware.APIKeyRequired(apiKey))
-	s.registerServiceRoutesAt(legacy)
-
 	log.Info("Service API routes registered on private handler")
 }

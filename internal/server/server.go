@@ -77,10 +77,6 @@ func New(deps Dependencies) (*Server, error) {
 	s.registerUserRoutes(s.publicHandler)
 	s.registerAdminRoutesOn(s.publicHandler)
 	s.registerWebhookRoutes(s.publicHandler)
-	// Legacy alias: /v/1/*
-	s.registerUserRoutesAt(s.publicHandler, LegacyV1Prefix)
-	s.registerAdminRoutesAt(s.publicHandler, LegacyV1Prefix)
-	s.registerWebhookRoutesAt(s.publicHandler, LegacyV1Prefix)
 
 	// Private/service API surface.
 	s.registerServiceRoutes()

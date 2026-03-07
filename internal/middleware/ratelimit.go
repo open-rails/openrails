@@ -195,9 +195,6 @@ func classifyBucket(path, method string) string {
 			path = "/"
 		}
 	}
-	if strings.HasPrefix(path, "/v/1") {
-		path = "/v1" + strings.TrimPrefix(path, "/v/1")
-	}
 
 	method = strings.ToUpper(method)
 	switch {
