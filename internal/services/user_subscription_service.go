@@ -277,9 +277,6 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	if s.NMIClients != nil {
 		// Use processor name to look up NMI client
 		provider := strings.ToLower(string(subscription.Processor))
-		if provider == "nmi" {
-			provider = "mobius" // normalize legacy processor value
-		}
 
 		if client, ok := s.NMIClients[provider]; ok && subscription.ProcessorSubscriptionID != "" {
 			if err := client.DeleteRecurringSubscription(subscription.ProcessorSubscriptionID); err != nil {

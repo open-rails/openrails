@@ -1688,7 +1688,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Only NMI-backed processors support programmatic upgrades
-	if processor != "mobius" && processor != "nmi" {
+	if processor != "mobius" {
 		return nil, fmt.Errorf("unsupported processor for upgrades: %s", processor)
 	}
 
@@ -1983,7 +1983,7 @@ func (s *CheckoutService) processDowngrade(
 	}
 
 	// Only NMI-backed processors support programmatic downgrades
-	if processor != "mobius" && processor != "nmi" {
+	if processor != "mobius" {
 		return nil, fmt.Errorf("unsupported processor for downgrades: %s", processor)
 	}
 

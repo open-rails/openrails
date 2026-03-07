@@ -59,8 +59,6 @@ func (s *SubscriptionService) now() time.Time {
 const (
 	ProcessorCCBill = "ccbill"
 	ProcessorStripe = "stripe"
-	// Deprecated: ProcessorNMI is deprecated. Use "mobius" or other NMI-backed processor names instead.
-	ProcessorNMI = "nmi"
 
 	CurrencyUSD = "usd"
 	CurrencyEUR = "eur"

@@ -598,9 +598,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		provider := ""
 		if processors.IsNMIBackedProcessor(params.Processor) {
 			provider = strings.ToLower(string(params.Processor))
-			if provider == "nmi" {
-				provider = "mobius"
-			}
 		}
 
 		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), provider, params.ProcessorSubscriptionID)
@@ -950,9 +947,6 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		provider := ""
 		if processors.IsNMIBackedProcessor(params.Processor) {
 			provider = strings.ToLower(string(params.Processor))
-			if provider == "nmi" {
-				provider = "mobius"
-			}
 		}
 
 		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), provider, processorSubID)
@@ -1099,9 +1093,6 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		provider := ""
 		if params.Processor != nil && processors.IsNMIBackedProcessor(*params.Processor) {
 			provider = strings.ToLower(string(*params.Processor))
-			if provider == "nmi" {
-				provider = "mobius"
-			}
 		}
 
 		// Find subscription
@@ -1398,15 +1389,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		subService := NewSubscriptionService(db, priceService, productService, notificationService, nil, nil, nil)
 		entSvc := NewEntitlementService(db)
 		entSvc.SetClock(s.Clock) // Propagate clock for testing
-
-		// Use processor name for gateway lookup
-		provider := ""
-		if processors.IsNMIBackedProcessor(params.Processor) {
-			provider = strings.ToLower(string(params.Processor))
-			if provider == "nmi" {
-				provider = "mobius"
-			}
-		}
 
 		subscription, err := subService.GetByID(ctx, *params.SubscriptionID)
 		if err != nil {

@@ -176,9 +176,6 @@ func (s *AdminSubscriptionService) cancelWithNMI(subscription *models.Subscripti
 
 	// Use processor name to look up NMI client
 	provider := strings.ToLower(string(subscription.Processor))
-	if provider == "nmi" {
-		provider = "mobius" // normalize legacy processor value
-	}
 
 	client, ok := s.NMIClients[provider]
 	if !ok {

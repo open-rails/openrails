@@ -376,13 +376,13 @@ func TestHelperFunctions(t *testing.T) {
 	err := ValidateEvent("ccbill", "newsalesuccess.json")
 	assert.NoError(t, err, "Should validate CCBill event successfully")
 
-	err = ValidateEvent("nmi", "recurring_subscription_add.json")
+	err = ValidateEvent("mobius", "recurring_subscription_add.json")
 	assert.NoError(t, err, "Should validate NMI event successfully")
 
 	err = ValidateAllEvents("ccbill")
 	assert.NoError(t, err, "Should validate all CCBill events successfully")
 
-	err = ValidateAllEvents("nmi")
+	err = ValidateAllEvents("mobius")
 	assert.NoError(t, err, "Should validate all NMI events successfully")
 
 	err = ValidateEvent("invalid", "test.json")
@@ -409,7 +409,7 @@ func TestHelperFunctions(t *testing.T) {
 	err = ReplayEvent(ctx, "ccbill", "newsalesuccess.json", server.URL)
 	assert.NoError(t, err, "Should replay CCBill event successfully")
 
-	err = ReplayEvent(ctx, "nmi", "recurring_subscription_add.json", server.URL)
+	err = ReplayEvent(ctx, "mobius", "recurring_subscription_add.json", server.URL)
 	assert.NoError(t, err, "Should replay NMI event successfully")
 
 	err = ReplayAllEvents(ctx, "ccbill", server.URL)

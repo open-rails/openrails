@@ -130,9 +130,9 @@ type Price struct {
 	BillingCycleDays *int `bun:"billing_cycle_days,nullzero" json:"billing_cycle_days"`
 
 	// Processors is a JSONB map of processor name -> processor-specific configuration
-	// Keys: "nmi", "ccbill", "solana", etc.
+	// Keys: "mobius", "ccbill", "solana", etc.
 	// Values: processor-specific data (e.g., plan_id, price_id, provider)
-	// Example: {"nmi": {"plan_id": "123", "provider": "mobius"}, "ccbill": {"price_id": "456"}}
+	// Example: {"mobius": {"plan_id": "123"}, "ccbill": {"price_id": "456"}}
 	Processors map[string]map[string]string `bun:"processors,type:jsonb,nullzero" json:"processors,omitempty"`
 
 	CreatedAt time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
@@ -167,31 +167,16 @@ func (p *Price) HasProcessor(processor Processor) bool {
 	return p.GetProcessorConfig(processor) != nil
 }
 
-// GetNMIConfig returns the NMI processor configuration
-// Looks for "mobius" first, then falls back to legacy "nmi" key
+// GetNMIConfig returns the Mobius processor configuration.
 func (p *Price) GetNMIConfig() (planID, provider string, ok bool) {
-	// Try mobius first (preferred)
 	config := p.GetProcessorConfig(ProcessorMobius)
-	if config != nil {
-		planID = config[ProcessorKeyPlanID]
-		provider = config[ProcessorKeyProvider]
-		if provider == "" {
-			provider = "mobius"
-		}
-		if planID != "" {
-			return planID, provider, true
-		}
-	}
-
-	// Fall back to legacy "nmi" key for backwards compatibility
-	config = p.GetProcessorConfig(ProcessorNMI)
 	if config == nil {
 		return "", "", false
 	}
 	planID = config[ProcessorKeyPlanID]
 	provider = config[ProcessorKeyProvider]
 	if provider == "" {
-		provider = "mobius" // default provider
+		provider = "mobius"
 	}
 	return planID, provider, planID != ""
 }
@@ -254,7 +239,6 @@ func (p *Price) SetNMIConfig(planID, provider string) {
 	if provider != "" && provider != "mobius" {
 		config[ProcessorKeyProvider] = provider
 	}
-	// Use mobius as the key instead of legacy "nmi"
 	p.SetProcessorConfig(ProcessorMobius, config)
 }
 

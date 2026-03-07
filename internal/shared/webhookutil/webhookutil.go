@@ -14,8 +14,6 @@ import (
 	"time"
 )
 
-const canonicalMobiusProvider = "mobius"
-
 var (
 	ErrNMIWebhookSecretMissing    = errors.New("nmi webhook secret not configured")
 	ErrNMIWebhookSignatureMissing = errors.New("missing webhook signature")
@@ -23,11 +21,7 @@ var (
 )
 
 func CanonicalProvider(provider string) string {
-	provider = strings.Trim(strings.ToLower(provider), " /")
-	if provider == "nmi" {
-		return canonicalMobiusProvider
-	}
-	return provider
+	return strings.Trim(strings.ToLower(provider), " /")
 }
 
 func ParseStripeEventMeta(body []byte) (string, string, error) {

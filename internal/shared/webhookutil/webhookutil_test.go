@@ -12,7 +12,6 @@ import (
 )
 
 func TestCanonicalProvider(t *testing.T) {
-	require.Equal(t, "mobius", CanonicalProvider("nmi"))
 	require.Equal(t, "mobius", CanonicalProvider(" Mobius "))
 	require.Equal(t, "stripe", CanonicalProvider("/stripe/"))
 }
@@ -25,7 +24,7 @@ func TestParseStripeEventMeta(t *testing.T) {
 }
 
 func TestComputeUniqueKey(t *testing.T) {
-	require.Equal(t, "webhook:mobius:evt_123", ComputeUniqueKey("nmi", "evt_123", "", []byte(`{}`)))
+	require.Equal(t, "webhook:mobius:evt_123", ComputeUniqueKey("mobius", "evt_123", "", []byte(`{}`)))
 	require.NotEmpty(t, ComputeUniqueKey("ccbill", "", "NewSaleSuccess", []byte(`{"a":1}`)))
 }
 
