@@ -41,12 +41,6 @@ func Message(message string) Json {
 	}
 }
 
-// ErrorMessage is an alias for Message for backward compatibility.
-// Usage: c.JSON(http.StatusBadRequest, json.ErrorMessage("Invalid request"))
-func ErrorMessage(message string) Json {
-	return Message(message)
-}
-
 // Error is a convenience alias for Message for shorter syntax.
 // Usage: c.JSON(http.StatusBadRequest, json.Error("Invalid request"))
 func Error(message string) Json {

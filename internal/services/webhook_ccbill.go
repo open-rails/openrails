@@ -70,9 +70,8 @@ func parseCCBillDate(dateStr string) (time.Time, error) {
 // parseCCBillDateUsingTimestamp parses date-only fields (e.g., nextRenewalDate/nextRetryDate).
 //
 // CCBill sends these as YYYY-MM-DD with no time-of-day. To avoid accidental access gaps due to
-// ambiguity, we interpret the date as the end of that UTC day (23:59:59Z). The webhook timestamp
-// is intentionally ignored for these fields so the policy is deterministic and generous.
-func parseCCBillDateUsingTimestamp(dateStr, tsStr string) (*time.Time, error) {
+// ambiguity, we interpret the date as the end of that UTC day (23:59:59Z).
+func parseCCBillDateUsingTimestamp(dateStr string) (*time.Time, error) {
 	if strings.TrimSpace(dateStr) == "" {
 		return nil, nil
 	}
@@ -80,7 +79,6 @@ func parseCCBillDateUsingTimestamp(dateStr, tsStr string) (*time.Time, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = tsStr // kept for backward-compatible signature
 	combined := time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 0, time.UTC)
 	return &combined, nil
 }
@@ -403,7 +401,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	paidTermEnd, err := parseCCBillDateUsingTimestamp(data.NextRenewalDate, data.Timestamp)
+	paidTermEnd, err := parseCCBillDateUsingTimestamp(data.NextRenewalDate)
 	if err != nil {
 		return fmt.Errorf("failed to parse nextRenewalDate '%s': %w", data.NextRenewalDate, err)
 	}
@@ -1168,7 +1166,7 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
 
-		parsed, err := parseCCBillDateUsingTimestamp(nextRenewalDate, data.Timestamp)
+		parsed, err := parseCCBillDateUsingTimestamp(nextRenewalDate)
 		if err != nil {
 			return fmt.Errorf("failed to parse nextRenewalDate '%s': %w", nextRenewalDate, err)
 		}
@@ -1334,7 +1332,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		return fmt.Errorf("subscription lifecycle service not configured")
 	}
 
-	renewalDate, err := parseCCBillDateUsingTimestamp(nextRenewalDate, "")
+	renewalDate, err := parseCCBillDateUsingTimestamp(nextRenewalDate)
 	if err != nil {
 		return fmt.Errorf("failed to parse nextRenewalDate '%s': %w", nextRenewalDate, err)
 	}
@@ -2002,7 +2000,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	}
 	prevStatus := prevSub.Status
 
-	paidTermEnd, err := parseCCBillDateUsingTimestamp(data.NextRenewalDate, data.Timestamp)
+	paidTermEnd, err := parseCCBillDateUsingTimestamp(data.NextRenewalDate)
 	if err != nil {
 		return fmt.Errorf("failed to parse nextRenewalDate '%s': %w", data.NextRenewalDate, err)
 	}
@@ -2167,7 +2165,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 	ccBillSubID := data.SubscriptionID
 	transactionID := data.TransactionID
 
-	nextRetryAt, err := parseCCBillDateUsingTimestamp(data.NextRetryDate, data.Timestamp)
+	nextRetryAt, err := parseCCBillDateUsingTimestamp(data.NextRetryDate)
 	if err != nil {
 		return fmt.Errorf("failed to parse nextRetryDate '%s': %w", data.NextRetryDate, err)
 	}

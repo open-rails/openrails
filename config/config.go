@@ -355,15 +355,6 @@ type NMIProviderSettings struct {
 	QueryURL        string
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
 type CCBillConfig struct {
 	Salt               string `koanf:"salt"`
 	ClientSubAcc       string `koanf:"client_sub_acc"`
