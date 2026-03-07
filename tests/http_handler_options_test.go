@@ -34,6 +34,14 @@ func TestHTTPHandlerOptions_WebhooksOnly(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, w.Code)
 	}
 
+	// Embedded handler should not accept stripped-prefix legacy paths.
+	{
+		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/stripe", nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code)
+	}
+
 	// Admin routes should be excluded.
 	{
 		req := httptest.NewRequest(http.MethodGet, "/billing/v1/admin/metrics/summary", nil)

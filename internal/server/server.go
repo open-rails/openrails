@@ -108,19 +108,13 @@ func (s *Server) newHTTPHandlerEngine(opts HTTPHandlerOptions) *gin.Engine {
 	e := s.newPublicEngine()
 
 	if opts.IncludeUser {
-		// Canonical embedded contract: /billing/v1/*
 		s.registerUserRoutesAt(e, EmbeddedV1Prefix)
-		// Compatibility: allow mounting at /billing with http.StripPrefix("/billing", ...) (legacy).
-		// This results in requests to the embedded handler being routed as /v1/*.
-		s.registerUserRoutesAt(e, StandaloneV1Prefix)
 	}
 	if opts.IncludeAdmin {
 		s.registerAdminRoutesAt(e, EmbeddedV1Prefix)
-		s.registerAdminRoutesAt(e, StandaloneV1Prefix)
 	}
 	if opts.IncludeWebhooks {
 		s.registerWebhookRoutesAt(e, EmbeddedV1Prefix)
-		s.registerWebhookRoutesAt(e, StandaloneV1Prefix)
 	}
 	return e
 }
@@ -129,9 +123,7 @@ func (s *Server) newHTTPHandlerEngine(opts HTTPHandlerOptions) *gin.Engine {
 //
 // Intended for embedded hosts.
 //
-// Canonical embedded contract: routes live under `/billing/v1/*`.
-// Backwards compatibility: this handler also accepts `/v1/*` for hosts that still use
-// `http.StripPrefix("/billing", ...)`.
+// Embedded routes live under `/billing/v1/*`.
 func (s *Server) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 	return s.newHTTPHandlerEngine(opts)
 }

@@ -99,9 +99,7 @@ type HTTPHandlerOptions struct {
 
 // NewHTTPHandler returns a single mountable `http.Handler` for the selected route groups.
 //
-// Canonical embedded contract: routes live under `/billing/v1/*`.
-// Backwards compatibility: the handler also accepts `/v1/*` for hosts that still mount under `/billing`
-// via `http.StripPrefix`.
+// Embedded routes live under `/billing/v1/*`.
 func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 	if e == nil || e.server == nil {
 		return nil
