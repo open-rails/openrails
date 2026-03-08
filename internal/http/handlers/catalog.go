@@ -6,7 +6,6 @@ import (
 
 	"github.com/doujins-org/ginapi/response"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
-	legacyhandlers "github.com/open-rails/openrails/internal/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
@@ -65,7 +64,7 @@ func GetProducts(r *httprequest.Request) {
 
 	productObjects := make([]api.ProductObject, len(result.Products))
 	for i, p := range result.Products {
-		productObjects[i] = legacyhandlers.ProductToAPI(p.Product, p.Prices)
+		productObjects[i] = ProductToAPI(p.Product, p.Prices)
 	}
 
 	r.SuccessJSON(response.NewList(productObjects, result.TotalItems, req.Limit, req.Offset))
@@ -124,7 +123,7 @@ func GetPrices(r *httprequest.Request) {
 
 	priceObjects := make([]api.PriceObject, len(prices))
 	for i, p := range prices {
-		priceObjects[i] = legacyhandlers.PriceToAPI(p)
+		priceObjects[i] = PriceToAPI(p)
 	}
 
 	r.SuccessJSON(response.NewList(priceObjects, totalItems, req.Limit, req.Offset))
