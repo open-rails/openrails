@@ -57,59 +57,6 @@ type GetSubscriptionRequest struct {
 	BaseRequest
 }
 
-// -------------------------------- GetProducts Request --------------------------------
-// Query params follow Stripe's pattern: https://docs.stripe.com/api/products/list
-
-type GetProductsQueryParams struct {
-	// Stripe-style pagination using limit/offset
-	PaginationParams
-	// Only return products that are active or inactive. Defaults to true (only active).
-	// Non-admins can only see active products; inactive filter is silently ignored for them.
-	Active *bool `form:"active"`
-}
-
-type GetProductsRequest struct {
-	BaseRequest
-	GetProductsQueryParams
-}
-
-func (r *GetProductsRequest) Query() any {
-	return &r.GetProductsQueryParams
-}
-
-func (r *GetProductsRequest) SetDefaults() {
-	r.SetPaginationDefaults(20)
-}
-
-// -------------------------------- GetPrices Request --------------------------------
-// Query params follow Stripe's pattern: https://docs.stripe.com/api/prices/list
-
-type GetPricesQueryParams struct {
-	PaginationParams
-	// Only return prices that are active or inactive. Defaults to true (only active).
-	// Non-admins can only see active prices; inactive filter is silently ignored for them.
-	Active *bool `form:"active"`
-	// Only return prices for the given currency (e.g., "usd")
-	Currency string `form:"currency"`
-	// Only return prices for the given product ID
-	Product string `form:"product"`
-	// Only return prices of type "recurring" or "one_time"
-	Type string `form:"type" validate:"omitempty,oneof=recurring one_time"`
-}
-
-type GetPricesRequest struct {
-	BaseRequest
-	GetPricesQueryParams
-}
-
-func (r *GetPricesRequest) Query() any {
-	return &r.GetPricesQueryParams
-}
-
-func (r *GetPricesRequest) SetDefaults() {
-	r.SetPaginationDefaults(20)
-}
-
 // -------------------------------- CancelSubscription Request --------------------------------
 
 type CancelSubscriptionBodyParams struct {

@@ -6,52 +6,93 @@ import (
 
 	"github.com/doujins-org/ginapi/response"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	legacyhandlers "github.com/open-rails/openrails/internal/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
-// GetPrices retrieves prices with optional filters.
-// Follows Stripe's API pattern: https://docs.stripe.com/api/prices/list
-//
-// Query params:
-//   - active: Only return active (true) or inactive (false) prices. Default: true.
-//     Non-admins can only see active=true; any other value is silently ignored.
-//   - currency: Only return prices for the given currency (e.g., "usd")
-//   - product: Only return prices for the given product ID (with or without prod_ prefix)
-//   - type: Only return prices of type "recurring" or "one_time"
-//   - limit: Maximum number of items to return (default: 20, max: 100)
-//   - offset: Number of items to skip (default: 0)
-func GetPrices(r *httprequest.Request) {
-	req := new(GetPricesRequest)
-	req.SetDefaults()
-	if !r.BindQuery(req.Query()) {
+type catalogPaginationParams struct {
+	Limit  int `form:"limit"`
+	Offset int `form:"offset"`
+}
+
+type getProductsQuery struct {
+	catalogPaginationParams
+	Active *bool `form:"active"`
+}
+
+type getPricesQuery struct {
+	catalogPaginationParams
+	Active   *bool  `form:"active"`
+	Currency string `form:"currency"`
+	Product  string `form:"product"`
+	Type     string `form:"type"`
+}
+
+func (q *catalogPaginationParams) setDefaults(defaultLimit int) {
+	q.Limit = defaultLimit
+	q.Offset = 0
+}
+
+func GetProducts(r *httprequest.Request) {
+	req := &getProductsQuery{}
+	req.setDefaults(20)
+	if !r.BindQuery(req) {
 		return
 	}
 
-	// Build filter
+	includeInactive := false
+	if req.Active != nil && !*req.Active {
+		if uc, ok := authprovider.UserContextFromGin(r.GinCtx); ok {
+			if isAdmin, err := authpolicy.IsAdmin(r.Request.Context(), r.State.DB.GetDB(), uc.UserID); err == nil && isAdmin {
+				includeInactive = true
+			}
+		}
+	}
+
+	result, err := r.State.PublicSubscriptionService.GetProductsPaginated(
+		r.Request.Context(),
+		includeInactive,
+		req.Limit,
+		req.Offset,
+	)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	productObjects := make([]api.ProductObject, len(result.Products))
+	for i, p := range result.Products {
+		productObjects[i] = legacyhandlers.ProductToAPI(p.Product, p.Prices)
+	}
+
+	r.SuccessJSON(response.NewList(productObjects, result.TotalItems, req.Limit, req.Offset))
+}
+
+func GetPrices(r *httprequest.Request) {
+	req := &getPricesQuery{}
+	req.setDefaults(20)
+	if !r.BindQuery(req) {
+		return
+	}
+
 	filter := services.PriceFilter{
 		Currency: strings.ToLower(req.Currency),
 		Type:     req.Type,
 	}
 
-	// Determine active filter
-	// By default, only active prices are shown
-	// Non-admins can only see active prices
 	if req.Active == nil {
-		// Default to active only
 		active := true
 		filter.Active = &active
 	} else if *req.Active {
 		filter.Active = req.Active
 	} else {
-		// Requesting inactive prices - only admins can do this
 		if uc, ok := authprovider.UserContextFromGin(r.GinCtx); ok {
 			if isAdmin, err := authpolicy.IsAdmin(r.Request.Context(), r.State.DB.GetDB(), uc.UserID); err == nil && isAdmin {
 				filter.Active = req.Active
 			} else {
-				// Silently ignore for non-admins, show active only
 				active := true
 				filter.Active = &active
 			}
@@ -61,7 +102,6 @@ func GetPrices(r *httprequest.Request) {
 		}
 	}
 
-	// Parse product ID if provided
 	if req.Product != "" {
 		productID, err := api.ParseProductID(req.Product)
 		if err != nil {
@@ -82,10 +122,9 @@ func GetPrices(r *httprequest.Request) {
 		return
 	}
 
-	// Convert to API response
 	priceObjects := make([]api.PriceObject, len(prices))
 	for i, p := range prices {
-		priceObjects[i] = PriceToAPI(p)
+		priceObjects[i] = legacyhandlers.PriceToAPI(p)
 	}
 
 	r.SuccessJSON(response.NewList(priceObjects, totalItems, req.Limit, req.Offset))

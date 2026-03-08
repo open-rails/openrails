@@ -30,8 +30,8 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 		return wrapHandler(rt, fn)
 	}
 
-	group.GET("/products", opts.AuthProvider.Optional(), wrap(handlers.GetProducts))
-	group.GET("/prices", opts.AuthProvider.Optional(), wrap(handlers.GetPrices))
+	group.GET("/products", opts.AuthProvider.Optional(), wrap(httphandlers.GetProducts))
+	group.GET("/prices", opts.AuthProvider.Optional(), wrap(httphandlers.GetPrices))
 	group.GET("/solana/tokens", wrap(httphandlers.GetSupportedTokens))
 
 	checkout := group.Group("/checkout")
