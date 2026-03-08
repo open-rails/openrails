@@ -92,13 +92,13 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	group.POST("/users/:user_id/payments/off-channel", wrap(handlers.AdminCreateOffChannelPayment))
 
 	group.GET("/users/:user_id", wrap(handlers.GetAdminUserBillingProfile))
-	group.GET("/users/:user_id/entitlements", wrap(handlers.GetAdminUserEntitlements))
+	group.GET("/users/:user_id/entitlements", wrap(httphandlers.GetAdminUserEntitlements))
 	group.GET("/users/:user_id/mobius", wrap(handlers.GetAdminUserMobius))
 	group.GET("/users/:user_id/mobius/metrics", wrap(handlers.GetAdminUserMobiusMetrics))
 	group.GET("/users/:user_id/ccbill", wrap(handlers.GetAdminUserCCBill))
 	group.GET("/users/:user_id/ccbill/metrics", wrap(handlers.GetAdminUserCCBillMetrics))
-	group.POST("/users/:user_id/entitlements", wrap(handlers.GrantAdminEntitlement))
-	group.DELETE("/users/:user_id/entitlements/:id", wrap(handlers.RevokeAdminEntitlement))
+	group.POST("/users/:user_id/entitlements", wrap(httphandlers.GrantAdminEntitlement))
+	group.DELETE("/users/:user_id/entitlements/:id", wrap(httphandlers.RevokeAdminEntitlement))
 
 	group.GET("/metrics/summary", wrap(httphandlers.GetAdminMetricsSummary))
 	group.GET("/metrics/revenue", wrap(httphandlers.GetAdminMetricsRevenue))
@@ -119,7 +119,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, authMiddlewa
 	group.Use(authMiddleware)
 
 	users := group.Group("/users/:user_id")
-	users.GET("/entitlements", wrap(handlers.ServiceGetUserEntitlements))
+	users.GET("/entitlements", wrap(httphandlers.ServiceGetUserEntitlements))
 	users.GET("/credits", wrap(httphandlers.ServiceGetUserCredits))
 
 	credits := group.Group("/credits")
