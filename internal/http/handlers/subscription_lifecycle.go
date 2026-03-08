@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/services"
@@ -13,10 +14,12 @@ import (
 	"github.com/riverqueue/river"
 )
 
-// CancelSubscription cancels a user's subscription by ID
-// POST /v1/me/subscriptions/:id/cancel
+type cancelSubscriptionRequest struct {
+	Feedback string `json:"feedback" validate:"max=500"`
+}
+
 func CancelSubscription(r *httprequest.Request) {
-	req := new(CancelSubscriptionRequest)
+	req := new(cancelSubscriptionRequest)
 	if !r.BindJSON(req) {
 		return
 	}
@@ -27,7 +30,6 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	// Parse subscription ID from path
 	subscriptionIDStr := r.GinCtx.Param("id")
 	if subscriptionIDStr == "" {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
@@ -45,7 +47,6 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	// Get subscription by ID and verify ownership
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -56,7 +57,6 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	// Verify ownership
 	if sub.UserID != uc.UserID {
 		r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		return
@@ -83,6 +83,74 @@ func CancelSubscription(r *httprequest.Request) {
 	}, &river.InsertOpts{Queue: riverjobs.QueueBilling})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to enqueue cancellation")
+		return
+	}
+
+	r.GinCtx.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
+}
+
+func ResumeSubscription(r *httprequest.Request) {
+	uc, ok := authprovider.UserContextFromGin(r.GinCtx)
+	if !ok || uc.UserID == "" {
+		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		return
+	}
+
+	subscriptionIDStr := r.GinCtx.Param("id")
+	if subscriptionIDStr == "" {
+		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
+		return
+	}
+
+	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
+		return
+	}
+
+	if r.State == nil || r.State.DB == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "database unavailable")
+		return
+	}
+	if r.State.RiverProducer == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "job queue unavailable")
+		return
+	}
+	if r.State.SubscriptionService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
+		return
+	}
+
+	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			r.ErrorJSON(http.StatusNotFound, "subscription not found")
+			return
+		}
+		r.ErrorJSON(http.StatusInternalServerError, "failed to load subscription")
+		return
+	}
+
+	if sub.UserID != uc.UserID {
+		r.ErrorJSON(http.StatusNotFound, "subscription not found")
+		return
+	}
+
+	if sub.Processor != models.ProcessorStripe {
+		r.ErrorJSON(http.StatusBadRequest, "resume unsupported for processor")
+		return
+	}
+
+	if sub.Status != models.StatusCancelled {
+		r.ErrorJSON(http.StatusBadRequest, "subscription is not cancelled")
+		return
+	}
+
+	if _, err := r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.ResumeSubscriptionArgs{
+		UserID:         uc.UserID,
+		SubscriptionID: subscriptionID,
+	}, &river.InsertOpts{Queue: riverjobs.QueueBilling}); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to enqueue resume")
 		return
 	}
 

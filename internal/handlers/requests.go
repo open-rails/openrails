@@ -57,21 +57,6 @@ type GetSubscriptionRequest struct {
 	BaseRequest
 }
 
-// -------------------------------- CancelSubscription Request --------------------------------
-
-type CancelSubscriptionBodyParams struct {
-	Feedback string `json:"feedback" validate:"max=500"`
-}
-
-type CancelSubscriptionRequest struct {
-	BaseRequest
-	CancelSubscriptionBodyParams
-}
-
-func (r *CancelSubscriptionRequest) Body() any {
-	return &r.CancelSubscriptionBodyParams
-}
-
 // -------------------------------- Payment Methods Requests --------------------------------
 
 type ListPaymentMethodsQueryParams struct {
