@@ -1,11 +1,10 @@
 package handlers
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -71,18 +70,19 @@ func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
 		return false
 	}
-	body, err = webhookutil.NormalizeCCBillPayload(body)
+	prepared, err := webhookutil.PrepareCCBill(body, r.Query("eventType"))
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		switch {
+		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):
+			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		case errors.Is(err, webhookutil.ErrWebhookEventTypeMissing):
+			r.ErrorJSON(http.StatusBadRequest, "Missing eventType parameter")
+		default:
+			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		}
 		return false
 	}
-	eventType := strings.TrimSpace(r.Query("eventType"))
-	if eventType == "" {
-		r.ErrorJSON(http.StatusBadRequest, "Missing eventType parameter")
-		return false
-	}
-	uniqueKey := webhookutil.ComputeUniqueKey(services.ProcessorCCBill, "", eventType, body)
-	args := riverjobs.WebhookProcessArgs{Provider: services.ProcessorCCBill, EventType: eventType, Body: body, ClientIP: clientIP, UniqueKey: uniqueKey}
+	args := prepared.QueueArgs(clientIP)
 	if err := enqueueWebhookJob(r, args); err != nil {
 		log.WithError(err).Error("failed to enqueue CCBill webhook")
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to enqueue webhook")
@@ -105,29 +105,23 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 	if stripeProc := r.State.Config.GetStripeProcessor(); stripeProc != nil {
 		secret = stripeProc.WebhookSecret
 	}
-	sig := r.Request.Header.Get("Stripe-Signature")
-	var signatureValidPtr *bool
-	if secret == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "Webhook signature required")
-		return false
-	}
-	if sig == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
-		return false
-	}
-	if err = webhookutil.VerifyStripeSignature(secret, sig, body, 5*time.Minute); err != nil {
-		r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
-		return false
-	}
-	truth := true
-	signatureValidPtr = &truth
-	eventID, eventType, err := webhookutil.ParseStripeEventMeta(body)
+	prepared, err := webhookutil.PrepareStripe(body, secret, r.Request.Header.Get("Stripe-Signature"), 5*time.Minute)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		switch {
+		case errors.Is(err, webhookutil.ErrWebhookSignatureRequired):
+			r.ErrorJSON(http.StatusUnauthorized, "Webhook signature required")
+		case errors.Is(err, webhookutil.ErrWebhookSignatureMissing):
+			r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
+		case errors.Is(err, webhookutil.ErrWebhookSignatureInvalid):
+			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
+		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):
+			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		default:
+			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		}
 		return false
 	}
-	uniqueKey := webhookutil.ComputeUniqueKey(services.ProcessorStripe, eventID, eventType, body)
-	args := riverjobs.WebhookProcessArgs{Provider: services.ProcessorStripe, EventID: eventID, EventType: eventType, Body: body, ClientIP: clientIP, Signature: sig, SignatureValid: signatureValidPtr, UniqueKey: uniqueKey}
+	args := prepared.QueueArgs(clientIP)
 	if err := enqueueWebhookJob(r, args); err != nil {
 		log.WithError(err).Error("failed to enqueue Stripe webhook")
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to enqueue webhook")
@@ -158,36 +152,32 @@ func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string)
 		return false
 	}
 	signingKey := client.GetWebhookSecret()
-	if signingKey == "" {
-		log.Error("NMI webhook secret not configured")
-		r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
-		return false
-	}
-	signature, err := webhookutil.ValidateNMISignature(signingKey, body, r.Request.Header.Get("Webhook-Signature"))
+	prepared, err := webhookutil.PrepareNMI(providerKey, body, signingKey, r.Request.Header.Get("Webhook-Signature"))
 	if err != nil {
-		if err == webhookutil.ErrNMIWebhookSecretMissing || err == webhookutil.ErrNMIWebhookSignatureMissing {
+		if errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing) || errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing) {
 			log.WithError(err).Error("Missing webhook signature for NMI webhook")
 			r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
 			return false
 		}
-		log.WithError(err).Error("NMI webhook signature verification failed")
-		r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
+		if errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid) {
+			log.WithError(err).Error("NMI webhook signature verification failed")
+			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
+			return false
+		}
+		if errors.Is(err, webhookutil.ErrWebhookPayloadInvalid) {
+			log.WithError(err).Error("failed to parse NMI webhook JSON")
+			r.ErrorJSON(http.StatusBadRequest, "Invalid JSON data")
+			return false
+		}
+		if errors.Is(err, webhookutil.ErrWebhookEventIDMissing) {
+			r.ErrorJSON(http.StatusBadRequest, "Missing event_id in payload")
+			return false
+		}
+		log.WithError(err).Error("failed to prepare NMI webhook")
+		r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
 		return false
 	}
-	var data services.NMIWebhookEvent
-	if err := json.Unmarshal(body, &data); err != nil {
-		log.WithError(err).Error("failed to parse NMI webhook JSON")
-		r.ErrorJSON(http.StatusBadRequest, "Invalid JSON data")
-		return false
-	}
-	if data.EventID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "Missing event_id in payload")
-		return false
-	}
-	truth := true
-	signatureValidPtr := &truth
-	uniqueKey := webhookutil.ComputeUniqueKey(providerKey, data.EventID, string(data.EventType), body)
-	args := riverjobs.WebhookProcessArgs{Provider: providerKey, EventID: data.EventID, EventType: string(data.EventType), Body: body, ClientIP: clientIP, Signature: signature, SignatureValid: signatureValidPtr, UniqueKey: uniqueKey}
+	args := prepared.QueueArgs(clientIP)
 	if err := enqueueWebhookJob(r, args); err != nil {
 		log.WithError(err).Error("failed to enqueue NMI webhook")
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to enqueue webhook")

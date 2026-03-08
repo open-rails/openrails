@@ -3,7 +3,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,10 +51,7 @@ func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (
 }
 
 func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req HandleWebhookRequest) (*WebhookResult, error) {
-	providerKey := strings.TrimSpace(strings.ToLower(provider))
-	if providerKey == "" {
-		providerKey = "mobius"
-	}
+	providerKey := webhookutil.CanonicalProvider(provider)
 
 	client, ok := s.rt.NMIClients[providerKey]
 	if !ok || client == nil {
@@ -65,7 +61,7 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 		}, nil
 	}
 
-	signature, err := webhookutil.ValidateNMISignature(client.GetWebhookSecret(), req.Body, getHeaderValue(req.Headers, "Webhook-Signature"))
+	prepared, err := webhookutil.PrepareNMI(providerKey, req.Body, client.GetWebhookSecret(), getHeaderValue(req.Headers, "Webhook-Signature"))
 	if err != nil {
 		if errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing) || errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing) {
 			log.WithError(err).Error("Missing webhook signature for NMI webhook")
@@ -74,44 +70,35 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 				Error:    "missing webhook signature",
 			}, nil
 		}
+		if errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid) {
+			log.WithError(err).Error("NMI webhook signature verification failed")
+			return &WebhookResult{
+				Accepted: false,
+				Error:    "invalid webhook signature",
+			}, nil
+		}
+		if errors.Is(err, webhookutil.ErrWebhookPayloadInvalid) {
+			log.WithError(err).Error("failed to parse NMI webhook JSON")
+			return &WebhookResult{
+				Accepted: false,
+				Error:    "invalid JSON data",
+			}, nil
+		}
+		if errors.Is(err, webhookutil.ErrWebhookEventIDMissing) {
+			return &WebhookResult{
+				Accepted: false,
+				Error:    "missing event_id in payload",
+			}, nil
+		}
 
-		log.WithError(err).Error("NMI webhook signature verification failed")
+		log.WithError(err).Error("failed to prepare NMI webhook")
 		return &WebhookResult{
 			Accepted: false,
-			Error:    "invalid webhook signature",
+			Error:    "invalid webhook payload",
 		}, nil
 	}
 
-	var data services.NMIWebhookEvent
-	if err := json.Unmarshal(req.Body, &data); err != nil {
-		log.WithError(err).Error("failed to parse NMI webhook JSON")
-		return &WebhookResult{
-			Accepted: false,
-			Error:    "invalid JSON data",
-		}, nil
-	}
-	if data.EventID == "" {
-		return &WebhookResult{
-			Accepted: false,
-			Error:    "missing event_id in payload",
-		}, nil
-	}
-
-	truth := true
-	signatureValidPtr := &truth
-
-	uniqueKey := webhookutil.ComputeUniqueKey(providerKey, data.EventID, string(data.EventType), req.Body)
-
-	args := riverjobs.WebhookProcessArgs{
-		Provider:       providerKey,
-		EventID:        data.EventID,
-		EventType:      string(data.EventType),
-		Body:           req.Body,
-		ClientIP:       req.ClientIP,
-		Signature:      signature,
-		SignatureValid: signatureValidPtr,
-		UniqueKey:      uniqueKey,
-	}
+	args := prepared.QueueArgs(req.ClientIP)
 
 	if err := s.enqueueWebhookJob(ctx, args); err != nil {
 		log.WithError(err).Error("failed to enqueue NMI webhook")
@@ -120,8 +107,8 @@ func (s *Service) handleNMIWebhook(ctx context.Context, provider string, req Han
 
 	return &WebhookResult{
 		Accepted:  true,
-		EventID:   data.EventID,
-		EventType: string(data.EventType),
+		EventID:   prepared.EventID,
+		EventType: prepared.EventType,
 	}, nil
 }
 
@@ -164,31 +151,20 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 		log.WithField("client_ip", req.ClientIP).Debug("CCBill webhook authentication bypassed - test mode enabled")
 	}
 
-	body, err := webhookutil.NormalizeCCBillPayload(req.Body)
+	prepared, err := webhookutil.PrepareCCBill(req.Body, req.EventType)
 	if err != nil {
+		if errors.Is(err, webhookutil.ErrWebhookEventTypeMissing) {
+			return &WebhookResult{
+				Accepted: false,
+				Error:    "missing eventType parameter",
+			}, nil
+		}
 		return &WebhookResult{
 			Accepted: false,
 			Error:    "invalid webhook payload",
 		}, nil
 	}
-
-	eventType := strings.TrimSpace(req.EventType)
-	if eventType == "" {
-		return &WebhookResult{
-			Accepted: false,
-			Error:    "missing eventType parameter",
-		}, nil
-	}
-
-	uniqueKey := webhookutil.ComputeUniqueKey(services.ProcessorCCBill, "", eventType, body)
-
-	args := riverjobs.WebhookProcessArgs{
-		Provider:  services.ProcessorCCBill,
-		EventType: eventType,
-		Body:      body,
-		ClientIP:  req.ClientIP,
-		UniqueKey: uniqueKey,
-	}
+	args := prepared.QueueArgs(req.ClientIP)
 
 	if err := s.enqueueWebhookJob(ctx, args); err != nil {
 		log.WithError(err).Error("failed to enqueue CCBill webhook")
@@ -197,7 +173,7 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 
 	return &WebhookResult{
 		Accepted:  true,
-		EventType: eventType,
+		EventType: prepared.EventType,
 	}, nil
 }
 
@@ -207,49 +183,32 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 		secret = stripeProc.WebhookSecret
 	}
 
-	sig := req.Headers["Stripe-Signature"]
-	var signatureValidPtr *bool
-	if secret == "" {
-		return &WebhookResult{
-			Accepted: false,
-			Error:    "webhook signature required",
-		}, nil
-	}
-	if sig == "" {
-		return &WebhookResult{
-			Accepted: false,
-			Error:    "missing webhook signature",
-		}, nil
-	}
-	if err := webhookutil.VerifyStripeSignature(secret, sig, req.Body, 5*time.Minute); err != nil {
-		return &WebhookResult{
-			Accepted: false,
-			Error:    "invalid webhook signature",
-		}, nil
-	}
-	truth := true
-	signatureValidPtr = &truth
-
-	eventID, eventType, err := webhookutil.ParseStripeEventMeta(req.Body)
+	prepared, err := webhookutil.PrepareStripe(req.Body, secret, getHeaderValue(req.Headers, "Stripe-Signature"), 5*time.Minute)
 	if err != nil {
+		if errors.Is(err, webhookutil.ErrWebhookSignatureRequired) {
+			return &WebhookResult{
+				Accepted: false,
+				Error:    "webhook signature required",
+			}, nil
+		}
+		if errors.Is(err, webhookutil.ErrWebhookSignatureMissing) {
+			return &WebhookResult{
+				Accepted: false,
+				Error:    "missing webhook signature",
+			}, nil
+		}
+		if errors.Is(err, webhookutil.ErrWebhookSignatureInvalid) {
+			return &WebhookResult{
+				Accepted: false,
+				Error:    "invalid webhook signature",
+			}, nil
+		}
 		return &WebhookResult{
 			Accepted: false,
 			Error:    "invalid webhook payload",
 		}, nil
 	}
-
-	uniqueKey := webhookutil.ComputeUniqueKey(services.ProcessorStripe, eventID, eventType, req.Body)
-
-	args := riverjobs.WebhookProcessArgs{
-		Provider:       services.ProcessorStripe,
-		EventID:        eventID,
-		EventType:      eventType,
-		Body:           req.Body,
-		ClientIP:       req.ClientIP,
-		Signature:      sig,
-		SignatureValid: signatureValidPtr,
-		UniqueKey:      uniqueKey,
-	}
+	args := prepared.QueueArgs(req.ClientIP)
 
 	if err := s.enqueueWebhookJob(ctx, args); err != nil {
 		log.WithError(err).Error("failed to enqueue Stripe webhook")
@@ -258,8 +217,8 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 
 	return &WebhookResult{
 		Accepted:  true,
-		EventID:   eventID,
-		EventType: eventType,
+		EventID:   prepared.EventID,
+		EventType: prepared.EventType,
 	}, nil
 }
 

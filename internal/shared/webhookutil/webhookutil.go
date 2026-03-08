@@ -12,16 +12,133 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/services"
 )
 
 var (
+	ErrWebhookEventIDMissing      = errors.New("missing webhook event id")
+	ErrWebhookEventTypeMissing    = errors.New("missing webhook event type")
+	ErrWebhookPayloadInvalid      = errors.New("invalid webhook payload")
+	ErrWebhookSignatureInvalid    = errors.New("invalid webhook signature")
+	ErrWebhookSignatureMissing    = errors.New("missing webhook signature")
+	ErrWebhookSignatureRequired   = errors.New("webhook signature required")
 	ErrNMIWebhookSecretMissing    = errors.New("nmi webhook secret not configured")
 	ErrNMIWebhookSignatureMissing = errors.New("missing webhook signature")
 	ErrNMIWebhookSignatureInvalid = errors.New("invalid webhook signature")
 )
 
+type Prepared struct {
+	Provider          string
+	EventID           string
+	EventType         string
+	Body              []byte
+	Signature         string
+	SignatureVerified bool
+}
+
+func (p Prepared) UniqueKey() string {
+	return ComputeUniqueKey(p.Provider, p.EventID, p.EventType, p.Body)
+}
+
+func (p Prepared) QueueArgs(clientIP string) riverjobs.WebhookProcessArgs {
+	var signatureValid *bool
+	if p.SignatureVerified {
+		truth := true
+		signatureValid = &truth
+	}
+
+	return riverjobs.WebhookProcessArgs{
+		Provider:       p.Provider,
+		EventID:        p.EventID,
+		EventType:      p.EventType,
+		Body:           p.Body,
+		ClientIP:       clientIP,
+		Signature:      p.Signature,
+		SignatureValid: signatureValid,
+		UniqueKey:      p.UniqueKey(),
+	}
+}
+
 func CanonicalProvider(provider string) string {
 	return strings.Trim(strings.ToLower(provider), " /")
+}
+
+func PrepareCCBill(body []byte, eventType string) (Prepared, error) {
+	normalizedBody, err := NormalizeCCBillPayload(body)
+	if err != nil {
+		return Prepared{}, fmt.Errorf("%w: %v", ErrWebhookPayloadInvalid, err)
+	}
+
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return Prepared{}, ErrWebhookEventTypeMissing
+	}
+
+	return Prepared{
+		Provider:  services.ProcessorCCBill,
+		EventType: eventType,
+		Body:      normalizedBody,
+	}, nil
+}
+
+func PrepareStripe(body []byte, secret, header string, tolerance time.Duration) (Prepared, error) {
+	if strings.TrimSpace(secret) == "" {
+		return Prepared{}, ErrWebhookSignatureRequired
+	}
+
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return Prepared{}, ErrWebhookSignatureMissing
+	}
+
+	if err := VerifyStripeSignature(secret, header, body, tolerance); err != nil {
+		return Prepared{}, fmt.Errorf("%w: %v", ErrWebhookSignatureInvalid, err)
+	}
+
+	eventID, eventType, err := ParseStripeEventMeta(body)
+	if err != nil {
+		return Prepared{}, fmt.Errorf("%w: %v", ErrWebhookPayloadInvalid, err)
+	}
+
+	return Prepared{
+		Provider:          services.ProcessorStripe,
+		EventID:           eventID,
+		EventType:         eventType,
+		Body:              body,
+		Signature:         header,
+		SignatureVerified: true,
+	}, nil
+}
+
+func PrepareNMI(provider string, body []byte, secret, header string) (Prepared, error) {
+	signature, err := ValidateNMISignature(secret, body, header)
+	if err != nil {
+		return Prepared{}, err
+	}
+
+	var payload struct {
+		EventID   string `json:"event_id"`
+		EventType string `json:"event_type"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return Prepared{}, fmt.Errorf("%w: %v", ErrWebhookPayloadInvalid, err)
+	}
+
+	payload.EventID = strings.TrimSpace(payload.EventID)
+	if payload.EventID == "" {
+		return Prepared{}, ErrWebhookEventIDMissing
+	}
+
+	return Prepared{
+		Provider:          CanonicalProvider(provider),
+		EventID:           payload.EventID,
+		EventType:         strings.TrimSpace(payload.EventType),
+		Body:              body,
+		Signature:         signature,
+		SignatureVerified: true,
+	}, nil
 }
 
 func ParseStripeEventMeta(body []byte) (string, string, error) {
