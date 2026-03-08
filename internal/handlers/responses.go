@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"time"
-
 	"github.com/doujins-org/ginapi/response"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/services"
@@ -245,102 +243,4 @@ type SubscriptionEventItem struct {
 	Metadata                map[string]interface{} `json:"metadata,omitempty"`
 	Timestamp               int64                  `json:"timestamp"`  // Unix epoch seconds
 	CreatedAt               int64                  `json:"created_at"` // Unix epoch seconds
-}
-
-// -------------------------------- Payment Method Responses --------------------------------
-
-// SubscriptionSummary represents a minimal subscription for payment method responses
-type SubscriptionSummary struct {
-	ID          string    `json:"id"`
-	DisplayName string    `json:"display_name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-// PaymentMethodResponse represents a Stripe-style payment method (card)
-type PaymentMethodResponse struct {
-	ID             string                       `json:"id"`                 // pm_xxx
-	Object         string                       `json:"object"`             // "payment_method"
-	Type           string                       `json:"type"`               // "card"
-	Processor      string                       `json:"processor"`          // nmi, mobius, etc.
-	Customer       *string                      `json:"customer,omitempty"` // usr_ prefix if available
-	BillingDetails *PaymentMethodBillingDetails `json:"billing_details,omitempty"`
-	Card           *PaymentMethodCardDetails    `json:"card,omitempty"`
-	Metadata       map[string]string            `json:"metadata,omitempty"`
-	Livemode       bool                         `json:"livemode"`
-	Created        int64                        `json:"created"` // Unix epoch seconds
-	FailureReason  *string                      `json:"failure_reason,omitempty"`
-	Subscriptions  []SubscriptionSummary        `json:"subscriptions,omitempty"`
-}
-
-type PaymentMethodBillingDetails struct {
-	Name    *string               `json:"name,omitempty"`
-	Email   *string               `json:"email,omitempty"`
-	Phone   *string               `json:"phone,omitempty"`
-	Address *PaymentMethodAddress `json:"address,omitempty"`
-}
-
-type PaymentMethodAddress struct {
-	Line1      *string `json:"line1,omitempty"`
-	Line2      *string `json:"line2,omitempty"`
-	City       *string `json:"city,omitempty"`
-	State      *string `json:"state,omitempty"`
-	PostalCode *string `json:"postal_code,omitempty"`
-	Country    *string `json:"country,omitempty"`
-}
-
-type PaymentMethodCardDetails struct {
-	Brand    *string `json:"brand,omitempty"` // visa, mastercard, amex
-	Last4    *string `json:"last4,omitempty"`
-	ExpMonth *int    `json:"exp_month,omitempty"`
-	ExpYear  *int    `json:"exp_year,omitempty"`
-}
-
-// PaymentMethodToAPI converts a models.PaymentMethod to a Stripe-compatible PaymentMethodResponse
-func PaymentMethodToAPI(pm *models.PaymentMethod) PaymentMethodResponse {
-	card := &PaymentMethodCardDetails{
-		Brand: pm.CardType,
-		Last4: pm.LastFour,
-	}
-	if pm.ExpiryDate != nil {
-		if month, year, ok := sharedformat.ParseExpiry(*pm.ExpiryDate); ok {
-			card.ExpMonth = &month
-			card.ExpYear = &year
-		}
-	}
-
-	// Compose subscription summaries
-	var subs []SubscriptionSummary
-	for _, s := range pm.Subscriptions {
-		summary := SubscriptionSummary{
-			ID:        s.ID.String(),
-			CreatedAt: s.CreatedAt,
-		}
-		if s.Product != nil {
-			summary.DisplayName = s.Product.DisplayName
-			summary.Description = s.Product.Description
-		}
-		subs = append(subs, summary)
-	}
-
-	return PaymentMethodResponse{
-		ID:            api.FormatPaymentMethodID(pm.ID),
-		Object:        "payment_method",
-		Type:          "card",
-		Processor:     string(pm.Processor),
-		Card:          card,
-		Created:       api.ToUnix(pm.CreatedAt),
-		Metadata:      map[string]string{},
-		FailureReason: pm.FailureReason,
-		Subscriptions: subs,
-	}
-}
-
-// PaymentMethodsToAPI converts a slice of models.PaymentMethod to PaymentMethodResponse slice
-func PaymentMethodsToAPI(methods []*models.PaymentMethod) []PaymentMethodResponse {
-	result := make([]PaymentMethodResponse, len(methods))
-	for i, pm := range methods {
-		result[i] = PaymentMethodToAPI(pm)
-	}
-	return result
 }
