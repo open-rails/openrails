@@ -5,7 +5,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
-	"github.com/open-rails/openrails/internal/handlers"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/authprovider"
@@ -108,7 +107,7 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 }
 
 func RegisterWebhookRoutes(group *gin.RouterGroup, rt *app.Runtime) {
-	group.POST(":provider", wrapHandler(rt, handlers.Webhook))
+	group.POST(":provider", wrapHandler(rt, httphandlers.Webhook))
 }
 
 func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, authMiddleware gin.HandlerFunc) {
