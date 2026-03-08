@@ -15,7 +15,11 @@ type serviceCreateCreditTypeRequest struct {
 	DecimalPlaces int    `json:"decimal_places"`
 }
 
-// POST /v1/credit-types
+type serviceUpdateCreditTypeRequest struct {
+	DisplayName *string `json:"display_name"`
+	IsActive    *bool   `json:"is_active"`
+}
+
 func ServiceCreateCreditType(r *httprequest.Request) {
 	req := new(serviceCreateCreditTypeRequest)
 	if !r.BindJSON(req) {
@@ -41,7 +45,6 @@ func ServiceCreateCreditType(r *httprequest.Request) {
 	r.GinCtx.JSON(http.StatusOK, out)
 }
 
-// GET /v1/credit-types?active_only=true
 func ServiceListCreditTypes(r *httprequest.Request) {
 	activeOnly := true
 	if v := strings.TrimSpace(r.GinCtx.Query("active_only")); v != "" {
@@ -69,12 +72,6 @@ func ServiceListCreditTypes(r *httprequest.Request) {
 	r.GinCtx.JSON(http.StatusOK, items)
 }
 
-type serviceUpdateCreditTypeRequest struct {
-	DisplayName *string `json:"display_name"`
-	IsActive    *bool   `json:"is_active"`
-}
-
-// PATCH /v1/credit-types/:name
 func ServiceUpdateCreditType(r *httprequest.Request) {
 	name := strings.TrimSpace(r.GinCtx.Param("name"))
 	if name == "" {
@@ -102,7 +99,6 @@ func ServiceUpdateCreditType(r *httprequest.Request) {
 	r.GinCtx.JSON(http.StatusOK, out)
 }
 
-// POST /v1/credit-types/:name/deactivate
 func ServiceDeactivateCreditType(r *httprequest.Request) {
 	name := strings.TrimSpace(r.GinCtx.Param("name"))
 	if name == "" {
@@ -121,7 +117,6 @@ func ServiceDeactivateCreditType(r *httprequest.Request) {
 	r.GinCtx.JSON(http.StatusOK, map[string]any{"ok": true})
 }
 
-// POST /v1/credit-types/:name/activate
 func ServiceActivateCreditType(r *httprequest.Request) {
 	name := strings.TrimSpace(r.GinCtx.Param("name"))
 	if name == "" {

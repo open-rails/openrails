@@ -9,7 +9,6 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// POST /v1/catalog/products
 func ServiceCreateProduct(r *httprequest.Request) {
 	var req billingservice.CreateProductRequest
 	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
@@ -29,7 +28,6 @@ func ServiceCreateProduct(r *httprequest.Request) {
 	r.GinCtx.JSON(http.StatusOK, out)
 }
 
-// PATCH /v1/catalog/products/:id
 func ServiceUpdateProduct(r *httprequest.Request) {
 	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
 	if err != nil || id == uuid.Nil {
@@ -54,7 +52,6 @@ func ServiceUpdateProduct(r *httprequest.Request) {
 	r.GinCtx.JSON(http.StatusOK, out)
 }
 
-// POST /v1/catalog/prices
 func ServiceCreatePrice(r *httprequest.Request) {
 	var req billingservice.CreatePriceRequest
 	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
@@ -74,7 +71,6 @@ func ServiceCreatePrice(r *httprequest.Request) {
 	r.GinCtx.JSON(http.StatusOK, out)
 }
 
-// PATCH /v1/catalog/prices/:id
 func ServiceUpdatePrice(r *httprequest.Request) {
 	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
 	if err != nil || id == uuid.Nil {
