@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
 type AdminMobiusPayment struct {
@@ -27,7 +28,7 @@ type AdminMobiusMetrics struct {
 
 // GetAdminUserMobius returns basic Mobius payment details for a user (latest payment)
 // GET /v1/admin/users/:user_id/mobius
-func GetAdminUserMobius(r *Request) {
+func GetAdminUserMobius(r *httprequest.Request) {
 	var path AdminUserPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -84,7 +85,7 @@ func GetAdminUserMobius(r *Request) {
 
 // GetAdminUserMobiusMetrics returns rebill metrics for Mobius payments
 // GET /v1/admin/users/:user_id/mobius/metrics
-func GetAdminUserMobiusMetrics(r *Request) {
+func GetAdminUserMobiusMetrics(r *httprequest.Request) {
 	var path AdminUserPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())

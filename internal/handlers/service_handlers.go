@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -27,7 +28,7 @@ type ServiceEntitlementRecord struct {
 // ServiceGetUserEntitlements returns active entitlements for a user.
 // This is a service-to-service endpoint using X-API-KEY auth.
 // GET /v1/users/:user_id/entitlements?at=RFC3339 (on private port 8060)
-func ServiceGetUserEntitlements(r *Request) {
+func ServiceGetUserEntitlements(r *httprequest.Request) {
 	userID := strings.TrimSpace(r.GinCtx.Param("user_id"))
 	if userID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "user_id is required")

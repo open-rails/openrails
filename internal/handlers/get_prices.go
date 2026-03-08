@@ -6,6 +6,7 @@ import (
 
 	"github.com/doujins-org/ginapi/response"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/authprovider"
@@ -22,7 +23,7 @@ import (
 //   - type: Only return prices of type "recurring" or "one_time"
 //   - limit: Maximum number of items to return (default: 20, max: 100)
 //   - offset: Number of items to skip (default: 0)
-func GetPrices(r *Request) {
+func GetPrices(r *httprequest.Request) {
 	req := new(GetPricesRequest)
 	req.SetDefaults()
 	if !r.BindQuery(req.Query()) {

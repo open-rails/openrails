@@ -4,12 +4,13 @@ import (
 	"net/http"
 	"strconv"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
 // GetAdminUserPayments returns paginated payments for a user
 // GET /v1/admin/users/:user_id/payments?page=1&page_size=50
-func GetAdminUserPayments(r *Request) {
+func GetAdminUserPayments(r *httprequest.Request) {
 	var path AdminUserPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())

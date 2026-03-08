@@ -10,6 +10,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/processors"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/services"
@@ -18,7 +19,7 @@ import (
 	"github.com/riverqueue/river"
 )
 
-func Webhook(r *Request) {
+func Webhook(r *httprequest.Request) {
 	// Single path segment: /v1/webhooks/:provider
 	// Provider can be: mobius, ccbill, solana
 	// NMI is the gateway used by mobius, not a provider itself
@@ -90,7 +91,7 @@ func Webhook(r *Request) {
 	}
 }
 
-func enqueueCCBillWebhook(r *Request, clientIP string) bool {
+func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {
 	body, err := readRequestBody(r.Request.Body)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
@@ -128,7 +129,7 @@ func enqueueCCBillWebhook(r *Request, clientIP string) bool {
 	return true
 }
 
-func enqueueStripeWebhook(r *Request, clientIP string) bool {
+func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 	body, err := readRequestBody(r.Request.Body)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
@@ -189,7 +190,7 @@ func enqueueStripeWebhook(r *Request, clientIP string) bool {
 	return true
 }
 
-func enqueueWebhookJob(r *Request, args riverjobs.WebhookProcessArgs) error {
+func enqueueWebhookJob(r *httprequest.Request, args riverjobs.WebhookProcessArgs) error {
 	if r.State == nil || r.State.RiverProducer == nil {
 		return fmt.Errorf("river producer unavailable")
 	}
@@ -206,7 +207,7 @@ func enqueueWebhookJob(r *Request, args riverjobs.WebhookProcessArgs) error {
 	return err
 }
 
-func enqueueNMIWebhook(r *Request, provider string, clientIP string) bool {
+func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string) bool {
 	// Read the request body for signature verification
 	body, err := readRequestBody(r.Request.Body)
 	if err != nil {

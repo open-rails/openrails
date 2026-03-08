@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
 type AdminCCBillPayment struct {
@@ -23,7 +24,7 @@ type AdminCCBillMetrics struct {
 
 // GetAdminUserCCBill returns basic CCBill payment details for a user (latest payment)
 // GET /v1/admin/users/:user_id/ccbill
-func GetAdminUserCCBill(r *Request) {
+func GetAdminUserCCBill(r *httprequest.Request) {
 	var path AdminUserPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -69,7 +70,7 @@ func GetAdminUserCCBill(r *Request) {
 
 // GetAdminUserCCBillMetrics returns rebill metrics for CCBill payments
 // GET /v1/admin/users/:user_id/ccbill/metrics
-func GetAdminUserCCBillMetrics(r *Request) {
+func GetAdminUserCCBillMetrics(r *httprequest.Request) {
 	var path AdminUserPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())

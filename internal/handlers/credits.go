@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin/binding"
 	"github.com/google/uuid"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -23,7 +24,7 @@ type creditBalanceResponse struct {
 	HeldBalance   int64  `json:"held_balance"`
 }
 
-func GetMyCredits(r *Request) {
+func GetMyCredits(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
@@ -72,7 +73,7 @@ func GetMyCredits(r *Request) {
 	r.SuccessJSON(resp)
 }
 
-func GetMyCreditsType(r *Request) {
+func GetMyCreditsType(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
@@ -105,7 +106,7 @@ func GetMyCreditsType(r *Request) {
 	})
 }
 
-func GetMyCreditTransactions(r *Request) {
+func GetMyCreditTransactions(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
@@ -157,7 +158,7 @@ type serviceDepositRequest struct {
 
 // ServiceDepositCredits deposits/grants credits to a user.
 // POST /v1/credits/deposit (private port 8060, X-API-KEY)
-func ServiceDepositCredits(r *Request) {
+func ServiceDepositCredits(r *httprequest.Request) {
 	var req serviceDepositRequest
 	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid request")
@@ -195,7 +196,7 @@ func ServiceDepositCredits(r *Request) {
 	r.SuccessJSON(trx)
 }
 
-func ServiceWithdrawCredits(r *Request) {
+func ServiceWithdrawCredits(r *httprequest.Request) {
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
@@ -303,7 +304,7 @@ type serviceHoldRequest struct {
 	ExpiresAt  int64  `json:"expires_at" binding:"required"` // epoch seconds
 }
 
-func ServiceHoldCredits(r *Request) {
+func ServiceHoldCredits(r *httprequest.Request) {
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
@@ -393,7 +394,7 @@ type serviceCaptureRequest struct {
 	MaxNegative   *int64 `json:"max_negative"` // absolute units
 }
 
-func ServiceCaptureHold(r *Request) {
+func ServiceCaptureHold(r *httprequest.Request) {
 	idParam := strings.TrimSpace(r.GinCtx.Param("id"))
 	if strings.EqualFold(idParam, "batch") {
 		type captureBatchItem struct {
@@ -496,7 +497,7 @@ func ServiceCaptureHold(r *Request) {
 	r.SuccessJSON(trx)
 }
 
-func ServiceReleaseHold(r *Request) {
+func ServiceReleaseHold(r *httprequest.Request) {
 	idParam := strings.TrimSpace(r.GinCtx.Param("id"))
 	if strings.EqualFold(idParam, "batch") {
 		type releaseBatchItem struct {
@@ -555,7 +556,7 @@ func ServiceReleaseHold(r *Request) {
 	r.SuccessJSON(map[string]any{"ok": true})
 }
 
-func ServiceGetUserCredits(r *Request) {
+func ServiceGetUserCredits(r *httprequest.Request) {
 	userID := strings.TrimSpace(r.GinCtx.Param("user_id"))
 	if userID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "user_id required")
@@ -579,7 +580,7 @@ func ServiceGetUserCredits(r *Request) {
 
 // ServiceLookupCreditTransaction looks up a single credit transaction by its idempotency key.
 // GET /v1/credits/transactions/lookup?user_id=...&credit_type=...&source=...&source_id=...&transaction_type=hold
-func ServiceLookupCreditTransaction(r *Request) {
+func ServiceLookupCreditTransaction(r *httprequest.Request) {
 	userID := strings.TrimSpace(r.Request.URL.Query().Get("user_id"))
 	if userID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "user_id required")

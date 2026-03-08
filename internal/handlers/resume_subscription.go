@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/authprovider"
@@ -14,7 +15,7 @@ import (
 
 // ResumeSubscription resumes a cancelled Stripe subscription (cancel_at_period_end=false).
 // POST /v1/me/subscriptions/:id/resume
-func ResumeSubscription(r *Request) {
+func ResumeSubscription(r *httprequest.Request) {
 	uc, ok := authprovider.UserContextFromGin(r.GinCtx)
 	if !ok || uc.UserID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")

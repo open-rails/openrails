@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -15,7 +16,7 @@ type BillingStatusResponse struct {
 	Entitlements          []models.Entitlement               `json:"entitlements,omitempty"`
 }
 
-func GetMyBillingStatus(r *Request) {
+func GetMyBillingStatus(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil {
 		r.ErrorJSON(http.StatusUnauthorized, "unauthorized")

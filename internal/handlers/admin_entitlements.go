@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -26,7 +27,7 @@ type GrantEntitlementRequest struct {
 
 // GetAdminUserEntitlements returns active entitlements for a user (admin action)
 // GET /v1/admin/users/:user_id/entitlements?at=RFC3339
-func GetAdminUserEntitlements(r *Request) {
+func GetAdminUserEntitlements(r *httprequest.Request) {
 	var path AdminUserEntitlementsPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -94,7 +95,7 @@ func GetAdminUserEntitlements(r *Request) {
 
 // GrantAdminEntitlement grants an entitlement to a user (admin action)
 // POST /v1/admin/users/:user_id/entitlements
-func GrantAdminEntitlement(r *Request) {
+func GrantAdminEntitlement(r *httprequest.Request) {
 	var path AdminUserEntitlementsPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -170,7 +171,7 @@ func GrantAdminEntitlement(r *Request) {
 
 // RevokeAdminEntitlement revokes an entitlement immediately (admin action)
 // DELETE /v1/admin/users/:user_id/entitlements/:id
-func RevokeAdminEntitlement(r *Request) {
+func RevokeAdminEntitlement(r *httprequest.Request) {
 	var path AdminEntitlementPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())

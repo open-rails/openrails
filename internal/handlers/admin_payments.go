@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
@@ -29,7 +30,7 @@ type RefundRequest struct {
 //
 // For NMI/Mobius and Stripe: Issues the refund through the processor API
 // For CCBill: Returns an error - refunds must be done through CCBill's admin portal
-func AdminRefundPayment(r *Request) {
+func AdminRefundPayment(r *httprequest.Request) {
 	var path PaymentPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -133,7 +134,7 @@ func AdminRefundPayment(r *Request) {
 
 // GetAdminPayments returns a paginated list of payments with filters
 // GET /v1/admin/payments
-func GetAdminPayments(r *Request) {
+func GetAdminPayments(r *httprequest.Request) {
 	queryOpts := query.QueryOptions[services.GetPaymentsFilters]{}
 	if err := r.Inner().ShouldBindQuery(&queryOpts); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -162,7 +163,7 @@ func GetAdminPayments(r *Request) {
 
 // GetAdminPayment returns a single payment with full details including refunds
 // GET /v1/admin/payments/:id
-func GetAdminPayment(r *Request) {
+func GetAdminPayment(r *httprequest.Request) {
 	var path PaymentPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())

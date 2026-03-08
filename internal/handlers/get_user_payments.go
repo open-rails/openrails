@@ -4,12 +4,13 @@ import (
 	"net/http"
 	"strconv"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
 // GetUserPayments retrieves the user's one-off payments
-func GetUserPayments(r *Request) {
+func GetUserPayments(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")

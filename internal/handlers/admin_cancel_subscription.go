@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -12,7 +13,7 @@ type AdminCancelSubscriptionRequest struct {
 }
 
 // AdminCancelSubscription cancels a subscription by subscription ID (admin)
-func AdminCancelSubscription(r *Request) {
+func AdminCancelSubscription(r *httprequest.Request) {
 	subscriptionID, err := api.ParseSubscriptionID(r.GinCtx.Param("id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
@@ -14,7 +15,7 @@ import (
 
 // CancelSubscription cancels a user's subscription by ID
 // POST /v1/me/subscriptions/:id/cancel
-func CancelSubscription(r *Request) {
+func CancelSubscription(r *httprequest.Request) {
 	req := new(CancelSubscriptionRequest)
 	if !r.BindJSON(req) {
 		return

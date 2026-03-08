@@ -11,7 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/handlers"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/middleware"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -128,9 +128,9 @@ func (s *Server) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 	return s.newHTTPHandlerEngine(opts)
 }
 
-func (s *Server) wrap(fn func(r *handlers.Request)) func(c *gin.Context) {
+func (s *Server) wrap(fn func(r *httprequest.Request)) func(c *gin.Context) {
 	return func(c *gin.Context) {
-		fn(handlers.NewRequest(c, s.runtime))
+		fn(httprequest.New(c, s.runtime))
 	}
 }
 

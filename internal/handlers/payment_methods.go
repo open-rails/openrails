@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/doujins-org/ginapi/response"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
@@ -16,7 +17,7 @@ import (
 )
 
 // ListPaymentMethods returns the user's payment methods (optionally including inactive)
-func CreatePaymentMethod(r *Request) {
+func CreatePaymentMethod(r *httprequest.Request) {
 	if r.State == nil || r.State.VaultService == nil {
 		r.ErrorJSON(http.StatusServiceUnavailable, "payment vault unavailable")
 		return
@@ -93,7 +94,7 @@ func CreatePaymentMethod(r *Request) {
 }
 
 // UpdatePaymentMethod replaces the stored payment method using a tokenized payload
-func UpdatePaymentMethod(r *Request) {
+func UpdatePaymentMethod(r *httprequest.Request) {
 	if r.State == nil || r.State.VaultService == nil {
 		r.ErrorJSON(http.StatusServiceUnavailable, "payment vault unavailable")
 		return
@@ -181,7 +182,7 @@ func UpdatePaymentMethod(r *Request) {
 	r.SuccessJSON(PaymentMethodToAPI(updated))
 }
 
-func ListPaymentMethods(r *Request) {
+func ListPaymentMethods(r *httprequest.Request) {
 	req := new(ListPaymentMethodsRequest)
 	req.SetDefaults()
 	if !r.BindQuery(req.Query()) {
@@ -249,7 +250,7 @@ func ListPaymentMethods(r *Request) {
 }
 
 // DeletePaymentMethod removes a payment method by ID
-func DeletePaymentMethod(r *Request) {
+func DeletePaymentMethod(r *httprequest.Request) {
 	req := new(DeletePaymentMethodRequest)
 	if !r.BindURI(req.Path()) {
 		return

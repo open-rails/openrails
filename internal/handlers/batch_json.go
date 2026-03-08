@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
 // readJSONSingleOrArrayRaw reads the request body and returns:
@@ -13,7 +15,7 @@ import (
 //
 // For batch mode we return RawMessages so handlers can validate and execute each item
 // independently (partial success is allowed).
-func readJSONSingleOrArrayRaw(r *Request) (items []json.RawMessage, isBatch bool, err error) {
+func readJSONSingleOrArrayRaw(r *httprequest.Request) (items []json.RawMessage, isBatch bool, err error) {
 	if r == nil || r.Request == nil || r.Request.Body == nil {
 		return nil, false, fmt.Errorf("invalid request")
 	}

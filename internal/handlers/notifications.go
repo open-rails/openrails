@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/query"
 )
@@ -14,7 +15,7 @@ import (
 //   - limit: max results (1-100, default 20)
 //   - offset: pagination offset (default 0)
 //   - seen: filter by read status (true, false, or omit for all)
-func GetNotifications(r *Request) {
+func GetNotifications(r *httprequest.Request) {
 	user := r.GetUser()
 
 	// Parse query params
@@ -55,7 +56,7 @@ func GetNotifications(r *Request) {
 }
 
 // MarkNotificationRead marks a notification as read for the user
-func MarkNotificationRead(r *Request) {
+func MarkNotificationRead(r *httprequest.Request) {
 	user := r.GetUser()
 	idStr := r.Param("id")
 	id, err := uuid.Parse(idStr)
@@ -71,7 +72,7 @@ func MarkNotificationRead(r *Request) {
 }
 
 // GetUnreadNotificationCount returns the user's unread count
-func GetUnreadNotificationCount(r *Request) {
+func GetUnreadNotificationCount(r *httprequest.Request) {
 	user := r.GetUser()
 	f := false
 	q := &query.QueryOptions[services.GetNotificationsFilters]{

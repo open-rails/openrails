@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -14,7 +15,7 @@ type portalResponse struct {
 
 // CreatePortalSession creates a Stripe customer portal session.
 // POST /v1/stripe/portal
-func CreatePortalSession(r *Request) {
+func CreatePortalSession(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")

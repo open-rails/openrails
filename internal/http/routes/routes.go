@@ -6,6 +6,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/handlers"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
@@ -13,9 +14,9 @@ type Options struct {
 	AuthProvider authprovider.Provider
 }
 
-func wrapHandler(rt *app.Runtime, fn func(r *handlers.Request)) gin.HandlerFunc {
+func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		fn(handlers.NewRequest(c, rt))
+		fn(httprequest.New(c, rt))
 	}
 }
 
@@ -24,7 +25,7 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 		panic("AuthProvider is required for user routes")
 	}
 
-	wrap := func(fn func(r *handlers.Request)) gin.HandlerFunc {
+	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 
@@ -72,7 +73,7 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 		panic("AuthProvider is required for admin routes")
 	}
 
-	wrap := func(fn func(r *handlers.Request)) gin.HandlerFunc {
+	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 
@@ -110,7 +111,7 @@ func RegisterWebhookRoutes(group *gin.RouterGroup, rt *app.Runtime) {
 }
 
 func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, authMiddleware gin.HandlerFunc) {
-	wrap := func(fn func(r *handlers.Request)) gin.HandlerFunc {
+	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 

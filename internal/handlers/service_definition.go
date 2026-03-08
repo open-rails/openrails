@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -15,7 +16,7 @@ type serviceCreateCreditTypeRequest struct {
 }
 
 // POST /v1/credit-types
-func ServiceCreateCreditType(r *Request) {
+func ServiceCreateCreditType(r *httprequest.Request) {
 	req := new(serviceCreateCreditTypeRequest)
 	if !r.BindJSON(req) {
 		return
@@ -41,7 +42,7 @@ func ServiceCreateCreditType(r *Request) {
 }
 
 // GET /v1/credit-types?active_only=true
-func ServiceListCreditTypes(r *Request) {
+func ServiceListCreditTypes(r *httprequest.Request) {
 	activeOnly := true
 	if v := strings.TrimSpace(r.GinCtx.Query("active_only")); v != "" {
 		switch strings.ToLower(v) {
@@ -74,7 +75,7 @@ type serviceUpdateCreditTypeRequest struct {
 }
 
 // PATCH /v1/credit-types/:name
-func ServiceUpdateCreditType(r *Request) {
+func ServiceUpdateCreditType(r *httprequest.Request) {
 	name := strings.TrimSpace(r.GinCtx.Param("name"))
 	if name == "" {
 		r.ErrorJSON(http.StatusBadRequest, "name is required")
@@ -102,7 +103,7 @@ func ServiceUpdateCreditType(r *Request) {
 }
 
 // POST /v1/credit-types/:name/deactivate
-func ServiceDeactivateCreditType(r *Request) {
+func ServiceDeactivateCreditType(r *httprequest.Request) {
 	name := strings.TrimSpace(r.GinCtx.Param("name"))
 	if name == "" {
 		r.ErrorJSON(http.StatusBadRequest, "name is required")
@@ -121,7 +122,7 @@ func ServiceDeactivateCreditType(r *Request) {
 }
 
 // POST /v1/credit-types/:name/activate
-func ServiceActivateCreditType(r *Request) {
+func ServiceActivateCreditType(r *httprequest.Request) {
 	name := strings.TrimSpace(r.GinCtx.Param("name"))
 	if name == "" {
 		r.ErrorJSON(http.StatusBadRequest, "name is required")

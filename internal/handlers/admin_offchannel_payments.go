@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -29,7 +30,7 @@ type AdminOffChannelPaymentRequest struct {
 // and grants entitlements/credits sourced from the resulting Payment.
 //
 // POST /v1/admin/users/:user_id/payments/off-channel
-func AdminCreateOffChannelPayment(r *Request) {
+func AdminCreateOffChannelPayment(r *httprequest.Request) {
 	var path AdminOffChannelPaymentPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())

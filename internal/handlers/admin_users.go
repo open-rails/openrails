@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
@@ -25,7 +26,7 @@ type AdminUserBillingProfile struct {
 
 // GetAdminUserBillingProfile returns a user's complete billing profile
 // GET /v1/admin/users/:user_id
-func GetAdminUserBillingProfile(r *Request) {
+func GetAdminUserBillingProfile(r *httprequest.Request) {
 	var path AdminUserPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -71,7 +72,7 @@ func GetAdminUserBillingProfile(r *Request) {
 
 // GetAdminSubscriptions returns a paginated list of subscriptions with filters
 // GET /v1/admin/subscriptions
-func GetAdminSubscriptions(r *Request) {
+func GetAdminSubscriptions(r *httprequest.Request) {
 	queryOpts := query.QueryOptions[services.GetSubscriptionsFilters]{
 		Limit:  50,
 		Offset: 0,
@@ -113,7 +114,7 @@ type AdminSubscriptionPath struct {
 
 // GetAdminSubscription returns a single subscription with full details including payments
 // GET /v1/admin/subscriptions/:id
-func GetAdminSubscription(r *Request) {
+func GetAdminSubscription(r *httprequest.Request) {
 	var path AdminSubscriptionPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())

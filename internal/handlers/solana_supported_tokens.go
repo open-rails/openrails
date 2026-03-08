@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 
 	"github.com/google/uuid"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	jupiter "github.com/open-rails/openrails/internal/integrations/jupiter"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
@@ -34,7 +35,7 @@ type SupportedTokensQuery struct {
 //   - price_id: Calculate quotes for each token based on a price
 //   - checkout_session_id: Use the price from a checkout session
 //   - wallet: Fetch on-chain balances for a wallet address
-func GetSupportedTokens(r *Request) {
+func GetSupportedTokens(r *httprequest.Request) {
 	cfg := r.State.Config
 	solanaProc := cfg.GetSolanaProcessor()
 	if cfg == nil || solanaProc == nil {
@@ -165,7 +166,7 @@ func GetSupportedTokens(r *Request) {
 }
 
 // resolvePriceFromID fetches price amount and currency from a price ID.
-func resolvePriceFromID(ctx context.Context, r *Request, priceIDStr string) (int64, string, string) {
+func resolvePriceFromID(ctx context.Context, r *httprequest.Request, priceIDStr string) (int64, string, string) {
 	if r.State.PriceService == nil {
 		return 0, "", "price service unavailable"
 	}
@@ -184,7 +185,7 @@ func resolvePriceFromID(ctx context.Context, r *Request, priceIDStr string) (int
 }
 
 // resolvePriceFromSession fetches price amount and currency from a checkout session.
-func resolvePriceFromSession(ctx context.Context, r *Request, sessionIDStr string) (int64, string, string) {
+func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessionIDStr string) (int64, string, string) {
 	if r.State.CheckoutSessionService == nil {
 		return 0, "", "checkout session service unavailable"
 	}
@@ -210,7 +211,7 @@ func resolvePriceFromSession(ctx context.Context, r *Request, sessionIDStr strin
 }
 
 // fetchWalletBalances fetches SOL and SPL token balances for a wallet.
-func fetchWalletBalances(ctx context.Context, r *Request, walletStr string, mints []string) (map[string]uint64, uint64, string) {
+func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr string, mints []string) (map[string]uint64, uint64, string) {
 	if r.State.SolanaRPC == nil {
 		return nil, 0, "solana rpc unavailable"
 	}
@@ -243,7 +244,7 @@ func fetchWalletBalances(ctx context.Context, r *Request, walletStr string, mint
 }
 
 // calculateQuoteForToken calculates the quote for a single token.
-func calculateQuoteForToken(ctx context.Context, r *Request, tokenCfg config.SolanaToken, amountCents int64, currency string, tokenPriceUSD float64, quotedAt, expiresAt time.Time) *TokenQuote {
+func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenCfg config.SolanaToken, amountCents int64, currency string, tokenPriceUSD float64, quotedAt, expiresAt time.Time) *TokenQuote {
 	// Calculate using the service function
 	quote, err := services.CalculateTokenQuote(ctx, tokenCfg, amountCents, currency, r.State.FXProvider)
 	if err != nil {

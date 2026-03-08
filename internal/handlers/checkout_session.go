@@ -5,13 +5,14 @@ import (
 	"net/http"
 	"strings"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
 
 // CreateCheckoutSession handles POST /v1/checkout
-func CreateCheckoutSession(r *Request) {
+func CreateCheckoutSession(r *httprequest.Request) {
 	var req CheckoutSessionCreateRequest
 	if !r.BindJSON(&req) {
 		return
@@ -74,7 +75,7 @@ func CreateCheckoutSession(r *Request) {
 }
 
 // GetCheckoutSession handles GET /v1/checkout/:id
-func GetCheckoutSession(r *Request) {
+func GetCheckoutSession(r *httprequest.Request) {
 	sessionID := strings.TrimSpace(r.GinCtx.Param("id"))
 	if sessionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
@@ -107,7 +108,7 @@ func GetCheckoutSession(r *Request) {
 }
 
 // ConfirmCheckoutSession handles POST /v1/checkout/:id/confirm
-func ConfirmCheckoutSession(r *Request) {
+func ConfirmCheckoutSession(r *httprequest.Request) {
 	sessionID := strings.TrimSpace(r.GinCtx.Param("id"))
 	if sessionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
@@ -152,7 +153,7 @@ func ConfirmCheckoutSession(r *Request) {
 	r.SuccessJSON(resp)
 }
 
-func writeCheckoutSessionError(r *Request, err error) {
+func writeCheckoutSessionError(r *httprequest.Request, err error) {
 	var vaultErr *services.VaultError
 	if errors.As(err, &vaultErr) {
 		code := api.CodePaymentFailed

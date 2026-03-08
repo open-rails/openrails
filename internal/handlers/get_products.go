@@ -5,6 +5,7 @@ import (
 
 	"github.com/doujins-org/ginapi/response"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
@@ -17,7 +18,7 @@ import (
 //     Non-admins can only see active=true; any other value is silently ignored.
 //   - limit: Maximum items to return (default: 20, max: 100)
 //   - offset: Number of items to skip (default: 0)
-func GetProducts(r *Request) {
+func GetProducts(r *httprequest.Request) {
 	req := new(GetProductsRequest)
 	req.SetDefaults()
 	if !r.BindQuery(req.Query()) {

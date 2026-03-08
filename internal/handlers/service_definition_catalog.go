@@ -5,11 +5,12 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // POST /v1/catalog/products
-func ServiceCreateProduct(r *Request) {
+func ServiceCreateProduct(r *httprequest.Request) {
 	var req billingservice.CreateProductRequest
 	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid request")
@@ -29,7 +30,7 @@ func ServiceCreateProduct(r *Request) {
 }
 
 // PATCH /v1/catalog/products/:id
-func ServiceUpdateProduct(r *Request) {
+func ServiceUpdateProduct(r *httprequest.Request) {
 	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
@@ -54,7 +55,7 @@ func ServiceUpdateProduct(r *Request) {
 }
 
 // POST /v1/catalog/prices
-func ServiceCreatePrice(r *Request) {
+func ServiceCreatePrice(r *httprequest.Request) {
 	var req billingservice.CreatePriceRequest
 	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid request")
@@ -74,7 +75,7 @@ func ServiceCreatePrice(r *Request) {
 }
 
 // PATCH /v1/catalog/prices/:id
-func ServiceUpdatePrice(r *Request) {
+func ServiceUpdatePrice(r *httprequest.Request) {
 	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")

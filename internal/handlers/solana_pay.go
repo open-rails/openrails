@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -30,7 +31,7 @@ type SolanaPayPostResponse struct {
 // GetSolanaPay handles GET /v1/checkout/:id/solana-pay
 // Returns label and icon per Solana Pay Transaction Request spec.
 // This endpoint is called by wallets when scanning a Solana Pay QR code.
-func GetSolanaPay(r *Request) {
+func GetSolanaPay(r *httprequest.Request) {
 	sessionID := strings.TrimSpace(r.GinCtx.Param("id"))
 	if sessionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
@@ -79,7 +80,7 @@ func GetSolanaPay(r *Request) {
 // PostSolanaPay handles POST /v1/checkout/:id/solana-pay
 // Accepts wallet account, builds transaction, returns base64-encoded transaction.
 // This endpoint is called by wallets to get a transaction to sign.
-func PostSolanaPay(r *Request) {
+func PostSolanaPay(r *httprequest.Request) {
 	sessionID := strings.TrimSpace(r.GinCtx.Param("id"))
 	if sessionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
@@ -120,7 +121,7 @@ func PostSolanaPay(r *Request) {
 	})
 }
 
-func writeSolanaPayError(r *Request, err error) {
+func writeSolanaPayError(r *httprequest.Request, err error) {
 	switch {
 	case err == services.ErrCheckoutSessionNotFound:
 		r.ErrorJSON(http.StatusNotFound, "checkout session not found")

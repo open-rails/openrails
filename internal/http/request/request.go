@@ -1,4 +1,4 @@
-package handlers
+package request
 
 import (
 	"errors"
@@ -27,7 +27,7 @@ type Request struct {
 	Clock   clockwork.Clock
 }
 
-func NewRequest(ctx *gin.Context, runtime *app.Runtime) *Request {
+func New(ctx *gin.Context, runtime *app.Runtime) *Request {
 	return &Request{
 		GinCtx:  ctx,
 		State:   runtime,
@@ -41,15 +41,11 @@ func (r *Request) AbortJSON(code int, msg string) {
 	r.GinCtx.AbortWithStatusJSON(code, api.SimpleErrorResponse(code, msg))
 }
 
-// ErrorJSON sends a structured error response in Stripe's format
-// The error type is inferred from the HTTP status code
 func (r *Request) ErrorJSON(code int, msg string) {
 	logrus.Error(msg)
 	r.GinCtx.JSON(code, api.SimpleErrorResponse(code, msg))
 }
 
-// APIError sends a structured error response with full error details
-// Example: r.APIError(api.InvalidParamError("price_id", "Price ID must be a valid UUID"))
 func (r *Request) APIError(err *api.APIError) {
 	logrus.WithFields(logrus.Fields{
 		"type":   err.Type,
@@ -71,12 +67,10 @@ func (r *Request) SuccessJSONMessage(msg string) {
 }
 
 func (r *Request) SuccessJSONPaginated(data any, total int64, limit, offset int) {
-	// Calculate has_more based on whether there are items beyond current page
 	dataLen := 0
 	if slice, ok := data.([]any); ok {
 		dataLen = len(slice)
 	} else {
-		// Use reflection for typed slices
 		v := reflect.ValueOf(data)
 		if v.Kind() == reflect.Slice {
 			dataLen = v.Len()
@@ -216,7 +210,6 @@ func (r *Request) GetState() *app.Runtime {
 func normaliseBindError(err error) string {
 	var verr validator.ValidationErrors
 	if errors.As(err, &verr) {
-		// return first field error message for brevity
 		if len(verr) > 0 {
 			e := verr[0]
 			return strings.ToLower(e.Field()) + " is invalid"

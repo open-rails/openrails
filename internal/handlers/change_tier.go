@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -16,7 +17,7 @@ type ChangeTierRequest struct {
 
 // ChangeTier handles POST /v1/me/subscriptions/:id/change-tier
 // This endpoint provides a unified interface for subscription tier changes across all processors.
-func ChangeTier(r *Request) {
+func ChangeTier(r *httprequest.Request) {
 	var req ChangeTierRequest
 	if !r.BindJSON(&req) {
 		return
@@ -63,7 +64,7 @@ func ChangeTier(r *Request) {
 	r.SuccessJSON(resp)
 }
 
-func writeChangeTierError(r *Request, err error) {
+func writeChangeTierError(r *httprequest.Request, err error) {
 	var tierErr *services.TierChangeError
 	if errors.As(err, &tierErr) {
 		r.ErrorJSON(tierErr.HTTPStatus, tierErr.Message)

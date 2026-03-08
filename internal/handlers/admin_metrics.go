@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 )
 
-func GetAdminMetricsSummary(r *Request) {
+func GetAdminMetricsSummary(r *httprequest.Request) {
 	rng, err := parseMetricsRange(r, 30)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -34,7 +35,7 @@ func GetAdminMetricsSummary(r *Request) {
 	r.SuccessJSON(resp)
 }
 
-func GetAdminMetricsRevenue(r *Request) {
+func GetAdminMetricsRevenue(r *httprequest.Request) {
 	rng, err := parseMetricsRange(r, 30)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -59,7 +60,7 @@ func GetAdminMetricsRevenue(r *Request) {
 	r.SuccessJSON(resp)
 }
 
-func GetAdminMetricsSubscriptions(r *Request) {
+func GetAdminMetricsSubscriptions(r *httprequest.Request) {
 	rng, err := parseMetricsRange(r, 30)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -84,7 +85,7 @@ func GetAdminMetricsSubscriptions(r *Request) {
 	r.SuccessJSON(resp)
 }
 
-func GetAdminMetricsProcessors(r *Request) {
+func GetAdminMetricsProcessors(r *httprequest.Request) {
 	rng, err := parseMetricsRange(r, 30)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -108,7 +109,7 @@ func GetAdminMetricsProcessors(r *Request) {
 	r.SuccessJSON(resp)
 }
 
-func GetAdminMetricsChurn(r *Request) {
+func GetAdminMetricsChurn(r *httprequest.Request) {
 	rng, err := parseMetricsRange(r, 180)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -132,7 +133,7 @@ func GetAdminMetricsChurn(r *Request) {
 	r.SuccessJSON(resp)
 }
 
-func parseMetricsRange(r *Request, defaultDays int) (services.MetricsDateRange, error) {
+func parseMetricsRange(r *httprequest.Request, defaultDays int) (services.MetricsDateRange, error) {
 	startParam := strings.TrimSpace(r.Query("start"))
 	endParam := strings.TrimSpace(r.Query("end"))
 	periodParam := strings.TrimSpace(r.Query("period"))

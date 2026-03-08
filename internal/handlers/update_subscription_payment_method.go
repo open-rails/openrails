@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
@@ -29,7 +30,7 @@ type UpdateSubscriptionPaymentMethodBody struct {
 //   - Payment method must be NMI-backed
 //   - Subscription must be NMI-backed (not CCBill/Solana)
 //   - Subscription must be active or past_due (not cancelled)
-func UpdateSubscriptionPaymentMethod(r *Request) {
+func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil {
 		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")

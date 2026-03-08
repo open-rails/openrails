@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/query"
 )
@@ -13,7 +14,7 @@ import (
 //   - status: filter by status (active, cancelled, past_due, all). Default: non-cancelled
 //   - limit: max results (1-100, default 10)
 //   - offset: pagination offset (default 0)
-func GetMySubscriptions(r *Request) {
+func GetMySubscriptions(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
@@ -24,7 +25,7 @@ func GetMySubscriptions(r *Request) {
 }
 
 // listSubscriptionsForUser handles the core listing logic and is reused by customer-scoped routes.
-func listSubscriptionsForUser(r *Request, userID string) {
+func listSubscriptionsForUser(r *httprequest.Request, userID string) {
 	// Parse query parameters
 	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 100 {
