@@ -45,7 +45,7 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 
 	me := group.Group("/me")
 	me.Use(opts.AuthProvider.Required())
-	me.GET("/status", wrap(handlers.GetMyBillingStatus))
+	me.GET("/status", wrap(httphandlers.GetMyBillingStatus))
 	me.GET("/subscriptions", wrap(httphandlers.GetMySubscriptions))
 	me.GET("/subscriptions/:id", wrap(httphandlers.GetSubscription))
 	me.PUT("/subscriptions/:id/payment-method", wrap(handlers.UpdateSubscriptionPaymentMethod))

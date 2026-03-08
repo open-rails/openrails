@@ -23,7 +23,6 @@ func GetMyBillingStatus(r *httprequest.Request) {
 		return
 	}
 
-	// Subscription details
 	var sub *services.UserSubscriptionResponse
 	var next *time.Time
 	var hasActive bool
@@ -32,7 +31,6 @@ func GetMyBillingStatus(r *httprequest.Request) {
 		if err == nil && resp != nil {
 			sub = resp
 			if resp.Subscription != nil {
-				// Check if subscription is active
 				hasActive = resp.Subscription.Status == models.StatusActive
 				if resp.Subscription.CurrentPeriodEndsAt != nil {
 					next = resp.Subscription.CurrentPeriodEndsAt
@@ -41,7 +39,6 @@ func GetMyBillingStatus(r *httprequest.Request) {
 		}
 	}
 
-	// List entitlements (optional)
 	var ents []models.Entitlement
 	if r.State.EntitlementService != nil {
 		list, err := r.State.EntitlementService.ListByUser(r.Request.Context(), user.ID)

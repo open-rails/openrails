@@ -13,7 +13,7 @@ import (
 
 	"github.com/doujins-org/ginapi/response"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/handlers"
+	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -311,7 +311,7 @@ func TestGetMyBillingStatusEndpoint(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var response handlers.BillingStatusResponse
+		var response httphandlers.BillingStatusResponse
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
@@ -336,7 +336,7 @@ func TestGetMyBillingStatusEndpoint(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var response handlers.BillingStatusResponse
+		var response httphandlers.BillingStatusResponse
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
