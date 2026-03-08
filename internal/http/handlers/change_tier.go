@@ -10,13 +10,10 @@ import (
 	"github.com/open-rails/openrails/pkg/api"
 )
 
-// ChangeTierRequest is the request body for POST /v1/me/subscriptions/:id/change-tier
 type ChangeTierRequest struct {
 	PriceID string `json:"price_id" binding:"required"`
 }
 
-// ChangeTier handles POST /v1/me/subscriptions/:id/change-tier
-// This endpoint provides a unified interface for subscription tier changes across all processors.
 func ChangeTier(r *httprequest.Request) {
 	var req ChangeTierRequest
 	if !r.BindJSON(&req) {
@@ -29,7 +26,6 @@ func ChangeTier(r *httprequest.Request) {
 		return
 	}
 
-	// Parse subscription ID from path
 	subscriptionIDStr := r.GinCtx.Param("id")
 	if subscriptionIDStr == "" {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")

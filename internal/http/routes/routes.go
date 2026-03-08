@@ -51,7 +51,7 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 	me.PUT("/subscriptions/:id/payment-method", wrap(handlers.UpdateSubscriptionPaymentMethod))
 	me.POST("/subscriptions/:id/cancel", wrap(httphandlers.CancelSubscription))
 	me.POST("/subscriptions/:id/resume", wrap(httphandlers.ResumeSubscription))
-	me.POST("/subscriptions/:id/change-tier", wrap(handlers.ChangeTier))
+	me.POST("/subscriptions/:id/change-tier", wrap(httphandlers.ChangeTier))
 	me.GET("/payments", wrap(httphandlers.GetUserPayments))
 	me.GET("/payment-methods", wrap(handlers.ListPaymentMethods))
 	me.POST("/payment-methods", wrap(handlers.CreatePaymentMethod))
