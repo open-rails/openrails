@@ -3,9 +3,9 @@ package server
 import (
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/internal/handlers"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/middleware"
 )
@@ -20,16 +20,12 @@ func (s *Server) registerServiceRoutes() {
 	if apiKey == "" {
 		log.Warn("API key not configured; service API endpoints will be disabled")
 		// Still set up a health endpoint for the private server
-		s.privateHandler.GET("/health", s.wrap(func(r *handlers.Request) {
-			r.SuccessJSON(map[string]string{"status": "ok", "api": "service"})
-		}))
+		s.privateHandler.GET("/health", s.serviceHealth)
 		return
 	}
 
 	// Health check (no auth required)
-	s.privateHandler.GET("/health", s.wrap(func(r *handlers.Request) {
-		r.SuccessJSON(map[string]string{"status": "ok", "api": "service"})
-	}))
+	s.privateHandler.GET("/health", s.serviceHealth)
 
 	// Private API v1 routes (X-API-KEY required)
 	// No /internal or /service prefix needed - the separate port (8060) is the boundary
@@ -37,4 +33,8 @@ func (s *Server) registerServiceRoutes() {
 	httproutes.RegisterServiceRoutes(v1, s.runtime, middleware.APIKeyRequired(apiKey))
 
 	log.Info("Service API routes registered on private handler")
+}
+
+func (s *Server) serviceHealth(c *gin.Context) {
+	c.JSON(200, gin.H{"status": "ok", "api": "service"})
 }
