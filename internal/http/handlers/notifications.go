@@ -10,15 +10,9 @@ import (
 	"github.com/open-rails/openrails/pkg/query"
 )
 
-// GetNotifications returns paginated in-app notifications for the current user
-// Query params:
-//   - limit: max results (1-100, default 20)
-//   - offset: pagination offset (default 0)
-//   - seen: filter by read status (true, false, or omit for all)
 func GetNotifications(r *httprequest.Request) {
 	user := r.GetUser()
 
-	// Parse query params
 	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 100 {
 		limit = 20
@@ -55,7 +49,6 @@ func GetNotifications(r *httprequest.Request) {
 	r.SuccessJSONPaginated(items, q.TotalItems, limit, offset)
 }
 
-// MarkNotificationRead marks a notification as read for the user
 func MarkNotificationRead(r *httprequest.Request) {
 	user := r.GetUser()
 	idStr := r.Param("id")
@@ -71,7 +64,6 @@ func MarkNotificationRead(r *httprequest.Request) {
 	r.SuccessJSONMessage("notification marked as read")
 }
 
-// GetUnreadNotificationCount returns the user's unread count
 func GetUnreadNotificationCount(r *httprequest.Request) {
 	user := r.GetUser()
 	f := false
@@ -80,7 +72,6 @@ func GetUnreadNotificationCount(r *httprequest.Request) {
 		Offset:  0,
 		Filters: services.GetNotificationsFilters{UserID: user.ID, Seen: &f},
 	}
-	// We only need total count; items ignored
 	if _, _, err := r.State.UserSubscriptionService.GetUserNotifications(r.Request.Context(), user.ID, q); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
