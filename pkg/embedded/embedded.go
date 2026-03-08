@@ -13,10 +13,10 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/server"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/cache"
-	"github.com/open-rails/openrails/pkg/routes"
 	"github.com/open-rails/openrails/pkg/service"
 )
 
@@ -131,7 +131,7 @@ func (e *Embedded) RegisterUserRoutes(group *gin.RouterGroup, opts RouteOptions)
 	if auth == nil {
 		auth = e.app.AuthProvider
 	}
-	routes.RegisterUserRoutes(group, e.app.Runtime, routes.Options{
+	httproutes.RegisterUserRoutes(group, e.app.Runtime, httproutes.Options{
 		AuthProvider: auth,
 	})
 }
@@ -153,7 +153,7 @@ func (e *Embedded) RegisterAdminRoutes(group *gin.RouterGroup, opts RouteOptions
 	if auth == nil {
 		auth = e.app.AuthProvider
 	}
-	routes.RegisterAdminRoutes(group, e.app.Runtime, routes.Options{
+	httproutes.RegisterAdminRoutes(group, e.app.Runtime, httproutes.Options{
 		AuthProvider: auth,
 	})
 }
@@ -170,7 +170,7 @@ func (e *Embedded) RegisterWebhookRoutes(group *gin.RouterGroup) {
 	if e == nil || e.app == nil {
 		panic("embedded billing: not initialized")
 	}
-	routes.RegisterWebhookRoutes(group, e.app.Runtime)
+	httproutes.RegisterWebhookRoutes(group, e.app.Runtime)
 }
 
 func (e *Embedded) RunWorkers(ctx context.Context) error {

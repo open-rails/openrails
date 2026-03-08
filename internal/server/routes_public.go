@@ -5,57 +5,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/open-rails/openrails/internal/handlers"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
 func (s *Server) registerUserRoutesAt(e *gin.Engine, apiPrefix string) {
 	api := e.Group(apiPrefix)
-
-	// Products and Prices - public catalog endpoints
-	api.GET("/products", s.authProvider.Optional(), s.wrap(handlers.GetProducts))
-	api.GET("/prices", s.authProvider.Optional(), s.wrap(handlers.GetPrices))
-
-	// Solana tokens endpoint (public, no auth required)
-	api.GET("/solana/tokens", s.wrap(handlers.GetSupportedTokens))
-
-	// Checkout Sessions - unified flow
-	checkout := api.Group("/checkout")
-	checkout.Use(s.authProvider.Required())
-	checkout.POST("", s.wrap(handlers.CreateCheckoutSession))
-	checkout.GET("/:id", s.wrap(handlers.GetCheckoutSession))
-	checkout.POST("/:id/confirm", s.wrap(handlers.ConfirmCheckoutSession))
-
-	// Solana Pay Transaction Request spec endpoints (public, no auth - called by wallets)
-	// These implement: https://docs.solanapay.com/spec#specification-transaction-request
-	api.GET("/checkout/:id/solana-pay", s.wrap(handlers.GetSolanaPay))
-	api.POST("/checkout/:id/solana-pay", s.wrap(handlers.PostSolanaPay))
-
-	me := api.Group("/me")
-	me.Use(s.authProvider.Required())
-	me.GET("/status", s.wrap(handlers.GetMyBillingStatus))
-	// Subscription endpoints - RESTful with :id in path
-	me.GET("/subscriptions", s.wrap(handlers.GetMySubscriptions))
-	me.GET("/subscriptions/:id", s.wrap(handlers.GetSubscription))
-	me.PUT("/subscriptions/:id/payment-method", s.wrap(handlers.UpdateSubscriptionPaymentMethod))
-	me.POST("/subscriptions/:id/cancel", s.wrap(handlers.CancelSubscription))
-	me.POST("/subscriptions/:id/resume", s.wrap(handlers.ResumeSubscription))
-	me.POST("/subscriptions/:id/change-tier", s.wrap(handlers.ChangeTier))
-	me.GET("/payments", s.wrap(handlers.GetUserPayments))
-	me.GET("/payment-methods", s.wrap(handlers.ListPaymentMethods))
-	me.POST("/payment-methods", s.wrap(handlers.CreatePaymentMethod))
-	me.PUT("/payment-methods/:id", s.wrap(handlers.UpdatePaymentMethod))
-	me.DELETE("/payment-methods/:id", s.wrap(handlers.DeletePaymentMethod))
-	me.GET("/notifications", s.wrap(handlers.GetNotifications))
-	me.GET("/notifications/unread-count", s.wrap(handlers.GetUnreadNotificationCount))
-	me.POST("/notifications/:id/read", s.wrap(handlers.MarkNotificationRead))
-	me.GET("/credits", s.wrap(handlers.GetMyCredits))
-	me.GET("/credits/:type", s.wrap(handlers.GetMyCreditsType))
-	me.GET("/credits/:type/transactions", s.wrap(handlers.GetMyCreditTransactions))
-
-	// Stripe-specific endpoints
-	stripe := api.Group("/stripe")
-	stripe.Use(s.authProvider.Required())
-	stripe.POST("/portal", s.wrap(handlers.CreatePortalSession))
+	httproutes.RegisterUserRoutes(api, s.runtime, httproutes.Options{AuthProvider: s.authProvider})
 }
 
 func (s *Server) registerUserRoutes(e *gin.Engine) {
@@ -65,7 +20,7 @@ func (s *Server) registerUserRoutes(e *gin.Engine) {
 func (s *Server) registerWebhookRoutesAt(e *gin.Engine, apiPrefix string) {
 	api := e.Group(apiPrefix)
 	webhooks := api.Group("/webhooks")
-	webhooks.POST("/:provider", s.wrap(handlers.Webhook))
+	httproutes.RegisterWebhookRoutes(webhooks, s.runtime)
 }
 
 func (s *Server) registerWebhookRoutes(e *gin.Engine) {

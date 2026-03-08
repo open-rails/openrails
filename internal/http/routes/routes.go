@@ -1,7 +1,3 @@
-// Package routes provides route registration functions for embedded hosts.
-//
-// These functions allow embedded hosts to mount billing routes on their own Gin router
-// without creating a full billing Server object.
 package routes
 
 import (
@@ -13,29 +9,16 @@ import (
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
-// Options configures route registration behavior.
 type Options struct {
-	// AuthProvider is required for routes that need authentication.
 	AuthProvider authprovider.Provider
 }
 
-// wrapHandler creates a Gin handler function from a Request handler.
 func wrapHandler(rt *app.Runtime, fn func(r *handlers.Request)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		fn(handlers.NewRequest(c, rt))
 	}
 }
 
-// RegisterUserRoutes registers user-facing billing routes on the provided Gin router group.
-// These routes include products, prices, checkout, subscriptions, payments, etc.
-//
-// Example usage for embedded hosts:
-//
-//	router := gin.Default()
-//	api := router.Group("/billing/v1")
-//	routes.RegisterUserRoutes(api, runtime, routes.Options{
-//	    AuthProvider: myAuthProvider,
-//	})
 func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 	if opts.AuthProvider == nil {
 		panic("AuthProvider is required for user routes")
@@ -45,24 +28,22 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 		return wrapHandler(rt, fn)
 	}
 
-	// Products and Prices - public catalog endpoints
 	group.GET("/products", opts.AuthProvider.Optional(), wrap(handlers.GetProducts))
 	group.GET("/prices", opts.AuthProvider.Optional(), wrap(handlers.GetPrices))
-
-	// Solana tokens endpoint (public, no auth required)
 	group.GET("/solana/tokens", wrap(handlers.GetSupportedTokens))
 
-	// Checkout Sessions - unified flow
 	checkout := group.Group("/checkout")
 	checkout.Use(opts.AuthProvider.Required())
 	checkout.POST("", wrap(handlers.CreateCheckoutSession))
 	checkout.GET("/:id", wrap(handlers.GetCheckoutSession))
 	checkout.POST("/:id/confirm", wrap(handlers.ConfirmCheckoutSession))
 
+	group.GET("/checkout/:id/solana-pay", wrap(handlers.GetSolanaPay))
+	group.POST("/checkout/:id/solana-pay", wrap(handlers.PostSolanaPay))
+
 	me := group.Group("/me")
 	me.Use(opts.AuthProvider.Required())
 	me.GET("/status", wrap(handlers.GetMyBillingStatus))
-	// Subscription endpoints - RESTful with :id in path
 	me.GET("/subscriptions", wrap(handlers.GetMySubscriptions))
 	me.GET("/subscriptions/:id", wrap(handlers.GetSubscription))
 	me.PUT("/subscriptions/:id/payment-method", wrap(handlers.UpdateSubscriptionPaymentMethod))
@@ -80,20 +61,12 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 	me.GET("/credits", wrap(handlers.GetMyCredits))
 	me.GET("/credits/:type", wrap(handlers.GetMyCreditsType))
 	me.GET("/credits/:type/transactions", wrap(handlers.GetMyCreditTransactions))
-	me.POST("/portal", wrap(handlers.CreatePortalSession))
+
+	stripe := group.Group("/stripe")
+	stripe.Use(opts.AuthProvider.Required())
+	stripe.POST("/portal", wrap(handlers.CreatePortalSession))
 }
 
-// RegisterAdminRoutes registers admin billing routes on the provided Gin router group.
-// These routes include subscription management, payment management, user management, and metrics.
-// All routes require admin authorization.
-//
-// Example usage for embedded hosts:
-//
-//	router := gin.Default()
-//	admin := router.Group("/billing/v1/admin")
-//	routes.RegisterAdminRoutes(admin, runtime, routes.Options{
-//	    AuthProvider: myAuthProvider,
-//	})
 func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 	if opts.AuthProvider == nil {
 		panic("AuthProvider is required for admin routes")
@@ -103,29 +76,28 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 		return wrapHandler(rt, fn)
 	}
 
-	// Admin routes are protected by JWT authentication + admin role requirement
 	group.Use(opts.AuthProvider.Required())
 	group.Use(authpolicy.AdminRequired(rt.DB.GetDB()))
 
-	// Subscription management
 	group.GET("/subscriptions", wrap(handlers.GetAdminSubscriptions))
 	group.GET("/subscriptions/:id", wrap(handlers.GetAdminSubscription))
 	group.POST("/subscriptions/:id/cancel", wrap(handlers.AdminCancelSubscription))
 
-	// Payment management
 	group.GET("/payments", wrap(handlers.GetAdminPayments))
 	group.GET("/payments/:id", wrap(handlers.GetAdminPayment))
 	group.POST("/payments/:id/refund", wrap(handlers.AdminRefundPayment))
 	group.GET("/users/:user_id/payments", wrap(handlers.GetAdminUserPayments))
 	group.POST("/users/:user_id/payments/off-channel", wrap(handlers.AdminCreateOffChannelPayment))
 
-	// User management
 	group.GET("/users/:user_id", wrap(handlers.GetAdminUserBillingProfile))
 	group.GET("/users/:user_id/entitlements", wrap(handlers.GetAdminUserEntitlements))
+	group.GET("/users/:user_id/mobius", wrap(handlers.GetAdminUserMobius))
+	group.GET("/users/:user_id/mobius/metrics", wrap(handlers.GetAdminUserMobiusMetrics))
+	group.GET("/users/:user_id/ccbill", wrap(handlers.GetAdminUserCCBill))
+	group.GET("/users/:user_id/ccbill/metrics", wrap(handlers.GetAdminUserCCBillMetrics))
 	group.POST("/users/:user_id/entitlements", wrap(handlers.GrantAdminEntitlement))
 	group.DELETE("/users/:user_id/entitlements/:id", wrap(handlers.RevokeAdminEntitlement))
 
-	// Metrics
 	group.GET("/metrics/summary", wrap(handlers.GetAdminMetricsSummary))
 	group.GET("/metrics/revenue", wrap(handlers.GetAdminMetricsRevenue))
 	group.GET("/metrics/subscriptions", wrap(handlers.GetAdminMetricsSubscriptions))
@@ -133,31 +105,10 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	group.GET("/metrics/churn", wrap(handlers.GetAdminMetricsChurn))
 }
 
-// RegisterWebhookRoutes registers webhook routes on the provided Gin router group.
-// These routes handle incoming webhooks from payment processors (Stripe, CCBill, NMI, etc.).
-//
-// Example usage for embedded hosts:
-//
-//	router := gin.Default()
-//	webhooks := router.Group("/billing/v1/webhooks")
-//	routes.RegisterWebhookRoutes(webhooks, runtime)
 func RegisterWebhookRoutes(group *gin.RouterGroup, rt *app.Runtime) {
-	wrap := func(fn func(r *handlers.Request)) gin.HandlerFunc {
-		return wrapHandler(rt, fn)
-	}
-
-	group.POST("/:provider", wrap(handlers.Webhook))
+	group.POST(":provider", wrapHandler(rt, handlers.Webhook))
 }
 
-// RegisterServiceRoutes registers internal service-to-service API routes.
-// These routes are intended for X-API-KEY authentication and should only
-// be accessible within trusted networks.
-//
-// Example usage:
-//
-//	router := gin.Default()
-//	svc := router.Group("/billing/v1")
-//	routes.RegisterServiceRoutes(svc, runtime, apiKeyMiddleware)
 func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, authMiddleware gin.HandlerFunc) {
 	wrap := func(fn func(r *handlers.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
@@ -165,20 +116,21 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, authMiddlewa
 
 	group.Use(authMiddleware)
 
-	// User entitlements
-	group.GET("/users/:user_id/entitlements", wrap(handlers.ServiceGetUserEntitlements))
+	users := group.Group("/users/:user_id")
+	users.GET("/entitlements", wrap(handlers.ServiceGetUserEntitlements))
+	users.GET("/credits", wrap(handlers.ServiceGetUserCredits))
 
-	// Credits operations
 	credits := group.Group("/credits")
 	credits.POST("/deposit", wrap(handlers.ServiceDepositCredits))
 	credits.POST("/withdraw", wrap(handlers.ServiceWithdrawCredits))
 	credits.POST("/hold", wrap(handlers.ServiceHoldCredits))
 	credits.POST("/holds/:id/capture", wrap(handlers.ServiceCaptureHold))
 	credits.POST("/holds/:id/release", wrap(handlers.ServiceReleaseHold))
+	credits.POST("/hold/:id/capture", wrap(handlers.ServiceCaptureHold))
+	credits.POST("/hold/:id/release", wrap(handlers.ServiceReleaseHold))
 	credits.GET("/transactions/lookup", wrap(handlers.ServiceLookupCreditTransaction))
 	credits.GET("/users/:user_id", wrap(handlers.ServiceGetUserCredits))
 
-	// Credit type definitions (host-configurable)
 	creditTypes := group.Group("/credit-types")
 	creditTypes.POST("", wrap(handlers.ServiceCreateCreditType))
 	creditTypes.GET("", wrap(handlers.ServiceListCreditTypes))
@@ -186,7 +138,6 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, authMiddlewa
 	creditTypes.POST("/:name/deactivate", wrap(handlers.ServiceDeactivateCreditType))
 	creditTypes.POST("/:name/activate", wrap(handlers.ServiceActivateCreditType))
 
-	// Catalog definition (host-configurable)
 	catalog := group.Group("/catalog")
 	products := catalog.Group("/products")
 	products.POST("", wrap(handlers.ServiceCreateProduct))

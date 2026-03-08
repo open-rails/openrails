@@ -3,53 +3,12 @@ package server
 import (
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/handlers"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/middleware"
 )
-
-func (s *Server) registerServiceRoutesAt(v1 *gin.RouterGroup) {
-	users := v1.Group("/users/:user_id")
-	{
-		users.GET("/entitlements", s.wrap(handlers.ServiceGetUserEntitlements))
-		users.GET("/credits", s.wrap(handlers.ServiceGetUserCredits))
-	}
-
-	credits := v1.Group("/credits")
-	{
-		credits.POST("/deposit", s.wrap(handlers.ServiceDepositCredits))
-		credits.POST("/withdraw", s.wrap(handlers.ServiceWithdrawCredits))
-		credits.POST("/hold", s.wrap(handlers.ServiceHoldCredits))
-		// Aliases: pluralized holds paths (preferred in docs)
-		credits.POST("/holds/:id/capture", s.wrap(handlers.ServiceCaptureHold))
-		credits.POST("/holds/:id/release", s.wrap(handlers.ServiceReleaseHold))
-		credits.POST("/hold/:id/capture", s.wrap(handlers.ServiceCaptureHold))
-		credits.POST("/hold/:id/release", s.wrap(handlers.ServiceReleaseHold))
-		credits.GET("/users/:user_id", s.wrap(handlers.ServiceGetUserCredits))
-	}
-
-	creditTypes := v1.Group("/credit-types")
-	{
-		creditTypes.POST("", s.wrap(handlers.ServiceCreateCreditType))
-		creditTypes.GET("", s.wrap(handlers.ServiceListCreditTypes))
-		creditTypes.PATCH("/:name", s.wrap(handlers.ServiceUpdateCreditType))
-		creditTypes.POST("/:name/deactivate", s.wrap(handlers.ServiceDeactivateCreditType))
-		creditTypes.POST("/:name/activate", s.wrap(handlers.ServiceActivateCreditType))
-	}
-
-	catalog := v1.Group("/catalog")
-	{
-		products := catalog.Group("/products")
-		products.POST("", s.wrap(handlers.ServiceCreateProduct))
-		products.PATCH("/:id", s.wrap(handlers.ServiceUpdateProduct))
-
-		prices := catalog.Group("/prices")
-		prices.POST("", s.wrap(handlers.ServiceCreatePrice))
-		prices.PATCH("/:id", s.wrap(handlers.ServiceUpdatePrice))
-	}
-}
 
 // registerServiceRoutes sets up routes on the private/service API.
 // These endpoints are authenticated via X-API-KEY header and are intended
@@ -75,8 +34,7 @@ func (s *Server) registerServiceRoutes() {
 	// Private API v1 routes (X-API-KEY required)
 	// No /internal or /service prefix needed - the separate port (8060) is the boundary
 	v1 := s.privateHandler.Group(StandaloneV1Prefix)
-	v1.Use(middleware.APIKeyRequired(apiKey))
-	s.registerServiceRoutesAt(v1)
+	httproutes.RegisterServiceRoutes(v1, s.runtime, middleware.APIKeyRequired(apiKey))
 
 	log.Info("Service API routes registered on private handler")
 }
