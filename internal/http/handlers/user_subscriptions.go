@@ -1,19 +1,16 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
-// GetMySubscriptions retrieves the user's subscriptions with query param filtering
-// Query params:
-//   - status: filter by status (active, cancelled, past_due, all). Default: non-cancelled
-//   - limit: max results (1-100, default 10)
-//   - offset: pagination offset (default 0)
 func GetMySubscriptions(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
@@ -24,9 +21,7 @@ func GetMySubscriptions(r *httprequest.Request) {
 	listSubscriptionsForUser(r, user.ID)
 }
 
-// listSubscriptionsForUser handles the core listing logic and is reused by customer-scoped routes.
 func listSubscriptionsForUser(r *httprequest.Request, userID string) {
-	// Parse query parameters
 	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 100 {
 		limit = 10
@@ -39,18 +34,12 @@ func listSubscriptionsForUser(r *httprequest.Request, userID string) {
 
 	status := r.Request.URL.Query().Get("status")
 
-	// Build query options
 	queryOpts := &query.QueryOptions[services.GetSubscriptionsFilters]{
 		Limit:   limit,
 		Offset:  offset,
 		Filters: services.GetSubscriptionsFilters{},
 	}
 
-	// Handle status filtering
-	// Default behavior: show non-cancelled subscriptions (like Stripe)
-	// status=all: show everything including cancelled
-	// status=active: only active
-	// status=cancelled: only cancelled
 	if status != "" && status != "all" {
 		queryOpts.Filters.Status = status
 	}
@@ -66,4 +55,36 @@ func listSubscriptionsForUser(r *httprequest.Request, userID string) {
 	}
 
 	r.SuccessJSONPaginated(subscriptions, queryOpts.TotalItems, limit, offset)
+}
+
+func GetSubscription(r *httprequest.Request) {
+	user := r.GetUser()
+	if user == nil || user.ID == "" {
+		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		return
+	}
+
+	subscriptionIDStr := r.GinCtx.Param("id")
+	if subscriptionIDStr == "" {
+		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
+		return
+	}
+
+	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
+		return
+	}
+
+	subscription, err := r.State.UserSubscriptionService.GetUserSubscriptionByID(r.Request.Context(), user.ID, subscriptionID)
+	if err != nil {
+		if errors.Is(err, services.ErrSubscriptionNotFound) {
+			r.ErrorJSON(http.StatusNotFound, "Subscription not found")
+			return
+		}
+		r.ErrorJSON(http.StatusInternalServerError, "Failed to retrieve subscription")
+		return
+	}
+
+	r.SuccessJSON(subscription)
 }

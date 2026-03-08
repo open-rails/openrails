@@ -9,7 +9,6 @@ import (
 	"github.com/open-rails/openrails/pkg/query"
 )
 
-// GetUserPayments retrieves the user's one-off payments
 func GetUserPayments(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
@@ -17,7 +16,6 @@ func GetUserPayments(r *httprequest.Request) {
 		return
 	}
 
-	// Parse query parameters
 	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 100 {
 		limit = 10
@@ -30,7 +28,6 @@ func GetUserPayments(r *httprequest.Request) {
 
 	paymentType := r.Request.URL.Query().Get("type")
 
-	// Build query options
 	queryOpts := &query.QueryOptions[services.GetPaymentsFilters]{
 		Limit:   limit,
 		Offset:  offset,
