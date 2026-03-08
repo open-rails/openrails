@@ -13,8 +13,6 @@ type portalResponse struct {
 	RedirectURL string `json:"redirect_url"`
 }
 
-// CreatePortalSession creates a Stripe customer portal session.
-// POST /v1/stripe/portal
 func CreatePortalSession(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
@@ -35,7 +33,7 @@ func CreatePortalSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "return_url unavailable")
 		return
 	}
-	returnURL = returnURL + "/account"
+	returnURL += "/account"
 	service := &services.StripePortalService{Config: r.State.Config}
 	urlStr, err := service.CreatePortalSession(r.Request.Context(), customerID, returnURL)
 	if err != nil {

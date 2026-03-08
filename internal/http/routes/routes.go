@@ -66,7 +66,7 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 
 	stripe := group.Group("/stripe")
 	stripe.Use(opts.AuthProvider.Required())
-	stripe.POST("/portal", wrap(handlers.CreatePortalSession))
+	stripe.POST("/portal", wrap(httphandlers.CreatePortalSession))
 }
 
 func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
