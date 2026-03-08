@@ -1,15 +1,17 @@
-package handlers
+package server
 
 import (
 	"bytes"
 	"html/template"
 	"net/http"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 type debugMobiusTokenizationPageData struct {
 	Provider            string
-	Mode                string // "stub" | "real"
+	Mode                string
 	TokenizationKey     string
 	TokenizationURL     string
 	EffectiveScriptURL  string
@@ -272,14 +274,12 @@ curl -fsS "https://YOUR_BILLING_HOST/v1/checkout/checkout_session_UUID" \
             return;
           }
         } catch (e) {
-          // ignore and fallback
         }
         el('token').focus();
         el('token').select();
         status('Token selected (press Ctrl/Cmd+C).');
       });
 
-      // auto-config if script is present
       setTimeout(() => {
         if (window.CollectJS) configureCollect();
       }, 50);
@@ -288,27 +288,18 @@ curl -fsS "https://YOUR_BILLING_HOST/v1/checkout/checkout_session_UUID" \
 </html>
 `))
 
-// DebugMobiusTokenization serves a dev-only harness page that loads Collect.js to generate a payment_token.
-func DebugMobiusTokenization(r *Request) {
-	if r.State == nil || r.State.Config == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "runtime not configured")
-		return
-	}
-
-	mode := strings.TrimSpace(strings.ToLower(r.GinCtx.Query("mode")))
-	if mode == "" {
-		mode = "real"
-	}
-	if mode != "real" && mode != "stub" {
+func (s *Server) debugMobiusTokenization(c *gin.Context) {
+	mode := strings.TrimSpace(strings.ToLower(c.Query("mode")))
+	if mode != "stub" {
 		mode = "real"
 	}
 
-	provider := strings.TrimSpace(strings.ToLower(r.GinCtx.Query("provider")))
+	provider := strings.TrimSpace(strings.ToLower(c.Query("provider")))
 	if provider == "" {
 		provider = "mobius"
 	}
 
-	proc := r.State.Config.GetProcessor(provider)
+	proc := s.cfg.GetProcessor(provider)
 	tokenizationKey := ""
 	tokenizationURL := ""
 	if proc != nil {
@@ -326,35 +317,32 @@ func DebugMobiusTokenization(r *Request) {
 		if len(tokenizationKey) <= 6 {
 			hint = tokenizationKey
 		} else {
-			hint = tokenizationKey[:3] + "…" + tokenizationKey[len(tokenizationKey)-3:]
+			hint = tokenizationKey[:3] + "..." + tokenizationKey[len(tokenizationKey)-3:]
 		}
 	}
 
 	data := debugMobiusTokenizationPageData{
-		Provider:           provider,
-		Mode:               mode,
-		TokenizationKey:    tokenizationKey,
-		TokenizationURL:    tokenizationURL,
-		EffectiveScriptURL: effectiveScriptURL,
-		EffectiveKeyHint:   hint,
-		HasTokenizationKey: tokenizationKey != "",
-		HasTokenizationURL: tokenizationURL != "",
+		Provider:            provider,
+		Mode:                mode,
+		TokenizationKey:     tokenizationKey,
+		TokenizationURL:     tokenizationURL,
+		EffectiveScriptURL:  effectiveScriptURL,
+		EffectiveKeyHint:    hint,
+		HasTokenizationKey:  tokenizationKey != "",
+		HasTokenizationURL:  tokenizationURL != "",
+		IsConfiguredForReal: tokenizationKey != "" && tokenizationURL != "",
 	}
-	data.IsConfiguredForReal = data.HasTokenizationKey && data.HasTokenizationURL
 
 	var buf bytes.Buffer
 	if err := debugMobiusTokenizationTemplate.Execute(&buf, data); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to render debug page")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to render debug page"})
 		return
 	}
 
-	r.GinCtx.Data(http.StatusOK, "text/html; charset=utf-8", buf.Bytes())
+	c.Data(http.StatusOK, "text/html; charset=utf-8", buf.Bytes())
 }
 
-// DebugMobiusCollectStubJS serves a local stub for Collect.js for wiring tests.
-func DebugMobiusCollectStubJS(r *Request) {
-	// This is intentionally tiny and permissive; it exists to validate the harness page wiring
-	// without hitting a real Collect.js endpoint.
+func (s *Server) debugMobiusCollectStubJS(c *gin.Context) {
 	js := `(function(){
 if (window.CollectJS) return;
 var cfg = null;
@@ -374,5 +362,5 @@ window.CollectJS = {
   }
 };
 })();`
-	r.GinCtx.Data(http.StatusOK, "application/javascript; charset=utf-8", []byte(js))
+	c.Data(http.StatusOK, "application/javascript; charset=utf-8", []byte(js))
 }
