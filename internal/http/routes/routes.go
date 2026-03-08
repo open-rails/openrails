@@ -32,7 +32,7 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 
 	group.GET("/products", opts.AuthProvider.Optional(), wrap(handlers.GetProducts))
 	group.GET("/prices", opts.AuthProvider.Optional(), wrap(handlers.GetPrices))
-	group.GET("/solana/tokens", wrap(handlers.GetSupportedTokens))
+	group.GET("/solana/tokens", wrap(httphandlers.GetSupportedTokens))
 
 	checkout := group.Group("/checkout")
 	checkout.Use(opts.AuthProvider.Required())

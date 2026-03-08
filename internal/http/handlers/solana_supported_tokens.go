@@ -10,9 +10,8 @@ import (
 	"time"
 
 	solanago "github.com/doujins-org/solana-go"
-	"github.com/open-rails/openrails/config"
-
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	jupiter "github.com/open-rails/openrails/internal/integrations/jupiter"
 	"github.com/open-rails/openrails/internal/services"
@@ -20,21 +19,42 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// SupportedTokensQuery contains optional query parameters for the tokens endpoint.
 type SupportedTokensQuery struct {
-	// PriceID - if provided, calculates token quotes for this price
-	PriceID string `form:"price_id"`
-	// CheckoutSessionID - if provided, uses the price from this checkout session
+	PriceID           string `form:"price_id"`
 	CheckoutSessionID string `form:"checkout_session_id"`
-	// Wallet - if provided, fetches on-chain balances for this wallet
-	Wallet string `form:"wallet"`
+	Wallet            string `form:"wallet"`
 }
 
-// GetSupportedTokens lists Solana tokens from the token registry and enriches them with live prices.
-// Optional query params:
-//   - price_id: Calculate quotes for each token based on a price
-//   - checkout_session_id: Use the price from a checkout session
-//   - wallet: Fetch on-chain balances for a wallet address
+type SupportedTokensResponse struct {
+	Tokens []TokenInfo `json:"tokens"`
+}
+
+type TokenInfo struct {
+	Symbol   string        `json:"symbol"`
+	Name     string        `json:"name"`
+	Mint     string        `json:"mint"`
+	Decimals int           `json:"decimals"`
+	Price    float64       `json:"price"`
+	Quote    *TokenQuote   `json:"quote,omitempty"`
+	Balance  *TokenBalance `json:"balance,omitempty"`
+}
+
+type TokenQuote struct {
+	Amount        string  `json:"amount"`
+	Units         uint64  `json:"units"`
+	TokenPriceUSD float64 `json:"token_price_usd"`
+	FXRate        float64 `json:"fx_rate"`
+	FXCurrency    string  `json:"fx_currency"`
+	QuotedAt      string  `json:"quoted_at"`
+	ExpiresAt     string  `json:"expires_at"`
+}
+
+type TokenBalance struct {
+	Amount     string `json:"amount"`
+	Units      uint64 `json:"units"`
+	Sufficient bool   `json:"sufficient"`
+}
+
 func GetSupportedTokens(r *httprequest.Request) {
 	cfg := r.State.Config
 	solanaProc := cfg.GetSolanaProcessor()
@@ -43,7 +63,6 @@ func GetSupportedTokens(r *httprequest.Request) {
 		return
 	}
 
-	// Parse optional query params
 	var query SupportedTokensQuery
 	if !r.BindQuery(&query) {
 		return
@@ -100,7 +119,6 @@ func GetSupportedTokens(r *httprequest.Request) {
 		prices = map[string]float64{}
 	}
 
-	// Get price info if requested (for quotes)
 	var priceAmount int64
 	var priceCurrency string
 	var quoteError string
@@ -111,7 +129,6 @@ func GetSupportedTokens(r *httprequest.Request) {
 		priceAmount, priceCurrency, quoteError = resolvePriceFromSession(ctx, r, query.CheckoutSessionID)
 	}
 
-	// Get wallet balances if requested
 	var balances map[string]uint64
 	var solBalance uint64
 	var walletError string
@@ -144,16 +161,12 @@ func GetSupportedTokens(r *httprequest.Request) {
 			Price:    price,
 		}
 
-		// Add quote if price info was provided and we have token price
 		if priceAmount > 0 && price > 0 && quoteError == "" {
 			tokenInfo.Quote = calculateQuoteForToken(ctx, r, t, priceAmount, priceCurrency, price, quotedAt, quoteExpiry)
 		}
 
-		// Add balance if wallet was provided
 		if query.Wallet != "" && walletError == "" {
 			tokenInfo.Balance = calculateBalanceForToken(t, mainnetMint, balances, solBalance)
-
-			// Set Sufficient flag if we have both quote and balance
 			if tokenInfo.Quote != nil && tokenInfo.Balance != nil {
 				tokenInfo.Balance.Sufficient = tokenInfo.Balance.Units >= tokenInfo.Quote.Units
 			}
@@ -165,7 +178,6 @@ func GetSupportedTokens(r *httprequest.Request) {
 	r.SuccessJSON(SupportedTokensResponse{Tokens: tokens})
 }
 
-// resolvePriceFromID fetches price amount and currency from a price ID.
 func resolvePriceFromID(ctx context.Context, r *httprequest.Request, priceIDStr string) (int64, string, string) {
 	if r.State.PriceService == nil {
 		return 0, "", "price service unavailable"
@@ -184,7 +196,6 @@ func resolvePriceFromID(ctx context.Context, r *httprequest.Request, priceIDStr 
 	return price.Amount, price.Currency, ""
 }
 
-// resolvePriceFromSession fetches price amount and currency from a checkout session.
 func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessionIDStr string) (int64, string, string) {
 	if r.State.CheckoutSessionService == nil {
 		return 0, "", "checkout session service unavailable"
@@ -195,7 +206,6 @@ func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessio
 		return 0, "", fmt.Sprintf("invalid checkout_session_id: %v", err)
 	}
 
-	// Get user for session lookup
 	user := r.GetUser()
 	if user == nil {
 		return 0, "", "authentication required for checkout_session_id"
@@ -206,11 +216,9 @@ func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessio
 		return 0, "", fmt.Sprintf("session not found: %v", err)
 	}
 
-	// Get price from the session's price_id
 	return resolvePriceFromID(ctx, r, session.PriceID)
 }
 
-// fetchWalletBalances fetches SOL and SPL token balances for a wallet.
 func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr string, mints []string) (map[string]uint64, uint64, string) {
 	if r.State.SolanaRPC == nil {
 		return nil, 0, "solana rpc unavailable"
@@ -221,14 +229,11 @@ func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr 
 		return nil, 0, fmt.Sprintf("invalid wallet address: %v", err)
 	}
 
-	// Fetch SOL balance
 	solBalance, err := r.State.SolanaRPC.GetBalance(ctx, wallet)
 	if err != nil {
 		log.WithError(err).Warn("Failed to fetch SOL balance")
-		// Continue - we can still try to get token balances
 	}
 
-	// Fetch SPL token balances
 	tokenAccounts, err := r.State.SolanaRPC.GetTokenBalances(ctx, wallet, mints)
 	if err != nil {
 		log.WithError(err).Warn("Failed to fetch token balances")
@@ -243,9 +248,7 @@ func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr 
 	return balances, solBalance, ""
 }
 
-// calculateQuoteForToken calculates the quote for a single token.
 func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenCfg config.SolanaToken, amountCents int64, currency string, tokenPriceUSD float64, quotedAt, expiresAt time.Time) *TokenQuote {
-	// Calculate using the service function
 	quote, err := services.CalculateTokenQuote(ctx, tokenCfg, amountCents, currency, r.State.FXProvider)
 	if err != nil {
 		log.WithError(err).WithField("token", tokenCfg.Symbol).Warn("Failed to calculate token quote")
@@ -263,11 +266,9 @@ func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenCf
 	}
 }
 
-// calculateBalanceForToken calculates the balance info for a single token.
 func calculateBalanceForToken(tokenCfg config.SolanaToken, mint string, balances map[string]uint64, solBalance uint64) *TokenBalance {
 	var units uint64
 
-	// Special handling for native SOL
 	if tokenCfg.Symbol == "SOL" {
 		units = solBalance
 	} else {
@@ -280,6 +281,6 @@ func calculateBalanceForToken(tokenCfg config.SolanaToken, mint string, balances
 	return &TokenBalance{
 		Amount:     fmt.Sprintf("%.6f", amount),
 		Units:      units,
-		Sufficient: false, // Will be set by caller if quote is available
+		Sufficient: false,
 	}
 }
