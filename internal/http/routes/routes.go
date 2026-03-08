@@ -60,9 +60,9 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 	me.GET("/notifications", wrap(httphandlers.GetNotifications))
 	me.GET("/notifications/unread-count", wrap(httphandlers.GetUnreadNotificationCount))
 	me.POST("/notifications/:id/read", wrap(httphandlers.MarkNotificationRead))
-	me.GET("/credits", wrap(handlers.GetMyCredits))
-	me.GET("/credits/:type", wrap(handlers.GetMyCreditsType))
-	me.GET("/credits/:type/transactions", wrap(handlers.GetMyCreditTransactions))
+	me.GET("/credits", wrap(httphandlers.GetMyCredits))
+	me.GET("/credits/:type", wrap(httphandlers.GetMyCreditsType))
+	me.GET("/credits/:type/transactions", wrap(httphandlers.GetMyCreditTransactions))
 
 	stripe := group.Group("/stripe")
 	stripe.Use(opts.AuthProvider.Required())
