@@ -6,6 +6,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/handlers"
+	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
@@ -99,11 +100,11 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	group.POST("/users/:user_id/entitlements", wrap(handlers.GrantAdminEntitlement))
 	group.DELETE("/users/:user_id/entitlements/:id", wrap(handlers.RevokeAdminEntitlement))
 
-	group.GET("/metrics/summary", wrap(handlers.GetAdminMetricsSummary))
-	group.GET("/metrics/revenue", wrap(handlers.GetAdminMetricsRevenue))
-	group.GET("/metrics/subscriptions", wrap(handlers.GetAdminMetricsSubscriptions))
-	group.GET("/metrics/processors", wrap(handlers.GetAdminMetricsProcessors))
-	group.GET("/metrics/churn", wrap(handlers.GetAdminMetricsChurn))
+	group.GET("/metrics/summary", wrap(httphandlers.GetAdminMetricsSummary))
+	group.GET("/metrics/revenue", wrap(httphandlers.GetAdminMetricsRevenue))
+	group.GET("/metrics/subscriptions", wrap(httphandlers.GetAdminMetricsSubscriptions))
+	group.GET("/metrics/processors", wrap(httphandlers.GetAdminMetricsProcessors))
+	group.GET("/metrics/churn", wrap(httphandlers.GetAdminMetricsChurn))
 }
 
 func RegisterWebhookRoutes(group *gin.RouterGroup, rt *app.Runtime) {
