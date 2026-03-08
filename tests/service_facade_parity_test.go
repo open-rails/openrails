@@ -16,7 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/server"
+	server "github.com/open-rails/openrails/internal/http"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 

@@ -15,7 +15,7 @@ import (
 	authtesting "github.com/open-rails/authkit/testing"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/server"
+	server "github.com/open-rails/openrails/internal/http"
 )
 
 var (

@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/server"
+	server "github.com/open-rails/openrails/internal/http"
 )
 
 func TestHTTPHandlerOptions_WebhooksOnly(t *testing.T) {
