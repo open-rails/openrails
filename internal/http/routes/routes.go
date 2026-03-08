@@ -36,12 +36,12 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 
 	checkout := group.Group("/checkout")
 	checkout.Use(opts.AuthProvider.Required())
-	checkout.POST("", wrap(handlers.CreateCheckoutSession))
-	checkout.GET("/:id", wrap(handlers.GetCheckoutSession))
-	checkout.POST("/:id/confirm", wrap(handlers.ConfirmCheckoutSession))
+	checkout.POST("", wrap(httphandlers.CreateCheckoutSession))
+	checkout.GET("/:id", wrap(httphandlers.GetCheckoutSession))
+	checkout.POST("/:id/confirm", wrap(httphandlers.ConfirmCheckoutSession))
 
-	group.GET("/checkout/:id/solana-pay", wrap(handlers.GetSolanaPay))
-	group.POST("/checkout/:id/solana-pay", wrap(handlers.PostSolanaPay))
+	group.GET("/checkout/:id/solana-pay", wrap(httphandlers.GetSolanaPay))
+	group.POST("/checkout/:id/solana-pay", wrap(httphandlers.PostSolanaPay))
 
 	me := group.Group("/me")
 	me.Use(opts.AuthProvider.Required())
