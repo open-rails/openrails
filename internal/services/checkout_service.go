@@ -551,9 +551,9 @@ func (s *CheckoutService) processCCBillSubscription(
 	price *models.Price,
 ) (*CheckoutResponse, error) {
 	// Validate CCBill configuration
-	ccbillProc := s.Config.GetCCBillProcessor()
-	if s.Config == nil || ccbillProc == nil {
-		return nil, errors.New("CCBill configuration is not available")
+	ccbillProc, err := requireCCBillProcessorConfig(s.Config)
+	if err != nil {
+		return nil, err
 	}
 
 	// Validate price has CCBill configuration
@@ -615,9 +615,9 @@ func (s *CheckoutService) processCCBillUpgrade(
 	existingSub *models.Subscription,
 ) (*CheckoutResponse, error) {
 	// Validate CCBill configuration
-	ccbillProc := s.Config.GetCCBillProcessor()
-	if s.Config == nil || ccbillProc == nil {
-		return nil, errors.New("CCBill configuration is not available")
+	ccbillProc, err := requireCCBillProcessorConfig(s.Config)
+	if err != nil {
+		return nil, err
 	}
 
 	// Validate existing subscription is CCBill
@@ -1100,12 +1100,9 @@ func (s *CheckoutService) processStripeSubscription(
 	price *models.Price,
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
-	stripeProc := s.Config.GetStripeProcessor()
-	if s.Config == nil || stripeProc == nil {
-		return nil, errors.New("stripe configuration is not available")
-	}
-	if strings.TrimSpace(stripeProc.SecretKey) == "" {
-		return nil, errors.New("stripe secret key is not configured")
+	stripeProc, _, err := requireStripeSecretKey(s.Config)
+	if err != nil {
+		return nil, err
 	}
 	stripePriceID, err := getStripePriceID(price)
 	if err != nil {
@@ -1154,12 +1151,9 @@ func (s *CheckoutService) processStripePayment(
 	user *UserIdentity,
 	price *models.Price,
 ) (*CheckoutResponse, error) {
-	stripeProc := s.Config.GetStripeProcessor()
-	if s.Config == nil || stripeProc == nil {
-		return nil, errors.New("stripe configuration is not available")
-	}
-	if strings.TrimSpace(stripeProc.SecretKey) == "" {
-		return nil, errors.New("stripe secret key is not configured")
+	stripeProc, _, err := requireStripeSecretKey(s.Config)
+	if err != nil {
+		return nil, err
 	}
 	stripePriceID, err := getStripePriceID(price)
 	if err != nil {
@@ -1224,9 +1218,9 @@ type stripeCheckoutParams struct {
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
-	stripeProc := s.Config.GetStripeProcessor()
-	if s.Config == nil || stripeProc == nil {
-		return "", errors.New("stripe configuration is not available")
+	stripeProc, _, err := requireStripeSecretKey(s.Config)
+	if err != nil {
+		return "", err
 	}
 	values := url.Values{}
 	values.Set("mode", params.Mode)

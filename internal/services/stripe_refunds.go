@@ -46,16 +46,9 @@ type RefundResult struct {
 
 // CreateRefund creates a refund for a Stripe charge or payment intent
 func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundParams) (*RefundResult, error) {
-	if s == nil || s.Config == nil {
-		return nil, errors.New("stripe configuration is not available")
-	}
-	stripeProc := s.Config.GetStripeProcessor()
-	if stripeProc == nil {
-		return nil, errors.New("stripe configuration is not available")
-	}
-	secretKey := strings.TrimSpace(stripeProc.SecretKey)
-	if secretKey == "" {
-		return nil, errors.New("stripe secret key is not configured")
+	_, secretKey, err := requireStripeSecretKey(s.Config)
+	if err != nil {
+		return nil, err
 	}
 
 	chargeID := strings.TrimSpace(params.ChargeID)
@@ -154,16 +147,9 @@ func metadataStringValue(metadata map[string]any, key string) string {
 
 // GetRefund retrieves a refund by ID
 func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*RefundResult, error) {
-	if s == nil || s.Config == nil {
-		return nil, errors.New("stripe configuration is not available")
-	}
-	stripeProc := s.Config.GetStripeProcessor()
-	if stripeProc == nil {
-		return nil, errors.New("stripe configuration is not available")
-	}
-	secretKey := strings.TrimSpace(stripeProc.SecretKey)
-	if secretKey == "" {
-		return nil, errors.New("stripe secret key is not configured")
+	_, secretKey, err := requireStripeSecretKey(s.Config)
+	if err != nil {
+		return nil, err
 	}
 
 	refundID = strings.TrimSpace(refundID)

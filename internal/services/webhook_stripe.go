@@ -231,7 +231,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		if sessionID != uuid.Nil {
 			paymentID := uuid.Nil
 			if s.PaymentService != nil {
-				if payment, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, paymentTransactionID); err == nil && payment != nil {
+				if payment, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, paymentTransactionID); err == nil {
 					paymentID = payment.ID
 				}
 			}
@@ -460,7 +460,7 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 		stripePrice := strings.TrimSpace(data.Items.Data[0].Price.ID)
 		if stripePrice != "" {
 			price, err := s.PriceService.GetByStripePriceID(ctx, stripePrice)
-			if err == nil && price != nil {
+			if err == nil {
 				sub.PriceID = price.ID
 				sub.ProductID = price.ProductID
 				sub.ScheduledPriceID = nil

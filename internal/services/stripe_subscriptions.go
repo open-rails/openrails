@@ -19,13 +19,9 @@ type StripeSubscriptionService struct {
 }
 
 func (s *StripeSubscriptionService) GetSubscriptionItemID(ctx context.Context, subscriptionID string) (string, error) {
-	stripeProc := s.Config.GetStripeProcessor()
-	if s == nil || s.Config == nil || stripeProc == nil {
-		return "", errors.New("stripe configuration is not available")
-	}
-	secretKey := strings.TrimSpace(stripeProc.SecretKey)
-	if secretKey == "" {
-		return "", errors.New("stripe secret key is not configured")
+	_, secretKey, err := requireStripeSecretKey(s.Config)
+	if err != nil {
+		return "", err
 	}
 	subscriptionID = strings.TrimSpace(subscriptionID)
 	if subscriptionID == "" {
@@ -71,13 +67,9 @@ func (s *StripeSubscriptionService) GetSubscriptionItemID(ctx context.Context, s
 }
 
 func (s *StripeSubscriptionService) UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, prorationBehavior, billingAnchor string) error {
-	stripeProc := s.Config.GetStripeProcessor()
-	if s == nil || s.Config == nil || stripeProc == nil {
-		return errors.New("stripe configuration is not available")
-	}
-	secretKey := strings.TrimSpace(stripeProc.SecretKey)
-	if secretKey == "" {
-		return errors.New("stripe secret key is not configured")
+	_, secretKey, err := requireStripeSecretKey(s.Config)
+	if err != nil {
+		return err
 	}
 	subscriptionID = strings.TrimSpace(subscriptionID)
 	itemID = strings.TrimSpace(itemID)
@@ -120,13 +112,9 @@ func (s *StripeSubscriptionService) UpdateSubscriptionPrice(ctx context.Context,
 }
 
 func (s *StripeSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID string) error {
-	stripeProc := s.Config.GetStripeProcessor()
-	if s == nil || s.Config == nil || stripeProc == nil {
-		return errors.New("stripe configuration is not available")
-	}
-	secretKey := strings.TrimSpace(stripeProc.SecretKey)
-	if secretKey == "" {
-		return errors.New("stripe secret key is not configured")
+	_, secretKey, err := requireStripeSecretKey(s.Config)
+	if err != nil {
+		return err
 	}
 	subscriptionID = strings.TrimSpace(subscriptionID)
 	if subscriptionID == "" {
@@ -160,13 +148,9 @@ func (s *StripeSubscriptionService) CancelSubscription(ctx context.Context, subs
 }
 
 func (s *StripeSubscriptionService) ResumeSubscription(ctx context.Context, subscriptionID string) error {
-	stripeProc := s.Config.GetStripeProcessor()
-	if s == nil || s.Config == nil || stripeProc == nil {
-		return errors.New("stripe configuration is not available")
-	}
-	secretKey := strings.TrimSpace(stripeProc.SecretKey)
-	if secretKey == "" {
-		return errors.New("stripe secret key is not configured")
+	_, secretKey, err := requireStripeSecretKey(s.Config)
+	if err != nil {
+		return err
 	}
 	subscriptionID = strings.TrimSpace(subscriptionID)
 	if subscriptionID == "" {

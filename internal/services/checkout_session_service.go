@@ -463,14 +463,14 @@ func (s *CheckoutSessionService) initializeSession(ctx context.Context, session 
 	case processor == "ccbill" || processor == "stripe":
 		return s.initializeCheckoutSession(ctx, session, payment, user)
 	default:
-		return nil
+		return fmt.Errorf("%w: unsupported processor", ErrCheckoutSessionValidation)
 	}
 }
 
 func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest) error {
-	solanaProc := s.config.GetSolanaProcessor()
-	if s.config == nil || solanaProc == nil {
-		return fmt.Errorf("%w: solana not configured", ErrCheckoutSessionValidation)
+	solanaProc, err := requireSolanaProcessorConfig(s.config)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
 
 	tokenSymbol := strings.TrimSpace(payment.TokenSymbol)
@@ -865,9 +865,9 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if s.checkoutService == nil {
 		return nil, fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
-	solanaProc := s.config.GetSolanaProcessor()
-	if s.config == nil || solanaProc == nil {
-		return nil, fmt.Errorf("%w: solana not configured", ErrCheckoutSessionValidation)
+	solanaProc, err := requireSolanaProcessorConfig(s.config)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
 
 	// Get token symbol from ProcessorState (where initializeSolanaSession stores it)
@@ -1221,10 +1221,6 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 		}
 		return nil, err
 	}
-	if session == nil {
-		return nil, ErrCheckoutSessionNotFound
-	}
-
 	// Validate it's a Solana session
 	if session.Processor != models.ProcessorSolana {
 		return nil, ErrCheckoutSessionNotSolana
@@ -1245,9 +1241,9 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 	var productName string
 	if s.priceService != nil {
 		price, err := s.priceService.GetByID(ctx, session.PriceID)
-		if err == nil && price != nil && s.productService != nil {
+		if err == nil && s.productService != nil {
 			product, err := s.productService.GetByID(ctx, price.ProductID)
-			if err == nil && product != nil {
+			if err == nil {
 				productName = product.DisplayName
 			}
 		}
@@ -1267,9 +1263,9 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 	if s.solanaTransactionService == nil {
 		return nil, fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutSessionValidation)
 	}
-	solanaProc := s.config.GetSolanaProcessor()
-	if solanaProc == nil {
-		return nil, fmt.Errorf("%w: solana not configured", ErrCheckoutSessionValidation)
+	solanaProc, err := requireSolanaProcessorConfig(s.config)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
 
 	account = strings.TrimSpace(account)
@@ -1284,10 +1280,6 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		}
 		return nil, err
 	}
-	if session == nil {
-		return nil, ErrCheckoutSessionNotFound
-	}
-
 	// Validate it's a Solana session
 	if session.Processor != models.ProcessorSolana {
 		return nil, ErrCheckoutSessionNotSolana

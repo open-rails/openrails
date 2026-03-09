@@ -68,9 +68,9 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 		return nil, fmt.Errorf("failed to get price: %w", err)
 	}
 
-	solanaProc := s.cfg.GetSolanaProcessor()
-	if solanaProc == nil {
-		return nil, fmt.Errorf("solana configuration not found")
+	solanaProc, err := requireSolanaProcessorConfig(s.cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	tokenCfg, ok := solanaProc.SupportedTokens[tokenSymbol]

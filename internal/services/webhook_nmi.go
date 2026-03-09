@@ -1085,7 +1085,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 			return fmt.Errorf("failed to fetch existing payment for transaction: %w", err)
 		}
 
-		if err == nil && existingPayment != nil {
+		if err == nil {
 			if err := s.PaymentService.MarkFailed(ctx, existingPayment.ID); err != nil {
 				return fmt.Errorf("failed to mark payment as failed: %w", err)
 			}
@@ -1149,7 +1149,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 		log.WithContext(ctx).WithField("processor_subscription_id", nmiSubID).Info("Subscription marked as failed for NMI transaction failure")
 	}
 	if s.EventLogService != nil && subscription != nil {
-		if updated, err := s.SubscriptionService.GetByID(ctx, subscription.ID); err == nil && updated != nil {
+		if updated, err := s.SubscriptionService.GetByID(ctx, subscription.ID); err == nil {
 			subscription = updated
 		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).

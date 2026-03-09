@@ -19,13 +19,9 @@ type StripePortalService struct {
 }
 
 func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {
-	stripeProc := s.Config.GetStripeProcessor()
-	if s == nil || s.Config == nil || stripeProc == nil {
-		return "", errors.New("stripe configuration is not available")
-	}
-	secretKey := strings.TrimSpace(stripeProc.SecretKey)
-	if secretKey == "" {
-		return "", errors.New("stripe secret key is not configured")
+	_, secretKey, err := requireStripeSecretKey(s.Config)
+	if err != nil {
+		return "", err
 	}
 	customerID = strings.TrimSpace(customerID)
 	returnURL = strings.TrimSpace(returnURL)

@@ -150,9 +150,9 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Validate Solana config
-	solanaProc := s.cfg.GetSolanaProcessor()
-	if solanaProc == nil {
-		return nil, fmt.Errorf("solana not configured")
+	solanaProc, err := requireSolanaProcessorConfig(s.cfg)
+	if err != nil {
+		return nil, err
 	}
 	tokenCfg, ok := solanaProc.SupportedTokens[tokenSymbol]
 	if !ok || !tokenCfg.Enabled {
@@ -238,8 +238,8 @@ func (s *SolanaPayService) buildTransferRequestURL(recipient string, amount uint
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
 	// Get token config for decimals
-	solanaProc := s.cfg.GetSolanaProcessor()
-	if solanaProc == nil {
+	solanaProc, err := requireSolanaProcessorConfig(s.cfg)
+	if err != nil {
 		return baseURL // fallback without params if not configured
 	}
 	tokenCfg := solanaProc.SupportedTokens[tokenSymbol]

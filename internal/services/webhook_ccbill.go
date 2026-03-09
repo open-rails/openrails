@@ -463,7 +463,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		} else if session != nil {
 			paymentID := uuid.Nil
 			if s.PaymentService != nil && strings.TrimSpace(transactionID) != "" {
-				if payment, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorCCBill, transactionID); err == nil && payment != nil {
+				if payment, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorCCBill, transactionID); err == nil {
 					paymentID = payment.ID
 				}
 			}
@@ -703,7 +703,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("failed to check existing upgrade payment: %w", err)
 		}
-		if err == nil && existingPayment != nil {
+		if err == nil {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"transaction_id": transactionID,
 				"payment_id":     existingPayment.ID,

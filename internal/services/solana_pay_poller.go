@@ -389,7 +389,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("failed checking existing payment by transaction id: %w", err)
 	}
-	if err == nil && existingPayment != nil {
+	if err == nil {
 		log.WithFields(log.Fields{
 			"payment_id": existingPayment.ID,
 			"reference":  reference,
@@ -413,7 +413,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 		// Race-safe idempotency: if another worker inserted first, treat as success.
 		if isDuplicatePaymentTransactionIDError(err) {
 			existingPayment, getErr := p.checkoutService.PaymentService.GetByTransactionID(ctx, models.ProcessorSolana, signature)
-			if getErr == nil && existingPayment != nil {
+			if getErr == nil {
 				log.WithFields(log.Fields{
 					"payment_id": existingPayment.ID,
 					"reference":  reference,
