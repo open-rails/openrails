@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
@@ -69,8 +70,8 @@ type SolanaPayService struct {
 	redis           *redis.Client
 	cfg             *config.Config
 	Clock           clockwork.Clock
-	priceService    *PriceService
-	productService  *ProductService
+	priceService    *catalog.PriceService
+	productService  *catalog.ProductService
 	checkoutService *CheckoutService
 	fxProvider      fx.Provider
 }
@@ -80,8 +81,8 @@ func NewSolanaPayService(
 	db *db.DB,
 	redis *redis.Client,
 	cfg *config.Config,
-	priceService *PriceService,
-	productService *ProductService,
+	priceService *catalog.PriceService,
+	productService *catalog.ProductService,
 	checkoutService *CheckoutService,
 	fxProvider fx.Provider,
 ) *SolanaPayService {

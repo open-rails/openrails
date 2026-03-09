@@ -6,46 +6,49 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/services"
 )
 
-func (s *Service) creditsService() *services.CreditsService {
+func (s *Service) creditsService() *credits.CreditsService {
 	return s.rt.CreditsService
 }
 
-func (s *Service) entitlementService() *services.EntitlementService {
+func (s *Service) entitlementService() *entitlements.EntitlementService {
 	return s.rt.EntitlementService
 }
 
-func (s *Service) requireCreditTypeService() (*services.CreditTypeService, error) {
+func (s *Service) requireCreditTypeService() (*credits.CreditTypeService, error) {
 	if s.rt.CreditTypeService == nil {
 		return nil, fmt.Errorf("billing service: credit type service unavailable")
 	}
 	return s.rt.CreditTypeService, nil
 }
 
-func (s *Service) requireProductService() (*services.ProductService, error) {
+func (s *Service) requireProductService() (*catalog.ProductService, error) {
 	if s.rt.ProductService == nil {
 		return nil, fmt.Errorf("billing service: product service unavailable")
 	}
 	return s.rt.ProductService, nil
 }
 
-func (s *Service) requireCatalogServices() (*services.ProductService, *services.PriceService, error) {
+func (s *Service) requireCatalogServices() (*catalog.ProductService, *catalog.PriceService, error) {
 	if s.rt.ProductService == nil || s.rt.PriceService == nil {
 		return nil, nil, fmt.Errorf("billing service: price/product service unavailable")
 	}
 	return s.rt.ProductService, s.rt.PriceService, nil
 }
 
-func (s *Service) requirePriceService() (*services.PriceService, error) {
+func (s *Service) requirePriceService() (*catalog.PriceService, error) {
 	if s.rt.PriceService == nil {
 		return nil, fmt.Errorf("billing service: price service unavailable")
 	}
 	return s.rt.PriceService, nil
 }
 
-func (s *Service) requirePublicSubscriptionService() (*services.PublicSubscriptionService, error) {
+func (s *Service) requirePublicSubscriptionService() (*catalog.PublicSubscriptionService, error) {
 	if s.rt.PublicSubscriptionService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}

@@ -14,6 +14,9 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/riverqueue/river"
@@ -118,15 +121,15 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	log.WithContext(ctx).WithField("count", len(dueSubscriptions)).Info("Dunning: processing due subscriptions")
 
 	// Build services once for all attempts
-	priceSvc := services.NewPriceService(w.DB)
-	productSvc := services.NewProductService(w.DB)
-	entitlementSvc := services.NewEntitlementService(w.DB)
+	priceSvc := catalog.NewPriceService(w.DB)
+	productSvc := catalog.NewProductService(w.DB)
+	entitlementSvc := entitlements.NewEntitlementService(w.DB)
 	notifSvc := services.NewNotificationService(w.DB, nil)
 	paymentSvc := services.NewPaymentService(w.DB)
 	lifecycle := services.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService)
 	lifecycle.SetConfig(w.Config) // For feature flag access
 	lifecycle.SetClock(w.Clock)   // Ensure time mocking is honored during dunning
-	creditsSvc := services.NewCreditsService(w.DB)
+	creditsSvc := credits.NewCreditsService(w.DB)
 
 	successCount := 0
 	failCount := 0
@@ -155,9 +158,9 @@ func (w *DunningWorker) processSubscription(
 	ctx context.Context,
 	sub *models.Subscription,
 	lifecycle *services.SubscriptionLifecycleService,
-	priceSvc *services.PriceService,
+	priceSvc *catalog.PriceService,
 	paymentSvc *services.PaymentService,
-	creditsSvc *services.CreditsService,
+	creditsSvc *credits.CreditsService,
 ) bool {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
@@ -276,7 +279,7 @@ func (w *DunningWorker) processSubscription(
 			Scan(ctx); err != nil {
 			logEntry.WithError(err).Warn("load subscription after rebill for credit grants")
 		} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
-			if err := creditsSvc.GrantSubscriptionCredits(ctx, services.GrantSubscriptionCreditsParams{
+			if err := creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 				SubscriptionID: sub.ID,
 				PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
 				Cadence:        models.CreditGrantCadencePerRenewal,

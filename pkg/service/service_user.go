@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/services"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
@@ -71,7 +72,7 @@ func (s *Service) GetPrices(ctx context.Context, opts GetPricesOptions) (*Pagina
 		offset = 0
 	}
 
-	filter := services.PriceFilter{
+	filter := catalog.PriceFilter{
 		Currency: strings.ToLower(opts.Currency),
 		Type:     opts.Type,
 	}
@@ -885,7 +886,7 @@ func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, 
 
 // -------------------------------- Conversion Helpers --------------------------------
 
-func productFromModel(p *services.PublicProductResponse) Product {
+func productFromModel(p *catalog.PublicProductResponse) Product {
 	prices := make([]Price, 0, len(p.Prices))
 	for _, pr := range p.Prices {
 		prices = append(prices, priceFromModel(pr))

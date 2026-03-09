@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/credits"
 )
 
 // Service is the exported, in-process billing API.
@@ -34,10 +34,10 @@ func New(rt *app.Runtime) (*Service, error) {
 	return &Service{rt: rt}, nil
 }
 
-var ErrInsufficientCredits = services.ErrInsufficientCredits
-var ErrCreditTypeInactive = services.ErrCreditTypeInactive
-var ErrInvalidNegativePolicy = services.ErrInvalidNegativePolicy
-var ErrNegativeBalanceLimitExceeded = services.ErrNegativeBalanceLimitExceeded
+var ErrInsufficientCredits = credits.ErrInsufficientCredits
+var ErrCreditTypeInactive = credits.ErrCreditTypeInactive
+var ErrInvalidNegativePolicy = credits.ErrInvalidNegativePolicy
+var ErrNegativeBalanceLimitExceeded = credits.ErrNegativeBalanceLimitExceeded
 
 type HoldCreditsRequest struct {
 	UserID     string
@@ -166,7 +166,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	if req.Source == "" {
 		return nil, fmt.Errorf("source required")
 	}
-	trx, err := s.creditsService().Withdraw(ctx, services.CreditWithdrawParams{
+	trx, err := s.creditsService().Withdraw(ctx, credits.CreditWithdrawParams{
 		UserID:        req.UserID,
 		CreditType:    req.CreditType,
 		Amount:        req.Amount,
@@ -223,7 +223,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	if req.Source == "" {
 		return nil, fmt.Errorf("source required")
 	}
-	trx, err := s.creditsService().Deposit(ctx, services.CreditDepositParams{
+	trx, err := s.creditsService().Deposit(ctx, credits.CreditDepositParams{
 		UserID:      req.UserID,
 		CreditType:  req.CreditType,
 		Amount:      req.Amount,

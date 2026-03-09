@@ -12,6 +12,8 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
@@ -27,9 +29,9 @@ var (
 // AdminSubscriptionService handles administrative subscription operations
 type AdminSubscriptionService struct {
 	SubscriptionService *SubscriptionService
-	ProductService      *ProductService
-	PriceService        *PriceService
-	EntitlementService  *EntitlementService
+	ProductService      *catalog.ProductService
+	PriceService        *catalog.PriceService
+	EntitlementService  *entitlements.EntitlementService
 	NotificationService *NotificationService
 	PaymentService      *PaymentService
 	NMIClients          map[string]*nmi.NMIClient
@@ -239,7 +241,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 			for _, entName := range names {
 				st := models.EntitlementSourceSubscription
 				sid := subscription.ID
-				if err := s.EntitlementService.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+				if err := s.EntitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 					UserID:      subscription.UserID,
 					Entitlement: entName,
 					SourceType:  &st,
@@ -457,9 +459,9 @@ func (s *AdminSubscriptionService) SendManualNotification(ctx context.Context, u
 // NewAdminSubscriptionService creates a new AdminSubscriptionService
 func NewAdminSubscriptionService(
 	subscriptionService *SubscriptionService,
-	productService *ProductService,
-	priceService *PriceService,
-	entitlementService *EntitlementService,
+	productService *catalog.ProductService,
+	priceService *catalog.PriceService,
+	entitlementService *entitlements.EntitlementService,
 	notificationService *NotificationService,
 	paymentService *PaymentService,
 	nmiClients map[string]*nmi.NMIClient,

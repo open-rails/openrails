@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/credits"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
@@ -75,10 +75,10 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", creditTypeID).Exec(ctx)
 	})
 
-	creditsSvc := services.NewCreditsService(dbi)
+	creditsSvc := credits.NewCreditsService(dbi)
 
 	// Seed spendable credits (creates a credit block).
-	_, err = creditsSvc.Deposit(ctx, services.CreditDepositParams{
+	_, err = creditsSvc.Deposit(ctx, credits.CreditDepositParams{
 		UserID:     userID,
 		CreditType: creditTypeName,
 		Amount:     1000,

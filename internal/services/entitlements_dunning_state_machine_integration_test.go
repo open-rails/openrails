@@ -12,6 +12,8 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -111,10 +113,10 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
 	})
 
-	entSvc := NewEntitlementService(dbi)
+	entSvc := entitlements.NewEntitlementService(dbi)
 	entSvc.SetClock(clock)
-	priceSvc := NewPriceService(dbi)
-	productSvc := NewProductService(dbi)
+	priceSvc := catalog.NewPriceService(dbi)
+	productSvc := catalog.NewProductService(dbi)
 	notifSvc := NewNotificationService(dbi, nil)
 	paymentSvc := NewPaymentService(dbi)
 	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, notifSvc, paymentSvc, nil)

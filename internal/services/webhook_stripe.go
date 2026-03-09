@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
@@ -17,13 +19,13 @@ import (
 
 type StripeWebhookService struct {
 	DB                           *db.DB
-	PriceService                 *PriceService
-	ProductService               *ProductService
+	PriceService                 *catalog.PriceService
+	ProductService               *catalog.ProductService
 	SubscriptionService          *SubscriptionService
 	SubscriptionLifecycleService *SubscriptionLifecycleService
 	CheckoutService              *CheckoutService
 	PaymentService               *PaymentService
-	CreditsService               *CreditsService
+	CreditsService               *credits.CreditsService
 	DeduplicationService         *DeduplicationService
 	ProcessorCustomerService     *ProcessorCustomerService
 	CheckoutSessionService       *CheckoutSessionService
@@ -206,7 +208,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 				cadence = models.CreditGrantCadenceOnce
 				source = "subscription_initial"
 			}
-			if err := s.CreditsService.GrantSubscriptionCredits(ctx, GrantSubscriptionCreditsParams{
+			if err := s.CreditsService.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 				SubscriptionID: sub.ID,
 				PeriodEnd:      periodEnd,
 				Cadence:        cadence,
@@ -381,7 +383,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 				t := time.Now().UTC().Add(time.Duration(*spec.ExpiresDays) * 24 * time.Hour)
 				expiresAt = &t
 			}
-			_, err = s.CreditsService.Deposit(ctx, CreditDepositParams{
+			_, err = s.CreditsService.Deposit(ctx, credits.CreditDepositParams{
 				UserID:     userID,
 				CreditType: creditType,
 				Amount:     spec.Amount,

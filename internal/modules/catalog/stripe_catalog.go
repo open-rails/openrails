@@ -1,4 +1,4 @@
-package services
+package catalog
 
 import (
 	"context"
@@ -162,4 +162,16 @@ func stripePostForm(ctx context.Context, secretKey string, endpoint string, form
 		return nil, fmt.Errorf("stripe response missing id")
 	}
 	return &out, nil
+}
+
+func parseStripeError(body []byte) string {
+	var out struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.Error.Message)
 }

@@ -19,6 +19,9 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/jupiter"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -39,23 +42,23 @@ type Runtime struct {
 	riverPool         *pgxpool.Pool
 
 	SubscriptionService  *services.SubscriptionService
-	ProductService       *services.ProductService
-	PriceService         *services.PriceService
+	ProductService       *catalog.ProductService
+	PriceService         *catalog.PriceService
 	NotificationService  *services.NotificationService
 	PaymentMethodService *services.PaymentMethodService
 	PaymentService       *services.PaymentService
 	VaultService         *services.VaultService
 
 	UserSubscriptionService   *services.UserSubscriptionService
-	PublicSubscriptionService *services.PublicSubscriptionService
+	PublicSubscriptionService *catalog.PublicSubscriptionService
 	AdminSubscriptionService  *services.AdminSubscriptionService
 
 	EmailService *services.EmailService
 
 	EventLogService          *services.EventLogService
-	EntitlementService       *services.EntitlementService
-	CreditsService           *services.CreditsService
-	CreditTypeService        *services.CreditTypeService
+	EntitlementService       *entitlements.EntitlementService
+	CreditsService           *credits.CreditsService
+	CreditTypeService        *credits.CreditTypeService
 	ProcessorCustomerService *services.ProcessorCustomerService
 
 	SolanaPayService         *services.SolanaPayService

@@ -19,6 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
@@ -145,10 +147,10 @@ type EligibilityResult struct {
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
 type CheckoutService struct {
 	SubscriptionService  *SubscriptionService
-	ProductService       *ProductService
-	PriceService         *PriceService
+	ProductService       *catalog.ProductService
+	PriceService         *catalog.PriceService
 	PaymentService       *PaymentService
-	EntitlementService   *EntitlementService
+	EntitlementService   *entitlements.EntitlementService
 	PaymentMethodService *PaymentMethodService
 	VaultService         *VaultService
 	IdempotencyService   *IdempotencyService
@@ -168,10 +170,10 @@ func (s *CheckoutService) now() time.Time {
 // NewCheckoutService creates a new CheckoutService
 func NewCheckoutService(
 	subscriptionService *SubscriptionService,
-	productService *ProductService,
-	priceService *PriceService,
+	productService *catalog.ProductService,
+	priceService *catalog.PriceService,
 	paymentService *PaymentService,
-	entitlementService *EntitlementService,
+	entitlementService *entitlements.EntitlementService,
 	paymentMethodService *PaymentMethodService,
 	vaultService *VaultService,
 	idempotencyService *IdempotencyService,
@@ -1408,9 +1410,9 @@ func (s *CheckoutService) grantProductEntitlements(
 			paymentMode = models.EntitlementSourceSubscription
 		}
 		notBefore := startAt
-		var params PushNewEntitlementParams
+		var params entitlements.PushNewEntitlementParams
 		if endAt == nil {
-			params = PushNewEntitlementParams{
+			params = entitlements.PushNewEntitlementParams{
 				UserID:      userID,
 				Entitlement: entitlementName,
 				NotBefore:   &notBefore,
@@ -1420,7 +1422,7 @@ func (s *CheckoutService) grantProductEntitlements(
 			}
 		} else {
 			e := endAt.UTC()
-			params = PushNewEntitlementParams{
+			params = entitlements.PushNewEntitlementParams{
 				UserID:      userID,
 				Entitlement: entitlementName,
 				NotBefore:   &notBefore,
@@ -1901,10 +1903,10 @@ func (s *CheckoutService) processUpgrade(
 	if s.EntitlementService != nil && newProduct.EntitlementsSpec != nil {
 		for entitlementName, durationDays := range newProduct.EntitlementsSpec {
 			notBefore := now
-			var params PushNewEntitlementParams
+			var params entitlements.PushNewEntitlementParams
 			if durationDays != nil && *durationDays > 0 {
 				d := time.Duration(*durationDays) * 24 * time.Hour
-				params = PushNewEntitlementParams{
+				params = entitlements.PushNewEntitlementParams{
 					UserID:      user.ID,
 					Entitlement: entitlementName,
 					NotBefore:   &notBefore,
@@ -1913,7 +1915,7 @@ func (s *CheckoutService) processUpgrade(
 					SourceID:    newSubscriptionID,
 				}
 			} else {
-				params = PushNewEntitlementParams{
+				params = entitlements.PushNewEntitlementParams{
 					UserID:      user.ID,
 					Entitlement: entitlementName,
 					NotBefore:   &notBefore,

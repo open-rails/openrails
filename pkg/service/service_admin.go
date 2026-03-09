@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	entitlementmod "github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
@@ -403,7 +404,7 @@ func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string,
 	if req.EndAt != nil && !req.EndAt.IsZero() {
 		endAt := req.EndAt.UTC()
 		if endAt.After(now) {
-			ent, err = entitlements.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+			ent, err = entitlements.PushNewEntitlement(ctx, entitlementmod.PushNewEntitlementParams{
 				UserID:      req.UserID,
 				Entitlement: req.Entitlement,
 				EndAt:       &endAt,
@@ -414,7 +415,7 @@ func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string,
 			return nil, fmt.Errorf("end_at must be in the future")
 		}
 	} else {
-		ent, err = entitlements.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+		ent, err = entitlements.PushNewEntitlement(ctx, entitlementmod.PushNewEntitlementParams{
 			UserID:      req.UserID,
 			Entitlement: req.Entitlement,
 			Indefinite:  true,
@@ -454,7 +455,7 @@ func (s *Service) AdminRevokeEntitlement(ctx context.Context, userID string, ent
 		return fmt.Errorf("entitlement does not belong to user")
 	}
 
-	return entitlements.RevokeExistingEntitlement(ctx, services.RevokeExistingEntitlementParams{
+	return entitlements.RevokeExistingEntitlement(ctx, entitlementmod.RevokeExistingEntitlementParams{
 		EntitlementID: &entitlementID,
 		Reason:        models.EntitlementRevokeAdmin,
 	})

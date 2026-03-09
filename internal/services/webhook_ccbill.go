@@ -14,6 +14,9 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -29,8 +32,8 @@ type CCBillWebhookService struct {
 	DB                           *db.DB
 	Clock                        clockwork.Clock
 	CCBillClient                 *ccbill.RESTClient
-	ProductService               *ProductService
-	PriceService                 *PriceService
+	ProductService               *catalog.ProductService
+	PriceService                 *catalog.PriceService
 	NotificationService          *NotificationService
 	EventLogService              *EventLogService
 	SubscriptionService          *SubscriptionService
@@ -39,7 +42,7 @@ type CCBillWebhookService struct {
 	PaymentService               *PaymentService
 	DeduplicationService         *DeduplicationService
 	CheckoutSessionService       *CheckoutSessionService
-	CreditsService               *CreditsService
+	CreditsService               *credits.CreditsService
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -442,7 +445,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 			periodEnd = subscription.CurrentPeriodEndsAt.UTC()
 		}
 		if !periodEnd.IsZero() {
-			if err := s.CreditsService.GrantSubscriptionCredits(ctx, GrantSubscriptionCreditsParams{
+			if err := s.CreditsService.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 				SubscriptionID: subscription.ID,
 				PeriodEnd:      periodEnd,
 				Cadence:        models.CreditGrantCadenceOnce,
@@ -714,10 +717,10 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		txdb := db.NewWithTx(tx)
-		priceService := NewPriceService(txdb)
-		productService := NewProductService(txdb)
+		priceService := catalog.NewPriceService(txdb)
+		productService := catalog.NewProductService(txdb)
 		notificationService := NewNotificationService(txdb, nil)
-		entitlementService := NewEntitlementService(txdb)
+		entitlementService := entitlements.NewEntitlementService(txdb)
 		paymentService := NewPaymentService(txdb)
 		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
 
@@ -917,9 +920,9 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
 	ctx context.Context,
 	txdb *db.DB,
-	entitlementService *EntitlementService,
-	productService *ProductService,
-	priceService *PriceService,
+	entitlementService *entitlements.EntitlementService,
+	productService *catalog.ProductService,
+	priceService *catalog.PriceService,
 	subscription *models.Subscription,
 	oldPriceID uuid.UUID,
 	newPriceID uuid.UUID,
@@ -974,7 +977,7 @@ func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
 			reason := models.EntitlementRevokeDowngrade
 			st := models.EntitlementSourceSubscription
 			sid := subscription.ID
-			if err := entitlementService.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+			if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 				UserID:      subscription.UserID,
 				Entitlement: oldEnt,
 				SourceType:  &st,
@@ -1007,10 +1010,10 @@ func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
 
 			// Grant new entitlement window tied to subscription.
 			notBefore := now.UTC()
-			var params PushNewEntitlementParams
+			var params entitlements.PushNewEntitlementParams
 			if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
 				endAt := subscription.CurrentPeriodEndsAt.UTC()
-				params = PushNewEntitlementParams{
+				params = entitlements.PushNewEntitlementParams{
 					UserID:      subscription.UserID,
 					Entitlement: newEnt,
 					NotBefore:   &notBefore,
@@ -1019,7 +1022,7 @@ func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
 					SourceID:    subscription.ID,
 				}
 			} else {
-				params = PushNewEntitlementParams{
+				params = entitlements.PushNewEntitlementParams{
 					UserID:      subscription.UserID,
 					Entitlement: newEnt,
 					NotBefore:   &notBefore,
@@ -1150,8 +1153,8 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		txdb := db.NewWithTx(tx)
-		priceService := NewPriceService(txdb)
-		productService := NewProductService(txdb)
+		priceService := catalog.NewPriceService(txdb)
+		productService := catalog.NewProductService(txdb)
 		notificationService := NewNotificationService(txdb, nil)
 		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
 
@@ -1236,8 +1239,8 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		txdb := db.NewWithTx(tx)
-		priceService := NewPriceService(txdb)
-		productService := NewProductService(txdb)
+		priceService := catalog.NewPriceService(txdb)
+		productService := catalog.NewProductService(txdb)
 		notificationService := NewNotificationService(txdb, nil)
 		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
 
@@ -1452,11 +1455,11 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		txdb := db.NewWithTx(tx)
-		priceService := NewPriceService(txdb)
-		productService := NewProductService(txdb)
+		priceService := catalog.NewPriceService(txdb)
+		productService := catalog.NewProductService(txdb)
 		notificationService := NewNotificationService(txdb, nil)
 		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
-		entSvc := NewEntitlementService(txdb)
+		entSvc := entitlements.NewEntitlementService(txdb)
 
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
@@ -1503,7 +1506,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 				st := models.EntitlementSourceSubscription
 				sid := sub.ID
 				for _, entName := range names {
-					if err := entSvc.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 						UserID:      sub.UserID,
 						Entitlement: entName,
 						SourceType:  &st,
@@ -1618,8 +1621,8 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		db := db.NewWithTx(tx)
-		priceService := NewPriceService(db)
-		productService := NewProductService(db)
+		priceService := catalog.NewPriceService(db)
+		productService := catalog.NewProductService(db)
 		notificationService := NewNotificationService(db, nil)
 		subService := NewSubscriptionService(db, priceService, productService, notificationService, s.CCBillClient, nil, nil)
 
@@ -1761,11 +1764,11 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		db := db.NewWithTx(tx)
-		priceService := NewPriceService(db)
-		productService := NewProductService(db)
+		priceService := catalog.NewPriceService(db)
+		productService := catalog.NewProductService(db)
 		notificationService := NewNotificationService(db, nil)
 		subService := NewSubscriptionService(db, priceService, productService, notificationService, s.CCBillClient, nil, nil)
-		entSvc := NewEntitlementService(db)
+		entSvc := entitlements.NewEntitlementService(db)
 
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
@@ -1854,7 +1857,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			st := models.EntitlementSourceSubscription
 			sid := sub.ID
 			for _, entName := range names {
-				if err := entSvc.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+				if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 					UserID:      sub.UserID,
 					Entitlement: entName,
 					SourceType:  &st,
@@ -2039,7 +2042,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			periodEnd = subscription.CurrentPeriodEndsAt.UTC()
 		}
 		if !periodEnd.IsZero() {
-			if err := s.CreditsService.GrantSubscriptionCredits(ctx, GrantSubscriptionCreditsParams{
+			if err := s.CreditsService.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 				SubscriptionID: subscription.ID,
 				PeriodEnd:      periodEnd,
 				Cadence:        models.CreditGrantCadencePerRenewal,
@@ -2172,11 +2175,11 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		txdb := db.NewWithTx(tx)
-		priceService := NewPriceService(txdb)
-		productService := NewProductService(txdb)
+		priceService := catalog.NewPriceService(txdb)
+		productService := catalog.NewProductService(txdb)
 		notificationService := NewNotificationService(txdb, nil)
 		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
-		entSvc := NewEntitlementService(txdb)
+		entSvc := entitlements.NewEntitlementService(txdb)
 		entSvc.SetClock(s.Clock)
 
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)
@@ -2226,7 +2229,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 				if paidTermEnd != nil && paidTermEnd.After(notBefore) {
 					notBefore = paidTermEnd.UTC()
 				}
-				if _, err := entSvc.PushNewEntitlement(ctx, PushNewEntitlementParams{
+				if _, err := entSvc.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 					UserID:      sub.UserID,
 					Entitlement: entName,
 					NotBefore:   &notBefore,

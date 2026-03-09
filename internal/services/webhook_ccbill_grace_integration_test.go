@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -111,8 +113,8 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
 	})
 
-	priceSvc := NewPriceService(dbi)
-	productSvc := NewProductService(dbi)
+	priceSvc := catalog.NewPriceService(dbi)
+	productSvc := catalog.NewProductService(dbi)
 	notifSvc := NewNotificationService(dbi, nil)
 	subSvc := NewSubscriptionService(dbi, priceSvc, productSvc, notifSvc, nil, nil, nil)
 
@@ -283,9 +285,9 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
 	})
 
-	priceSvc := NewPriceService(dbi)
-	productSvc := NewProductService(dbi)
-	entitlementSvc := NewEntitlementService(dbi)
+	priceSvc := catalog.NewPriceService(dbi)
+	productSvc := catalog.NewProductService(dbi)
+	entitlementSvc := entitlements.NewEntitlementService(dbi)
 	notifSvc := NewNotificationService(dbi, nil)
 	paymentSvc := NewPaymentService(dbi)
 	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)

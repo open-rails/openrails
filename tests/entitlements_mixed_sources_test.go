@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,7 +84,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	for _, entName := range []string{"premium", "extra"} {
 		notBefore := periodStart.UTC()
 		endAt := paidEnd.UTC()
-		_, err := rt.EntitlementService.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+		_, err := rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 			UserID:      userID,
 			Entitlement: entName,
 			NotBefore:   &notBefore,
@@ -106,7 +106,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	})
 	oneOffEnd := paidEnd.Add(10 * 24 * time.Hour).UTC()
 	notBefore := clock.Now().UTC()
-	_, err = rt.EntitlementService.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+	_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 		UserID:      userID,
 		Entitlement: "premium",
 		NotBefore:   &notBefore,
@@ -128,7 +128,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	d := 5 * 24 * time.Hour
-	_, err = rt.EntitlementService.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+	_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 		UserID:      userID,
 		Entitlement: "extra",
 		NotBefore:   &notBefore,
@@ -140,7 +140,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 
 	// Grace: premium +2 days (simulating dunning), should schedule after one-off tail.
 	graceUntil := oneOffEnd.Add(2 * 24 * time.Hour).UTC()
-	_, err = rt.EntitlementService.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+	_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 		UserID:      userID,
 		Entitlement: "premium",
 		NotBefore:   &notBefore,

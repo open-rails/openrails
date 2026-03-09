@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
@@ -36,8 +37,8 @@ type GetSubscriptionsFilters struct {
 type SubscriptionService struct {
 	subscriptionRepo     *repo.SubscriptionRepo
 	Clock                clockwork.Clock
-	PriceService         *PriceService
-	ProductService       *ProductService
+	PriceService         *catalog.PriceService
+	ProductService       *catalog.ProductService
 	NotificationService  *NotificationService
 	CCBillRESTClient     *ccbill.RESTClient
 	NMIClients           map[string]*nmi.NMIClient
@@ -147,8 +148,8 @@ func (s *SubscriptionService) GetAvailableProducts(ctx context.Context) ([]*mode
 
 func NewSubscriptionService(
 	db *db.DB,
-	priceService *PriceService,
-	productService *ProductService,
+	priceService *catalog.PriceService,
+	productService *catalog.ProductService,
 	notificationService *NotificationService,
 	ccbillRESTClient *ccbill.RESTClient,
 	nmiClients map[string]*nmi.NMIClient,

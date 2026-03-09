@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -147,9 +147,9 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 	var err error
 	if req.Days != nil {
 		d := time.Duration(*req.Days) * 24 * time.Hour
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), services.PushNewEntitlementParams{UserID: path.UserID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
+		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
 	} else {
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), services.PushNewEntitlementParams{UserID: path.UserID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
+		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
 	}
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
@@ -183,7 +183,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "entitlement not found for this user")
 		return
 	}
-	if err := svc.RevokeExistingEntitlement(r.Request.Context(), services.RevokeExistingEntitlementParams{EntitlementID: &entitlementID, Reason: models.EntitlementRevokeAdmin}); err != nil {
+	if err := svc.RevokeExistingEntitlement(r.Request.Context(), entitlements.RevokeExistingEntitlementParams{EntitlementID: &entitlementID, Reason: models.EntitlementRevokeAdmin}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

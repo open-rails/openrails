@@ -7,7 +7,7 @@ import (
 	"github.com/doujins-org/ginapi/response"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
@@ -77,7 +77,7 @@ func GetPrices(r *httprequest.Request) {
 		return
 	}
 
-	filter := services.PriceFilter{
+	filter := catalog.PriceFilter{
 		Currency: strings.ToLower(req.Currency),
 		Type:     req.Type,
 	}

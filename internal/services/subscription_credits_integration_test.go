@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -115,16 +116,16 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", creditTypeID).Exec(ctx)
 	})
 
-	creditsSvc := NewCreditsService(dbi)
+	creditsSvc := credits.NewCreditsService(dbi)
 	creditsSvc.Clock = nil
 
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, GrantSubscriptionCreditsParams{
+	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadencePerRenewal,
 		Source:         "subscription_renewal",
 	}))
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, GrantSubscriptionCreditsParams{
+	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadencePerRenewal,
@@ -283,16 +284,16 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id IN (?)", bun.In([]uuid.UUID{ctOnceID, ctRenewID})).Exec(ctx)
 	})
 
-	creditsSvc := NewCreditsService(dbi)
+	creditsSvc := credits.NewCreditsService(dbi)
 
 	// Once grant should apply once.
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, GrantSubscriptionCreditsParams{
+	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadenceOnce,
 		Source:         "subscription_initial",
 	}))
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, GrantSubscriptionCreditsParams{
+	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadenceOnce,
@@ -300,13 +301,13 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	}))
 
 	// Renewal grant should apply once.
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, GrantSubscriptionCreditsParams{
+	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadencePerRenewal,
 		Source:         "subscription_renewal",
 	}))
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, GrantSubscriptionCreditsParams{
+	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadencePerRenewal,

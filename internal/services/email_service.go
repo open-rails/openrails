@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -33,8 +34,8 @@ type EmailService struct {
 
 	// Domain dependencies for building subscription emails
 	subscriptionService *SubscriptionService
-	productService      *ProductService
-	priceService        *PriceService
+	productService      *catalog.ProductService
+	priceService        *catalog.PriceService
 	profiles            *repo.ProfileRepo
 }
 
@@ -78,8 +79,8 @@ func NewEmailService(sendgridCfg *config.SendGridConfig, storeCfg *config.StoreC
 // This is called after creation to avoid circular dependencies.
 func (s *EmailService) SetDomainServices(
 	subscriptionService *SubscriptionService,
-	productService *ProductService,
-	priceService *PriceService,
+	productService *catalog.ProductService,
+	priceService *catalog.PriceService,
 	profiles *repo.ProfileRepo,
 ) {
 	s.subscriptionService = subscriptionService

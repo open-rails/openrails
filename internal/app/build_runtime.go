@@ -24,6 +24,9 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/jupiter"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
@@ -426,12 +429,12 @@ func createCCBillDataLinkClient(cfg *config.Config) *ccbill.DataLinkClient {
 type servicesInstances struct {
 	SubscriptionService *services.SubscriptionService
 
-	ProductService           *services.ProductService
-	PriceService             *services.PriceService
+	ProductService           *catalog.ProductService
+	PriceService             *catalog.PriceService
 	NotificationService      *services.NotificationService
 	PaymentMethodService     *services.PaymentMethodService
 	PurchaseService          *services.PaymentService
-	EntitlementService       *services.EntitlementService
+	EntitlementService       *entitlements.EntitlementService
 	VaultService             *services.VaultService
 	SolanaPayService         *services.SolanaPayService
 	SolanaPayPoller          *services.SolanaPayPoller
@@ -440,7 +443,7 @@ type servicesInstances struct {
 	FXProvider               fx.Provider
 
 	UserSubscriptionService   *services.UserSubscriptionService
-	PublicSubscriptionService *services.PublicSubscriptionService
+	PublicSubscriptionService *catalog.PublicSubscriptionService
 	AdminSubscriptionService  *services.AdminSubscriptionService
 
 	SubscriptionLifecycleService *services.SubscriptionLifecycleService
@@ -450,24 +453,24 @@ type servicesInstances struct {
 
 	CheckoutService          *services.CheckoutService
 	CheckoutSessionService   *services.CheckoutSessionService
-	CreditsService           *services.CreditsService
-	CreditTypeService        *services.CreditTypeService
+	CreditsService           *credits.CreditsService
+	CreditTypeService        *credits.CreditTypeService
 	ProcessorCustomerService *services.ProcessorCustomerService
 }
 
 func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock) *servicesInstances {
-	productService := services.NewProductService(database)
-	priceService := services.NewPriceService(database)
+	productService := catalog.NewProductService(database)
+	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
 	notificationService := services.NewNotificationService(database, nil)
 	paymentMethodService := services.NewPaymentMethodService(database)
 	purchaseService := services.NewPaymentService(database)
 	purchaseService.Clock = clock
-	entitlementService := services.NewEntitlementService(database)
+	entitlementService := entitlements.NewEntitlementService(database)
 	entitlementService.Clock = clock
-	creditsService := services.NewCreditsService(database)
+	creditsService := credits.NewCreditsService(database)
 	creditsService.Clock = clock
-	creditTypeService := services.NewCreditTypeService(database)
+	creditTypeService := credits.NewCreditTypeService(database)
 	processorCustomerService := services.NewProcessorCustomerService(database)
 	profileRepo := repo.NewProfileRepo(database)
 
@@ -533,7 +536,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		nmiClients,
 	)
 
-	publicSubscriptionService := services.NewPublicSubscriptionService(
+	publicSubscriptionService := catalog.NewPublicSubscriptionService(
 		productService,
 		priceService,
 	)

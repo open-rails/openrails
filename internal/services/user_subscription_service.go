@@ -12,6 +12,8 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
@@ -28,11 +30,11 @@ var (
 // UserSubscriptionService handles user-facing subscription operations
 type UserSubscriptionService struct {
 	SubscriptionService *SubscriptionService
-	ProductService      *ProductService
-	PriceService        *PriceService
+	ProductService      *catalog.ProductService
+	PriceService        *catalog.PriceService
 	PaymentService      *PaymentService
 	NotificationService *NotificationService
-	EntitlementService  *EntitlementService
+	EntitlementService  *entitlements.EntitlementService
 	NMIClients          map[string]*nmi.NMIClient
 	Clock               clockwork.Clock
 }
@@ -395,11 +397,11 @@ func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, u
 // NewUserSubscriptionService creates a new UserSubscriptionService
 func NewUserSubscriptionService(
 	subscriptionService *SubscriptionService,
-	productService *ProductService,
-	priceService *PriceService,
+	productService *catalog.ProductService,
+	priceService *catalog.PriceService,
 	paymentService *PaymentService,
 	notificationService *NotificationService,
-	entitlementService *EntitlementService,
+	entitlementService *entitlements.EntitlementService,
 	nmiClients map[string]*nmi.NMIClient,
 ) *UserSubscriptionService {
 	return &UserSubscriptionService{

@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
 type CreditGrantCadence string
@@ -128,7 +128,7 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 	if productID == uuid.Nil {
 		return nil, fmt.Errorf("product_id required")
 	}
-	p, err := products.UpdateDefinition(ctx, productID, services.ProductDefinitionUpdateParams{
+	p, err := products.UpdateDefinition(ctx, productID, catalog.ProductDefinitionUpdateParams{
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
 		EntitlementsSpec: req.EntitlementsSpec,
@@ -279,7 +279,7 @@ func (s *Service) resolveProcessorMappings(ctx context.Context, product *models.
 					return nil, fmt.Errorf("stripe link requires processors['stripe'].link.price_id")
 				}
 				if s.rt.Config != nil && s.rt.Config.FeatureFlags != nil && s.rt.Config.FeatureFlags.VerifyProcessorMappings {
-					stripeSvc := &services.StripeCatalogService{Config: s.rt.Config}
+					stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
 					if err := stripeSvc.VerifyPriceExists(ctx, id); err != nil {
 						return nil, err
 					}
@@ -306,7 +306,7 @@ func (s *Service) resolveProcessorMappings(ctx context.Context, product *models.
 			if s.rt.Config == nil {
 				return nil, fmt.Errorf("stripe create requested but config is unavailable")
 			}
-			stripeSvc := &services.StripeCatalogService{Config: s.rt.Config}
+			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
 			idKeyProduct := "openrails-product-" + product.ID.String()
 			stripeProductID, err := stripeSvc.CreateProduct(ctx, product.DisplayName, product.Description, idKeyProduct)
 			if err != nil {

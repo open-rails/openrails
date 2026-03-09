@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -89,7 +89,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	for _, entName := range []string{"premium", "extra"} {
 		notBefore := periodStart.UTC()
 		endAt := paidEnd.UTC()
-		_, err := rt.EntitlementService.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+		_, err := rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 			UserID:      userID,
 			Entitlement: entName,
 			NotBefore:   &notBefore,
@@ -175,7 +175,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 	// Minimal entitlement for this subscription.
 	notBefore := periodStart.UTC()
 	endAt := paidEnd.UTC()
-	_, err := rt.EntitlementService.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+	_, err := rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 		UserID:      userID,
 		Entitlement: "premium",
 		NotBefore:   &notBefore,

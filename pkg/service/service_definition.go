@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/credits"
 )
 
 // -------------------------------- Definition Surface (Host/Admin) --------------------------------
@@ -78,7 +78,7 @@ func (s *Service) UpdateCreditType(ctx context.Context, name string, req UpdateC
 	if name == "" {
 		return nil, fmt.Errorf("name required")
 	}
-	ct, err := creditTypes.Update(ctx, name, services.CreditTypeUpdateParams{
+	ct, err := creditTypes.Update(ctx, name, credits.CreditTypeUpdateParams{
 		DisplayName: req.DisplayName,
 		IsActive:    req.IsActive,
 	})

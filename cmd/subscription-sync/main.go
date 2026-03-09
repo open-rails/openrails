@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -287,7 +288,7 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 		if err != nil {
 			return err
 		}
-		priceService := services.NewPriceService(application.Runtime.DB)
+		priceService := catalog.NewPriceService(application.Runtime.DB)
 		price, err := priceService.GetByID(ctx, priceID)
 		if err != nil {
 			return fmt.Errorf("load price for ccbill add-remote: %w", err)
@@ -416,7 +417,7 @@ func resolveCCBillPriceID(ctx context.Context, database *db.DB, rawID string) (u
 		return parsed, nil
 	}
 
-	priceService := services.NewPriceService(database)
+	priceService := catalog.NewPriceService(database)
 	prices, err := priceService.GetAllActive(ctx)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("load active prices: %w", err)

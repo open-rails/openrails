@@ -13,6 +13,8 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -26,9 +28,9 @@ type SubscriptionLifecycleService struct {
 	DB                  *db.DB
 	Config              *config.Config
 	Clock               clockwork.Clock
-	ProductService      *ProductService
-	PriceService        *PriceService
-	EntitlementService  *EntitlementService
+	ProductService      *catalog.ProductService
+	PriceService        *catalog.PriceService
+	EntitlementService  *entitlements.EntitlementService
 	NotificationService *NotificationService
 	PaymentService      *PaymentService  // For creating Payment records on renewal
 	EventLogService     *EventLogService // For logging events to ClickHouse
@@ -188,7 +190,7 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 }
 
 // NewSubscriptionLifecycleService creates a new instance of SubscriptionLifecycleService
-func NewSubscriptionLifecycleService(db *db.DB, productService *ProductService, priceService *PriceService, entitlementService *EntitlementService, notificationService *NotificationService, paymentService *PaymentService, eventLogService *EventLogService) *SubscriptionLifecycleService {
+func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService *NotificationService, paymentService *PaymentService, eventLogService *EventLogService) *SubscriptionLifecycleService {
 	return &SubscriptionLifecycleService{
 		DB:                  db,
 		Config:              nil,                      // Set via SetConfig if feature flags are needed
@@ -286,9 +288,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		return nil, nil, errors.New("database handle is required")
 	}
 
-	priceService := NewPriceService(dbb)
-	productService := NewProductService(dbb)
-	entitlementService := NewEntitlementService(dbb)
+	priceService := catalog.NewPriceService(dbb)
+	productService := catalog.NewProductService(dbb)
+	entitlementService := entitlements.NewEntitlementService(dbb)
 	entitlementService.SetClock(s.Clock) // Propagate clock for testing
 	notificationService := NewNotificationService(dbb, nil)
 	subService := NewSubscriptionService(dbb, priceService, productService, notificationService, nil, nil, nil)
@@ -461,7 +463,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 			notBefore := periodStartsAt.UTC()
 			endAt := periodEndsAt.UTC()
-			window, err := entitlementService.PushNewEntitlement(ctx, PushNewEntitlementParams{
+			window, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 				UserID:      params.UserID,
 				Entitlement: ent,
 				NotBefore:   &notBefore,
@@ -582,11 +584,11 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 	err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		db := db.NewWithTx(tx)
-		priceService := NewPriceService(db)
-		productService := NewProductService(db)
+		priceService := catalog.NewPriceService(db)
+		productService := catalog.NewProductService(db)
 		notificationService := NewNotificationService(db, nil)
 		subService := NewSubscriptionService(db, priceService, productService, notificationService, nil, nil, nil)
-		entitlementService := NewEntitlementService(db)
+		entitlementService := entitlements.NewEntitlementService(db)
 		entitlementService.SetClock(s.Clock)
 
 		// Find subscription - use processor name for gateway lookup
@@ -731,7 +733,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				// cause the paid push to be scheduled after grace or become a no-op.
 				grace := models.EntitlementSourceGrace
 				sid := subscription.ID
-				if err := entitlementService.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+				if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 					UserID:      subscription.UserID,
 					Entitlement: entName,
 					SourceType:  &grace,
@@ -741,7 +743,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 					return fmt.Errorf("failed to clear grace entitlement %s on renewal: %w", entName, err)
 				}
 
-				if _, err := entitlementService.PushNewEntitlement(ctx, PushNewEntitlementParams{
+				if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 					UserID:      subscription.UserID,
 					Entitlement: entName,
 					NotBefore:   &notBefore,
@@ -773,7 +775,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 					reason := models.EntitlementRevokeDowngrade
 					st := models.EntitlementSourceSubscription
 					sid := subscription.ID
-					if err := entitlementService.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+					if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 						UserID:      subscription.UserID,
 						Entitlement: entName,
 						SourceType:  &st,
@@ -927,11 +929,11 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 
 	err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		txdb := db.NewWithTx(tx)
-		priceService := NewPriceService(txdb)
-		productService := NewProductService(txdb)
+		priceService := catalog.NewPriceService(txdb)
+		productService := catalog.NewProductService(txdb)
 		notificationService := NewNotificationService(txdb, nil)
 		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, nil, nil, nil)
-		entitlementService := NewEntitlementService(txdb)
+		entitlementService := entitlements.NewEntitlementService(txdb)
 		entitlementService.SetClock(s.Clock)
 
 		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), processorSubID)
@@ -997,7 +999,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		subID := subscription.ID
 
 		for _, entName := range entNames {
-			if err := entitlementService.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+			if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 				UserID:      subscription.UserID,
 				Entitlement: entName,
 				SourceType:  &graceSource,
@@ -1007,7 +1009,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 				return fmt.Errorf("failed to clear grace entitlement %s on reactivation: %w", entName, err)
 			}
 
-			if _, err := entitlementService.PushNewEntitlement(ctx, PushNewEntitlementParams{
+			if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 				UserID:      subscription.UserID,
 				Entitlement: entName,
 				NotBefore:   &notBefore,
@@ -1067,11 +1069,11 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 
 	err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		db := db.NewWithTx(tx)
-		priceService := NewPriceService(db)
-		productService := NewProductService(db)
+		priceService := catalog.NewPriceService(db)
+		productService := catalog.NewProductService(db)
 		notificationService := NewNotificationService(db, nil)
 		subService := NewSubscriptionService(db, priceService, productService, notificationService, nil, nil, nil)
-		entSvc := NewEntitlementService(db)
+		entSvc := entitlements.NewEntitlementService(db)
 		entSvc.SetClock(s.Clock) // Propagate clock for testing
 
 		// Use processor name for gateway lookup
@@ -1149,7 +1151,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 				st := models.EntitlementSourceSubscription
 				sid := subscription.ID
 				for _, entName := range names {
-					if err := entSvc.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 						UserID:      subscription.UserID,
 						Entitlement: entName,
 						SourceType:  &st,
@@ -1229,11 +1231,11 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 
 	err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		db := db.NewWithTx(tx)
-		priceService := NewPriceService(db)
-		productService := NewProductService(db)
+		priceService := catalog.NewPriceService(db)
+		productService := catalog.NewProductService(db)
 		notificationService := NewNotificationService(db, nil)
 		subService := NewSubscriptionService(db, priceService, productService, notificationService, nil, nil, nil)
-		entSvc := NewEntitlementService(db)
+		entSvc := entitlements.NewEntitlementService(db)
 		entSvc.SetClock(s.Clock) // Propagate clock for testing
 
 		subscription, err := subService.GetByID(ctx, subscriptionID)
@@ -1270,7 +1272,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 				st := models.EntitlementSourceSubscription
 				sid := subscription.ID
 				for _, entName := range names {
-					if err := entSvc.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 						UserID:      subscription.UserID,
 						Entitlement: entName,
 						SourceType:  &st,
@@ -1293,7 +1295,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 				st := models.EntitlementSourceGrace
 				sid := subscription.ID
 				for _, entName := range graceNames {
-					if err := entSvc.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 						UserID:      subscription.UserID,
 						Entitlement: entName,
 						SourceType:  &st,
@@ -1363,11 +1365,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 	err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		db := db.NewWithTx(tx)
-		priceService := NewPriceService(db)
-		productService := NewProductService(db)
+		priceService := catalog.NewPriceService(db)
+		productService := catalog.NewProductService(db)
 		notificationService := NewNotificationService(db, nil)
 		subService := NewSubscriptionService(db, priceService, productService, notificationService, nil, nil, nil)
-		entSvc := NewEntitlementService(db)
+		entSvc := entitlements.NewEntitlementService(db)
 		entSvc.SetClock(s.Clock) // Propagate clock for testing
 
 		subscription, err := subService.GetByID(ctx, *params.SubscriptionID)
@@ -1438,7 +1440,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 						if paidEnd.After(notBefore) {
 							notBefore = paidEnd
 						}
-						_, err := entSvc.PushNewEntitlement(ctx, PushNewEntitlementParams{
+						_, err := entSvc.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 							UserID:      subscription.UserID,
 							Entitlement: entName,
 							NotBefore:   &notBefore,
@@ -1489,7 +1491,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 					st := models.EntitlementSourceSubscription
 					sid := subscription.ID
 					for _, entName := range names {
-						if err := entSvc.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+						if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 							UserID:      subscription.UserID,
 							Entitlement: entName,
 							SourceType:  &st,
@@ -1515,7 +1517,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 					st := models.EntitlementSourceGrace
 					sid := subscription.ID
 					for _, entName := range graceNames {
-						if err := entSvc.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+						if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 							UserID:      subscription.UserID,
 							Entitlement: entName,
 							SourceType:  &st,

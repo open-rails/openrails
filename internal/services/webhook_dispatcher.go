@@ -12,6 +12,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/processors"
 )
 
@@ -32,8 +34,8 @@ type WebhookMessage struct {
 type WebhookDispatcher struct {
 	DB                           *db.DB
 	Clock                        clockwork.Clock
-	PriceService                 *PriceService
-	ProductService               *ProductService
+	PriceService                 *catalog.PriceService
+	ProductService               *catalog.ProductService
 	NotificationService          *NotificationService
 	SubscriptionService          *SubscriptionService
 	PaymentService               *PaymentService
@@ -46,7 +48,7 @@ type WebhookDispatcher struct {
 	NMIClients                   map[string]*nmi.NMIClient
 	CheckoutService              *CheckoutService
 	CheckoutSessionService       *CheckoutSessionService
-	CreditsService               *CreditsService
+	CreditsService               *credits.CreditsService
 }
 
 // Process executes the processor-specific webhook flow.

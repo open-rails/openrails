@@ -1,4 +1,4 @@
-package services
+package entitlements
 
 import (
 	"context"

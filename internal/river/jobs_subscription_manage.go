@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -121,7 +122,7 @@ type ResumeSubscriptionWorker struct {
 	river.WorkerDefaults[ResumeSubscriptionArgs]
 	DB                  *db.DB
 	Config              *config.Config
-	EntitlementService  *services.EntitlementService
+	EntitlementService  *entitlements.EntitlementService
 	SubscriptionService *services.SubscriptionService
 }
 

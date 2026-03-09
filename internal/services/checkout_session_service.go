@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/pkg/api"
@@ -118,8 +119,8 @@ type CheckoutSessionResponse struct {
 type CheckoutSessionService struct {
 	db                       *db.DB
 	repo                     *repo.CheckoutSessionRepo
-	priceService             *PriceService
-	productService           *ProductService
+	priceService             *catalog.PriceService
+	productService           *catalog.ProductService
 	paymentMethodService     *PaymentMethodService
 	idempotencyService       *IdempotencyService
 	checkoutService          *CheckoutService
@@ -132,8 +133,8 @@ type CheckoutSessionService struct {
 
 func NewCheckoutSessionService(
 	db *db.DB,
-	priceService *PriceService,
-	productService *ProductService,
+	priceService *catalog.PriceService,
+	productService *catalog.ProductService,
 	paymentMethodService *PaymentMethodService,
 	idempotencyService *IdempotencyService,
 	checkoutService *CheckoutService,

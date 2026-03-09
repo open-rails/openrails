@@ -11,6 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -120,14 +123,14 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", creditTypeID).Exec(ctx)
 	})
 
-	priceSvc := NewPriceService(dbi)
-	productSvc := NewProductService(dbi)
-	entitlementSvc := NewEntitlementService(dbi)
+	priceSvc := catalog.NewPriceService(dbi)
+	productSvc := catalog.NewProductService(dbi)
+	entitlementSvc := entitlements.NewEntitlementService(dbi)
 	notifSvc := NewNotificationService(dbi, nil)
 	paymentSvc := NewPaymentService(dbi)
 	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	subSvc := NewSubscriptionService(dbi, priceSvc, productSvc, notifSvc, nil, nil, nil)
-	creditsSvc := NewCreditsService(dbi)
+	creditsSvc := credits.NewCreditsService(dbi)
 
 	nextRenewal := now.Add(30 * 24 * time.Hour).Format("2006-01-02")
 	ts := now.Format("2006-01-02 15:04:05")
