@@ -3,7 +3,6 @@ package riverjobs
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -34,10 +33,6 @@ type CreditExpiryWorker struct {
 func (CreditExpiryWorker) Kind() string { return KindCreditExpiry }
 
 func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpiryArgs]) error {
-	if w.DB == nil {
-		return fmt.Errorf("db is required")
-	}
-
 	// Check if entitlement expiration is disabled via feature flags
 	if w.Config != nil && w.Config.IsEntitlementExpirationDisabled() {
 		log.WithContext(ctx).WithField("worker", KindCreditExpiry).

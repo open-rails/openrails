@@ -19,18 +19,9 @@ import (
 
 func Webhook(r *httprequest.Request) {
 	provider := webhookutil.CanonicalProvider(r.Param("provider"))
-	if r.State == nil || r.State.RiverProducer == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "job queue unavailable")
-		return
-	}
 	clientIP := r.GetClientIP()
 	log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).Debug("Received webhook")
-	isTestMode := false
-	if r.State != nil && r.State.Config != nil {
-		isTestMode = r.State.Config.IsTestMode()
-	} else if r.State == nil || r.State.Config == nil {
-		log.Warn("State or Config is nil - defaulting to non-test mode for webhook processing")
-	}
+	isTestMode := r.State.Config.IsTestMode()
 	if processors.IsNMIBacked(provider) {
 		if enqueueNMIWebhook(r, provider, clientIP) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
@@ -97,10 +88,6 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
 		return false
 	}
-	if r.State == nil || r.State.Config == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
-		return false
-	}
 	secret := ""
 	if stripeProc := r.State.Config.GetStripeProcessor(); stripeProc != nil {
 		secret = stripeProc.WebhookSecret
@@ -131,9 +118,6 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 }
 
 func enqueueWebhookJob(r *httprequest.Request, args riverjobs.WebhookProcessArgs) error {
-	if r.State == nil || r.State.RiverProducer == nil {
-		return fmt.Errorf("river producer unavailable")
-	}
 	opts := &river.InsertOpts{Queue: riverjobs.QueueWebhooks, UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true}}
 	_, err := r.State.RiverProducer.Insert(r.Request.Context(), args, opts)
 	return err

@@ -21,10 +21,6 @@ func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFu
 }
 
 func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
-	if opts.AuthProvider == nil {
-		panic("AuthProvider is required for user routes")
-	}
-
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
@@ -69,10 +65,6 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 }
 
 func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
-	if opts.AuthProvider == nil {
-		panic("AuthProvider is required for admin routes")
-	}
-
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}

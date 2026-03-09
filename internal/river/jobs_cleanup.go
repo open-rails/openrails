@@ -54,10 +54,6 @@ type CleanupResult struct {
 }
 
 func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[CleanupExpiredDataArgs]) error {
-	if w.DB == nil {
-		return fmt.Errorf("db is required")
-	}
-
 	clock := w.Clock
 	if clock == nil {
 		clock = clockwork.NewRealClock()

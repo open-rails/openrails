@@ -42,11 +42,6 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	if r.State.SubscriptionService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
-		return
-	}
-
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -68,11 +63,6 @@ func CancelSubscription(r *httprequest.Request) {
 			"support_url": "https://support.ccbill.com",
 			"code":        "ccbill_cancel_required",
 		})
-		return
-	}
-
-	if r.State.RiverProducer == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "job queue unavailable")
 		return
 	}
 
@@ -105,19 +95,6 @@ func ResumeSubscription(r *httprequest.Request) {
 	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
-		return
-	}
-
-	if r.State == nil || r.State.DB == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "database unavailable")
-		return
-	}
-	if r.State.RiverProducer == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "job queue unavailable")
-		return
-	}
-	if r.State.SubscriptionService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
 		return
 	}
 

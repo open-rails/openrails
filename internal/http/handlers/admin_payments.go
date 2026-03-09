@@ -55,10 +55,6 @@ func AdminRefundPayment(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if r.State.PaymentService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment service unavailable")
-		return
-	}
 	ctx := r.Request.Context()
 	payment, err := r.State.PaymentService.GetByID(ctx, paymentID)
 	if err != nil {
@@ -114,10 +110,6 @@ func GetAdminPayments(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	if r.State.PaymentService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment service unavailable")
-		return
-	}
 	payments, total, err := r.State.PaymentService.GetPayments(r.Request.Context(), queryOpts)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
@@ -141,10 +133,6 @@ func GetAdminPayment(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid payment ID")
 		return
 	}
-	if r.State.PaymentService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment service unavailable")
-		return
-	}
 	payment, refunds, err := r.State.PaymentService.GetByIDWithDetails(r.Request.Context(), paymentID)
 	if err != nil {
 		r.ErrorJSON(http.StatusNotFound, "payment not found")
@@ -157,10 +145,6 @@ func GetAdminUserPayments(r *httprequest.Request) {
 	var path adminUserPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	if r.State.PaymentService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment service unavailable")
 		return
 	}
 	page := 1
@@ -197,10 +181,6 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 	}
 	var req adminOffChannelPaymentRequest
 	if !r.BindJSON(&req) {
-		return
-	}
-	if r.State == nil || r.State.CheckoutService == nil || r.State.PaymentService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing services unavailable")
 		return
 	}
 	priceID, err := api.ParsePriceID(strings.TrimSpace(req.PriceID))

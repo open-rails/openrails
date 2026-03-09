@@ -23,6 +23,10 @@ func (r *Runtime) buildRiverWorkers(ctx context.Context) (*river.Workers, error)
 // addBillingWorkersToRegistry adds billing workers to an existing worker registry.
 // This is used both internally (buildRiverWorkers) and externally (AddBillingWorkersTo).
 func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *river.Workers) error {
+	if err := r.validateBillingWorkerRuntime(); err != nil {
+		return err
+	}
+
 	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
@@ -80,6 +84,34 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Dispatcher: r.WebhookDispatcher,
 	}); err != nil {
 		return fmt.Errorf("add webhook process worker: %w", err)
+	}
+	return nil
+}
+
+func (r *Runtime) validateBillingWorkerRuntime() error {
+	if r == nil {
+		return fmt.Errorf("runtime is required")
+	}
+	if r.DB == nil {
+		return fmt.Errorf("billing worker runtime DB is required")
+	}
+	if r.Config == nil {
+		return fmt.Errorf("billing worker runtime config is required")
+	}
+	if r.SubscriptionService == nil {
+		return fmt.Errorf("billing worker runtime subscription service is required")
+	}
+	if r.UserSubscriptionService == nil {
+		return fmt.Errorf("billing worker runtime user subscription service is required")
+	}
+	if r.SubscriptionLifecycleService == nil {
+		return fmt.Errorf("billing worker runtime subscription lifecycle service is required")
+	}
+	if r.EntitlementService == nil {
+		return fmt.Errorf("billing worker runtime entitlement service is required")
+	}
+	if r.WebhookDispatcher == nil {
+		return fmt.Errorf("billing worker runtime webhook dispatcher is required")
 	}
 	return nil
 }

@@ -109,11 +109,6 @@ type paymentMethodCardDetails struct {
 }
 
 func CreatePaymentMethod(r *httprequest.Request) {
-	if r.State == nil || r.State.VaultService == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "payment vault unavailable")
-		return
-	}
-
 	user := r.GetUser()
 	if user == nil {
 		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
@@ -184,11 +179,6 @@ func CreatePaymentMethod(r *httprequest.Request) {
 }
 
 func UpdatePaymentMethod(r *httprequest.Request) {
-	if r.State == nil || r.State.VaultService == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "payment vault unavailable")
-		return
-	}
-
 	path := new(paymentMethodURI)
 	if !r.BindURI(path) {
 		return

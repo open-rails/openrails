@@ -51,6 +51,42 @@ func New(deps Dependencies) (*Server, error) {
 	if deps.Runtime.DB == nil {
 		return nil, fmt.Errorf("server runtime DB is required")
 	}
+	if deps.Runtime.Clock == nil {
+		return nil, fmt.Errorf("server runtime clock is required")
+	}
+	if deps.Runtime.PaymentService == nil {
+		return nil, fmt.Errorf("server runtime payment service is required")
+	}
+	if deps.Runtime.CheckoutService == nil {
+		return nil, fmt.Errorf("server runtime checkout service is required")
+	}
+	if deps.Runtime.CheckoutSessionService == nil {
+		return nil, fmt.Errorf("server runtime checkout session service is required")
+	}
+	if deps.Runtime.SubscriptionService == nil {
+		return nil, fmt.Errorf("server runtime subscription service is required")
+	}
+	if deps.Runtime.UserSubscriptionService == nil {
+		return nil, fmt.Errorf("server runtime user subscription service is required")
+	}
+	if deps.Runtime.PublicSubscriptionService == nil {
+		return nil, fmt.Errorf("server runtime public subscription service is required")
+	}
+	if deps.Runtime.AdminSubscriptionService == nil {
+		return nil, fmt.Errorf("server runtime admin subscription service is required")
+	}
+	if deps.Runtime.PaymentMethodService == nil {
+		return nil, fmt.Errorf("server runtime payment method service is required")
+	}
+	if deps.Runtime.VaultService == nil {
+		return nil, fmt.Errorf("server runtime vault service is required")
+	}
+	if deps.Runtime.ProcessorCustomerService == nil {
+		return nil, fmt.Errorf("server runtime processor customer service is required")
+	}
+	if deps.Runtime.RiverProducer == nil {
+		return nil, fmt.Errorf("server runtime river producer is required")
+	}
 	if deps.Cache == nil {
 		return nil, fmt.Errorf("server cache is required")
 	}

@@ -68,10 +68,6 @@ func (w *DunningWorker) now() time.Time {
 }
 
 func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) error {
-	if w.DB == nil {
-		return fmt.Errorf("db is required")
-	}
-
 	// Check dunning mode from feature flags
 	dunningMode := config.DunningModeOn
 	if w.Config != nil {

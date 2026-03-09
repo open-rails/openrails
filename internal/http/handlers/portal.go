@@ -19,10 +19,6 @@ func CreatePortalSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	if r.State == nil || r.State.ProcessorCustomerService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "portal service unavailable")
-		return
-	}
 	customerID, err := r.State.ProcessorCustomerService.GetCustomerID(r.Request.Context(), user.ID, "stripe")
 	if err != nil || strings.TrimSpace(customerID) == "" {
 		r.ErrorJSON(http.StatusNotFound, "stripe customer not found")

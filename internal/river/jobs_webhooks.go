@@ -42,10 +42,6 @@ type WebhookProcessWorker struct {
 func (WebhookProcessWorker) Kind() string { return KindWebhookProcess }
 
 func (w WebhookProcessWorker) Work(ctx context.Context, job *river.Job[WebhookProcessArgs]) error {
-	if w.Dispatcher == nil {
-		return fmt.Errorf("webhook dispatcher not configured")
-	}
-
 	args := job.Args
 	if args.ReceivedAt.IsZero() {
 		args.ReceivedAt = time.Now()

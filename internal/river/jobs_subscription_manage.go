@@ -47,7 +47,7 @@ type CancelSubscriptionWorker struct {
 func (CancelSubscriptionWorker) Kind() string { return KindSubscriptionCancel }
 
 func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[CancelSubscriptionArgs]) error {
-	if w.DB == nil || w.SubscriptionService == nil {
+	if w.SubscriptionService == nil {
 		return fmt.Errorf("subscription service unavailable")
 	}
 	userID := job.Args.UserID
@@ -128,7 +128,7 @@ type ResumeSubscriptionWorker struct {
 func (ResumeSubscriptionWorker) Kind() string { return KindSubscriptionResume }
 
 func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[ResumeSubscriptionArgs]) error {
-	if w.DB == nil || w.SubscriptionService == nil {
+	if w.SubscriptionService == nil {
 		return fmt.Errorf("subscription service unavailable")
 	}
 	userID := job.Args.UserID
