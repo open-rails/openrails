@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -1354,10 +1355,8 @@ func parseNMIChargebackDate(raw string) (time.Time, bool) {
 		"2006-01-02T15:04:05Z07:00",
 		time.RFC3339,
 	}
-	for _, layout := range layouts {
-		if ts, err := time.Parse(layout, trimmed); err == nil {
-			return ts.UTC(), true
-		}
+	if ts, err := timeutil.ParseFirstUTC(trimmed, layouts...); err == nil {
+		return ts.UTC(), true
 	}
 	return time.Time{}, false
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -53,7 +54,7 @@ func ServiceGetUserEntitlements(r *httprequest.Request) {
 	atStr := strings.TrimSpace(r.GinCtx.Query("at"))
 	var at *time.Time
 	if atStr != "" {
-		parsed, err := time.Parse(time.RFC3339, atStr)
+		parsed, err := timeutil.ParseRFC3339UTC(atStr)
 		if err != nil {
 			r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
 			return
@@ -94,7 +95,7 @@ func GetAdminUserEntitlements(r *httprequest.Request) {
 		queryTime = r.State.Clock.Now()
 	}
 	if atStr != "" {
-		parsed, err := time.Parse(time.RFC3339, atStr)
+		parsed, err := timeutil.ParseRFC3339UTC(atStr)
 		if err != nil {
 			r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
 			return

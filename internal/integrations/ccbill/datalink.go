@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 type DataLinkClient struct {
@@ -255,10 +256,9 @@ func (c *DataLinkClient) ParseCCBillDate(dateStr string) (*time.Time, error) {
 		"2006-01-02T15:04:05.000Z",
 	}
 
-	for _, format := range formats {
-		if parsed, err := time.Parse(format, dateStr); err == nil {
-			return &parsed, nil
-		}
+	parsed, err := timeutil.ParseFirstUTC(dateStr, formats...)
+	if err == nil {
+		return &parsed, nil
 	}
 
 	return nil, fmt.Errorf("unable to parse CCBill date: %s", dateStr)

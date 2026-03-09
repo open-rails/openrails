@@ -9,6 +9,7 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 func GetAdminMetricsSummary(r *httprequest.Request) {
@@ -170,13 +171,11 @@ func parseMetricsRange(r *httprequest.Request, defaultDays int) (services.Metric
 }
 
 func parseDateParam(value string) (time.Time, error) {
-	layouts := []string{time.RFC3339, "2006-01-02"}
-	for _, layout := range layouts {
-		if t, err := time.Parse(layout, value); err == nil {
-			return t.UTC(), nil
-		}
+	parsed, err := timeutil.ParseDateOrRFC3339UTC(value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid date: %s", value)
 	}
-	return time.Time{}, fmt.Errorf("invalid date: %s", value)
+	return parsed, nil
 }
 
 func applyPeriod(end time.Time, period string) time.Time {

@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 )
@@ -60,11 +61,7 @@ func parseCCBillTimestamp(ts string) (time.Time, error) {
 }*/
 
 func parseCCBillDate(dateStr string) (time.Time, error) {
-	dateStr = strings.TrimSpace(dateStr)
-	if dateStr == "" {
-		return time.Time{}, fmt.Errorf("date is empty")
-	}
-	return time.ParseInLocation("2006-01-02", dateStr, time.UTC)
+	return timeutil.ParseDateUTC(dateStr)
 }
 
 // parseCCBillDateUsingTimestamp parses date-only fields (e.g., nextRenewalDate/nextRetryDate).

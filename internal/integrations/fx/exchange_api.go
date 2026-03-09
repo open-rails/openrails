@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 const (
@@ -101,7 +103,7 @@ func (p *ExchangeAPIProvider) fetchRate(ctx context.Context, baseURL, currency s
 
 	asOf := time.Now()
 	if dateStr != "" {
-		if parsed, err := time.Parse("2006-01-02", dateStr); err == nil {
+		if parsed, err := timeutil.ParseDateUTC(dateStr); err == nil {
 			asOf = parsed
 		}
 	}
