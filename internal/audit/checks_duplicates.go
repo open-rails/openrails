@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/uptrace/bun"
 )
 
@@ -142,7 +143,7 @@ func (c *CheckDuplicateChargesSamePeriod) Run(ctx context.Context, db bun.IDB, o
 			EntityType:     EntityPayment,
 			EntityID:       entityID,
 			UserID:         r.UserID,
-			Description:    fmt.Sprintf("User charged %d times for product '%s' in same period (total $%.2f)", r.Count, r.ProductSlug, float64(r.TotalAmount)/100),
+			Description:    fmt.Sprintf("User charged %d times for product '%s' in same period (total %s)", r.Count, r.ProductSlug, moneyutil.FormatUSD(r.TotalAmount)),
 			Recommendation: "MANUAL REVIEW - Refund duplicate charges",
 			AutoFixable:    false,
 			Details: map[string]any{

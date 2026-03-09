@@ -12,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 const (
@@ -568,7 +569,7 @@ func (c *NMIClient) RunSale(params SaleParams) (*SaleResponse, error) {
 	}
 
 	// Convert cents to dollars for NMI API (NMI expects decimal format)
-	amountStr := strconv.FormatFloat(float64(params.Amount)/100.0, 'f', 2, 64)
+	amountStr := moneyutil.FormatCentsDecimal(params.Amount)
 
 	currency := params.Currency
 	if currency == "" {
@@ -634,7 +635,7 @@ func (c *NMIClient) Refund(params RefundParams) (*RefundResponse, error) {
 
 	// If amount is specified, convert cents to dollars for NMI API
 	if params.Amount > 0 {
-		amountStr := strconv.FormatFloat(float64(params.Amount)/100.0, 'f', 2, 64)
+		amountStr := moneyutil.FormatCentsDecimal(params.Amount)
 		values.Set("amount", amountStr)
 	}
 

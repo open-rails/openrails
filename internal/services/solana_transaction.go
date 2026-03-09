@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -127,7 +128,7 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 		TokenAmount:       tokenAmount,
 		TokenSymbol:       tokenSymbol,
 		ExpiresAt:         expiresAt,
-		Instructions:      fmt.Sprintf("Sign this transaction to pay %.2f %s using %s", float64(price.Amount)/100.0, price.Currency, tokenSymbol),
+		Instructions:      fmt.Sprintf("Sign this transaction to pay %s %s using %s", moneyutil.FormatCentsDecimal(price.Amount), price.Currency, tokenSymbol),
 	}, nil
 }
 

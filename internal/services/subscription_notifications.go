@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // SubscriptionEmailData contains data for subscription-related emails
@@ -55,11 +56,6 @@ type SubscriptionEmailData struct {
 	TransactionID  string
 }
 
-// AmountDollars returns the amount converted to dollars for display
-func (d SubscriptionEmailData) AmountDollars() float64 {
-	return float64(d.Amount) / 100.0
-}
-
 func (s *EmailService) storeName() string {
 	if s == nil || s.store == nil {
 		return "My Store"
@@ -87,6 +83,7 @@ func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data Su
 	}
 
 	subject := fmt.Sprintf("Welcome to %s! Your subscription is confirmed", premiumName)
+	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
 
 	htmlContent := fmt.Sprintf(`
 		<h2>Welcome to %s!</h2>
@@ -96,14 +93,14 @@ func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data Su
 		<h3>Subscription Details:</h3>
 		<ul>
 			<li><strong>Subscription ID:</strong> %s</li>
-			<li><strong>Amount:</strong> $%.2f %s</li>
+			<li><strong>Amount:</strong> %s</li>
 			<li><strong>Current Period:</strong> %s to %s</li>
 			<li><strong>Payment Method:</strong> %s</li>
 		</ul>
 		
 		<p>Enjoy!</p>
 		<p>The %s Team</p>
-	`, premiumName, data.Username, data.SubscriptionID, data.AmountDollars(), data.Currency,
+	`, premiumName, data.Username, data.SubscriptionID, amountLine,
 		data.PeriodStart.Format("Jan 2, 2006"), data.PeriodEnd.Format("Jan 2, 2006"), data.PaymentMethod, storeName)
 
 	plainContent := fmt.Sprintf(`
@@ -115,13 +112,13 @@ func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data Su
 
 		Subscription Details:
 		- Subscription ID: %s
-		- Amount: $%.2f %s
+		- Amount: %s
 		- Current Period: %s to %s
 		- Payment Method: %s
 
 		Enjoy!
 		The %s Team
-	`, premiumName, data.Username, data.SubscriptionID, data.AmountDollars(), data.Currency,
+	`, premiumName, data.Username, data.SubscriptionID, amountLine,
 		data.PeriodStart.Format("Jan 2, 2006"), data.PeriodEnd.Format("Jan 2, 2006"), data.PaymentMethod, storeName)
 
 	return s.SendEmail(ctx, data.UserEmail, subject, htmlContent, plainContent)
@@ -136,6 +133,7 @@ func (s *EmailService) SendSubscriptionRenewal(ctx context.Context, data Subscri
 	}
 
 	subject := fmt.Sprintf("Your %s subscription has been renewed", premiumName)
+	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
 
 	htmlContent := fmt.Sprintf(`
 		<h2>Subscription Renewed Successfully</h2>
@@ -145,14 +143,14 @@ func (s *EmailService) SendSubscriptionRenewal(ctx context.Context, data Subscri
 		<h3>Renewal Details:</h3>
 		<ul>
 			<li><strong>Subscription ID:</strong> %s</li>
-			<li><strong>Amount Charged:</strong> $%.2f %s</li>
+			<li><strong>Amount Charged:</strong> %s</li>
 			<li><strong>New Period:</strong> %s to %s</li>
 			<li><strong>Transaction ID:</strong> %s</li>
 		</ul>
 		
 		<p>Your access continues uninterrupted.</p>
 		<p>The %s Team</p>
-	`, data.Username, premiumName, data.SubscriptionID, data.AmountDollars(), data.Currency,
+	`, data.Username, premiumName, data.SubscriptionID, amountLine,
 		data.PeriodStart.Format("Jan 2, 2006"), data.PeriodEnd.Format("Jan 2, 2006"), data.TransactionID, storeName)
 
 	plainContent := fmt.Sprintf(`
@@ -164,14 +162,14 @@ func (s *EmailService) SendSubscriptionRenewal(ctx context.Context, data Subscri
 
 		Renewal Details:
 		- Subscription ID: %s
-		- Amount Charged: $%.2f %s
+		- Amount Charged: %s
 		- New Period: %s to %s
 		- Transaction ID: %s
 
 		Your access continues uninterrupted.
 
 		The %s Team
-	`, data.Username, premiumName, data.SubscriptionID, data.AmountDollars(), data.Currency,
+	`, data.Username, premiumName, data.SubscriptionID, amountLine,
 		data.PeriodStart.Format("Jan 2, 2006"), data.PeriodEnd.Format("Jan 2, 2006"), data.TransactionID, storeName)
 
 	return s.SendEmail(ctx, data.UserEmail, subject, htmlContent, plainContent)
@@ -281,7 +279,7 @@ func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data Subscri
 
 // sendPaymentFailed sends notification when subscription payment fails (internal, takes SubscriptionEmailData)
 func (s *EmailService) sendPaymentFailed(ctx context.Context, data SubscriptionEmailData) error {
-	amountLine := fmt.Sprintf("$%.2f %s", data.AmountDollars(), data.Currency)
+	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
 	storeName := s.storeName()
 	premiumName := strings.TrimSpace(data.ProductName)
 	if premiumName == "" {

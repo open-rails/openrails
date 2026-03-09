@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -134,7 +135,7 @@ func TestParseNMIChargebackAmountCents(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestParseAmountToCentsExact(t *testing.T) {
+func TestParseDecimalToCents(t *testing.T) {
 	tests := []struct {
 		name    string
 		raw     string
@@ -153,7 +154,7 @@ func TestParseAmountToCentsExact(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseAmountToCentsExact(tc.raw)
+			got, err := moneyutil.ParseDecimalToCents(tc.raw)
 			if tc.wantErr {
 				require.Error(t, err)
 				return

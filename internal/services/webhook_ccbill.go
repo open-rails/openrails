@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
@@ -81,7 +82,7 @@ func parseCCBillDateUsingTimestamp(dateStr string) (*time.Time, error) {
 }
 
 func parseCCBillPositiveAmountCents(rawAmount, parseFieldName, invalidFieldName string) (int64, error) {
-	amountCents, err := parseAmountToCentsExact(rawAmount)
+	amountCents, err := moneyutil.ParseDecimalToCents(rawAmount)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse %s '%s': %w", parseFieldName, rawAmount, err)
 	}
@@ -356,7 +357,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	billedAmount := amountFloatFromCents(billedAmountCents)
+	billedAmount := moneyutil.CentsToMajorUnits(billedAmountCents)
 
 	// Get price information
 	price, err := s.PriceService.GetByCCBillPriceID(ctx, data.FlexID)
@@ -677,7 +678,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	billedAmount := amountFloatFromCents(billedAmountCents)
+	billedAmount := moneyutil.CentsToMajorUnits(billedAmountCents)
 
 	if strings.TrimSpace(ccBillSubID) == "" {
 		return fmt.Errorf("missing required field: subscriptionId")
@@ -1443,7 +1444,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	refundAmount := amountFloatFromCents(refundAmountCents)
+	refundAmount := moneyutil.CentsToMajorUnits(refundAmountCents)
 	currencyValue, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode")
 	if err != nil {
 		return err
@@ -1609,7 +1610,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	voidAmount := amountFloatFromCents(voidAmountCents)
+	voidAmount := moneyutil.CentsToMajorUnits(voidAmountCents)
 	currencyValue, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode")
 	if err != nil {
 		return err
@@ -1752,7 +1753,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	chargebackAmount := amountFloatFromCents(chargebackAmountCents)
+	chargebackAmount := moneyutil.CentsToMajorUnits(chargebackAmountCents)
 	currencyValue, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode")
 	if err != nil {
 		return err
@@ -1984,7 +1985,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	billedAmount := amountFloatFromCents(billedAmountCents)
+	billedAmount := moneyutil.CentsToMajorUnits(billedAmountCents)
 
 	currencyValue, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode")
 	if err != nil {

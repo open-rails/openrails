@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/processors"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -1940,7 +1941,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Mark idempotency request as complete
-	successMessage := fmt.Sprintf("Upgraded to %s. Prorated charge: $%.2f", newProduct.DisplayName, float64(prorationAmount)/100.0)
+	successMessage := fmt.Sprintf("Upgraded to %s. Prorated charge: %s", newProduct.DisplayName, moneyutil.FormatUSD(prorationAmount))
 	cachedResult, _ := json.Marshal(upgradeIdempotencyResult{
 		SubscriptionID:         newSubscriptionID.String(),
 		ProrationTransactionID: prorationTransactionID,

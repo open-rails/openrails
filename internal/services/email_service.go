@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/processors"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 var errUserEmailUnavailable = errors.New("user email unavailable")
@@ -45,11 +46,6 @@ type OneOffPurchaseEmailData struct {
 	ProductName   string
 	PaymentMethod string
 	IsPremium     bool
-}
-
-// AmountDollars returns the amount converted to dollars for display
-func (d OneOffPurchaseEmailData) AmountDollars() float64 {
-	return float64(d.Amount) / 100.0
 }
 
 // NewEmailService wires the SendGrid SDK into the billing domain service.
@@ -151,10 +147,7 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 		productName = "Premium content"
 	}
 
-	amountLine := fmt.Sprintf("%.2f %s", data.AmountDollars(), strings.ToUpper(data.Currency))
-	if strings.EqualFold(data.Currency, "usd") {
-		amountLine = fmt.Sprintf("$%.2f %s", data.AmountDollars(), strings.ToUpper(data.Currency))
-	}
+	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
 
 	issuedAt := s.now().Format("Jan 2, 2006 15:04 MST")
 

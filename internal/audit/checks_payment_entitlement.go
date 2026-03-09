@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/uptrace/bun"
 
 	"github.com/open-rails/openrails/internal/db/models"
@@ -231,7 +232,7 @@ func (c *CheckRefundedPaymentActiveEntitlements) Run(ctx context.Context, db bun
 			EntityType:     EntityEntitlement,
 			EntityID:       r.EntitlementID,
 			UserID:         r.UserID,
-			Description:    fmt.Sprintf("Payment %s was fully refunded ($%.2f of $%.2f) but entitlement '%s' is still active", r.PaymentID, float64(r.RefundedAmount)/100, float64(r.OriginalAmount)/100, r.EntitlementName),
+			Description:    fmt.Sprintf("Payment %s was fully refunded (%s of %s) but entitlement '%s' is still active", r.PaymentID, moneyutil.FormatUSD(r.RefundedAmount), moneyutil.FormatUSD(r.OriginalAmount), r.EntitlementName),
 			Recommendation: "Revoke entitlement with reason='refund'",
 			AutoFixable:    true,
 			Details: map[string]any{

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"strings"
 	"time"
 	"unicode"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 
 	"github.com/google/uuid"
@@ -260,62 +260,12 @@ func getOriginalTransactionID(body *NMITransactionEventBody) string {
 	return strings.TrimSpace(body.TransactionDetail.TransactionID.Trimmed())
 }
 
-func parseAmountToCentsExact(raw string) (int64, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return 0, fmt.Errorf("amount is empty")
-	}
-
-	parsed, ok := new(big.Rat).SetString(trimmed)
-	if !ok {
-		return 0, fmt.Errorf("invalid decimal amount %q", trimmed)
-	}
-
-	scaled := new(big.Rat).Mul(parsed, big.NewRat(100, 1))
-	return roundRatHalfAwayFromZero(scaled)
-}
-
-func roundRatHalfAwayFromZero(value *big.Rat) (int64, error) {
-	if value == nil {
-		return 0, fmt.Errorf("value is nil")
-	}
-	if value.Sign() == 0 {
-		return 0, nil
-	}
-
-	sign := value.Sign()
-	num := new(big.Int).Abs(value.Num())
-	den := new(big.Int).Set(value.Denom())
-
-	quotient, remainder := new(big.Int), new(big.Int)
-	quotient.QuoRem(num, den, remainder)
-
-	twiceRemainder := new(big.Int).Lsh(remainder, 1)
-	if twiceRemainder.Cmp(den) >= 0 {
-		quotient.Add(quotient, big.NewInt(1))
-	}
-
-	if !quotient.IsInt64() {
-		return 0, fmt.Errorf("amount is out of int64 range")
-	}
-
-	rounded := quotient.Int64()
-	if sign < 0 {
-		rounded = -rounded
-	}
-	return rounded, nil
-}
-
 func transactionAmountCents(body *NMITransactionEventBody) (int64, error) {
 	raw, err := transactionAmountRaw(body)
 	if err != nil {
 		return 0, err
 	}
-	return parseAmountToCentsExact(raw)
-}
-
-func amountFloatFromCents(cents int64) float64 {
-	return float64(cents) / 100.0
+	return moneyutil.ParseDecimalToCents(raw)
 }
 
 type NMIBillingError struct {
@@ -558,7 +508,7 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 
 	// Get amount from plan (in dollars as string, e.g., "19.00")
 	if body.Plan != nil && body.Plan.Amount.Trimmed() != "" {
-		parsedAmountCents, amountErr := parseAmountToCentsExact(body.Plan.Amount.Trimmed())
+		parsedAmountCents, amountErr := moneyutil.ParseDecimalToCents(body.Plan.Amount.Trimmed())
 		if amountErr != nil {
 			log.WithContext(ctx).
 				WithError(amountErr).
@@ -1009,7 +959,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 
 		var amountPtr *float64
 		if amountErr == nil {
-			amountValue := amountFloatFromCents(parsedAmountCents)
+			amountValue := moneyutil.CentsToMajorUnits(parsedAmountCents)
 			amountPtr = &amountValue
 		}
 
@@ -1223,7 +1173,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 
 		var amountPtr *float64
 		if amtCents, amtErr := transactionAmountCents(body); amtErr == nil {
-			amt := amountFloatFromCents(amtCents)
+			amt := moneyutil.CentsToMajorUnits(amtCents)
 			amountPtr = &amt
 		}
 
@@ -1328,7 +1278,7 @@ func normalizeNMIChargebackLast4(raw string) string {
 }
 
 func parseNMIChargebackAmountCents(raw string) (int64, error) {
-	amountCents, err := parseAmountToCentsExact(raw)
+	amountCents, err := moneyutil.ParseDecimalToCents(raw)
 	if err != nil {
 		return 0, err
 	}
@@ -1537,7 +1487,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 
 		var amountPtr *float64
 		if cbAmountCents, err := parseNMIChargebackAmountCents(cb.Amount); err == nil {
-			cbAmount := amountFloatFromCents(cbAmountCents)
+			cbAmount := moneyutil.CentsToMajorUnits(cbAmountCents)
 			amountPtr = &cbAmount
 		}
 
@@ -1743,7 +1693,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	if refundAmountCents < 0 {
 		refundAmountCents = -refundAmountCents
 	}
-	refundAmount := amountFloatFromCents(refundAmountCents)
+	refundAmount := moneyutil.CentsToMajorUnits(refundAmountCents)
 
 	provider := strings.TrimSpace(strings.ToLower(s.Processor))
 	if provider == "" {

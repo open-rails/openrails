@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/processors"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 )
@@ -1619,7 +1620,7 @@ func (s *SubscriptionLifecycleService) logPaymentEvent(ctx context.Context, sub 
 	// Convert amount from cents to dollars for ClickHouse
 	var amountFloat *float64
 	if amount > 0 {
-		f := float64(amount) / 100.0
+		f := moneyutil.CentsToMajorUnits(amount)
 		amountFloat = &f
 	}
 
