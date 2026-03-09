@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
@@ -33,7 +34,7 @@ type AdminSubscriptionService struct {
 	PriceService        *catalog.PriceService
 	EntitlementService  *entitlements.EntitlementService
 	NotificationService *NotificationService
-	PaymentService      *PaymentService
+	PaymentService      *payments.PaymentService
 	NMIClients          map[string]*nmi.NMIClient
 	EventLogService     *EventLogService
 	Clock               clockwork.Clock
@@ -422,7 +423,7 @@ func (s *AdminSubscriptionService) CreatePrice(ctx context.Context, price *model
 }
 
 // GetAllPurchases retrieves all purchases with filtering (admin)
-func (s *AdminSubscriptionService) GetAllPurchases(ctx context.Context, queryOpts *query.QueryOptions[GetPaymentsFilters]) ([]*models.Payment, int64, error) {
+func (s *AdminSubscriptionService) GetAllPurchases(ctx context.Context, queryOpts *query.QueryOptions[payments.GetPaymentsFilters]) ([]*models.Payment, int64, error) {
 	purchases, total, err := s.PaymentService.GetPayments(ctx, *queryOpts)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get purchases: %w", err)
@@ -463,7 +464,7 @@ func NewAdminSubscriptionService(
 	priceService *catalog.PriceService,
 	entitlementService *entitlements.EntitlementService,
 	notificationService *NotificationService,
-	paymentService *PaymentService,
+	paymentService *payments.PaymentService,
 	nmiClients map[string]*nmi.NMIClient,
 ) *AdminSubscriptionService {
 	return &AdminSubscriptionService{

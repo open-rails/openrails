@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
@@ -32,7 +33,7 @@ type UserSubscriptionService struct {
 	SubscriptionService *SubscriptionService
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
-	PaymentService      *PaymentService
+	PaymentService      *payments.PaymentService
 	NotificationService *NotificationService
 	EntitlementService  *entitlements.EntitlementService
 	NMIClients          map[string]*nmi.NMIClient
@@ -196,7 +197,7 @@ func (s *UserSubscriptionService) GetUserSubscriptionHistory(ctx context.Context
 }
 
 // GetUserPayments retrieves one-off purchases for a user
-func (s *UserSubscriptionService) GetUserPayments(ctx context.Context, userID string, queryOpts *query.QueryOptions[GetPaymentsFilters]) ([]*models.Payment, int64, error) {
+func (s *UserSubscriptionService) GetUserPayments(ctx context.Context, userID string, queryOpts *query.QueryOptions[payments.GetPaymentsFilters]) ([]*models.Payment, int64, error) {
 	// Set user filter
 	if queryOpts.Filters.UserID == "" {
 		queryOpts.Filters.UserID = userID
@@ -399,7 +400,7 @@ func NewUserSubscriptionService(
 	subscriptionService *SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
-	paymentService *PaymentService,
+	paymentService *payments.PaymentService,
 	notificationService *NotificationService,
 	entitlementService *entitlements.EntitlementService,
 	nmiClients map[string]*nmi.NMIClient,

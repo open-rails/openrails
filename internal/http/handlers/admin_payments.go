@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
@@ -105,7 +106,7 @@ func AdminRefundPayment(r *httprequest.Request) {
 }
 
 func GetAdminPayments(r *httprequest.Request) {
-	queryOpts := query.QueryOptions[services.GetPaymentsFilters]{}
+	queryOpts := query.QueryOptions[payments.GetPaymentsFilters]{}
 	if err := r.Inner().ShouldBindQuery(&queryOpts); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return

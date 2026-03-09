@@ -1,4 +1,4 @@
-package services
+package payments
 
 import (
 	"context"
@@ -17,10 +17,14 @@ import (
 
 type VaultService struct {
 	PaymentMethodService *PaymentMethodService
-	SubscriptionService  *SubscriptionService
+	SubscriptionService  subscriptionReader
 	NMIClients           map[string]*nmi.NMIClient
 	DB                   *db.DB
 	Clock                clockwork.Clock
+}
+
+type subscriptionReader interface {
+	GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error)
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -88,7 +92,7 @@ func (e *VaultError) Unwrap() error {
 	return e.Err
 }
 
-func NewVaultService(pm *PaymentMethodService, sub *SubscriptionService, nmiClients map[string]*nmi.NMIClient, dbx *db.DB) *VaultService {
+func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB) *VaultService {
 	return &VaultService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,
@@ -98,7 +102,7 @@ func NewVaultService(pm *PaymentMethodService, sub *SubscriptionService, nmiClie
 }
 
 // CreateVault creates a NMI customer vault and stores a local PaymentMethod
-func (s *VaultService) CreateVault(ctx context.Context, user *UserIdentity, req *CreateVaultRequest) (*models.PaymentMethod, error) {
+func (s *VaultService) CreateVault(ctx context.Context, userID string, req *CreateVaultRequest) (*models.PaymentMethod, error) {
 	// Currently only mobius uses NMI vaults
 	processor := "mobius"
 
@@ -124,7 +128,7 @@ func (s *VaultService) CreateVault(ctx context.Context, user *UserIdentity, req 
 
 	nmiResponse, err := client.CreateCustomerVault(vaultData)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"user_id": user.ID}).Error("Failed to create vault in NMI")
+		log.WithError(err).WithFields(log.Fields{"user_id": userID}).Error("Failed to create vault in NMI")
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {
 			return nil, &VaultError{
@@ -138,7 +142,7 @@ func (s *VaultService) CreateVault(ctx context.Context, user *UserIdentity, req 
 
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
-		UserID:               user.ID,
+		UserID:               userID,
 		Processor:            models.ProcessorMobius,
 		VaultID:              nmiResponse.CustomerVaultID,
 		InitialTransactionID: "",
@@ -151,13 +155,13 @@ func (s *VaultService) CreateVault(ctx context.Context, user *UserIdentity, req 
 	}
 
 	if err := s.PaymentMethodService.Create(ctx, pm); err != nil {
-		log.WithError(err).WithFields(log.Fields{"user_id": user.ID, "vault_id": nmiResponse.CustomerVaultID}).Error("Failed to store vault locally")
+		log.WithError(err).WithFields(log.Fields{"user_id": userID, "vault_id": nmiResponse.CustomerVaultID}).Error("Failed to store vault locally")
 		// Attempt remote cleanup
 		_ = client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
 		return nil, fmt.Errorf("failed to store vault locally: %w", err)
 	}
 
-	log.WithFields(log.Fields{"user_id": user.ID, "vault_id": pm.VaultID}).Info("Successfully created payment vault")
+	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.VaultID}).Info("Successfully created payment vault")
 	return pm, nil
 }
 

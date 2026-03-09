@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -32,8 +33,8 @@ type SubscriptionLifecycleService struct {
 	PriceService        *catalog.PriceService
 	EntitlementService  *entitlements.EntitlementService
 	NotificationService *NotificationService
-	PaymentService      *PaymentService  // For creating Payment records on renewal
-	EventLogService     *EventLogService // For logging events to ClickHouse
+	PaymentService      *payments.PaymentService // For creating Payment records on renewal
+	EventLogService     *EventLogService         // For logging events to ClickHouse
 }
 
 type CreateMembershipParams struct {
@@ -190,7 +191,7 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 }
 
 // NewSubscriptionLifecycleService creates a new instance of SubscriptionLifecycleService
-func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService *NotificationService, paymentService *PaymentService, eventLogService *EventLogService) *SubscriptionLifecycleService {
+func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService *NotificationService, paymentService *payments.PaymentService, eventLogService *EventLogService) *SubscriptionLifecycleService {
 	return &SubscriptionLifecycleService{
 		DB:                  db,
 		Config:              nil,                      // Set via SetConfig if feature flags are needed
@@ -502,7 +503,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	// Create Payment record if payment info is provided
 	if params.TransactionID != "" && s.PaymentService != nil {
-		paymentService := NewPaymentService(dbb)
+		paymentService := payments.NewPaymentService(dbb)
 		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)

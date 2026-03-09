@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -39,7 +40,7 @@ type CCBillWebhookService struct {
 	SubscriptionService          *SubscriptionService
 	SubscriptionLifecycleService *SubscriptionLifecycleService
 	ProfileRepo                  *repo.ProfileRepo
-	PaymentService               *PaymentService
+	PaymentService               *payments.PaymentService
 	DeduplicationService         *DeduplicationService
 	CheckoutSessionService       *CheckoutSessionService
 	CreditsService               *credits.CreditsService
@@ -136,12 +137,12 @@ func (s *CCBillWebhookService) resolveUserID(ctx context.Context, username strin
 	return userID, nil
 }
 
-func (s *CCBillWebhookService) paymentService() *PaymentService {
+func (s *CCBillWebhookService) paymentService() *payments.PaymentService {
 	if s.PaymentService != nil {
 		return s.PaymentService
 	}
 	if s.DB != nil {
-		return NewPaymentService(s.DB)
+		return payments.NewPaymentService(s.DB)
 	}
 	return nil
 }
@@ -721,7 +722,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		productService := catalog.NewProductService(txdb)
 		notificationService := NewNotificationService(txdb, nil)
 		entitlementService := entitlements.NewEntitlementService(txdb)
-		paymentService := NewPaymentService(txdb)
+		paymentService := payments.NewPaymentService(txdb)
 		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
 
 		// Find subscription by the original processor subscription ID and then transition it.

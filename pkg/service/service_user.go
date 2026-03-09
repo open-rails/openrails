@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/services"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
@@ -411,10 +412,10 @@ func (s *Service) GetPayments(ctx context.Context, userID string, opts GetPaymen
 		offset = 0
 	}
 
-	queryOpts := &query.QueryOptions[services.GetPaymentsFilters]{
+	queryOpts := &query.QueryOptions[payments.GetPaymentsFilters]{
 		Limit:   limit,
 		Offset:  offset,
-		Filters: services.GetPaymentsFilters{UserID: userID},
+		Filters: payments.GetPaymentsFilters{UserID: userID},
 	}
 
 	payments, total, err := userSubscriptions.GetUserPayments(ctx, userID, queryOpts)
@@ -487,7 +488,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 	}
 
 	user := &services.UserIdentity{ID: userID}
-	pm, err := vaults.CreateVault(ctx, user, &services.CreateVaultRequest{
+	pm, err := vaults.CreateVault(ctx, user.ID, &payments.CreateVaultRequest{
 		PaymentToken: req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -537,7 +538,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 	}
 
 	// Build update request
-	updateReq := &services.UpdateVaultRequest{
+	updateReq := &payments.UpdateVaultRequest{
 		PaymentToken: &req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,

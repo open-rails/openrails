@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -69,28 +70,28 @@ func (s *Service) requireUserSubscriptionService() (*services.UserSubscriptionSe
 	return s.rt.UserSubscriptionService, nil
 }
 
-func (s *Service) requireSubscriptionAndPaymentMethodServices() (*services.SubscriptionService, *services.PaymentMethodService, error) {
+func (s *Service) requireSubscriptionAndPaymentMethodServices() (*services.SubscriptionService, *payments.PaymentMethodService, error) {
 	if s.rt.SubscriptionService == nil || s.rt.PaymentMethodService == nil {
 		return nil, nil, fmt.Errorf("billing service: not initialized")
 	}
 	return s.rt.SubscriptionService, s.rt.PaymentMethodService, nil
 }
 
-func (s *Service) requirePaymentMethodService() (*services.PaymentMethodService, error) {
+func (s *Service) requirePaymentMethodService() (*payments.PaymentMethodService, error) {
 	if s.rt.PaymentMethodService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
 	return s.rt.PaymentMethodService, nil
 }
 
-func (s *Service) requireVaultService() (*services.VaultService, error) {
+func (s *Service) requireVaultService() (*payments.VaultService, error) {
 	if s.rt.VaultService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
 	return s.rt.VaultService, nil
 }
 
-func (s *Service) requireVaultAndPaymentMethodServices() (*services.VaultService, *services.PaymentMethodService, error) {
+func (s *Service) requireVaultAndPaymentMethodServices() (*payments.VaultService, *payments.PaymentMethodService, error) {
 	if s.rt.VaultService == nil || s.rt.PaymentMethodService == nil {
 		return nil, nil, fmt.Errorf("billing service: not initialized")
 	}
@@ -111,7 +112,7 @@ func (s *Service) requireConfig() (*config.Config, error) {
 	return s.rt.Config, nil
 }
 
-func (s *Service) requireProcessorCustomerAndConfig() (*services.ProcessorCustomerService, *config.Config, error) {
+func (s *Service) requireProcessorCustomerAndConfig() (*payments.ProcessorCustomerService, *config.Config, error) {
 	if s.rt.ProcessorCustomerService == nil || s.rt.Config == nil {
 		return nil, nil, fmt.Errorf("billing service: not initialized")
 	}
@@ -125,7 +126,7 @@ func (s *Service) requireAdminSubscriptionService() (*services.AdminSubscription
 	return s.rt.AdminSubscriptionService, nil
 }
 
-func (s *Service) requirePaymentService() (*services.PaymentService, error) {
+func (s *Service) requirePaymentService() (*payments.PaymentService, error) {
 	if s.rt.PaymentService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}

@@ -11,8 +11,8 @@ import (
 	"github.com/doujins-org/ginapi/response"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
-	"github.com/open-rails/openrails/internal/services"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
@@ -132,7 +132,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	if len(lastFour) > 4 {
 		lastFour = lastFour[len(lastFour)-4:]
 	}
-	createReq := &services.CreateVaultRequest{
+	createReq := &payments.CreateVaultRequest{
 		PaymentToken: req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -159,10 +159,10 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		createReq.Email = strings.TrimSpace(*user.Email)
 	}
 
-	pm, err := r.State.VaultService.CreateVault(ctx, user, createReq)
+	pm, err := r.State.VaultService.CreateVault(ctx, user.ID, createReq)
 	if err != nil {
 		log.WithError(err).WithField("user_id", user.ID).Error("Failed to create payment method")
-		var vaultErr *services.VaultError
+		var vaultErr *payments.VaultError
 		if errors.As(err, &vaultErr) {
 			code := api.CodePaymentFailed
 			if strings.TrimSpace(vaultErr.LocalizationID) != "" {
@@ -209,10 +209,10 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	pm, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), methodID, user.ID)
 	if err != nil {
 		switch {
-		case errors.Is(err, services.ErrPaymentMethodNotFound):
+		case errors.Is(err, payments.ErrPaymentMethodNotFound):
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
-		case errors.Is(err, services.ErrPaymentMethodAccessDenied):
+		case errors.Is(err, payments.ErrPaymentMethodAccessDenied):
 			r.ErrorJSON(http.StatusForbidden, "Access denied - you don't own this payment method")
 			return
 		default:
@@ -227,7 +227,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	updateReq := &services.UpdateVaultRequest{
+	updateReq := &payments.UpdateVaultRequest{
 		PaymentToken: &trimmedToken,
 		Provider:     body.Provider,
 		FirstName:    body.FirstName,
@@ -334,11 +334,11 @@ func DeletePaymentMethod(r *httprequest.Request) {
 	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), id, user.ID)
 	if err != nil {
 		switch {
-		case errors.Is(err, services.ErrPaymentMethodNotFound):
+		case errors.Is(err, payments.ErrPaymentMethodNotFound):
 			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Payment method not found for deletion")
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
-		case errors.Is(err, services.ErrPaymentMethodAccessDenied):
+		case errors.Is(err, payments.ErrPaymentMethodAccessDenied):
 			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Unauthorized payment method deletion attempt")
 			r.ErrorJSON(http.StatusForbidden, "Access denied - you don't own this payment method")
 			return
@@ -358,7 +358,7 @@ func DeletePaymentMethod(r *httprequest.Request) {
 	}
 
 	if err := r.State.PaymentMethodService.Delete(r.Request.Context(), id); err != nil {
-		if errors.Is(err, services.ErrPaymentMethodNotFound) {
+		if errors.Is(err, payments.ErrPaymentMethodNotFound) {
 			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Payment method not found during deletion")
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return

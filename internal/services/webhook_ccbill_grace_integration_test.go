@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -289,7 +290,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	productSvc := catalog.NewProductService(dbi)
 	entitlementSvc := entitlements.NewEntitlementService(dbi)
 	notifSvc := NewNotificationService(dbi, nil)
-	paymentSvc := NewPaymentService(dbi)
+	paymentSvc := payments.NewPaymentService(dbi)
 	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	subSvc := NewSubscriptionService(dbi, priceSvc, productSvc, notifSvc, nil, nil, nil)
 

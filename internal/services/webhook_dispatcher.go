@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
 )
 
@@ -38,12 +39,12 @@ type WebhookDispatcher struct {
 	ProductService               *catalog.ProductService
 	NotificationService          *NotificationService
 	SubscriptionService          *SubscriptionService
-	PaymentService               *PaymentService
+	PaymentService               *payments.PaymentService
 	EventLogService              *EventLogService
 	SubscriptionLifecycleService *SubscriptionLifecycleService
 	ProfileRepo                  *repo.ProfileRepo
 	DeduplicationService         *DeduplicationService
-	ProcessorCustomerService     *ProcessorCustomerService
+	ProcessorCustomerService     *payments.ProcessorCustomerService
 	CCBillRESTClient             *ccbill.RESTClient
 	NMIClients                   map[string]*nmi.NMIClient
 	CheckoutService              *CheckoutService

@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
@@ -24,10 +25,10 @@ type StripeWebhookService struct {
 	SubscriptionService          *SubscriptionService
 	SubscriptionLifecycleService *SubscriptionLifecycleService
 	CheckoutService              *CheckoutService
-	PaymentService               *PaymentService
+	PaymentService               *payments.PaymentService
 	CreditsService               *credits.CreditsService
 	DeduplicationService         *DeduplicationService
-	ProcessorCustomerService     *ProcessorCustomerService
+	ProcessorCustomerService     *payments.ProcessorCustomerService
 	CheckoutSessionService       *CheckoutSessionService
 }
 

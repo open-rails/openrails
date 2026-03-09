@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -118,7 +119,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
 	notifSvc := NewNotificationService(dbi, nil)
-	paymentSvc := NewPaymentService(dbi)
+	paymentSvc := payments.NewPaymentService(dbi)
 	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, notifSvc, paymentSvc, nil)
 	lifecycle.SetClock(clock)
 	subSvc := NewSubscriptionService(dbi, priceSvc, productSvc, notifSvc, nil, nil, nil)

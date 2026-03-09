@@ -1,4 +1,4 @@
-package services
+package payments
 
 import (
 	"context"

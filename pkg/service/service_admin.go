@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	entitlementmod "github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
@@ -111,7 +112,7 @@ func (s *Service) AdminGetPayments(ctx context.Context, opts AdminGetPaymentsOpt
 		offset = 0
 	}
 
-	filters := services.GetPaymentsFilters{
+	filters := payments.GetPaymentsFilters{
 		UserID:    opts.UserID,
 		Processor: opts.Processor,
 	}
@@ -124,7 +125,7 @@ func (s *Service) AdminGetPayments(ctx context.Context, opts AdminGetPaymentsOpt
 	if opts.EndDate != nil {
 		filters.EndDate = opts.EndDate
 	}
-	queryOpts := query.QueryOptions[services.GetPaymentsFilters]{
+	queryOpts := query.QueryOptions[payments.GetPaymentsFilters]{
 		Limit:   limit,
 		Offset:  offset,
 		Filters: filters,

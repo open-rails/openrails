@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
@@ -432,10 +433,10 @@ type servicesInstances struct {
 	ProductService           *catalog.ProductService
 	PriceService             *catalog.PriceService
 	NotificationService      *services.NotificationService
-	PaymentMethodService     *services.PaymentMethodService
-	PurchaseService          *services.PaymentService
+	PaymentMethodService     *payments.PaymentMethodService
+	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
-	VaultService             *services.VaultService
+	VaultService             *payments.VaultService
 	SolanaPayService         *services.SolanaPayService
 	SolanaPayPoller          *services.SolanaPayPoller
 	SolanaTransactionService *services.SolanaTransactionService
@@ -455,7 +456,7 @@ type servicesInstances struct {
 	CheckoutSessionService   *services.CheckoutSessionService
 	CreditsService           *credits.CreditsService
 	CreditTypeService        *credits.CreditTypeService
-	ProcessorCustomerService *services.ProcessorCustomerService
+	ProcessorCustomerService *payments.ProcessorCustomerService
 }
 
 func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock) *servicesInstances {
@@ -463,15 +464,15 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
 	notificationService := services.NewNotificationService(database, nil)
-	paymentMethodService := services.NewPaymentMethodService(database)
-	purchaseService := services.NewPaymentService(database)
+	paymentMethodService := payments.NewPaymentMethodService(database)
+	purchaseService := payments.NewPaymentService(database)
 	purchaseService.Clock = clock
 	entitlementService := entitlements.NewEntitlementService(database)
 	entitlementService.Clock = clock
 	creditsService := credits.NewCreditsService(database)
 	creditsService.Clock = clock
 	creditTypeService := credits.NewCreditTypeService(database)
-	processorCustomerService := services.NewProcessorCustomerService(database)
+	processorCustomerService := payments.NewProcessorCustomerService(database)
 	profileRepo := repo.NewProfileRepo(database)
 
 	// Create FX provider for Solana token quoting with non-USD prices
@@ -521,7 +522,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	)
 	subscriptionService.Clock = clock
 
-	vaultService := services.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database)
+	vaultService := payments.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database)
 	vaultService.Clock = clock
 	subscriptionService.VaultService = vaultService
 	idempotencyService := services.NewIdempotencyService(redisClient)

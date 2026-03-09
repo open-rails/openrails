@@ -9,8 +9,8 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -81,10 +81,10 @@ func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(ctx, paymentMethodID, user.ID)
 	if err != nil {
 		switch {
-		case errors.Is(err, services.ErrPaymentMethodNotFound):
+		case errors.Is(err, payments.ErrPaymentMethodNotFound):
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
-		case errors.Is(err, services.ErrPaymentMethodAccessDenied):
+		case errors.Is(err, payments.ErrPaymentMethodAccessDenied):
 			r.ErrorJSON(http.StatusForbidden, "You don't own this payment method")
 			return
 		default:

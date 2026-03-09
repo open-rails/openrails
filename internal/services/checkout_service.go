@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
@@ -149,10 +150,10 @@ type CheckoutService struct {
 	SubscriptionService  *SubscriptionService
 	ProductService       *catalog.ProductService
 	PriceService         *catalog.PriceService
-	PaymentService       *PaymentService
+	PaymentService       *payments.PaymentService
 	EntitlementService   *entitlements.EntitlementService
-	PaymentMethodService *PaymentMethodService
-	VaultService         *VaultService
+	PaymentMethodService *payments.PaymentMethodService
+	VaultService         *payments.VaultService
 	IdempotencyService   *IdempotencyService
 	NMIClients           map[string]*nmi.NMIClient
 	Clock                clockwork.Clock
@@ -172,10 +173,10 @@ func NewCheckoutService(
 	subscriptionService *SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
-	paymentService *PaymentService,
+	paymentService *payments.PaymentService,
 	entitlementService *entitlements.EntitlementService,
-	paymentMethodService *PaymentMethodService,
-	vaultService *VaultService,
+	paymentMethodService *payments.PaymentMethodService,
+	vaultService *payments.VaultService,
 	idempotencyService *IdempotencyService,
 	nmiClients map[string]*nmi.NMIClient,
 	cfg *config.Config,
@@ -808,7 +809,7 @@ func (s *CheckoutService) processNMISubscription(
 		wrappedErr := fmt.Errorf("failed to create subscription: %w", err)
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {
-			wrappedErr = &VaultError{
+			wrappedErr = &payments.VaultError{
 				Err:            wrappedErr,
 				LocalizationID: nmiErr.LocalizationID,
 				Message:        wrappedErr.Error(),
@@ -1322,7 +1323,7 @@ func (s *CheckoutService) resolveVault(ctx context.Context, req *CheckoutRequest
 		return "", nil, errors.New("vault service unavailable")
 	}
 
-	pm, err := s.VaultService.CreateVault(ctx, user, &CreateVaultRequest{
+	pm, err := s.VaultService.CreateVault(ctx, user.ID, &payments.CreateVaultRequest{
 		PaymentToken: req.PaymentToken,
 		Provider:     provider,
 		FirstName:    s.resolveFirstName(req, user),
@@ -1841,7 +1842,7 @@ func (s *CheckoutService) processUpgrade(
 		subErr := fmt.Errorf("failed to create upgraded subscription: %w", err)
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {
-			subErr = &VaultError{
+			subErr = &payments.VaultError{
 				Err:            subErr,
 				LocalizationID: nmiErr.LocalizationID,
 				Message:        subErr.Error(),

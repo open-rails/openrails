@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
@@ -28,10 +28,10 @@ func GetUserPayments(r *httprequest.Request) {
 
 	paymentType := r.Request.URL.Query().Get("type")
 
-	queryOpts := &query.QueryOptions[services.GetPaymentsFilters]{
+	queryOpts := &query.QueryOptions[payments.GetPaymentsFilters]{
 		Limit:   limit,
 		Offset:  offset,
-		Filters: services.GetPaymentsFilters{},
+		Filters: payments.GetPaymentsFilters{},
 	}
 
 	if paymentType != "" {

@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 
@@ -36,7 +37,7 @@ type NMIWebhookService struct {
 	NMIClient                    *nmi.NMIClient
 	EventLogService              *EventLogService
 	SubscriptionService          *SubscriptionService
-	PaymentService               *PaymentService
+	PaymentService               *payments.PaymentService
 	CreditsService               *credits.CreditsService
 	DeduplicationService         *DeduplicationService
 	NotificationService          *NotificationService

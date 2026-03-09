@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
@@ -143,7 +144,7 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 }
 
 func writeCheckoutSessionError(r *httprequest.Request, err error) {
-	var vaultErr *services.VaultError
+	var vaultErr *payments.VaultError
 	if errors.As(err, &vaultErr) {
 		code := api.CodePaymentFailed
 		if strings.TrimSpace(vaultErr.LocalizationID) != "" {

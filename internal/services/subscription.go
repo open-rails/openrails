@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
@@ -42,8 +43,8 @@ type SubscriptionService struct {
 	NotificationService  *NotificationService
 	CCBillRESTClient     *ccbill.RESTClient
 	NMIClients           map[string]*nmi.NMIClient
-	PaymentMethodService *PaymentMethodService
-	VaultService         *VaultService
+	PaymentMethodService *payments.PaymentMethodService
+	VaultService         *payments.VaultService
 	IdempotencyService   *IdempotencyService
 }
 
@@ -153,7 +154,7 @@ func NewSubscriptionService(
 	notificationService *NotificationService,
 	ccbillRESTClient *ccbill.RESTClient,
 	nmiClients map[string]*nmi.NMIClient,
-	paymentMethodService *PaymentMethodService,
+	paymentMethodService *payments.PaymentMethodService,
 ) *SubscriptionService {
 	return &SubscriptionService{
 		subscriptionRepo:     repo.NewSubscriptionRepo(db),

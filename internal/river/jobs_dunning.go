@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/riverqueue/river"
@@ -125,7 +126,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	productSvc := catalog.NewProductService(w.DB)
 	entitlementSvc := entitlements.NewEntitlementService(w.DB)
 	notifSvc := services.NewNotificationService(w.DB, nil)
-	paymentSvc := services.NewPaymentService(w.DB)
+	paymentSvc := payments.NewPaymentService(w.DB)
 	lifecycle := services.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService)
 	lifecycle.SetConfig(w.Config) // For feature flag access
 	lifecycle.SetClock(w.Clock)   // Ensure time mocking is honored during dunning
@@ -159,7 +160,7 @@ func (w *DunningWorker) processSubscription(
 	sub *models.Subscription,
 	lifecycle *services.SubscriptionLifecycleService,
 	priceSvc *catalog.PriceService,
-	paymentSvc *services.PaymentService,
+	paymentSvc *payments.PaymentService,
 	creditsSvc *credits.CreditsService,
 ) bool {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
