@@ -57,8 +57,12 @@ type TokenBalance struct {
 
 func GetSupportedTokens(r *httprequest.Request) {
 	cfg := r.State.Config
+	if cfg == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
+		return
+	}
 	solanaProc := cfg.GetSolanaProcessor()
-	if cfg == nil || solanaProc == nil {
+	if solanaProc == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
 		return
 	}

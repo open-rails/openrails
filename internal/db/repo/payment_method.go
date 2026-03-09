@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
@@ -120,7 +119,6 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 
 func (r *PaymentMethodRepo) GetByVaultID(ctx context.Context, processor, vaultID string) (*models.PaymentMethod, error) {
 	pm := new(models.PaymentMethod)
-	processor = strings.TrimSpace(strings.ToLower(processor))
 
 	query := r.db.GetDB().NewSelect().Model(pm).
 		Where("pm.processor = ?", processor).
@@ -138,7 +136,6 @@ func (r *PaymentMethodRepo) GetByVaultID(ctx context.Context, processor, vaultID
 
 func (r *PaymentMethodRepo) GetByInitialTransactionID(ctx context.Context, processor, initialTransactionID string) (*models.PaymentMethod, error) {
 	pm := new(models.PaymentMethod)
-	processor = strings.TrimSpace(strings.ToLower(processor))
 
 	query := r.db.GetDB().NewSelect().Model(pm).
 		Where("pm.processor = ?", processor).
@@ -231,9 +228,6 @@ func (r *PaymentMethodRepo) GetByProcessor(ctx context.Context, processor models
 func (r *PaymentMethodRepo) RequireByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
 	pm, err := r.GetByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrPaymentMethodNotFound) {
-			return nil, err
-		}
 		return nil, err
 	}
 	return pm, nil

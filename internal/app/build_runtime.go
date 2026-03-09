@@ -324,9 +324,6 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 
 func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
 	clients := make(map[string]*nmi.NMIClient)
-	if cfg == nil {
-		return clients, nil
-	}
 
 	nmiProcessors := cfg.GetNMIProcessors()
 	if len(nmiProcessors) == 0 {

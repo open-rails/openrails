@@ -130,9 +130,6 @@ func run(cmd *cobra.Command, _ []string) error {
 }
 
 func buildNMIClient(cfg *config.Config, processor string) (*nmi.NMIClient, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("config is required")
-	}
 	name := strings.TrimSpace(strings.ToLower(processor))
 	if name == "" {
 		name = "mobius"
@@ -153,9 +150,6 @@ func buildNMIClient(cfg *config.Config, processor string) (*nmi.NMIClient, error
 }
 
 func fetchCCBillSubscriptions(ctx context.Context, cfg *config.Config) ([]ccbill.CCBillRecord, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("config is required")
-	}
 	ccbillProc := cfg.GetCCBillProcessor()
 	if ccbillProc == nil {
 		return nil, fmt.Errorf("ccbill processor not configured")
@@ -254,7 +248,7 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 	}
 
 	if opts.apply && len(localOnly) > 0 {
-		if application.Runtime == nil || application.Runtime.SubscriptionLifecycleService == nil {
+		if application.Runtime.SubscriptionLifecycleService == nil {
 			return fmt.Errorf("subscription lifecycle service unavailable; cannot apply changes")
 		}
 
@@ -285,7 +279,7 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 	}
 
 	if opts.addRemote && processorName == "ccbill" && len(remoteOnly) > 0 {
-		if application.Runtime == nil || application.Runtime.SubscriptionLifecycleService == nil {
+		if application.Runtime.SubscriptionLifecycleService == nil {
 			return fmt.Errorf("subscription lifecycle service unavailable; cannot add memberships")
 		}
 
@@ -297,9 +291,6 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 		price, err := priceService.GetByID(ctx, priceID)
 		if err != nil {
 			return fmt.Errorf("load price for ccbill add-remote: %w", err)
-		}
-		if price == nil {
-			return fmt.Errorf("price not found for ccbill add-remote")
 		}
 
 		profileRepo := repo.NewProfileRepo(application.Runtime.DB)
@@ -417,9 +408,6 @@ func normalizeProcessorList(processors []string, fallback string) []string {
 }
 
 func resolveCCBillPriceID(ctx context.Context, database *db.DB, rawID string) (uuid.UUID, error) {
-	if database == nil {
-		return uuid.Nil, fmt.Errorf("database is required")
-	}
 	if strings.TrimSpace(rawID) != "" {
 		parsed, err := uuid.Parse(strings.TrimSpace(rawID))
 		if err != nil {
@@ -436,7 +424,7 @@ func resolveCCBillPriceID(ctx context.Context, database *db.DB, rawID string) (u
 
 	var matches []uuid.UUID
 	for _, price := range prices {
-		if price != nil && price.HasProcessor(models.ProcessorCCBill) {
+		if price.HasProcessor(models.ProcessorCCBill) {
 			matches = append(matches, price.ID)
 		}
 	}

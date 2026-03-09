@@ -103,8 +103,8 @@ func (s *Subscription) updateCurrentPeriods(billingCycle *time.Duration) {
 }
 
 func (s *Subscription) ActivateWithPrice(price *Price) error {
-	if price == nil {
-		return fmt.Errorf("price model cannot be nil")
+	if price.BillingCycleDays == nil {
+		return fmt.Errorf("recurring price billing cycle is required")
 	}
 
 	billingCycle := time.Duration(*price.BillingCycleDays) * 24 * time.Hour

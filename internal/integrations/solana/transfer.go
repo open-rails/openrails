@@ -213,7 +213,7 @@ func validateTransactionContent(txResult *rpc.GetTransactionResult, expectedAmou
 		if err != nil {
 			return fmt.Errorf("invalid reference key: %w", err)
 		}
-		if !messageContainsKey(&tx.Message, referencePub, txResult.Meta.LoadedAddresses) {
+		if !messageContainsKey(tx.Message, referencePub, txResult.Meta.LoadedAddresses) {
 			return fmt.Errorf("reference key not included in transaction")
 		}
 	}
@@ -268,10 +268,6 @@ type transferMatch struct {
 }
 
 func findTransferMatch(tx *solanago.Transaction, txResult *rpc.GetTransactionResult, recipientCandidates map[string]struct{}, expectedTokenMint string, expectedAmount uint64, expectedPayer string) (*transferMatch, error) {
-	if tx == nil {
-		return nil, errors.New("transaction message unavailable")
-	}
-
 	if len(recipientCandidates) == 0 {
 		return nil, errors.New("no recipient candidates provided")
 	}
@@ -288,7 +284,7 @@ func findTransferMatch(tx *solanago.Transaction, txResult *rpc.GetTransactionRes
 	var bestMatch *transferMatch
 	expectedMintNorm := normalizeMint(expectedTokenMint)
 
-	for instIdx, inst := range tx.Message.Instructions {
+	for _, inst := range tx.Message.Instructions {
 		programID, err := tx.ResolveProgramIDIndex(inst.ProgramIDIndex)
 		if err != nil {
 			continue
@@ -301,32 +297,32 @@ func findTransferMatch(tx *solanago.Transaction, txResult *rpc.GetTransactionRes
 		switch {
 		case programID.Equals(system.ProgramID):
 			sysInstr, err := system.DecodeInstruction(accounts, inst.Data)
-			if err != nil || sysInstr == nil {
+			if err != nil {
 				continue
 			}
 			transfer, ok := sysInstr.Impl.(*system.Transfer)
 			if !ok {
 				continue
 			}
-			match := evaluateSystemTransfer(transfer, accountIndexFromInstruction(&inst, 1), candidateKeys, expectedAmount, expectedPayer)
+			match := evaluateSystemTransfer(transfer, accountIndexFromInstruction(inst, 1), candidateKeys, expectedAmount, expectedPayer)
 			if match != nil {
-				bestMatch = pickBetterMatch(bestMatch, match, instIdx)
+				bestMatch = pickBetterMatch(bestMatch, match)
 			}
 		case programID.Equals(token.ProgramID):
 			tokenInstr, err := token.DecodeInstruction(accounts, inst.Data)
-			if err != nil || tokenInstr == nil {
+			if err != nil {
 				continue
 			}
 			switch dec := tokenInstr.Impl.(type) {
 			case *token.Transfer:
-				match := evaluateTokenTransfer(txResult, accounts, dec.Amount, accountIndexFromInstruction(&inst, 1), candidateKeys, expectedMintNorm, expectedAmount, expectedPayer)
+				match := evaluateTokenTransfer(txResult, accounts, dec.Amount, accountIndexFromInstruction(inst, 1), candidateKeys, expectedMintNorm, expectedAmount, expectedPayer)
 				if match != nil {
-					bestMatch = pickBetterMatch(bestMatch, match, instIdx)
+					bestMatch = pickBetterMatch(bestMatch, match)
 				}
 			case *token.TransferChecked:
-				match := evaluateTokenTransferChecked(txResult, accounts, dec.Amount, accountIndexFromInstruction(&inst, 2), candidateKeys, expectedMintNorm, expectedAmount, expectedPayer)
+				match := evaluateTokenTransferChecked(txResult, accounts, dec.Amount, accountIndexFromInstruction(inst, 2), candidateKeys, expectedMintNorm, expectedAmount, expectedPayer)
 				if match != nil {
-					bestMatch = pickBetterMatch(bestMatch, match, instIdx)
+					bestMatch = pickBetterMatch(bestMatch, match)
 				}
 			}
 		default:
@@ -417,9 +413,7 @@ func evaluateTokenTransferChecked(txResult *rpc.GetTransactionResult, accounts [
 		return nil
 	}
 	mint := ""
-	if len(accounts) > 1 {
-		mint = accounts[1].PublicKey.String()
-	}
+	mint = accounts[1].PublicKey.String()
 	if mint == "" {
 		mint = mintForAccount(txResult, accountIdx)
 	}
@@ -439,7 +433,7 @@ func evaluateTokenTransferChecked(txResult *rpc.GetTransactionResult, accounts [
 	}
 }
 
-func pickBetterMatch(current, candidate *transferMatch, _ int) *transferMatch {
+func pickBetterMatch(current, candidate *transferMatch) *transferMatch {
 	if candidate == nil {
 		return current
 	}
@@ -452,17 +446,14 @@ func pickBetterMatch(current, candidate *transferMatch, _ int) *transferMatch {
 	return current
 }
 
-func accountIndexFromInstruction(inst *solanago.CompiledInstruction, accountPosition int) int {
-	if inst == nil || accountPosition >= len(inst.Accounts) {
+func accountIndexFromInstruction(inst solanago.CompiledInstruction, accountPosition int) int {
+	if accountPosition >= len(inst.Accounts) {
 		return -1
 	}
 	return int(inst.Accounts[accountPosition])
 }
 
 func mintForAccount(txResult *rpc.GetTransactionResult, accountIndex int) string {
-	if txResult == nil || txResult.Meta == nil {
-		return ""
-	}
 	for i := range txResult.Meta.PostTokenBalances {
 		if int(txResult.Meta.PostTokenBalances[i].AccountIndex) == accountIndex {
 			return txResult.Meta.PostTokenBalances[i].Mint.String()
@@ -487,12 +478,10 @@ func mintMatches(expected, actual string) bool {
 	return exp == act
 }
 
-func messageContainsKey(msg *solanago.Message, key solanago.PublicKey, loaded rpc.LoadedAddresses) bool {
-	if msg != nil {
-		for _, k := range msg.AccountKeys {
-			if k.Equals(key) {
-				return true
-			}
+func messageContainsKey(msg solanago.Message, key solanago.PublicKey, loaded rpc.LoadedAddresses) bool {
+	for _, k := range msg.AccountKeys {
+		if k.Equals(key) {
+			return true
 		}
 	}
 	for _, k := range loaded.Writable {

@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 type PaymentMethodService struct {
@@ -63,7 +64,7 @@ func (s *PaymentMethodService) ListByUserID(ctx context.Context, userID string, 
 
 // GetByVaultID finds a NMI payment method by vault ID
 func (s *PaymentMethodService) GetByVaultID(ctx context.Context, provider, vaultID string) (*models.PaymentMethod, error) {
-	pm, err := s.repo.GetByVaultID(ctx, provider, vaultID)
+	pm, err := s.repo.GetByVaultID(ctx, normalize.FirstNonEmpty(normalize.Lower(provider), "mobius"), vaultID)
 	if err != nil {
 		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
 			return nil, ErrPaymentMethodNotFound
@@ -75,7 +76,7 @@ func (s *PaymentMethodService) GetByVaultID(ctx context.Context, provider, vault
 
 // GetByInitialTransactionID finds a NMI payment method by initial transaction ID
 func (s *PaymentMethodService) GetByInitialTransactionID(ctx context.Context, provider, initialTransactionID string) (*models.PaymentMethod, error) {
-	pm, err := s.repo.GetByInitialTransactionID(ctx, provider, initialTransactionID)
+	pm, err := s.repo.GetByInitialTransactionID(ctx, normalize.FirstNonEmpty(normalize.Lower(provider), "mobius"), initialTransactionID)
 	if err != nil {
 		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
 			return nil, ErrPaymentMethodNotFound

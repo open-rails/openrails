@@ -3,7 +3,6 @@ package repo
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
@@ -112,12 +111,6 @@ func (r *PriceRepo) ListPaginated(ctx context.Context, filter PriceFilter, limit
 
 func (r *PriceRepo) GetByNMIPlan(ctx context.Context, provider, nmiPlanID string) (*models.Price, error) {
 	price := new(models.Price)
-
-	// TODO - Sanitize provider string?
-	provider = strings.TrimSpace(strings.ToLower(provider))
-	if provider == "" {
-		provider = "mobius"
-	}
 
 	// The provider parameter determines which processor key to look up directly (e.g., "mobius", "acme").
 	query := r.db.GetDB().NewSelect().Model(price).

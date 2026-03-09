@@ -401,7 +401,7 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 
 	productName := ""
 	if s.productService != nil {
-		if prod, perr := s.productService.GetByID(ctx, price.ProductID); perr == nil && prod != nil {
+		if prod, perr := s.productService.GetByID(ctx, price.ProductID); perr == nil {
 			productName = strings.TrimSpace(prod.DisplayName)
 		}
 	}

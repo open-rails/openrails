@@ -3,7 +3,6 @@ package repo
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
@@ -41,7 +40,6 @@ func (r *CreditTypeRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Cre
 
 func (r *CreditTypeRepo) GetByName(ctx context.Context, name string) (*models.CreditType, error) {
 	ct := new(models.CreditType)
-	name = strings.TrimSpace(name)
 	if err := r.db.GetDB().NewSelect().Model(ct).Where("ct.name = ?", name).Limit(1).Scan(ctx); err != nil {
 		return nil, err
 	}

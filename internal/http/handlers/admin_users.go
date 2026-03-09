@@ -73,7 +73,7 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	profile := adminUserBillingProfile{UserID: path.UserID, Entitlements: []models.Entitlement{}, Payments: []*models.Payment{}}
 	if r.State.SubscriptionService != nil {
 		sub, err := r.State.SubscriptionService.GetActiveSubscription(ctx, path.UserID)
-		if err == nil && sub != nil {
+		if err == nil {
 			profile.Subscription = sub
 		}
 	}
@@ -152,7 +152,7 @@ func GetAdminUserMobius(r *httprequest.Request) {
 		return
 	}
 	subscription, err := r.State.SubscriptionService.GetActiveSubscription(r.Request.Context(), path.UserID)
-	if err != nil || subscription == nil {
+	if err != nil {
 		r.ErrorJSON(http.StatusNotFound, "active subscription not found")
 		return
 	}
@@ -167,7 +167,7 @@ func GetAdminUserMobius(r *httprequest.Request) {
 	}
 	var pmVault string
 	if subscription.PaymentMethodID != nil {
-		if pm, err := r.State.PaymentMethodService.GetByID(r.Request.Context(), *subscription.PaymentMethodID); err == nil && pm != nil {
+		if pm, err := r.State.PaymentMethodService.GetByID(r.Request.Context(), *subscription.PaymentMethodID); err == nil {
 			pmVault = pm.VaultID
 		}
 	}
@@ -209,7 +209,7 @@ func GetAdminUserCCBill(r *httprequest.Request) {
 		return
 	}
 	subscription, err := r.State.SubscriptionService.GetActiveSubscription(r.Request.Context(), path.UserID)
-	if err != nil || subscription == nil {
+	if err != nil {
 		r.ErrorJSON(http.StatusNotFound, "active subscription not found")
 		return
 	}

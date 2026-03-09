@@ -23,6 +23,9 @@ type cachedQuote struct {
 // NewCachedProvider creates a CachedProvider with the given TTL.
 // A TTL of 5 minutes is recommended to balance freshness with API rate limits.
 func NewCachedProvider(provider Provider, ttl time.Duration) *CachedProvider {
+	if provider == nil {
+		panic("fx provider is required")
+	}
 	return &CachedProvider{
 		provider: provider,
 		ttl:      ttl,

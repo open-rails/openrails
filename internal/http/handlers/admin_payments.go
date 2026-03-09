@@ -207,7 +207,7 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 		tm = tm.UTC()
 		purchasedAt = &tm
 	}
-	if existing, err := r.State.PaymentService.GetByTransactionID(r.Request.Context(), models.ProcessorManual, transactionID); err == nil && existing != nil {
+	if existing, err := r.State.PaymentService.GetByTransactionID(r.Request.Context(), models.ProcessorManual, transactionID); err == nil {
 		r.Inner().JSON(http.StatusOK, map[string]any{"payment_id": existing.ID.String(), "status": "exists"})
 		return
 	}

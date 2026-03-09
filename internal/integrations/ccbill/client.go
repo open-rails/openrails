@@ -24,7 +24,7 @@ func (c *RESTClient) Config() *config.CCBillConfig {
 
 func NewRESTClient(cfg *config.CCBillConfig) *RESTClient {
 	return &RESTClient{
-		config: cfg,
+		config: requireConfig(cfg),
 	}
 }
 
@@ -52,14 +52,12 @@ func (c *RESTClient) ValidateWebhookIP(clientIP string) error {
 }
 
 func (c *RESTClient) ValidateWebhookAuth(clientAccnum, clientSubacc string) error {
-	cfg := c.Config()
-
-	if clientAccnum != cfg.ClientAccNum {
-		return fmt.Errorf("webhook clientAccnum mismatch: got %s, expected %s", clientAccnum, cfg.ClientAccNum)
+	if clientAccnum != c.config.ClientAccNum {
+		return fmt.Errorf("webhook clientAccnum mismatch: got %s, expected %s", clientAccnum, c.config.ClientAccNum)
 	}
 
-	if clientSubacc != cfg.ClientSubAcc {
-		return fmt.Errorf("webhook clientSubacc mismatch: got %s, expected %s", clientSubacc, cfg.ClientSubAcc)
+	if clientSubacc != c.config.ClientSubAcc {
+		return fmt.Errorf("webhook clientSubacc mismatch: got %s, expected %s", clientSubacc, c.config.ClientSubAcc)
 	}
 
 	return nil

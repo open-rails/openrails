@@ -48,9 +48,6 @@ type CreditsSpec map[string]CreditGrantSpec
 
 // UnmarshalJSON decodes the current map-based credits_spec schema.
 func (c *CreditsSpec) UnmarshalJSON(b []byte) error {
-	if c == nil {
-		return nil
-	}
 	if len(b) == 0 || string(b) == "null" {
 		*c = nil
 		return nil

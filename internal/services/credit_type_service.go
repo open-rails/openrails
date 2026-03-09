@@ -59,7 +59,7 @@ func (s *CreditTypeService) Create(ctx context.Context, ct *models.CreditType) e
 }
 
 func (s *CreditTypeService) GetByName(ctx context.Context, name string) (*models.CreditType, error) {
-	return s.repo.GetByName(ctx, name)
+	return s.repo.GetByName(ctx, strings.TrimSpace(name))
 }
 
 func (s *CreditTypeService) List(ctx context.Context, activeOnly bool) ([]*models.CreditType, error) {
@@ -76,7 +76,7 @@ type CreditTypeUpdateParams struct {
 // Note: Name/unit/decimal_places are treated as immutable because they affect display and
 // downstream interpretation of stored balances/transactions.
 func (s *CreditTypeService) Update(ctx context.Context, name string, params CreditTypeUpdateParams) (*models.CreditType, error) {
-	ct, err := s.repo.GetByName(ctx, name)
+	ct, err := s.repo.GetByName(ctx, strings.TrimSpace(name))
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (s *CreditTypeService) Update(ctx context.Context, name string, params Cred
 }
 
 func (s *CreditTypeService) Deactivate(ctx context.Context, name string) error {
-	ct, err := s.repo.GetByName(ctx, name)
+	ct, err := s.repo.GetByName(ctx, strings.TrimSpace(name))
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func (s *CreditTypeService) Deactivate(ctx context.Context, name string) error {
 }
 
 func (s *CreditTypeService) Activate(ctx context.Context, name string) error {
-	ct, err := s.repo.GetByName(ctx, name)
+	ct, err := s.repo.GetByName(ctx, strings.TrimSpace(name))
 	if err != nil {
 		return err
 	}

@@ -313,7 +313,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	// Only stop if an active subscription exists
-	if err == nil && activeSub != nil && activeSub.Status == models.StatusActive {
+	if err == nil && activeSub.Status == models.StatusActive {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"user_id":                   params.UserID,
 			"product_id":                price.ProductID,
@@ -505,7 +505,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
 		}
-		if err == nil && existingPayment != nil && existingPayment.UserID == subscription.UserID {
+		if err == nil && existingPayment.UserID == subscription.UserID {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"user_id":         subscription.UserID,

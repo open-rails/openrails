@@ -43,6 +43,7 @@ type CCBillRecord struct {
 }
 
 func NewDataLinkClient(cfg *config.CCBillConfig) *DataLinkClient {
+	cfg = requireConfig(cfg)
 	return &DataLinkClient{
 		BaseURL:      defaultDataLinkBaseURL,
 		ClientAccNum: cfg.ClientAccNum,

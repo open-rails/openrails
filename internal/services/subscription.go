@@ -171,8 +171,8 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 	}
 
 	if subscription.Status == models.StatusActive || subscription.Status == models.StatusPending {
-		existing, err := s.GetActiveOrPendingByUserIDAndProductID(ctx, subscription.UserID, subscription.ProductID)
-		if err == nil && existing != nil {
+		_, err := s.GetActiveOrPendingByUserIDAndProductID(ctx, subscription.UserID, subscription.ProductID)
+		if err == nil {
 			return ErrActiveSubscriptionExists
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 type PriceService struct {
@@ -31,6 +32,7 @@ func (s *PriceService) GetByProductID(ctx context.Context, productID uuid.UUID) 
 }
 
 func (s *PriceService) GetByNMIPlan(ctx context.Context, provider, nmiPlanID string) (*models.Price, error) {
+	provider = normalize.FirstNonEmpty(normalize.Lower(provider), "mobius")
 	return s.repo.GetByNMIPlan(ctx, provider, nmiPlanID)
 }
 

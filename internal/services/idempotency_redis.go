@@ -119,7 +119,7 @@ func (s *IdempotencyService) Begin(ctx context.Context, operation, key string) (
 func (s *IdempotencyService) beginRedis(ctx context.Context, redisKey string) (*IdempotencyRecord, bool, error) {
 	// Try to get existing record first
 	existing, err := s.getRedis(ctx, redisKey)
-	if err == nil && existing != nil {
+	if err == nil {
 		return existing, true, nil
 	}
 	if err != nil && err != redis.Nil {
