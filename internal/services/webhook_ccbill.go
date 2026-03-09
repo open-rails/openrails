@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -37,7 +38,7 @@ type CCBillWebhookService struct {
 	PriceService                 *catalog.PriceService
 	NotificationService          *NotificationService
 	EventLogService              *EventLogService
-	SubscriptionService          *SubscriptionService
+	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *SubscriptionLifecycleService
 	ProfileRepo                  *repo.ProfileRepo
 	PaymentService               *payments.PaymentService
@@ -720,10 +721,9 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		notificationService := NewNotificationService(txdb, nil)
 		entitlementService := entitlements.NewEntitlementService(txdb)
 		paymentService := payments.NewPaymentService(txdb)
-		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
 
 		// Find subscription by the original processor subscription ID and then transition it.
 		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), originalSubscriptionID)
@@ -1156,8 +1156,7 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		notificationService := NewNotificationService(txdb, nil)
-		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
 
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
@@ -1242,8 +1241,7 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		notificationService := NewNotificationService(txdb, nil)
-		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
 
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
@@ -1458,8 +1456,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		notificationService := NewNotificationService(txdb, nil)
-		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
 		entSvc := entitlements.NewEntitlementService(txdb)
 
 		// Find subscription by processor subscription ID
@@ -1624,8 +1621,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		db := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationService := NewNotificationService(db, nil)
-		subService := NewSubscriptionService(db, priceService, productService, notificationService, s.CCBillClient, nil, nil)
+		subService := subscriptions.NewSubscriptionService(db, priceService, productService, s.CCBillClient, nil, nil)
 
 		// Try to find subscription by processor subscription ID
 		// Note: For voids, the subscription might not exist yet since the transaction was voided
@@ -1767,8 +1763,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		db := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationService := NewNotificationService(db, nil)
-		subService := NewSubscriptionService(db, priceService, productService, notificationService, s.CCBillClient, nil, nil)
+		subService := subscriptions.NewSubscriptionService(db, priceService, productService, s.CCBillClient, nil, nil)
 		entSvc := entitlements.NewEntitlementService(db)
 
 		// Find subscription by processor subscription ID
@@ -2178,8 +2173,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		notificationService := NewNotificationService(txdb, nil)
-		subService := NewSubscriptionService(txdb, priceService, productService, notificationService, s.CCBillClient, nil, nil)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
 		entSvc := entitlements.NewEntitlementService(txdb)
 		entSvc.SetClock(s.Clock)
 

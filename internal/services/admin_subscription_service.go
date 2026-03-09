@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
@@ -29,7 +30,7 @@ var (
 
 // AdminSubscriptionService handles administrative subscription operations
 type AdminSubscriptionService struct {
-	SubscriptionService *SubscriptionService
+	SubscriptionService *subscriptions.SubscriptionService
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
 	EntitlementService  *entitlements.EntitlementService
@@ -63,7 +64,7 @@ type AdminSubscriptionResponse struct {
 }
 
 // GetAllSubscriptions retrieves all subscriptions with filtering (admin)
-func (s *AdminSubscriptionService) GetAllSubscriptions(ctx context.Context, queryOpts *query.QueryOptions[GetSubscriptionsFilters]) ([]*AdminSubscriptionResponse, int64, error) {
+func (s *AdminSubscriptionService) GetAllSubscriptions(ctx context.Context, queryOpts *query.QueryOptions[subscriptions.GetSubscriptionsFilters]) ([]*AdminSubscriptionResponse, int64, error) {
 	subscriptions, total, err := s.SubscriptionService.GetSubscribers(ctx, *queryOpts)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get subscriptions: %w", err)
@@ -459,7 +460,7 @@ func (s *AdminSubscriptionService) SendManualNotification(ctx context.Context, u
 
 // NewAdminSubscriptionService creates a new AdminSubscriptionService
 func NewAdminSubscriptionService(
-	subscriptionService *SubscriptionService,
+	subscriptionService *subscriptions.SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
 	entitlementService *entitlements.EntitlementService,

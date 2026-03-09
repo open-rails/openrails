@@ -10,9 +10,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	ipverify "github.com/open-rails/openrails/internal/utils"
 	"github.com/riverqueue/river"
@@ -39,9 +39,9 @@ func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (
 	}
 
 	switch provider {
-	case services.ProcessorCCBill:
+	case subscriptions.ProcessorCCBill:
 		return s.handleCCBillWebhook(ctx, req)
-	case services.ProcessorStripe:
+	case subscriptions.ProcessorStripe:
 		return s.handleStripeWebhook(ctx, req)
 	default:
 		return &WebhookResult{

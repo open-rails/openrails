@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -116,8 +117,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
-	notifSvc := NewNotificationService(dbi, nil)
-	subSvc := NewSubscriptionService(dbi, priceSvc, productSvc, notifSvc, nil, nil, nil)
+	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 
 	body, err := json.Marshal(CCBillRenewalFailureEvent{
 		TransactionID:  "txn_" + uuid.New().String(),
@@ -292,7 +292,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	notifSvc := NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi)
 	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
-	subSvc := NewSubscriptionService(dbi, priceSvc, productSvc, notifSvc, nil, nil, nil)
+	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 
 	nextRenewal := paidEnd.Add(30 * 24 * time.Hour)
 	body, err := json.Marshal(CCBillRenewalSuccessEvent{

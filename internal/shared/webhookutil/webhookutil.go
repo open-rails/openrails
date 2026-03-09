@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/internal/services"
 )
 
 var (
@@ -77,7 +77,7 @@ func PrepareCCBill(body []byte, eventType string) (Prepared, error) {
 	}
 
 	return Prepared{
-		Provider:  services.ProcessorCCBill,
+		Provider:  subscriptions.ProcessorCCBill,
 		EventType: eventType,
 		Body:      normalizedBody,
 	}, nil
@@ -103,7 +103,7 @@ func PrepareStripe(body []byte, secret, header string, tolerance time.Duration) 
 	}
 
 	return Prepared{
-		Provider:          services.ProcessorStripe,
+		Provider:          subscriptions.ProcessorStripe,
 		EventID:           eventID,
 		EventType:         eventType,
 		Body:              body,

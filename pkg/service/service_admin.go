@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	entitlementmod "github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
@@ -34,10 +35,10 @@ func (s *Service) AdminGetSubscriptions(ctx context.Context, opts AdminGetSubscr
 		offset = 0
 	}
 
-	queryOpts := &query.QueryOptions[services.GetSubscriptionsFilters]{
+	queryOpts := &query.QueryOptions[subscriptions.GetSubscriptionsFilters]{
 		Limit:  limit,
 		Offset: offset,
-		Filters: services.GetSubscriptionsFilters{
+		Filters: subscriptions.GetSubscriptionsFilters{
 			UserID:    opts.UserID,
 			Status:    opts.Status,
 			Processor: opts.Processor,

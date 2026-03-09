@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
@@ -428,7 +429,7 @@ func createCCBillDataLinkClient(cfg *config.Config) *ccbill.DataLinkClient {
 }
 
 type servicesInstances struct {
-	SubscriptionService *services.SubscriptionService
+	SubscriptionService *subscriptions.SubscriptionService
 
 	ProductService           *catalog.ProductService
 	PriceService             *catalog.PriceService
@@ -511,11 +512,10 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	subscriptionLifecycleService.Clock = clock
 	subscriptionLifecycleService.SetConfig(cfg) // For feature flag access (dunning_mode, etc.)
 
-	subscriptionService := services.NewSubscriptionService(
+	subscriptionService := subscriptions.NewSubscriptionService(
 		database,
 		priceService,
 		productService,
-		notificationService,
 		ccbillRESTClient,
 		nmiClients,
 		paymentMethodService,

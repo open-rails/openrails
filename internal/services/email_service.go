@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -33,7 +34,7 @@ type EmailService struct {
 	Clock  clockwork.Clock
 
 	// Domain dependencies for building subscription emails
-	subscriptionService *SubscriptionService
+	subscriptionService *subscriptions.SubscriptionService
 	productService      *catalog.ProductService
 	priceService        *catalog.PriceService
 	profiles            *repo.ProfileRepo
@@ -78,7 +79,7 @@ func NewEmailService(sendgridCfg *config.SendGridConfig, storeCfg *config.StoreC
 // SetDomainServices configures the domain services needed for subscription emails.
 // This is called after creation to avoid circular dependencies.
 func (s *EmailService) SetDomainServices(
-	subscriptionService *SubscriptionService,
+	subscriptionService *subscriptions.SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
 	profiles *repo.ProfileRepo,

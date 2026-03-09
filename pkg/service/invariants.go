@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -70,7 +71,7 @@ func (s *Service) requireUserSubscriptionService() (*services.UserSubscriptionSe
 	return s.rt.UserSubscriptionService, nil
 }
 
-func (s *Service) requireSubscriptionAndPaymentMethodServices() (*services.SubscriptionService, *payments.PaymentMethodService, error) {
+func (s *Service) requireSubscriptionAndPaymentMethodServices() (*subscriptions.SubscriptionService, *payments.PaymentMethodService, error) {
 	if s.rt.SubscriptionService == nil || s.rt.PaymentMethodService == nil {
 		return nil, nil, fmt.Errorf("billing service: not initialized")
 	}

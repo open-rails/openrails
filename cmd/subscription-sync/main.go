@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -210,7 +211,7 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 		}
 	}
 
-	subService := services.NewSubscriptionService(application.Runtime.DB, nil, nil, nil, nil, nil, nil)
+	subService := subscriptions.NewSubscriptionService(application.Runtime.DB, nil, nil, nil, nil, nil)
 	localSubs, err := subService.GetActiveSubscriptionsByProcessor(ctx, processorName)
 	if err != nil {
 		return fmt.Errorf("fetch local subscriptions failed: %w", err)

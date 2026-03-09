@@ -1,4 +1,4 @@
-package services
+package subscriptions
 
 import (
 	"context"
@@ -37,15 +37,14 @@ type GetSubscriptionsFilters struct {
 
 type SubscriptionService struct {
 	subscriptionRepo     *repo.SubscriptionRepo
+	notificationRepo     *repo.NotificationQueueRepo
 	Clock                clockwork.Clock
 	PriceService         *catalog.PriceService
 	ProductService       *catalog.ProductService
-	NotificationService  *NotificationService
 	CCBillRESTClient     *ccbill.RESTClient
 	NMIClients           map[string]*nmi.NMIClient
 	PaymentMethodService *payments.PaymentMethodService
 	VaultService         *payments.VaultService
-	IdempotencyService   *IdempotencyService
 }
 
 var ErrActiveSubscriptionExists = errors.New("active or pending subscription already exists for this product")
@@ -114,10 +113,10 @@ func (s *SubscriptionService) CancelUserSubscription(ctx context.Context, userID
 		UserID:    userID,
 		EventType: models.NotificationPremiumEnded,
 		Data: map[string]any{
-			"reason": string(PremiumEndReasonUserCancel),
+			"reason": "user_cancel",
 		},
 	}
-	if err := s.NotificationService.Create(ctx, notification); err != nil {
+	if err := s.notificationRepo.Create(ctx, notification); err != nil {
 		log.WithError(err).Error("failed to create cancellation notification")
 	}
 
@@ -151,16 +150,15 @@ func NewSubscriptionService(
 	db *db.DB,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
-	notificationService *NotificationService,
 	ccbillRESTClient *ccbill.RESTClient,
 	nmiClients map[string]*nmi.NMIClient,
 	paymentMethodService *payments.PaymentMethodService,
 ) *SubscriptionService {
 	return &SubscriptionService{
 		subscriptionRepo:     repo.NewSubscriptionRepo(db),
+		notificationRepo:     repo.NewNotificationQueueRepo(db),
 		PriceService:         priceService,
 		ProductService:       productService,
-		NotificationService:  notificationService,
 		CCBillRESTClient:     ccbillRESTClient,
 		NMIClients:           nmiClients,
 		PaymentMethodService: paymentMethodService,

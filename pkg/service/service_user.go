@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
@@ -263,10 +264,10 @@ func (s *Service) GetSubscriptions(ctx context.Context, userID string, opts GetS
 		offset = 0
 	}
 
-	queryOpts := &query.QueryOptions[services.GetSubscriptionsFilters]{
+	queryOpts := &query.QueryOptions[subscriptions.GetSubscriptionsFilters]{
 		Limit:   limit,
 		Offset:  offset,
-		Filters: services.GetSubscriptionsFilters{UserID: userID},
+		Filters: subscriptions.GetSubscriptionsFilters{UserID: userID},
 	}
 	if opts.Status != "" && opts.Status != "all" {
 		queryOpts.Filters.Status = opts.Status

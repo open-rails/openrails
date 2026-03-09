@@ -6,7 +6,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 )
@@ -93,12 +93,12 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 }
 
 func GetAdminSubscriptions(r *httprequest.Request) {
-	queryOpts := query.QueryOptions[services.GetSubscriptionsFilters]{Limit: 50, Offset: 0}
+	queryOpts := query.QueryOptions[subscriptions.GetSubscriptionsFilters]{Limit: 50, Offset: 0}
 	if err := r.Inner().ShouldBindQuery(&queryOpts); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	var filters services.GetSubscriptionsFilters
+	var filters subscriptions.GetSubscriptionsFilters
 	if err := r.Inner().ShouldBindQuery(&filters); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return

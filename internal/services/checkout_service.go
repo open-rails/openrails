@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
@@ -147,7 +148,7 @@ type EligibilityResult struct {
 
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
 type CheckoutService struct {
-	SubscriptionService  *SubscriptionService
+	SubscriptionService  *subscriptions.SubscriptionService
 	ProductService       *catalog.ProductService
 	PriceService         *catalog.PriceService
 	PaymentService       *payments.PaymentService
@@ -170,7 +171,7 @@ func (s *CheckoutService) now() time.Time {
 
 // NewCheckoutService creates a new CheckoutService
 func NewCheckoutService(
-	subscriptionService *SubscriptionService,
+	subscriptionService *subscriptions.SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
 	paymentService *payments.PaymentService,

@@ -7,8 +7,8 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/riverqueue/river"
@@ -57,7 +57,7 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	if sub.Processor == services.ProcessorCCBill {
+	if sub.Processor == subscriptions.ProcessorCCBill {
 		r.GinCtx.JSON(http.StatusUnprocessableEntity, map[string]any{
 			"error":       "CCBill subscriptions cannot be cancelled through our system. Please visit the CCBill consumer support portal to manage your subscription. You will need the email address you used when subscribing.",
 			"support_url": "https://support.ccbill.com",

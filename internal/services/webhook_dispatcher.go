@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 )
 
@@ -38,7 +39,7 @@ type WebhookDispatcher struct {
 	PriceService                 *catalog.PriceService
 	ProductService               *catalog.ProductService
 	NotificationService          *NotificationService
-	SubscriptionService          *SubscriptionService
+	SubscriptionService          *subscriptions.SubscriptionService
 	PaymentService               *payments.PaymentService
 	EventLogService              *EventLogService
 	SubscriptionLifecycleService *SubscriptionLifecycleService

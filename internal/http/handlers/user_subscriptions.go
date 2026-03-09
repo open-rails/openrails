@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
@@ -34,10 +35,10 @@ func listSubscriptionsForUser(r *httprequest.Request, userID string) {
 
 	status := r.Request.URL.Query().Get("status")
 
-	queryOpts := &query.QueryOptions[services.GetSubscriptionsFilters]{
+	queryOpts := &query.QueryOptions[subscriptions.GetSubscriptionsFilters]{
 		Limit:   limit,
 		Offset:  offset,
-		Filters: services.GetSubscriptionsFilters{},
+		Filters: subscriptions.GetSubscriptionsFilters{},
 	}
 
 	if status != "" && status != "all" {

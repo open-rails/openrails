@@ -8,9 +8,9 @@ import (
 	"time"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	ipverify "github.com/open-rails/openrails/internal/utils"
 	"github.com/riverqueue/river"
@@ -29,7 +29,7 @@ func Webhook(r *httprequest.Request) {
 		return
 	}
 	switch provider {
-	case services.ProcessorCCBill:
+	case subscriptions.ProcessorCCBill:
 		if !isTestMode {
 			if !ipverify.IsValidCCBillIP(clientIP) {
 				log.WithFields(log.Fields{"client_ip": clientIP, "processor": "ccbill", "event_type": r.Query("eventType")}).Warn("CCBill webhook rejected - unauthorized IP address")
@@ -44,7 +44,7 @@ func Webhook(r *httprequest.Request) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}
 		return
-	case services.ProcessorStripe:
+	case subscriptions.ProcessorStripe:
 		if enqueueStripeWebhook(r, clientIP) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
 		}

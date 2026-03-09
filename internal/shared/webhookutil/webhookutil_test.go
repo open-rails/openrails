@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
 )
 
@@ -120,7 +120,7 @@ func TestValidateNMISignature(t *testing.T) {
 func TestPrepareCCBill(t *testing.T) {
 	prepared, err := PrepareCCBill([]byte("eventType=NewSaleSuccess&subscriptionId=123"), " NewSaleSuccess ")
 	require.NoError(t, err)
-	require.Equal(t, services.ProcessorCCBill, prepared.Provider)
+	require.Equal(t, subscriptions.ProcessorCCBill, prepared.Provider)
 	require.Equal(t, "NewSaleSuccess", prepared.EventType)
 	require.JSONEq(t, `{"eventType":"NewSaleSuccess","subscriptionId":"123"}`, string(prepared.Body))
 	require.Equal(t, prepared.UniqueKey(), prepared.QueueArgs("127.0.0.1").UniqueKey)
@@ -140,7 +140,7 @@ func TestPrepareStripe(t *testing.T) {
 
 	prepared, err := PrepareStripe(body, secret, header, time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, services.ProcessorStripe, prepared.Provider)
+	require.Equal(t, subscriptions.ProcessorStripe, prepared.Provider)
 	require.Equal(t, "evt_123", prepared.EventID)
 	require.Equal(t, "checkout.session.completed", prepared.EventType)
 	require.True(t, prepared.SignatureVerified)

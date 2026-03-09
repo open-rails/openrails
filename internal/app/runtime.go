@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -42,7 +43,7 @@ type Runtime struct {
 	RiverClient       *river.Client[pgx.Tx]
 	riverPool         *pgxpool.Pool
 
-	SubscriptionService  *services.SubscriptionService
+	SubscriptionService  *subscriptions.SubscriptionService
 	ProductService       *catalog.ProductService
 	PriceService         *catalog.PriceService
 	NotificationService  *services.NotificationService
