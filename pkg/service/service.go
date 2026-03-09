@@ -62,9 +62,6 @@ type CreditHold struct {
 }
 
 func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*CreditHold, error) {
-	if s == nil || s.rt == nil || s.rt.CreditsService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	req.UserID = strings.TrimSpace(req.UserID)
 	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
@@ -88,7 +85,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.rt.CreditsService.Hold(ctx, req.UserID, req.CreditType, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.creditsService().Hold(ctx, req.UserID, req.CreditType, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -154,9 +151,6 @@ type WithdrawCreditsRequest struct {
 }
 
 func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
-	if s == nil || s.rt == nil || s.rt.CreditsService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	req.UserID = strings.TrimSpace(req.UserID)
 	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
@@ -172,7 +166,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	if req.Source == "" {
 		return nil, fmt.Errorf("source required")
 	}
-	trx, err := s.rt.CreditsService.Withdraw(ctx, services.CreditWithdrawParams{
+	trx, err := s.creditsService().Withdraw(ctx, services.CreditWithdrawParams{
 		UserID:        req.UserID,
 		CreditType:    req.CreditType,
 		Amount:        req.Amount,
@@ -214,9 +208,6 @@ type DepositCreditsRequest struct {
 }
 
 func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
-	if s == nil || s.rt == nil || s.rt.CreditsService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	req.UserID = strings.TrimSpace(req.UserID)
 	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
@@ -232,7 +223,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	if req.Source == "" {
 		return nil, fmt.Errorf("source required")
 	}
-	trx, err := s.rt.CreditsService.Deposit(ctx, services.CreditDepositParams{
+	trx, err := s.creditsService().Deposit(ctx, services.CreditDepositParams{
 		UserID:      req.UserID,
 		CreditType:  req.CreditType,
 		Amount:      req.Amount,
@@ -264,16 +255,13 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 }
 
 func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error) {
-	if s == nil || s.rt == nil || s.rt.CreditsService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	if req.HoldID == uuid.Nil {
 		return nil, fmt.Errorf("hold_id required")
 	}
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
-	trx, err := s.rt.CreditsService.CaptureHoldWithPolicy(ctx, req.HoldID, req.Amount, req.AllowNegative, req.MaxNegative)
+	trx, err := s.creditsService().CaptureHoldWithPolicy(ctx, req.HoldID, req.Amount, req.AllowNegative, req.MaxNegative)
 	if err != nil {
 		return nil, err
 	}
@@ -297,19 +285,13 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 }
 
 func (s *Service) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
-	if s == nil || s.rt == nil || s.rt.CreditsService == nil {
-		return fmt.Errorf("billing service: not initialized")
-	}
 	if holdID == uuid.Nil {
 		return fmt.Errorf("hold_id required")
 	}
-	return s.rt.CreditsService.ReleaseHold(ctx, holdID)
+	return s.creditsService().ReleaseHold(ctx, holdID)
 }
 
 func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {
-	if s == nil || s.rt == nil || s.rt.EntitlementService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -317,7 +299,7 @@ func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at 
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return s.rt.EntitlementService.ListActiveEntitlements(ctx, userID, at.UTC())
+	return s.entitlementService().ListActiveEntitlements(ctx, userID, at.UTC())
 }
 
 type EntitlementRecord struct {
@@ -335,9 +317,6 @@ type EntitlementRecord struct {
 }
 
 func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID string, at time.Time) ([]EntitlementRecord, error) {
-	if s == nil || s.rt == nil || s.rt.EntitlementService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -345,7 +324,7 @@ func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID strin
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	records, err := s.rt.EntitlementService.ListActiveRecords(ctx, userID, at.UTC())
+	records, err := s.entitlementService().ListActiveRecords(ctx, userID, at.UTC())
 	if err != nil {
 		return nil, err
 	}

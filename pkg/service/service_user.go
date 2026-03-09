@@ -21,8 +21,9 @@ import (
 
 // GetProducts returns a paginated list of products.
 func (s *Service) GetProducts(ctx context.Context, opts GetProductsOptions) (*PaginatedResult[Product], error) {
-	if s == nil || s.rt == nil || s.rt.PublicSubscriptionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	publicSubscriptions, err := s.requirePublicSubscriptionService()
+	if err != nil {
+		return nil, err
 	}
 
 	limit := opts.Limit
@@ -34,7 +35,7 @@ func (s *Service) GetProducts(ctx context.Context, opts GetProductsOptions) (*Pa
 		offset = 0
 	}
 
-	result, err := s.rt.PublicSubscriptionService.GetProductsPaginated(ctx, opts.IncludeInactive, limit, offset)
+	result, err := publicSubscriptions.GetProductsPaginated(ctx, opts.IncludeInactive, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get products: %w", err)
 	}
@@ -56,8 +57,9 @@ func (s *Service) GetProducts(ctx context.Context, opts GetProductsOptions) (*Pa
 
 // GetPrices returns a paginated list of prices.
 func (s *Service) GetPrices(ctx context.Context, opts GetPricesOptions) (*PaginatedResult[Price], error) {
-	if s == nil || s.rt == nil || s.rt.PriceService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	prices, err := s.requirePriceService()
+	if err != nil {
+		return nil, err
 	}
 
 	limit := opts.Limit
@@ -83,18 +85,18 @@ func (s *Service) GetPrices(ctx context.Context, opts GetPricesOptions) (*Pagina
 		filter.Active = &active
 	}
 
-	modelPrices, totalItems, err := s.rt.PriceService.ListPaginated(ctx, filter, limit, offset)
+	modelPrices, totalItems, err := prices.ListPaginated(ctx, filter, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get prices: %w", err)
 	}
 
-	prices := make([]Price, 0, len(modelPrices))
+	items := make([]Price, 0, len(modelPrices))
 	for _, p := range modelPrices {
-		prices = append(prices, priceFromModel(p))
+		items = append(items, priceFromModel(p))
 	}
 
 	return &PaginatedResult[Price]{
-		Data:       prices,
+		Data:       items,
 		TotalItems: totalItems,
 		Limit:      limit,
 		Offset:     offset,
@@ -105,8 +107,9 @@ func (s *Service) GetPrices(ctx context.Context, opts GetPricesOptions) (*Pagina
 
 // CreateCheckoutSession creates a new checkout session.
 func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
-	if s == nil || s.rt == nil || s.rt.CheckoutSessionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	checkoutSessions, err := s.requireCheckoutSessionService()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -140,7 +143,7 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req 
 	}
 
 	user := &services.UserIdentity{ID: userID}
-	resp, err := s.rt.CheckoutSessionService.CreateSession(ctx, svcReq, user)
+	resp, err := checkoutSessions.CreateSession(ctx, svcReq, user)
 	if err != nil {
 		return nil, err
 	}
@@ -150,8 +153,9 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req 
 
 // GetCheckoutSession retrieves a checkout session by ID.
 func (s *Service) GetCheckoutSession(ctx context.Context, userID string, sessionID uuid.UUID) (*CheckoutSession, error) {
-	if s == nil || s.rt == nil || s.rt.CheckoutSessionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	checkoutSessions, err := s.requireCheckoutSessionService()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -162,7 +166,7 @@ func (s *Service) GetCheckoutSession(ctx context.Context, userID string, session
 	}
 
 	user := &services.UserIdentity{ID: userID}
-	resp, err := s.rt.CheckoutSessionService.GetSession(ctx, sessionID, user)
+	resp, err := checkoutSessions.GetSession(ctx, sessionID, user)
 	if err != nil {
 		return nil, err
 	}
@@ -172,8 +176,9 @@ func (s *Service) GetCheckoutSession(ctx context.Context, userID string, session
 
 // ConfirmCheckoutSession confirms a checkout session (primarily for Solana).
 func (s *Service) ConfirmCheckoutSession(ctx context.Context, userID string, sessionID uuid.UUID, req ConfirmCheckoutSessionRequest) (*CheckoutSession, error) {
-	if s == nil || s.rt == nil || s.rt.CheckoutSessionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	checkoutSessions, err := s.requireCheckoutSessionService()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -192,7 +197,7 @@ func (s *Service) ConfirmCheckoutSession(ctx context.Context, userID string, ses
 	}
 
 	user := &services.UserIdentity{ID: userID}
-	resp, err := s.rt.CheckoutSessionService.ConfirmSession(ctx, sessionID, svcReq, user)
+	resp, err := checkoutSessions.ConfirmSession(ctx, sessionID, svcReq, user)
 	if err != nil {
 		return nil, err
 	}
@@ -204,9 +209,6 @@ func (s *Service) ConfirmCheckoutSession(ctx context.Context, userID string, ses
 
 // GetBillingStatus returns a user's overall billing status.
 func (s *Service) GetBillingStatus(ctx context.Context, userID string) (*BillingStatus, error) {
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -241,8 +243,9 @@ func (s *Service) GetBillingStatus(ctx context.Context, userID string) (*Billing
 
 // GetSubscriptions returns a user's subscriptions.
 func (s *Service) GetSubscriptions(ctx context.Context, userID string, opts GetSubscriptionsOptions) (*PaginatedResult[Subscription], error) {
-	if s == nil || s.rt == nil || s.rt.UserSubscriptionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -267,7 +270,7 @@ func (s *Service) GetSubscriptions(ctx context.Context, userID string, opts GetS
 		queryOpts.Filters.Status = opts.Status
 	}
 
-	subs, total, err := s.rt.UserSubscriptionService.GetUserSubscriptionHistory(ctx, userID, queryOpts)
+	subs, total, err := userSubscriptions.GetUserSubscriptionHistory(ctx, userID, queryOpts)
 	if err != nil {
 		return nil, fmt.Errorf("get subscriptions: %w", err)
 	}
@@ -287,15 +290,16 @@ func (s *Service) GetSubscriptions(ctx context.Context, userID string, opts GetS
 
 // CancelSubscription cancels a user's active subscription.
 func (s *Service) CancelSubscription(ctx context.Context, userID string, req CancelSubscriptionRequest) (*CancelSubscriptionResult, error) {
-	if s == nil || s.rt == nil || s.rt.UserSubscriptionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	err := s.rt.UserSubscriptionService.CancelUserSubscription(ctx, userID, req.Feedback)
+	err = userSubscriptions.CancelUserSubscription(ctx, userID, req.Feedback)
 	if err != nil {
 		var ccbillErr *services.CCBillCancelError
 		if errors.As(err, &ccbillErr) {
@@ -316,9 +320,6 @@ func (s *Service) CancelSubscription(ctx context.Context, userID string, req Can
 // ResumeSubscription resumes a cancelled subscription (if supported).
 // Note: Resume functionality is not currently supported by the underlying lifecycle service.
 func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*ResumeSubscriptionResult, error) {
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -331,8 +332,9 @@ func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*Resum
 
 // UpdateSubscriptionPaymentMethod updates the payment method for a subscription.
 func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID string, req UpdateSubscriptionPaymentMethodRequest) (*UpdateSubscriptionPaymentMethodResult, error) {
-	if s == nil || s.rt == nil || s.rt.SubscriptionService == nil || s.rt.PaymentMethodService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	subscriptions, paymentMethods, err := s.requireSubscriptionAndPaymentMethodServices()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -356,7 +358,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	}
 
 	// Verify ownership and update
-	sub, err := s.rt.SubscriptionService.GetByID(ctx, subID)
+	sub, err := subscriptions.GetByID(ctx, subID)
 	if err != nil {
 		return nil, fmt.Errorf("subscription not found")
 	}
@@ -364,7 +366,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 		return nil, fmt.Errorf("subscription does not belong to user")
 	}
 
-	pm, err := s.rt.PaymentMethodService.GetByID(ctx, pmID)
+	pm, err := paymentMethods.GetByID(ctx, pmID)
 	if err != nil {
 		return nil, fmt.Errorf("payment method not found")
 	}
@@ -374,7 +376,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 
 	// Update subscription payment method
 	sub.PaymentMethodID = &pmID
-	if err := s.rt.SubscriptionService.Update(ctx, sub); err != nil {
+	if err := subscriptions.Update(ctx, sub); err != nil {
 		return nil, fmt.Errorf("update subscription: %w", err)
 	}
 
@@ -390,8 +392,9 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 
 // GetPayments returns a user's payments.
 func (s *Service) GetPayments(ctx context.Context, userID string, opts GetPaymentsOptions) (*PaginatedResult[Payment], error) {
-	if s == nil || s.rt == nil || s.rt.UserSubscriptionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -413,7 +416,7 @@ func (s *Service) GetPayments(ctx context.Context, userID string, opts GetPaymen
 		Filters: services.GetPaymentsFilters{UserID: userID},
 	}
 
-	payments, total, err := s.rt.UserSubscriptionService.GetUserPayments(ctx, userID, queryOpts)
+	payments, total, err := userSubscriptions.GetUserPayments(ctx, userID, queryOpts)
 	if err != nil {
 		return nil, fmt.Errorf("get payments: %w", err)
 	}
@@ -435,8 +438,9 @@ func (s *Service) GetPayments(ctx context.Context, userID string, opts GetPaymen
 
 // GetPaymentMethods returns a user's payment methods.
 func (s *Service) GetPaymentMethods(ctx context.Context, userID string, opts GetPaymentMethodsOptions) (*PaginatedResult[PaymentMethod], error) {
-	if s == nil || s.rt == nil || s.rt.PaymentMethodService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	paymentMethods, err := s.requirePaymentMethodService()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -452,7 +456,7 @@ func (s *Service) GetPaymentMethods(ctx context.Context, userID string, opts Get
 		offset = 0
 	}
 
-	methods, total, err := s.rt.PaymentMethodService.ListByUserID(ctx, userID, limit, offset)
+	methods, total, err := paymentMethods.ListByUserID(ctx, userID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get payment methods: %w", err)
 	}
@@ -472,8 +476,9 @@ func (s *Service) GetPaymentMethods(ctx context.Context, userID string, opts Get
 
 // CreatePaymentMethod creates a new payment method.
 func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req CreatePaymentMethodRequest) (*PaymentMethod, error) {
-	if s == nil || s.rt == nil || s.rt.VaultService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	vaults, err := s.requireVaultService()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -481,7 +486,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 	}
 
 	user := &services.UserIdentity{ID: userID}
-	pm, err := s.rt.VaultService.CreateVault(ctx, user, &services.CreateVaultRequest{
+	pm, err := vaults.CreateVault(ctx, user, &services.CreateVaultRequest{
 		PaymentToken: req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -509,8 +514,9 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 
 // UpdatePaymentMethod updates an existing payment method.
 func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymentMethodID uuid.UUID, req UpdatePaymentMethodRequest) (*PaymentMethod, error) {
-	if s == nil || s.rt == nil || s.rt.VaultService == nil || s.rt.PaymentMethodService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	vaults, paymentMethods, err := s.requireVaultAndPaymentMethodServices()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -521,7 +527,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 	}
 
 	// Get the existing payment method and verify ownership
-	pm, err := s.rt.PaymentMethodService.GetByID(ctx, paymentMethodID)
+	pm, err := paymentMethods.GetByID(ctx, paymentMethodID)
 	if err != nil {
 		return nil, fmt.Errorf("payment method not found")
 	}
@@ -546,7 +552,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 		Provider:     req.Provider,
 	}
 
-	pm, err = s.rt.VaultService.UpdateVault(ctx, pm, updateReq)
+	pm, err = vaults.UpdateVault(ctx, pm, updateReq)
 	if err != nil {
 		return nil, err
 	}
@@ -557,8 +563,9 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 
 // DeletePaymentMethod deletes (deactivates) a payment method.
 func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymentMethodID uuid.UUID) error {
-	if s == nil || s.rt == nil || s.rt.VaultService == nil || s.rt.PaymentMethodService == nil {
-		return fmt.Errorf("billing service: not initialized")
+	vaults, paymentMethods, err := s.requireVaultAndPaymentMethodServices()
+	if err != nil {
+		return err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -568,7 +575,7 @@ func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymen
 		return fmt.Errorf("payment_method_id required")
 	}
 
-	pm, err := s.rt.PaymentMethodService.GetByID(ctx, paymentMethodID)
+	pm, err := paymentMethods.GetByID(ctx, paymentMethodID)
 	if err != nil {
 		return fmt.Errorf("payment method not found")
 	}
@@ -576,15 +583,16 @@ func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymen
 		return fmt.Errorf("payment method does not belong to user")
 	}
 
-	return s.rt.VaultService.DeleteVault(ctx, pm)
+	return vaults.DeleteVault(ctx, pm)
 }
 
 // -------------------------------- Notifications --------------------------------
 
 // GetNotifications returns a user's notifications.
 func (s *Service) GetNotifications(ctx context.Context, userID string, opts GetNotificationsOptions) (*PaginatedResult[Notification], error) {
-	if s == nil || s.rt == nil || s.rt.UserSubscriptionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -606,7 +614,7 @@ func (s *Service) GetNotifications(ctx context.Context, userID string, opts GetN
 		Filters: services.GetNotificationsFilters{UserID: userID, Seen: opts.Seen},
 	}
 
-	notifications, total, err := s.rt.UserSubscriptionService.GetUserNotifications(ctx, userID, queryOpts)
+	notifications, total, err := userSubscriptions.GetUserNotifications(ctx, userID, queryOpts)
 	if err != nil {
 		return nil, fmt.Errorf("get notifications: %w", err)
 	}
@@ -626,8 +634,9 @@ func (s *Service) GetNotifications(ctx context.Context, userID string, opts GetN
 
 // GetUnreadNotificationCount returns the count of unread notifications.
 func (s *Service) GetUnreadNotificationCount(ctx context.Context, userID string) (*UnreadNotificationCount, error) {
-	if s == nil || s.rt == nil || s.rt.UserSubscriptionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -641,7 +650,7 @@ func (s *Service) GetUnreadNotificationCount(ctx context.Context, userID string)
 		Filters: services.GetNotificationsFilters{UserID: userID, Seen: &unread},
 	}
 
-	_, total, err := s.rt.UserSubscriptionService.GetUserNotifications(ctx, userID, queryOpts)
+	_, total, err := userSubscriptions.GetUserNotifications(ctx, userID, queryOpts)
 	if err != nil {
 		return nil, fmt.Errorf("get unread count: %w", err)
 	}
@@ -651,8 +660,9 @@ func (s *Service) GetUnreadNotificationCount(ctx context.Context, userID string)
 
 // MarkNotificationRead marks a notification as read.
 func (s *Service) MarkNotificationRead(ctx context.Context, userID string, notificationID uuid.UUID) error {
-	if s == nil || s.rt == nil || s.rt.UserSubscriptionService == nil {
-		return fmt.Errorf("billing service: not initialized")
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -662,7 +672,7 @@ func (s *Service) MarkNotificationRead(ctx context.Context, userID string, notif
 		return fmt.Errorf("notification_id required")
 	}
 
-	return s.rt.UserSubscriptionService.MarkNotificationRead(ctx, userID, notificationID)
+	return userSubscriptions.MarkNotificationRead(ctx, userID, notificationID)
 }
 
 // -------------------------------- Credits (User-facing) --------------------------------
@@ -670,8 +680,9 @@ func (s *Service) MarkNotificationRead(ctx context.Context, userID string, notif
 // GetCredits returns all credit balances for a user.
 // Note: This queries the database directly since there's no CreditsService.GetAllBalances method.
 func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalance, error) {
-	if s == nil || s.rt == nil || s.rt.DB == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	database, err := s.requireDB()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -690,7 +701,7 @@ func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalanc
 		HeldBalance   *int64    `bun:"held_balance"`
 	}
 
-	err := s.rt.DB.GetDB().NewSelect().
+	err = database.GetDB().NewSelect().
 		TableExpr("billing.credit_types ct").
 		ColumnExpr("ct.id as credit_type_id").
 		ColumnExpr("ct.name").
@@ -730,9 +741,6 @@ func derefInt64(v *int64) int64 {
 
 // GetCreditsByType returns a specific credit balance for a user.
 func (s *Service) GetCreditsByType(ctx context.Context, userID, creditType string) (*CreditBalance, error) {
-	if s == nil || s.rt == nil || s.rt.CreditsService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	userID = strings.TrimSpace(userID)
 	creditType = strings.TrimSpace(creditType)
 	if userID == "" {
@@ -742,12 +750,12 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, creditType strin
 		return nil, fmt.Errorf("credit_type required")
 	}
 
-	bal, err := s.rt.CreditsService.GetBalance(ctx, userID, creditType)
+	bal, err := s.creditsService().GetBalance(ctx, userID, creditType)
 	if err != nil {
 		return nil, fmt.Errorf("get credit balance: %w", err)
 	}
 
-	ct, err := s.rt.CreditsService.GetCreditTypeByName(ctx, creditType)
+	ct, err := s.creditsService().GetCreditTypeByName(ctx, creditType)
 	if err != nil {
 		return nil, fmt.Errorf("credit type not found")
 	}
@@ -764,9 +772,6 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, creditType strin
 
 // GetCreditTransactions returns credit transactions for a user.
 func (s *Service) GetCreditTransactions(ctx context.Context, userID, creditType string, opts GetCreditTransactionsOptions) (*PaginatedResult[CreditTransaction], error) {
-	if s == nil || s.rt == nil || s.rt.CreditsService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	userID = strings.TrimSpace(userID)
 	creditType = strings.TrimSpace(creditType)
 	if userID == "" {
@@ -785,7 +790,7 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, creditType 
 		offset = 0
 	}
 
-	transactions, total, err := s.rt.CreditsService.GetTransactions(ctx, userID, creditType, limit, offset)
+	transactions, total, err := s.creditsService().GetTransactions(ctx, userID, creditType, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get credit transactions: %w", err)
 	}
@@ -817,8 +822,12 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, creditType 
 
 // GetSupportedTokens returns the list of supported Solana tokens with prices.
 func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResult, error) {
-	solanaProc := s.rt.Config.GetSolanaProcessor()
-	if s == nil || s.rt == nil || s.rt.Config == nil || solanaProc == nil {
+	cfg, err := s.requireConfig()
+	if err != nil {
+		return nil, err
+	}
+	solanaProc := cfg.GetSolanaProcessor()
+	if solanaProc == nil {
 		return nil, fmt.Errorf("solana not configured")
 	}
 
@@ -846,15 +855,16 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 
 // CreateStripePortalSession creates a Stripe customer portal session.
 func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, req CreateStripePortalSessionRequest) (*StripePortalSession, error) {
-	if s == nil || s.rt == nil || s.rt.ProcessorCustomerService == nil || s.rt.Config == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	processorCustomers, cfg, err := s.requireProcessorCustomerAndConfig()
+	if err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	customerID, err := s.rt.ProcessorCustomerService.GetCustomerID(ctx, userID, "stripe")
+	customerID, err := processorCustomers.GetCustomerID(ctx, userID, "stripe")
 	if err != nil || strings.TrimSpace(customerID) == "" {
 		return nil, fmt.Errorf("stripe customer not found")
 	}
@@ -864,7 +874,7 @@ func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, 
 		return nil, fmt.Errorf("return_url required")
 	}
 
-	service := &services.StripePortalService{Config: s.rt.Config}
+	service := &services.StripePortalService{Config: cfg}
 	urlStr, err := service.CreatePortalSession(ctx, customerID, returnURL)
 	if err != nil {
 		return nil, err

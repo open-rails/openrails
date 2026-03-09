@@ -69,8 +69,9 @@ type CreateProductRequest struct {
 }
 
 func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
-	if s == nil || s.rt == nil || s.rt.ProductService == nil {
-		return nil, fmt.Errorf("billing service: product service unavailable")
+	products, err := s.requireProductService()
+	if err != nil {
+		return nil, err
 	}
 	req.Slug = strings.TrimSpace(req.Slug)
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
@@ -100,7 +101,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if err := s.rt.ProductService.Create(ctx, p); err != nil {
+	if err := products.Create(ctx, p); err != nil {
 		return nil, err
 	}
 	return productToCatalogProduct(p), nil
@@ -120,13 +121,14 @@ type UpdateProductRequest struct {
 }
 
 func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req UpdateProductRequest) (*CatalogProduct, error) {
-	if s == nil || s.rt == nil || s.rt.ProductService == nil {
-		return nil, fmt.Errorf("billing service: product service unavailable")
+	products, err := s.requireProductService()
+	if err != nil {
+		return nil, err
 	}
 	if productID == uuid.Nil {
 		return nil, fmt.Errorf("product_id required")
 	}
-	p, err := s.rt.ProductService.UpdateDefinition(ctx, productID, services.ProductDefinitionUpdateParams{
+	p, err := products.UpdateDefinition(ctx, productID, services.ProductDefinitionUpdateParams{
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
 		EntitlementsSpec: req.EntitlementsSpec,
@@ -200,8 +202,9 @@ type CreatePriceRequest struct {
 }
 
 func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*CatalogPrice, error) {
-	if s == nil || s.rt == nil || s.rt.PriceService == nil || s.rt.ProductService == nil {
-		return nil, fmt.Errorf("billing service: price/product service unavailable")
+	products, prices, err := s.requireCatalogServices()
+	if err != nil {
+		return nil, err
 	}
 	if req.ProductID == uuid.Nil {
 		return nil, fmt.Errorf("product_id required")
@@ -219,7 +222,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	}
 
 	// Validate product exists.
-	product, err := s.rt.ProductService.GetByID(ctx, req.ProductID)
+	product, err := products.GetByID(ctx, req.ProductID)
 	if err != nil {
 		return nil, fmt.Errorf("product not found")
 	}
@@ -247,7 +250,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if err := s.rt.PriceService.Create(ctx, price); err != nil {
+	if err := prices.Create(ctx, price); err != nil {
 		return nil, err
 	}
 	return priceToCatalogPrice(price), nil
@@ -275,7 +278,7 @@ func (s *Service) resolveProcessorMappings(ctx context.Context, product *models.
 				if id == "" {
 					return nil, fmt.Errorf("stripe link requires processors['stripe'].link.price_id")
 				}
-				if s.rt != nil && s.rt.Config != nil && s.rt.Config.FeatureFlags != nil && s.rt.Config.FeatureFlags.VerifyProcessorMappings {
+				if s.rt.Config != nil && s.rt.Config.FeatureFlags != nil && s.rt.Config.FeatureFlags.VerifyProcessorMappings {
 					stripeSvc := &services.StripeCatalogService{Config: s.rt.Config}
 					if err := stripeSvc.VerifyPriceExists(ctx, id); err != nil {
 						return nil, err
@@ -335,34 +338,35 @@ type UpdatePriceRequest struct {
 }
 
 func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req UpdatePriceRequest) (*CatalogPrice, error) {
-	if s == nil || s.rt == nil || s.rt.PriceService == nil {
-		return nil, fmt.Errorf("billing service: price service unavailable")
+	prices, err := s.requirePriceService()
+	if err != nil {
+		return nil, err
 	}
 	if priceID == uuid.Nil {
 		return nil, fmt.Errorf("price_id required")
 	}
 	if req.DisplayName != nil {
-		if err := s.rt.PriceService.UpdateDisplayName(ctx, priceID, strings.TrimSpace(*req.DisplayName)); err != nil {
+		if err := prices.UpdateDisplayName(ctx, priceID, strings.TrimSpace(*req.DisplayName)); err != nil {
 			return nil, err
 		}
 	}
 	if req.SetProcessors {
-		if err := s.rt.PriceService.UpdateProcessors(ctx, priceID, req.Processors); err != nil {
+		if err := prices.UpdateProcessors(ctx, priceID, req.Processors); err != nil {
 			return nil, err
 		}
 	}
 	if req.IsActive != nil {
 		if *req.IsActive {
-			if err := s.rt.PriceService.Activate(ctx, priceID); err != nil {
+			if err := prices.Activate(ctx, priceID); err != nil {
 				return nil, err
 			}
 		} else {
-			if err := s.rt.PriceService.Deactivate(ctx, priceID); err != nil {
+			if err := prices.Deactivate(ctx, priceID); err != nil {
 				return nil, err
 			}
 		}
 	}
-	updated, err := s.rt.PriceService.GetByID(ctx, priceID)
+	updated, err := prices.GetByID(ctx, priceID)
 	if err != nil {
 		return nil, err
 	}

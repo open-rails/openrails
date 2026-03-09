@@ -29,8 +29,9 @@ type CreateCreditTypeRequest struct {
 }
 
 func (s *Service) CreateCreditType(ctx context.Context, req CreateCreditTypeRequest) (*CreditType, error) {
-	if s == nil || s.rt == nil || s.rt.CreditTypeService == nil {
-		return nil, fmt.Errorf("billing service: credit type service unavailable")
+	creditTypes, err := s.requireCreditTypeService()
+	if err != nil {
+		return nil, err
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
@@ -50,7 +51,7 @@ func (s *Service) CreateCreditType(ctx context.Context, req CreateCreditTypeRequ
 		Unit:          req.Unit,
 		DecimalPlaces: req.DecimalPlaces,
 	}
-	if err := s.rt.CreditTypeService.Create(ctx, ct); err != nil {
+	if err := creditTypes.Create(ctx, ct); err != nil {
 		return nil, err
 	}
 	return &CreditType{
@@ -69,14 +70,15 @@ type UpdateCreditTypeRequest struct {
 }
 
 func (s *Service) UpdateCreditType(ctx context.Context, name string, req UpdateCreditTypeRequest) (*CreditType, error) {
-	if s == nil || s.rt == nil || s.rt.CreditTypeService == nil {
-		return nil, fmt.Errorf("billing service: credit type service unavailable")
+	creditTypes, err := s.requireCreditTypeService()
+	if err != nil {
+		return nil, err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("name required")
 	}
-	ct, err := s.rt.CreditTypeService.Update(ctx, name, services.CreditTypeUpdateParams{
+	ct, err := creditTypes.Update(ctx, name, services.CreditTypeUpdateParams{
 		DisplayName: req.DisplayName,
 		IsActive:    req.IsActive,
 	})
@@ -94,32 +96,35 @@ func (s *Service) UpdateCreditType(ctx context.Context, name string, req UpdateC
 }
 
 func (s *Service) DeactivateCreditType(ctx context.Context, name string) error {
-	if s == nil || s.rt == nil || s.rt.CreditTypeService == nil {
-		return fmt.Errorf("billing service: credit type service unavailable")
+	creditTypes, err := s.requireCreditTypeService()
+	if err != nil {
+		return err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("name required")
 	}
-	return s.rt.CreditTypeService.Deactivate(ctx, name)
+	return creditTypes.Deactivate(ctx, name)
 }
 
 func (s *Service) ActivateCreditType(ctx context.Context, name string) error {
-	if s == nil || s.rt == nil || s.rt.CreditTypeService == nil {
-		return fmt.Errorf("billing service: credit type service unavailable")
+	creditTypes, err := s.requireCreditTypeService()
+	if err != nil {
+		return err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("name required")
 	}
-	return s.rt.CreditTypeService.Activate(ctx, name)
+	return creditTypes.Activate(ctx, name)
 }
 
 func (s *Service) ListCreditTypes(ctx context.Context, activeOnly bool) ([]CreditType, error) {
-	if s == nil || s.rt == nil || s.rt.CreditTypeService == nil {
-		return nil, fmt.Errorf("billing service: credit type service unavailable")
+	creditTypes, err := s.requireCreditTypeService()
+	if err != nil {
+		return nil, err
 	}
-	items, err := s.rt.CreditTypeService.List(ctx, activeOnly)
+	items, err := creditTypes.List(ctx, activeOnly)
 	if err != nil {
 		return nil, err
 	}

@@ -18,8 +18,9 @@ import (
 
 // AdminGetSubscriptions returns a paginated list of all subscriptions.
 func (s *Service) AdminGetSubscriptions(ctx context.Context, opts AdminGetSubscriptionsOptions) (*PaginatedResult[Subscription], error) {
-	if s == nil || s.rt == nil || s.rt.AdminSubscriptionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	adminSubscriptions, err := s.requireAdminSubscriptionService()
+	if err != nil {
+		return nil, err
 	}
 
 	limit := opts.Limit
@@ -41,7 +42,7 @@ func (s *Service) AdminGetSubscriptions(ctx context.Context, opts AdminGetSubscr
 		},
 	}
 
-	subs, total, err := s.rt.AdminSubscriptionService.GetAllSubscriptions(ctx, queryOpts)
+	subs, total, err := adminSubscriptions.GetAllSubscriptions(ctx, queryOpts)
 	if err != nil {
 		return nil, fmt.Errorf("get subscriptions: %w", err)
 	}
@@ -61,14 +62,15 @@ func (s *Service) AdminGetSubscriptions(ctx context.Context, opts AdminGetSubscr
 
 // AdminGetSubscription returns a single subscription by ID.
 func (s *Service) AdminGetSubscription(ctx context.Context, subscriptionID uuid.UUID) (*Subscription, error) {
-	if s == nil || s.rt == nil || s.rt.AdminSubscriptionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	adminSubscriptions, err := s.requireAdminSubscriptionService()
+	if err != nil {
+		return nil, err
 	}
 	if subscriptionID == uuid.Nil {
 		return nil, fmt.Errorf("subscription_id required")
 	}
 
-	sub, err := s.rt.AdminSubscriptionService.GetSubscriptionByID(ctx, subscriptionID)
+	sub, err := adminSubscriptions.GetSubscriptionByID(ctx, subscriptionID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,22 +81,24 @@ func (s *Service) AdminGetSubscription(ctx context.Context, subscriptionID uuid.
 
 // AdminCancelSubscription cancels a subscription by ID.
 func (s *Service) AdminCancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string) error {
-	if s == nil || s.rt == nil || s.rt.AdminSubscriptionService == nil {
-		return fmt.Errorf("billing service: not initialized")
+	adminSubscriptions, err := s.requireAdminSubscriptionService()
+	if err != nil {
+		return err
 	}
 	if subscriptionID == uuid.Nil {
 		return fmt.Errorf("subscription_id required")
 	}
 
-	return s.rt.AdminSubscriptionService.CancelSubscription(ctx, subscriptionID, reason)
+	return adminSubscriptions.CancelSubscription(ctx, subscriptionID, reason)
 }
 
 // -------------------------------- Admin Payments --------------------------------
 
 // AdminGetPayments returns a paginated list of all payments.
 func (s *Service) AdminGetPayments(ctx context.Context, opts AdminGetPaymentsOptions) (*PaginatedResult[Payment], error) {
-	if s == nil || s.rt == nil || s.rt.PaymentService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	paymentsService, err := s.requirePaymentService()
+	if err != nil {
+		return nil, err
 	}
 
 	limit := opts.Limit
@@ -125,7 +129,7 @@ func (s *Service) AdminGetPayments(ctx context.Context, opts AdminGetPaymentsOpt
 		Filters: filters,
 	}
 
-	payments, total, err := s.rt.PaymentService.GetPayments(ctx, queryOpts)
+	payments, total, err := paymentsService.GetPayments(ctx, queryOpts)
 	if err != nil {
 		return nil, fmt.Errorf("get payments: %w", err)
 	}
@@ -145,14 +149,15 @@ func (s *Service) AdminGetPayments(ctx context.Context, opts AdminGetPaymentsOpt
 
 // AdminGetPayment returns a single payment by ID with refund details.
 func (s *Service) AdminGetPayment(ctx context.Context, paymentID uuid.UUID) (*Payment, error) {
-	if s == nil || s.rt == nil || s.rt.PaymentService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	paymentsService, err := s.requirePaymentService()
+	if err != nil {
+		return nil, err
 	}
 	if paymentID == uuid.Nil {
 		return nil, fmt.Errorf("payment_id required")
 	}
 
-	payment, refunds, err := s.rt.PaymentService.GetByIDWithDetails(ctx, paymentID)
+	payment, refunds, err := paymentsService.GetByIDWithDetails(ctx, paymentID)
 	if err != nil {
 		return nil, err
 	}
@@ -169,8 +174,9 @@ func (s *Service) AdminGetPayment(ctx context.Context, paymentID uuid.UUID) (*Pa
 
 // AdminRefundPayment issues a refund for a payment.
 func (s *Service) AdminRefundPayment(ctx context.Context, paymentID uuid.UUID, req RefundPaymentRequest) (*Payment, error) {
-	if s == nil || s.rt == nil || s.rt.PaymentService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	paymentsService, err := s.requirePaymentService()
+	if err != nil {
+		return nil, err
 	}
 	if paymentID == uuid.Nil {
 		return nil, fmt.Errorf("payment_id required")
@@ -182,7 +188,7 @@ func (s *Service) AdminRefundPayment(ctx context.Context, paymentID uuid.UUID, r
 		return nil, fmt.Errorf("refund_transaction_id required")
 	}
 
-	refund, err := s.rt.PaymentService.Refund(ctx, paymentID, req.RefundTransactionID, req.Amount)
+	refund, err := paymentsService.Refund(ctx, paymentID, req.RefundTransactionID, req.Amount)
 	if err != nil {
 		return nil, err
 	}
@@ -193,8 +199,8 @@ func (s *Service) AdminRefundPayment(ctx context.Context, paymentID uuid.UUID, r
 
 // AdminGetUserPayments returns payments for a specific user.
 func (s *Service) AdminGetUserPayments(ctx context.Context, userID string, opts AdminGetPaymentsOptions) (*PaginatedResult[Payment], error) {
-	if s == nil || s.rt == nil || s.rt.PaymentService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	if _, err := s.requirePaymentService(); err != nil {
+		return nil, err
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -207,8 +213,9 @@ func (s *Service) AdminGetUserPayments(ctx context.Context, userID string, opts 
 
 // AdminCreateOffChannelPayment creates a payment record for an off-channel payment.
 func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCreateOffChannelPaymentRequest) (*Payment, error) {
-	if s == nil || s.rt == nil || s.rt.PaymentService == nil || s.rt.PriceService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	paymentsService, err := s.requirePaymentService()
+	if err != nil {
+		return nil, err
 	}
 
 	req.UserID = strings.TrimSpace(req.UserID)
@@ -255,7 +262,7 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 		payment.PriceID = *priceID
 	}
 
-	if err := s.rt.PaymentService.Create(ctx, payment); err != nil {
+	if err := paymentsService.Create(ctx, payment); err != nil {
 		return nil, fmt.Errorf("create payment: %w", err)
 	}
 
@@ -267,9 +274,6 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 
 // AdminGetUserBillingProfile returns a user's complete billing profile.
 func (s *Service) AdminGetUserBillingProfile(ctx context.Context, userID string) (*AdminUserProfile, error) {
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
@@ -319,7 +323,8 @@ func (s *Service) AdminGetUserBillingProfile(ctx context.Context, userID string)
 
 // AdminGetUserEntitlements returns entitlements for a user.
 func (s *Service) AdminGetUserEntitlements(ctx context.Context, userID string, at *time.Time) ([]EntitlementRecord, error) {
-	if s == nil || s.rt == nil || s.rt.EntitlementService == nil {
+	entitlements := s.entitlementService()
+	if entitlements == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
 	userID = strings.TrimSpace(userID)
@@ -332,7 +337,7 @@ func (s *Service) AdminGetUserEntitlements(ctx context.Context, userID string, a
 		queryTime = *at
 	}
 
-	ents, err := s.rt.EntitlementService.ListActiveRecords(ctx, userID, queryTime)
+	ents, err := entitlements.ListActiveRecords(ctx, userID, queryTime)
 	if err != nil {
 		return nil, fmt.Errorf("get entitlements: %w", err)
 	}
@@ -347,7 +352,12 @@ func (s *Service) AdminGetUserEntitlements(ctx context.Context, userID string, a
 
 // AdminGrantEntitlement grants an entitlement to a user.
 func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string, req AdminGrantEntitlementRequest) (*EntitlementRecord, error) {
-	if s == nil || s.rt == nil || s.rt.EntitlementService == nil || s.rt.DB == nil {
+	database, dbErr := s.requireDB()
+	if dbErr != nil {
+		return nil, dbErr
+	}
+	entitlements := s.entitlementService()
+	if entitlements == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
 	req.UserID = strings.TrimSpace(req.UserID)
@@ -383,7 +393,7 @@ func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string,
 		}
 	}
 
-	if _, err := s.rt.DB.GetDB().NewInsert().Model(adminGrant).Exec(ctx); err != nil {
+	if _, err := database.GetDB().NewInsert().Model(adminGrant).Exec(ctx); err != nil {
 		return nil, fmt.Errorf("create admin grant: %w", err)
 	}
 
@@ -393,7 +403,7 @@ func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string,
 	if req.EndAt != nil && !req.EndAt.IsZero() {
 		endAt := req.EndAt.UTC()
 		if endAt.After(now) {
-			ent, err = s.rt.EntitlementService.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+			ent, err = entitlements.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
 				UserID:      req.UserID,
 				Entitlement: req.Entitlement,
 				EndAt:       &endAt,
@@ -404,7 +414,7 @@ func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string,
 			return nil, fmt.Errorf("end_at must be in the future")
 		}
 	} else {
-		ent, err = s.rt.EntitlementService.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+		ent, err = entitlements.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
 			UserID:      req.UserID,
 			Entitlement: req.Entitlement,
 			Indefinite:  true,
@@ -423,7 +433,8 @@ func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string,
 
 // AdminRevokeEntitlement revokes an entitlement.
 func (s *Service) AdminRevokeEntitlement(ctx context.Context, userID string, entitlementID uuid.UUID, req AdminRevokeEntitlementRequest) error {
-	if s == nil || s.rt == nil || s.rt.EntitlementService == nil {
+	entitlements := s.entitlementService()
+	if entitlements == nil {
 		return fmt.Errorf("billing service: not initialized")
 	}
 	userID = strings.TrimSpace(userID)
@@ -435,7 +446,7 @@ func (s *Service) AdminRevokeEntitlement(ctx context.Context, userID string, ent
 	}
 
 	// Verify the entitlement belongs to the user
-	ent, err := s.rt.EntitlementService.GetByID(ctx, entitlementID)
+	ent, err := entitlements.GetByID(ctx, entitlementID)
 	if err != nil {
 		return fmt.Errorf("entitlement not found")
 	}
@@ -443,7 +454,7 @@ func (s *Service) AdminRevokeEntitlement(ctx context.Context, userID string, ent
 		return fmt.Errorf("entitlement does not belong to user")
 	}
 
-	return s.rt.EntitlementService.RevokeExistingEntitlement(ctx, services.RevokeExistingEntitlementParams{
+	return entitlements.RevokeExistingEntitlement(ctx, services.RevokeExistingEntitlementParams{
 		EntitlementID: &entitlementID,
 		Reason:        models.EntitlementRevokeAdmin,
 	})
@@ -454,11 +465,12 @@ func (s *Service) AdminRevokeEntitlement(ctx context.Context, userID string, ent
 // AdminGetMetricsSummary returns aggregated billing metrics.
 // Returns the raw SummaryResponse slice from the internal service.
 func (s *Service) AdminGetMetricsSummary(ctx context.Context, opts MetricsOptions) ([]services.SummaryResponse, error) {
-	if s == nil || s.rt == nil || s.rt.Config == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	cfg, err := s.requireAdminMetricsConfig()
+	if err != nil {
+		return nil, err
 	}
 
-	svc := services.NewAdminMetricsService(s.rt.Config.ClickHouse)
+	svc := services.NewAdminMetricsService(cfg.ClickHouse)
 	dateRange := services.MetricsDateRange{
 		Start: opts.DateRange.Start,
 		End:   opts.DateRange.End,
@@ -470,11 +482,12 @@ func (s *Service) AdminGetMetricsSummary(ctx context.Context, opts MetricsOption
 // AdminGetMetricsRevenue returns revenue time series data.
 // Returns the raw RevenueSeriesResponse slice from the internal service.
 func (s *Service) AdminGetMetricsRevenue(ctx context.Context, opts MetricsOptions) ([]services.RevenueSeriesResponse, error) {
-	if s == nil || s.rt == nil || s.rt.Config == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	cfg, err := s.requireAdminMetricsConfig()
+	if err != nil {
+		return nil, err
 	}
 
-	svc := services.NewAdminMetricsService(s.rt.Config.ClickHouse)
+	svc := services.NewAdminMetricsService(cfg.ClickHouse)
 	dateRange := services.MetricsDateRange{
 		Start: opts.DateRange.Start,
 		End:   opts.DateRange.End,
@@ -486,11 +499,12 @@ func (s *Service) AdminGetMetricsRevenue(ctx context.Context, opts MetricsOption
 // AdminGetMetricsSubscriptions returns subscription time series data.
 // Returns the raw SubscriptionSeriesResponse slice from the internal service.
 func (s *Service) AdminGetMetricsSubscriptions(ctx context.Context, opts MetricsOptions) ([]services.SubscriptionSeriesResponse, error) {
-	if s == nil || s.rt == nil || s.rt.Config == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	cfg, err := s.requireAdminMetricsConfig()
+	if err != nil {
+		return nil, err
 	}
 
-	svc := services.NewAdminMetricsService(s.rt.Config.ClickHouse)
+	svc := services.NewAdminMetricsService(cfg.ClickHouse)
 	dateRange := services.MetricsDateRange{
 		Start: opts.DateRange.Start,
 		End:   opts.DateRange.End,
@@ -502,11 +516,12 @@ func (s *Service) AdminGetMetricsSubscriptions(ctx context.Context, opts Metrics
 // AdminGetMetricsProcessors returns per-processor metrics.
 // Returns the raw ProcessorMetricsResponse slice from the internal service.
 func (s *Service) AdminGetMetricsProcessors(ctx context.Context, opts MetricsOptions) ([]services.ProcessorMetricsResponse, error) {
-	if s == nil || s.rt == nil || s.rt.Config == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	cfg, err := s.requireAdminMetricsConfig()
+	if err != nil {
+		return nil, err
 	}
 
-	svc := services.NewAdminMetricsService(s.rt.Config.ClickHouse)
+	svc := services.NewAdminMetricsService(cfg.ClickHouse)
 	dateRange := services.MetricsDateRange{
 		Start: opts.DateRange.Start,
 		End:   opts.DateRange.End,
@@ -518,11 +533,12 @@ func (s *Service) AdminGetMetricsProcessors(ctx context.Context, opts MetricsOpt
 // AdminGetMetricsChurn returns churn analysis data.
 // Returns the raw ChurnResponse slice from the internal service.
 func (s *Service) AdminGetMetricsChurn(ctx context.Context, opts MetricsOptions) ([]services.ChurnResponse, error) {
-	if s == nil || s.rt == nil || s.rt.Config == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
+	cfg, err := s.requireAdminMetricsConfig()
+	if err != nil {
+		return nil, err
 	}
 
-	svc := services.NewAdminMetricsService(s.rt.Config.ClickHouse)
+	svc := services.NewAdminMetricsService(cfg.ClickHouse)
 	dateRange := services.MetricsDateRange{
 		Start: opts.DateRange.Start,
 		End:   opts.DateRange.End,

@@ -21,11 +21,12 @@ import (
 // HandleWebhook processes an incoming webhook from a payment processor.
 // It validates the signature, parses the payload, and enqueues a job for async processing.
 func (s *Service) HandleWebhook(ctx context.Context, req HandleWebhookRequest) (*WebhookResult, error) {
-	provider := webhookutil.CanonicalProvider(req.Provider)
-
-	if s.rt == nil || s.rt.RiverProducer == nil {
-		return nil, fmt.Errorf("job queue unavailable")
+	_, err := s.requireWebhookRuntime()
+	if err != nil {
+		return nil, err
 	}
+
+	provider := webhookutil.CanonicalProvider(req.Provider)
 
 	log.WithFields(log.Fields{
 		"provider":  provider,
@@ -129,8 +130,12 @@ func getHeaderValue(headers map[string]string, keys ...string) string {
 }
 
 func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequest) (*WebhookResult, error) {
+	cfg, err := s.requireConfig()
+	if err != nil {
+		return nil, err
+	}
 	// Use global test_mode for CCBill IP allowlist bypass.
-	isTestMode := s.rt.Config.IsTestMode()
+	isTestMode := cfg.IsTestMode()
 
 	if !isTestMode {
 		// Verify CCBill webhook comes from authorized IP ranges
@@ -178,8 +183,12 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 }
 
 func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequest) (*WebhookResult, error) {
+	cfg, err := s.requireConfig()
+	if err != nil {
+		return nil, err
+	}
 	secret := ""
-	if stripeProc := s.rt.Config.GetStripeProcessor(); stripeProc != nil {
+	if stripeProc := cfg.GetStripeProcessor(); stripeProc != nil {
 		secret = stripeProc.WebhookSecret
 	}
 
@@ -223,8 +232,9 @@ func (s *Service) handleStripeWebhook(ctx context.Context, req HandleWebhookRequ
 }
 
 func (s *Service) enqueueWebhookJob(ctx context.Context, args riverjobs.WebhookProcessArgs) error {
-	if s.rt == nil || s.rt.RiverProducer == nil {
-		return fmt.Errorf("river producer unavailable")
+	rt, err := s.requireWebhookRuntime()
+	if err != nil {
+		return err
 	}
 
 	opts := &river.InsertOpts{
@@ -235,6 +245,6 @@ func (s *Service) enqueueWebhookJob(ctx context.Context, args riverjobs.WebhookP
 		},
 	}
 
-	_, err := s.rt.RiverProducer.Insert(ctx, args, opts)
+	_, err = rt.RiverProducer.Insert(ctx, args, opts)
 	return err
 }
