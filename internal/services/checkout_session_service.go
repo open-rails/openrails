@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/processors"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -275,7 +276,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	}
 
 	if strings.TrimSpace(req.IdempotencyKey) != "" {
-		session.IdempotencyKey = stringPtr(strings.TrimSpace(req.IdempotencyKey))
+		session.IdempotencyKey = normalize.OptionalString(req.IdempotencyKey)
 	}
 
 	if err := s.repo.Create(ctx, session); err != nil {
@@ -615,7 +616,7 @@ func (s *CheckoutSessionService) applyCheckoutResponse(session *models.CheckoutS
 			session.SubscriptionID = resp.SubscriptionID
 		}
 		if strings.TrimSpace(resp.TransactionID) != "" {
-			session.TransactionID = stringPtr(resp.TransactionID)
+			session.TransactionID = normalize.OptionalString(resp.TransactionID)
 		}
 	case "redirect_required":
 		redirectURL := strings.TrimSpace(resp.RedirectURL)
@@ -973,7 +974,7 @@ func (s *CheckoutSessionService) MarkSucceeded(ctx context.Context, sessionID uu
 		session.PaymentID = &paymentID
 	}
 	if strings.TrimSpace(transactionID) != "" {
-		session.TransactionID = stringPtr(transactionID)
+		session.TransactionID = normalize.OptionalString(transactionID)
 	}
 
 	return s.repo.Update(ctx, session)
@@ -1056,7 +1057,7 @@ func (s *CheckoutSessionService) MarkSucceededWithSubscription(ctx context.Conte
 		session.SubscriptionID = &subscriptionID
 	}
 	if strings.TrimSpace(transactionID) != "" {
-		session.TransactionID = stringPtr(transactionID)
+		session.TransactionID = normalize.OptionalString(transactionID)
 	}
 
 	return s.repo.Update(ctx, session)
@@ -1193,14 +1194,6 @@ func setSolanaQuoteState(processorState map[string]any, tokenAmount uint64, toke
 
 func timePtr(t time.Time) *time.Time {
 	return &t
-}
-
-func stringPtr(value string) *string {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	val := strings.TrimSpace(value)
-	return &val
 }
 
 // SolanaPaySessionInfo contains session info for Solana Pay GET endpoint

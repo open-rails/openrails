@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -119,7 +120,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	if err := json.Unmarshal(obj, &inv); err != nil {
 		return fmt.Errorf("parse invoice: %w", err)
 	}
-	userID := pickMetadata(inv.Metadata, "user_id", "userId", "uid")
+	userID := normalize.FirstNonEmpty(inv.Metadata["user_id"], inv.Metadata["userId"], inv.Metadata["uid"])
 	if userID == "" {
 		return fmt.Errorf("stripe invoice missing user_id metadata")
 	}
@@ -133,7 +134,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	if err != nil {
 		return err
 	}
-	paymentTransactionID := stripeRefundableTransactionID(inv.Charge, inv.PaymentIntent)
+	paymentTransactionID := normalize.FirstNonEmpty(inv.Charge, inv.PaymentIntent)
 	if paymentTransactionID == "" {
 		return fmt.Errorf("stripe invoice missing refundable transaction id (charge/payment_intent)")
 	}
@@ -149,7 +150,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	if err != nil {
 		sub, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &CreateMembershipParams{
 			UserID:                  userID,
-			UserEmail:               nullableString(inv.CustomerEmail),
+			UserEmail:               normalize.OptionalString(inv.CustomerEmail),
 			PriceID:                 priceID,
 			Processor:               models.ProcessorStripe,
 			ProcessorSubscriptionID: &processorSubID,
@@ -270,7 +271,7 @@ func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context,
 
 	sessionID := parseCheckoutSessionID(sess.Metadata)
 	if sessionID == uuid.Nil {
-		userID := pickMetadata(sess.Metadata, "user_id", "userId", "uid")
+		userID := normalize.FirstNonEmpty(sess.Metadata["user_id"], sess.Metadata["userId"], sess.Metadata["uid"])
 		if userID == "" {
 			return nil
 		}
@@ -300,7 +301,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	if err := json.Unmarshal(obj, &sess); err != nil {
 		return fmt.Errorf("parse checkout session: %w", err)
 	}
-	userID := pickMetadata(sess.Metadata, "user_id", "userId", "uid")
+	userID := normalize.FirstNonEmpty(sess.Metadata["user_id"], sess.Metadata["userId"], sess.Metadata["uid"])
 	if userID == "" {
 		return fmt.Errorf("stripe checkout missing user_id metadata")
 	}
@@ -317,7 +318,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	paymentTransactionID := stripeRefundableTransactionID("", sess.PaymentIntent)
+	paymentTransactionID := normalize.FirstNonEmpty("", sess.PaymentIntent)
 	if paymentTransactionID == "" {
 		return fmt.Errorf("stripe checkout session missing payment_intent")
 	}
@@ -493,7 +494,7 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 }
 
 func (s *StripeWebhookService) resolvePriceFromMetadata(ctx context.Context, metadata map[string]string, lines []stripeInvoiceLineItem) (uuid.UUID, *models.Price, error) {
-	if idStr := pickMetadata(metadata, "internal_price_id", "price_id"); idStr != "" {
+	if idStr := normalize.FirstNonEmpty(metadata["internal_price_id"], metadata["price_id"]); idStr != "" {
 		priceID, err := uuid.Parse(idStr)
 		if err == nil {
 			return priceID, nil, nil
@@ -509,32 +510,8 @@ func (s *StripeWebhookService) resolvePriceFromMetadata(ctx context.Context, met
 	return uuid.Nil, nil, fmt.Errorf("unable to resolve price")
 }
 
-func pickMetadata(meta map[string]string, keys ...string) string {
-	for _, k := range keys {
-		if v := strings.TrimSpace(meta[k]); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func nullableString(v string) *string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return nil
-	}
-	return &v
-}
-
 func ptrProcessor(p models.Processor) *models.Processor {
 	return &p
-}
-
-func stripeRefundableTransactionID(chargeID, paymentIntentID string) string {
-	if chargeID = strings.TrimSpace(chargeID); chargeID != "" {
-		return chargeID
-	}
-	return strings.TrimSpace(paymentIntentID)
 }
 
 func stripeInvoicePaymentMetadata(inv stripeInvoice) map[string]any {

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 )
@@ -135,13 +136,6 @@ type FailMembershipParams struct {
 	FailureCode    *string
 }
 
-func safeString(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return strings.TrimSpace(*value)
-}
-
 func normalizeCancelType(cancelType *models.CancelType) string {
 	if cancelType == nil {
 		return ""
@@ -159,7 +153,7 @@ func terminalCancelReason(subscription *models.Subscription) (string, bool) {
 	if subscription.CancelType != nil && *subscription.CancelType == models.CancelTypeChargeback {
 		return "cancel_type=chargeback", true
 	}
-	feedback := strings.TrimSpace(safeString(subscription.CancelFeedback))
+	feedback := normalize.FromPtr(subscription.CancelFeedback)
 	if feedback != "" && strings.Contains(strings.ToUpper(feedback), "CHARGEBACK") {
 		return "legacy_chargeback_feedback", true
 	}
@@ -248,7 +242,7 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 		notifications []*models.NotificationQueue
 	)
 
-	procSubID := safeString(params.ProcessorSubscriptionID)
+	procSubID := normalize.FromPtr(params.ProcessorSubscriptionID)
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"user_id":                   params.UserID,
@@ -1056,12 +1050,12 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 	if params.Processor != nil {
 		procName = string(*params.Processor)
 	}
-	procSub := safeString(params.ProcessorSubscriptionID)
+	procSub := normalize.FromPtr(params.ProcessorSubscriptionID)
 	subID := ""
 	if params.SubscriptionID != nil {
 		subID = params.SubscriptionID.String()
 	}
-	cancelFeedback := safeString(params.CancelFeedback)
+	cancelFeedback := normalize.FromPtr(params.CancelFeedback)
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id":           subID,
 		"processor":                 procName,
@@ -1362,8 +1356,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	log.WithContext(ctx).WithFields(log.Fields{
 		"processor":                 params.Processor,
 		"processor_subscription_id": params.SubscriptionID,
-		"failure_reason":            safeString(params.FailureReason),
-		"failure_code":              safeString(params.FailureCode),
+		"failure_reason":            normalize.FromPtr(params.FailureReason),
+		"failure_code":              normalize.FromPtr(params.FailureCode),
 		"dunning_mode":              dunningMode,
 	}).Warn("Starting membership failure flow")
 

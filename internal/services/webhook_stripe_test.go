@@ -26,15 +26,3 @@ func TestStripeInvoicePeriodEnd(t *testing.T) {
 		t.Fatalf("expected unix=200, got %d", end.Unix())
 	}
 }
-
-func TestStripeRefundableTransactionID(t *testing.T) {
-	if got := stripeRefundableTransactionID("ch_123", "pi_123"); got != "ch_123" {
-		t.Fatalf("expected charge id, got %q", got)
-	}
-	if got := stripeRefundableTransactionID("", "pi_123"); got != "pi_123" {
-		t.Fatalf("expected payment_intent id, got %q", got)
-	}
-	if got := stripeRefundableTransactionID("", ""); got != "" {
-		t.Fatalf("expected empty id, got %q", got)
-	}
-}
