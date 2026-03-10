@@ -25,9 +25,11 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/processors"
@@ -439,9 +441,9 @@ type servicesInstances struct {
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
 	VaultService             *vault.VaultService
-	SolanaPayService         *services.SolanaPayService
-	SolanaPayPoller          *services.SolanaPayPoller
-	SolanaTransactionService *services.SolanaTransactionService
+	SolanaPayService         *solanamodule.SolanaPayService
+	SolanaPayPoller          *solanamodule.SolanaPayPoller
+	SolanaTransactionService *solanamodule.SolanaTransactionService
 	SolanaRPC                *solana.RPCClient
 	FXProvider               fx.Provider
 
@@ -454,8 +456,8 @@ type servicesInstances struct {
 	IdempotencyService           *services.IdempotencyService
 	WebhookDispatcher            *services.WebhookDispatcher
 
-	CheckoutService          *services.CheckoutService
-	CheckoutSessionService   *payments.CheckoutSessionService
+	CheckoutService          *checkout.CheckoutService
+	CheckoutSessionService   *checkout.CheckoutSessionService
 	CreditsService           *credits.CreditsService
 	CreditTypeService        *credits.CreditTypeService
 	ProcessorCustomerService *payments.ProcessorCustomerService
@@ -483,7 +485,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
-	solanaPayService := services.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider)
+	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider)
 	solanaPayService.Clock = clock
 	var solanaRPC *solana.RPCClient
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
@@ -498,7 +500,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 			Network:      solanaNetwork,
 		})
 	}
-	solanaTransactionService := services.NewSolanaTransactionService(database, solanaRPC, cfg, priceService, purchaseService, fxProvider)
+	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, solanaRPC, cfg, priceService, fxProvider)
 	solanaTransactionService.Clock = clock
 
 	subscriptionLifecycleService := subscriptions.NewSubscriptionLifecycleService(
@@ -573,7 +575,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	}
 
 	// Create checkout service for unified checkout endpoint
-	checkoutService := services.NewCheckoutService(
+	checkoutService := checkout.NewCheckoutService(
 		subscriptionService,
 		productService,
 		priceService,
@@ -581,7 +583,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		entitlementService,
 		paymentMethodService,
 		vaultService,
-		idempotencyService,
+		services.NewPaymentsIdempotencyAdapter(idempotencyService),
 		nmiClients,
 		cfg,
 	)
@@ -592,7 +594,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	webhookDispatcher.CheckoutService = checkoutService
 	subscriptionLifecycleService.EventLogService = nil // reset until ClickHouse init
 
-	checkoutSessionService := payments.NewCheckoutSessionService(
+	checkoutSessionService := checkout.NewCheckoutSessionService(
 		database,
 		priceService,
 		productService,
@@ -606,18 +608,17 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	)
 	checkoutSessionService.Clock = clock
 	webhookDispatcher.CheckoutSessionService = checkoutSessionService
-
-	// Wire up checkoutService to solanaPayService for eligibility checks
-	solanaPayService.SetCheckoutService(checkoutService)
+	solanaPayService.SetEligibilityChecker(&solanaEligibilityAdapter{service: checkoutService})
 
 	// Create SolanaPayPoller (depends on checkoutService for RegisterPurchase)
-	solanaPayPoller := services.NewSolanaPayPoller(
+	solanaPayPoller := solanamodule.NewSolanaPayPoller(
 		database,
 		redisClient,
 		cfg,
 		solanaPayService,
 		solanaTransactionService,
-		checkoutService,
+		&solanaPurchaseRegistrarAdapter{service: checkoutService},
+		purchaseService,
 		checkoutSessionService,
 	)
 

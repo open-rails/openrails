@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
@@ -72,7 +72,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 			req.Metadata["e2e_run_id"] = e2eRunID
 		}
 	}
-	svcReq := &payments.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: payments.CheckoutSessionPaymentRequest{Processor: req.Payment.Processor, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
+	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{Processor: req.Payment.Processor, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if err != nil {
 		log.WithError(err).Error("Failed to create checkout session")
@@ -134,7 +134,7 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
 	}
-	svcReq := &payments.CheckoutSessionConfirmRequest{Payment: payments.CheckoutSessionConfirmPayment{Processor: req.Payment.Processor, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
+	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Processor: req.Payment.Processor, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
 	resp, err := r.State.CheckoutSessionService.ConfirmSession(r.Request.Context(), parsedID, svcReq, user)
 	if err != nil {
 		writeCheckoutSessionError(r, err)
@@ -154,17 +154,17 @@ func writeCheckoutSessionError(r *httprequest.Request, err error) {
 		return
 	}
 	switch {
-	case errors.Is(err, payments.ErrCheckoutSessionNotFound):
+	case errors.Is(err, checkout.ErrCheckoutSessionNotFound):
 		r.ErrorJSON(http.StatusNotFound, err.Error())
-	case errors.Is(err, payments.ErrCheckoutSessionForbidden):
+	case errors.Is(err, checkout.ErrCheckoutSessionForbidden):
 		r.ErrorJSON(http.StatusForbidden, err.Error())
-	case errors.Is(err, payments.ErrCheckoutSessionExpired):
+	case errors.Is(err, checkout.ErrCheckoutSessionExpired):
 		r.ErrorJSON(http.StatusGone, err.Error())
-	case errors.Is(err, payments.ErrCheckoutSessionPending):
+	case errors.Is(err, checkout.ErrCheckoutSessionPending):
 		r.ErrorJSON(http.StatusConflict, err.Error())
-	case errors.Is(err, payments.ErrCheckoutSessionConflict):
+	case errors.Is(err, checkout.ErrCheckoutSessionConflict):
 		r.ErrorJSON(http.StatusConflict, err.Error())
-	case errors.Is(err, payments.ErrCheckoutSessionValidation):
+	case errors.Is(err, checkout.ErrCheckoutSessionValidation):
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session request failed")

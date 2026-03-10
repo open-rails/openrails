@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 )
 
 type PaymentsIdempotencyAdapter struct {
@@ -18,13 +18,13 @@ func NewPaymentsIdempotencyAdapter(service *IdempotencyService) *PaymentsIdempot
 	return &PaymentsIdempotencyAdapter{service: service}
 }
 
-func (a *PaymentsIdempotencyAdapter) Begin(ctx context.Context, operation, key string) (*payments.IdempotencyRecord, bool, error) {
+func (a *PaymentsIdempotencyAdapter) Begin(ctx context.Context, operation, key string) (*checkout.IdempotencyRecord, bool, error) {
 	rec, exists, err := a.service.Begin(ctx, operation, key)
 	if err != nil || !exists || rec == nil {
 		return nil, exists, err
 	}
-	return &payments.IdempotencyRecord{
-		Status:    payments.IdempotencyStatus(rec.Status),
+	return &checkout.IdempotencyRecord{
+		Status:    checkout.IdempotencyStatus(rec.Status),
 		Result:    rec.Result,
 		Error:     rec.Error,
 		CreatedAt: rec.CreatedAt,

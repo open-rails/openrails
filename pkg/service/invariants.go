@@ -7,6 +7,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -57,7 +58,7 @@ func (s *Service) requirePublicSubscriptionService() (*catalog.PublicSubscriptio
 	return s.rt.PublicSubscriptionService, nil
 }
 
-func (s *Service) requireCheckoutSessionService() (*payments.CheckoutSessionService, error) {
+func (s *Service) requireCheckoutSessionService() (*checkout.CheckoutSessionService, error) {
 	if s.rt.CheckoutSessionService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}

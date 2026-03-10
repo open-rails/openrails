@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -48,8 +49,8 @@ type WebhookDispatcher struct {
 	ProcessorCustomerService     *payments.ProcessorCustomerService
 	CCBillRESTClient             *ccbill.RESTClient
 	NMIClients                   map[string]*nmi.NMIClient
-	CheckoutService              *CheckoutService
-	CheckoutSessionService       *payments.CheckoutSessionService
+	CheckoutService              *checkout.CheckoutService
+	CheckoutSessionService       *checkout.CheckoutSessionService
 	CreditsService               *credits.CreditsService
 }
 

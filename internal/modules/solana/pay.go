@@ -1,4 +1,4 @@
-package services
+package solana
 
 import (
 	"context"
@@ -14,9 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
-	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
@@ -30,6 +29,22 @@ const (
 	// TTL for pending payments
 	pendingPaymentTTL = 15 * time.Minute
 	consumedRefTTL    = 24 * time.Hour
+)
+
+type purchaseEligibilityChecker interface {
+	CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*PurchaseEligibilityResult, error)
+}
+
+type PurchaseEligibilityResult struct {
+	Status string
+	Reason string
+}
+
+const (
+	eligibilityAllowed   = "allowed"
+	eligibilityBlocked   = "blocked"
+	eligibilityUpgrade   = "upgrade"
+	eligibilityDowngrade = "downgrade"
 )
 
 // PendingSolanaPayment represents a pending Solana payment stored in Redis
@@ -48,14 +63,14 @@ type PendingSolanaPayment struct {
 
 // SolanaPayService handles Solana Pay Transfer Request flow
 type SolanaPayService struct {
-	db              *db.DB
-	redis           *redis.Client
-	cfg             *config.Config
-	Clock           clockwork.Clock
-	priceService    *catalog.PriceService
-	productService  *catalog.ProductService
-	checkoutService *CheckoutService
-	fxProvider      fx.Provider
+	db                 *db.DB
+	redis              *redis.Client
+	cfg                *config.Config
+	Clock              clockwork.Clock
+	priceService       *catalog.PriceService
+	productService     *catalog.ProductService
+	eligibilityChecker purchaseEligibilityChecker
+	fxProvider         fx.Provider
 }
 
 // NewSolanaPayService creates a new SolanaPayService
@@ -65,18 +80,22 @@ func NewSolanaPayService(
 	cfg *config.Config,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
-	checkoutService *CheckoutService,
+	eligibilityChecker purchaseEligibilityChecker,
 	fxProvider fx.Provider,
 ) *SolanaPayService {
 	return &SolanaPayService{
-		db:              db,
-		redis:           redis,
-		cfg:             cfg,
-		priceService:    priceService,
-		productService:  productService,
-		checkoutService: checkoutService,
-		fxProvider:      fxProvider,
+		db:                 db,
+		redis:              redis,
+		cfg:                cfg,
+		priceService:       priceService,
+		productService:     productService,
+		eligibilityChecker: eligibilityChecker,
+		fxProvider:         fxProvider,
 	}
+}
+
+func (s *SolanaPayService) SetEligibilityChecker(checker purchaseEligibilityChecker) {
+	s.eligibilityChecker = checker
 }
 
 func (s *SolanaPayService) now() time.Time {
@@ -86,28 +105,23 @@ func (s *SolanaPayService) now() time.Time {
 	return time.Now()
 }
 
-// SetCheckoutService sets the checkout service (used to break circular dependency during init)
-func (s *SolanaPayService) SetCheckoutService(cs *CheckoutService) {
-	s.checkoutService = cs
-}
-
 // GeneratePayment creates a new pending Solana payment and returns the Transfer Request URL.
 // It first checks purchase eligibility to prevent duplicate purchases.
-func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*payments.SolanaPayResult, error) {
+func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*PayResult, error) {
 	// Check purchase eligibility BEFORE generating the payment URL
-	if s.checkoutService != nil {
-		eligibility, err := s.checkoutService.CheckPurchaseEligibility(ctx, userID, priceID)
+	if s.eligibilityChecker != nil {
+		eligibility, err := s.eligibilityChecker.CheckPurchaseEligibility(ctx, userID, priceID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check purchase eligibility: %w", err)
 		}
 
 		switch eligibility.Status {
-		case payments.EligibilityBlocked:
+		case eligibilityBlocked:
 			return nil, fmt.Errorf("purchase blocked: %s", eligibility.Reason)
-		case payments.EligibilityUpgrade, payments.EligibilityDowngrade:
+		case eligibilityUpgrade, eligibilityDowngrade:
 			// Solana doesn't support subscription upgrades/downgrades
 			return nil, fmt.Errorf("solana does not support subscription tier changes; please cancel existing subscription first")
-		case payments.EligibilityAllowed:
+		case eligibilityAllowed:
 			// Continue with payment generation
 		}
 	}
@@ -133,7 +147,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Validate Solana config
-	solanaProc, err := payments.RequireSolanaProcessorConfig(s.cfg)
+	solanaProc, err := RequireSolanaProcessorConfig(s.cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +157,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Calculate token amount from fiat price with FX conversion if needed
-	quote, err := payments.CalculateTokenQuote(ctx, tokenCfg, price.Amount, price.Currency, s.fxProvider)
+	quote, err := CalculateTokenQuote(ctx, tokenCfg, price.Amount, price.Currency, s.fxProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate token quote: %w", err)
 	}
@@ -153,7 +167,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Generate reference for Solana Pay
-	reference, err := solana.GenerateReference()
+	reference, err := solanarpc.GenerateReference()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate reference: %w", err)
 	}
@@ -196,7 +210,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	// Build Solana Pay Transfer Request URL
 	url := s.buildTransferRequestURL(recipient, tokenUnits, tokenMint, tokenSymbol, reference)
 
-	return &payments.SolanaPayResult{
+	return &PayResult{
 		URL:            url,
 		Reference:      reference,
 		Amount:         price.Amount,
@@ -221,7 +235,7 @@ func (s *SolanaPayService) buildTransferRequestURL(recipient string, amount uint
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
 	// Get token config for decimals
-	solanaProc, err := payments.RequireSolanaProcessorConfig(s.cfg)
+	solanaProc, err := RequireSolanaProcessorConfig(s.cfg)
 	if err != nil {
 		return baseURL // fallback without params if not configured
 	}

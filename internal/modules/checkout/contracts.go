@@ -1,4 +1,4 @@
-package payments
+package checkout
 
 import (
 	"time"
@@ -6,6 +6,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 )
+
+type UserIdentity struct {
+	ID       string
+	Email    *string
+	Username string
+	Roles    []string
+}
 
 type CheckoutRequest struct {
 	PriceID         string `json:"price_id"`

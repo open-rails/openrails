@@ -1,4 +1,4 @@
-package services
+package solana
 
 import (
 	"context"
@@ -11,9 +11,8 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/fx"
-	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -21,10 +20,9 @@ import (
 // SolanaTransactionService builds real Solana transactions for payments.
 type SolanaTransactionService struct {
 	db           *db.DB
-	rpc          *solana.RPCClient
+	rpc          *solanarpc.RPCClient
 	cfg          *config.Config
 	priceService *catalog.PriceService
-	paymentSvc   *payments.PaymentService
 	fxProvider   fx.Provider
 	Clock        clockwork.Clock
 }
@@ -38,19 +36,18 @@ func (s *SolanaTransactionService) now() time.Time {
 }
 
 // NewSolanaTransactionService creates a new transaction service.
-func NewSolanaTransactionService(db *db.DB, rpc *solana.RPCClient, cfg *config.Config, price *catalog.PriceService, payment *payments.PaymentService, fxProvider fx.Provider) *SolanaTransactionService {
+func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *config.Config, price *catalog.PriceService, fxProvider fx.Provider) *SolanaTransactionService {
 	return &SolanaTransactionService{
 		db:           db,
 		rpc:          rpc,
 		cfg:          cfg,
 		priceService: price,
-		paymentSvc:   payment,
 		fxProvider:   fxProvider,
 	}
 }
 
 // BuildPaymentTransaction creates a Solana transaction for payment.
-func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*payments.SolanaTransactionBuildResponse, error) {
+func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*TransactionBuildResponse, error) {
 	if s.rpc == nil {
 		return nil, fmt.Errorf("solana rpc client unavailable")
 	}
@@ -60,7 +57,7 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 		return nil, fmt.Errorf("failed to get price: %w", err)
 	}
 
-	solanaProc, err := payments.RequireSolanaProcessorConfig(s.cfg)
+	solanaProc, err := RequireSolanaProcessorConfig(s.cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +72,7 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 		return nil, fmt.Errorf("merchant wallet not configured")
 	}
 
-	quote, err := payments.CalculateTokenQuote(ctx, tokenCfg, price.Amount, price.Currency, s.fxProvider)
+	quote, err := CalculateTokenQuote(ctx, tokenCfg, price.Amount, price.Currency, s.fxProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate token amount: %w", err)
 	}
@@ -90,7 +87,7 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 		referenceStr = strings.TrimSpace(*reference)
 	}
 
-	txResp, err := s.rpc.BuildTransferTransaction(ctx, solana.TransferRequest{
+	txResp, err := s.rpc.BuildTransferTransaction(ctx, solanarpc.TransferRequest{
 		FromWallet:  userWallet,
 		ToWallet:    merchantWallet,
 		TokenSymbol: tokenSymbol,
@@ -114,7 +111,7 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 		"to_wallet":    merchantWallet,
 	}).Info("Built Solana payment transaction")
 
-	return &payments.SolanaTransactionBuildResponse{
+	return &TransactionBuildResponse{
 		TransactionBase64: txResp.TransactionBase64,
 		Amount:            price.Amount,
 		TokenAmount:       tokenAmount,
@@ -144,7 +141,7 @@ func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Cont
 		return fmt.Errorf("expected reference is required")
 	}
 
-	return s.rpc.VerifyTransfer(ctx, solana.VerifyTransferRequest{
+	return s.rpc.VerifyTransfer(ctx, solanarpc.VerifyTransferRequest{
 		Signature:         strings.TrimSpace(signature),
 		ExpectedAmount:    expectedAmount,
 		ExpectedRecipient: strings.TrimSpace(expectedRecipient),

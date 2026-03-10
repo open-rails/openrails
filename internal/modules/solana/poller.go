@@ -1,4 +1,4 @@
-package services
+package solana
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
@@ -28,16 +28,34 @@ const (
 	solanaUnmatchedTxRetryInterval = 5 * time.Second
 )
 
+type purchaseRegistrar interface {
+	RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*RegisterPurchaseResult, error)
+}
+
+type RegisterPurchaseResult struct {
+	PaymentID    uuid.UUID
+	Entitlements []string
+}
+
+type paymentLookup interface {
+	GetByTransactionID(ctx context.Context, processor models.Processor, transactionID string) (*models.Payment, error)
+}
+
+type checkoutSessionMarker interface {
+	MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error
+}
+
 // SolanaPayPoller polls the blockchain for confirmed Solana Pay payments
 type SolanaPayPoller struct {
 	db                     *db.DB
 	redis                  *redis.Client
 	cfg                    *config.Config
-	rpc                    *solana.RPCClient
+	rpc                    *solanarpc.RPCClient
 	solanaPayService       *SolanaPayService
 	solanaTransactionSvc   *SolanaTransactionService
-	checkoutService        *CheckoutService
-	checkoutSessionService *payments.CheckoutSessionService
+	purchaseRegistrar      purchaseRegistrar
+	paymentLookup          paymentLookup
+	checkoutSessionService checkoutSessionMarker
 
 	mu      sync.Mutex
 	running bool
@@ -54,12 +72,13 @@ func NewSolanaPayPoller(
 	cfg *config.Config,
 	solanaPayService *SolanaPayService,
 	solanaTransactionService *SolanaTransactionService,
-	checkoutService *CheckoutService,
-	checkoutSessionService *payments.CheckoutSessionService,
+	purchaseRegistrar purchaseRegistrar,
+	paymentLookup paymentLookup,
+	checkoutSessionService checkoutSessionMarker,
 ) *SolanaPayPoller {
-	var rpc *solana.RPCClient
+	var rpc *solanarpc.RPCClient
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
-		rpc = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
+		rpc = solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
 			Endpoint: solanaProc.RPCEndpoint,
 			Network:  solanaProc.Network,
 		})
@@ -72,7 +91,8 @@ func NewSolanaPayPoller(
 		rpc:                    rpc,
 		solanaPayService:       solanaPayService,
 		solanaTransactionSvc:   solanaTransactionService,
-		checkoutService:        checkoutService,
+		purchaseRegistrar:      purchaseRegistrar,
+		paymentLookup:          paymentLookup,
 		checkoutSessionService: checkoutSessionService,
 		retryAfter:             make(map[string]time.Time),
 	}
@@ -189,7 +209,7 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 	}
 
 	// Query blockchain for transactions with this reference
-	if err := solana.ValidateAddress(reference); err != nil {
+	if err := solanarpc.ValidateAddress(reference); err != nil {
 		log.WithError(err).WithField("reference", reference).Warn("Invalid Solana reference; removing pending payment")
 		if removeErr := p.solanaPayService.RemovePendingPayment(ctx, reference); removeErr != nil {
 			log.WithError(removeErr).WithField("reference", reference).Warn("Failed to remove invalid Solana pending payment")
@@ -234,8 +254,8 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 		}
 
 		// Idempotency short-circuit: if this signature is already recorded, stop polling this reference.
-		if p.checkoutService != nil && p.checkoutService.PaymentService != nil {
-			existingPayment, getErr := p.checkoutService.PaymentService.GetByTransactionID(ctx, models.ProcessorSolana, sig.Signature)
+		if p.purchaseRegistrar != nil && p.paymentLookup != nil {
+			existingPayment, getErr := p.paymentLookup.GetByTransactionID(ctx, models.ProcessorSolana, sig.Signature)
 			if getErr == nil && existingPayment != nil {
 				log.WithFields(log.Fields{
 					"reference":  reference,
@@ -381,12 +401,12 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 		return err
 	}
 
-	if p.checkoutService == nil || p.checkoutService.PaymentService == nil {
+	if p.purchaseRegistrar == nil || p.paymentLookup == nil {
 		return fmt.Errorf("checkout payment service is not configured")
 	}
 
 	// Fast idempotency guard: skip processing if this signature is already recorded.
-	existingPayment, err := p.checkoutService.PaymentService.GetByTransactionID(ctx, models.ProcessorSolana, signature)
+	existingPayment, err := p.paymentLookup.GetByTransactionID(ctx, models.ProcessorSolana, signature)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("failed checking existing payment by transaction id: %w", err)
 	}
@@ -400,7 +420,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 	}
 
 	// Use the unified RegisterPurchase to record payment and grant entitlements
-	result, err := p.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
+	result, err := p.purchaseRegistrar.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:         pending.UserID,
 		PriceID:        priceID,
 		Processor:      "solana",
@@ -413,7 +433,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 	if err != nil {
 		// Race-safe idempotency: if another worker inserted first, treat as success.
 		if isDuplicatePaymentTransactionIDError(err) {
-			existingPayment, getErr := p.checkoutService.PaymentService.GetByTransactionID(ctx, models.ProcessorSolana, signature)
+			existingPayment, getErr := p.paymentLookup.GetByTransactionID(ctx, models.ProcessorSolana, signature)
 			if getErr == nil {
 				log.WithFields(log.Fields{
 					"payment_id": existingPayment.ID,

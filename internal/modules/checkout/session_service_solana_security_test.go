@@ -1,4 +1,4 @@
-package payments
+package checkout
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/stretchr/testify/require"
 )
 
@@ -272,7 +273,7 @@ func testSolanaCheckoutConfig() *config.Config {
 
 type stubSolanaTransactionService struct{}
 
-func (s *stubSolanaTransactionService) BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*SolanaTransactionBuildResponse, error) {
+func (s *stubSolanaTransactionService) BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*solanamodule.TransactionBuildResponse, error) {
 	return nil, nil
 }
 

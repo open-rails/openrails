@@ -1,4 +1,4 @@
-package payments
+package checkout
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -23,7 +24,7 @@ type checkoutSubscriptionAccess interface {
 type CheckoutPurchaseService struct {
 	PriceService        *catalog.PriceService
 	ProductService      *catalog.ProductService
-	PaymentService      *PaymentService
+	PaymentService      *payments.PaymentService
 	EntitlementService  *entitlements.EntitlementService
 	SubscriptionService checkoutSubscriptionAccess
 	Clock               clockwork.Clock
@@ -32,7 +33,7 @@ type CheckoutPurchaseService struct {
 func NewCheckoutPurchaseService(
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
-	paymentService *PaymentService,
+	paymentService *payments.PaymentService,
 	entitlementService *entitlements.EntitlementService,
 	subscriptionService checkoutSubscriptionAccess,
 ) *CheckoutPurchaseService {

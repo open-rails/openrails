@@ -20,9 +20,11 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/services"
@@ -64,9 +66,9 @@ type Runtime struct {
 	CreditTypeService        *credits.CreditTypeService
 	ProcessorCustomerService *payments.ProcessorCustomerService
 
-	SolanaPayService         *services.SolanaPayService
-	SolanaPayPoller          *services.SolanaPayPoller
-	SolanaTransactionService *services.SolanaTransactionService
+	SolanaPayService         *solanamodule.SolanaPayService
+	SolanaPayPoller          *solanamodule.SolanaPayPoller
+	SolanaTransactionService *solanamodule.SolanaTransactionService
 	SolanaRPC                *solana.RPCClient
 	SolanaTokenRegistry      *jupiter.TokenRegistry
 	FXProvider               fx.Provider
@@ -76,8 +78,8 @@ type Runtime struct {
 	DeduplicationService         *services.DeduplicationService
 	IdempotencyService           *services.IdempotencyService
 
-	CheckoutService        *services.CheckoutService
-	CheckoutSessionService *payments.CheckoutSessionService
+	CheckoutService        *checkout.CheckoutService
+	CheckoutSessionService *checkout.CheckoutSessionService
 
 	riverStarted        bool
 	externalRiverClient bool // true if River client was provided externally

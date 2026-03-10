@@ -1,4 +1,4 @@
-package payments
+package checkout
 
 import (
 	"context"
@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -59,12 +60,12 @@ type checkoutSessionExecutor interface {
 }
 
 type solanaPaymentService interface {
-	GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*SolanaPayResult, error)
+	GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*solanamodule.PayResult, error)
 	ConsumeAndRemovePending(ctx context.Context, reference, transactionID string) error
 }
 
 type solanaTransactionService interface {
-	BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*SolanaTransactionBuildResponse, error)
+	BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*solanamodule.TransactionBuildResponse, error)
 	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string) error
 }
 type CheckoutSessionService struct {
@@ -420,7 +421,7 @@ func (s *CheckoutSessionService) initializeSession(ctx context.Context, session 
 }
 
 func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest) error {
-	solanaProc, err := RequireSolanaProcessorConfig(s.config)
+	solanaProc, err := solanamodule.RequireSolanaProcessorConfig(s.config)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
@@ -497,7 +498,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		session.ProcessorState["token_symbol"] = tokenSymbol
 		session.ProcessorState["token_mint"] = tokenMint
 		session.ProcessorState["recipient"] = recipient
-		quote, err := CalculateTokenQuote(ctx, tokenCfg, session.Amount, session.Currency, s.fxProvider)
+		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenCfg, session.Amount, session.Currency, s.fxProvider)
 		if err != nil {
 			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutSessionValidation, err)
 		}
@@ -817,7 +818,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if s.checkoutService == nil {
 		return nil, fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
-	solanaProc, err := RequireSolanaProcessorConfig(s.config)
+	solanaProc, err := solanamodule.RequireSolanaProcessorConfig(s.config)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
@@ -1144,10 +1145,6 @@ func setSolanaQuoteState(processorState map[string]any, tokenAmount uint64, toke
 	return nil
 }
 
-func timePtr(t time.Time) *time.Time {
-	return &t
-}
-
 // GetSessionForSolanaPay retrieves and validates a checkout session for Solana Pay spec endpoints.
 // Returns session info needed for GET endpoint or an error if the session is invalid.
 func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, sessionID uuid.UUID) (*SolanaPaySessionInfo, error) {
@@ -1204,7 +1201,7 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 	if s.solanaTransactionService == nil {
 		return nil, fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutSessionValidation)
 	}
-	solanaProc, err := RequireSolanaProcessorConfig(s.config)
+	solanaProc, err := solanamodule.RequireSolanaProcessorConfig(s.config)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
