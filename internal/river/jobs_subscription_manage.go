@@ -97,7 +97,7 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 		if w.SubscriptionLifecycleService == nil {
 			return fmt.Errorf("subscription lifecycle service unavailable")
 		}
-		stripeSvc := &services.StripeSubscriptionService{Config: w.Config}
+		stripeSvc := &subscriptions.StripeService{Config: w.Config}
 		if err := stripeSvc.CancelSubscription(ctx, sub.ProcessorSubscriptionID); err != nil {
 			return err
 		}
@@ -188,7 +188,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		"subscription_id": sub.ID,
 		"processor":       sub.Processor,
 	}).Info("processing subscription resume")
-	stripeSvc := &services.StripeSubscriptionService{Config: w.Config}
+	stripeSvc := &subscriptions.StripeService{Config: w.Config}
 	if err := stripeSvc.ResumeSubscription(ctx, sub.ProcessorSubscriptionID); err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-package services
+package subscriptions
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func removeCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, userID string, productID uuid.UUID, excludeID uuid.UUID) (int, error) {
+func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, userID string, productID uuid.UUID, excludeID uuid.UUID) (int, error) {
 	if dbb == nil {
 		return 0, fmt.Errorf("database handle is required")
 	}

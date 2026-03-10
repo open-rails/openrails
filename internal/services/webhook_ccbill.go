@@ -410,7 +410,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	}
 
 	if s.DB != nil {
-		removed, err := removeCancelledSubscriptionsForActivation(ctx, s.DB, userID, price.ProductID, uuid.Nil)
+		removed, err := subscriptions.RemoveCancelledSubscriptionsForActivation(ctx, s.DB, userID, price.ProductID, uuid.Nil)
 		if err != nil {
 			return fmt.Errorf("failed to cleanup cancelled subscriptions before activation: %w", err)
 		}

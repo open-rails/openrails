@@ -796,7 +796,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 	switch subscription.Status {
 	case models.StatusPending:
 		if s.DB != nil {
-			removed, err := removeCancelledSubscriptionsForActivation(ctx, s.DB, subscription.UserID, subscription.ProductID, subscription.ID)
+			removed, err := subscriptions.RemoveCancelledSubscriptionsForActivation(ctx, s.DB, subscription.UserID, subscription.ProductID, subscription.ID)
 			if err != nil {
 				return fmt.Errorf("failed to cleanup cancelled subscriptions before activation: %w", err)
 			}

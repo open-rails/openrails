@@ -2210,7 +2210,7 @@ func (s *CheckoutService) processTierChangeStripe(
 	}
 
 	// Call Stripe API
-	stripeService := &StripeSubscriptionService{Config: s.Config}
+	stripeService := &subscriptions.StripeService{Config: s.Config}
 	itemID, err := stripeService.GetSubscriptionItemID(ctx, existingSub.ProcessorSubscriptionID)
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
