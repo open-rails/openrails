@@ -116,6 +116,76 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, htmlContent, 
 	return s.send(ctx, msg)
 }
 
+func (s *EmailService) storeName() string {
+	if s == nil || s.store == nil {
+		return "My Store"
+	}
+	name := strings.TrimSpace(s.store.Name)
+	if name == "" {
+		return "My Store"
+	}
+	return name
+}
+
+func (s *EmailService) storeCustomerPortalURL() string {
+	if s == nil || s.store == nil {
+		return ""
+	}
+	return strings.TrimSpace(s.store.CustomerPortalURL)
+}
+
+func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
+	rendered := subscriptions.RenderSubscriptionConfirmationEmail(s.storeName(), data)
+	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
+}
+
+func (s *EmailService) SendSubscriptionRenewal(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
+	rendered := subscriptions.RenderSubscriptionRenewalEmail(s.storeName(), data)
+	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
+}
+
+func (s *EmailService) SendSubscriptionCancellation(ctx context.Context, data subscriptions.SubscriptionEmailData, reason subscriptions.PremiumEndReason) error {
+	rendered := subscriptions.RenderSubscriptionCancellationEmail(s.storeName(), data, reason)
+	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
+}
+
+func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
+	rendered := subscriptions.RenderSubscriptionExpiredEmail(s.storeName(), s.storeCustomerPortalURL(), data)
+	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
+}
+
+func (s *EmailService) sendPaymentFailed(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
+	rendered := subscriptions.RenderPaymentFailedEmail(s.storeName(), s.storeCustomerPortalURL(), data)
+	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
+}
+
+func (s *EmailService) SendEntitlementExpiration(ctx context.Context, userEmail, username, entitlementName string, expiresAt time.Time) error {
+	subject := fmt.Sprintf("Your %s access expires soon", entitlementName)
+	storeName := s.storeName()
+	daysUntilExpiry := int(time.Until(expiresAt).Hours() / 24)
+	htmlContent := fmt.Sprintf(`
+		<h2>Access Expiring Soon</h2>
+		<p>Hi %s,</p>
+		<p>This is a reminder that your <strong>%s</strong> access will expire in %d days on <strong>%s</strong>.</p>
+		<p>To continue enjoying premium features, please renew your subscription before the expiration date.</p>
+		<p>Thank you for being a valued member!</p>
+		<p>The %s Team</p>
+	`, username, entitlementName, daysUntilExpiry, expiresAt.Format("January 2, 2006"), storeName)
+	plainContent := fmt.Sprintf(`
+		Access Expiring Soon
+
+		Hi %s,
+
+		Your %s access will expire in %d days on %s.
+
+		To continue enjoying premium features, please renew your subscription before the expiration date.
+
+		Thank you for being a valued member!
+		The %s Team
+	`, username, entitlementName, daysUntilExpiry, expiresAt.Format("January 2, 2006"), storeName)
+	return s.SendEmail(ctx, userEmail, subject, htmlContent, plainContent)
+}
+
 // SendTemplatedEmail sends a template-based email using the configured provider.
 func (s *EmailService) SendTemplatedEmail(ctx context.Context, to, templateID string, templateData map[string]any) error {
 	if !s.IsEnabled() {
