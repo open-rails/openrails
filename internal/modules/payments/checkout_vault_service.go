@@ -7,16 +7,17 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
 type CheckoutVaultService struct {
-	PaymentMethodService *PaymentMethodService
-	VaultService         *VaultService
+	PaymentMethodService *vault.PaymentMethodService
+	VaultService         *vault.VaultService
 }
 
-func NewCheckoutVaultService(paymentMethodService *PaymentMethodService, vaultService *VaultService) *CheckoutVaultService {
+func NewCheckoutVaultService(paymentMethodService *vault.PaymentMethodService, vaultService *vault.VaultService) *CheckoutVaultService {
 	return &CheckoutVaultService{
 		PaymentMethodService: paymentMethodService,
 		VaultService:         vaultService,
@@ -49,7 +50,7 @@ func (s *CheckoutVaultService) ResolveVault(ctx context.Context, req *CheckoutRe
 		return "", nil, errors.New("vault service unavailable")
 	}
 
-	pm, err := s.VaultService.CreateVault(ctx, user.ID, &CreateVaultRequest{
+	pm, err := s.VaultService.CreateVault(ctx, user.ID, &vault.CreateVaultRequest{
 		PaymentToken: req.PaymentToken,
 		Provider:     provider,
 		FirstName:    ResolveCheckoutFirstName(req, user),

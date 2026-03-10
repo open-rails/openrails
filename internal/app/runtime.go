@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -47,9 +48,9 @@ type Runtime struct {
 	ProductService       *catalog.ProductService
 	PriceService         *catalog.PriceService
 	NotificationService  *services.NotificationService
-	PaymentMethodService *payments.PaymentMethodService
+	PaymentMethodService *vault.PaymentMethodService
 	PaymentService       *payments.PaymentService
-	VaultService         *payments.VaultService
+	VaultService         *vault.VaultService
 
 	UserSubscriptionService   *subscriptions.UserSubscriptionService
 	PublicSubscriptionService *catalog.PublicSubscriptionService

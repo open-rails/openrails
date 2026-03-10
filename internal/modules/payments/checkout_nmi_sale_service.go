@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/vault"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -29,7 +30,7 @@ type checkoutIdempotencyStore interface {
 type CheckoutNMISaleService struct {
 	PurchaseService  *CheckoutPurchaseService
 	VaultResolver    *CheckoutVaultService
-	VaultService     *VaultService
+	VaultService     *vault.VaultService
 	IdempotencyStore checkoutIdempotencyStore
 	NMIClients       map[string]*nmi.NMIClient
 }
@@ -37,7 +38,7 @@ type CheckoutNMISaleService struct {
 func NewCheckoutNMISaleService(
 	purchaseService *CheckoutPurchaseService,
 	vaultResolver *CheckoutVaultService,
-	vaultService *VaultService,
+	vaultService *vault.VaultService,
 	idempotencyStore checkoutIdempotencyStore,
 	nmiClients map[string]*nmi.NMIClient,
 ) *CheckoutNMISaleService {

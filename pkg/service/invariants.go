@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/vault"
 )
 
 func (s *Service) creditsService() *credits.CreditsService {
@@ -70,28 +71,28 @@ func (s *Service) requireUserSubscriptionService() (*subscriptions.UserSubscript
 	return s.rt.UserSubscriptionService, nil
 }
 
-func (s *Service) requireSubscriptionAndPaymentMethodServices() (*subscriptions.SubscriptionService, *payments.PaymentMethodService, error) {
+func (s *Service) requireSubscriptionAndPaymentMethodServices() (*subscriptions.SubscriptionService, *vault.PaymentMethodService, error) {
 	if s.rt.SubscriptionService == nil || s.rt.PaymentMethodService == nil {
 		return nil, nil, fmt.Errorf("billing service: not initialized")
 	}
 	return s.rt.SubscriptionService, s.rt.PaymentMethodService, nil
 }
 
-func (s *Service) requirePaymentMethodService() (*payments.PaymentMethodService, error) {
+func (s *Service) requirePaymentMethodService() (*vault.PaymentMethodService, error) {
 	if s.rt.PaymentMethodService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
 	return s.rt.PaymentMethodService, nil
 }
 
-func (s *Service) requireVaultService() (*payments.VaultService, error) {
+func (s *Service) requireVaultService() (*vault.VaultService, error) {
 	if s.rt.VaultService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
 	return s.rt.VaultService, nil
 }
 
-func (s *Service) requireVaultAndPaymentMethodServices() (*payments.VaultService, *payments.PaymentMethodService, error) {
+func (s *Service) requireVaultAndPaymentMethodServices() (*vault.VaultService, *vault.PaymentMethodService, error) {
 	if s.rt.VaultService == nil || s.rt.PaymentMethodService == nil {
 		return nil, nil, fmt.Errorf("billing service: not initialized")
 	}

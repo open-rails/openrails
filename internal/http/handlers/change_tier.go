@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -68,7 +68,7 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 		return
 	}
 
-	var vaultErr *payments.VaultError
+	var vaultErr *vault.VaultError
 	if errors.As(err, &vaultErr) {
 		code := api.CodePaymentFailed
 		if strings.TrimSpace(vaultErr.LocalizationID) != "" {

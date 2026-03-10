@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/vault"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
@@ -488,7 +489,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 	}
 
 	user := &payments.UserIdentity{ID: userID}
-	pm, err := vaults.CreateVault(ctx, user.ID, &payments.CreateVaultRequest{
+	pm, err := vaults.CreateVault(ctx, user.ID, &vault.CreateVaultRequest{
 		PaymentToken: req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -538,7 +539,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 	}
 
 	// Build update request
-	updateReq := &payments.UpdateVaultRequest{
+	updateReq := &vault.UpdateVaultRequest{
 		PaymentToken: &req.PaymentToken,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,

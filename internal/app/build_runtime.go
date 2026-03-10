@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
@@ -434,10 +435,10 @@ type servicesInstances struct {
 	ProductService           *catalog.ProductService
 	PriceService             *catalog.PriceService
 	NotificationService      *services.NotificationService
-	PaymentMethodService     *payments.PaymentMethodService
+	PaymentMethodService     *vault.PaymentMethodService
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
-	VaultService             *payments.VaultService
+	VaultService             *vault.VaultService
 	SolanaPayService         *services.SolanaPayService
 	SolanaPayPoller          *services.SolanaPayPoller
 	SolanaTransactionService *services.SolanaTransactionService
@@ -465,7 +466,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
 	notificationService := services.NewNotificationService(database, nil)
-	paymentMethodService := payments.NewPaymentMethodService(database)
+	paymentMethodService := vault.NewPaymentMethodService(database)
 	purchaseService := payments.NewPaymentService(database)
 	purchaseService.Clock = clock
 	entitlementService := entitlements.NewEntitlementService(database)
@@ -522,7 +523,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	)
 	subscriptionService.Clock = clock
 
-	vaultService := payments.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database)
+	vaultService := vault.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database)
 	vaultService.Clock = clock
 	subscriptionService.VaultService = vaultService
 	idempotencyService := services.NewIdempotencyService(redisClient)

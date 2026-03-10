@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
@@ -55,8 +56,8 @@ type CheckoutService struct {
 	PurchaseService      *payments.CheckoutPurchaseService
 	VaultResolver        *payments.CheckoutVaultService
 	NMISaleService       *payments.CheckoutNMISaleService
-	PaymentMethodService *payments.PaymentMethodService
-	VaultService         *payments.VaultService
+	PaymentMethodService *vault.PaymentMethodService
+	VaultService         *vault.VaultService
 	IdempotencyService   *IdempotencyService
 	NMIClients           map[string]*nmi.NMIClient
 	Clock                clockwork.Clock
@@ -78,8 +79,8 @@ func NewCheckoutService(
 	priceService *catalog.PriceService,
 	paymentService *payments.PaymentService,
 	entitlementService *entitlements.EntitlementService,
-	paymentMethodService *payments.PaymentMethodService,
-	vaultService *payments.VaultService,
+	paymentMethodService *vault.PaymentMethodService,
+	vaultService *vault.VaultService,
 	idempotencyService *IdempotencyService,
 	nmiClients map[string]*nmi.NMIClient,
 	cfg *config.Config,
@@ -587,7 +588,7 @@ func (s *CheckoutService) processNMISubscription(
 		wrappedErr := fmt.Errorf("failed to create subscription: %w", err)
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {
-			wrappedErr = &payments.VaultError{
+			wrappedErr = &vault.VaultError{
 				Err:            wrappedErr,
 				LocalizationID: nmiErr.LocalizationID,
 				Message:        wrappedErr.Error(),
@@ -1147,7 +1148,7 @@ func (s *CheckoutService) processUpgrade(
 		subErr := fmt.Errorf("failed to create upgraded subscription: %w", err)
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {
-			subErr = &payments.VaultError{
+			subErr = &vault.VaultError{
 				Err:            subErr,
 				LocalizationID: nmiErr.LocalizationID,
 				Message:        subErr.Error(),
