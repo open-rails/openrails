@@ -14,6 +14,7 @@ import (
 	"github.com/doujins-org/ginapi/response"
 	"github.com/open-rails/openrails/internal/db/models"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -141,7 +142,7 @@ func TestGetActiveSubscriptionEndpoint(t *testing.T) {
 		require.Len(t, resp.Data, 1, "Should have 1 active subscription")
 
 		// Extract subscription data
-		var subscriptions []services.UserSubscriptionResponse
+		var subscriptions []subscriptions.UserSubscriptionResponse
 		dataBytes, err := json.Marshal(resp.Data)
 		require.NoError(t, err)
 		err = json.Unmarshal(dataBytes, &subscriptions)

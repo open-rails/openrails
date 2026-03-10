@@ -22,13 +22,6 @@ type NotificationService struct {
 	emailService *EmailService
 }
 
-// GetNotificationsFilters defines filters for notification queries
-type GetNotificationsFilters struct {
-	UserID    string `form:"user_id"`
-	EventType string `form:"event_type"`
-	Seen      *bool  `form:"seen"`
-}
-
 // NewNotificationService creates a new notification service.
 // emailService can be nil and set later via SetEmailService.
 func NewNotificationService(database *db.DB, emailService *EmailService) *NotificationService {
@@ -92,7 +85,7 @@ func (s *NotificationService) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.repo.Delete(ctx, id)
 }
 
-func (s *NotificationService) GetNotifications(ctx context.Context, queryOpts query.QueryOptions[GetNotificationsFilters]) ([]*models.NotificationQueue, int64, error) {
+func (s *NotificationService) GetNotifications(ctx context.Context, queryOpts query.QueryOptions[subscriptions.GetNotificationsFilters]) ([]*models.NotificationQueue, int64, error) {
 	repoFilters := repo.NotificationFilters{
 		UserID:    queryOpts.Filters.UserID,
 		EventType: models.NotificationEventType(queryOpts.Filters.EventType),
@@ -287,8 +280,8 @@ func (s *NotificationService) cleanupObsoleteNotifications(ctx context.Context, 
 func (s *NotificationService) removeObsoleteNotifications(ctx context.Context, userID string, eventTypes []models.NotificationEventType) (int, error) {
 	// Get unseen notifications for this user that match the obsolete types
 	falseVal := false
-	notifications, _, err := s.GetNotifications(ctx, query.QueryOptions[GetNotificationsFilters]{
-		Filters: GetNotificationsFilters{
+	notifications, _, err := s.GetNotifications(ctx, query.QueryOptions[subscriptions.GetNotificationsFilters]{
+		Filters: subscriptions.GetNotificationsFilters{
 			UserID: userID,
 			Seen:   &falseVal, // Only unseen notifications
 		},

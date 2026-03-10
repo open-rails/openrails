@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
@@ -34,10 +34,10 @@ func GetNotifications(r *httprequest.Request) {
 		seen = &f
 	}
 
-	q := &query.QueryOptions[services.GetNotificationsFilters]{
+	q := &query.QueryOptions[subscriptions.GetNotificationsFilters]{
 		Limit:   limit,
 		Offset:  offset,
-		Filters: services.GetNotificationsFilters{UserID: user.ID, Seen: seen},
+		Filters: subscriptions.GetNotificationsFilters{UserID: user.ID, Seen: seen},
 	}
 
 	items, _, err := r.State.UserSubscriptionService.GetUserNotifications(r.Request.Context(), user.ID, q)
@@ -67,10 +67,10 @@ func MarkNotificationRead(r *httprequest.Request) {
 func GetUnreadNotificationCount(r *httprequest.Request) {
 	user := r.GetUser()
 	f := false
-	q := &query.QueryOptions[services.GetNotificationsFilters]{
+	q := &query.QueryOptions[subscriptions.GetNotificationsFilters]{
 		Limit:   1,
 		Offset:  0,
-		Filters: services.GetNotificationsFilters{UserID: user.ID, Seen: &f},
+		Filters: subscriptions.GetNotificationsFilters{UserID: user.ID, Seen: &f},
 	}
 	if _, _, err := r.State.UserSubscriptionService.GetUserNotifications(r.Request.Context(), user.ID, q); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())

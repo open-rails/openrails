@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/spool"
 	log "github.com/sirupsen/logrus"
 )
@@ -745,6 +746,62 @@ func CreateMetadataJSON(data map[string]interface{}) string {
 	}
 
 	return string(jsonData)
+}
+
+func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, subscription *models.Subscription, reason string, at time.Time) error {
+	if s == nil || subscription == nil {
+		return nil
+	}
+
+	var procSubID *string
+	if subscription.ProcessorSubscriptionID != "" {
+		procSubID = &subscription.ProcessorSubscriptionID
+	}
+
+	cancelType := ""
+	if subscription.CancelType != nil {
+		cancelType = string(*subscription.CancelType)
+	}
+
+	metadata := map[string]interface{}{"source": "admin"}
+	if cancelType != "" {
+		metadata["cancel_type"] = cancelType
+	}
+	if reason != "" {
+		metadata["reason"] = redactPII(reason)
+	}
+
+	var priceAmount float64
+	priceCurrency := "usd"
+	var billingDays uint32
+	var productID *uuid.UUID
+	var priceID *uuid.UUID
+	if subscription.Price != nil {
+		priceAmount = float64(subscription.Price.Amount) / 100.0
+		priceCurrency = subscription.Price.Currency
+		if subscription.Price.BillingCycleDays != nil {
+			billingDays = uint32(*subscription.Price.BillingCycleDays)
+		}
+		productID = &subscription.Price.ProductID
+		priceID = &subscription.Price.ID
+	}
+
+	return s.LogSubscriptionEvent(ctx, SubscriptionEventData{
+		SubscriptionID:          subscription.ID,
+		UserID:                  subscription.UserID,
+		EventType:               PaymentEventSubscriptionCancelled,
+		Status:                  string(subscription.Status),
+		CancelType:              cancelType,
+		PriceAmount:             priceAmount,
+		PriceCurrency:           priceCurrency,
+		BillingCycleDays:        billingDays,
+		ProductID:               productID,
+		PriceID:                 priceID,
+		Processor:               string(subscription.Processor),
+		ProcessorSubscriptionID: procSubID,
+		Metadata:                CreateMetadataJSON(metadata),
+		Timestamp:               at.UTC(),
+	})
 }
 
 // enqueue helper

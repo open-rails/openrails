@@ -1,4 +1,4 @@
-package services
+package subscriptions
 
 import (
 	"context"
@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
@@ -31,11 +30,11 @@ var (
 
 // UserSubscriptionService handles user-facing subscription operations
 type UserSubscriptionService struct {
-	SubscriptionService *subscriptions.SubscriptionService
+	SubscriptionService *SubscriptionService
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
 	PaymentService      *payments.PaymentService
-	NotificationService *NotificationService
+	NotificationService NotificationStore
 	EntitlementService  *entitlements.EntitlementService
 	NMIClients          map[string]*nmi.NMIClient
 	Clock               clockwork.Clock
@@ -164,7 +163,7 @@ func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, u
 }
 
 // GetUserSubscriptionHistory retrieves subscription history for a user
-func (s *UserSubscriptionService) GetUserSubscriptionHistory(ctx context.Context, userID string, queryOpts *query.QueryOptions[subscriptions.GetSubscriptionsFilters]) ([]*UserSubscriptionResponse, int64, error) {
+func (s *UserSubscriptionService) GetUserSubscriptionHistory(ctx context.Context, userID string, queryOpts *query.QueryOptions[GetSubscriptionsFilters]) ([]*UserSubscriptionResponse, int64, error) {
 	// Set user filter
 	if queryOpts.Filters.UserID == "" {
 		queryOpts.Filters.UserID = userID
@@ -308,7 +307,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		ID:        uuid.New(),
 		UserID:    userID,
 		EventType: models.NotificationPremiumEnded,
-		Data:      map[string]any{"reason": string(subscriptions.PremiumEndReasonUserCancel)},
+		Data:      map[string]any{"reason": string(PremiumEndReasonUserCancel)},
 	}
 	if err := s.NotificationService.Create(ctx, notification); err != nil {
 		log.WithFields(log.Fields{
@@ -398,11 +397,11 @@ func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, u
 
 // NewUserSubscriptionService creates a new UserSubscriptionService
 func NewUserSubscriptionService(
-	subscriptionService *subscriptions.SubscriptionService,
+	subscriptionService *SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
 	paymentService *payments.PaymentService,
-	notificationService *NotificationService,
+	notificationService NotificationStore,
 	entitlementService *entitlements.EntitlementService,
 	nmiClients map[string]*nmi.NMIClient,
 ) *UserSubscriptionService {

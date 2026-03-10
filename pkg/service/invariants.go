@@ -64,7 +64,7 @@ func (s *Service) requireCheckoutSessionService() (*services.CheckoutSessionServ
 	return s.rt.CheckoutSessionService, nil
 }
 
-func (s *Service) requireUserSubscriptionService() (*services.UserSubscriptionService, error) {
+func (s *Service) requireUserSubscriptionService() (*subscriptions.UserSubscriptionService, error) {
 	if s.rt.UserSubscriptionService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
@@ -120,7 +120,7 @@ func (s *Service) requireProcessorCustomerAndConfig() (*payments.ProcessorCustom
 	return s.rt.ProcessorCustomerService, s.rt.Config, nil
 }
 
-func (s *Service) requireAdminSubscriptionService() (*services.AdminSubscriptionService, error) {
+func (s *Service) requireAdminSubscriptionService() (*subscriptions.AdminSubscriptionService, error) {
 	if s.rt.AdminSubscriptionService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}

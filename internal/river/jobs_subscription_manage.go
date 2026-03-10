@@ -41,7 +41,7 @@ type CancelSubscriptionWorker struct {
 	river.WorkerDefaults[CancelSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
-	UserSubscriptionService      *services.UserSubscriptionService
+	UserSubscriptionService      *subscriptions.UserSubscriptionService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *services.SubscriptionLifecycleService
 }

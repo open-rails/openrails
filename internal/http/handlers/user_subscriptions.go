@@ -7,7 +7,6 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 )
@@ -79,7 +78,7 @@ func GetSubscription(r *httprequest.Request) {
 
 	subscription, err := r.State.UserSubscriptionService.GetUserSubscriptionByID(r.Request.Context(), user.ID, subscriptionID)
 	if err != nil {
-		if errors.Is(err, services.ErrSubscriptionNotFound) {
+		if errors.Is(err, subscriptions.ErrSubscriptionNotFound) {
 			r.ErrorJSON(http.StatusNotFound, "Subscription not found")
 			return
 		}

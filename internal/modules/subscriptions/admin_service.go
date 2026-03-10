@@ -1,4 +1,4 @@
-package services
+package subscriptions
 
 import (
 	"context"
@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
@@ -30,14 +29,14 @@ var (
 
 // AdminSubscriptionService handles administrative subscription operations
 type AdminSubscriptionService struct {
-	SubscriptionService *subscriptions.SubscriptionService
+	SubscriptionService *SubscriptionService
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
 	EntitlementService  *entitlements.EntitlementService
-	NotificationService *NotificationService
+	NotificationService NotificationStore
 	PaymentService      *payments.PaymentService
 	NMIClients          map[string]*nmi.NMIClient
-	EventLogService     *EventLogService
+	EventLogService     AdminCancellationLogger
 	Clock               clockwork.Clock
 	// No user directory enrichment; IdP subject is stored on subscription
 }
@@ -64,7 +63,7 @@ type AdminSubscriptionResponse struct {
 }
 
 // GetAllSubscriptions retrieves all subscriptions with filtering (admin)
-func (s *AdminSubscriptionService) GetAllSubscriptions(ctx context.Context, queryOpts *query.QueryOptions[subscriptions.GetSubscriptionsFilters]) ([]*AdminSubscriptionResponse, int64, error) {
+func (s *AdminSubscriptionService) GetAllSubscriptions(ctx context.Context, queryOpts *query.QueryOptions[GetSubscriptionsFilters]) ([]*AdminSubscriptionResponse, int64, error) {
 	subscriptions, total, err := s.SubscriptionService.GetSubscribers(ctx, *queryOpts)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get subscriptions: %w", err)
@@ -266,7 +265,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		ID:        uuid.New(),
 		UserID:    subscription.UserID,
 		EventType: models.NotificationPremiumEnded,
-		Data:      map[string]any{"reason": string(subscriptions.PremiumEndReasonAdmin)},
+		Data:      map[string]any{"reason": string(PremiumEndReasonAdmin)},
 	}
 	if err := s.NotificationService.Create(ctx, notification); err != nil {
 		log.WithFields(log.Fields{
@@ -288,59 +287,7 @@ func (s *AdminSubscriptionService) logCancellationEvent(ctx context.Context, sub
 		return
 	}
 
-	var procSubID *string
-	if subscription.ProcessorSubscriptionID != "" {
-		procSubID = &subscription.ProcessorSubscriptionID
-	}
-
-	cancelType := ""
-	if subscription.CancelType != nil {
-		cancelType = string(*subscription.CancelType)
-	}
-
-	metadata := map[string]any{
-		"source": "admin",
-	}
-	if cancelType != "" {
-		metadata["cancel_type"] = cancelType
-	}
-	if reason != "" {
-		metadata["reason"] = redactPII(reason)
-	}
-
-	var priceAmount float64
-	priceCurrency := "usd"
-	var billingDays uint32
-	var productID *uuid.UUID
-	var priceID *uuid.UUID
-	if subscription.Price != nil {
-		priceAmount = float64(subscription.Price.Amount) / 100.0
-		priceCurrency = subscription.Price.Currency
-		if subscription.Price.BillingCycleDays != nil {
-			billingDays = uint32(*subscription.Price.BillingCycleDays)
-		}
-		productID = &subscription.Price.ProductID
-		priceID = &subscription.Price.ID
-	}
-
-	data := SubscriptionEventData{
-		SubscriptionID:          subscription.ID,
-		UserID:                  subscription.UserID,
-		EventType:               PaymentEventSubscriptionCancelled,
-		Status:                  string(subscription.Status),
-		CancelType:              cancelType,
-		PriceAmount:             priceAmount,
-		PriceCurrency:           priceCurrency,
-		BillingCycleDays:        billingDays,
-		ProductID:               productID,
-		PriceID:                 priceID,
-		Processor:               string(subscription.Processor),
-		ProcessorSubscriptionID: procSubID,
-		Metadata:                CreateMetadataJSON(metadata),
-		Timestamp:               s.now().UTC(),
-	}
-
-	if err := s.EventLogService.LogSubscriptionEvent(ctx, data); err != nil {
+	if err := s.EventLogService.LogAdminSubscriptionCancellation(ctx, subscription, reason, s.now()); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"subscription_id": subscription.ID,
 			"user_id":         subscription.UserID,
@@ -460,11 +407,11 @@ func (s *AdminSubscriptionService) SendManualNotification(ctx context.Context, u
 
 // NewAdminSubscriptionService creates a new AdminSubscriptionService
 func NewAdminSubscriptionService(
-	subscriptionService *subscriptions.SubscriptionService,
+	subscriptionService *SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
 	entitlementService *entitlements.EntitlementService,
-	notificationService *NotificationService,
+	notificationService NotificationStore,
 	paymentService *payments.PaymentService,
 	nmiClients map[string]*nmi.NMIClient,
 ) *AdminSubscriptionService {

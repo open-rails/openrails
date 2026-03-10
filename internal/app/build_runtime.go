@@ -444,9 +444,9 @@ type servicesInstances struct {
 	SolanaRPC                *solana.RPCClient
 	FXProvider               fx.Provider
 
-	UserSubscriptionService   *services.UserSubscriptionService
+	UserSubscriptionService   *subscriptions.UserSubscriptionService
 	PublicSubscriptionService *catalog.PublicSubscriptionService
-	AdminSubscriptionService  *services.AdminSubscriptionService
+	AdminSubscriptionService  *subscriptions.AdminSubscriptionService
 
 	SubscriptionLifecycleService *services.SubscriptionLifecycleService
 	DeduplicationService         *services.DeduplicationService
@@ -527,7 +527,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	subscriptionService.VaultService = vaultService
 	idempotencyService := services.NewIdempotencyService(redisClient)
 
-	userSubscriptionService := services.NewUserSubscriptionService(
+	userSubscriptionService := subscriptions.NewUserSubscriptionService(
 		subscriptionService,
 		productService,
 		priceService,
@@ -542,7 +542,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		priceService,
 	)
 
-	adminSubscriptionService := services.NewAdminSubscriptionService(
+	adminSubscriptionService := subscriptions.NewAdminSubscriptionService(
 		subscriptionService,
 		productService,
 		priceService,

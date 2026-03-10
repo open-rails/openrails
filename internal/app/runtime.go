@@ -51,9 +51,9 @@ type Runtime struct {
 	PaymentService       *payments.PaymentService
 	VaultService         *payments.VaultService
 
-	UserSubscriptionService   *services.UserSubscriptionService
+	UserSubscriptionService   *subscriptions.UserSubscriptionService
 	PublicSubscriptionService *catalog.PublicSubscriptionService
-	AdminSubscriptionService  *services.AdminSubscriptionService
+	AdminSubscriptionService  *subscriptions.AdminSubscriptionService
 
 	EmailService *services.EmailService
 

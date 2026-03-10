@@ -6,14 +6,14 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 type BillingStatusResponse struct {
-	HasActiveSubscription bool                               `json:"has_active_subscription"`
-	Subscription          *services.UserSubscriptionResponse `json:"subscription,omitempty"`
-	NextRenewalAt         *time.Time                         `json:"next_renewal_at,omitempty"`
-	Entitlements          []models.Entitlement               `json:"entitlements,omitempty"`
+	HasActiveSubscription bool                                    `json:"has_active_subscription"`
+	Subscription          *subscriptions.UserSubscriptionResponse `json:"subscription,omitempty"`
+	NextRenewalAt         *time.Time                              `json:"next_renewal_at,omitempty"`
+	Entitlements          []models.Entitlement                    `json:"entitlements,omitempty"`
 }
 
 func GetMyBillingStatus(r *httprequest.Request) {
@@ -23,7 +23,7 @@ func GetMyBillingStatus(r *httprequest.Request) {
 		return
 	}
 
-	var sub *services.UserSubscriptionResponse
+	var sub *subscriptions.UserSubscriptionResponse
 	var next *time.Time
 	var hasActive bool
 	if r.State.UserSubscriptionService != nil {

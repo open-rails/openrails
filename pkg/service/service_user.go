@@ -304,7 +304,7 @@ func (s *Service) CancelSubscription(ctx context.Context, userID string, req Can
 
 	err = userSubscriptions.CancelUserSubscription(ctx, userID, req.Feedback)
 	if err != nil {
-		var ccbillErr *services.CCBillCancelError
+		var ccbillErr *subscriptions.CCBillCancelError
 		if errors.As(err, &ccbillErr) {
 			return &CancelSubscriptionResult{
 				Success: false,
@@ -611,10 +611,10 @@ func (s *Service) GetNotifications(ctx context.Context, userID string, opts GetN
 		offset = 0
 	}
 
-	queryOpts := &query.QueryOptions[services.GetNotificationsFilters]{
+	queryOpts := &query.QueryOptions[subscriptions.GetNotificationsFilters]{
 		Limit:   limit,
 		Offset:  offset,
-		Filters: services.GetNotificationsFilters{UserID: userID, Seen: opts.Seen},
+		Filters: subscriptions.GetNotificationsFilters{UserID: userID, Seen: opts.Seen},
 	}
 
 	notifications, total, err := userSubscriptions.GetUserNotifications(ctx, userID, queryOpts)
@@ -647,10 +647,10 @@ func (s *Service) GetUnreadNotificationCount(ctx context.Context, userID string)
 	}
 
 	unread := false
-	queryOpts := &query.QueryOptions[services.GetNotificationsFilters]{
+	queryOpts := &query.QueryOptions[subscriptions.GetNotificationsFilters]{
 		Limit:   1,
 		Offset:  0,
-		Filters: services.GetNotificationsFilters{UserID: userID, Seen: &unread},
+		Filters: subscriptions.GetNotificationsFilters{UserID: userID, Seen: &unread},
 	}
 
 	_, total, err := userSubscriptions.GetUserNotifications(ctx, userID, queryOpts)
@@ -932,7 +932,7 @@ func priceFromModel(p *models.Price) Price {
 	}
 }
 
-func subscriptionFromModel(resp *services.UserSubscriptionResponse) Subscription {
+func subscriptionFromModel(resp *subscriptions.UserSubscriptionResponse) Subscription {
 	sub := resp.Subscription
 	result := Subscription{
 		ID:                      api.FormatSubscriptionID(sub.ID),
@@ -978,7 +978,7 @@ func subscriptionFromModel(resp *services.UserSubscriptionResponse) Subscription
 	return result
 }
 
-func subscriptionDetailFromModel(resp *services.UserSubscriptionResponse) *SubscriptionDetail {
+func subscriptionDetailFromModel(resp *subscriptions.UserSubscriptionResponse) *SubscriptionDetail {
 	sub := subscriptionFromModel(resp)
 	detail := &SubscriptionDetail{Subscription: sub}
 	if resp.Product != nil {

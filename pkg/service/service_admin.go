@@ -552,7 +552,7 @@ func (s *Service) AdminGetMetricsChurn(ctx context.Context, opts MetricsOptions)
 
 // -------------------------------- Conversion Helpers --------------------------------
 
-func adminSubscriptionFromResponse(resp *services.AdminSubscriptionResponse) Subscription {
+func adminSubscriptionFromResponse(resp *subscriptions.AdminSubscriptionResponse) Subscription {
 	if resp == nil || resp.Subscription == nil {
 		return Subscription{}
 	}
