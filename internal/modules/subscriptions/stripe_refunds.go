@@ -1,4 +1,4 @@
-package services
+package subscriptions
 
 import (
 	"context"
@@ -14,40 +14,32 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 var ErrStripeRefundTargetMissing = errors.New("stripe refundable transaction id is missing")
 
-// StripeRefundService handles Stripe refund operations
 type StripeRefundService struct {
 	Config *config.Config
 }
 
-// RefundParams contains parameters for creating a Stripe refund
 type RefundParams struct {
-	// ChargeID is the ID of the charge to refund (ch_xxx or pi_xxx for payment intents)
 	ChargeID string
-	// Amount in cents. If 0, refunds the full amount.
-	Amount int64
-	// Reason for the refund: duplicate, fraudulent, or requested_by_customer
-	Reason string
+	Amount   int64
+	Reason   string
 }
 
-// RefundResult contains the result of a Stripe refund
 type RefundResult struct {
-	ID            string `json:"id"`             // Refund ID (re_xxx)
-	Amount        int64  `json:"amount"`         // Amount refunded in cents
-	Currency      string `json:"currency"`       // Currency code
-	ChargeID      string `json:"charge"`         // Original charge ID
-	Status        string `json:"status"`         // pending, succeeded, failed, canceled
-	Reason        string `json:"reason"`         // Reason for refund
-	FailureReason string `json:"failure_reason"` // If failed, the reason
+	ID            string `json:"id"`
+	Amount        int64  `json:"amount"`
+	Currency      string `json:"currency"`
+	ChargeID      string `json:"charge"`
+	Status        string `json:"status"`
+	Reason        string `json:"reason"`
+	FailureReason string `json:"failure_reason"`
 }
 
-// CreateRefund creates a refund for a Stripe charge or payment intent
 func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundParams) (*RefundResult, error) {
-	_, secretKey, err := subscriptions.RequireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -58,28 +50,21 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	}
 
 	values := url.Values{}
-
-	// Stripe accepts either charge or payment_intent
 	if strings.HasPrefix(chargeID, "pi_") {
 		values.Set("payment_intent", chargeID)
 	} else {
 		values.Set("charge", chargeID)
 	}
-
-	// If amount is specified, set it (otherwise full refund)
 	if params.Amount > 0 {
 		values.Set("amount", strconv.FormatInt(params.Amount, 10))
 	}
 
-	// Set reason if provided
 	reason := strings.TrimSpace(params.Reason)
 	if reason != "" {
-		// Validate reason is one of the allowed values
 		switch reason {
 		case "duplicate", "fraudulent", "requested_by_customer":
 			values.Set("reason", reason)
 		default:
-			// Default to requested_by_customer for other reasons
 			values.Set("reason", "requested_by_customer")
 		}
 	}
@@ -98,9 +83,12 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read stripe refund response: %w", err)
+	}
 	if resp.StatusCode >= 400 {
-		msg := subscriptions.ParseStripeAPIError(body)
+		msg := ParseStripeAPIError(body)
 		if msg == "" {
 			msg = fmt.Sprintf("stripe refund failed (%d)", resp.StatusCode)
 		}
@@ -119,7 +107,6 @@ func ResolveStripeRefundTarget(payment *models.Payment) (string, error) {
 	if chargeID := strings.TrimSpace(metadataStringValue(payment.Metadata, "stripe_charge_id")); strings.HasPrefix(chargeID, "ch_") {
 		return chargeID, nil
 	}
-
 	if paymentIntentID := strings.TrimSpace(metadataStringValue(payment.Metadata, "stripe_payment_intent_id")); strings.HasPrefix(paymentIntentID, "pi_") {
 		return paymentIntentID, nil
 	}
@@ -137,18 +124,15 @@ func metadataStringValue(metadata map[string]any, key string) string {
 	if !ok {
 		return ""
 	}
-
 	s, ok := v.(string)
 	if !ok {
 		return ""
 	}
-
 	return s
 }
 
-// GetRefund retrieves a refund by ID
 func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*RefundResult, error) {
-	_, secretKey, err := subscriptions.RequireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -171,9 +155,12 @@ func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read stripe refund fetch response: %w", err)
+	}
 	if resp.StatusCode >= 400 {
-		msg := subscriptions.ParseStripeAPIError(body)
+		msg := ParseStripeAPIError(body)
 		if msg == "" {
 			msg = fmt.Sprintf("stripe refund fetch failed (%d)", resp.StatusCode)
 		}

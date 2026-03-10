@@ -11,6 +11,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
@@ -68,13 +69,13 @@ func AdminRefundPayment(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "CCBill refunds must be processed through CCBill's admin portal. After issuing the refund in CCBill, it will be recorded automatically via webhook.")
 		return
 	case payment.Processor == models.ProcessorStripe:
-		refundTargetID, err := services.ResolveStripeRefundTarget(payment)
+		refundTargetID, err := subscriptions.ResolveStripeRefundTarget(payment)
 		if err != nil {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}
-		stripeService := &services.StripeRefundService{Config: r.State.Config}
-		result, err := stripeService.CreateRefund(ctx, services.RefundParams{ChargeID: refundTargetID, Amount: req.Amount, Reason: req.Reason})
+		stripeService := &subscriptions.StripeRefundService{Config: r.State.Config}
+		result, err := stripeService.CreateRefund(ctx, subscriptions.RefundParams{ChargeID: refundTargetID, Amount: req.Amount, Reason: req.Reason})
 		if err != nil {
 			r.ErrorJSON(http.StatusBadGateway, fmt.Sprintf("stripe refund failed: %s", err.Error()))
 			return

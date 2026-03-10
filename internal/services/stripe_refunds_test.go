@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -22,19 +23,19 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 	tests := []struct {
 		name      string
 		config    *config.Config
-		params    RefundParams
+		params    subscriptions.RefundParams
 		wantError string
 	}{
 		{
 			name:      "nil config",
 			config:    nil,
-			params:    RefundParams{ChargeID: "ch_123"},
+			params:    subscriptions.RefundParams{ChargeID: "ch_123"},
 			wantError: "stripe configuration is not available",
 		},
 		{
 			name:      "nil stripe config",
 			config:    &config.Config{},
-			params:    RefundParams{ChargeID: "ch_123"},
+			params:    subscriptions.RefundParams{ChargeID: "ch_123"},
 			wantError: "stripe configuration is not available",
 		},
 		{
@@ -44,7 +45,7 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 					"stripe": {Type: config.ProcessorTypeStripe, SecretKey: ""},
 				},
 			},
-			params:    RefundParams{ChargeID: "ch_123"},
+			params:    subscriptions.RefundParams{ChargeID: "ch_123"},
 			wantError: "stripe secret key is not configured",
 		},
 		{
@@ -54,14 +55,14 @@ func TestStripeRefundService_CreateRefund_ValidationErrors(t *testing.T) {
 					"stripe": {Type: config.ProcessorTypeStripe, SecretKey: "sk_test_123"},
 				},
 			},
-			params:    RefundParams{ChargeID: ""},
+			params:    subscriptions.RefundParams{ChargeID: ""},
 			wantError: "charge_id or payment_intent_id is required",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := &StripeRefundService{Config: tt.config}
+			svc := &subscriptions.StripeRefundService{Config: tt.config}
 			_, err := svc.CreateRefund(context.Background(), tt.params)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantError)
@@ -96,7 +97,7 @@ func TestStripeRefundService_GetRefund_ValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := &StripeRefundService{Config: tt.config}
+			svc := &subscriptions.StripeRefundService{Config: tt.config}
 			_, err := svc.GetRefund(context.Background(), tt.refundID)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantError)
@@ -116,7 +117,7 @@ func TestRefundParams_ChargeIDTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.chargeID, func(t *testing.T) {
-			params := RefundParams{
+			params := subscriptions.RefundParams{
 				ChargeID: tt.chargeID,
 				Amount:   1000,
 			}
@@ -134,7 +135,7 @@ func TestRefundParams_ReasonValidation(t *testing.T) {
 	// Valid reasons
 	validReasons := []string{"duplicate", "fraudulent", "requested_by_customer"}
 	for _, reason := range validReasons {
-		params := RefundParams{
+		params := subscriptions.RefundParams{
 			ChargeID: "ch_test",
 			Reason:   reason,
 		}
@@ -192,7 +193,7 @@ func TestResolveStripeRefundTarget(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			target, err := ResolveStripeRefundTarget(tt.payment)
+			target, err := subscriptions.ResolveStripeRefundTarget(tt.payment)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
