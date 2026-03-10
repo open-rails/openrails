@@ -79,10 +79,3 @@ type UpgradeResponse struct {
 	ProratedAmount    int64      `json:"prorated_amount,omitempty"`
 	OldSubscriptionID *uuid.UUID `json:"old_subscription_id,omitempty"`
 }
-
-type RegisterPurchaseResponse struct {
-	PaymentID    uuid.UUID
-	Entitlements []string
-	DelayedStart *time.Time
-	Eligibility  EligibilityStatus
-}

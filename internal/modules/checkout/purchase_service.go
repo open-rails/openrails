@@ -251,7 +251,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *Reg
 		"delayed_start": delayedStart, "eligibility": eligibility.Status,
 	}).Info("registered purchase")
 
-	return &RegisterPurchaseResponse{PaymentID: paymentID, Entitlements: grantedEntitlements, DelayedStart: delayedStart, Eligibility: eligibility.Status}, nil
+	return &RegisterPurchaseResponse{PaymentID: paymentID, Entitlements: grantedEntitlements, DelayedStart: delayedStart, Eligibility: string(eligibility.Status)}, nil
 }
 
 func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, product *models.Product, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, walletPurchase bool, billingCycleDays *int) error {

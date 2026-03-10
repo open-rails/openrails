@@ -21,3 +21,10 @@ type RegisterPurchaseRequest struct {
 	DiscountMetadata map[string]any
 	Metadata         map[string]any
 }
+
+type RegisterPurchaseResponse struct {
+	PaymentID    uuid.UUID
+	Entitlements []string
+	DelayedStart *time.Time
+	Eligibility  string
+}
