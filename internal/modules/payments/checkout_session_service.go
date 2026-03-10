@@ -1,4 +1,4 @@
-package services
+package payments
 
 import (
 	"context"
@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/pkg/api"
@@ -32,27 +31,51 @@ const (
 	redirectCheckoutSessionTTL   = 24 * time.Hour
 )
 
-var (
-	ErrCheckoutSessionValidation       = payments.ErrCheckoutSessionValidation
-	ErrCheckoutSessionNotFound         = payments.ErrCheckoutSessionNotFound
-	ErrCheckoutSessionForbidden        = payments.ErrCheckoutSessionForbidden
-	ErrCheckoutSessionExpired          = payments.ErrCheckoutSessionExpired
-	ErrCheckoutSessionPending          = payments.ErrCheckoutSessionPending
-	ErrCheckoutSessionConflict         = payments.ErrCheckoutSessionConflict
-	ErrCheckoutSessionNotSolana        = payments.ErrCheckoutSessionNotSolana
-	ErrCheckoutSessionAlreadyCompleted = payments.ErrCheckoutSessionAlreadyCompleted
+type IdempotencyStatus string
+
+const (
+	IdempotencyStatusPending IdempotencyStatus = "pending"
+	IdempotencyStatusSuccess IdempotencyStatus = "success"
+	IdempotencyStatusFailed  IdempotencyStatus = "failed"
 )
 
+type IdempotencyRecord struct {
+	Status    IdempotencyStatus
+	Result    json.RawMessage
+	Error     string
+	CreatedAt time.Time
+}
+
+type sessionIdempotencyStore interface {
+	Begin(ctx context.Context, operation, key string) (*IdempotencyRecord, bool, error)
+	Fail(ctx context.Context, operation, key string, operationErr error) error
+	Complete(ctx context.Context, operation, key string, result any) error
+}
+
+type checkoutSessionExecutor interface {
+	Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error)
+	RegisterPurchase(ctx context.Context, req *RegisterPurchaseRequest) (*RegisterPurchaseResponse, error)
+}
+
+type solanaPaymentService interface {
+	GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*SolanaPayResult, error)
+	ConsumeAndRemovePending(ctx context.Context, reference, transactionID string) error
+}
+
+type solanaTransactionService interface {
+	BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*SolanaTransactionBuildResponse, error)
+	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string) error
+}
 type CheckoutSessionService struct {
 	db                       *db.DB
 	repo                     *repo.CheckoutSessionRepo
 	priceService             *catalog.PriceService
 	productService           *catalog.ProductService
-	paymentMethodService     *payments.PaymentMethodService
-	idempotencyService       *IdempotencyService
-	checkoutService          *CheckoutService
-	solanaPayService         *SolanaPayService
-	solanaTransactionService *SolanaTransactionService
+	paymentMethodService     *PaymentMethodService
+	idempotencyService       sessionIdempotencyStore
+	checkoutService          checkoutSessionExecutor
+	solanaPayService         solanaPaymentService
+	solanaTransactionService solanaTransactionService
 	fxProvider               fx.Provider
 	config                   *config.Config
 	Clock                    clockwork.Clock
@@ -62,11 +85,11 @@ func NewCheckoutSessionService(
 	db *db.DB,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
-	paymentMethodService *payments.PaymentMethodService,
-	idempotencyService *IdempotencyService,
-	checkoutService *CheckoutService,
-	solanaPayService *SolanaPayService,
-	solanaTransactionService *SolanaTransactionService,
+	paymentMethodService *PaymentMethodService,
+	idempotencyService sessionIdempotencyStore,
+	checkoutService checkoutSessionExecutor,
+	solanaPayService solanaPaymentService,
+	solanaTransactionService solanaTransactionService,
 	fxProvider fx.Provider,
 	cfg *config.Config,
 ) *CheckoutSessionService {
@@ -92,7 +115,7 @@ func (s *CheckoutSessionService) now() time.Time {
 	return time.Now()
 }
 
-func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *payments.CheckoutSessionCreateRequest, user *payments.UserIdentity) (*payments.CheckoutSessionResponse, error) {
+func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return nil, fmt.Errorf("%w: user is required", ErrCheckoutSessionValidation)
 	}
@@ -111,7 +134,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *payment
 		if exists {
 			switch rec.Status {
 			case IdempotencyStatusSuccess:
-				var cached payments.CheckoutSessionResponse
+				var cached CheckoutSessionResponse
 				if err := json.Unmarshal(rec.Result, &cached); err != nil {
 					return nil, fmt.Errorf("failed to decode cached response: %w", err)
 				}
@@ -141,7 +164,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *payment
 	return resp, nil
 }
 
-func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context, req *payments.CheckoutSessionCreateRequest, user *payments.UserIdentity) (*payments.CheckoutSessionResponse, error) {
+func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	if strings.TrimSpace(req.PriceID) == "" {
 		return nil, fmt.Errorf("%w: price_id is required", ErrCheckoutSessionValidation)
 	}
@@ -224,7 +247,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	return s.sessionToResponse(session), nil
 }
 
-func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.UUID, user *payments.UserIdentity) (*payments.CheckoutSessionResponse, error) {
+func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.UUID, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
 		return nil, ErrCheckoutSessionNotFound
@@ -244,7 +267,7 @@ func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.
 	return s.sessionToResponse(session), nil
 }
 
-func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID uuid.UUID, req *payments.CheckoutSessionConfirmRequest, user *payments.UserIdentity) (*payments.CheckoutSessionResponse, error) {
+func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID uuid.UUID, req *CheckoutSessionConfirmRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
 		return nil, ErrCheckoutSessionNotFound
@@ -315,7 +338,7 @@ func (s *CheckoutSessionService) resolveMode(mode string, processor string, pric
 	return models.CheckoutSessionMode(trimmedMode), nil
 }
 
-func (s *CheckoutSessionService) validatePayment(ctx context.Context, processor string, payment *payments.CheckoutSessionPaymentRequest, user *payments.UserIdentity) error {
+func (s *CheckoutSessionService) validatePayment(ctx context.Context, processor string, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
 	// Route to processor-specific validation based on config type detection
 	// This allows adding new NMI providers via config without code changes
 	switch {
@@ -372,7 +395,7 @@ func (s *CheckoutSessionService) validatePayment(ctx context.Context, processor 
 	return nil
 }
 
-func (s *CheckoutSessionService) initializeSession(ctx context.Context, session *models.CheckoutSession, payment *payments.CheckoutSessionPaymentRequest, user *payments.UserIdentity) error {
+func (s *CheckoutSessionService) initializeSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
 	if session == nil {
 		return fmt.Errorf("%w: session is required", ErrCheckoutSessionValidation)
 	}
@@ -395,8 +418,8 @@ func (s *CheckoutSessionService) initializeSession(ctx context.Context, session 
 	}
 }
 
-func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, session *models.CheckoutSession, payment *payments.CheckoutSessionPaymentRequest) error {
-	solanaProc, err := requireSolanaProcessorConfig(s.config)
+func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest) error {
+	solanaProc, err := RequireSolanaProcessorConfig(s.config)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
@@ -487,12 +510,12 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 	return nil
 }
 
-func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, session *models.CheckoutSession, payment *payments.CheckoutSessionPaymentRequest, user *payments.UserIdentity) error {
+func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
 	if s.checkoutService == nil {
 		return fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
 
-	req := &payments.CheckoutRequest{
+	req := &CheckoutRequest{
 		PriceID:         api.FormatPriceID(session.PriceID),
 		PaymentMethodID: payment.PaymentMethodID,
 		PaymentToken:    payment.PaymentToken,
@@ -526,7 +549,7 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 	return s.applyCheckoutResponse(session, resp)
 }
 
-func (s *CheckoutSessionService) applyCheckoutResponse(session *models.CheckoutSession, resp *payments.CheckoutResponse) error {
+func (s *CheckoutSessionService) applyCheckoutResponse(session *models.CheckoutSession, resp *CheckoutResponse) error {
 	if session == nil {
 		return fmt.Errorf("%w: session is required", ErrCheckoutSessionValidation)
 	}
@@ -569,7 +592,7 @@ func (s *CheckoutSessionService) applyCheckoutResponse(session *models.CheckoutS
 	return nil
 }
 
-func requireBillingFields(payment *payments.CheckoutSessionPaymentRequest) error {
+func requireBillingFields(payment *CheckoutSessionPaymentRequest) error {
 	if strings.TrimSpace(payment.Email) == "" ||
 		strings.TrimSpace(payment.FirstName) == "" ||
 		strings.TrimSpace(payment.LastName) == "" ||
@@ -588,7 +611,7 @@ func requireBillingFields(payment *payments.CheckoutSessionPaymentRequest) error
 	return nil
 }
 
-func (s *CheckoutSessionService) buildProcessorFields(processor string, payment *payments.CheckoutSessionPaymentRequest) map[string]any {
+func (s *CheckoutSessionService) buildProcessorFields(processor string, payment *CheckoutSessionPaymentRequest) map[string]any {
 	fields := map[string]any{
 		"processor": processor,
 	}
@@ -616,14 +639,14 @@ func addField(fields map[string]any, key, value string) {
 	fields[key] = strings.TrimSpace(value)
 }
 
-func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSession) *payments.CheckoutSessionResponse {
-	resp := &payments.CheckoutSessionResponse{
+func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSession) *CheckoutSessionResponse {
+	resp := &CheckoutSessionResponse{
 		Object:  "checkout_session",
 		ID:      api.FormatCheckoutSessionID(session.ID),
 		Status:  string(session.Status),
 		Mode:    string(session.Mode),
 		PriceID: api.FormatPriceID(session.PriceID),
-		Payment: payments.CheckoutSessionPaymentResponse{
+		Payment: CheckoutSessionPaymentResponse{
 			Processor: string(session.Processor),
 		},
 		ExpiresAt: session.ExpiresAt,
@@ -728,7 +751,7 @@ func (s *CheckoutSessionService) isExpired(session *models.CheckoutSession) bool
 	return session.ExpiresAt.Before(s.now())
 }
 
-func (s *CheckoutSessionService) buildNextAction(resp *payments.CheckoutSessionResponse) *payments.CheckoutSessionNextAction {
+func (s *CheckoutSessionService) buildNextAction(resp *CheckoutSessionResponse) *CheckoutSessionNextAction {
 	if resp == nil {
 		return nil
 	}
@@ -736,20 +759,20 @@ func (s *CheckoutSessionService) buildNextAction(resp *payments.CheckoutSessionR
 		return nil
 	}
 	if resp.Payment.RedirectURL != "" {
-		return &payments.CheckoutSessionNextAction{
+		return &CheckoutSessionNextAction{
 			Type: "redirect_to_url",
-			RedirectToURL: &payments.CheckoutSessionRedirectToURL{
+			RedirectToURL: &CheckoutSessionRedirectToURL{
 				URL: resp.Payment.RedirectURL,
 			},
 		}
 	}
 	if resp.Payment.TransactionURL != "" {
-		return &payments.CheckoutSessionNextAction{
+		return &CheckoutSessionNextAction{
 			Type: "solana_qr",
 		}
 	}
 	if resp.Payment.SolanaPayURL != "" {
-		return &payments.CheckoutSessionNextAction{
+		return &CheckoutSessionNextAction{
 			Type: "solana_pay",
 		}
 	}
@@ -783,7 +806,7 @@ func (s *CheckoutSessionService) getAPIBaseURL() string {
 	return strings.TrimSuffix(apiURL, "/")
 }
 
-func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, session *models.CheckoutSession, req *payments.CheckoutSessionConfirmRequest, user *payments.UserIdentity) (*payments.CheckoutSessionResponse, error) {
+func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, session *models.CheckoutSession, req *CheckoutSessionConfirmRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	if strings.TrimSpace(req.Payment.Signature) == "" {
 		return nil, fmt.Errorf("%w: signature is required", ErrCheckoutSessionValidation)
 	}
@@ -793,7 +816,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if s.checkoutService == nil {
 		return nil, fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
-	solanaProc, err := requireSolanaProcessorConfig(s.config)
+	solanaProc, err := RequireSolanaProcessorConfig(s.config)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
@@ -856,7 +879,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		return nil, err
 	}
 
-	result, err := s.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
+	result, err := s.checkoutService.RegisterPurchase(ctx, &RegisterPurchaseRequest{
 		UserID:        session.UserID,
 		PriceID:       session.PriceID,
 		Processor:     "solana",
@@ -1126,7 +1149,7 @@ func timePtr(t time.Time) *time.Time {
 
 // GetSessionForSolanaPay retrieves and validates a checkout session for Solana Pay spec endpoints.
 // Returns session info needed for GET endpoint or an error if the session is invalid.
-func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, sessionID uuid.UUID) (*payments.SolanaPaySessionInfo, error) {
+func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, sessionID uuid.UUID) (*SolanaPaySessionInfo, error) {
 	if s.repo == nil {
 		return nil, ErrCheckoutSessionNotFound
 	}
@@ -1166,21 +1189,21 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 		}
 	}
 
-	return &payments.SolanaPaySessionInfo{
+	return &SolanaPaySessionInfo{
 		ProductName: productName,
 	}, nil
 }
 
 // BuildSolanaPayTransaction builds a Solana transaction for the given checkout session and wallet account.
 // This implements the POST endpoint of the Solana Pay Transaction Request spec.
-func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, sessionID uuid.UUID, account string) (*payments.SolanaPayTransactionResponse, error) {
+func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, sessionID uuid.UUID, account string) (*SolanaPayTransactionResponse, error) {
 	if s.repo == nil {
 		return nil, ErrCheckoutSessionNotFound
 	}
 	if s.solanaTransactionService == nil {
 		return nil, fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutSessionValidation)
 	}
-	solanaProc, err := requireSolanaProcessorConfig(s.config)
+	solanaProc, err := RequireSolanaProcessorConfig(s.config)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
@@ -1260,7 +1283,7 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		message = "Sign to complete your payment"
 	}
 
-	return &payments.SolanaPayTransactionResponse{
+	return &SolanaPayTransactionResponse{
 		TransactionBase64: txResp.TransactionBase64,
 		Message:           message,
 	}, nil

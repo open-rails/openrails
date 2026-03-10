@@ -1380,6 +1380,10 @@ func (s *CheckoutService) defaultIfEmpty(value, defaultValue string) string {
 	return value
 }
 
+func timePtr(t time.Time) *time.Time {
+	return &t
+}
+
 // RegisterPurchase records a confirmed one-time purchase and grants entitlements.
 // This is the single source of truth for "user paid for product" logic.
 //

@@ -60,7 +60,7 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 		return nil, fmt.Errorf("failed to get price: %w", err)
 	}
 
-	solanaProc, err := requireSolanaProcessorConfig(s.cfg)
+	solanaProc, err := payments.RequireSolanaProcessorConfig(s.cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 		return nil, fmt.Errorf("merchant wallet not configured")
 	}
 
-	quote, err := CalculateTokenQuote(ctx, tokenCfg, price.Amount, price.Currency, s.fxProvider)
+	quote, err := payments.CalculateTokenQuote(ctx, tokenCfg, price.Amount, price.Currency, s.fxProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate token amount: %w", err)
 	}

@@ -37,7 +37,7 @@ type SolanaPayPoller struct {
 	solanaPayService       *SolanaPayService
 	solanaTransactionSvc   *SolanaTransactionService
 	checkoutService        *CheckoutService
-	checkoutSessionService *CheckoutSessionService
+	checkoutSessionService *payments.CheckoutSessionService
 
 	mu      sync.Mutex
 	running bool
@@ -55,7 +55,7 @@ func NewSolanaPayPoller(
 	solanaPayService *SolanaPayService,
 	solanaTransactionService *SolanaTransactionService,
 	checkoutService *CheckoutService,
-	checkoutSessionService *CheckoutSessionService,
+	checkoutSessionService *payments.CheckoutSessionService,
 ) *SolanaPayPoller {
 	var rpc *solana.RPCClient
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {

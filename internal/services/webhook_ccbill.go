@@ -43,7 +43,7 @@ type CCBillWebhookService struct {
 	ProfileRepo                  *repo.ProfileRepo
 	PaymentService               *payments.PaymentService
 	DeduplicationService         *DeduplicationService
-	CheckoutSessionService       *CheckoutSessionService
+	CheckoutSessionService       *payments.CheckoutSessionService
 	CreditsService               *credits.CreditsService
 }
 

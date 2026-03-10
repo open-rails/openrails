@@ -133,7 +133,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Validate Solana config
-	solanaProc, err := requireSolanaProcessorConfig(s.cfg)
+	solanaProc, err := payments.RequireSolanaProcessorConfig(s.cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Calculate token amount from fiat price with FX conversion if needed
-	quote, err := CalculateTokenQuote(ctx, tokenCfg, price.Amount, price.Currency, s.fxProvider)
+	quote, err := payments.CalculateTokenQuote(ctx, tokenCfg, price.Amount, price.Currency, s.fxProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate token quote: %w", err)
 	}
@@ -221,7 +221,7 @@ func (s *SolanaPayService) buildTransferRequestURL(recipient string, amount uint
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
 	// Get token config for decimals
-	solanaProc, err := requireSolanaProcessorConfig(s.cfg)
+	solanaProc, err := payments.RequireSolanaProcessorConfig(s.cfg)
 	if err != nil {
 		return baseURL // fallback without params if not configured
 	}

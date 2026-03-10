@@ -76,7 +76,7 @@ type Runtime struct {
 	IdempotencyService           *services.IdempotencyService
 
 	CheckoutService        *services.CheckoutService
-	CheckoutSessionService *services.CheckoutSessionService
+	CheckoutSessionService *payments.CheckoutSessionService
 
 	riverStarted        bool
 	externalRiverClient bool // true if River client was provided externally

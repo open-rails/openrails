@@ -49,7 +49,7 @@ type WebhookDispatcher struct {
 	CCBillRESTClient             *ccbill.RESTClient
 	NMIClients                   map[string]*nmi.NMIClient
 	CheckoutService              *CheckoutService
-	CheckoutSessionService       *CheckoutSessionService
+	CheckoutSessionService       *payments.CheckoutSessionService
 	CreditsService               *credits.CreditsService
 }
 

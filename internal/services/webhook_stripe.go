@@ -30,7 +30,7 @@ type StripeWebhookService struct {
 	CreditsService               *credits.CreditsService
 	DeduplicationService         *DeduplicationService
 	ProcessorCustomerService     *payments.ProcessorCustomerService
-	CheckoutSessionService       *CheckoutSessionService
+	CheckoutSessionService       *payments.CheckoutSessionService
 }
 
 type stripeEvent struct {

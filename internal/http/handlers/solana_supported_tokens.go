@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	jupiter "github.com/open-rails/openrails/internal/integrations/jupiter"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -253,7 +253,7 @@ func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr 
 }
 
 func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenCfg config.SolanaToken, amountCents int64, currency string, tokenPriceUSD float64, quotedAt, expiresAt time.Time) *TokenQuote {
-	quote, err := services.CalculateTokenQuote(ctx, tokenCfg, amountCents, currency, r.State.FXProvider)
+	quote, err := payments.CalculateTokenQuote(ctx, tokenCfg, amountCents, currency, r.State.FXProvider)
 	if err != nil {
 		log.WithError(err).WithField("token", tokenCfg.Symbol).Warn("Failed to calculate token quote")
 		return nil

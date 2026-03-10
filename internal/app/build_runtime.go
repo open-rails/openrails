@@ -454,7 +454,7 @@ type servicesInstances struct {
 	WebhookDispatcher            *services.WebhookDispatcher
 
 	CheckoutService          *services.CheckoutService
-	CheckoutSessionService   *services.CheckoutSessionService
+	CheckoutSessionService   *payments.CheckoutSessionService
 	CreditsService           *credits.CreditsService
 	CreditTypeService        *credits.CreditTypeService
 	ProcessorCustomerService *payments.ProcessorCustomerService
@@ -588,12 +588,12 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	webhookDispatcher.CheckoutService = checkoutService
 	subscriptionLifecycleService.EventLogService = nil // reset until ClickHouse init
 
-	checkoutSessionService := services.NewCheckoutSessionService(
+	checkoutSessionService := payments.NewCheckoutSessionService(
 		database,
 		priceService,
 		productService,
 		paymentMethodService,
-		idempotencyService,
+		services.NewPaymentsIdempotencyAdapter(idempotencyService),
 		checkoutService,
 		solanaPayService,
 		solanaTransactionService,
