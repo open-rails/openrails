@@ -7,7 +7,7 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -46,7 +46,7 @@ func ChangeTier(r *httprequest.Request) {
 
 	idempotencyKey := r.GinCtx.GetHeader("X-Idempotency-Key")
 
-	svcReq := &services.TierChangeRequest{
+	svcReq := &subscriptions.TierChangeRequest{
 		PriceID:        req.PriceID,
 		SubscriptionID: subscriptionID,
 		IdempotencyKey: idempotencyKey,
@@ -62,7 +62,7 @@ func ChangeTier(r *httprequest.Request) {
 }
 
 func writeChangeTierError(r *httprequest.Request, err error) {
-	var tierErr *services.TierChangeError
+	var tierErr *subscriptions.TierChangeError
 	if errors.As(err, &tierErr) {
 		r.ErrorJSON(tierErr.HTTPStatus, tierErr.Message)
 		return
@@ -79,17 +79,17 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 	}
 
 	switch {
-	case errors.Is(err, services.ErrTierChangeNoSubscription):
+	case errors.Is(err, subscriptions.ErrTierChangeNoSubscription):
 		r.ErrorJSON(http.StatusNotFound, "no active subscription found")
-	case errors.Is(err, services.ErrTierChangeNotSupported):
+	case errors.Is(err, subscriptions.ErrTierChangeNotSupported):
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
-	case errors.Is(err, services.ErrTierChangeBlocked):
+	case errors.Is(err, subscriptions.ErrTierChangeBlocked):
 		r.ErrorJSON(http.StatusConflict, err.Error())
-	case errors.Is(err, services.ErrTierChangePending):
+	case errors.Is(err, subscriptions.ErrTierChangePending):
 		r.ErrorJSON(http.StatusConflict, err.Error())
-	case errors.Is(err, services.ErrTierChangeSameProduct):
+	case errors.Is(err, subscriptions.ErrTierChangeSameProduct):
 		r.ErrorJSON(http.StatusConflict, "already on this plan")
-	case errors.Is(err, services.ErrTierChangeDifferentGroup):
+	case errors.Is(err, subscriptions.ErrTierChangeDifferentGroup):
 		r.ErrorJSON(http.StatusBadRequest, "cannot change to a different tier group")
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "tier change request failed")
