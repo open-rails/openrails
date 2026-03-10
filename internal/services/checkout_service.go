@@ -77,17 +77,17 @@ type CheckoutResponse struct {
 // TierChangeResponse represents the response from a tier change operation.
 // This reuses the CheckoutSessionResponse envelope pattern for API consistency.
 type TierChangeResponse struct {
-	Object         string                         `json:"object"`                    // "tier_change"
-	ID             string                         `json:"id,omitempty"`              // Operation ID for tracking
-	Status         string                         `json:"status"`                    // succeeded, requires_action, blocked
-	Mode           string                         `json:"mode"`                      // "tier_change"
-	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
-	PriceID        string                         `json:"price_id"`                  // Target price ID
-	Payment        CheckoutSessionPaymentResponse `json:"payment"`                   // Processor info
-	SubscriptionID *string                        `json:"subscription_id,omitempty"` // Affected subscription
-	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`     // For redirects
-	Message        string                         `json:"message,omitempty"`         // User-friendly message
-	DelayedStart   *time.Time                     `json:"delayed_start,omitempty"`   // For scheduled downgrades
+	Object         string                                  `json:"object"`                    // "tier_change"
+	ID             string                                  `json:"id,omitempty"`              // Operation ID for tracking
+	Status         string                                  `json:"status"`                    // succeeded, requires_action, blocked
+	Mode           string                                  `json:"mode"`                      // "tier_change"
+	Action         string                                  `json:"action,omitempty"`          // upgrade, downgrade
+	PriceID        string                                  `json:"price_id"`                  // Target price ID
+	Payment        payments.CheckoutSessionPaymentResponse `json:"payment"`                   // Processor info
+	SubscriptionID *string                                 `json:"subscription_id,omitempty"` // Affected subscription
+	NextAction     *payments.CheckoutSessionNextAction     `json:"next_action,omitempty"`     // For redirects
+	Message        string                                  `json:"message,omitempty"`         // User-friendly message
+	DelayedStart   *time.Time                              `json:"delayed_start,omitempty"`   // For scheduled downgrades
 }
 
 // CoverageInfo represents the user's current product coverage
@@ -295,7 +295,7 @@ func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID s
 }
 
 // Checkout processes a unified checkout request
-func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error) {
+func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, user *payments.UserIdentity) (*CheckoutResponse, error) {
 	// Parse and validate price
 	priceID, err := api.ParsePriceID(req.PriceID)
 	if err != nil {
@@ -470,7 +470,7 @@ func (s *CheckoutService) GetUserProductCoverage(ctx context.Context, userID str
 func (s *CheckoutService) processSubscription(
 	ctx context.Context,
 	req *CheckoutRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
@@ -496,7 +496,7 @@ func (s *CheckoutService) processSubscription(
 func (s *CheckoutService) processOneTimePurchase(
 	ctx context.Context,
 	req *CheckoutRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
@@ -523,7 +523,7 @@ func (s *CheckoutService) processOneTimePurchase(
 func (s *CheckoutService) processCCBillSubscription(
 	ctx context.Context,
 	req *CheckoutRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	price *models.Price,
 ) (*CheckoutResponse, error) {
 	// Validate CCBill configuration
@@ -586,7 +586,7 @@ func (s *CheckoutService) processCCBillSubscription(
 // Returns a FlexForm URL for the upgrade that the client can redirect to
 func (s *CheckoutService) processCCBillUpgrade(
 	ctx context.Context,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	newPrice *models.Price,
 	existingSub *models.Subscription,
 ) (*CheckoutResponse, error) {
@@ -663,7 +663,7 @@ type subscriptionIdempotencyResult struct {
 func (s *CheckoutService) processNMISubscription(
 	ctx context.Context,
 	req *CheckoutRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
@@ -918,7 +918,7 @@ type upgradeIdempotencyResult struct {
 func (s *CheckoutService) processNMISale(
 	ctx context.Context,
 	req *CheckoutRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
@@ -1061,7 +1061,7 @@ func (s *CheckoutService) processNMISale(
 func (s *CheckoutService) processSolanaPurchase(
 	ctx context.Context,
 	req *CheckoutRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
@@ -1072,7 +1072,7 @@ func (s *CheckoutService) processSolanaPurchase(
 func (s *CheckoutService) processStripeSubscription(
 	ctx context.Context,
 	req *CheckoutRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	price *models.Price,
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
@@ -1124,7 +1124,7 @@ func (s *CheckoutService) processStripeSubscription(
 func (s *CheckoutService) processStripePayment(
 	ctx context.Context,
 	req *CheckoutRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	price *models.Price,
 ) (*CheckoutResponse, error) {
 	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Config)
@@ -1267,7 +1267,7 @@ func parseStripeError(body []byte) string {
 }
 
 // resolveVault gets an existing vault or creates one from payment token
-func (s *CheckoutService) resolveVault(ctx context.Context, req *CheckoutRequest, user *UserIdentity, provider string) (string, *models.PaymentMethod, error) {
+func (s *CheckoutService) resolveVault(ctx context.Context, req *CheckoutRequest, user *payments.UserIdentity, provider string) (string, *models.PaymentMethod, error) {
 	// Try existing payment method first
 	if req.PaymentMethodID != "" {
 		pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
@@ -1429,7 +1429,7 @@ func (s *CheckoutService) grantProductEntitlements(
 }
 
 // Helper functions
-func (s *CheckoutService) resolveFirstName(req *CheckoutRequest, user *UserIdentity) string {
+func (s *CheckoutService) resolveFirstName(req *CheckoutRequest, user *payments.UserIdentity) string {
 	if req.FirstName != "" {
 		return req.FirstName
 	}
@@ -1617,7 +1617,7 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 func (s *CheckoutService) processUpgrade(
 	ctx context.Context,
 	req *CheckoutRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
@@ -1911,7 +1911,7 @@ func (s *CheckoutService) processUpgrade(
 func (s *CheckoutService) processDowngrade(
 	ctx context.Context,
 	req *CheckoutRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
@@ -2030,7 +2030,7 @@ func (s *CheckoutService) cancelNMISubscription(ctx context.Context, sub *models
 
 // TierChange processes a subscription tier change (upgrade or downgrade).
 // This is the unified entry point that routes to processor-specific implementations.
-func (s *CheckoutService) TierChange(ctx context.Context, req *subscriptions.TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
+func (s *CheckoutService) TierChange(ctx context.Context, req *subscriptions.TierChangeRequest, user *payments.UserIdentity) (*TierChangeResponse, error) {
 	// 1. Parse and validate price
 	priceID, err := api.ParsePriceID(req.PriceID)
 	if err != nil {
@@ -2128,7 +2128,7 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *subscriptions.Tie
 func (s *CheckoutService) processTierChangeStripe(
 	ctx context.Context,
 	req *subscriptions.TierChangeRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
@@ -2188,7 +2188,7 @@ func (s *CheckoutService) processTierChangeStripe(
 		Mode:           "tier_change",
 		Action:         action,
 		PriceID:        api.FormatPriceID(newPrice.ID),
-		Payment:        CheckoutSessionPaymentResponse{Processor: "stripe"},
+		Payment:        payments.CheckoutSessionPaymentResponse{Processor: "stripe"},
 		SubscriptionID: &subID,
 		Message:        msg,
 	}, nil
@@ -2200,7 +2200,7 @@ func (s *CheckoutService) processTierChangeStripe(
 func (s *CheckoutService) processTierChangeMobius(
 	ctx context.Context,
 	req *subscriptions.TierChangeRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
@@ -2238,7 +2238,7 @@ func (s *CheckoutService) processTierChangeMobius(
 func (s *CheckoutService) processTierChangeCCBill(
 	ctx context.Context,
 	req *subscriptions.TierChangeRequest,
-	user *UserIdentity,
+	user *payments.UserIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
@@ -2252,7 +2252,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 			Mode:    "tier_change",
 			Action:  action,
 			PriceID: api.FormatPriceID(newPrice.ID),
-			Payment: CheckoutSessionPaymentResponse{Processor: "ccbill"},
+			Payment: payments.CheckoutSessionPaymentResponse{Processor: "ccbill"},
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
 		}, nil
 	}
@@ -2272,7 +2272,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 		Action:         action,
 		PriceID:        api.FormatPriceID(newPrice.ID),
 		SubscriptionID: &subID,
-		Payment: CheckoutSessionPaymentResponse{
+		Payment: payments.CheckoutSessionPaymentResponse{
 			Processor:   "ccbill",
 			RedirectURL: checkoutResp.RedirectURL,
 		},
@@ -2281,9 +2281,9 @@ func (s *CheckoutService) processTierChangeCCBill(
 
 	// Build NextAction for redirect
 	if checkoutResp.RedirectURL != "" {
-		resp.NextAction = &CheckoutSessionNextAction{
+		resp.NextAction = &payments.CheckoutSessionNextAction{
 			Type: "redirect_to_url",
-			RedirectToURL: &CheckoutSessionRedirectToURL{
+			RedirectToURL: &payments.CheckoutSessionRedirectToURL{
 				URL: checkoutResp.RedirectURL,
 			},
 		}
@@ -2299,7 +2299,7 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 		Mode:    "tier_change",
 		Action:  action,
 		PriceID: api.FormatPriceID(newPrice.ID),
-		Payment: CheckoutSessionPaymentResponse{
+		Payment: payments.CheckoutSessionPaymentResponse{
 			TransactionID: resp.TransactionID,
 		},
 		Message:      resp.Message,
@@ -2327,9 +2327,9 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 	// Map redirect
 	if resp.RedirectURL != "" {
 		tierResp.Payment.RedirectURL = resp.RedirectURL
-		tierResp.NextAction = &CheckoutSessionNextAction{
+		tierResp.NextAction = &payments.CheckoutSessionNextAction{
 			Type: "redirect_to_url",
-			RedirectToURL: &CheckoutSessionRedirectToURL{
+			RedirectToURL: &payments.CheckoutSessionRedirectToURL{
 				URL: resp.RedirectURL,
 			},
 		}

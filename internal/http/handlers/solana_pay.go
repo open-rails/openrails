@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -90,13 +90,13 @@ func PostSolanaPay(r *httprequest.Request) {
 
 func writeSolanaPayError(r *httprequest.Request, err error) {
 	switch {
-	case err == services.ErrCheckoutSessionNotFound:
+	case err == payments.ErrCheckoutSessionNotFound:
 		r.ErrorJSON(http.StatusNotFound, "checkout session not found")
-	case err == services.ErrCheckoutSessionExpired:
+	case err == payments.ErrCheckoutSessionExpired:
 		r.ErrorJSON(http.StatusGone, "checkout session expired")
-	case err == services.ErrCheckoutSessionNotSolana:
+	case err == payments.ErrCheckoutSessionNotSolana:
 		r.ErrorJSON(http.StatusBadRequest, "not a solana checkout session")
-	case err == services.ErrCheckoutSessionAlreadyCompleted:
+	case err == payments.ErrCheckoutSessionAlreadyCompleted:
 		r.ErrorJSON(http.StatusConflict, "checkout session already completed")
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "failed to process request")

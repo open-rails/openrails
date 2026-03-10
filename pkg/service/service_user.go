@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/services"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
@@ -119,12 +118,12 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req 
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	svcReq := &services.CheckoutSessionCreateRequest{
+	svcReq := &payments.CheckoutSessionCreateRequest{
 		PriceID:        req.PriceID,
 		Mode:           req.Mode,
 		Metadata:       req.Metadata,
 		IdempotencyKey: req.IdempotencyKey,
-		Payment: services.CheckoutSessionPaymentRequest{
+		Payment: payments.CheckoutSessionPaymentRequest{
 			Processor:       req.Payment.Processor,
 			PaymentMethodID: req.Payment.PaymentMethodID,
 			PaymentToken:    req.Payment.PaymentToken,
@@ -145,7 +144,7 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req 
 		},
 	}
 
-	user := &services.UserIdentity{ID: userID}
+	user := &payments.UserIdentity{ID: userID}
 	resp, err := checkoutSessions.CreateSession(ctx, svcReq, user)
 	if err != nil {
 		return nil, err
@@ -168,7 +167,7 @@ func (s *Service) GetCheckoutSession(ctx context.Context, userID string, session
 		return nil, fmt.Errorf("session_id required")
 	}
 
-	user := &services.UserIdentity{ID: userID}
+	user := &payments.UserIdentity{ID: userID}
 	resp, err := checkoutSessions.GetSession(ctx, sessionID, user)
 	if err != nil {
 		return nil, err
@@ -191,15 +190,15 @@ func (s *Service) ConfirmCheckoutSession(ctx context.Context, userID string, ses
 		return nil, fmt.Errorf("session_id required")
 	}
 
-	svcReq := &services.CheckoutSessionConfirmRequest{
-		Payment: services.CheckoutSessionConfirmPayment{
+	svcReq := &payments.CheckoutSessionConfirmRequest{
+		Payment: payments.CheckoutSessionConfirmPayment{
 			Processor: req.Payment.Processor,
 			Signature: req.Payment.Signature,
 			Wallet:    req.Payment.Wallet,
 		},
 	}
 
-	user := &services.UserIdentity{ID: userID}
+	user := &payments.UserIdentity{ID: userID}
 	resp, err := checkoutSessions.ConfirmSession(ctx, sessionID, svcReq, user)
 	if err != nil {
 		return nil, err
@@ -488,7 +487,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	user := &services.UserIdentity{ID: userID}
+	user := &payments.UserIdentity{ID: userID}
 	pm, err := vaults.CreateVault(ctx, user.ID, &payments.CreateVaultRequest{
 		PaymentToken: req.PaymentToken,
 		FirstName:    req.FirstName,
@@ -1053,7 +1052,7 @@ func notificationFromModel(n *models.NotificationQueue) Notification {
 	}
 }
 
-func checkoutSessionFromResponse(resp *services.CheckoutSessionResponse) *CheckoutSession {
+func checkoutSessionFromResponse(resp *payments.CheckoutSessionResponse) *CheckoutSession {
 	result := &CheckoutSession{
 		ID:       resp.ID,
 		Status:   resp.Status,

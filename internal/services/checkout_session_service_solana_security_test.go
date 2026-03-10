@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +25,7 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 		Amount:   1000,
 		Currency: "eur",
 	}
-	payment := &CheckoutSessionPaymentRequest{
+	payment := &payments.CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
 		Flow:        "transaction_request",
 	}
@@ -49,7 +50,7 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 		Amount:   0,
 		Currency: "usd",
 	}
-	payment := &CheckoutSessionPaymentRequest{
+	payment := &payments.CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
 		Flow:        "transaction_request",
 	}
@@ -82,9 +83,9 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 			"recipient":    testRecipientWallet,
 		},
 	}
-	req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
+	req := &payments.CheckoutSessionConfirmRequest{Payment: payments.CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-	_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.UserID})
+	_, err := svc.confirmSolanaSession(context.Background(), session, req, &payments.UserIdentity{ID: session.UserID})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 	require.Contains(t, err.Error(), "token_amount missing or invalid")
@@ -116,9 +117,9 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 				"token_amount": uint64(1234567),
 			},
 		}
-		req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
+		req := &payments.CheckoutSessionConfirmRequest{Payment: payments.CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.UserID})
+		_, err := svc.confirmSolanaSession(context.Background(), session, req, &payments.UserIdentity{ID: session.UserID})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 		require.Contains(t, err.Error(), "recipient missing")
@@ -140,9 +141,9 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 				"recipient":    testRecipientWallet,
 			},
 		}
-		req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
+		req := &payments.CheckoutSessionConfirmRequest{Payment: payments.CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.UserID})
+		_, err := svc.confirmSolanaSession(context.Background(), session, req, &payments.UserIdentity{ID: session.UserID})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 		require.Contains(t, err.Error(), "reference missing")

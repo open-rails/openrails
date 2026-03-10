@@ -14,7 +14,7 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/message"
@@ -145,9 +145,9 @@ func (r *Request) Set(key string, value any) {
 	r.GinCtx.Set(key, value)
 }
 
-func (r *Request) GetUser() *services.UserIdentity {
+func (r *Request) GetUser() *payments.UserIdentity {
 	if uc, ok := authprovider.UserContextFromGin(r.GinCtx); ok && uc.UserID != "" {
-		user := &services.UserIdentity{
+		user := &payments.UserIdentity{
 			ID:       uc.UserID,
 			Username: uc.Username,
 			Roles:    uc.Roles,
@@ -164,7 +164,7 @@ func (r *Request) GetUser() *services.UserIdentity {
 		return nil
 	}
 
-	if ui, ok := user.(*services.UserIdentity); ok {
+	if ui, ok := user.(*payments.UserIdentity); ok {
 		return ui
 	}
 
