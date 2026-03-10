@@ -1147,7 +1147,7 @@ func setSolanaQuoteState(processorState map[string]any, tokenAmount uint64, toke
 
 // GetSessionForSolanaPay retrieves and validates a checkout session for Solana Pay spec endpoints.
 // Returns session info needed for GET endpoint or an error if the session is invalid.
-func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, sessionID uuid.UUID) (*SolanaPaySessionInfo, error) {
+func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, sessionID uuid.UUID) (*solanamodule.PaySessionInfo, error) {
 	if s.repo == nil {
 		return nil, ErrCheckoutSessionNotFound
 	}
@@ -1187,14 +1187,14 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 		}
 	}
 
-	return &SolanaPaySessionInfo{
+	return &solanamodule.PaySessionInfo{
 		ProductName: productName,
 	}, nil
 }
 
 // BuildSolanaPayTransaction builds a Solana transaction for the given checkout session and wallet account.
 // This implements the POST endpoint of the Solana Pay Transaction Request spec.
-func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, sessionID uuid.UUID, account string) (*SolanaPayTransactionResponse, error) {
+func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, sessionID uuid.UUID, account string) (*solanamodule.PayTransactionResponse, error) {
 	if s.repo == nil {
 		return nil, ErrCheckoutSessionNotFound
 	}
@@ -1281,7 +1281,7 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		message = "Sign to complete your payment"
 	}
 
-	return &SolanaPayTransactionResponse{
+	return &solanamodule.PayTransactionResponse{
 		TransactionBase64: txResp.TransactionBase64,
 		Message:           message,
 	}, nil

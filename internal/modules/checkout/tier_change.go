@@ -1,4 +1,4 @@
-package subscriptions
+package checkout
 
 import (
 	"errors"

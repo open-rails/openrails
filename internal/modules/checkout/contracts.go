@@ -86,39 +86,3 @@ type RegisterPurchaseResponse struct {
 	DelayedStart *time.Time
 	Eligibility  EligibilityStatus
 }
-
-type SolanaPayResult struct {
-	URL            string
-	Reference      string
-	Amount         int64
-	Currency       string
-	TokenAmount    string
-	TokenUnits     uint64
-	TokenMint      string
-	Recipient      string
-	TokenPriceUSD  float64
-	FXRate         float64
-	FXCurrency     string
-	QuotedAt       time.Time
-	QuoteExpiresAt time.Time
-	Token          string
-	ExpiresAt      time.Time
-}
-
-type SolanaTransactionBuildResponse struct {
-	TransactionBase64 string
-	Amount            int64
-	TokenAmount       uint64
-	TokenSymbol       string
-	ExpiresAt         time.Time
-	Instructions      string
-}
-
-type SolanaPaySessionInfo struct {
-	ProductName string
-}
-
-type SolanaPayTransactionResponse struct {
-	TransactionBase64 string
-	Message           string
-}
