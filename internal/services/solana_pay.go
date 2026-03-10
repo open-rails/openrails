@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
@@ -43,25 +44,6 @@ type PendingSolanaPayment struct {
 	TokenAmount uint64    `json:"token_amount"` // token base units
 	Recipient   string    `json:"recipient"`    // merchant wallet
 	CreatedAt   time.Time `json:"created_at"`
-}
-
-// SolanaPayResult is returned when creating a new Solana Pay URL
-type SolanaPayResult struct {
-	URL            string
-	Reference      string
-	Amount         int64 // cents
-	Currency       string
-	TokenAmount    string // formatted token amount (e.g., "9.99")
-	TokenUnits     uint64 // token amount in base units
-	TokenMint      string // token mint used for this quote/payment
-	Recipient      string // merchant wallet for this quote/payment
-	TokenPriceUSD  float64
-	FXRate         float64
-	FXCurrency     string
-	QuotedAt       time.Time
-	QuoteExpiresAt time.Time
-	Token          string
-	ExpiresAt      time.Time
 }
 
 // SolanaPayService handles Solana Pay Transfer Request flow
@@ -111,7 +93,7 @@ func (s *SolanaPayService) SetCheckoutService(cs *CheckoutService) {
 
 // GeneratePayment creates a new pending Solana payment and returns the Transfer Request URL.
 // It first checks purchase eligibility to prevent duplicate purchases.
-func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*SolanaPayResult, error) {
+func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*payments.SolanaPayResult, error) {
 	// Check purchase eligibility BEFORE generating the payment URL
 	if s.checkoutService != nil {
 		eligibility, err := s.checkoutService.CheckPurchaseEligibility(ctx, userID, priceID)
@@ -120,12 +102,12 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		}
 
 		switch eligibility.Status {
-		case EligibilityBlocked:
+		case payments.EligibilityBlocked:
 			return nil, fmt.Errorf("purchase blocked: %s", eligibility.Reason)
-		case EligibilityUpgrade, EligibilityDowngrade:
+		case payments.EligibilityUpgrade, payments.EligibilityDowngrade:
 			// Solana doesn't support subscription upgrades/downgrades
 			return nil, fmt.Errorf("solana does not support subscription tier changes; please cancel existing subscription first")
-		case EligibilityAllowed:
+		case payments.EligibilityAllowed:
 			// Continue with payment generation
 		}
 	}
@@ -214,7 +196,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	// Build Solana Pay Transfer Request URL
 	url := s.buildTransferRequestURL(recipient, tokenUnits, tokenMint, tokenSymbol, reference)
 
-	return &SolanaPayResult{
+	return &payments.SolanaPayResult{
 		URL:            url,
 		Reference:      reference,
 		Amount:         price.Amount,

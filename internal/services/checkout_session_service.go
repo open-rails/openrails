@@ -492,7 +492,7 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 		return fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
 	}
 
-	req := &CheckoutRequest{
+	req := &payments.CheckoutRequest{
 		PriceID:         api.FormatPriceID(session.PriceID),
 		PaymentMethodID: payment.PaymentMethodID,
 		PaymentToken:    payment.PaymentToken,
@@ -526,7 +526,7 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 	return s.applyCheckoutResponse(session, resp)
 }
 
-func (s *CheckoutSessionService) applyCheckoutResponse(session *models.CheckoutSession, resp *CheckoutResponse) error {
+func (s *CheckoutSessionService) applyCheckoutResponse(session *models.CheckoutSession, resp *payments.CheckoutResponse) error {
 	if session == nil {
 		return fmt.Errorf("%w: session is required", ErrCheckoutSessionValidation)
 	}
@@ -1124,20 +1124,9 @@ func timePtr(t time.Time) *time.Time {
 	return &t
 }
 
-// SolanaPaySessionInfo contains session info for Solana Pay GET endpoint
-type SolanaPaySessionInfo struct {
-	ProductName string
-}
-
-// SolanaPayTransactionResponse is the response from BuildSolanaPayTransaction
-type SolanaPayTransactionResponse struct {
-	TransactionBase64 string
-	Message           string
-}
-
 // GetSessionForSolanaPay retrieves and validates a checkout session for Solana Pay spec endpoints.
 // Returns session info needed for GET endpoint or an error if the session is invalid.
-func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, sessionID uuid.UUID) (*SolanaPaySessionInfo, error) {
+func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, sessionID uuid.UUID) (*payments.SolanaPaySessionInfo, error) {
 	if s.repo == nil {
 		return nil, ErrCheckoutSessionNotFound
 	}
@@ -1177,14 +1166,14 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 		}
 	}
 
-	return &SolanaPaySessionInfo{
+	return &payments.SolanaPaySessionInfo{
 		ProductName: productName,
 	}, nil
 }
 
 // BuildSolanaPayTransaction builds a Solana transaction for the given checkout session and wallet account.
 // This implements the POST endpoint of the Solana Pay Transaction Request spec.
-func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, sessionID uuid.UUID, account string) (*SolanaPayTransactionResponse, error) {
+func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, sessionID uuid.UUID, account string) (*payments.SolanaPayTransactionResponse, error) {
 	if s.repo == nil {
 		return nil, ErrCheckoutSessionNotFound
 	}
@@ -1271,7 +1260,7 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		message = "Sign to complete your payment"
 	}
 
-	return &SolanaPayTransactionResponse{
+	return &payments.SolanaPayTransactionResponse{
 		TransactionBase64: txResp.TransactionBase64,
 		Message:           message,
 	}, nil

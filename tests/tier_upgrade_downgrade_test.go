@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 )
@@ -73,7 +74,7 @@ func TestTierGroupDetection(t *testing.T) {
 
 		eligibility, err := checkoutService.CheckPurchaseEligibility(ctx, userID, premiumPlusPriceID)
 		require.NoError(t, err, "Should check eligibility without error")
-		assert.Equal(t, services.EligibilityUpgrade, eligibility.Status, "Should detect upgrade scenario")
+		assert.Equal(t, payments.EligibilityUpgrade, eligibility.Status, "Should detect upgrade scenario")
 		assert.NotNil(t, eligibility.ExistingSubscription, "Should have existing subscription")
 		assert.Equal(t, sub.ID.String(), eligibility.ExistingSubscription.ID.String())
 	})
@@ -93,7 +94,7 @@ func TestTierGroupDetection(t *testing.T) {
 
 		eligibility, err := checkoutService.CheckPurchaseEligibility(ctx, userID, premiumPriceID)
 		require.NoError(t, err, "Should check eligibility without error")
-		assert.Equal(t, services.EligibilityDowngrade, eligibility.Status, "Should detect downgrade scenario")
+		assert.Equal(t, payments.EligibilityDowngrade, eligibility.Status, "Should detect downgrade scenario")
 		assert.NotNil(t, eligibility.ExistingSubscription, "Should have existing subscription")
 		assert.Equal(t, sub.ID.String(), eligibility.ExistingSubscription.ID.String())
 	})
@@ -105,7 +106,7 @@ func TestTierGroupDetection(t *testing.T) {
 
 		eligibility, err := checkoutService.CheckPurchaseEligibility(ctx, newUserID, premiumPriceID)
 		require.NoError(t, err, "Should check eligibility without error")
-		assert.Equal(t, services.EligibilityAllowed, eligibility.Status, "Should allow new subscription")
+		assert.Equal(t, payments.EligibilityAllowed, eligibility.Status, "Should allow new subscription")
 		assert.Nil(t, eligibility.ExistingSubscription, "Should not have existing subscription")
 	})
 }

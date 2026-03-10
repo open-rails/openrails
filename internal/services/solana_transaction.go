@@ -49,18 +49,8 @@ func NewSolanaTransactionService(db *db.DB, rpc *solana.RPCClient, cfg *config.C
 	}
 }
 
-// TransactionResponse contains the built transaction and metadata.
-type TransactionResponse struct {
-	TransactionBase64 string
-	Amount            int64 // Amount in cents (smallest currency unit)
-	TokenAmount       uint64
-	TokenSymbol       string
-	ExpiresAt         time.Time
-	Instructions      string
-}
-
 // BuildPaymentTransaction creates a Solana transaction for payment.
-func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*TransactionResponse, error) {
+func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*payments.SolanaTransactionBuildResponse, error) {
 	if s.rpc == nil {
 		return nil, fmt.Errorf("solana rpc client unavailable")
 	}
@@ -124,7 +114,7 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 		"to_wallet":    merchantWallet,
 	}).Info("Built Solana payment transaction")
 
-	return &TransactionResponse{
+	return &payments.SolanaTransactionBuildResponse{
 		TransactionBase64: txResp.TransactionBase64,
 		Amount:            price.Amount,
 		TokenAmount:       tokenAmount,

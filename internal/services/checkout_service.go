@@ -29,51 +29,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// CheckoutRequest represents a unified checkout request
-type CheckoutRequest struct {
-	PriceID         string `json:"price_id"`
-	PaymentMethodID string `json:"payment_method_id,omitempty"` // For stored payment methods
-	PaymentToken    string `json:"payment_token,omitempty"`     // For direct tokenized card
-	Processor       string `json:"processor"`                   // mobius, ccbill, solana
-	SuccessURL      string `json:"success_url,omitempty"`
-	CancelURL       string `json:"cancel_url,omitempty"`
-
-	// IdempotencyKey is an optional client-provided key for deduplication.
-	// If provided, the same key with a successful result will return the cached response.
-	// If not provided, a key is generated from user_id:price_id.
-	IdempotencyKey string `json:"-"` // Set from header, not JSON body
-	// CheckoutSessionID links hosted checkout redirects to a checkout session.
-	CheckoutSessionID string `json:"-"`
-
-	// Optional billing info (used when creating vault from payment token)
-	Email      string `json:"email,omitempty"`
-	FirstName  string `json:"first_name,omitempty"`
-	LastName   string `json:"last_name,omitempty"`
-	Address1   string `json:"address1,omitempty"`
-	City       string `json:"city,omitempty"`
-	State      string `json:"state,omitempty"`
-	Zip        string `json:"zip,omitempty"`
-	Country    string `json:"country,omitempty"`
-	LastFour   string `json:"last_four,omitempty"`
-	CardType   string `json:"card_type,omitempty"`
-	ExpiryDate string `json:"expiry_date,omitempty"`
-
-	// Optional metadata forwarded from checkout session (used for E2E tracing).
-	Metadata map[string]string `json:"-"`
-}
-
-// CheckoutResponse represents the unified checkout response
-type CheckoutResponse struct {
-	Status         string     `json:"status"`                    // success, pending, redirect_required, blocked
-	Action         string     `json:"action,omitempty"`          // new, upgrade, downgrade - indicates the type of checkout
-	Message        string     `json:"message,omitempty"`         // User-friendly message
-	SubscriptionID *uuid.UUID `json:"subscription_id,omitempty"` // For subscription purchases
-	PaymentID      *uuid.UUID `json:"payment_id,omitempty"`      // For one-time purchases
-	TransactionID  string     `json:"transaction_id,omitempty"`  // Processor transaction ID
-	RedirectURL    string     `json:"redirect_url,omitempty"`    // For CCBill FlexForm
-	DelayedStart   *time.Time `json:"delayed_start,omitempty"`   // When subscription/entitlement will start
-}
-
 // TierChangeResponse represents the response from a tier change operation.
 // This reuses the CheckoutSessionResponse envelope pattern for API consistency.
 type TierChangeResponse struct {
@@ -88,34 +43,6 @@ type TierChangeResponse struct {
 	NextAction     *payments.CheckoutSessionNextAction     `json:"next_action,omitempty"`     // For redirects
 	Message        string                                  `json:"message,omitempty"`         // User-friendly message
 	DelayedStart   *time.Time                              `json:"delayed_start,omitempty"`   // For scheduled downgrades
-}
-
-// CoverageInfo represents the user's current product coverage
-type CoverageInfo struct {
-	HasCoverage  bool       // Whether user has any active coverage
-	IsIndefinite bool       // True if coverage has no end date
-	EndDate      *time.Time // When coverage ends (nil if indefinite)
-	SourceType   string     // "subscription" or "entitlement"
-	SourceID     *uuid.UUID // ID of the subscription or entitlement source
-}
-
-// EligibilityStatus represents the result of a purchase eligibility check
-type EligibilityStatus string
-
-const (
-	EligibilityAllowed   EligibilityStatus = "allowed"   // User can purchase
-	EligibilityBlocked   EligibilityStatus = "blocked"   // User already has this product
-	EligibilityUpgrade   EligibilityStatus = "upgrade"   // User is upgrading within a tier group
-	EligibilityDowngrade EligibilityStatus = "downgrade" // User is downgrading within a tier group
-)
-
-// EligibilityResult contains the result of checking if a user can purchase a product
-type EligibilityResult struct {
-	Status               EligibilityStatus    // Whether the purchase is allowed
-	Reason               string               // Human-readable explanation
-	Coverage             *CoverageInfo        // User's current coverage for this product
-	ExistingSubscription *models.Subscription // For upgrades/downgrades, the existing subscription
-	ExistingProduct      *models.Product      // For upgrades/downgrades, the existing product
 }
 
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
@@ -170,7 +97,7 @@ func NewCheckoutService(
 
 // getIdempotencyKey returns the idempotency key to use for a checkout operation.
 // If the request contains a client-provided key, use it. Otherwise generate one.
-func (s *CheckoutService) getIdempotencyKey(req *CheckoutRequest, userID string, priceID uuid.UUID, operation string) string {
+func (s *CheckoutService) getIdempotencyKey(req *payments.CheckoutRequest, userID string, priceID uuid.UUID, operation string) string {
 	if req.IdempotencyKey != "" {
 		return req.IdempotencyKey
 	}
@@ -187,7 +114,7 @@ func (s *CheckoutService) getIdempotencyKey(req *CheckoutRequest, userID string,
 
 // getUpgradeIdempotencyKey returns the idempotency key for an upgrade operation.
 // If client-provided key exists, use it. Otherwise generate from upgrade parameters.
-func (s *CheckoutService) getUpgradeIdempotencyKey(req *CheckoutRequest, userID string, existingSubID, newPriceID uuid.UUID) string {
+func (s *CheckoutService) getUpgradeIdempotencyKey(req *payments.CheckoutRequest, userID string, existingSubID, newPriceID uuid.UUID) string {
 	if req.IdempotencyKey != "" {
 		return req.IdempotencyKey
 	}
@@ -198,22 +125,22 @@ func (s *CheckoutService) getUpgradeIdempotencyKey(req *CheckoutRequest, userID 
 // This should be called BEFORE generating payment URLs or charging cards.
 //
 // Returns:
-//   - EligibilityAllowed: User can proceed with purchase
-//   - EligibilityBlocked: User already owns this product (duplicate prevention)
-//   - EligibilityUpgrade: User is upgrading within a tier group
-//   - EligibilityDowngrade: User is downgrading within a tier group
+//   - payments.EligibilityAllowed: User can proceed with purchase
+//   - payments.EligibilityBlocked: User already owns this product (duplicate prevention)
+//   - payments.EligibilityUpgrade: User is upgrading within a tier group
+//   - payments.EligibilityDowngrade: User is downgrading within a tier group
 //
 // For upgrades/downgrades, the caller can decide how to handle (e.g., proration).
 // For blocked, the caller should reject the purchase attempt.
-func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*EligibilityResult, error) {
+func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*payments.EligibilityResult, error) {
 	// Get price
 	price, err := s.PriceService.GetByID(ctx, priceID)
 	if err != nil {
 		return nil, fmt.Errorf("price not found: %w", err)
 	}
 	if !price.IsActive {
-		return &EligibilityResult{
-			Status: EligibilityBlocked,
+		return &payments.EligibilityResult{
+			Status: payments.EligibilityBlocked,
 			Reason: "price is not available for purchase",
 		}, nil
 	}
@@ -224,8 +151,8 @@ func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID s
 		return nil, fmt.Errorf("product not found: %w", err)
 	}
 	if !product.IsActive {
-		return &EligibilityResult{
-			Status: EligibilityBlocked,
+		return &payments.EligibilityResult{
+			Status: payments.EligibilityBlocked,
 			Reason: "product is not available for purchase",
 		}, nil
 	}
@@ -247,24 +174,24 @@ func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID s
 				// Same product - fall through to coverage check
 			} else if existingProduct.TierRank < product.TierRank {
 				// Upgrade: existing is lower tier than requested
-				return &EligibilityResult{
-					Status:               EligibilityUpgrade,
+				return &payments.EligibilityResult{
+					Status:               payments.EligibilityUpgrade,
 					Reason:               fmt.Sprintf("Upgrading from %s to %s", existingProduct.DisplayName, product.DisplayName),
 					ExistingSubscription: existingSub,
 					ExistingProduct:      existingProduct,
 				}, nil
 			} else if existingProduct.TierRank > product.TierRank {
 				// Downgrade: existing is higher tier than requested
-				return &EligibilityResult{
-					Status:               EligibilityDowngrade,
+				return &payments.EligibilityResult{
+					Status:               payments.EligibilityDowngrade,
 					Reason:               fmt.Sprintf("Downgrading from %s to %s", existingProduct.DisplayName, product.DisplayName),
 					ExistingSubscription: existingSub,
 					ExistingProduct:      existingProduct,
 				}, nil
 			} else {
 				// Same tier rank but different product - block as duplicate
-				return &EligibilityResult{
-					Status: EligibilityBlocked,
+				return &payments.EligibilityResult{
+					Status: payments.EligibilityBlocked,
 					Reason: fmt.Sprintf("You already have an equivalent product (%s) in this tier", existingProduct.DisplayName),
 				}, nil
 			}
@@ -279,23 +206,23 @@ func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID s
 
 	if coverage.HasCoverage && coverage.IsIndefinite {
 		// User has indefinite coverage - block purchase
-		return &EligibilityResult{
-			Status:   EligibilityBlocked,
+		return &payments.EligibilityResult{
+			Status:   payments.EligibilityBlocked,
 			Reason:   "You already have active access to this product",
 			Coverage: coverage,
 		}, nil
 	}
 
 	// User can purchase (possibly with delayed start if they have finite coverage)
-	return &EligibilityResult{
-		Status:   EligibilityAllowed,
+	return &payments.EligibilityResult{
+		Status:   payments.EligibilityAllowed,
 		Reason:   "Purchase allowed",
 		Coverage: coverage,
 	}, nil
 }
 
 // Checkout processes a unified checkout request
-func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, user *payments.UserIdentity) (*CheckoutResponse, error) {
+func (s *CheckoutService) Checkout(ctx context.Context, req *payments.CheckoutRequest, user *payments.UserIdentity) (*payments.CheckoutResponse, error) {
 	// Parse and validate price
 	priceID, err := api.ParsePriceID(req.PriceID)
 	if err != nil {
@@ -345,19 +272,19 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 				// Fall through to normal coverage check below
 			} else if existingProduct.TierRank < product.TierRank {
 				// Upgrade detected - direct to change-tier endpoint
-				return &CheckoutResponse{
+				return &payments.CheckoutResponse{
 					Status:  "blocked",
 					Message: "Use POST /v1/me/subscriptions/change-tier for tier upgrades",
 				}, nil
 			} else if existingProduct.TierRank > product.TierRank {
 				// Downgrade detected - direct to change-tier endpoint
-				return &CheckoutResponse{
+				return &payments.CheckoutResponse{
 					Status:  "blocked",
 					Message: "Use POST /v1/me/subscriptions/change-tier for tier downgrades",
 				}, nil
 			} else {
 				// Same tier rank but different product - treat as duplicate
-				return &CheckoutResponse{
+				return &payments.CheckoutResponse{
 					Status:  "blocked",
 					Message: fmt.Sprintf("You already have an equivalent product (%s) in this tier", existingProduct.DisplayName),
 				}, nil
@@ -375,7 +302,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	if coverage.HasCoverage {
 		if coverage.IsIndefinite {
 			// User has indefinite coverage - block purchase
-			return &CheckoutResponse{
+			return &payments.CheckoutResponse{
 				Status:  "blocked",
 				Message: "You already have active access to this product",
 			}, nil
@@ -384,7 +311,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 		// User has coverage with an end date
 		// CCBill cannot schedule future start dates - block
 		if processor == "ccbill" {
-			return &CheckoutResponse{
+			return &payments.CheckoutResponse{
 				Status:  "blocked",
 				Message: "You already have active access. CCBill subscriptions cannot be scheduled for future start. Please try again when your current access expires.",
 			}, nil
@@ -406,9 +333,9 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 // It checks both:
 // 1. Active/pending subscriptions (using the denormalized ProductID field)
 // 2. Active entitlements matching the product's EntitlementsSpec
-func (s *CheckoutService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*CoverageInfo, error) {
+func (s *CheckoutService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*payments.CoverageInfo, error) {
 	now := s.now()
-	coverage := &CoverageInfo{HasCoverage: false}
+	coverage := &payments.CoverageInfo{HasCoverage: false}
 
 	// Check for active/pending subscription for this product (single query using denormalized ProductID)
 	if s.SubscriptionService != nil {
@@ -469,13 +396,13 @@ func (s *CheckoutService) GetUserProductCoverage(ctx context.Context, userID str
 // processSubscription handles subscription purchases
 func (s *CheckoutService) processSubscription(
 	ctx context.Context,
-	req *CheckoutRequest,
+	req *payments.CheckoutRequest,
 	user *payments.UserIdentity,
 	price *models.Price,
 	product *models.Product,
-	coverage *CoverageInfo,
+	coverage *payments.CoverageInfo,
 	processor string,
-) (*CheckoutResponse, error) {
+) (*payments.CheckoutResponse, error) {
 	// Route to processor-specific handler based on config type detection
 	// This allows adding new NMI providers via config without code changes
 	switch {
@@ -495,13 +422,13 @@ func (s *CheckoutService) processSubscription(
 // processOneTimePurchase handles one-time purchases
 func (s *CheckoutService) processOneTimePurchase(
 	ctx context.Context,
-	req *CheckoutRequest,
+	req *payments.CheckoutRequest,
 	user *payments.UserIdentity,
 	price *models.Price,
 	product *models.Product,
-	coverage *CoverageInfo,
+	coverage *payments.CoverageInfo,
 	processor string,
-) (*CheckoutResponse, error) {
+) (*payments.CheckoutResponse, error) {
 	// Route to processor-specific handler based on config type detection
 	// This allows adding new NMI providers via config without code changes
 	switch {
@@ -522,10 +449,10 @@ func (s *CheckoutService) processOneTimePurchase(
 // Returns a FlexForm URL that the client can redirect to for payment
 func (s *CheckoutService) processCCBillSubscription(
 	ctx context.Context,
-	req *CheckoutRequest,
+	req *payments.CheckoutRequest,
 	user *payments.UserIdentity,
 	price *models.Price,
-) (*CheckoutResponse, error) {
+) (*payments.CheckoutResponse, error) {
 	// Validate CCBill configuration
 	ccbillProc, err := requireCCBillProcessorConfig(s.Config)
 	if err != nil {
@@ -574,7 +501,7 @@ func (s *CheckoutService) processCCBillSubscription(
 		"price_id": price.ID,
 	}).Info("Generated CCBill FlexForm URL via checkout")
 
-	return &CheckoutResponse{
+	return &payments.CheckoutResponse{
 		Status:      "redirect_required",
 		Action:      "new",
 		Message:     "Redirect to CCBill payment form",
@@ -589,7 +516,7 @@ func (s *CheckoutService) processCCBillUpgrade(
 	user *payments.UserIdentity,
 	newPrice *models.Price,
 	existingSub *models.Subscription,
-) (*CheckoutResponse, error) {
+) (*payments.CheckoutResponse, error) {
 	// Validate CCBill configuration
 	ccbillProc, err := requireCCBillProcessorConfig(s.Config)
 	if err != nil {
@@ -643,7 +570,7 @@ func (s *CheckoutService) processCCBillUpgrade(
 		"processor_subscription_id": existingSub.ProcessorSubscriptionID,
 	}).Info("Generated CCBill upgrade FlexForm URL via checkout")
 
-	return &CheckoutResponse{
+	return &payments.CheckoutResponse{
 		Status:         "redirect_required",
 		Action:         "upgrade",
 		Message:        "Redirect to CCBill upgrade form",
@@ -662,12 +589,12 @@ type subscriptionIdempotencyResult struct {
 
 func (s *CheckoutService) processNMISubscription(
 	ctx context.Context,
-	req *CheckoutRequest,
+	req *payments.CheckoutRequest,
 	user *payments.UserIdentity,
 	price *models.Price,
 	product *models.Product,
-	coverage *CoverageInfo,
-) (*CheckoutResponse, error) {
+	coverage *payments.CoverageInfo,
+) (*payments.CheckoutResponse, error) {
 	// Get NMI plan configuration from price
 	nmiPlanID, provider, hasNMI := price.GetNMIConfig()
 	if !hasNMI || nmiPlanID == "" {
@@ -696,7 +623,7 @@ func (s *CheckoutService) processNMISubscription(
 			var cached subscriptionIdempotencyResult
 			if err := json.Unmarshal(idempRec.Result, &cached); err != nil {
 				log.WithError(err).Warn("failed to unmarshal cached subscription result")
-				return &CheckoutResponse{
+				return &payments.CheckoutResponse{
 					Status:        "success",
 					Action:        "new",
 					Message:       "Subscription already created",
@@ -710,7 +637,7 @@ func (s *CheckoutService) processNMISubscription(
 					delayedStart = &t
 				}
 			}
-			return &CheckoutResponse{
+			return &payments.CheckoutResponse{
 				Status:         "success",
 				Action:         "new",
 				Message:        "Subscription already created",
@@ -890,7 +817,7 @@ func (s *CheckoutService) processNMISubscription(
 		return nil, fmt.Errorf("failed to register purchase: %w", err)
 	}*/
 
-	return &CheckoutResponse{
+	return &payments.CheckoutResponse{
 		Status:         statusMsg,
 		Action:         "new",
 		Message:        message,
@@ -917,12 +844,12 @@ type upgradeIdempotencyResult struct {
 // processNMISale handles NMI one-time sale (card purchase)
 func (s *CheckoutService) processNMISale(
 	ctx context.Context,
-	req *CheckoutRequest,
+	req *payments.CheckoutRequest,
 	user *payments.UserIdentity,
 	price *models.Price,
 	product *models.Product,
-	coverage *CoverageInfo,
-) (*CheckoutResponse, error) {
+	coverage *payments.CoverageInfo,
+) (*payments.CheckoutResponse, error) {
 	provider := "mobius" // Default NMI provider
 
 	client, ok := s.NMIClients[provider]
@@ -947,7 +874,7 @@ func (s *CheckoutService) processNMISale(
 			var cached saleIdempotencyResult
 			if err := json.Unmarshal(idempRec.Result, &cached); err != nil {
 				log.WithError(err).Warn("failed to unmarshal cached sale result, proceeding anyway")
-				return &CheckoutResponse{
+				return &payments.CheckoutResponse{
 					Status:        "success",
 					Action:        "new",
 					Message:       "Purchase already completed",
@@ -960,7 +887,7 @@ func (s *CheckoutService) processNMISale(
 					delayedStart = &t
 				}
 			}
-			return &CheckoutResponse{
+			return &payments.CheckoutResponse{
 				Status:        "success",
 				Action:        "new",
 				Message:       "Purchase already completed",
@@ -1047,7 +974,7 @@ func (s *CheckoutService) processNMISale(
 	})
 	_ = s.IdempotencyService.Complete(ctx, idempOp, idempotencyKey, cachedResult)
 
-	return &CheckoutResponse{
+	return &payments.CheckoutResponse{
 		Status:        "success",
 		Action:        "new",
 		Message:       "Purchase completed successfully",
@@ -1060,22 +987,22 @@ func (s *CheckoutService) processNMISale(
 // processSolanaPurchase handles Solana one-time purchases
 func (s *CheckoutService) processSolanaPurchase(
 	ctx context.Context,
-	req *CheckoutRequest,
+	req *payments.CheckoutRequest,
 	user *payments.UserIdentity,
 	price *models.Price,
 	product *models.Product,
-	coverage *CoverageInfo,
-) (*CheckoutResponse, error) {
+	coverage *payments.CoverageInfo,
+) (*payments.CheckoutResponse, error) {
 	return nil, errors.New("solana checkout is handled via /v1/checkout sessions")
 }
 
 func (s *CheckoutService) processStripeSubscription(
 	ctx context.Context,
-	req *CheckoutRequest,
+	req *payments.CheckoutRequest,
 	user *payments.UserIdentity,
 	price *models.Price,
-	coverage *CoverageInfo,
-) (*CheckoutResponse, error) {
+	coverage *payments.CoverageInfo,
+) (*payments.CheckoutResponse, error) {
 	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return nil, err
@@ -1113,7 +1040,7 @@ func (s *CheckoutService) processStripeSubscription(
 	if err != nil {
 		return nil, err
 	}
-	return &CheckoutResponse{
+	return &payments.CheckoutResponse{
 		Status:      "redirect_required",
 		Action:      "new",
 		Message:     "Redirect to Stripe checkout",
@@ -1123,10 +1050,10 @@ func (s *CheckoutService) processStripeSubscription(
 
 func (s *CheckoutService) processStripePayment(
 	ctx context.Context,
-	req *CheckoutRequest,
+	req *payments.CheckoutRequest,
 	user *payments.UserIdentity,
 	price *models.Price,
-) (*CheckoutResponse, error) {
+) (*payments.CheckoutResponse, error) {
 	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return nil, err
@@ -1159,7 +1086,7 @@ func (s *CheckoutService) processStripePayment(
 	if err != nil {
 		return nil, err
 	}
-	return &CheckoutResponse{
+	return &payments.CheckoutResponse{
 		Status:      "redirect_required",
 		Action:      "new",
 		Message:     "Redirect to Stripe checkout",
@@ -1267,7 +1194,7 @@ func parseStripeError(body []byte) string {
 }
 
 // resolveVault gets an existing vault or creates one from payment token
-func (s *CheckoutService) resolveVault(ctx context.Context, req *CheckoutRequest, user *payments.UserIdentity, provider string) (string, *models.PaymentMethod, error) {
+func (s *CheckoutService) resolveVault(ctx context.Context, req *payments.CheckoutRequest, user *payments.UserIdentity, provider string) (string, *models.PaymentMethod, error) {
 	// Try existing payment method first
 	if req.PaymentMethodID != "" {
 		pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
@@ -1338,7 +1265,7 @@ func (s *CheckoutService) grantProductEntitlements(
 	userID string,
 	product *models.Product,
 	paymentID uuid.UUID,
-	coverage *CoverageInfo,
+	coverage *payments.CoverageInfo,
 	subscription bool,
 	walletPurchase bool,
 	billingCycleDays *int,
@@ -1429,7 +1356,7 @@ func (s *CheckoutService) grantProductEntitlements(
 }
 
 // Helper functions
-func (s *CheckoutService) resolveFirstName(req *CheckoutRequest, user *payments.UserIdentity) string {
+func (s *CheckoutService) resolveFirstName(req *payments.CheckoutRequest, user *payments.UserIdentity) string {
 	if req.FirstName != "" {
 		return req.FirstName
 	}
@@ -1439,7 +1366,7 @@ func (s *CheckoutService) resolveFirstName(req *CheckoutRequest, user *payments.
 	return "Customer"
 }
 
-func (s *CheckoutService) resolveLastName(req *CheckoutRequest) string {
+func (s *CheckoutService) resolveLastName(req *payments.CheckoutRequest) string {
 	if req.LastName != "" {
 		return req.LastName
 	}
@@ -1451,21 +1378,6 @@ func (s *CheckoutService) defaultIfEmpty(value, defaultValue string) string {
 		return defaultValue
 	}
 	return value
-}
-
-// UpgradeResponse extends CheckoutResponse with upgrade-specific details
-type UpgradeResponse struct {
-	*CheckoutResponse
-	ProratedAmount    int64      `json:"prorated_amount,omitempty"`     // Amount charged for proration
-	OldSubscriptionID *uuid.UUID `json:"old_subscription_id,omitempty"` // The subscription being replaced
-}
-
-// RegisterPurchaseResponse contains the result of a registered purchase
-type RegisterPurchaseResponse struct {
-	PaymentID    uuid.UUID         // Created payment record ID
-	Entitlements []string          // Names of entitlements granted
-	DelayedStart *time.Time        // If user had coverage, when entitlements start
-	Eligibility  EligibilityStatus // For logging: was this allowed, blocked (duplicate), upgrade, or downgrade
 }
 
 // RegisterPurchase records a confirmed one-time purchase and grants entitlements.
@@ -1482,7 +1394,7 @@ type RegisterPurchaseResponse struct {
 //  2. Looking up Product from Price
 //  3. Checking coverage for delayed start
 //  4. Granting entitlements from Product.EntitlementsSpec
-func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*RegisterPurchaseResponse, error) {
+func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
 	// Validate required fields
 	if req.UserID == "" {
 		return nil, errors.New("user_id is required")
@@ -1514,13 +1426,13 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 			"user_id":  req.UserID,
 			"price_id": req.PriceID,
 		}).Warn("failed to check eligibility during RegisterPurchase")
-		eligibility = &EligibilityResult{Status: EligibilityAllowed}
+		eligibility = &payments.EligibilityResult{Status: payments.EligibilityAllowed}
 	}
 
 	// Get coverage from eligibility result (avoids duplicate query)
 	coverage := eligibility.Coverage
 	if coverage == nil {
-		coverage = &CoverageInfo{}
+		coverage = &payments.CoverageInfo{}
 	}
 
 	// Use provided amount/currency or fall back to price defaults
@@ -1603,7 +1515,7 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 		"eligibility":    eligibility.Status,
 	}).Info("registered purchase") // one-time
 
-	return &RegisterPurchaseResponse{
+	return &payments.RegisterPurchaseResponse{
 		PaymentID:    paymentID,
 		Entitlements: grantedEntitlements,
 		DelayedStart: delayedStart,
@@ -1616,13 +1528,13 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 // Behavior: Immediate switch, charge prorated difference for remaining days
 func (s *CheckoutService) processUpgrade(
 	ctx context.Context,
-	req *CheckoutRequest,
+	req *payments.CheckoutRequest,
 	user *payments.UserIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
 	processor string,
-) (*CheckoutResponse, error) {
+) (*payments.CheckoutResponse, error) {
 	now := s.now()
 
 	// CCBill handles upgrades via their own Package Upgrade flow
@@ -1657,7 +1569,7 @@ func (s *CheckoutService) processUpgrade(
 			var cached upgradeIdempotencyResult
 			if err := json.Unmarshal(idempRec.Result, &cached); err != nil {
 				log.WithError(err).Warn("failed to unmarshal cached upgrade result")
-				return &CheckoutResponse{
+				return &payments.CheckoutResponse{
 					Status:        "success",
 					Action:        "upgrade",
 					Message:       "Upgrade already completed",
@@ -1665,7 +1577,7 @@ func (s *CheckoutService) processUpgrade(
 				}, nil
 			}
 			subID, _ := uuid.Parse(cached.SubscriptionID)
-			return &CheckoutResponse{
+			return &payments.CheckoutResponse{
 				Status:         "success",
 				Action:         "upgrade",
 				Message:        cached.Message,
@@ -1896,7 +1808,7 @@ func (s *CheckoutService) processUpgrade(
 	})
 	_ = s.IdempotencyService.Complete(ctx, idempOp, idempotencyKey, cachedResult)
 
-	return &CheckoutResponse{
+	return &payments.CheckoutResponse{
 		Status:         "success",
 		Action:         "upgrade",
 		Message:        successMessage,
@@ -1910,16 +1822,16 @@ func (s *CheckoutService) processUpgrade(
 // Behavior: Keep current tier until period ends, then switch to new tier at next renewal
 func (s *CheckoutService) processDowngrade(
 	ctx context.Context,
-	req *CheckoutRequest,
+	req *payments.CheckoutRequest,
 	user *payments.UserIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
 	existingSub *models.Subscription,
 	processor string,
-) (*CheckoutResponse, error) {
+) (*payments.CheckoutResponse, error) {
 	// CCBill handles downgrades via their own flow
 	if processor == "ccbill" {
-		return &CheckoutResponse{
+		return &payments.CheckoutResponse{
 			Status:  "blocked",
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
 		}, nil
@@ -1943,7 +1855,7 @@ func (s *CheckoutService) processDowngrade(
 
 	// Check if there's already a scheduled downgrade
 	if existingSub.ScheduledPriceID != nil {
-		return &CheckoutResponse{
+		return &payments.CheckoutResponse{
 			Status:  "blocked",
 			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 		}, nil
@@ -1970,7 +1882,7 @@ func (s *CheckoutService) processDowngrade(
 		"effective_date":     effectiveDate,
 	}).Info("scheduled downgrade for end of period")
 
-	return &CheckoutResponse{
+	return &payments.CheckoutResponse{
 		Status:         "success",
 		Action:         "downgrade",
 		Message:        fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", newProduct.DisplayName, effectiveDate),
@@ -2207,15 +2119,15 @@ func (s *CheckoutService) processTierChangeMobius(
 	currentProduct *models.Product,
 	action string,
 ) (*TierChangeResponse, error) {
-	// Create a synthetic CheckoutRequest for reuse of existing upgrade/downgrade logic
-	checkoutReq := &CheckoutRequest{
+	// Create a synthetic payments.CheckoutRequest for reuse of existing upgrade/downgrade logic
+	checkoutReq := &payments.CheckoutRequest{
 		PriceID:        req.PriceID,
 		Processor:      string(existingSub.Processor),
 		IdempotencyKey: req.IdempotencyKey,
 	}
 
 	// Route to existing methods which handle the heavy lifting
-	var checkoutResp *CheckoutResponse
+	var checkoutResp *payments.CheckoutResponse
 	var err error
 
 	if action == "upgrade" {
@@ -2228,7 +2140,7 @@ func (s *CheckoutService) processTierChangeMobius(
 		return nil, err
 	}
 
-	// Map CheckoutResponse to TierChangeResponse
+	// Map payments.CheckoutResponse to TierChangeResponse
 	return s.mapCheckoutToTierChangeResponse(checkoutResp, newPrice, action), nil
 }
 
@@ -2292,8 +2204,8 @@ func (s *CheckoutService) processTierChangeCCBill(
 	return resp, nil
 }
 
-// mapCheckoutToTierChangeResponse converts a CheckoutResponse to TierChangeResponse
-func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse, newPrice *models.Price, action string) *TierChangeResponse {
+// mapCheckoutToTierChangeResponse converts a payments.CheckoutResponse to TierChangeResponse
+func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *payments.CheckoutResponse, newPrice *models.Price, action string) *TierChangeResponse {
 	tierResp := &TierChangeResponse{
 		Object:  "tier_change",
 		Mode:    "tier_change",
