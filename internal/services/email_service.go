@@ -284,7 +284,7 @@ func (s *EmailService) SendSubscriptionRenewed(ctx context.Context, userID strin
 }
 
 // SendPremiumEnded sends the appropriate email when a premium entitlement ends.
-func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reason PremiumEndReason) error {
+func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reason subscriptions.PremiumEndReason) error {
 	if !s.IsEnabled() {
 		log.WithContext(ctx).Debug("email service not available - skipping premium-ended email")
 		return nil
@@ -300,14 +300,14 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 	}
 
 	switch reason {
-	case PremiumEndReasonExpired:
+	case subscriptions.PremiumEndReasonExpired:
 		return s.SendSubscriptionExpired(ctx, *emailData)
-	case PremiumEndReasonChargeback, PremiumEndReasonRefund, PremiumEndReasonAdmin, PremiumEndReasonProcessor:
+	case subscriptions.PremiumEndReasonChargeback, subscriptions.PremiumEndReasonRefund, subscriptions.PremiumEndReasonAdmin, subscriptions.PremiumEndReasonProcessor:
 		return s.SendSubscriptionCancellation(ctx, *emailData, reason)
-	case PremiumEndReasonUserCancel:
+	case subscriptions.PremiumEndReasonUserCancel:
 		fallthrough
-	case PremiumEndReasonUnknown:
-		return s.SendSubscriptionCancellation(ctx, *emailData, PremiumEndReasonUserCancel)
+	case subscriptions.PremiumEndReasonUnknown:
+		return s.SendSubscriptionCancellation(ctx, *emailData, subscriptions.PremiumEndReasonUserCancel)
 	default:
 		return s.SendSubscriptionCancellation(ctx, *emailData, reason)
 	}
@@ -352,7 +352,7 @@ func (s *EmailService) SendEntitlementExpired(ctx context.Context, userID string
 }
 
 // getEmailData fetches subscription data for email notifications
-func (s *EmailService) getEmailData(ctx context.Context, userID string) (*SubscriptionEmailData, error) {
+func (s *EmailService) getEmailData(ctx context.Context, userID string) (*subscriptions.SubscriptionEmailData, error) {
 	if s.subscriptionService == nil {
 		return nil, fmt.Errorf("subscription service not configured")
 	}
@@ -431,7 +431,7 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 		}
 	}
 
-	return &SubscriptionEmailData{
+	return &subscriptions.SubscriptionEmailData{
 		UserEmail:      email,
 		Username:       username,
 		SubscriptionID: subscription.ID,

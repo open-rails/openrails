@@ -6,55 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
-
-// SubscriptionEmailData contains data for subscription-related emails
-type PremiumEndReason string
-
-const (
-	PremiumEndReasonUserCancel PremiumEndReason = "user_cancel"
-	PremiumEndReasonExpired    PremiumEndReason = "expired"
-	PremiumEndReasonChargeback PremiumEndReason = "chargeback"
-	PremiumEndReasonRefund     PremiumEndReason = "refund"
-	PremiumEndReasonAdmin      PremiumEndReason = "admin"
-	PremiumEndReasonProcessor  PremiumEndReason = "processor_cancel"
-	PremiumEndReasonUnknown    PremiumEndReason = "unknown"
-)
-
-func ParsePremiumEndReason(value string) PremiumEndReason {
-	switch strings.ToLower(value) {
-	case string(PremiumEndReasonUserCancel):
-		return PremiumEndReasonUserCancel
-	case string(PremiumEndReasonExpired):
-		return PremiumEndReasonExpired
-	case string(PremiumEndReasonChargeback):
-		return PremiumEndReasonChargeback
-	case string(PremiumEndReasonRefund):
-		return PremiumEndReasonRefund
-	case string(PremiumEndReasonAdmin):
-		return PremiumEndReasonAdmin
-	case string(PremiumEndReasonProcessor):
-		return PremiumEndReasonProcessor
-	default:
-		return PremiumEndReasonUnknown
-	}
-}
-
-type SubscriptionEmailData struct {
-	UserEmail      string
-	Username       string
-	SubscriptionID uuid.UUID
-	ProductName    string
-	PriceName      string
-	Amount         int64 // Amount in cents (smallest currency unit)
-	Currency       string
-	PeriodStart    time.Time
-	PeriodEnd      time.Time
-	PaymentMethod  string
-	TransactionID  string
-}
 
 func (s *EmailService) storeName() string {
 	if s == nil || s.store == nil {
@@ -75,7 +29,7 @@ func (s *EmailService) storeCustomerPortalURL() string {
 }
 
 // SendSubscriptionConfirmation sends a confirmation email when subscription is created
-func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data SubscriptionEmailData) error {
+func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
 	storeName := s.storeName()
 	premiumName := strings.TrimSpace(data.ProductName)
 	if premiumName == "" {
@@ -125,7 +79,7 @@ func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data Su
 }
 
 // SendSubscriptionRenewal sends notification when subscription is renewed
-func (s *EmailService) SendSubscriptionRenewal(ctx context.Context, data SubscriptionEmailData) error {
+func (s *EmailService) SendSubscriptionRenewal(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
 	storeName := s.storeName()
 	premiumName := strings.TrimSpace(data.ProductName)
 	if premiumName == "" {
@@ -176,7 +130,7 @@ func (s *EmailService) SendSubscriptionRenewal(ctx context.Context, data Subscri
 }
 
 // SendSubscriptionCancellation sends notification when subscription is cancelled
-func (s *EmailService) SendSubscriptionCancellation(ctx context.Context, data SubscriptionEmailData, reason PremiumEndReason) error {
+func (s *EmailService) SendSubscriptionCancellation(ctx context.Context, data subscriptions.SubscriptionEmailData, reason subscriptions.PremiumEndReason) error {
 	periodEnd := data.PeriodEnd.Format("Jan 2, 2006")
 	storeName := s.storeName()
 	premiumName := strings.TrimSpace(data.ProductName)
@@ -189,17 +143,17 @@ func (s *EmailService) SendSubscriptionCancellation(ctx context.Context, data Su
 	footer := "You can resubscribe at any time. We'd love to see you back!"
 
 	switch reason {
-	case PremiumEndReasonChargeback:
+	case subscriptions.PremiumEndReasonChargeback:
 		subject = fmt.Sprintf("Your %s subscription has been terminated", premiumName)
 		reasonBlurb = "We received a dispute on your most recent payment, so the membership has been closed for now."
 		footer = "If this was unexpected, please reach out to support so we can help restore your access."
-	case PremiumEndReasonRefund:
+	case subscriptions.PremiumEndReasonRefund:
 		subject = fmt.Sprintf("Your %s subscription was refunded", premiumName)
 		reasonBlurb = "We've processed your refund and closed the associated premium membership."
-	case PremiumEndReasonAdmin:
+	case subscriptions.PremiumEndReasonAdmin:
 		subject = fmt.Sprintf("Your %s subscription was cancelled", premiumName)
 		reasonBlurb = "Our support team closed this subscription."
-	case PremiumEndReasonProcessor:
+	case subscriptions.PremiumEndReasonProcessor:
 		subject = fmt.Sprintf("Your %s subscription was cancelled", premiumName)
 		reasonBlurb = "Your payment provider confirmed this cancellation, so we’ve closed the membership."
 	}
@@ -236,7 +190,7 @@ func (s *EmailService) SendSubscriptionCancellation(ctx context.Context, data Su
 	return s.SendEmail(ctx, data.UserEmail, subject, htmlContent, plainContent)
 }
 
-func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data SubscriptionEmailData) error {
+func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
 	periodEnd := data.PeriodEnd.Format("Jan 2, 2006")
 	storeName := s.storeName()
 	premiumName := strings.TrimSpace(data.ProductName)
@@ -278,7 +232,7 @@ func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data Subscri
 }
 
 // sendPaymentFailed sends notification when subscription payment fails (internal, takes SubscriptionEmailData)
-func (s *EmailService) sendPaymentFailed(ctx context.Context, data SubscriptionEmailData) error {
+func (s *EmailService) sendPaymentFailed(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
 	amountLine := moneyutil.FormatDisplay(data.Amount, data.Currency)
 	storeName := s.storeName()
 	premiumName := strings.TrimSpace(data.ProductName)

@@ -1168,14 +1168,14 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 			}
 		}
 
-		reason := PremiumEndReasonAdmin
+		reason := subscriptions.PremiumEndReasonAdmin
 		switch params.CancelType {
 		case models.CancelTypeUser:
-			reason = PremiumEndReasonUserCancel
+			reason = subscriptions.PremiumEndReasonUserCancel
 		case models.CancelTypeExpired:
-			reason = PremiumEndReasonExpired
+			reason = subscriptions.PremiumEndReasonExpired
 		case models.CancelTypeMerchant:
-			reason = PremiumEndReasonProcessor
+			reason = subscriptions.PremiumEndReasonProcessor
 		}
 
 		notification := &models.NotificationQueue{
@@ -1316,7 +1316,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 			ID:        uuid.New(),
 			UserID:    subscription.UserID,
 			EventType: models.NotificationPremiumEnded,
-			Data:      map[string]any{"reason": string(PremiumEndReasonExpired)},
+			Data:      map[string]any{"reason": string(subscriptions.PremiumEndReasonExpired)},
 		}
 		if err := notificationService.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create membership expired notification")
@@ -1542,7 +1542,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 		var data map[string]any
 		if eventType == models.NotificationPremiumEnded {
-			data = map[string]any{"reason": string(PremiumEndReasonExpired)}
+			data = map[string]any{"reason": string(subscriptions.PremiumEndReasonExpired)}
 		}
 
 		notification := &models.NotificationQueue{

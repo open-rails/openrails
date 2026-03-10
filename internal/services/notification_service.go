@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
@@ -171,10 +172,10 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 		return s.emailService.SendSubscriptionRenewed(ctx, notification.UserID)
 
 	case models.NotificationPremiumEnded:
-		reason := PremiumEndReasonUnknown
+		reason := subscriptions.PremiumEndReasonUnknown
 		if notification.Data != nil {
 			if r, ok := notification.Data["reason"].(string); ok {
-				reason = ParsePremiumEndReason(r)
+				reason = subscriptions.ParsePremiumEndReason(r)
 			}
 		}
 		return s.emailService.SendPremiumEnded(ctx, notification.UserID, reason)

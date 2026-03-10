@@ -1522,7 +1522,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 					ID:        uuid.New(),
 					UserID:    sub.UserID,
 					EventType: models.NotificationPremiumEnded,
-					Data:      map[string]any{"reason": string(PremiumEndReasonRefund)},
+					Data:      map[string]any{"reason": string(subscriptions.PremiumEndReasonRefund)},
 				}
 				if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
 					log.WithContext(ctx).WithError(err).Error("failed to create and deliver refund termination notification")
@@ -1921,7 +1921,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 				ID:        uuid.New(),
 				UserID:    sub.UserID,
 				EventType: models.NotificationPremiumEnded,
-				Data:      map[string]any{"reason": string(PremiumEndReasonChargeback)},
+				Data:      map[string]any{"reason": string(subscriptions.PremiumEndReasonChargeback)},
 			}
 			if err := s.NotificationService.CreateAndDeliver(ctx, userNotification); err != nil {
 				log.WithContext(ctx).WithError(err).Error("failed to create and deliver chargeback termination notification")
@@ -2389,11 +2389,11 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 
 	// Add notification to queue for user and send immediate email
 	if s.NotificationService != nil {
-		reasonMarker := PremiumEndReasonProcessor
+		reasonMarker := subscriptions.PremiumEndReasonProcessor
 		if cancelType == models.CancelTypeExpired {
-			reasonMarker = PremiumEndReasonExpired
+			reasonMarker = subscriptions.PremiumEndReasonExpired
 		} else if cancelType == models.CancelTypeUser {
-			reasonMarker = PremiumEndReasonUserCancel
+			reasonMarker = subscriptions.PremiumEndReasonUserCancel
 		}
 
 		notification := &models.NotificationQueue{
@@ -2485,7 +2485,7 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			ID:        uuid.New(),
 			UserID:    subscription.UserID,
 			EventType: models.NotificationPremiumEnded,
-			Data:      map[string]any{"reason": string(PremiumEndReasonExpired)},
+			Data:      map[string]any{"reason": string(subscriptions.PremiumEndReasonExpired)},
 		}
 
 		if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
