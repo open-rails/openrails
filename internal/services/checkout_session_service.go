@@ -930,7 +930,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		return nil, err
 	}
 
-	result, err := s.checkoutService.RegisterPurchase(ctx, &RegisterPurchaseRequest{
+	result, err := s.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        session.UserID,
 		PriceID:       session.PriceID,
 		Processor:     "solana",

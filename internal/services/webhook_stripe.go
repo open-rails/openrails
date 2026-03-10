@@ -327,7 +327,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		return fmt.Errorf("stripe checkout session missing payment_intent")
 	}
 
-	result, err := s.CheckoutService.RegisterPurchase(ctx, &RegisterPurchaseRequest{
+	result, err := s.CheckoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        userID,
 		PriceID:       priceID,
 		Processor:     string(models.ProcessorStripe),

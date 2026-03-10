@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 )
@@ -217,7 +216,7 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 	if req.Amount != nil {
 		amount = *req.Amount
 	}
-	result, err := r.State.CheckoutService.RegisterPurchase(r.Request.Context(), &services.RegisterPurchaseRequest{UserID: path.UserID, PriceID: priceID, Processor: string(models.ProcessorManual), TransactionID: transactionID, Amount: amount, Currency: strings.TrimSpace(req.Currency), PurchasedAt: purchasedAt, DiscountCode: req.DiscountCode, DiscountReason: req.DiscountReason, DiscountMetadata: req.DiscountMetadata})
+	result, err := r.State.CheckoutService.RegisterPurchase(r.Request.Context(), &payments.RegisterPurchaseRequest{UserID: path.UserID, PriceID: priceID, Processor: string(models.ProcessorManual), TransactionID: transactionID, Amount: amount, Currency: strings.TrimSpace(req.Currency), PurchasedAt: purchasedAt, DiscountCode: req.DiscountCode, DiscountReason: req.DiscountReason, DiscountMetadata: req.DiscountMetadata})
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return

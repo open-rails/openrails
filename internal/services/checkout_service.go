@@ -1009,7 +1009,7 @@ func (s *CheckoutService) processNMISale(
 	}
 
 	// Use RegisterPurchase to record payment and grant entitlements
-	result, err := s.RegisterPurchase(ctx, &RegisterPurchaseRequest{
+	result, err := s.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        user.ID,
 		PriceID:       price.ID,
 		Processor:     string(models.ProcessorMobius),
@@ -1460,29 +1460,6 @@ type UpgradeResponse struct {
 	OldSubscriptionID *uuid.UUID `json:"old_subscription_id,omitempty"` // The subscription being replaced
 }
 
-// RegisterPurchaseRequest contains everything needed to record a completed one-time purchase.
-// This is the universal entry point for all processors after payment is confirmed.
-type RegisterPurchaseRequest struct {
-	UserID         string     // User who made the purchase
-	PriceID        uuid.UUID  // Price that was purchased
-	Processor      string     // "solana", "mobius", "ccbill"
-	TransactionID  string     // Processor's transaction/signature ID
-	Amount         int64      // Amount in smallest unit (cents for usd, lamports for SOL)
-	Currency       string     // "usd", "USDC", "SOL", etc.
-	SubscriptionID *uuid.UUID // Optional: link payment to subscription (for subscription renewals/purchases)
-	WalletPurchase bool       // Is this purchase made via on-chain wallet (Solana)?
-	// Optional: when this purchase happened (defaults to now).
-	PurchasedAt *time.Time
-
-	// Optional discount metadata (useful for off-channel/manual purchases).
-	DiscountCode     *string
-	DiscountReason   *string
-	DiscountMetadata map[string]any
-
-	// Optional metadata (e.g., E2E tracing).
-	Metadata map[string]any
-}
-
 // RegisterPurchaseResponse contains the result of a registered purchase
 type RegisterPurchaseResponse struct {
 	PaymentID    uuid.UUID         // Created payment record ID
@@ -1505,7 +1482,7 @@ type RegisterPurchaseResponse struct {
 //  2. Looking up Product from Price
 //  3. Checking coverage for delayed start
 //  4. Granting entitlements from Product.EntitlementsSpec
-func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *RegisterPurchaseRequest) (*RegisterPurchaseResponse, error) {
+func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*RegisterPurchaseResponse, error) {
 	// Validate required fields
 	if req.UserID == "" {
 		return nil, errors.New("user_id is required")

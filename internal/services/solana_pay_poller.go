@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
@@ -399,7 +400,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 	}
 
 	// Use the unified RegisterPurchase to record payment and grant entitlements
-	result, err := p.checkoutService.RegisterPurchase(ctx, &RegisterPurchaseRequest{
+	result, err := p.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:         pending.UserID,
 		PriceID:        priceID,
 		Processor:      "solana",
