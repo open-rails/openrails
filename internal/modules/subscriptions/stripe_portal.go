@@ -1,4 +1,4 @@
-package services
+package subscriptions
 
 import (
 	"context"
@@ -19,7 +19,7 @@ type StripePortalService struct {
 }
 
 func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {
-	_, secretKey, err := requireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return "", err
 	}
@@ -46,9 +46,12 @@ func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerI
 		return "", fmt.Errorf("stripe portal failed: %w", err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read stripe portal response: %w", err)
+	}
 	if resp.StatusCode >= 400 {
-		msg := parseStripePortalError(body)
+		msg := ParseStripeAPIError(body)
 		if msg == "" {
 			msg = fmt.Sprintf("stripe portal failed (%d)", resp.StatusCode)
 		}
@@ -64,16 +67,4 @@ func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerI
 		return "", errors.New("stripe portal returned empty URL")
 	}
 	return out.URL, nil
-}
-
-func parseStripePortalError(body []byte) string {
-	var out struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &out); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out.Error.Message)
 }

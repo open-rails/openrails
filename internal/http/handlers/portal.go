@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 type portalResponse struct {
@@ -30,7 +30,7 @@ func CreatePortalSession(r *httprequest.Request) {
 		return
 	}
 	returnURL += "/account"
-	service := &services.StripePortalService{Config: r.State.Config}
+	service := &subscriptions.StripePortalService{Config: r.State.Config}
 	urlStr, err := service.CreatePortalSession(r.Request.Context(), customerID, returnURL)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())

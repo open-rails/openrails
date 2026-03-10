@@ -877,7 +877,7 @@ func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, 
 		return nil, fmt.Errorf("return_url required")
 	}
 
-	service := &services.StripePortalService{Config: cfg}
+	service := &subscriptions.StripePortalService{Config: cfg}
 	urlStr, err := service.CreatePortalSession(ctx, customerID, returnURL)
 	if err != nil {
 		return nil, err

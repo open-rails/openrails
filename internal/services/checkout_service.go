@@ -1104,7 +1104,7 @@ func (s *CheckoutService) processStripeSubscription(
 	price *models.Price,
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
-	stripeProc, _, err := requireStripeSecretKey(s.Config)
+	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -1155,7 +1155,7 @@ func (s *CheckoutService) processStripePayment(
 	user *UserIdentity,
 	price *models.Price,
 ) (*CheckoutResponse, error) {
-	stripeProc, _, err := requireStripeSecretKey(s.Config)
+	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -1222,7 +1222,7 @@ type stripeCheckoutParams struct {
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
-	stripeProc, _, err := requireStripeSecretKey(s.Config)
+	stripeProc, _, err := subscriptions.RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return "", err
 	}

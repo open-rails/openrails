@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 var ErrStripeRefundTargetMissing = errors.New("stripe refundable transaction id is missing")
@@ -46,7 +47,7 @@ type RefundResult struct {
 
 // CreateRefund creates a refund for a Stripe charge or payment intent
 func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundParams) (*RefundResult, error) {
-	_, secretKey, err := requireStripeSecretKey(s.Config)
+	_, secretKey, err := subscriptions.RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +100,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		msg := parseStripePortalError(body)
+		msg := subscriptions.ParseStripeAPIError(body)
 		if msg == "" {
 			msg = fmt.Sprintf("stripe refund failed (%d)", resp.StatusCode)
 		}
@@ -147,7 +148,7 @@ func metadataStringValue(metadata map[string]any, key string) string {
 
 // GetRefund retrieves a refund by ID
 func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*RefundResult, error) {
-	_, secretKey, err := requireStripeSecretKey(s.Config)
+	_, secretKey, err := subscriptions.RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +173,7 @@ func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		msg := parseStripePortalError(body)
+		msg := subscriptions.ParseStripeAPIError(body)
 		if msg == "" {
 			msg = fmt.Sprintf("stripe refund fetch failed (%d)", resp.StatusCode)
 		}

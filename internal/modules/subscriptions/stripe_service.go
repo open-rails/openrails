@@ -25,7 +25,7 @@ func requireStripeProcessorConfig(cfg *config.Config) (*config.ProcessorConfig, 
 	return proc, nil
 }
 
-func requireStripeSecretKey(cfg *config.Config) (*config.ProcessorConfig, string, error) {
+func RequireStripeSecretKey(cfg *config.Config) (*config.ProcessorConfig, string, error) {
 	proc, err := requireStripeProcessorConfig(cfg)
 	if err != nil {
 		return nil, "", err
@@ -37,7 +37,7 @@ func requireStripeSecretKey(cfg *config.Config) (*config.ProcessorConfig, string
 	return proc, secretKey, nil
 }
 
-func parseStripePortalError(body []byte) string {
+func ParseStripeAPIError(body []byte) string {
 	var out struct {
 		Error struct {
 			Message string `json:"message"`
@@ -54,7 +54,7 @@ type StripeService struct {
 }
 
 func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionID string) (string, error) {
-	_, secretKey, err := requireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return "", err
 	}
@@ -79,7 +79,7 @@ func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionI
 		return "", fmt.Errorf("read stripe subscription response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		msg := parseStripePortalError(body)
+		msg := ParseStripeAPIError(body)
 		if msg == "" {
 			msg = fmt.Sprintf("stripe subscription fetch failed (%d)", resp.StatusCode)
 		}
@@ -105,7 +105,7 @@ func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionI
 }
 
 func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, prorationBehavior, billingAnchor string) error {
-	_, secretKey, err := requireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptio
 		return fmt.Errorf("read stripe subscription update response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		msg := parseStripePortalError(body)
+		msg := ParseStripeAPIError(body)
 		if msg == "" {
 			msg = fmt.Sprintf("stripe subscription update failed (%d)", resp.StatusCode)
 		}
@@ -153,7 +153,7 @@ func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptio
 }
 
 func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID string) error {
-	_, secretKey, err := requireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID s
 		return fmt.Errorf("read stripe subscription cancel response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		msg := parseStripePortalError(body)
+		msg := ParseStripeAPIError(body)
 		if msg == "" {
 			msg = fmt.Sprintf("stripe subscription cancel failed (%d)", resp.StatusCode)
 		}
@@ -192,7 +192,7 @@ func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID s
 }
 
 func (s *StripeService) ResumeSubscription(ctx context.Context, subscriptionID string) error {
-	_, secretKey, err := requireStripeSecretKey(s.Config)
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return err
 	}
@@ -221,7 +221,7 @@ func (s *StripeService) ResumeSubscription(ctx context.Context, subscriptionID s
 		return fmt.Errorf("read stripe subscription resume response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		msg := parseStripePortalError(body)
+		msg := ParseStripeAPIError(body)
 		if msg == "" {
 			msg = fmt.Sprintf("stripe subscription resume failed (%d)", resp.StatusCode)
 		}
