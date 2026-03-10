@@ -53,6 +53,7 @@ type CheckoutService struct {
 	PaymentService       *payments.PaymentService
 	EntitlementService   *entitlements.EntitlementService
 	PurchaseService      *payments.CheckoutPurchaseService
+	VaultResolver        *payments.CheckoutVaultService
 	PaymentMethodService *payments.PaymentMethodService
 	VaultService         *payments.VaultService
 	IdempotencyService   *IdempotencyService
@@ -89,6 +90,7 @@ func NewCheckoutService(
 		PaymentService:       paymentService,
 		EntitlementService:   entitlementService,
 		PurchaseService:      payments.NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService),
+		VaultResolver:        payments.NewCheckoutVaultService(paymentMethodService, vaultService),
 		PaymentMethodService: paymentMethodService,
 		VaultService:         vaultService,
 		IdempotencyService:   idempotencyService,
@@ -520,7 +522,7 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	// Get or create vault (payment method)
-	customerVaultID, createdPaymentMethod, err := s.resolveVault(ctx, req, user, provider)
+	customerVaultID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -551,13 +553,13 @@ func (s *CheckoutService) processNMISubscription(
 	// Build NMI params
 	params := nmi.RecurringPaymentData{
 		CardUserData: nmi.CardUserData{
-			FirstName: s.resolveFirstName(req, user),
-			LastName:  s.resolveLastName(req),
-			Address1:  s.defaultIfEmpty(req.Address1, "N/A"),
-			City:      s.defaultIfEmpty(req.City, "N/A"),
-			State:     s.defaultIfEmpty(req.State, "N/A"),
-			Zip:       s.defaultIfEmpty(req.Zip, "00000"),
-			Country:   s.defaultIfEmpty(req.Country, "US"),
+			FirstName: payments.ResolveCheckoutFirstName(req, user),
+			LastName:  payments.ResolveCheckoutLastName(req),
+			Address1:  payments.DefaultIfEmpty(req.Address1, "N/A"),
+			City:      payments.DefaultIfEmpty(req.City, "N/A"),
+			State:     payments.DefaultIfEmpty(req.State, "N/A"),
+			Zip:       payments.DefaultIfEmpty(req.Zip, "00000"),
+			Country:   payments.DefaultIfEmpty(req.Country, "US"),
 		},
 		PlanID:          nmiPlanID,
 		CustomerVaultID: customerVaultID,
@@ -771,7 +773,7 @@ func (s *CheckoutService) processNMISale(
 	}
 
 	// Get or create vault
-	customerVaultID, createdPaymentMethod, err := s.resolveVault(ctx, req, user, provider)
+	customerVaultID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -1061,97 +1063,7 @@ func parseStripeError(body []byte) string {
 }
 
 // resolveVault gets an existing vault or creates one from payment token
-func (s *CheckoutService) resolveVault(ctx context.Context, req *payments.CheckoutRequest, user *payments.UserIdentity, provider string) (string, *models.PaymentMethod, error) {
-	// Try existing payment method first
-	if req.PaymentMethodID != "" {
-		pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
-		if err != nil {
-			return "", nil, fmt.Errorf("invalid payment_method_id: %w", err)
-		}
-
-		pm, err := s.PaymentMethodService.ValidatePaymentMethodOperation(ctx, pmID, user.ID)
-		if err != nil {
-			return "", nil, fmt.Errorf("invalid payment method: %w", err)
-		}
-
-		if !processors.IsNMIBackedProcessor(pm.Processor) {
-			return "", nil, errors.New("payment method is not compatible with card payments")
-		}
-
-		return pm.VaultID, nil, nil
-	}
-
-	// Create new vault from payment token
-	if req.PaymentToken == "" {
-		return "", nil, errors.New("payment_method_id or payment_token is required")
-	}
-
-	if s.VaultService == nil {
-		return "", nil, errors.New("vault service unavailable")
-	}
-
-	pm, err := s.VaultService.CreateVault(ctx, user.ID, &payments.CreateVaultRequest{
-		PaymentToken: req.PaymentToken,
-		Provider:     provider,
-		FirstName:    s.resolveFirstName(req, user),
-		LastName:     s.resolveLastName(req),
-		Address1:     req.Address1,
-		City:         req.City,
-		State:        req.State,
-		Zip:          req.Zip,
-		Country:      req.Country,
-		Email:        req.Email,
-		LastFour: func() string {
-			if len(req.LastFour) > 4 {
-				return req.LastFour[len(req.LastFour)-4:]
-			}
-			return req.LastFour
-		}(),
-		CardType:   req.CardType,
-		ExpiryDate: req.ExpiryDate,
-		Metadata: func() map[string]any {
-			if req.Metadata == nil {
-				return nil
-			}
-			if v := strings.TrimSpace(req.Metadata["e2e_run_id"]); v != "" {
-				return map[string]any{"e2e_run_id": v}
-			}
-			return nil
-		}(),
-	})
-	if err != nil {
-		return "", nil, err
-	}
-
-	return pm.VaultID, pm, nil
-}
-
 // grantProductEntitlements grants entitlements from product spec after a one-time or subscription purchase
-
-// Helper functions
-func (s *CheckoutService) resolveFirstName(req *payments.CheckoutRequest, user *payments.UserIdentity) string {
-	if req.FirstName != "" {
-		return req.FirstName
-	}
-	if user.Username != "" {
-		return user.Username
-	}
-	return "Customer"
-}
-
-func (s *CheckoutService) resolveLastName(req *payments.CheckoutRequest) string {
-	if req.LastName != "" {
-		return req.LastName
-	}
-	return "Member"
-}
-
-func (s *CheckoutService) defaultIfEmpty(value, defaultValue string) string {
-	if strings.TrimSpace(value) == "" {
-		return defaultValue
-	}
-	return value
-}
 
 func timePtr(t time.Time) *time.Time {
 	return &t
@@ -1287,7 +1199,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Get or create vault
-	customerVaultID, createdPaymentMethod, err := s.resolveVault(ctx, req, user, provider)
+	customerVaultID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
@@ -1334,13 +1246,13 @@ func (s *CheckoutService) processUpgrade(
 
 	params := nmi.RecurringPaymentData{
 		CardUserData: nmi.CardUserData{
-			FirstName: s.resolveFirstName(req, user),
-			LastName:  s.resolveLastName(req),
-			Address1:  s.defaultIfEmpty(req.Address1, "N/A"),
-			City:      s.defaultIfEmpty(req.City, "N/A"),
-			State:     s.defaultIfEmpty(req.State, "N/A"),
-			Zip:       s.defaultIfEmpty(req.Zip, "00000"),
-			Country:   s.defaultIfEmpty(req.Country, "US"),
+			FirstName: payments.ResolveCheckoutFirstName(req, user),
+			LastName:  payments.ResolveCheckoutLastName(req),
+			Address1:  payments.DefaultIfEmpty(req.Address1, "N/A"),
+			City:      payments.DefaultIfEmpty(req.City, "N/A"),
+			State:     payments.DefaultIfEmpty(req.State, "N/A"),
+			Zip:       payments.DefaultIfEmpty(req.Zip, "00000"),
+			Country:   payments.DefaultIfEmpty(req.Country, "US"),
 		},
 		PlanID:          nmiPlanID,
 		CustomerVaultID: customerVaultID,
