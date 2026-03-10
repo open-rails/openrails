@@ -534,7 +534,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 	processorSubID := "test-dunning-max-" + uuid.New().String()[:8]
 
 	// Create a subscription at max retries (one more failure = cancelled)
-	retryAttempts := services.MaxDunningFailures - 1 // One retry left
+	retryAttempts := subscriptions.MaxDunningFailures - 1 // One retry left
 	nextRetry := startTime
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:         userID,
@@ -593,7 +593,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 		assert.Equal(t, models.StatusCancelled, updatedSub.Status,
 			"Subscription should be cancelled after max retries")
 		assert.NotNil(t, updatedSub.EndedAt, "EndedAt should be set")
-		assert.Equal(t, services.MaxDunningFailures, *updatedSub.RetryAttempts,
+		assert.Equal(t, subscriptions.MaxDunningFailures, *updatedSub.RetryAttempts,
 			"RetryAttempts should equal MaxDunningFailures")
 	})
 

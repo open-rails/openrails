@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -43,7 +42,7 @@ type CancelSubscriptionWorker struct {
 	Config                       *config.Config
 	UserSubscriptionService      *subscriptions.UserSubscriptionService
 	SubscriptionService          *subscriptions.SubscriptionService
-	SubscriptionLifecycleService *services.SubscriptionLifecycleService
+	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 }
 
 func (CancelSubscriptionWorker) Kind() string { return KindSubscriptionCancel }

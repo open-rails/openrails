@@ -42,7 +42,7 @@ type WebhookDispatcher struct {
 	SubscriptionService          *subscriptions.SubscriptionService
 	PaymentService               *payments.PaymentService
 	EventLogService              *EventLogService
-	SubscriptionLifecycleService *SubscriptionLifecycleService
+	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	ProfileRepo                  *repo.ProfileRepo
 	DeduplicationService         *DeduplicationService
 	ProcessorCustomerService     *payments.ProcessorCustomerService

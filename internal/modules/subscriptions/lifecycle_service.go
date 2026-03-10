@@ -1,4 +1,4 @@
-package services
+package subscriptions
 
 import (
 	"context"
@@ -13,12 +13,11 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
@@ -33,13 +32,13 @@ type SubscriptionLifecycleService struct {
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
 	EntitlementService  *entitlements.EntitlementService
-	NotificationService *NotificationService
+	NotificationService NotificationEmailSender
 	PaymentService      *payments.PaymentService // For creating Payment records on renewal
-	EventLogService     *EventLogService         // For logging events to ClickHouse
+	EventLogService     LifecycleEventLogger     // For logging events to ClickHouse
 }
 
 func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context.Context, subscription *models.Subscription, trigger string, allowOverride bool) error {
-	reason, terminal := subscriptions.TerminalCancelReason(subscription)
+	reason, terminal := TerminalCancelReason(subscription)
 	if !terminal {
 		return nil
 	}
@@ -54,19 +53,19 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 		return nil
 	}
 
-	return &subscriptions.TerminalTransitionBlockedError{
+	return &TerminalTransitionBlockedError{
 		SubscriptionID: subscription.ID,
 		Processor:      subscription.Processor,
 		FromStatus:     subscription.Status,
 		ToStatus:       models.StatusActive,
-		CancelType:     subscriptions.NormalizeCancelType(subscription.CancelType),
+		CancelType:     NormalizeCancelType(subscription.CancelType),
 		Trigger:        trigger,
 		Reason:         reason,
 	}
 }
 
 // NewSubscriptionLifecycleService creates a new instance of SubscriptionLifecycleService
-func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService *NotificationService, paymentService *payments.PaymentService, eventLogService *EventLogService) *SubscriptionLifecycleService {
+func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService NotificationEmailSender, paymentService *payments.PaymentService, eventLogService LifecycleEventLogger) *SubscriptionLifecycleService {
 	return &SubscriptionLifecycleService{
 		DB:                  db,
 		Config:              nil,                      // Set via SetConfig if feature flags are needed
@@ -114,7 +113,7 @@ func (s *SubscriptionLifecycleService) dispatchNotifications(ctx context.Context
 }
 
 // CreateMembership creates a new subscription and grants associated roles
-func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, params *subscriptions.CreateMembershipParams) (*models.Subscription, error) {
+func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, params *CreateMembershipParams) (*models.Subscription, error) {
 	var (
 		subscription  *models.Subscription
 		notifications []*models.NotificationQueue
@@ -145,21 +144,21 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 	s.dispatchNotifications(ctx, notifications)
 
 	// Log the charge success event to ClickHouse
-	s.logPaymentEvent(ctx, subscription, params.Processor, params.TransactionID, params.Amount, params.Currency, PaymentEventChargeSuccess)
+	s.logPaymentEvent(ctx, subscription, params.Processor, params.TransactionID, params.Amount, params.Currency)
 
 	return subscription, nil
 }
 
 // CreateMembershipTx executes the membership creation logic using the provided transactional DB.
 // The caller is responsible for wrapping the call in a transaction and dispatching any queued notifications.
-func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, txDB *db.DB, params *subscriptions.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, txDB *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
 	if txDB == nil {
 		return nil, nil, errors.New("transaction DB is required")
 	}
 	return s.createMembershipCore(ctx, txDB, params)
 }
 
-func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context, dbb *db.DB, params *subscriptions.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context, dbb *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
 	if dbb == nil {
 		return nil, nil, errors.New("database handle is required")
 	}
@@ -168,8 +167,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	productService := catalog.NewProductService(dbb)
 	entitlementService := entitlements.NewEntitlementService(dbb)
 	entitlementService.SetClock(s.Clock) // Propagate clock for testing
-	notificationService := NewNotificationService(dbb, nil)
-	subService := subscriptions.NewSubscriptionService(dbb, priceService, productService, nil, nil, nil)
+	notificationRepo := repo.NewNotificationQueueRepo(dbb)
+	subService := NewSubscriptionService(dbb, priceService, productService, nil, nil, nil)
 
 	price, err := priceService.GetByID(ctx, params.PriceID)
 	if err != nil {
@@ -370,7 +369,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		UserID:    params.UserID,
 		EventType: models.NotificationPremiumStarted,
 	}
-	if err := notificationService.Create(ctx, notification); err != nil {
+	if err := notificationRepo.Create(ctx, notification); err != nil {
 		log.WithContext(ctx).WithError(err).Error("failed to create membership started notification")
 	} else {
 		notifications = append(notifications, notification)
@@ -441,7 +440,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 // RenewMembership renews an existing subscription and extends the membership.
 // It also creates a Payment record for the renewal transaction.
 // If a scheduled downgrade exists (ScheduledPriceID), it will be applied on renewal.
-func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, params *subscriptions.RenewMembershipParams) error {
+func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, params *RenewMembershipParams) error {
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
 	// Variables to capture from transaction for Payment creation
@@ -462,8 +461,8 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		db := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationService := NewNotificationService(db, nil)
-		subService := subscriptions.NewSubscriptionService(db, priceService, productService, nil, nil, nil)
+		notificationRepo := repo.NewNotificationQueueRepo(db)
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil)
 		entitlementService := entitlements.NewEntitlementService(db)
 		entitlementService.SetClock(s.Clock)
 
@@ -690,7 +689,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			EventType: eventType,
 			Data:      notifData,
 		}
-		if err := notificationService.Create(ctx, notification); err != nil {
+		if err := notificationRepo.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create membership renewed notification")
 		} else {
 			notifications = append(notifications, notification)
@@ -745,36 +744,11 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 	// Log the charge success event to ClickHouse
 	if s.EventLogService != nil {
-		var amountFloat *float64
-		if params.Amount > 0 {
-			f := float64(params.Amount) / 100.0
-			amountFloat = &f
-		}
-		var txnID *string
-		if params.TransactionID != "" {
-			txnID = &params.TransactionID
-		}
-		currency := params.Currency
-		if currency == "" {
-			currency = "usd"
-		}
-		data := PaymentEventData{
-			SubscriptionID:         &subscriptionID,
-			UserID:                 userID,
-			EventType:              PaymentEventChargeSuccess,
-			Processor:              string(params.Processor),
-			ProcessorTransactionID: txnID,
-			Amount:                 amountFloat,
-			Currency:               currency,
-			BillingInfo:            "{}",
-			WebhookSource:          "lifecycle",
-			Metadata:               CreateMetadataJSON(map[string]interface{}{"subscription_id": subscriptionID.String(), "renewal": true}),
-			Timestamp:              s.now().UTC(),
-		}
-		if err := s.EventLogService.LogPaymentEvent(ctx, data); err != nil {
+		sub := &models.Subscription{ID: subscriptionID, UserID: userID}
+		if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, params.Processor, params.TransactionID, params.Amount, params.Currency, s.now(), map[string]interface{}{"renewal": true}); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
-				"event_type":      PaymentEventChargeSuccess,
+				"event_type":      "charge_success",
 			}).Warn("failed to log renewal payment event to ClickHouse")
 		}
 	}
@@ -784,7 +758,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 // ReactivateMembership reactivates a previously cancelled subscription and restores
 // its paid entitlement windows for the current product tier.
-func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context, params *subscriptions.ReactivateMembershipParams) (*models.Subscription, error) {
+func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context, params *ReactivateMembershipParams) (*models.Subscription, error) {
 	if params == nil {
 		return nil, fmt.Errorf("reactivation params are required")
 	}
@@ -807,7 +781,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, nil, nil)
+		subService := NewSubscriptionService(txdb, priceService, productService, nil, nil, nil)
 		entitlementService := entitlements.NewEntitlementService(txdb)
 		entitlementService.SetClock(s.Clock)
 
@@ -915,7 +889,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 }
 
 // CancelMembership cancels a subscription and revokes associated roles
-func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, params *subscriptions.CancelMembershipParams) error {
+func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, params *CancelMembershipParams) error {
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
 	// Variables to capture from transaction for event logging
@@ -946,8 +920,8 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		db := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationService := NewNotificationService(db, nil)
-		subService := subscriptions.NewSubscriptionService(db, priceService, productService, nil, nil, nil)
+		notificationRepo := repo.NewNotificationQueueRepo(db)
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil)
 		entSvc := entitlements.NewEntitlementService(db)
 		entSvc.SetClock(s.Clock) // Propagate clock for testing
 
@@ -1042,14 +1016,14 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 			}
 		}
 
-		reason := subscriptions.PremiumEndReasonAdmin
+		reason := PremiumEndReasonAdmin
 		switch params.CancelType {
 		case models.CancelTypeUser:
-			reason = subscriptions.PremiumEndReasonUserCancel
+			reason = PremiumEndReasonUserCancel
 		case models.CancelTypeExpired:
-			reason = subscriptions.PremiumEndReasonExpired
+			reason = PremiumEndReasonExpired
 		case models.CancelTypeMerchant:
-			reason = subscriptions.PremiumEndReasonProcessor
+			reason = PremiumEndReasonProcessor
 		}
 
 		notification := &models.NotificationQueue{
@@ -1058,7 +1032,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 			EventType: models.NotificationPremiumEnded,
 			Data:      map[string]any{"reason": string(reason)},
 		}
-		if err := notificationService.Create(ctx, notification); err != nil {
+		if err := notificationRepo.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create membership ended notification")
 		} else {
 			notifications = append(notifications, notification)
@@ -1079,18 +1053,10 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 
 	// Log the subscription cancelled event to ClickHouse
 	if s.EventLogService != nil {
-		data := SubscriptionEventData{
-			SubscriptionID: subscriptionID,
-			UserID:         userID,
-			EventType:      PaymentEventSubscriptionCancelled,
-			Processor:      string(processor),
-			Metadata:       CreateMetadataJSON(map[string]interface{}{"cancel_type": string(params.CancelType), "revoke_access": params.RevokeAccess}),
-			Timestamp:      s.now().UTC(),
-		}
-		if err := s.EventLogService.LogSubscriptionEvent(ctx, data); err != nil {
+		if err := s.EventLogService.LogLifecycleCancellation(ctx, subscriptionID, userID, processor, params.CancelType, params.RevokeAccess, s.now()); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
-				"event_type":      PaymentEventSubscriptionCancelled,
+				"event_type":      "subscription_cancelled",
 			}).Warn("failed to log subscription cancelled event to ClickHouse")
 		}
 	}
@@ -1108,8 +1074,8 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		db := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationService := NewNotificationService(db, nil)
-		subService := subscriptions.NewSubscriptionService(db, priceService, productService, nil, nil, nil)
+		notificationRepo := repo.NewNotificationQueueRepo(db)
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil)
 		entSvc := entitlements.NewEntitlementService(db)
 		entSvc.SetClock(s.Clock) // Propagate clock for testing
 
@@ -1190,9 +1156,9 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 			ID:        uuid.New(),
 			UserID:    subscription.UserID,
 			EventType: models.NotificationPremiumEnded,
-			Data:      map[string]any{"reason": string(subscriptions.PremiumEndReasonExpired)},
+			Data:      map[string]any{"reason": string(PremiumEndReasonExpired)},
 		}
-		if err := notificationService.Create(ctx, notification); err != nil {
+		if err := notificationRepo.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create membership expired notification")
 		} else {
 			notifications = append(notifications, notification)
@@ -1216,7 +1182,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 // Behavior depends on config.FeatureFlags.DunningMode:
 //   - "on" or "dry_run_only": Normal dunning flow - go to past_due, schedule retries
 //   - "off": Immediate cancellation - no grace period, no retries
-func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *subscriptions.FailMembershipParams) error {
+func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *FailMembershipParams) error {
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
 	// Variables to capture from transaction for event logging
@@ -1242,8 +1208,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		db := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationService := NewNotificationService(db, nil)
-		subService := subscriptions.NewSubscriptionService(db, priceService, productService, nil, nil, nil)
+		notificationRepo := repo.NewNotificationQueueRepo(db)
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil)
 		entSvc := entitlements.NewEntitlementService(db)
 		entSvc.SetClock(s.Clock) // Propagate clock for testing
 
@@ -1416,7 +1382,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 		var data map[string]any
 		if eventType == models.NotificationPremiumEnded {
-			data = map[string]any{"reason": string(subscriptions.PremiumEndReasonExpired)}
+			data = map[string]any{"reason": string(PremiumEndReasonExpired)}
 		}
 
 		notification := &models.NotificationQueue{
@@ -1425,7 +1391,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			EventType: eventType,
 			Data:      data,
 		}
-		if err := notificationService.Create(ctx, notification); err != nil {
+		if err := notificationRepo.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create payment failed notification")
 		} else {
 			notifications = append(notifications, notification)
@@ -1442,38 +1408,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 	// Log the payment failure event to ClickHouse
 	if s.EventLogService != nil {
-		eventType := PaymentEventChargeFailure
-		metadata := map[string]interface{}{
-			"subscription_id": subscriptionID.String(),
-			"final_status":    string(finalStatus),
-		}
-		if params.FailureReason != nil {
-			metadata["failure_reason"] = *params.FailureReason
-		}
-		if params.FailureCode != nil {
-			metadata["failure_code"] = *params.FailureCode
-		}
-
-		// If the subscription was cancelled due to max retries, also log expiration
-		if finalStatus == models.StatusCancelled {
-			eventType = PaymentEventSubscriptionExpired
-		}
-
-		data := PaymentEventData{
-			SubscriptionID: &subscriptionID,
-			UserID:         userID,
-			EventType:      eventType,
-			Processor:      string(params.Processor),
-			Currency:       "usd",
-			BillingInfo:    "{}",
-			WebhookSource:  "lifecycle",
-			Metadata:       CreateMetadataJSON(metadata),
-			Timestamp:      s.now().UTC(),
-		}
-		if err := s.EventLogService.LogPaymentEvent(ctx, data); err != nil {
+		if err := s.EventLogService.LogLifecycleFailure(ctx, subscriptionID, userID, params.Processor, finalStatus, params.FailureReason, params.FailureCode, s.now()); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
-				"event_type":      eventType,
+				"event_type":      "charge_failure",
 			}).Warn("failed to log payment failure event to ClickHouse")
 		}
 	}
@@ -1481,47 +1419,14 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	return nil
 }
 
-// logPaymentEvent logs a payment event to ClickHouse via EventLogService.
-// It's a helper that creates PaymentEventData from subscription and payment info.
-func (s *SubscriptionLifecycleService) logPaymentEvent(ctx context.Context, sub *models.Subscription, processor models.Processor, transactionID string, amount int64, currency string, eventType PaymentEventType) {
+func (s *SubscriptionLifecycleService) logPaymentEvent(ctx context.Context, sub *models.Subscription, processor models.Processor, transactionID string, amount int64, currency string) {
 	if s.EventLogService == nil || sub == nil {
 		return
 	}
-
-	// Convert amount from cents to dollars for ClickHouse
-	var amountFloat *float64
-	if amount > 0 {
-		f := moneyutil.CentsToMajorUnits(amount)
-		amountFloat = &f
-	}
-
-	var txnID *string
-	if transactionID != "" {
-		txnID = &transactionID
-	}
-
-	if currency == "" {
-		currency = "usd"
-	}
-
-	data := PaymentEventData{
-		SubscriptionID:         &sub.ID,
-		UserID:                 sub.UserID,
-		EventType:              eventType,
-		Processor:              string(processor),
-		ProcessorTransactionID: txnID,
-		Amount:                 amountFloat,
-		Currency:               currency,
-		BillingInfo:            "{}",
-		WebhookSource:          "lifecycle",
-		Metadata:               CreateMetadataJSON(map[string]interface{}{"subscription_id": sub.ID.String()}),
-		Timestamp:              s.now().UTC(),
-	}
-
-	if err := s.EventLogService.LogPaymentEvent(ctx, data); err != nil {
+	if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, processor, transactionID, amount, currency, s.now(), nil); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"subscription_id": sub.ID,
-			"event_type":      eventType,
+			"event_type":      "charge_success",
 			"processor":       processor,
 		}).Warn("failed to log payment event to ClickHouse")
 	}

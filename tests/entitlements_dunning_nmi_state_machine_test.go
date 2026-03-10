@@ -120,7 +120,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 
 	// First retry attempt: fail via mock, should append grace up to next_retry_at.
 	mock.ShouldFail = true
-	clock.Advance(services.DunningInterval)
+	clock.Advance(subscriptions.DunningInterval)
 
 	worker := &riverjobs.DunningWorker{
 		DB:                 rt.DB,
@@ -134,7 +134,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 
 	// Second retry attempt: succeed via mock, should clear grace and push the next paid window.
 	mock.ShouldFail = false
-	clock.Advance(services.DunningInterval)
+	clock.Advance(subscriptions.DunningInterval)
 	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
 
 	for _, entName := range []string{"premium", "extra"} {
@@ -211,8 +211,8 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 	}
 
 	// Drive retries until the subscription is cancelled.
-	for i := 0; i < services.MaxDunningFailures+1; i++ {
-		clock.Advance(services.DunningInterval)
+	for i := 0; i < subscriptions.MaxDunningFailures+1; i++ {
+		clock.Advance(subscriptions.DunningInterval)
 		require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
 		var refreshed models.Subscription
 		require.NoError(t, suite.BunDB.NewSelect().Model(&refreshed).Where("id = ?", sub.ID).Scan(ctx))

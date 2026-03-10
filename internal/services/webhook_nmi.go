@@ -42,7 +42,7 @@ type NMIWebhookService struct {
 	CreditsService               *credits.CreditsService
 	DeduplicationService         *DeduplicationService
 	NotificationService          *NotificationService
-	SubscriptionLifecycleService *SubscriptionLifecycleService
+	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.

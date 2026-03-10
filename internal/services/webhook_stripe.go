@@ -24,7 +24,7 @@ type StripeWebhookService struct {
 	PriceService                 *catalog.PriceService
 	ProductService               *catalog.ProductService
 	SubscriptionService          *subscriptions.SubscriptionService
-	SubscriptionLifecycleService *SubscriptionLifecycleService
+	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	CheckoutService              *CheckoutService
 	PaymentService               *payments.PaymentService
 	CreditsService               *credits.CreditsService

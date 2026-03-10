@@ -70,7 +70,7 @@ type Runtime struct {
 	SolanaTokenRegistry      *jupiter.TokenRegistry
 	FXProvider               fx.Provider
 
-	SubscriptionLifecycleService *services.SubscriptionLifecycleService
+	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	WebhookDispatcher            *services.WebhookDispatcher
 	DeduplicationService         *services.DeduplicationService
 	IdempotencyService           *services.IdempotencyService

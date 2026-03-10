@@ -128,7 +128,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	entitlementSvc := entitlements.NewEntitlementService(w.DB)
 	notifSvc := services.NewNotificationService(w.DB, nil)
 	paymentSvc := payments.NewPaymentService(w.DB)
-	lifecycle := services.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService)
 	lifecycle.SetConfig(w.Config) // For feature flag access
 	lifecycle.SetClock(w.Clock)   // Ensure time mocking is honored during dunning
 	creditsSvc := credits.NewCreditsService(w.DB)
@@ -159,7 +159,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 func (w *DunningWorker) processSubscription(
 	ctx context.Context,
 	sub *models.Subscription,
-	lifecycle *services.SubscriptionLifecycleService,
+	lifecycle *subscriptions.SubscriptionLifecycleService,
 	priceSvc *catalog.PriceService,
 	paymentSvc *payments.PaymentService,
 	creditsSvc *credits.CreditsService,

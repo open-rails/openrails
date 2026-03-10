@@ -804,6 +804,86 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 	})
 }
 
+func (s *EventLogService) LogLifecycleChargeSuccess(ctx context.Context, sub *models.Subscription, processor models.Processor, transactionID string, amount int64, currency string, at time.Time, metadata map[string]interface{}) error {
+	if s == nil || sub == nil {
+		return nil
+	}
+	var amountFloat *float64
+	if amount > 0 {
+		f := float64(amount) / 100.0
+		amountFloat = &f
+	}
+	var txnID *string
+	if transactionID != "" {
+		txnID = &transactionID
+	}
+	if currency == "" {
+		currency = "usd"
+	}
+	if metadata == nil {
+		metadata = map[string]interface{}{}
+	}
+	metadata["subscription_id"] = sub.ID.String()
+	return s.LogPaymentEvent(ctx, PaymentEventData{
+		SubscriptionID:         &sub.ID,
+		UserID:                 sub.UserID,
+		EventType:              PaymentEventChargeSuccess,
+		Processor:              string(processor),
+		ProcessorTransactionID: txnID,
+		Amount:                 amountFloat,
+		Currency:               currency,
+		BillingInfo:            "{}",
+		WebhookSource:          "lifecycle",
+		Metadata:               CreateMetadataJSON(metadata),
+		Timestamp:              at.UTC(),
+	})
+}
+
+func (s *EventLogService) LogLifecycleCancellation(ctx context.Context, subscriptionID uuid.UUID, userID string, processor models.Processor, cancelType models.CancelType, revokeAccess bool, at time.Time) error {
+	if s == nil {
+		return nil
+	}
+	return s.LogSubscriptionEvent(ctx, SubscriptionEventData{
+		SubscriptionID: subscriptionID,
+		UserID:         userID,
+		EventType:      PaymentEventSubscriptionCancelled,
+		Processor:      string(processor),
+		Metadata:       CreateMetadataJSON(map[string]interface{}{"cancel_type": string(cancelType), "revoke_access": revokeAccess}),
+		Timestamp:      at.UTC(),
+	})
+}
+
+func (s *EventLogService) LogLifecycleFailure(ctx context.Context, subscriptionID uuid.UUID, userID string, processor models.Processor, finalStatus models.SubscriptionStatus, failureReason *string, failureCode *string, at time.Time) error {
+	if s == nil {
+		return nil
+	}
+	eventType := PaymentEventChargeFailure
+	metadata := map[string]interface{}{
+		"subscription_id": subscriptionID.String(),
+		"final_status":    string(finalStatus),
+	}
+	if failureReason != nil {
+		metadata["failure_reason"] = *failureReason
+	}
+	if failureCode != nil {
+		metadata["failure_code"] = *failureCode
+	}
+	if finalStatus == models.StatusCancelled {
+		eventType = PaymentEventSubscriptionExpired
+	}
+	return s.LogPaymentEvent(ctx, PaymentEventData{
+		SubscriptionID: &subscriptionID,
+		UserID:         userID,
+		EventType:      eventType,
+		Processor:      string(processor),
+		Currency:       "usd",
+		BillingInfo:    "{}",
+		WebhookSource:  "lifecycle",
+		Metadata:       CreateMetadataJSON(metadata),
+		Timestamp:      at.UTC(),
+	})
+}
+
 // enqueue helper
 func (s *EventLogService) enqueue(kind string, v interface{}) {
 	if s.spool == nil {

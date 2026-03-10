@@ -448,7 +448,7 @@ type servicesInstances struct {
 	PublicSubscriptionService *catalog.PublicSubscriptionService
 	AdminSubscriptionService  *subscriptions.AdminSubscriptionService
 
-	SubscriptionLifecycleService *services.SubscriptionLifecycleService
+	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	DeduplicationService         *services.DeduplicationService
 	IdempotencyService           *services.IdempotencyService
 	WebhookDispatcher            *services.WebhookDispatcher
@@ -500,7 +500,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	solanaTransactionService := services.NewSolanaTransactionService(database, solanaRPC, cfg, priceService, purchaseService, fxProvider)
 	solanaTransactionService.Clock = clock
 
-	subscriptionLifecycleService := services.NewSubscriptionLifecycleService(
+	subscriptionLifecycleService := subscriptions.NewSubscriptionLifecycleService(
 		database,
 		productService,
 		priceService,
