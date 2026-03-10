@@ -52,6 +52,7 @@ type CheckoutService struct {
 	PriceService         *catalog.PriceService
 	PaymentService       *payments.PaymentService
 	EntitlementService   *entitlements.EntitlementService
+	PurchaseService      *payments.CheckoutPurchaseService
 	PaymentMethodService *payments.PaymentMethodService
 	VaultService         *payments.VaultService
 	IdempotencyService   *IdempotencyService
@@ -87,6 +88,7 @@ func NewCheckoutService(
 		PriceService:         priceService,
 		PaymentService:       paymentService,
 		EntitlementService:   entitlementService,
+		PurchaseService:      payments.NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService),
 		PaymentMethodService: paymentMethodService,
 		VaultService:         vaultService,
 		IdempotencyService:   idempotencyService,
@@ -133,92 +135,10 @@ func (s *CheckoutService) getUpgradeIdempotencyKey(req *payments.CheckoutRequest
 // For upgrades/downgrades, the caller can decide how to handle (e.g., proration).
 // For blocked, the caller should reject the purchase attempt.
 func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*payments.EligibilityResult, error) {
-	// Get price
-	price, err := s.PriceService.GetByID(ctx, priceID)
-	if err != nil {
-		return nil, fmt.Errorf("price not found: %w", err)
+	if s.PurchaseService == nil {
+		return nil, errors.New("purchase service unavailable")
 	}
-	if !price.IsActive {
-		return &payments.EligibilityResult{
-			Status: payments.EligibilityBlocked,
-			Reason: "price is not available for purchase",
-		}, nil
-	}
-
-	// Get product
-	product, err := s.ProductService.GetByID(ctx, price.ProductID)
-	if err != nil {
-		return nil, fmt.Errorf("product not found: %w", err)
-	}
-	if !product.IsActive {
-		return &payments.EligibilityResult{
-			Status: payments.EligibilityBlocked,
-			Reason: "product is not available for purchase",
-		}, nil
-	}
-
-	// Check for tier group conflicts (upgrade/downgrade scenarios)
-	if product.TierGroup != nil && *product.TierGroup != "" {
-		existingSub, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndTierGroup(ctx, userID, *product.TierGroup)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("failed to check tier group: %w", err)
-		}
-
-		if existingSub != nil {
-			existingProduct := existingSub.Price.Product
-			if existingProduct == nil {
-				return nil, errors.New("failed to load existing product for tier comparison")
-			}
-
-			if existingProduct.ID == product.ID {
-				// Same product - fall through to coverage check
-			} else if existingProduct.TierRank < product.TierRank {
-				// Upgrade: existing is lower tier than requested
-				return &payments.EligibilityResult{
-					Status:               payments.EligibilityUpgrade,
-					Reason:               fmt.Sprintf("Upgrading from %s to %s", existingProduct.DisplayName, product.DisplayName),
-					ExistingSubscription: existingSub,
-					ExistingProduct:      existingProduct,
-				}, nil
-			} else if existingProduct.TierRank > product.TierRank {
-				// Downgrade: existing is higher tier than requested
-				return &payments.EligibilityResult{
-					Status:               payments.EligibilityDowngrade,
-					Reason:               fmt.Sprintf("Downgrading from %s to %s", existingProduct.DisplayName, product.DisplayName),
-					ExistingSubscription: existingSub,
-					ExistingProduct:      existingProduct,
-				}, nil
-			} else {
-				// Same tier rank but different product - block as duplicate
-				return &payments.EligibilityResult{
-					Status: payments.EligibilityBlocked,
-					Reason: fmt.Sprintf("You already have an equivalent product (%s) in this tier", existingProduct.DisplayName),
-				}, nil
-			}
-		}
-	}
-
-	// Check for existing coverage
-	coverage, err := s.GetUserProductCoverage(ctx, userID, product)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check existing coverage: %w", err)
-	}
-
-	if coverage.HasCoverage && coverage.IsIndefinite {
-		// User has indefinite coverage - block purchase
-		return &payments.EligibilityResult{
-			Status:   payments.EligibilityBlocked,
-			Reason:   "You already have active access to this product",
-			Coverage: coverage,
-		}, nil
-	}
-
-	// User can purchase (possibly with delayed start if they have finite coverage)
-	return &payments.EligibilityResult{
-		Status:   payments.EligibilityAllowed,
-		Reason:   "Purchase allowed",
-		Coverage: coverage,
-	}, nil
+	return s.PurchaseService.CheckPurchaseEligibility(ctx, userID, priceID)
 }
 
 // Checkout processes a unified checkout request
@@ -334,63 +254,10 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *payments.CheckoutRe
 // 1. Active/pending subscriptions (using the denormalized ProductID field)
 // 2. Active entitlements matching the product's EntitlementsSpec
 func (s *CheckoutService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*payments.CoverageInfo, error) {
-	now := s.now()
-	coverage := &payments.CoverageInfo{HasCoverage: false}
-
-	// Check for active/pending subscription for this product (single query using denormalized ProductID)
-	if s.SubscriptionService != nil {
-		sub, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndProductID(ctx, userID, product.ID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("failed to check subscription: %w", err)
-		}
-		if sub != nil {
-			coverage.HasCoverage = true
-			coverage.SourceType = "subscription"
-			coverage.SourceID = &sub.ID
-
-			// Check if subscription has an end date
-			if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
-				coverage.IsIndefinite = true
-				return coverage, nil
-			}
-
-			coverage.EndDate = sub.CurrentPeriodEndsAt
-		}
+	if s.PurchaseService == nil {
+		return nil, errors.New("purchase service unavailable")
 	}
-
-	// Check for active entitlements from the product's EntitlementsSpec
-	if s.EntitlementService != nil && product.EntitlementsSpec != nil {
-		for entitlementName := range product.EntitlementsSpec {
-			// Check for indefinite entitlement
-			hasIndefinite, err := s.EntitlementService.HasActiveIndefinite(ctx, userID, entitlementName, now)
-			if err != nil {
-				return nil, fmt.Errorf("failed to check indefinite entitlement: %w", err)
-			}
-			if hasIndefinite {
-				coverage.HasCoverage = true
-				coverage.IsIndefinite = true
-				coverage.SourceType = "entitlement"
-				return coverage, nil
-			}
-
-			// Check for finite entitlement
-			ent, err := s.EntitlementService.LatestFiniteWindow(ctx, userID, entitlementName, now)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return nil, fmt.Errorf("failed to check finite entitlement: %w", err)
-			}
-			if ent != nil && ent.EndAt != nil {
-				coverage.HasCoverage = true
-				coverage.SourceType = "entitlement"
-				coverage.SourceID = &ent.ID
-
-				if coverage.EndDate == nil || ent.EndAt.After(*coverage.EndDate) {
-					coverage.EndDate = ent.EndAt
-				}
-			}
-		}
-	}
-
-	return coverage, nil
+	return s.PurchaseService.GetUserProductCoverage(ctx, userID, product)
 }
 
 // processSubscription handles subscription purchases
@@ -1260,100 +1127,6 @@ func (s *CheckoutService) resolveVault(ctx context.Context, req *payments.Checko
 }
 
 // grantProductEntitlements grants entitlements from product spec after a one-time or subscription purchase
-func (s *CheckoutService) grantProductEntitlements(
-	ctx context.Context,
-	userID string,
-	product *models.Product,
-	paymentID uuid.UUID,
-	coverage *payments.CoverageInfo,
-	subscription bool,
-	walletPurchase bool,
-	billingCycleDays *int,
-) error {
-	if s.EntitlementService == nil || product.EntitlementsSpec == nil {
-		return nil
-	}
-
-	now := s.now()
-
-	for entitlementName, durationDays := range product.EntitlementsSpec {
-		var startAt time.Time
-		var endAt *time.Time
-
-		// Determine start time
-		if coverage.HasCoverage && coverage.EndDate != nil {
-			// Delayed start - entitlement starts when current coverage ends
-			startAt = *coverage.EndDate
-		} else {
-			// Immediate start
-			startAt = now
-		}
-
-		// Set entitlements to expire 1 month from purchase for wallet purchases
-		if walletPurchase && billingCycleDays == nil {
-			newDate := startAt.AddDate(0, 1, 0)
-			endAt = &newDate
-		} else if billingCycleDays != nil && *billingCycleDays > 0 {
-			// For wallet purchases with known billing cycle, set end date to match billing cycle
-			end := startAt.Add(time.Duration(*billingCycleDays) * 24 * time.Hour)
-			endAt = &end
-		}
-
-		// Determine end time
-		if durationDays != nil && *durationDays > 0 {
-			end := startAt.Add(time.Duration(*durationDays) * 24 * time.Hour)
-			endAt = &end
-		}
-		// If durationDays is nil or 0, endAt stays nil (indefinite)
-
-		paymentMode := models.EntitlementSourceOneOff
-		if subscription {
-			paymentMode = models.EntitlementSourceSubscription
-		}
-		notBefore := startAt
-		var params entitlements.PushNewEntitlementParams
-		if endAt == nil {
-			params = entitlements.PushNewEntitlementParams{
-				UserID:      userID,
-				Entitlement: entitlementName,
-				NotBefore:   &notBefore,
-				Indefinite:  true,
-				SourceType:  paymentMode,
-				SourceID:    paymentID,
-			}
-		} else {
-			e := endAt.UTC()
-			params = entitlements.PushNewEntitlementParams{
-				UserID:      userID,
-				Entitlement: entitlementName,
-				NotBefore:   &notBefore,
-				EndAt:       &e,
-				SourceType:  paymentMode,
-				SourceID:    paymentID,
-			}
-		}
-		_, err := s.EntitlementService.PushNewEntitlement(ctx, params)
-
-		if err != nil {
-			log.WithError(err).WithFields(log.Fields{
-				"user_id":     userID,
-				"entitlement": entitlementName,
-				"payment_id":  paymentID,
-			}).Error("failed to grant entitlement")
-			return err
-		}
-
-		log.WithFields(log.Fields{
-			"user_id":     userID,
-			"entitlement": entitlementName,
-			"payment_id":  paymentID,
-			"start_at":    startAt,
-			"end_at":      endAt,
-		}).Info(fmt.Sprintf("granted entitlement from %s purchase", paymentMode))
-	}
-
-	return nil
-}
 
 // Helper functions
 func (s *CheckoutService) resolveFirstName(req *payments.CheckoutRequest, user *payments.UserIdentity) string {
@@ -1399,132 +1172,10 @@ func timePtr(t time.Time) *time.Time {
 //  3. Checking coverage for delayed start
 //  4. Granting entitlements from Product.EntitlementsSpec
 func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
-	// Validate required fields
-	if req.UserID == "" {
-		return nil, errors.New("user_id is required")
+	if s.PurchaseService == nil {
+		return nil, errors.New("purchase service unavailable")
 	}
-	if req.TransactionID == "" {
-		return nil, errors.New("transaction_id is required")
-	}
-	if req.Processor == "" {
-		return nil, errors.New("processor is required")
-	}
-
-	// Get price
-	price, err := s.PriceService.GetByID(ctx, req.PriceID)
-	if err != nil {
-		return nil, fmt.Errorf("price not found: %w", err)
-	}
-
-	// Get product
-	product, err := s.ProductService.GetByID(ctx, price.ProductID)
-	if err != nil {
-		return nil, fmt.Errorf("product not found: %w", err)
-	}
-
-	// Check eligibility (for logging/analytics - can't block at this point, payment already happened)
-	eligibility, err := s.CheckPurchaseEligibility(ctx, req.UserID, req.PriceID)
-	if err != nil {
-		// Log but don't fail - the payment happened, we need to record it
-		log.WithError(err).WithFields(log.Fields{
-			"user_id":  req.UserID,
-			"price_id": req.PriceID,
-		}).Warn("failed to check eligibility during RegisterPurchase")
-		eligibility = &payments.EligibilityResult{Status: payments.EligibilityAllowed}
-	}
-
-	// Get coverage from eligibility result (avoids duplicate query)
-	coverage := eligibility.Coverage
-	if coverage == nil {
-		coverage = &payments.CoverageInfo{}
-	}
-
-	// Use provided amount/currency or fall back to price defaults
-	amount := req.Amount
-	if amount == 0 {
-		amount = price.Amount
-	}
-	currency := req.Currency
-	if currency == "" {
-		currency = price.Currency
-	}
-
-	now := s.now()
-	purchasedAt := now
-	if req.PurchasedAt != nil {
-		purchasedAt = (*req.PurchasedAt).UTC()
-	}
-
-	// Create payment record
-	paymentID := uuid.New()
-	payment := &models.Payment{
-		ID:               paymentID,
-		UserID:           req.UserID,
-		PriceID:          price.ID,
-		SubscriptionID:   req.SubscriptionID, // Link to subscription if provided
-		Processor:        models.Processor(req.Processor),
-		TransactionID:    req.TransactionID,
-		Amount:           amount,
-		ListAmount:       price.Amount,
-		Currency:         currency,
-		PurchasedAt:      purchasedAt,
-		CreatedAt:        now,
-		DiscountCode:     req.DiscountCode,
-		DiscountReason:   req.DiscountReason,
-		DiscountMetadata: req.DiscountMetadata,
-		Metadata:         req.Metadata,
-	}
-
-	if err := s.PaymentService.Create(ctx, payment); err != nil {
-		return nil, fmt.Errorf("failed to create payment record: %w", err)
-	}
-
-	sourceId := paymentID
-	if req.SubscriptionID != nil {
-		log.WithFields(log.Fields{
-			"payment_id":      paymentID,
-			"user_id":         req.UserID,
-			"price_id":        req.PriceID,
-			"subscription_id": req.SubscriptionID,
-		}).Info("registered subscription payment")
-		sourceId = *req.SubscriptionID
-	}
-
-	// Grant entitlements
-	var grantedEntitlements []string
-	if err := s.grantProductEntitlements(ctx, req.UserID, product, sourceId, coverage, req.SubscriptionID != nil && req.SubscriptionID.String() != "", req.WalletPurchase, price.BillingCycleDays); err != nil {
-		log.WithError(err).WithField("payment_id", sourceId).Error("failed to grant entitlements after payment")
-		// Don't fail - payment record was created successfully
-	} else if product.EntitlementsSpec != nil {
-		for entName := range product.EntitlementsSpec {
-			grantedEntitlements = append(grantedEntitlements, entName)
-		}
-	}
-
-	// Determine delayed start
-	var delayedStart *time.Time
-	if coverage.HasCoverage && coverage.EndDate != nil {
-		delayedStart = coverage.EndDate
-	}
-
-	log.WithFields(log.Fields{
-		"payment_id":     paymentID,
-		"user_id":        req.UserID,
-		"price_id":       req.PriceID,
-		"product_id":     product.ID,
-		"processor":      req.Processor,
-		"transaction_id": req.TransactionID,
-		"entitlements":   grantedEntitlements,
-		"delayed_start":  delayedStart,
-		"eligibility":    eligibility.Status,
-	}).Info("registered purchase") // one-time
-
-	return &payments.RegisterPurchaseResponse{
-		PaymentID:    paymentID,
-		Entitlements: grantedEntitlements,
-		DelayedStart: delayedStart,
-		Eligibility:  eligibility.Status,
-	}, nil
+	return s.PurchaseService.RegisterPurchase(ctx, req)
 }
 
 // processUpgrade handles tier upgrades with proration
