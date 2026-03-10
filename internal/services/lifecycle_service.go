@@ -38,134 +38,8 @@ type SubscriptionLifecycleService struct {
 	EventLogService     *EventLogService         // For logging events to ClickHouse
 }
 
-type CreateMembershipParams struct {
-	UserID                  string
-	PriceID                 uuid.UUID
-	Processor               models.Processor
-	ProcessorSubscriptionID *string
-	UserEmail               *string
-	// CurrentPeriodEndsAt is an optional override for the subscription paid-term end.
-	// Used for processors like CCBill that provide an authoritative nextRenewalDate.
-	CurrentPeriodEndsAt *time.Time
-	// Payment fields - required for creating Payment record
-	TransactionID   string // Processor's transaction ID for this purchase
-	Amount          int64  // Amount charged in smallest unit (cents for USD)
-	Currency        string // Currency code (e.g., "usd")
-	PaymentMetadata map[string]any
-}
-
-type RenewMembershipParams struct {
-	Processor               models.Processor
-	ProcessorSubscriptionID string
-	// CurrentPeriodEndsAt is an optional override for the subscription paid-term end.
-	// Used for processors like CCBill that provide an authoritative nextRenewalDate.
-	CurrentPeriodEndsAt *time.Time
-	// Payment fields - required for creating Payment record
-	TransactionID   string // Processor's transaction ID for this renewal
-	Amount          int64  // Amount charged in smallest unit (cents for USD)
-	Currency        string // Currency code (e.g., "usd")
-	PaymentMetadata map[string]any
-	// AllowTerminalReactivation bypasses policy and permits terminal -> active transitions.
-	// This should only be set by explicit manual operator workflows.
-	AllowTerminalReactivation bool
-}
-
-type ReactivateMembershipParams struct {
-	Processor               models.Processor
-	ProcessorSubscriptionID string
-	// CurrentPeriodEndsAt is an optional override for the subscription paid-term end.
-	// Used for processors like CCBill that provide an authoritative nextRenewalDate.
-	CurrentPeriodEndsAt *time.Time
-	// AllowTerminalReactivation bypasses policy and permits terminal -> active transitions.
-	// This should only be set by explicit manual operator workflows.
-	AllowTerminalReactivation bool
-}
-
-var ErrTerminalTransitionBlocked = errors.New("terminal-to-active transition blocked by lifecycle policy")
-
-type TerminalTransitionBlockedError struct {
-	SubscriptionID uuid.UUID
-	Processor      models.Processor
-	FromStatus     models.SubscriptionStatus
-	ToStatus       models.SubscriptionStatus
-	CancelType     string
-	Trigger        string
-	Reason         string
-}
-
-func (e *TerminalTransitionBlockedError) Error() string {
-	if e == nil {
-		return ErrTerminalTransitionBlocked.Error()
-	}
-	return fmt.Sprintf("%v: trigger=%s subscription_id=%s processor=%s from=%s to=%s cancel_type=%s reason=%s",
-		ErrTerminalTransitionBlocked,
-		e.Trigger,
-		e.SubscriptionID,
-		e.Processor,
-		e.FromStatus,
-		e.ToStatus,
-		e.CancelType,
-		e.Reason,
-	)
-}
-
-func (e *TerminalTransitionBlockedError) Unwrap() error {
-	return ErrTerminalTransitionBlocked
-}
-
-func IsTerminalTransitionBlocked(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrTerminalTransitionBlocked) {
-		return true
-	}
-	var blockedErr *TerminalTransitionBlockedError
-	return errors.As(err, &blockedErr)
-}
-
-type CancelMembershipParams struct {
-	SubscriptionID          *uuid.UUID
-	Processor               *models.Processor
-	ProcessorSubscriptionID *string
-	CancelType              models.CancelType
-	CancelFeedback          *string
-	RevokeAccess            bool // If true, entitlements revoked immediately. If false, access continues until period end.
-}
-
-type FailMembershipParams struct {
-	Processor      models.Processor
-	SubscriptionID *uuid.UUID
-	FailureReason  *string
-	FailureCode    *string
-}
-
-func normalizeCancelType(cancelType *models.CancelType) string {
-	if cancelType == nil {
-		return ""
-	}
-	return string(*cancelType)
-}
-
-func terminalCancelReason(subscription *models.Subscription) (string, bool) {
-	if subscription == nil {
-		return "", false
-	}
-	if subscription.Status != models.StatusCancelled {
-		return "", false
-	}
-	if subscription.CancelType != nil && *subscription.CancelType == models.CancelTypeChargeback {
-		return "cancel_type=chargeback", true
-	}
-	feedback := normalize.FromPtr(subscription.CancelFeedback)
-	if feedback != "" && strings.Contains(strings.ToUpper(feedback), "CHARGEBACK") {
-		return "legacy_chargeback_feedback", true
-	}
-	return "", false
-}
-
 func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context.Context, subscription *models.Subscription, trigger string, allowOverride bool) error {
-	reason, terminal := terminalCancelReason(subscription)
+	reason, terminal := subscriptions.TerminalCancelReason(subscription)
 	if !terminal {
 		return nil
 	}
@@ -180,12 +54,12 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 		return nil
 	}
 
-	return &TerminalTransitionBlockedError{
+	return &subscriptions.TerminalTransitionBlockedError{
 		SubscriptionID: subscription.ID,
 		Processor:      subscription.Processor,
 		FromStatus:     subscription.Status,
 		ToStatus:       models.StatusActive,
-		CancelType:     normalizeCancelType(subscription.CancelType),
+		CancelType:     subscriptions.NormalizeCancelType(subscription.CancelType),
 		Trigger:        trigger,
 		Reason:         reason,
 	}
@@ -240,7 +114,7 @@ func (s *SubscriptionLifecycleService) dispatchNotifications(ctx context.Context
 }
 
 // CreateMembership creates a new subscription and grants associated roles
-func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, params *CreateMembershipParams) (*models.Subscription, error) {
+func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, params *subscriptions.CreateMembershipParams) (*models.Subscription, error) {
 	var (
 		subscription  *models.Subscription
 		notifications []*models.NotificationQueue
@@ -278,14 +152,14 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 
 // CreateMembershipTx executes the membership creation logic using the provided transactional DB.
 // The caller is responsible for wrapping the call in a transaction and dispatching any queued notifications.
-func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, txDB *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, txDB *db.DB, params *subscriptions.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
 	if txDB == nil {
 		return nil, nil, errors.New("transaction DB is required")
 	}
 	return s.createMembershipCore(ctx, txDB, params)
 }
 
-func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context, dbb *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
+func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context, dbb *db.DB, params *subscriptions.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
 	if dbb == nil {
 		return nil, nil, errors.New("database handle is required")
 	}
@@ -567,7 +441,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 // RenewMembership renews an existing subscription and extends the membership.
 // It also creates a Payment record for the renewal transaction.
 // If a scheduled downgrade exists (ScheduledPriceID), it will be applied on renewal.
-func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, params *RenewMembershipParams) error {
+func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, params *subscriptions.RenewMembershipParams) error {
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
 	// Variables to capture from transaction for Payment creation
@@ -910,7 +784,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 // ReactivateMembership reactivates a previously cancelled subscription and restores
 // its paid entitlement windows for the current product tier.
-func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context, params *ReactivateMembershipParams) (*models.Subscription, error) {
+func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context, params *subscriptions.ReactivateMembershipParams) (*models.Subscription, error) {
 	if params == nil {
 		return nil, fmt.Errorf("reactivation params are required")
 	}
@@ -1041,7 +915,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 }
 
 // CancelMembership cancels a subscription and revokes associated roles
-func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, params *CancelMembershipParams) error {
+func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, params *subscriptions.CancelMembershipParams) error {
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
 	// Variables to capture from transaction for event logging
@@ -1342,7 +1216,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 // Behavior depends on config.FeatureFlags.DunningMode:
 //   - "on" or "dry_run_only": Normal dunning flow - go to past_due, schedule retries
 //   - "off": Immediate cancellation - no grace period, no retries
-func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *FailMembershipParams) error {
+func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *subscriptions.FailMembershipParams) error {
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
 	// Variables to capture from transaction for event logging

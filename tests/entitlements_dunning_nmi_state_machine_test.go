@@ -11,6 +11,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -111,7 +112,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	// Move time to paid end and mark a failure (puts subscription into past_due and schedules next_retry_at).
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
 	failReason := "declined"
-	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &services.FailMembershipParams{
+	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
 		Processor:      models.ProcessorMobius,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &failReason,
@@ -193,7 +194,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
 	failReason := "declined"
-	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &services.FailMembershipParams{
+	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
 		Processor:      models.ProcessorMobius,
 		SubscriptionID: &sub.ID,
 		FailureReason:  &failReason,

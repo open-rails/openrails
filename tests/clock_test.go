@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -152,7 +153,7 @@ func TestLifecycleServiceUsesMockClock(t *testing.T) {
 		userID := uuid.New().String()
 
 		// Create membership through the lifecycle service
-		sub, err := suite.App.Runtime.SubscriptionLifecycleService.CreateMembership(ctx, &services.CreateMembershipParams{
+		sub, err := suite.App.Runtime.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 			UserID:    userID,
 			PriceID:   priceID,
 			Processor: models.ProcessorMobius,
@@ -181,7 +182,7 @@ func TestLifecycleServiceUsesMockClock(t *testing.T) {
 		processorSubID := "test-cancel-" + uuid.New().String()
 
 		// Create subscription
-		sub, err := suite.App.Runtime.SubscriptionLifecycleService.CreateMembership(ctx, &services.CreateMembershipParams{
+		sub, err := suite.App.Runtime.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 			UserID:                  userID,
 			PriceID:                 priceID,
 			Processor:               models.ProcessorMobius,
@@ -195,7 +196,7 @@ func TestLifecycleServiceUsesMockClock(t *testing.T) {
 		cancelTime := initialTime.Add(15 * 24 * time.Hour)
 
 		// Cancel the subscription
-		err = suite.App.Runtime.SubscriptionLifecycleService.CancelMembership(ctx, &services.CancelMembershipParams{
+		err = suite.App.Runtime.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: &sub.ID,
 			CancelType:     models.CancelTypeUser,
 			RevokeAccess:   true,

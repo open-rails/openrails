@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,7 +24,7 @@ func TestAssertActiveTransitionAllowed_BlocksChargebackCancelType(t *testing.T) 
 
 	err := svc.assertActiveTransitionAllowed(context.Background(), sub, "renewal", false)
 	require.Error(t, err)
-	require.True(t, IsTerminalTransitionBlocked(err))
+	require.True(t, subscriptions.IsTerminalTransitionBlocked(err))
 }
 
 func TestAssertActiveTransitionAllowed_BlocksLegacyChargebackFeedback(t *testing.T) {
@@ -40,7 +41,7 @@ func TestAssertActiveTransitionAllowed_BlocksLegacyChargebackFeedback(t *testing
 
 	err := svc.assertActiveTransitionAllowed(context.Background(), sub, "reactivation", false)
 	require.Error(t, err)
-	require.True(t, IsTerminalTransitionBlocked(err))
+	require.True(t, subscriptions.IsTerminalTransitionBlocked(err))
 }
 
 func TestAssertActiveTransitionAllowed_AllowsExpiredCancelType(t *testing.T) {

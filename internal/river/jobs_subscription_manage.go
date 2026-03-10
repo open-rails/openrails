@@ -105,7 +105,7 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 		if job.Args.Feedback != "" {
 			feedback = &job.Args.Feedback
 		}
-		return w.SubscriptionLifecycleService.CancelMembership(ctx, &services.CancelMembershipParams{
+		return w.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: &sub.ID,
 			CancelType:     models.CancelTypeUser,
 			CancelFeedback: feedback,

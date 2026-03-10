@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -243,7 +244,7 @@ func TestScheduledDowngrade(t *testing.T) {
 		// Use lifecycle service from runtime
 		lifecycleService := suite.App.Runtime.SubscriptionLifecycleService
 
-		err = lifecycleService.RenewMembership(ctx, &services.RenewMembershipParams{
+		err = lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 			Processor:               models.ProcessorMobius,
 			ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
 			TransactionID:           "renewal-txn-" + uuid.New().String()[:8],

@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -263,7 +262,7 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 
 			cancelFeedback := "Cancelled via subscription-sync reconciliation"
 			processorModel := models.Processor(processorName)
-			err = application.Runtime.SubscriptionLifecycleService.CancelMembership(ctx, &services.CancelMembershipParams{
+			err = application.Runtime.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 				RevokeAccess:            opts.revokeAccess,
 				Processor:               &processorModel,
 				ProcessorSubscriptionID: &id,
@@ -343,7 +342,7 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 						}
 					}
 
-					err = application.Runtime.SubscriptionLifecycleService.RenewMembership(ctx, &services.RenewMembershipParams{
+					err = application.Runtime.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 						Processor:                 models.ProcessorCCBill,
 						ProcessorSubscriptionID:   id,
 						TransactionID:             fmt.Sprintf("ccbill-cmd-renew-%s", id),
@@ -363,7 +362,7 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 				continue
 			}
 
-			_, err = application.Runtime.SubscriptionLifecycleService.CreateMembership(ctx, &services.CreateMembershipParams{
+			_, err = application.Runtime.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 				UserID:                  userID,
 				PriceID:                 priceID,
 				Processor:               models.ProcessorCCBill,

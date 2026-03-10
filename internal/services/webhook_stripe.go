@@ -152,7 +152,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), processorSubID)
 	createdSubscription := false
 	if err != nil {
-		sub, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &CreateMembershipParams{
+		sub, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 			UserID:                  userID,
 			UserEmail:               normalize.OptionalString(inv.CustomerEmail),
 			PriceID:                 priceID,
@@ -168,7 +168,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		}
 		createdSubscription = true
 	} else {
-		if err := s.SubscriptionLifecycleService.RenewMembership(ctx, &RenewMembershipParams{
+		if err := s.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 			Processor:               models.ProcessorStripe,
 			ProcessorSubscriptionID: processorSubID,
 			TransactionID:           paymentTransactionID,
@@ -176,7 +176,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			Currency:                inv.Currency,
 			PaymentMetadata:         paymentMetadata,
 		}); err != nil {
-			if IsTerminalTransitionBlocked(err) {
+			if subscriptions.IsTerminalTransitionBlocked(err) {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 					"processor_subscription_id": processorSubID,
 					"transaction_id":            paymentTransactionID,
@@ -426,7 +426,7 @@ func (s *StripeWebhookService) handleSubscriptionDeleted(ctx context.Context, ob
 	if data.ID == "" {
 		return nil
 	}
-	return s.SubscriptionLifecycleService.CancelMembership(ctx, &CancelMembershipParams{
+	return s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 		Processor:               ptrProcessor(models.ProcessorStripe),
 		ProcessorSubscriptionID: &data.ID,
 		CancelType:              models.CancelTypeUser,

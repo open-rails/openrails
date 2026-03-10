@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/riverqueue/river"
@@ -209,7 +210,7 @@ func (w *DunningWorker) processSubscription(
 		if idemClaimed && w.IdempotencyService != nil {
 			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, errors.New(reason))
 		}
-		if err := lifecycle.FailMembership(ctx, &services.FailMembershipParams{
+		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      models.ProcessorMobius,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
@@ -230,7 +231,7 @@ func (w *DunningWorker) processSubscription(
 		if idemClaimed && w.IdempotencyService != nil {
 			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, err)
 		}
-		if err2 := lifecycle.FailMembership(ctx, &services.FailMembershipParams{
+		if err2 := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      models.ProcessorMobius,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &msg,
@@ -248,7 +249,7 @@ func (w *DunningWorker) processSubscription(
 		if idemClaimed && w.IdempotencyService != nil {
 			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, errors.New(reason))
 		}
-		if err := lifecycle.FailMembership(ctx, &services.FailMembershipParams{
+		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      models.ProcessorMobius,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
@@ -259,7 +260,7 @@ func (w *DunningWorker) processSubscription(
 	}
 
 	// Success: renew membership window and create a payment record
-	if err := lifecycle.RenewMembership(ctx, &services.RenewMembershipParams{
+	if err := lifecycle.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 		Processor:               models.ProcessorMobius,
 		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
 	}); err != nil {

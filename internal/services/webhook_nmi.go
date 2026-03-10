@@ -554,7 +554,7 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		"subscription_lifecycle_step": "create_membership_from_subscription_add",
 	}).Info("Creating membership for NMI subscription add event")
 
-	_, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &CreateMembershipParams{
+	_, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 		PriceID:                 price.ID,
 		UserID:                  subscription.UserID,
 		Processor:               models.ProcessorMobius,
@@ -685,7 +685,7 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 		"processor_subscription_id": nmiSubID,
 		"user_id":                   subscription.UserID,
 	}).Info("Cancelling subscription via NMI delete event")
-	if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &CancelMembershipParams{
+	if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 		RevokeAccess:            false, // User keeps access until period end
 		Processor:               &processor,
 		ProcessorSubscriptionID: &nmiSubID,
@@ -820,7 +820,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			"subscription_lifecycle_step": "activate_pending_membership",
 		}).Info("Activating pending subscription from NMI transaction success")
 
-		_, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &CreateMembershipParams{
+		_, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 			PriceID:                 subscription.PriceID,
 			UserID:                  subscription.UserID,
 			Processor:               models.ProcessorMobius,
@@ -873,14 +873,14 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}).Info("Renewing subscription from NMI transaction success")
 
 		// RenewMembership now creates the Payment record internally
-		if err := s.SubscriptionLifecycleService.RenewMembership(ctx, &RenewMembershipParams{
+		if err := s.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 			Processor:               models.ProcessorMobius,
 			ProcessorSubscriptionID: nmiSubID,
 			TransactionID:           txnID,
 			Amount:                  amountCents,
 			Currency:                currencyValue,
 		}); err != nil {
-			if IsTerminalTransitionBlocked(err) {
+			if subscriptions.IsTerminalTransitionBlocked(err) {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 					"subscription_id":             subscription.ID,
 					"processor_subscription_id":   subscription.ProcessorSubscriptionID,
@@ -1141,7 +1141,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 	}
 
 	if subscription != nil {
-		if err := s.SubscriptionLifecycleService.FailMembership(ctx, &FailMembershipParams{
+		if err := s.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      models.Processor(s.Processor),
 			SubscriptionID: &subscription.ID,
 			FailureReason:  failureReason,
@@ -1567,7 +1567,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 						)
 						proc := models.Processor(processor)
 						subProcID := strings.TrimSpace(match.ProcessorSubscriptionID)
-						params := &CancelMembershipParams{
+						params := &subscriptions.CancelMembershipParams{
 							RevokeAccess:   true,
 							Processor:      &proc,
 							SubscriptionID: &match.SubscriptionID,
@@ -1813,7 +1813,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		cancelReason := "Refund processed"
 
 		if s.SubscriptionLifecycleService != nil {
-			if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &CancelMembershipParams{
+			if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 				Processor:               &processor,
 				ProcessorSubscriptionID: &nmiSubID,
 				SubscriptionID:          &subscription.ID,

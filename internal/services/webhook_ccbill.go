@@ -424,7 +424,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	}
 
 	// CreateMembership now creates the Payment record internally
-	subscription, err := s.SubscriptionLifecycleService.CreateMembership(ctx, &CreateMembershipParams{
+	subscription, err := s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 		UserID:                  userID,
 		PriceID:                 price.ID,
 		Processor:               models.ProcessorCCBill,
@@ -1337,13 +1337,13 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		return fmt.Errorf("failed to parse nextRenewalDate '%s': %w", nextRenewalDate, err)
 	}
 
-	sub, err := s.SubscriptionLifecycleService.ReactivateMembership(ctx, &ReactivateMembershipParams{
+	sub, err := s.SubscriptionLifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{
 		Processor:               models.ProcessorCCBill,
 		ProcessorSubscriptionID: pSubscriptionID,
 		CurrentPeriodEndsAt:     renewalDate,
 	})
 	if err != nil {
-		if IsTerminalTransitionBlocked(err) {
+		if subscriptions.IsTerminalTransitionBlocked(err) {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"processor_subscription_id": pSubscriptionID,
 				"transaction_id":            transactionID,
@@ -2003,7 +2003,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	}
 
 	// RenewMembership now creates the Payment record internally
-	if err = s.SubscriptionLifecycleService.RenewMembership(ctx, &RenewMembershipParams{
+	if err = s.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 		Processor:               models.ProcessorCCBill,
 		ProcessorSubscriptionID: ccBillSubID,
 		CurrentPeriodEndsAt:     paidTermEnd,
@@ -2011,7 +2011,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		Amount:                  billedAmountCents,
 		Currency:                currencyValue,
 	}); err != nil {
-		if IsTerminalTransitionBlocked(err) {
+		if subscriptions.IsTerminalTransitionBlocked(err) {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"processor_subscription_id": ccBillSubID,
 				"transaction_id":            transactionID,
@@ -2376,7 +2376,7 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 
 	// Use SubscriptionLifecycleService to cancel membership
 	processor := models.ProcessorCCBill
-	if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &CancelMembershipParams{
+	if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 		SubscriptionID:          &subscription.ID,
 		Processor:               &processor,
 		ProcessorSubscriptionID: &ccBillSubID,

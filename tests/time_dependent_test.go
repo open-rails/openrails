@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -268,7 +269,7 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 		mockClock.Advance(5 * 24 * time.Hour)
 
 		// User cancels but keeps access until period end
-		err := lifecycleService.CancelMembership(ctx, &services.CancelMembershipParams{
+		err := lifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: &sub.ID,
 			CancelType:     models.CancelTypeUser,
 			RevokeAccess:   false, // Access continues until period end
@@ -382,7 +383,7 @@ func TestAdminRevokeAccess(t *testing.T) {
 		mockClock.Advance(5 * 24 * time.Hour)
 
 		// Admin revokes access immediately
-		err := lifecycleService.CancelMembership(ctx, &services.CancelMembershipParams{
+		err := lifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: &sub.ID,
 			CancelType:     models.CancelTypeMerchant, // "merchant" = admin/merchant cancellation
 			RevokeAccess:   true,                      // Access revoked immediately
@@ -579,7 +580,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 		// FailMembership uses s.now() which uses the mock clock
 		failureReason := "Card declined"
 		failureCode := "05"
-		err := lifecycleService.FailMembership(ctx, &services.FailMembershipParams{
+		err := lifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      models.ProcessorMobius,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &failureReason,
@@ -676,7 +677,7 @@ func TestDunningSuccessReactivates(t *testing.T) {
 
 		// Simulate successful rebill via RenewMembership
 		// RenewMembership uses the mock clock for period calculations
-		err := lifecycleService.RenewMembership(ctx, &services.RenewMembershipParams{
+		err := lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 			Processor: models.ProcessorMobius,
 		})
 		require.NoError(t, err)
@@ -775,7 +776,7 @@ func TestSubscriptionRenewalWithMockClock(t *testing.T) {
 
 	t.Run("renewal extends period by billing cycle days", func(t *testing.T) {
 		// Simulate renewal webhook
-		err := lifecycleService.RenewMembership(ctx, &services.RenewMembershipParams{
+		err := lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 			Processor: models.ProcessorMobius,
 		})
 		require.NoError(t, err)
@@ -989,7 +990,7 @@ func TestCancellationTimestamp(t *testing.T) {
 	lifecycleService := suite.App.Runtime.SubscriptionLifecycleService
 
 	t.Run("cancellation timestamp matches mock clock", func(t *testing.T) {
-		err := lifecycleService.CancelMembership(ctx, &services.CancelMembershipParams{
+		err := lifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: &sub.ID,
 			CancelType:     models.CancelTypeUser,
 			RevokeAccess:   false,
@@ -1020,7 +1021,7 @@ func TestCancellationTimestamp(t *testing.T) {
 		mockClock.Advance(5 * 24 * time.Hour)
 		expectedCancelTime := cancelTime.Add(5 * 24 * time.Hour)
 
-		err := lifecycleService.CancelMembership(ctx, &services.CancelMembershipParams{
+		err := lifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: &sub2.ID,
 			CancelType:     models.CancelTypeUser,
 			RevokeAccess:   false,
