@@ -54,6 +54,7 @@ type CheckoutService struct {
 	EntitlementService   *entitlements.EntitlementService
 	PurchaseService      *payments.CheckoutPurchaseService
 	VaultResolver        *payments.CheckoutVaultService
+	NMISaleService       *payments.CheckoutNMISaleService
 	PaymentMethodService *payments.PaymentMethodService
 	VaultService         *payments.VaultService
 	IdempotencyService   *IdempotencyService
@@ -83,7 +84,7 @@ func NewCheckoutService(
 	nmiClients map[string]*nmi.NMIClient,
 	cfg *config.Config,
 ) *CheckoutService {
-	return &CheckoutService{
+	service := &CheckoutService{
 		SubscriptionService:  subscriptionService,
 		ProductService:       productService,
 		PriceService:         priceService,
@@ -97,6 +98,14 @@ func NewCheckoutService(
 		NMIClients:           nmiClients,
 		Config:               cfg,
 	}
+	service.NMISaleService = payments.NewCheckoutNMISaleService(
+		service.PurchaseService,
+		service.VaultResolver,
+		vaultService,
+		NewPaymentsIdempotencyAdapter(idempotencyService),
+		nmiClients,
+	)
+	return service
 }
 
 // getIdempotencyKey returns the idempotency key to use for a checkout operation.
@@ -696,13 +705,6 @@ func (s *CheckoutService) processNMISubscription(
 	}, nil
 }
 
-// saleIdempotencyResult stores the cached result of a successful sale for idempotency replay
-type saleIdempotencyResult struct {
-	TransactionID string    `json:"transaction_id"`
-	PaymentID     uuid.UUID `json:"payment_id"`
-	DelayedStart  *string   `json:"delayed_start,omitempty"`
-}
-
 // upgradeIdempotencyResult stores the cached result of a successful upgrade for idempotency replay
 type upgradeIdempotencyResult struct {
 	SubscriptionID         string `json:"subscription_id"`
@@ -719,138 +721,12 @@ func (s *CheckoutService) processNMISale(
 	product *models.Product,
 	coverage *payments.CoverageInfo,
 ) (*payments.CheckoutResponse, error) {
-	provider := "mobius" // Default NMI provider
-
-	client, ok := s.NMIClients[provider]
-	if !ok {
-		return nil, fmt.Errorf("NMI provider '%s' is not configured", provider)
+	_ = coverage
+	if s.NMISaleService == nil {
+		return nil, errors.New("NMI sale service unavailable")
 	}
-
-	// Get idempotency key (client-provided or generated)
-	const idempOp = "nmi_sale"
-	idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, idempOp)
-
-	// Check idempotency - have we already processed this request?
-	idempRec, alreadyExists, err := s.IdempotencyService.Begin(ctx, idempOp, idempotencyKey)
-	if err != nil {
-		return nil, fmt.Errorf("idempotency check failed: %w", err)
-	}
-
-	if alreadyExists {
-		switch idempRec.Status {
-		case IdempotencyStatusSuccess:
-			// Return cached result
-			var cached saleIdempotencyResult
-			if err := json.Unmarshal(idempRec.Result, &cached); err != nil {
-				log.WithError(err).Warn("failed to unmarshal cached sale result, proceeding anyway")
-				return &payments.CheckoutResponse{
-					Status:        "success",
-					Action:        "new",
-					Message:       "Purchase already completed",
-					TransactionID: cached.TransactionID,
-				}, nil
-			}
-			var delayedStart *time.Time
-			if cached.DelayedStart != nil {
-				if t, err := time.Parse(time.RFC3339, *cached.DelayedStart); err == nil {
-					delayedStart = &t
-				}
-			}
-			return &payments.CheckoutResponse{
-				Status:        "success",
-				Action:        "new",
-				Message:       "Purchase already completed",
-				PaymentID:     &cached.PaymentID,
-				TransactionID: cached.TransactionID,
-				DelayedStart:  delayedStart,
-			}, nil
-		case IdempotencyStatusPending:
-			return nil, errors.New("checkout already in progress, please wait")
-		case IdempotencyStatusFailed:
-			// Previous attempt failed - allow retry after TTL expires
-			return nil, errors.New("previous checkout attempt failed, please try again")
-		}
-	}
-
-	// Get or create vault
-	customerVaultID, createdPaymentMethod, err := s.VaultResolver.ResolveVault(ctx, req, user, provider)
-	if err != nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, err
-	}
-
-	// Generate order ID for the sale
-	orderID := uuid.New().String()
-	if req.Metadata != nil {
-		if runID := strings.TrimSpace(req.Metadata["e2e_run_id"]); runID != "" {
-			orderID = fmt.Sprintf("e2e_%s_%s", runID, orderID)
-		}
-	}
-
-	// Execute sale via NMI
-	saleResp, err := client.RunSale(nmi.SaleParams{
-		CustomerVaultID:  customerVaultID,
-		Amount:           price.Amount,
-		Currency:         price.Currency,
-		OrderDescription: fmt.Sprintf("Purchase: %s - %s", product.DisplayName, price.DisplayName),
-		OrderID:          orderID,
-	})
-	if err != nil {
-		// Cleanup vault if we created it
-		if createdPaymentMethod != nil && s.VaultService != nil {
-			_ = s.VaultService.DeleteVault(ctx, createdPaymentMethod)
-		}
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("payment failed: %w", err)
-	}
-
-	// Use RegisterPurchase to record payment and grant entitlements
-	result, err := s.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		UserID:        user.ID,
-		PriceID:       price.ID,
-		Processor:     string(models.ProcessorMobius),
-		TransactionID: saleResp.TransactionID,
-		Amount:        price.Amount,
-		Currency:      price.Currency,
-		Metadata: func() map[string]any {
-			if req.Metadata == nil {
-				return nil
-			}
-			if runID := strings.TrimSpace(req.Metadata["e2e_run_id"]); runID != "" {
-				return map[string]any{"e2e_run_id": runID, "order_id": orderID}
-			}
-			return nil
-		}(),
-	})
-	if err != nil {
-		log.WithError(err).WithField("transaction_id", saleResp.TransactionID).Error("failed to register purchase after successful NMI sale")
-		// Note: We still mark as failed because the purchase wasn't fully registered
-		// The user was charged but entitlements weren't granted - this needs manual review
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("payment processed but failed to register: %w", err)
-	}
-
-	// Cache successful result for idempotency replay
-	var delayedStartStr *string
-	if result.DelayedStart != nil {
-		str := result.DelayedStart.Format(time.RFC3339)
-		delayedStartStr = &str
-	}
-	cachedResult, _ := json.Marshal(saleIdempotencyResult{
-		TransactionID: saleResp.TransactionID,
-		PaymentID:     result.PaymentID,
-		DelayedStart:  delayedStartStr,
-	})
-	_ = s.IdempotencyService.Complete(ctx, idempOp, idempotencyKey, cachedResult)
-
-	return &payments.CheckoutResponse{
-		Status:        "success",
-		Action:        "new",
-		Message:       "Purchase completed successfully",
-		PaymentID:     &result.PaymentID,
-		TransactionID: saleResp.TransactionID,
-		DelayedStart:  result.DelayedStart,
-	}, nil
+	idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "nmi_sale")
+	return s.NMISaleService.Process(ctx, req, user, price, product, idempotencyKey)
 }
 
 // processSolanaPurchase handles Solana one-time purchases
