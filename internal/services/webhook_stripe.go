@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -35,7 +34,7 @@ type StripeWebhookService struct {
 	CreditsService               *credits.CreditsService
 	DeduplicationService         *DeduplicationService
 	ProcessorCustomerService     *payments.ProcessorCustomerService
-	CheckoutSessionService       *checkout.CheckoutSessionService
+	CheckoutSessionService       webhookCheckoutSessionStore
 }
 
 type stripeEvent struct {

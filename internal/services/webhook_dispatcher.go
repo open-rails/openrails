@@ -7,18 +7,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 )
+
+type webhookCheckoutSessionStore interface {
+	FindOpenByUserPriceProcessor(ctx context.Context, userID string, priceID uuid.UUID, processor models.Processor) (*models.CheckoutSession, error)
+	MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error
+	MarkSucceededWithSubscription(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string, subscriptionID uuid.UUID) error
+	MarkFailed(ctx context.Context, sessionID uuid.UUID, failureMessage, failureCode string) error
+	MarkExpired(ctx context.Context, sessionID uuid.UUID, reason string) error
+}
 
 // WebhookMessage is the runtime representation of a webhook event that needs dispatching.
 // It is intentionally minimal and decoupled from any database persistence.
@@ -50,7 +59,7 @@ type WebhookDispatcher struct {
 	CCBillRESTClient             *ccbill.RESTClient
 	NMIClients                   map[string]*nmi.NMIClient
 	PurchaseRegistrar            stripePurchaseRegistrar
-	CheckoutSessionService       *checkout.CheckoutSessionService
+	CheckoutSessionService       webhookCheckoutSessionStore
 	CreditsService               *credits.CreditsService
 }
 

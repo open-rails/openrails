@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -44,7 +43,7 @@ type CCBillWebhookService struct {
 	ProfileRepo                  *repo.ProfileRepo
 	PaymentService               *payments.PaymentService
 	DeduplicationService         *DeduplicationService
-	CheckoutSessionService       *checkout.CheckoutSessionService
+	CheckoutSessionService       webhookCheckoutSessionStore
 	CreditsService               *credits.CreditsService
 }
 
