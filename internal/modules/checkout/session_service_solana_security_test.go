@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/stretchr/testify/require"
 )
@@ -287,6 +288,6 @@ func (s *stubCheckoutExecutor) Checkout(ctx context.Context, req *CheckoutReques
 	return nil, nil
 }
 
-func (s *stubCheckoutExecutor) RegisterPurchase(ctx context.Context, req *RegisterPurchaseRequest) (*RegisterPurchaseResponse, error) {
+func (s *stubCheckoutExecutor) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
 	return nil, nil
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/processors"
@@ -56,7 +57,7 @@ type sessionIdempotencyStore interface {
 
 type checkoutSessionExecutor interface {
 	Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error)
-	RegisterPurchase(ctx context.Context, req *RegisterPurchaseRequest) (*RegisterPurchaseResponse, error)
+	RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error)
 }
 
 type solanaPaymentService interface {
@@ -881,7 +882,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		return nil, err
 	}
 
-	result, err := s.checkoutService.RegisterPurchase(ctx, &RegisterPurchaseRequest{
+	result, err := s.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        session.UserID,
 		PriceID:       session.PriceID,
 		Processor:     "solana",

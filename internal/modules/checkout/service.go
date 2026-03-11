@@ -673,7 +673,7 @@ func (s *CheckoutService) processNMISubscription(
 
 	// Leaving RegisterPurchase for immediate starts only,
 	// TODO - Test in production to see when NMI charges the card.
-	/*_, err = s.RegisterPurchase(ctx, &RegisterPurchaseRequest{
+	/*_, err = s.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:         user.ID,
 		PriceID:        price.ID,
 		Processor:      "mobius",
@@ -960,7 +960,7 @@ func timePtr(t time.Time) *time.Time {
 //  2. Looking up Product from Price
 //  3. Checking coverage for delayed start
 //  4. Granting entitlements from Product.EntitlementsSpec
-func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *RegisterPurchaseRequest) (*RegisterPurchaseResponse, error) {
+func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")
 	}

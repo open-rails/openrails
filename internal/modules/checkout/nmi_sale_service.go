@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	log "github.com/sirupsen/logrus"
 )
@@ -114,7 +115,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		return nil, fmt.Errorf("payment failed: %w", err)
 	}
 
-	result, err := s.PurchaseService.RegisterPurchase(ctx, &RegisterPurchaseRequest{
+	result, err := s.PurchaseService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        user.ID,
 		PriceID:       price.ID,
 		Processor:     string(models.ProcessorMobius),

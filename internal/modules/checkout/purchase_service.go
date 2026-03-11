@@ -156,7 +156,7 @@ func (s *CheckoutPurchaseService) GetUserProductCoverage(ctx context.Context, us
 	return coverage, nil
 }
 
-func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *RegisterPurchaseRequest) (*RegisterPurchaseResponse, error) {
+func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
 	if req.UserID == "" {
 		return nil, errors.New("user_id is required")
 	}
@@ -251,7 +251,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *Reg
 		"delayed_start": delayedStart, "eligibility": eligibility.Status,
 	}).Info("registered purchase")
 
-	return &RegisterPurchaseResponse{PaymentID: paymentID, Entitlements: grantedEntitlements, DelayedStart: delayedStart, Eligibility: string(eligibility.Status)}, nil
+	return &payments.RegisterPurchaseResponse{PaymentID: paymentID, Entitlements: grantedEntitlements, DelayedStart: delayedStart, Eligibility: string(eligibility.Status)}, nil
 }
 
 func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, product *models.Product, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, walletPurchase bool, billingCycleDays *int) error {
