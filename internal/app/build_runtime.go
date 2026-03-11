@@ -591,7 +591,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	if checkoutService.PurchaseService != nil {
 		checkoutService.PurchaseService.Clock = clock
 	}
-	webhookDispatcher.CheckoutService = checkoutService
+	webhookDispatcher.PurchaseRegistrar = checkoutService
 	subscriptionLifecycleService.EventLogService = nil // reset until ClickHouse init
 
 	checkoutSessionService := checkout.NewCheckoutSessionService(

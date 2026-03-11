@@ -20,13 +20,17 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type stripePurchaseRegistrar interface {
+	RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error)
+}
+
 type StripeWebhookService struct {
 	DB                           *db.DB
 	PriceService                 *catalog.PriceService
 	ProductService               *catalog.ProductService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
-	CheckoutService              *checkout.CheckoutService
+	PurchaseRegistrar            stripePurchaseRegistrar
 	PaymentService               *payments.PaymentService
 	CreditsService               *credits.CreditsService
 	DeduplicationService         *DeduplicationService
@@ -328,7 +332,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		return fmt.Errorf("stripe checkout session missing payment_intent")
 	}
 
-	result, err := s.CheckoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
+	result, err := s.PurchaseRegistrar.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        userID,
 		PriceID:       priceID,
 		Processor:     string(models.ProcessorStripe),

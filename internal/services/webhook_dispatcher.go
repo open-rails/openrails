@@ -49,7 +49,7 @@ type WebhookDispatcher struct {
 	ProcessorCustomerService     *payments.ProcessorCustomerService
 	CCBillRESTClient             *ccbill.RESTClient
 	NMIClients                   map[string]*nmi.NMIClient
-	CheckoutService              *checkout.CheckoutService
+	PurchaseRegistrar            stripePurchaseRegistrar
 	CheckoutSessionService       *checkout.CheckoutSessionService
 	CreditsService               *credits.CreditsService
 }
@@ -134,7 +134,7 @@ func (d *WebhookDispatcher) processStripe(ctx context.Context, event *WebhookMes
 		ProductService:               d.ProductService,
 		SubscriptionService:          d.SubscriptionService,
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
-		CheckoutService:              d.CheckoutService,
+		PurchaseRegistrar:            d.PurchaseRegistrar,
 		PaymentService:               d.PaymentService,
 		CreditsService:               d.CreditsService,
 		DeduplicationService:         d.DeduplicationService,
