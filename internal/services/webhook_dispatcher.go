@@ -49,7 +49,7 @@ type WebhookDispatcher struct {
 	Clock                        clockwork.Clock
 	PriceService                 *catalog.PriceService
 	ProductService               *catalog.ProductService
-	NotificationService          *NotificationService
+	NotificationService          *subscriptions.NotificationService
 	SubscriptionService          *subscriptions.SubscriptionService
 	PaymentService               *payments.PaymentService
 	EventLogService              *analytics.EventLogService

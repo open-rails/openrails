@@ -164,9 +164,9 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		solanaProc.SupportedTokens = registryToSupportedTokens(solanaTokenRegistry.All())
 	}
 
-	var emailService *services.EmailService
+	var emailService *subscriptions.EmailService
 	if cfg.SendGrid != nil {
-		if es, err := services.NewEmailService(cfg.SendGrid, cfg.Store); err != nil {
+		if es, err := subscriptions.NewEmailService(cfg.SendGrid, cfg.Store); err != nil {
 			log.WithError(err).Warn("EmailService init failed; email disabled")
 		} else {
 			emailService = es
@@ -437,7 +437,7 @@ type servicesInstances struct {
 
 	ProductService           *catalog.ProductService
 	PriceService             *catalog.PriceService
-	NotificationService      *services.NotificationService
+	NotificationService      *subscriptions.NotificationService
 	PaymentMethodService     *vault.PaymentMethodService
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
@@ -468,7 +468,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
-	notificationService := services.NewNotificationService(database, nil)
+	notificationService := subscriptions.NewNotificationService(database, nil)
 	paymentMethodService := vault.NewPaymentMethodService(database)
 	purchaseService := payments.NewPaymentService(database)
 	purchaseService.Clock = clock

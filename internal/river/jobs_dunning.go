@@ -127,7 +127,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	priceSvc := catalog.NewPriceService(w.DB)
 	productSvc := catalog.NewProductService(w.DB)
 	entitlementSvc := entitlements.NewEntitlementService(w.DB)
-	notifSvc := services.NewNotificationService(w.DB, nil)
+	notifSvc := subscriptions.NewNotificationService(w.DB, nil)
 	paymentSvc := payments.NewPaymentService(w.DB)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService)
 	lifecycle.SetConfig(w.Config) // For feature flag access

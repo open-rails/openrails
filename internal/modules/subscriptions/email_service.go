@@ -1,4 +1,4 @@
-package services
+package subscriptions
 
 import (
 	"context"
@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -34,7 +33,7 @@ type EmailService struct {
 	Clock  clockwork.Clock
 
 	// Domain dependencies for building subscription emails
-	subscriptionService *subscriptions.SubscriptionService
+	subscriptionService *SubscriptionService
 	productService      *catalog.ProductService
 	priceService        *catalog.PriceService
 	profiles            *repo.ProfileRepo
@@ -79,7 +78,7 @@ func NewEmailService(sendgridCfg *config.SendGridConfig, storeCfg *config.StoreC
 // SetDomainServices configures the domain services needed for subscription emails.
 // This is called after creation to avoid circular dependencies.
 func (s *EmailService) SetDomainServices(
-	subscriptionService *subscriptions.SubscriptionService,
+	subscriptionService *SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
 	profiles *repo.ProfileRepo,
@@ -134,28 +133,28 @@ func (s *EmailService) storeCustomerPortalURL() string {
 	return strings.TrimSpace(s.store.CustomerPortalURL)
 }
 
-func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
-	rendered := subscriptions.RenderSubscriptionConfirmationEmail(s.storeName(), data)
+func (s *EmailService) SendSubscriptionConfirmation(ctx context.Context, data SubscriptionEmailData) error {
+	rendered := RenderSubscriptionConfirmationEmail(s.storeName(), data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
-func (s *EmailService) SendSubscriptionRenewal(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
-	rendered := subscriptions.RenderSubscriptionRenewalEmail(s.storeName(), data)
+func (s *EmailService) SendSubscriptionRenewal(ctx context.Context, data SubscriptionEmailData) error {
+	rendered := RenderSubscriptionRenewalEmail(s.storeName(), data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
-func (s *EmailService) SendSubscriptionCancellation(ctx context.Context, data subscriptions.SubscriptionEmailData, reason subscriptions.PremiumEndReason) error {
-	rendered := subscriptions.RenderSubscriptionCancellationEmail(s.storeName(), data, reason)
+func (s *EmailService) SendSubscriptionCancellation(ctx context.Context, data SubscriptionEmailData, reason PremiumEndReason) error {
+	rendered := RenderSubscriptionCancellationEmail(s.storeName(), data, reason)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
-func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
-	rendered := subscriptions.RenderSubscriptionExpiredEmail(s.storeName(), s.storeCustomerPortalURL(), data)
+func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data SubscriptionEmailData) error {
+	rendered := RenderSubscriptionExpiredEmail(s.storeName(), s.storeCustomerPortalURL(), data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
-func (s *EmailService) sendPaymentFailed(ctx context.Context, data subscriptions.SubscriptionEmailData) error {
-	rendered := subscriptions.RenderPaymentFailedEmail(s.storeName(), s.storeCustomerPortalURL(), data)
+func (s *EmailService) sendPaymentFailed(ctx context.Context, data SubscriptionEmailData) error {
+	rendered := RenderPaymentFailedEmail(s.storeName(), s.storeCustomerPortalURL(), data)
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
@@ -251,7 +250,7 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 			<li><strong>Amount:</strong> %s</li>
 			<li><strong>Date:</strong> %s</li>
 			</ul>
-			<p>Enjoy your premium benefits—no rebill will occur automatically.</p>
+			<p>Enjoy your premium benefits; no rebill will occur automatically.</p>
 			<p>The %s Team</p>
 		`, messageIntro, productName, amountLine, issuedAt, storeName)
 
@@ -263,7 +262,7 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 		Amount: %s
 		Date: %s
 
-		Enjoy your premium benefits—there won't be an automatic rebill.
+		Enjoy your premium benefits; there won't be an automatic rebill.
 		The %s Team
 		`, messageIntro, productName, amountLine, issuedAt, storeName)
 
@@ -354,7 +353,7 @@ func (s *EmailService) SendSubscriptionRenewed(ctx context.Context, userID strin
 }
 
 // SendPremiumEnded sends the appropriate email when a premium entitlement ends.
-func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reason subscriptions.PremiumEndReason) error {
+func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reason PremiumEndReason) error {
 	if !s.IsEnabled() {
 		log.WithContext(ctx).Debug("email service not available - skipping premium-ended email")
 		return nil
@@ -370,14 +369,14 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 	}
 
 	switch reason {
-	case subscriptions.PremiumEndReasonExpired:
+	case PremiumEndReasonExpired:
 		return s.SendSubscriptionExpired(ctx, *emailData)
-	case subscriptions.PremiumEndReasonChargeback, subscriptions.PremiumEndReasonRefund, subscriptions.PremiumEndReasonAdmin, subscriptions.PremiumEndReasonProcessor:
+	case PremiumEndReasonChargeback, PremiumEndReasonRefund, PremiumEndReasonAdmin, PremiumEndReasonProcessor:
 		return s.SendSubscriptionCancellation(ctx, *emailData, reason)
-	case subscriptions.PremiumEndReasonUserCancel:
+	case PremiumEndReasonUserCancel:
 		fallthrough
-	case subscriptions.PremiumEndReasonUnknown:
-		return s.SendSubscriptionCancellation(ctx, *emailData, subscriptions.PremiumEndReasonUserCancel)
+	case PremiumEndReasonUnknown:
+		return s.SendSubscriptionCancellation(ctx, *emailData, PremiumEndReasonUserCancel)
 	default:
 		return s.SendSubscriptionCancellation(ctx, *emailData, reason)
 	}
@@ -422,7 +421,7 @@ func (s *EmailService) SendEntitlementExpired(ctx context.Context, userID string
 }
 
 // getEmailData fetches subscription data for email notifications
-func (s *EmailService) getEmailData(ctx context.Context, userID string) (*subscriptions.SubscriptionEmailData, error) {
+func (s *EmailService) getEmailData(ctx context.Context, userID string) (*SubscriptionEmailData, error) {
 	if s.subscriptionService == nil {
 		return nil, fmt.Errorf("subscription service not configured")
 	}
@@ -464,7 +463,6 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*subscr
 		return nil, errUserEmailUnavailable
 	}
 
-	// Get the price details
 	price, err := s.priceService.GetByID(ctx, subscription.PriceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get price: %w", err)
@@ -478,7 +476,6 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*subscr
 		}
 	}
 
-	// Calculate billing period based on subscription and price interval
 	periodStart := s.now()
 	periodEnd := s.now()
 	if subscription.CurrentPeriodStartsAt != nil {
@@ -486,7 +483,7 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*subscr
 		if price.BillingCycleDays != nil && *price.BillingCycleDays > 0 {
 			periodEnd = periodStart.AddDate(0, 0, *price.BillingCycleDays)
 		} else {
-			periodEnd = periodStart.AddDate(0, 1, 0) // Default to monthly for one-time purchases
+			periodEnd = periodStart.AddDate(0, 1, 0)
 		}
 		if subscription.CurrentPeriodEndsAt != nil {
 			periodEnd = *subscription.CurrentPeriodEndsAt
@@ -501,7 +498,7 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*subscr
 		}
 	}
 
-	return &subscriptions.SubscriptionEmailData{
+	return &SubscriptionEmailData{
 		UserEmail:      email,
 		Username:       username,
 		SubscriptionID: subscription.ID,
@@ -512,7 +509,7 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*subscr
 		PeriodStart:    periodStart,
 		PeriodEnd:      periodEnd,
 		PaymentMethod:  paymentMethod,
-		TransactionID:  "", // Would come from payment processor
+		TransactionID:  "",
 	}, nil
 }
 
@@ -529,7 +526,7 @@ func (s *EmailService) getUserEmail(ctx context.Context, userID string) (usernam
 	if qerr != nil || mail == "" || !active {
 		return "", "", errUserEmailUnavailable
 	}
-	_ = verified // reserved for future policy checks
+	_ = verified
 	return uname, mail, nil
 }
 
@@ -559,7 +556,7 @@ func describePaymentMethod(subscription *models.Subscription) string {
 	}
 
 	if lastFour != "" {
-		parts = append(parts, fmt.Sprintf("••••%s", lastFour))
+		parts = append(parts, fmt.Sprintf("****%s", lastFour))
 	}
 
 	if len(parts) == 0 {
@@ -570,7 +567,6 @@ func describePaymentMethod(subscription *models.Subscription) string {
 }
 
 func processorDisplayName(processor models.Processor) string {
-	// NMI-backed processors (mobius, etc.) are displayed as "Credit Card"
 	if processors.IsNMIBackedProcessor(processor) {
 		return "Credit Card"
 	}

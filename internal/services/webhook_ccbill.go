@@ -37,7 +37,7 @@ type CCBillWebhookService struct {
 	CCBillClient                 *ccbill.RESTClient
 	ProductService               *catalog.ProductService
 	PriceService                 *catalog.PriceService
-	NotificationService          *NotificationService
+	NotificationService          *subscriptions.NotificationService
 	EventLogService              *analytics.EventLogService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService

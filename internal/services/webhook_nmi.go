@@ -42,7 +42,7 @@ type NMIWebhookService struct {
 	PaymentService               *payments.PaymentService
 	CreditsService               *credits.CreditsService
 	DeduplicationService         *DeduplicationService
-	NotificationService          *NotificationService
+	NotificationService          *subscriptions.NotificationService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 }
 

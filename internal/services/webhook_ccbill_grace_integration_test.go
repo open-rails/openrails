@@ -289,7 +289,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
 	entitlementSvc := entitlements.NewEntitlementService(dbi)
-	notifSvc := NewNotificationService(dbi, nil)
+	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)

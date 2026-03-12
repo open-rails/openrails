@@ -50,7 +50,7 @@ type Runtime struct {
 	SubscriptionService  *subscriptions.SubscriptionService
 	ProductService       *catalog.ProductService
 	PriceService         *catalog.PriceService
-	NotificationService  *services.NotificationService
+	NotificationService  *subscriptions.NotificationService
 	PaymentMethodService *vault.PaymentMethodService
 	PaymentService       *payments.PaymentService
 	VaultService         *vault.VaultService
@@ -59,7 +59,7 @@ type Runtime struct {
 	PublicSubscriptionService *catalog.PublicSubscriptionService
 	AdminSubscriptionService  *subscriptions.AdminSubscriptionService
 
-	EmailService *services.EmailService
+	EmailService *subscriptions.EmailService
 
 	EventLogService          *analytics.EventLogService
 	EntitlementService       *entitlements.EntitlementService
