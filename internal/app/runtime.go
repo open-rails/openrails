@@ -28,6 +28,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/services"
 )
 
@@ -75,8 +76,8 @@ type Runtime struct {
 	FXProvider               fx.Provider
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
-	WebhookDispatcher            *services.WebhookDispatcher
-	DeduplicationService         *services.DeduplicationService
+	WebhookDispatcher            *webhooks.WebhookDispatcher
+	DeduplicationService         *webhooks.DeduplicationService
 	IdempotencyService           *services.IdempotencyService
 
 	CheckoutService        *checkout.CheckoutService

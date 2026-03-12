@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/services"
 	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
@@ -57,7 +58,7 @@ func (w IdempotencyCleanupWorker) Work(ctx context.Context, job *river.Job[Idemp
 	const retentionDays = 90
 
 	idempotencyService := services.NewIdempotencyService(redisClient)
-	dedupeService := services.NewDeduplicationService(idempotencyService)
+	dedupeService := webhooks.NewDeduplicationService(idempotencyService)
 	deletedRows, err := dedupeService.CleanupOldWebhooks(ctx, retentionDays)
 	if err != nil {
 		return fmt.Errorf("cleanup durable webhook dedupe records: %w", err)

@@ -1,4 +1,4 @@
-package services
+package webhooks
 
 import (
 	"context"
@@ -8,12 +8,13 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/services"
 	log "github.com/sirupsen/logrus"
 )
 
 // DeduplicationService provides robust webhook deduplication using the unified IdempotencyService
 type DeduplicationService struct {
-	idem *IdempotencyService
+	idem *services.IdempotencyService
 }
 
 // NonRetryableWebhookError marks a processing failure as terminal.
@@ -54,7 +55,7 @@ func isWebhookErrorNonRetryable(err error) bool {
 }
 
 // NewDeduplicationService creates a new webhook deduplication service
-func NewDeduplicationService(idem *IdempotencyService) *DeduplicationService {
+func NewDeduplicationService(idem *services.IdempotencyService) *DeduplicationService {
 	return &DeduplicationService{idem: idem}
 }
 
@@ -80,7 +81,7 @@ func (s *DeduplicationService) IsDuplicate(ctx context.Context, processor string
 	if err != nil {
 		return false, fmt.Errorf("failed to check idempotency: %w", err)
 	}
-	if alreadyExists && rec.Status == IdempotencyStatusSuccess {
+	if alreadyExists && rec.Status == services.IdempotencyStatusSuccess {
 		return true, nil // Already processed successfully
 	}
 
@@ -117,7 +118,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 			if err != nil {
 				return fmt.Errorf("failed to begin idempotency: %w", err)
 			}
-			if alreadyExists && rec.Status == IdempotencyStatusSuccess {
+			if alreadyExists && rec.Status == services.IdempotencyStatusSuccess {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"eventID":   trimmedEventID,
 					"eventType": eventType,
@@ -125,7 +126,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				}).Info("Webhook already processed successfully, skipping")
 				return nil
 			}
-			shouldRecordOutcome = rec == nil || rec.Status != IdempotencyStatusSuccess
+			shouldRecordOutcome = rec == nil || rec.Status != services.IdempotencyStatusSuccess
 		}
 	}
 

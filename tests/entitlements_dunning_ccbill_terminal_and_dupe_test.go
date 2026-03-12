@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/stretchr/testify/require"
 )
 
@@ -111,7 +112,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
 
 	sendRenewalFailure := func(nextRetryDate string) {
-		body, err := json.Marshal(services.CCBillRenewalFailureEvent{
+		body, err := json.Marshal(webhooks.CCBillRenewalFailureEvent{
 			TransactionID:  "txn_" + uuid.New().String(),
 			SubscriptionID: ccbillSubID,
 			ClientAccnum:   "1234",
@@ -121,9 +122,9 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 		})
 		require.NoError(t, err)
 
-		svc := &services.CCBillWebhookService{
-			Data: services.CCBillWebhookEvent{
-				EventType: services.EventTypeRenewalFailure,
+		svc := &webhooks.CCBillWebhookService{
+			Data: webhooks.CCBillWebhookEvent{
+				EventType: webhooks.EventTypeRenewalFailure,
 				EventBody: body,
 			},
 			DB:                  rt.DB,
@@ -141,8 +142,8 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	expireAt := paidEnd.Add(4 * 24 * time.Hour)
 	clock.Advance(expireAt.Sub(clock.Now().UTC()))
 
-	expBody, err := json.Marshal(services.CCBillExpirationEvent{
-		CCBillCommonFields: services.CCBillCommonFields{
+	expBody, err := json.Marshal(webhooks.CCBillExpirationEvent{
+		CCBillCommonFields: webhooks.CCBillCommonFields{
 			SubscriptionID: ccbillSubID,
 			ClientAccnum:   "1234",
 			ClientSubacc:   "0000",
@@ -151,9 +152,9 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	})
 	require.NoError(t, err)
 
-	expSvc := &services.CCBillWebhookService{
-		Data: services.CCBillWebhookEvent{
-			EventType: services.EventTypeExpiration,
+	expSvc := &webhooks.CCBillWebhookService{
+		Data: webhooks.CCBillWebhookEvent{
+			EventType: webhooks.EventTypeExpiration,
 			EventBody: expBody,
 		},
 		DB:                           rt.DB,
@@ -279,7 +280,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 
 	txid := "txn_dupe_" + uuid.New().String()
 	nextRenewal := paidEnd.Add(30 * 24 * time.Hour).Format("2006-01-02")
-	successBody, err := json.Marshal(services.CCBillRenewalSuccessEvent{
+	successBody, err := json.Marshal(webhooks.CCBillRenewalSuccessEvent{
 		TransactionID:      txid,
 		SubscriptionID:     ccbillSubID,
 		ClientAccnum:       "1234",
@@ -291,9 +292,9 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	})
 	require.NoError(t, err)
 
-	webhook := &services.CCBillWebhookService{
-		Data: services.CCBillWebhookEvent{
-			EventType: services.EventTypeRenewalSuccess,
+	webhook := &webhooks.CCBillWebhookService{
+		Data: webhooks.CCBillWebhookEvent{
+			EventType: webhooks.EventTypeRenewalSuccess,
 			EventBody: successBody,
 		},
 		DB:                           rt.DB,

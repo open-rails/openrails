@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -36,7 +36,7 @@ func (WebhookProcessArgs) Kind() string { return KindWebhookProcess }
 
 type WebhookProcessWorker struct {
 	river.WorkerDefaults[WebhookProcessArgs]
-	Dispatcher *services.WebhookDispatcher
+	Dispatcher *webhooks.WebhookDispatcher
 }
 
 func (WebhookProcessWorker) Kind() string { return KindWebhookProcess }
@@ -51,7 +51,7 @@ func (w WebhookProcessWorker) Work(ctx context.Context, job *river.Job[WebhookPr
 		return fmt.Errorf("webhook provider required")
 	}
 
-	msg := &services.WebhookMessage{
+	msg := &webhooks.WebhookMessage{
 		Processor:      provider,
 		EventID:        strings.TrimSpace(args.EventID),
 		EventType:      strings.TrimSpace(args.EventType),

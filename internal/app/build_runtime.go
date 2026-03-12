@@ -33,6 +33,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/internal/services"
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
@@ -453,9 +454,9 @@ type servicesInstances struct {
 	AdminSubscriptionService  *subscriptions.AdminSubscriptionService
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
-	DeduplicationService         *services.DeduplicationService
+	DeduplicationService         *webhooks.DeduplicationService
 	IdempotencyService           *services.IdempotencyService
-	WebhookDispatcher            *services.WebhookDispatcher
+	WebhookDispatcher            *webhooks.WebhookDispatcher
 
 	CheckoutService          *checkout.CheckoutService
 	CheckoutSessionService   *checkout.CheckoutSessionService
@@ -556,8 +557,8 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		nmiClients,
 	)
 
-	deduplicationService := services.NewDeduplicationService(idempotencyService)
-	webhookDispatcher := &services.WebhookDispatcher{
+	deduplicationService := webhooks.NewDeduplicationService(idempotencyService)
+	webhookDispatcher := &webhooks.WebhookDispatcher{
 		DB:                           database,
 		Clock:                        clock,
 		PriceService:                 priceService,

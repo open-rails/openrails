@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/stretchr/testify/require"
 )
 
@@ -130,7 +130,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	}
 
 	callRenewalFailure := func(nextRetryDate string) {
-		body, err := json.Marshal(services.CCBillRenewalFailureEvent{
+		body, err := json.Marshal(webhooks.CCBillRenewalFailureEvent{
 			TransactionID:  "txn_" + uuid.New().String(),
 			SubscriptionID: ccbillSubID,
 			ClientAccnum:   "1234",
@@ -142,9 +142,9 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		svc := &services.CCBillWebhookService{
-			Data: services.CCBillWebhookEvent{
-				EventType: services.EventTypeRenewalFailure,
+		svc := &webhooks.CCBillWebhookService{
+			Data: webhooks.CCBillWebhookEvent{
+				EventType: webhooks.EventTypeRenewalFailure,
 				EventBody: body,
 			},
 			DB:                  rt.DB,
@@ -184,7 +184,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	successAt := paidEnd.Add(4*24*time.Hour + 12*time.Hour)
 	clock.Advance(successAt.Sub(clock.Now().UTC()))
 
-	successBody, err := json.Marshal(services.CCBillRenewalSuccessEvent{
+	successBody, err := json.Marshal(webhooks.CCBillRenewalSuccessEvent{
 		TransactionID:      "txn_" + uuid.New().String(),
 		SubscriptionID:     ccbillSubID,
 		ClientAccnum:       "1234",
@@ -196,9 +196,9 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	webhook := &services.CCBillWebhookService{
-		Data: services.CCBillWebhookEvent{
-			EventType: services.EventTypeRenewalSuccess,
+	webhook := &webhooks.CCBillWebhookService{
+		Data: webhooks.CCBillWebhookEvent{
+			EventType: webhooks.EventTypeRenewalSuccess,
 			EventBody: successBody,
 		},
 		DB:                           rt.DB,

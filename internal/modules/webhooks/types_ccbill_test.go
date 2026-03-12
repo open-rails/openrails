@@ -1,4 +1,4 @@
-package services
+package webhooks
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestCCBillUpgradeSuccessEventUnmarshalFixture(t *testing.T) {
-	fixturePath := filepath.Join("..", "..", "testdata", "webhooks", "ccbill", "upgradesuccess.json")
+	fixturePath := filepath.Join("..", "..", "..", "testdata", "webhooks", "ccbill", "upgradesuccess.json")
 	payload, err := os.ReadFile(fixturePath)
 	require.NoError(t, err)
 
