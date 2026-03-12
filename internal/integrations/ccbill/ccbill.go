@@ -25,8 +25,6 @@ type GenerateFlexFormURLParams struct {
 
 	FlexID   string `json:"flex_id"`
 	FormName string `json:"form_name"`
-	UserID   string `json:"user_id"`
-	PriceID  string `json:"price_id"`
 }
 
 // FlexFormResponse contains the hosted checkout URL for CCBill.
@@ -49,8 +47,6 @@ func requireConfig(cfg *config.CCBillConfig) *config.CCBillConfig {
 const (
 	sandboxFlexFormBase = "https://sandbox-api.ccbill.com/wap-frontflex/flexforms"
 	prodFlexFormBase    = "https://api.ccbill.com/wap-frontflex/flexforms"
-	defaultIFrameWidth  = "100%"
-	defaultIFrameHeight = "600px"
 	defaultLanguage     = "English"
 	defaultCurrencyCode = "840" // USD
 )
@@ -72,48 +68,23 @@ func NewClient(cfg *config.CCBillConfig, testMode bool) *CCBillClient {
 	}
 }
 
-// GenerateFlexFormURL creates a CCBill FlexForm URL with subscription parameters for iFrame embedding
+// GenerateFlexFormURL creates a CCBill FlexForm URL with subscription parameters for iFrame embedding.
 func (c *CCBillClient) GenerateFlexFormURL(params *GenerateFlexFormURLParams) (*FlexFormResponse, error) {
-	if params.Username == "" || params.Email == "" {
-		return nil, fmt.Errorf("username and email are required")
-	}
-	if params.FormName == "" {
-		return nil, fmt.Errorf("form name is required")
-	}
-	if params.FlexID == "" {
-		return nil, fmt.Errorf("flex_id is required")
+	if err := validateFlexFormIdentity(params.Username, params.Email, params.FormName, params.FlexID); err != nil {
+		return nil, err
 	}
 
-	// Build FlexForm URL parameters
-	q := url.Values{
-		"clientAccnum": {c.config.ClientAccNum},
-		"clientSubacc": {c.config.ClientSubAcc},
-		"formName":     {params.FormName},
-		"language":     {defaultLanguage},
-		"currencyCode": {defaultCurrencyCode},
+	q := c.baseFlexFormQuery(params.Username, params.Email, params.FormName)
+	q.Set("password", params.Password)
+	q.Set("customer_fname", params.CustomerFName)
+	q.Set("customer_lname", params.CustomerLName)
+	q.Set("address1", params.Address1)
+	q.Set("city", params.City)
+	q.Set("state", params.State)
+	q.Set("zipcode", params.ZipCode)
+	q.Set("country", params.Country)
 
-		// Customer information
-		"email":          {params.Email},
-		"username":       {params.Username},
-		"password":       {params.Password},
-		"customer_fname": {params.CustomerFName},
-		"customer_lname": {params.CustomerLName},
-		"address1":       {params.Address1},
-		"city":           {params.City},
-		"state":          {params.State},
-		"zipcode":        {params.ZipCode},
-		"country":        {params.Country},
-	}
-
-	// Generate signature if salt is configured
-	if c.config.Salt != "" {
-		sigInput := url.Values{"username": {params.Username}}
-		q.Set("signature", c.generateCCBillSignature(sigInput))
-	}
-
-	flexFormURL := fmt.Sprintf("%s/%s?%s", c.flexFormBaseURL, params.FlexID, q.Encode())
-
-	return &FlexFormResponse{RedirectURL: flexFormURL}, nil
+	return c.flexFormResponse(params.FlexID, q), nil
 }
 
 func (c *CCBillClient) generateCCBillSignature(query url.Values) string {
@@ -130,10 +101,6 @@ func (c *CCBillClient) VerifyCallbackSignature(params url.Values) bool {
 
 func (c *CCBillClient) createSignatureInput(params url.Values) string {
 	return params.Get("username") + c.config.Salt
-}
-
-func (c *CCBillClient) Config() *config.CCBillConfig {
-	return c.config
 }
 
 // GenerateUpgradeFlexFormURLParams contains parameters for generating CCBill upgrade FlexForm URLs
@@ -153,39 +120,48 @@ type GenerateUpgradeFlexFormURLParams struct {
 // GenerateUpgradeFlexFormURL creates a CCBill FlexForm URL for upgrading an existing subscription
 // This allows users to change their subscription tier (upgrade or downgrade)
 func (c *CCBillClient) GenerateUpgradeFlexFormURL(params *GenerateUpgradeFlexFormURLParams) (*FlexFormResponse, error) {
-	if params.Username == "" || params.Email == "" {
-		return nil, fmt.Errorf("username and email are required")
-	}
-	if params.FormName == "" {
-		return nil, fmt.Errorf("form name (target price) is required")
-	}
-	if params.FlexID == "" {
-		return nil, fmt.Errorf("flex_id (target price) is required")
+	if err := validateFlexFormIdentity(params.Username, params.Email, params.FormName, params.FlexID); err != nil {
+		return nil, err
 	}
 	if params.OriginalSubscriptionID == "" {
 		return nil, fmt.Errorf("original_subscription_id is required")
 	}
 
-	// Build FlexForm URL parameters for upgrade
-	// CCBill upgrade forms require the original subscription ID to identify what to upgrade
+	q := c.baseFlexFormQuery(params.Username, params.Email, params.FormName)
+	q.Set("originalSubscriptionId", params.OriginalSubscriptionID)
+
+	return c.flexFormResponse(params.FlexID, q), nil
+}
+
+func validateFlexFormIdentity(username, email, formName, flexID string) error {
+	if username == "" || email == "" {
+		return fmt.Errorf("username and email are required")
+	}
+	if formName == "" {
+		return fmt.Errorf("form name is required")
+	}
+	if flexID == "" {
+		return fmt.Errorf("flex_id is required")
+	}
+	return nil
+}
+
+func (c *CCBillClient) baseFlexFormQuery(username, email, formName string) url.Values {
 	q := url.Values{
-		"clientAccnum":           {c.config.ClientAccNum},
-		"clientSubacc":           {c.config.ClientSubAcc},
-		"formName":               {params.FormName},
-		"language":               {defaultLanguage},
-		"currencyCode":           {defaultCurrencyCode},
-		"email":                  {params.Email},
-		"username":               {params.Username},
-		"originalSubscriptionId": {params.OriginalSubscriptionID},
+		"clientAccnum": {c.config.ClientAccNum},
+		"clientSubacc": {c.config.ClientSubAcc},
+		"formName":     {formName},
+		"language":     {defaultLanguage},
+		"currencyCode": {defaultCurrencyCode},
+		"email":        {email},
+		"username":     {username},
 	}
-
-	// Generate signature if salt is configured
 	if c.config.Salt != "" {
-		sigInput := url.Values{"username": {params.Username}}
-		q.Set("signature", c.generateCCBillSignature(sigInput))
+		q.Set("signature", c.generateCCBillSignature(url.Values{"username": {username}}))
 	}
+	return q
+}
 
-	flexFormURL := fmt.Sprintf("%s/%s?%s", c.flexFormBaseURL, params.FlexID, q.Encode())
-
-	return &FlexFormResponse{RedirectURL: flexFormURL}, nil
+func (c *CCBillClient) flexFormResponse(flexID string, query url.Values) *FlexFormResponse {
+	return &FlexFormResponse{RedirectURL: fmt.Sprintf("%s/%s?%s", c.flexFormBaseURL, flexID, query.Encode())}
 }

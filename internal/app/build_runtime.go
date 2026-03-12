@@ -96,23 +96,9 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		jupiterAPIKey := cfg.GetJupiterAPIKey()
 
 		loadStaticTokens := func(tokens map[string]config.TokenConfig) {
-			resolved := make(map[string]struct {
-				Symbol      string
-				Name        string
-				Mint        string
-				MainnetMint string
-				Decimals    int
-				Enabled     bool
-			}, len(tokens))
+			resolved := make(map[string]jupiter.TokenConfig, len(tokens))
 			for symbol, t := range tokens {
-				resolved[symbol] = struct {
-					Symbol      string
-					Name        string
-					Mint        string
-					MainnetMint string
-					Decimals    int
-					Enabled     bool
-				}{
+				resolved[symbol] = jupiter.TokenConfig{
 					Symbol:      t.Symbol,
 					Name:        t.Name,
 					Mint:        t.Mint,
@@ -122,26 +108,6 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 				}
 			}
 			solanaTokenRegistry.LoadTokens(resolved)
-		}
-
-		registryToSupportedTokens := func(tokens map[string]jupiter.ResolvedToken) map[string]config.TokenConfig {
-			isDevnet := strings.EqualFold(solanaProc.Network, "devnet")
-			result := make(map[string]config.TokenConfig, len(tokens))
-			for symbol, token := range tokens {
-				mint := token.MainnetMint
-				if isDevnet && token.DevnetMint != "" {
-					mint = token.DevnetMint
-				}
-				result[symbol] = config.TokenConfig{
-					Mint:        mint,
-					MainnetMint: token.MainnetMint,
-					Symbol:      token.Symbol,
-					Name:        token.Name,
-					Decimals:    token.Decimals,
-					Enabled:     true,
-				}
-			}
-			return result
 		}
 
 		if len(solanaProc.EnabledTokens) > 0 {
@@ -162,7 +128,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 			}
 		}
 
-		solanaProc.SupportedTokens = registryToSupportedTokens(solanaTokenRegistry.All())
+		solanaProc.SupportedTokens = solanaTokenRegistry.SupportedTokens(solanaProc.Network)
 	}
 
 	var emailService *subscriptions.EmailService

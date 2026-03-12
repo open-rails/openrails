@@ -2,6 +2,7 @@ package fx
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -35,6 +36,10 @@ func NewCachedProvider(provider Provider, ttl time.Duration) *CachedProvider {
 
 // QuoteToUSD returns a cached quote if available and not expired, otherwise fetches a new one.
 func (p *CachedProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
+	currency = normalizeCurrency(currency)
+	if currency == "" {
+		return nil, fmt.Errorf("currency is required")
+	}
 	// Check cache first
 	p.mu.RLock()
 	if cached, ok := p.cache[currency]; ok && time.Now().Before(cached.expiresAt) {
@@ -64,13 +69,6 @@ func (p *CachedProvider) QuoteToUSD(ctx context.Context, currency string) (*Quot
 	p.mu.Unlock()
 
 	return quote, nil
-}
-
-// Invalidate removes a specific currency from the cache.
-func (p *CachedProvider) Invalidate(currency string) {
-	p.mu.Lock()
-	delete(p.cache, currency)
-	p.mu.Unlock()
 }
 
 // InvalidateAll clears the entire cache.

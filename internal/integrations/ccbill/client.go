@@ -2,24 +2,13 @@ package ccbill
 
 import (
 	"fmt"
-	"net"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 )
-
-var ccbillIPRanges = []*net.IPNet{
-	parseCIDR("64.38.212.0/24"),
-	parseCIDR("64.38.215.0/24"),
-	parseCIDR("64.38.240.0/24"),
-	parseCIDR("64.38.241.0/24"),
-}
 
 type RESTClient struct {
 	config *config.CCBillConfig
-}
-
-func (c *RESTClient) Config() *config.CCBillConfig {
-	return c.config
 }
 
 func NewRESTClient(cfg *config.CCBillConfig) *RESTClient {
@@ -28,24 +17,9 @@ func NewRESTClient(cfg *config.CCBillConfig) *RESTClient {
 	}
 }
 
-func parseCIDR(cidr string) *net.IPNet {
-	_, ipNet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse CCBill IP range %s: %v", cidr, err))
-	}
-	return ipNet
-}
-
 func (c *RESTClient) ValidateWebhookIP(clientIP string) error {
-	ip := net.ParseIP(clientIP)
-	if ip == nil {
-		return fmt.Errorf("invalid IP address: %s", clientIP)
-	}
-
-	for _, ipRange := range ccbillIPRanges {
-		if ipRange.Contains(ip) {
-			return nil
-		}
+	if iputil.IsValidCCBillIP(clientIP) {
+		return nil
 	}
 
 	return fmt.Errorf("webhook request from unauthorized IP: %s", clientIP)

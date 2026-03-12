@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/open-rails/openrails/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -33,6 +34,16 @@ type ResolvedToken struct {
 	DevnetMint  string // Devnet mint address (if known)
 	LogoURI     string // Logo URL
 	IsVerified  bool   // Whether token is from Jupiter verified list
+}
+
+// TokenConfig is the static token metadata shape accepted by the registry.
+type TokenConfig struct {
+	Symbol      string
+	Name        string
+	Mint        string
+	MainnetMint string
+	Decimals    int
+	Enabled     bool
 }
 
 // TokenRegistry holds resolved token metadata.
@@ -175,14 +186,7 @@ func (r *TokenRegistry) LoadFromJupiter(ctx context.Context, apiKey string, enab
 }
 
 // LoadTokens loads token metadata directly into the registry.
-func (r *TokenRegistry) LoadTokens(tokens map[string]struct {
-	Symbol      string
-	Name        string
-	Mint        string
-	MainnetMint string
-	Decimals    int
-	Enabled     bool
-}) {
+func (r *TokenRegistry) LoadTokens(tokens map[string]TokenConfig) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -223,46 +227,26 @@ func (r *TokenRegistry) Get(symbol string) (ResolvedToken, bool) {
 	return token, ok
 }
 
-// GetMint returns the appropriate mint address for a token based on network.
-func (r *TokenRegistry) GetMint(symbol string, isDevnet bool) (string, bool) {
-	token, ok := r.Get(symbol)
-	if !ok {
-		return "", false
-	}
-
-	if isDevnet && token.DevnetMint != "" {
-		return token.DevnetMint, true
-	}
-	return token.MainnetMint, true
-}
-
-// All returns all resolved tokens.
-func (r *TokenRegistry) All() map[string]ResolvedToken {
+// SupportedTokens returns config-shaped token metadata for the requested network.
+func (r *TokenRegistry) SupportedTokens(network string) map[string]config.TokenConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	result := make(map[string]ResolvedToken, len(r.tokens))
-	for k, v := range r.tokens {
-		result[k] = v
+	isDevnet := strings.EqualFold(network, "devnet")
+	result := make(map[string]config.TokenConfig, len(r.tokens))
+	for symbol, token := range r.tokens {
+		mint := token.MainnetMint
+		if isDevnet && token.DevnetMint != "" {
+			mint = token.DevnetMint
+		}
+		result[symbol] = config.TokenConfig{
+			Mint:        mint,
+			MainnetMint: token.MainnetMint,
+			Symbol:      token.Symbol,
+			Name:        token.Name,
+			Decimals:    token.Decimals,
+			Enabled:     true,
+		}
 	}
 	return result
-}
-
-// Symbols returns all enabled token symbols.
-func (r *TokenRegistry) Symbols() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	symbols := make([]string, 0, len(r.tokens))
-	for symbol := range r.tokens {
-		symbols = append(symbols, symbol)
-	}
-	return symbols
-}
-
-// Count returns the number of registered tokens.
-func (r *TokenRegistry) Count() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.tokens)
 }

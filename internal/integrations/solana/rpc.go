@@ -3,6 +3,7 @@ package solana
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 // It supports automatic failover between multiple RPC endpoints.
 type RPCClient struct {
 	fallback *RPCFallbackClient
-	network  string // "mainnet", "devnet", "testnet"
 }
 
 // RPCClientConfig holds configuration for creating an RPC client.
@@ -45,7 +45,6 @@ func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 
 	return &RPCClient{
 		fallback: fallback,
-		network:  network,
 	}
 }
 
@@ -168,22 +167,6 @@ func (c *RPCClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataS
 	return c.fallback.GetMinimumBalanceForRentExemption(ctx, dataSize)
 }
 
-// IsValidAddress checks if a public key string is valid
-func (c *RPCClient) IsValidAddress(address string) bool {
-	_, err := solanago.PublicKeyFromBase58(address)
-	return err == nil
-}
-
-// ParseAddress converts a base58 string to PublicKey
-func (c *RPCClient) ParseAddress(address string) (solanago.PublicKey, error) {
-	return solanago.PublicKeyFromBase58(address)
-}
-
-// GetNetwork returns the current network
-func (c *RPCClient) GetNetwork() string {
-	return c.network
-}
-
 // GetEndpoint returns the current RPC endpoint
 func (c *RPCClient) GetEndpoint() string {
 	return c.fallback.GetEndpoint()
@@ -226,12 +209,6 @@ func (c *RPCClient) GetSignaturesForAddress(ctx context.Context, address string,
 	return results, nil
 }
 
-// GetClient returns the underlying RPC client for direct access when needed.
-// Prefer using the RPCClient methods directly when possible for fallback support.
-func (c *RPCClient) GetClient() *rpc.Client {
-	return c.fallback.GetClient()
-}
-
 // TokenAccountInfo represents an SPL token account balance for a specific mint.
 type TokenAccountInfo struct {
 	Mint    string
@@ -264,53 +241,34 @@ func (c *RPCClient) GetTokenBalanceForMint(ctx context.Context, owner solanago.P
 	}
 
 	// Parse the amount string to uint64
-	var balance uint64
-	fmt.Sscanf(resp.Value.Amount, "%d", &balance)
+	balance, err := strconv.ParseUint(resp.Value.Amount, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse token balance %q: %w", resp.Value.Amount, err)
+	}
 	return balance, nil
 }
 
 // GetTokenBalances returns token balances for multiple mints owned by a wallet.
 // Mints that don't exist or have zero balance are included with Balance=0.
-// Fetches balances in parallel for better performance.
 func (c *RPCClient) GetTokenBalances(ctx context.Context, owner solanago.PublicKey, mints []string) ([]TokenAccountInfo, error) {
 	if len(mints) == 0 {
 		return nil, nil
 	}
-
-	type result struct {
-		mint    string
-		balance uint64
-		err     error
-	}
-
-	results := make(chan result, len(mints))
-
-	// Fetch balances in parallel
+	accounts := make([]TokenAccountInfo, 0, len(mints))
 	for _, mintStr := range mints {
-		go func(mintStr string) {
-			mint, err := solanago.PublicKeyFromBase58(mintStr)
-			if err != nil {
-				results <- result{mint: mintStr, err: err}
-				return
-			}
-
-			balance, err := c.GetTokenBalanceForMint(ctx, owner, mint)
-			results <- result{mint: mintStr, balance: balance, err: err}
-		}(mintStr)
-	}
-
-	// Collect results
-	var accounts []TokenAccountInfo
-	for i := 0; i < len(mints); i++ {
-		r := <-results
-		if r.err != nil {
-			log.WithError(r.err).WithField("mint", r.mint).Debug("Failed to get token balance")
+		mint, err := solanago.PublicKeyFromBase58(mintStr)
+		if err != nil {
+			log.WithError(err).WithField("mint", mintStr).Debug("Failed to parse token mint")
 			continue
 		}
-		accounts = append(accounts, TokenAccountInfo{
-			Mint:    r.mint,
-			Balance: r.balance,
-		})
+
+		balance, err := c.GetTokenBalanceForMint(ctx, owner, mint)
+		if err != nil {
+			log.WithError(err).WithField("mint", mintStr).Debug("Failed to get token balance")
+			continue
+		}
+
+		accounts = append(accounts, TokenAccountInfo{Mint: mintStr, Balance: balance})
 	}
 
 	return accounts, nil

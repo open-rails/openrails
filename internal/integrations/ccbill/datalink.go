@@ -14,7 +14,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 type DataLinkClient struct {
@@ -23,7 +22,6 @@ type DataLinkClient struct {
 	ClientSubAcc string
 	Username     string
 	Password     string
-	DevMode      bool
 	HTTPClient   *http.Client
 }
 
@@ -50,7 +48,6 @@ func NewDataLinkClient(cfg *config.CCBillConfig) *DataLinkClient {
 		ClientSubAcc: cfg.ClientSubAcc,
 		Username:     cfg.DataLinkUsername,
 		Password:     cfg.DataLinkPassword,
-		DevMode:      cfg.TestMode,
 		HTTPClient: &http.Client{
 			Timeout: 15 * time.Minute,
 		},
@@ -71,10 +68,6 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 	if c.ClientSubAcc != "" {
 		formData.Set("clientSubacc", c.ClientSubAcc)
 	}
-
-	/*if c.DevMode {
-		formData.Set("testMode", "1")
-	}*/
 
 	var resp *http.Response
 	var err error
@@ -110,7 +103,6 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 			time.Sleep(time.Duration(tries) * time.Second) // Exponential backoff
 			continue
 		}
-		defer resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
 			break
@@ -118,9 +110,11 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 
 		// Handle authentication errors specifically
 		if resp.StatusCode == http.StatusUnauthorized {
+			resp.Body.Close()
 			return nil, fmt.Errorf("authentication failed: invalid credentials")
 		}
 		if resp.StatusCode == http.StatusForbidden {
+			resp.Body.Close()
 			return nil, fmt.Errorf("access forbidden: check client account permissions")
 		}
 
@@ -130,10 +124,13 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 		}).Warn("Non-200 response from CCBill")
 
 		if tries == maxRetries {
+			resp.Body.Close()
 			return nil, fmt.Errorf("failed after %d retries, last status: %d", maxRetries, resp.StatusCode)
 		}
+		resp.Body.Close()
 		time.Sleep(time.Duration(tries) * time.Second) // Exponential backoff
 	}
+	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -239,58 +236,5 @@ func (c *DataLinkClient) ValidateConfig() error {
 	if c.Password == "" {
 		return fmt.Errorf("CCBill datalink password is required")
 	}
-	return nil
-}
-
-func (c *DataLinkClient) ParseCCBillDate(dateStr string) (*time.Time, error) {
-	if dateStr == "" {
-		return nil, nil
-	}
-
-	// Try common CCBill date formats
-	formats := []string{
-		"2006-01-02",
-		"01/02/2006",
-		"2006-01-02 15:04:05",
-		"01/02/2006 15:04:05",
-		"2006-01-02T15:04:05Z",
-		"2006-01-02T15:04:05.000Z",
-	}
-
-	parsed, err := timeutil.ParseFirstUTC(dateStr, formats...)
-	if err == nil {
-		return &parsed, nil
-	}
-
-	return nil, fmt.Errorf("unable to parse CCBill date: %s", dateStr)
-}
-
-func (c *DataLinkClient) MapCCBillStatusToInternal(ccbillStatus string) string {
-	switch ccbillStatus {
-	case "ACTIVE":
-		return "active"
-	case "EXPIRED":
-		return "expired"
-	case "CANCELLED":
-		return "cancelled"
-	case "PENDING":
-		return "pending"
-	default:
-		log.WithField("ccbill_status", ccbillStatus).Warn("Unknown CCBill status, defaulting to pending")
-		return "pending"
-	}
-}
-
-func (c *DataLinkClient) ValidateRecord(record *CCBillRecord) error {
-	if record.SubscriptionID <= 0 {
-		return fmt.Errorf("invalid subscription ID: %d", record.SubscriptionID)
-	}
-	if record.Email == "" {
-		return fmt.Errorf("empty email address")
-	}
-	if record.Status == "" {
-		return fmt.Errorf("empty status")
-	}
-
 	return nil
 }

@@ -3,8 +3,13 @@ package fx
 
 import (
 	"context"
+	"strings"
 	"time"
 )
+
+func normalizeCurrency(currency string) string {
+	return strings.ToLower(strings.TrimSpace(currency))
+}
 
 // Quote represents an FX rate quote from a provider.
 type Quote struct {
@@ -32,6 +37,7 @@ type NoOpProvider struct{}
 
 // QuoteToUSD always returns rate=1.0 for NoOpProvider.
 func (p *NoOpProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
+	currency = normalizeCurrency(currency)
 	return &Quote{
 		FromCurrency: currency,
 		ToCurrency:   "usd",

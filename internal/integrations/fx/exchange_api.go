@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -39,7 +38,7 @@ func NewExchangeAPIProvider() *ExchangeAPIProvider {
 
 // QuoteToUSD fetches the conversion rate from the given currency to USD.
 func (p *ExchangeAPIProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
-	currency = strings.ToLower(strings.TrimSpace(currency))
+	currency = normalizeCurrency(currency)
 
 	// Short-circuit for USD
 	if currency == "usd" {

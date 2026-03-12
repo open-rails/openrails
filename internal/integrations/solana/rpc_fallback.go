@@ -412,33 +412,10 @@ func (c *RPCFallbackClient) GetSignaturesForAddressWithOpts(ctx context.Context,
 	return result, err
 }
 
-// GetNetwork returns the configured network.
-func (c *RPCFallbackClient) GetNetwork() string {
-	return c.network
-}
-
 // GetEndpoint returns the primary endpoint URL (first in chain).
 func (c *RPCFallbackClient) GetEndpoint() string {
 	if len(c.endpoints) == 0 {
 		return ""
 	}
 	return c.endpoints[0].URL
-}
-
-// GetActiveEndpointName returns the name of the currently active endpoint.
-func (c *RPCFallbackClient) GetActiveEndpointName() string {
-	active := c.getActiveEndpoints()
-	if len(active) == 0 {
-		return "none"
-	}
-	return c.endpoints[active[0]].Name
-}
-
-// GetClient returns the primary underlying RPC client for direct access when needed.
-// Prefer using the fallback methods when possible.
-func (c *RPCFallbackClient) GetClient() *rpc.Client {
-	if len(c.clients) == 0 {
-		return nil
-	}
-	return c.clients[0]
 }

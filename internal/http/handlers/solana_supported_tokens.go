@@ -73,26 +73,15 @@ func GetSupportedTokens(r *httprequest.Request) {
 	}
 
 	var tokenMap map[string]config.SolanaToken
-	isDevnet := strings.ToLower(solanaProc.Network) == "devnet"
 
-	if r.State.SolanaTokenRegistry != nil && r.State.SolanaTokenRegistry.Count() > 0 {
-		registryTokens := r.State.SolanaTokenRegistry.All()
-		tokenMap = make(map[string]config.SolanaToken, len(registryTokens))
-		for symbol, rt := range registryTokens {
-			mint := rt.MainnetMint
-			if isDevnet && rt.DevnetMint != "" {
-				mint = rt.DevnetMint
-			}
-			tokenMap[symbol] = config.SolanaToken{
-				Symbol:      rt.Symbol,
-				Name:        rt.Name,
-				Decimals:    rt.Decimals,
-				Mint:        mint,
-				MainnetMint: rt.MainnetMint,
-				Enabled:     true,
-			}
+	if r.State.SolanaTokenRegistry != nil {
+		registryTokens := r.State.SolanaTokenRegistry.SupportedTokens(solanaProc.Network)
+		if len(registryTokens) > 0 {
+			tokenMap = registryTokens
 		}
-	} else {
+	}
+
+	if tokenMap == nil {
 		tokenMap = config.TokensForNetwork(solanaProc.Network)
 	}
 

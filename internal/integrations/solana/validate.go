@@ -3,7 +3,8 @@ package solana
 import (
 	"errors"
 	"fmt"
-	"regexp"
+
+	solanago "github.com/doujins-org/solana-go"
 )
 
 var (
@@ -11,20 +12,12 @@ var (
 	ErrInvalidAddress   = errors.New("invalid Solana address")
 )
 
-// Base58 regex patterns for Solana
-var (
-	// Solana addresses are 32-44 characters in base58
-	addressRegex = regexp.MustCompile(`^[1-9A-HJ-NP-Za-km-z]{32,44}$`)
-	// Solana signatures are typically 87-88 characters in base58
-	signatureRegex = regexp.MustCompile(`^[1-9A-HJ-NP-Za-km-z]{87,88}$`)
-)
-
 // ValidateAddress checks if a string is a valid Solana wallet address
 func ValidateAddress(address string) error {
 	if address == "" {
 		return fmt.Errorf("%w: address cannot be empty", ErrInvalidAddress)
 	}
-	if !addressRegex.MatchString(address) {
+	if _, err := solanago.PublicKeyFromBase58(address); err != nil {
 		return fmt.Errorf("%w: address format invalid", ErrInvalidAddress)
 	}
 	return nil
@@ -35,7 +28,7 @@ func ValidateSignature(signature string) error {
 	if signature == "" {
 		return fmt.Errorf("%w: signature cannot be empty", ErrInvalidSignature)
 	}
-	if !signatureRegex.MatchString(signature) {
+	if _, err := solanago.SignatureFromBase58(signature); err != nil {
 		return fmt.Errorf("%w: signature format invalid", ErrInvalidSignature)
 	}
 	return nil
