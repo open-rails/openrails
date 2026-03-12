@@ -6,8 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/middleware"
 )
 
 // registerServiceRoutes sets up routes on the private/service API.
