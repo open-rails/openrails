@@ -16,9 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/services"
 )
 
 // TestTierGroupDetection tests that the checkout service correctly detects tier groups
@@ -303,7 +303,7 @@ func TestEntitlementChangesOnTierChange(t *testing.T) {
 
 		// Grant new "extra" entitlement
 		notBefore := now.UTC()
-		_, err := entService.PushNewEntitlement(ctx, services.PushNewEntitlementParams{
+		_, err := entService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 			UserID:      userID,
 			Entitlement: "extra",
 			NotBefore:   &notBefore,
@@ -351,7 +351,7 @@ func TestEntitlementChangesOnTierChange(t *testing.T) {
 
 		st := models.EntitlementSourceSubscription
 		sid := sub.ID
-		err := entService.RevokeExistingEntitlement(ctx, services.RevokeExistingEntitlementParams{
+		err := entService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 			UserID:      userID2,
 			Entitlement: "extra",
 			SourceType:  &st,

@@ -1,4 +1,4 @@
-package services
+package idempotency
 
 import (
 	"context"
@@ -13,14 +13,10 @@ import (
 )
 
 const (
-	// DefaultIdempotencyTTL is the default time-to-live for idempotency keys
 	DefaultIdempotencyTTL = 5 * time.Minute
-
-	// Redis key prefix for idempotency
-	idempotencyKeyPrefix = "idemp:"
+	idempotencyKeyPrefix  = "idemp:"
 )
 
-// IdempotencyStatus represents the status of an idempotency request
 type IdempotencyStatus string
 
 const (
@@ -29,7 +25,6 @@ const (
 	IdempotencyStatusFailed  IdempotencyStatus = "failed"
 )
 
-// IdempotencyRecord represents a stored idempotency record
 type IdempotencyRecord struct {
 	Status    IdempotencyStatus `json:"status"`
 	Result    json.RawMessage   `json:"result,omitempty"`
@@ -37,13 +32,10 @@ type IdempotencyRecord struct {
 	CreatedAt time.Time         `json:"created_at"`
 }
 
-// IdempotencyService provides idempotency with Redis backend and in-memory fallback.
-// Keys automatically expire after TTL.
 type IdempotencyService struct {
 	client *redis.Client
 	ttl    time.Duration
 
-	// In-memory fallback for when Redis is unavailable
 	mu       sync.RWMutex
 	memStore map[string]*memEntry
 }
@@ -53,8 +45,6 @@ type memEntry struct {
 	expiresAt time.Time
 }
 
-// NewIdempotencyService creates a new idempotency service.
-// If redisClient is nil, uses in-memory storage only.
 func NewIdempotencyService(redisClient *redis.Client) *IdempotencyService {
 	s := &IdempotencyService{
 		client:   redisClient,
@@ -62,13 +52,11 @@ func NewIdempotencyService(redisClient *redis.Client) *IdempotencyService {
 		memStore: make(map[string]*memEntry),
 	}
 
-	// Start cleanup goroutine for in-memory fallback
 	go s.cleanupLoop()
 
 	return s
 }
 
-// NewIdempotencyServiceWithTTL creates a new idempotency service with custom TTL
 func NewIdempotencyServiceWithTTL(redisClient *redis.Client, ttl time.Duration) *IdempotencyService {
 	s := &IdempotencyService{
 		client:   redisClient,
@@ -79,7 +67,6 @@ func NewIdempotencyServiceWithTTL(redisClient *redis.Client, ttl time.Duration) 
 	return s
 }
 
-// cleanupLoop periodically removes expired entries from in-memory store
 func (s *IdempotencyService) cleanupLoop() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
@@ -87,22 +74,18 @@ func (s *IdempotencyService) cleanupLoop() {
 	for range ticker.C {
 		s.mu.Lock()
 		now := time.Now()
-		for k, v := range s.memStore {
-			if now.After(v.expiresAt) {
-				delete(s.memStore, k)
+		for key, entry := range s.memStore {
+			if now.After(entry.expiresAt) {
+				delete(s.memStore, key)
 			}
 		}
 		s.mu.Unlock()
 	}
 }
 
-// Begin starts an idempotency-protected operation.
-// Returns (record, alreadyExists, error).
-// If alreadyExists is true, check record.Status to determine action.
 func (s *IdempotencyService) Begin(ctx context.Context, operation, key string) (*IdempotencyRecord, bool, error) {
 	fullKey := s.buildKey(operation, key)
 
-	// Try Redis first if available
 	if s.client != nil {
 		record, exists, err := s.beginRedis(ctx, fullKey)
 		if err != nil {
@@ -112,12 +95,10 @@ func (s *IdempotencyService) Begin(ctx context.Context, operation, key string) (
 		}
 	}
 
-	// In-memory fallback
 	return s.beginMemory(fullKey)
 }
 
 func (s *IdempotencyService) beginRedis(ctx context.Context, redisKey string) (*IdempotencyRecord, bool, error) {
-	// Try to get existing record first
 	existing, err := s.getRedis(ctx, redisKey)
 	if err == nil {
 		return existing, true, nil
@@ -126,7 +107,6 @@ func (s *IdempotencyService) beginRedis(ctx context.Context, redisKey string) (*
 		return nil, false, fmt.Errorf("redis get: %w", err)
 	}
 
-	// Create new pending record
 	record := &IdempotencyRecord{
 		Status:    IdempotencyStatusPending,
 		CreatedAt: time.Now(),
@@ -137,14 +117,12 @@ func (s *IdempotencyService) beginRedis(ctx context.Context, redisKey string) (*
 		return nil, false, fmt.Errorf("marshal record: %w", err)
 	}
 
-	// SET NX - only set if key doesn't exist (atomic)
 	set, err := s.client.SetNX(ctx, redisKey, recordJSON, s.ttl).Result()
 	if err != nil {
 		return nil, false, fmt.Errorf("redis setnx: %w", err)
 	}
 
 	if !set {
-		// Key was set by another request between our GET and SETNX
 		existing, err := s.getRedis(ctx, redisKey)
 		if err != nil {
 			return nil, false, fmt.Errorf("redis get after race: %w", err)
@@ -160,17 +138,13 @@ func (s *IdempotencyService) beginMemory(key string) (*IdempotencyRecord, bool, 
 	defer s.mu.Unlock()
 
 	now := time.Now()
-
-	// Check if exists and not expired
 	if entry, ok := s.memStore[key]; ok {
 		if now.Before(entry.expiresAt) {
 			return entry.record, true, nil
 		}
-		// Expired, remove it
 		delete(s.memStore, key)
 	}
 
-	// Create new record
 	record := &IdempotencyRecord{
 		Status:    IdempotencyStatusPending,
 		CreatedAt: now,
@@ -183,7 +157,6 @@ func (s *IdempotencyService) beginMemory(key string) (*IdempotencyRecord, bool, 
 	return record, false, nil
 }
 
-// Complete marks an idempotency request as successful with the result
 func (s *IdempotencyService) Complete(ctx context.Context, operation, key string, result json.RawMessage) error {
 	fullKey := s.buildKey(operation, key)
 
@@ -193,7 +166,6 @@ func (s *IdempotencyService) Complete(ctx context.Context, operation, key string
 		CreatedAt: time.Now(),
 	}
 
-	// Try Redis first
 	if s.client != nil {
 		if err := s.setRedis(ctx, fullKey, record); err != nil {
 			log.WithError(err).Warn("Redis complete failed, updating in-memory")
@@ -202,12 +174,10 @@ func (s *IdempotencyService) Complete(ctx context.Context, operation, key string
 		}
 	}
 
-	// In-memory fallback
 	s.setMemory(fullKey, record)
 	return nil
 }
 
-// Fail marks an idempotency request as failed with the error
 func (s *IdempotencyService) Fail(ctx context.Context, operation, key string, failure error) error {
 	fullKey := s.buildKey(operation, key)
 
@@ -222,13 +192,11 @@ func (s *IdempotencyService) Fail(ctx context.Context, operation, key string, fa
 		CreatedAt: time.Now(),
 	}
 
-	// Use shorter TTL for failures so user can retry sooner
 	failureTTL := s.ttl / 2
 	if failureTTL < time.Minute {
 		failureTTL = time.Minute
 	}
 
-	// Try Redis first
 	if s.client != nil {
 		if err := s.setRedisWithTTL(ctx, fullKey, record, failureTTL); err != nil {
 			log.WithError(err).Warn("Redis fail failed, updating in-memory")
@@ -237,12 +205,10 @@ func (s *IdempotencyService) Fail(ctx context.Context, operation, key string, fa
 		}
 	}
 
-	// In-memory fallback
 	s.setMemoryWithTTL(fullKey, record, failureTTL)
 	return nil
 }
 
-// Get retrieves an idempotency record if it exists
 func (s *IdempotencyService) Get(ctx context.Context, operation, key string) (*IdempotencyRecord, error) {
 	fullKey := s.buildKey(operation, key)
 
@@ -314,28 +280,6 @@ func (s *IdempotencyService) buildKey(operation, key string) string {
 	return idempotencyKeyPrefix + operation + ":" + key
 }
 
-// Key generation helpers - no time bucket needed since TTL handles expiration
-
-// GenerateKeyForSale generates idempotency key for one-time sale
-// Format: {user_id}:{price_id}
-func GenerateKeyForSale(userID string, priceID uuid.UUID) string {
-	return fmt.Sprintf("%s:%s", userID, priceID.String())
-}
-
-// GenerateKeyForSubscription generates idempotency key for subscription creation
-// Format: {user_id}:{price_id}
-func GenerateKeyForSubscription(userID string, priceID uuid.UUID) string {
-	return fmt.Sprintf("%s:%s", userID, priceID.String())
-}
-
-// GenerateKeyForUpgrade generates idempotency key for subscription upgrade
-// Format: {user_id}:{old_subscription_id}:{new_price_id}
-func GenerateKeyForUpgrade(userID string, oldSubscriptionID, newPriceID uuid.UUID) string {
-	return fmt.Sprintf("%s:%s:%s", userID, oldSubscriptionID.String(), newPriceID.String())
-}
-
-// GenerateKeyForRebill generates idempotency key for subscription rebill (dunning)
-// Format: {subscription_id}:{period_end_iso}
 func GenerateKeyForRebill(subscriptionID uuid.UUID, periodEndISO string) string {
 	return fmt.Sprintf("%s:%s", subscriptionID.String(), periodEndISO)
 }

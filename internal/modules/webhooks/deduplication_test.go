@@ -1,19 +1,18 @@
 package webhooks
 
 import (
-	"github.com/open-rails/openrails/internal/services"
-
 	"context"
 	"errors"
 	"testing"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/stretchr/testify/require"
 )
 
 func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 	ctx := context.Background()
-	idem := services.NewIdempotencyService(nil)
+	idem := idempotency.NewIdempotencyService(nil)
 	svc := NewDeduplicationService(idem)
 
 	attempts := 0
@@ -51,12 +50,12 @@ func TestProcessWebhook_RetryableErrorThenSuccess(t *testing.T) {
 	rec, err := idem.Get(ctx, "webhook.ccbill.RenewalSuccess", "tx-retryable")
 	require.NoError(t, err)
 	require.NotNil(t, rec)
-	require.Equal(t, services.IdempotencyStatusSuccess, rec.Status)
+	require.Equal(t, idempotency.IdempotencyStatusSuccess, rec.Status)
 }
 
 func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testing.T) {
 	ctx := context.Background()
-	idem := services.NewIdempotencyService(nil)
+	idem := idempotency.NewIdempotencyService(nil)
 	svc := NewDeduplicationService(idem)
 
 	attempts := 0
@@ -91,12 +90,12 @@ func TestProcessWebhook_NonRetryableErrorCompletesAndSkipsFutureRetries(t *testi
 	rec, err := idem.Get(ctx, "webhook.ccbill.RenewalSuccess", "tx-terminal")
 	require.NoError(t, err)
 	require.NotNil(t, rec)
-	require.Equal(t, services.IdempotencyStatusSuccess, rec.Status)
+	require.Equal(t, idempotency.IdempotencyStatusSuccess, rec.Status)
 }
 
 func TestIsDuplicate_DoesNotAutoCompletePendingClaim(t *testing.T) {
 	ctx := context.Background()
-	idem := services.NewIdempotencyService(nil)
+	idem := idempotency.NewIdempotencyService(nil)
 	svc := NewDeduplicationService(idem)
 
 	isDupe, err := svc.IsDuplicate(ctx, "ccbill", "evt-1")
@@ -106,7 +105,7 @@ func TestIsDuplicate_DoesNotAutoCompletePendingClaim(t *testing.T) {
 	rec, err := idem.Get(ctx, "webhook.ccbill.event", "evt-1")
 	require.NoError(t, err)
 	require.NotNil(t, rec)
-	require.Equal(t, services.IdempotencyStatusPending, rec.Status)
+	require.Equal(t, idempotency.IdempotencyStatusPending, rec.Status)
 
 	isDupe, err = svc.IsDuplicate(ctx, "ccbill", "evt-1")
 	require.NoError(t, err)

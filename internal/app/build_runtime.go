@@ -29,13 +29,13 @@ import (
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/processors"
-	"github.com/open-rails/openrails/internal/services"
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
@@ -455,7 +455,7 @@ type servicesInstances struct {
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	DeduplicationService         *webhooks.DeduplicationService
-	IdempotencyService           *services.IdempotencyService
+	IdempotencyService           *idempotency.IdempotencyService
 	WebhookDispatcher            *webhooks.WebhookDispatcher
 
 	CheckoutService          *checkout.CheckoutService
@@ -530,7 +530,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	vaultService := vault.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database)
 	vaultService.Clock = clock
 	subscriptionService.VaultService = vaultService
-	idempotencyService := services.NewIdempotencyService(redisClient)
+	idempotencyService := idempotency.NewIdempotencyService(redisClient)
 
 	userSubscriptionService := subscriptions.NewUserSubscriptionService(
 		subscriptionService,
@@ -585,7 +585,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		entitlementService,
 		paymentMethodService,
 		vaultService,
-		services.NewPaymentsIdempotencyAdapter(idempotencyService),
+		idempotency.NewPaymentsIdempotencyAdapter(idempotencyService),
 		nmiClients,
 		cfg,
 	)
@@ -601,7 +601,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		priceService,
 		productService,
 		paymentMethodService,
-		services.NewPaymentsIdempotencyAdapter(idempotencyService),
+		idempotency.NewPaymentsIdempotencyAdapter(idempotencyService),
 		checkoutService,
 		solanaPayService,
 		solanaTransactionService,

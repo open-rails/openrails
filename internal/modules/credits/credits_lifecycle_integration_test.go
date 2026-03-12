@@ -1,4 +1,4 @@
-package services_test
+package credits_test
 
 import (
 	"context"

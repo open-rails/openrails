@@ -18,10 +18,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
@@ -54,7 +54,7 @@ type DunningWorker struct {
 	Clock              clockwork.Clock
 	NMIClients         map[string]*nmi.NMIClient
 	EventLogService    *analytics.EventLogService
-	IdempotencyService *services.IdempotencyService
+	IdempotencyService *idempotency.IdempotencyService
 }
 
 // rebillIdempotencyResult stores the cached result of a successful rebill for idempotency replay
@@ -178,7 +178,7 @@ func (w *DunningWorker) processSubscription(
 	// This ensures we don't double-bill for the same billing period
 	const idemOp = "nmi_rebill"
 	periodEndISO := sub.CurrentPeriodEndsAt.Format(time.RFC3339)
-	idemKey := services.GenerateKeyForRebill(sub.ID, periodEndISO)
+	idemKey := idempotency.GenerateKeyForRebill(sub.ID, periodEndISO)
 	var idemClaimed bool
 
 	if w.IdempotencyService != nil {
@@ -187,15 +187,15 @@ func (w *DunningWorker) processSubscription(
 			logEntry.WithError(err).Warn("idempotency check failed, proceeding without idempotency")
 		} else if alreadyExists {
 			switch rec.Status {
-			case services.IdempotencyStatusSuccess:
+			case idempotency.IdempotencyStatusSuccess:
 				// Already rebilled successfully for this period
 				logEntry.Info("Dunning: rebill already completed for this period (idempotent)")
 				return true
-			case services.IdempotencyStatusPending:
+			case idempotency.IdempotencyStatusPending:
 				// Another rebill is in progress
 				logEntry.Info("Dunning: rebill already in progress for this period")
 				return false
-			case services.IdempotencyStatusFailed:
+			case idempotency.IdempotencyStatusFailed:
 				// Previous attempt failed, allow retry
 				logEntry.Info("Dunning: previous rebill attempt failed, retrying")
 			}

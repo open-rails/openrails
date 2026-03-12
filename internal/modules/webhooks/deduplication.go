@@ -8,13 +8,13 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	log "github.com/sirupsen/logrus"
 )
 
 // DeduplicationService provides robust webhook deduplication using the unified IdempotencyService
 type DeduplicationService struct {
-	idem *services.IdempotencyService
+	idem *idempotency.IdempotencyService
 }
 
 // NonRetryableWebhookError marks a processing failure as terminal.
@@ -55,7 +55,7 @@ func isWebhookErrorNonRetryable(err error) bool {
 }
 
 // NewDeduplicationService creates a new webhook deduplication service
-func NewDeduplicationService(idem *services.IdempotencyService) *DeduplicationService {
+func NewDeduplicationService(idem *idempotency.IdempotencyService) *DeduplicationService {
 	return &DeduplicationService{idem: idem}
 }
 
@@ -81,7 +81,7 @@ func (s *DeduplicationService) IsDuplicate(ctx context.Context, processor string
 	if err != nil {
 		return false, fmt.Errorf("failed to check idempotency: %w", err)
 	}
-	if alreadyExists && rec.Status == services.IdempotencyStatusSuccess {
+	if alreadyExists && rec.Status == idempotency.IdempotencyStatusSuccess {
 		return true, nil // Already processed successfully
 	}
 
@@ -118,7 +118,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 			if err != nil {
 				return fmt.Errorf("failed to begin idempotency: %w", err)
 			}
-			if alreadyExists && rec.Status == services.IdempotencyStatusSuccess {
+			if alreadyExists && rec.Status == idempotency.IdempotencyStatusSuccess {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"eventID":   trimmedEventID,
 					"eventType": eventType,
@@ -126,7 +126,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				}).Info("Webhook already processed successfully, skipping")
 				return nil
 			}
-			shouldRecordOutcome = rec == nil || rec.Status != services.IdempotencyStatusSuccess
+			shouldRecordOutcome = rec == nil || rec.Status != idempotency.IdempotencyStatusSuccess
 		}
 	}
 

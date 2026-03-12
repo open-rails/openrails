@@ -1085,6 +1085,6 @@ func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *Checko
 	return result
 }
 
-// Placeholder for UserIdentity to avoid importing internal package directly in method signatures
-// The actual UserIdentity is from internal/services, which we can use since this is in the same module
+// Placeholder for UserIdentity to avoid importing internal package directly in method signatures.
+// The actual UserIdentity lives in internal/modules/checkout.
 var _ = sql.ErrNoRows // Keep sql import

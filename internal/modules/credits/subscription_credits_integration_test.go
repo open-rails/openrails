@@ -1,4 +1,4 @@
-package services
+package credits_test
 
 import (
 	"context"
