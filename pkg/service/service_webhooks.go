@@ -13,8 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/processors"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
-	ipverify "github.com/open-rails/openrails/internal/utils"
 	"github.com/riverqueue/river"
 )
 
@@ -139,7 +139,7 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 
 	if !isTestMode {
 		// Verify CCBill webhook comes from authorized IP ranges
-		if !ipverify.IsValidCCBillIP(req.ClientIP) {
+		if !iputil.IsValidCCBillIP(req.ClientIP) {
 			log.WithFields(log.Fields{
 				"client_ip":  req.ClientIP,
 				"processor":  "ccbill",

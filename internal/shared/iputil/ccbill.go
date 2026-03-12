@@ -1,4 +1,4 @@
-package ipverify
+package iputil
 
 import (
 	"net"
