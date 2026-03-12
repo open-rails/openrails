@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -37,7 +38,7 @@ type CCBillWebhookService struct {
 	ProductService               *catalog.ProductService
 	PriceService                 *catalog.PriceService
 	NotificationService          *NotificationService
-	EventLogService              *EventLogService
+	EventLogService              *analytics.EventLogService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	ProfileRepo                  *repo.ProfileRepo
@@ -522,17 +523,17 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 			"country":       data.Country,
 		}
 
-		paymentEventData := PaymentEventData{
+		paymentEventData := analytics.PaymentEventData{
 			EventID:        uuid.New(),
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.UserID,
-			EventType:      PaymentEventChargeSuccess,
+			EventType:      analytics.PaymentEventChargeSuccess,
 			Processor:      "ccbill",
 			Amount:         &billedAmount,
 			Currency:       currencyValue,
 			WebhookSource:  "webhook",
-			BillingInfo:    CreateMetadataJSON(billingInfo),
-			Metadata:       CreateMetadataJSON(metadata),
+			BillingInfo:    analytics.CreateMetadataJSON(billingInfo),
+			Metadata:       analytics.CreateMetadataJSON(metadata),
 			Timestamp:      s.now().UTC(),
 		}
 
@@ -593,15 +594,15 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				"form_name":      formName,
 			}
 
-			paymentEventData := PaymentEventData{
+			paymentEventData := analytics.PaymentEventData{
 				EventID:       uuid.New(),
 				UserID:        userID,
-				EventType:     PaymentEventChargeFailure,
+				EventType:     analytics.PaymentEventChargeFailure,
 				Processor:     "ccbill",
 				Currency:      currencyValue,
-				BillingInfo:   CreateMetadataJSON(map[string]interface{}{"initial_signup": true}),
+				BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"initial_signup": true}),
 				WebhookSource: "webhook",
-				Metadata:      CreateMetadataJSON(metadata),
+				Metadata:      analytics.CreateMetadataJSON(metadata),
 				Timestamp:     s.now().UTC(),
 			}
 
@@ -865,17 +866,17 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 				"country":       data.Country,
 			}
 
-			paymentEventData := PaymentEventData{
+			paymentEventData := analytics.PaymentEventData{
 				EventID:        uuid.New(),
 				SubscriptionID: &subscription.ID,
 				UserID:         subscription.UserID,
-				EventType:      PaymentEventChargeSuccess,
+				EventType:      analytics.PaymentEventChargeSuccess,
 				Processor:      "ccbill",
 				Amount:         &billedAmount,
 				Currency:       currencyValue,
-				BillingInfo:    CreateMetadataJSON(billingInfo),
+				BillingInfo:    analytics.CreateMetadataJSON(billingInfo),
 				WebhookSource:  "webhook",
-				Metadata:       CreateMetadataJSON(metadata),
+				Metadata:       analytics.CreateMetadataJSON(metadata),
 				Timestamp:      s.now().UTC(),
 			}
 
@@ -1094,15 +1095,15 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 				"flex_id":                  data.FlexID,
 			}
 
-			paymentEventData := PaymentEventData{
+			paymentEventData := analytics.PaymentEventData{
 				EventID:       uuid.New(),
 				UserID:        userID,
-				EventType:     PaymentEventChargeFailure,
+				EventType:     analytics.PaymentEventChargeFailure,
 				Processor:     "ccbill",
 				Currency:      currencyValue,
-				BillingInfo:   CreateMetadataJSON(map[string]interface{}{"upgrade_failure": true}),
+				BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"upgrade_failure": true}),
 				WebhookSource: "webhook",
-				Metadata:      CreateMetadataJSON(metadata),
+				Metadata:      analytics.CreateMetadataJSON(metadata),
 				Timestamp:     s.now().UTC(),
 			}
 
@@ -1194,14 +1195,14 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 			}
 
 			uid1 := sub.UserID
-			subscriptionEventData := SubscriptionEventData{
+			subscriptionEventData := analytics.SubscriptionEventData{
 				EventID:                 uuid.New(),
 				SubscriptionID:          sub.ID,
 				UserID:                  uid1,
-				EventType:               PaymentEventBillingDateChanged,
+				EventType:               analytics.PaymentEventBillingDateChanged,
 				Processor:               "ccbill",
 				ProcessorSubscriptionID: &pSubscriptionID,
-				Metadata:                CreateMetadataJSON(metadata),
+				Metadata:                analytics.CreateMetadataJSON(metadata),
 				Timestamp:               s.now(),
 			}
 
@@ -1277,14 +1278,14 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 			}
 
 			uid2 := sub.UserID
-			subscriptionEventData := SubscriptionEventData{
+			subscriptionEventData := analytics.SubscriptionEventData{
 				EventID:                 uuid.New(),
 				SubscriptionID:          sub.ID,
 				UserID:                  uid2,
-				EventType:               PaymentEventCustomerDataUpdated,
+				EventType:               analytics.PaymentEventCustomerDataUpdated,
 				Processor:               "ccbill",
 				ProcessorSubscriptionID: &pSubscriptionID,
-				Metadata:                CreateMetadataJSON(metadata),
+				Metadata:                analytics.CreateMetadataJSON(metadata),
 				Timestamp:               s.now(),
 			}
 
@@ -1379,11 +1380,11 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 			priceID = &sub.Price.ID
 		}
 
-		subscriptionEventData := SubscriptionEventData{
+		subscriptionEventData := analytics.SubscriptionEventData{
 			EventID:                 uuid.New(),
 			SubscriptionID:          sub.ID,
 			UserID:                  sub.UserID,
-			EventType:               PaymentEventSubscriptionReactivated,
+			EventType:               analytics.PaymentEventSubscriptionReactivated,
 			Status:                  string(sub.Status),
 			CancelType:              "",
 			PriceAmount:             priceAmount,
@@ -1394,7 +1395,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 			Processor:               "ccbill",
 			ProcessorSubscriptionID: &pSubscriptionID,
 			ProcessorTransactionID:  &transactionID,
-			Metadata:                CreateMetadataJSON(metadata),
+			Metadata:                analytics.CreateMetadataJSON(metadata),
 			Timestamp:               s.now(),
 		}
 
@@ -1557,17 +1558,17 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 
 			// Log as payment event (negative amount for refund)
 			negativeAmount := -refundAmount
-			paymentEventData := PaymentEventData{
+			paymentEventData := analytics.PaymentEventData{
 				EventID:        uuid.New(),
 				SubscriptionID: &sub.ID,
 				UserID:         sub.UserID,
-				EventType:      PaymentEventRefund,
+				EventType:      analytics.PaymentEventRefund,
 				Processor:      "ccbill",
 				Amount:         &negativeAmount,
 				Currency:       currencyValue,
-				BillingInfo:    CreateMetadataJSON(map[string]interface{}{"refund": true}),
+				BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"refund": true}),
 				WebhookSource:  "webhook",
-				Metadata:       CreateMetadataJSON(metadata),
+				Metadata:       analytics.CreateMetadataJSON(metadata),
 				Timestamp:      s.now().UTC(),
 			}
 
@@ -1651,15 +1652,15 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 
 					// Log as payment event (negative amount for void)
 					negativeAmount := -voidAmount
-					paymentEventData := PaymentEventData{
+					paymentEventData := analytics.PaymentEventData{
 						EventID:       uuid.New(),
-						EventType:     PaymentEventVoid,
+						EventType:     analytics.PaymentEventVoid,
 						Processor:     "ccbill",
 						Amount:        &negativeAmount,
 						Currency:      currencyValue,
-						BillingInfo:   CreateMetadataJSON(map[string]interface{}{"void": true}),
+						BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"void": true}),
 						WebhookSource: "webhook",
-						Metadata:      CreateMetadataJSON(metadata),
+						Metadata:      analytics.CreateMetadataJSON(metadata),
 						Timestamp:     s.now().UTC(),
 					}
 
@@ -1698,17 +1699,17 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 
 			// Log as payment event (negative amount for void)
 			negativeAmount := -voidAmount
-			paymentEventData := PaymentEventData{
+			paymentEventData := analytics.PaymentEventData{
 				EventID:        uuid.New(),
 				SubscriptionID: &sub.ID,
 				UserID:         sub.UserID,
-				EventType:      PaymentEventVoid,
+				EventType:      analytics.PaymentEventVoid,
 				Processor:      "ccbill",
 				Amount:         &negativeAmount,
 				Currency:       currencyValue,
-				BillingInfo:    CreateMetadataJSON(map[string]interface{}{"void": true}),
+				BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"void": true}),
 				WebhookSource:  "webhook",
-				Metadata:       CreateMetadataJSON(metadata),
+				Metadata:       analytics.CreateMetadataJSON(metadata),
 				Timestamp:      s.now().UTC(),
 			}
 
@@ -1798,15 +1799,15 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 
 					// Log as payment event (negative amount for chargeback)
 					negativeAmount := -chargebackAmount
-					paymentEventData := PaymentEventData{
+					paymentEventData := analytics.PaymentEventData{
 						EventID:       uuid.New(),
-						EventType:     PaymentEventChargeback,
+						EventType:     analytics.PaymentEventChargeback,
 						Processor:     "ccbill",
 						Amount:        &negativeAmount,
 						Currency:      currencyValue,
-						BillingInfo:   CreateMetadataJSON(map[string]interface{}{"chargeback": true, "fraud_flag": true}),
+						BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"chargeback": true, "fraud_flag": true}),
 						WebhookSource: "webhook",
-						Metadata:      CreateMetadataJSON(metadata),
+						Metadata:      analytics.CreateMetadataJSON(metadata),
 						Timestamp:     s.now().UTC(),
 					}
 
@@ -1895,17 +1896,17 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 
 			// Log as payment event (negative amount for chargeback)
 			negativeAmount := -chargebackAmount
-			paymentEventData := PaymentEventData{
+			paymentEventData := analytics.PaymentEventData{
 				EventID:        uuid.New(),
 				SubscriptionID: &sub.ID,
 				UserID:         sub.UserID,
-				EventType:      PaymentEventChargeback,
+				EventType:      analytics.PaymentEventChargeback,
 				Processor:      "ccbill",
 				Amount:         &negativeAmount,
 				Currency:       currencyValue,
-				BillingInfo:    CreateMetadataJSON(map[string]interface{}{"chargeback": true, "fraud_flag": true}),
+				BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"chargeback": true, "fraud_flag": true}),
 				WebhookSource:  "webhook",
-				Metadata:       CreateMetadataJSON(metadata),
+				Metadata:       analytics.CreateMetadataJSON(metadata),
 				Timestamp:      s.now().UTC(),
 			}
 
@@ -2072,17 +2073,17 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			"card_exp_date": data.ExpDate,
 		}
 
-		paymentEventData := PaymentEventData{
+		paymentEventData := analytics.PaymentEventData{
 			EventID:        uuid.New(),
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.UserID,
-			EventType:      PaymentEventChargeSuccess,
+			EventType:      analytics.PaymentEventChargeSuccess,
 			Processor:      "ccbill",
 			Amount:         &billedAmount,
 			Currency:       currencyValue,
-			BillingInfo:    CreateMetadataJSON(billingInfo),
+			BillingInfo:    analytics.CreateMetadataJSON(billingInfo),
 			WebhookSource:  "webhook",
-			Metadata:       CreateMetadataJSON(metadata),
+			Metadata:       analytics.CreateMetadataJSON(metadata),
 			Timestamp:      s.now().UTC(),
 		}
 
@@ -2116,11 +2117,11 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			"from_status":               string(prevStatus),
 			"to_status":                 statusActive,
 		}
-		subscriptionEventData := SubscriptionEventData{
+		subscriptionEventData := analytics.SubscriptionEventData{
 			EventID:                 uuid.New(),
 			SubscriptionID:          subscription.ID,
 			UserID:                  uidStr,
-			EventType:               PaymentEventSubscriptionReactivated,
+			EventType:               analytics.PaymentEventSubscriptionReactivated,
 			Status:                  statusActive,
 			CancelType:              "",
 			PriceAmount:             priceAmount,
@@ -2131,7 +2132,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			Processor:               "ccbill",
 			ProcessorSubscriptionID: &ccBillSubID,
 			ProcessorTransactionID:  &transactionID,
-			Metadata:                CreateMetadataJSON(metadata),
+			Metadata:                analytics.CreateMetadataJSON(metadata),
 			Timestamp:               s.now(),
 		}
 		if err := s.EventLogService.LogSubscriptionEvent(ctx, subscriptionEventData); err != nil {
@@ -2275,16 +2276,16 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			"grace_ends_at":             subscription.GraceEndsAt,
 		}
 
-		paymentEventData := PaymentEventData{
+		paymentEventData := analytics.PaymentEventData{
 			EventID:        uuid.New(),
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.UserID,
-			EventType:      PaymentEventChargeFailure,
+			EventType:      analytics.PaymentEventChargeFailure,
 			Processor:      "ccbill",
 			Currency:       failureCurrency,
-			BillingInfo:    CreateMetadataJSON(map[string]interface{}{"renewal_failure": true}),
+			BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"renewal_failure": true}),
 			WebhookSource:  "webhook",
-			Metadata:       CreateMetadataJSON(metadata),
+			Metadata:       analytics.CreateMetadataJSON(metadata),
 			Timestamp:      s.now().UTC(),
 		}
 
@@ -2308,11 +2309,11 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			productID = &subscription.Price.ProductID
 			priceID = &subscription.Price.ID
 		}
-		subscriptionEventData := SubscriptionEventData{
+		subscriptionEventData := analytics.SubscriptionEventData{
 			EventID:                 uuid.New(),
 			SubscriptionID:          subscription.ID,
 			UserID:                  uidStr,
-			EventType:               PaymentEventSubscriptionPastDue,
+			EventType:               analytics.PaymentEventSubscriptionPastDue,
 			Status:                  statusPastDue,
 			CancelType:              "",
 			PriceAmount:             priceAmount,
@@ -2323,7 +2324,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			Processor:               "ccbill",
 			ProcessorSubscriptionID: &ccBillSubID,
 			ProcessorTransactionID:  &transactionID,
-			Metadata:                CreateMetadataJSON(metadata),
+			Metadata:                analytics.CreateMetadataJSON(metadata),
 			Timestamp:               s.now(),
 		}
 
@@ -2418,11 +2419,11 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 		}
 
 		uidStr := subscription.UserID
-		subscriptionEventData := SubscriptionEventData{
+		subscriptionEventData := analytics.SubscriptionEventData{
 			EventID:        uuid.New(),
 			SubscriptionID: subscription.ID,
 			UserID:         uidStr,
-			EventType:      PaymentEventSubscriptionCancelled,
+			EventType:      analytics.PaymentEventSubscriptionCancelled,
 			Status:         string(models.StatusCancelled),
 			CancelType:     string(cancelType),
 			PriceAmount:    float64(subscription.Price.Amount) / 100.0,
@@ -2437,7 +2438,7 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 			PriceID:                 &subscription.Price.ID,
 			Processor:               "ccbill",
 			ProcessorSubscriptionID: &ccBillSubID,
-			Metadata:                CreateMetadataJSON(metadata),
+			Metadata:                analytics.CreateMetadataJSON(metadata),
 			Timestamp:               s.now(),
 		}
 
@@ -2504,11 +2505,11 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 		}
 
 		uidStr := subscription.UserID
-		subscriptionEventData := SubscriptionEventData{
+		subscriptionEventData := analytics.SubscriptionEventData{
 			EventID:        uuid.New(),
 			SubscriptionID: subscription.ID,
 			UserID:         uidStr,
-			EventType:      PaymentEventSubscriptionExpired,
+			EventType:      analytics.PaymentEventSubscriptionExpired,
 			Status:         string(models.StatusCancelled),
 			CancelType:     string(models.CancelTypeExpired),
 			PriceAmount:    float64(subscription.Price.Amount) / 100.0,
@@ -2523,7 +2524,7 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			PriceID:                 &subscription.Price.ID,
 			Processor:               "ccbill",
 			ProcessorSubscriptionID: &ccBillSubID,
-			Metadata:                CreateMetadataJSON(metadata),
+			Metadata:                analytics.CreateMetadataJSON(metadata),
 			Timestamp:               s.now(),
 		}
 

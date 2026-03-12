@@ -8,7 +8,7 @@ import (
 	"time"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/services"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -19,7 +19,7 @@ func GetAdminMetricsSummary(r *httprequest.Request) {
 		return
 	}
 	currency := strings.TrimSpace(r.Query("currency"))
-	svc := services.NewAdminMetricsService(r.State.Config.ClickHouse)
+	svc := analytics.NewAdminMetricsService(r.State.Config.ClickHouse)
 	resp, err := svc.GetSummary(r.Request.Context(), rng, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
@@ -44,7 +44,7 @@ func GetAdminMetricsRevenue(r *httprequest.Request) {
 	}
 	granularity := r.Query("granularity")
 	currency := strings.TrimSpace(r.Query("currency"))
-	svc := services.NewAdminMetricsService(r.State.Config.ClickHouse)
+	svc := analytics.NewAdminMetricsService(r.State.Config.ClickHouse)
 	resp, err := svc.GetRevenueSeries(r.Request.Context(), rng, granularity, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
@@ -69,7 +69,7 @@ func GetAdminMetricsSubscriptions(r *httprequest.Request) {
 	}
 	granularity := r.Query("granularity")
 	currency := strings.TrimSpace(r.Query("currency"))
-	svc := services.NewAdminMetricsService(r.State.Config.ClickHouse)
+	svc := analytics.NewAdminMetricsService(r.State.Config.ClickHouse)
 	resp, err := svc.GetSubscriptionSeries(r.Request.Context(), rng, granularity, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
@@ -93,7 +93,7 @@ func GetAdminMetricsProcessors(r *httprequest.Request) {
 		return
 	}
 	currency := strings.TrimSpace(r.Query("currency"))
-	svc := services.NewAdminMetricsService(r.State.Config.ClickHouse)
+	svc := analytics.NewAdminMetricsService(r.State.Config.ClickHouse)
 	resp, err := svc.GetProcessorMetrics(r.Request.Context(), rng, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
@@ -117,7 +117,7 @@ func GetAdminMetricsChurn(r *httprequest.Request) {
 		return
 	}
 	currency := strings.TrimSpace(r.Query("currency"))
-	svc := services.NewAdminMetricsService(r.State.Config.ClickHouse)
+	svc := analytics.NewAdminMetricsService(r.State.Config.ClickHouse)
 	resp, err := svc.GetChurn(r.Request.Context(), rng, currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
@@ -134,7 +134,7 @@ func GetAdminMetricsChurn(r *httprequest.Request) {
 	r.SuccessJSON(resp)
 }
 
-func parseMetricsRange(r *httprequest.Request, defaultDays int) (services.MetricsDateRange, error) {
+func parseMetricsRange(r *httprequest.Request, defaultDays int) (analytics.MetricsDateRange, error) {
 	startParam := strings.TrimSpace(r.Query("start"))
 	endParam := strings.TrimSpace(r.Query("end"))
 	periodParam := strings.TrimSpace(r.Query("period"))
@@ -146,7 +146,7 @@ func parseMetricsRange(r *httprequest.Request, defaultDays int) (services.Metric
 	if endParam != "" {
 		end, err = parseDateParam(endParam)
 		if err != nil {
-			return services.MetricsDateRange{}, err
+			return analytics.MetricsDateRange{}, err
 		}
 	} else {
 		end = now
@@ -155,7 +155,7 @@ func parseMetricsRange(r *httprequest.Request, defaultDays int) (services.Metric
 	if startParam != "" {
 		start, err = parseDateParam(startParam)
 		if err != nil {
-			return services.MetricsDateRange{}, err
+			return analytics.MetricsDateRange{}, err
 		}
 	} else if periodParam != "" {
 		start = applyPeriod(end, periodParam)
@@ -167,7 +167,7 @@ func parseMetricsRange(r *httprequest.Request, defaultDays int) (services.Metric
 		start, end = end, start
 	}
 
-	return services.MetricsDateRange{Start: start, End: end}, nil
+	return analytics.MetricsDateRange{Start: start, End: end}, nil
 }
 
 func parseDateParam(value string) (time.Time, error) {

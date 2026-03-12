@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -51,7 +52,7 @@ type WebhookDispatcher struct {
 	NotificationService          *NotificationService
 	SubscriptionService          *subscriptions.SubscriptionService
 	PaymentService               *payments.PaymentService
-	EventLogService              *EventLogService
+	EventLogService              *analytics.EventLogService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	ProfileRepo                  *repo.ProfileRepo
 	DeduplicationService         *DeduplicationService

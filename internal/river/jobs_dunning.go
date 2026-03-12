@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -52,7 +53,7 @@ type DunningWorker struct {
 	Config             *config.Config
 	Clock              clockwork.Clock
 	NMIClients         map[string]*nmi.NMIClient
-	EventLogService    *services.EventLogService
+	EventLogService    *analytics.EventLogService
 	IdempotencyService *services.IdempotencyService
 }
 

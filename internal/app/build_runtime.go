@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/jupiter"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
@@ -234,7 +235,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 
 	if cfg.ClickHouse != nil {
-		if bes, err := services.NewEventLogService(cfg.ClickHouse); err != nil {
+		if bes, err := analytics.NewEventLogService(cfg.ClickHouse); err != nil {
 			log.WithError(err).Warn("EventLogService init failed; analytics disabled")
 		} else {
 			runtime.EventLogService = bes

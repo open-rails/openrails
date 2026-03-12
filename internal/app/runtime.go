@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/jupiter"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
@@ -60,7 +61,7 @@ type Runtime struct {
 
 	EmailService *services.EmailService
 
-	EventLogService          *services.EventLogService
+	EventLogService          *analytics.EventLogService
 	EntitlementService       *entitlements.EntitlementService
 	CreditsService           *credits.CreditsService
 	CreditTypeService        *credits.CreditTypeService

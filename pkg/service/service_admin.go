@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	entitlementmod "github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/services"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 )
@@ -467,14 +467,14 @@ func (s *Service) AdminRevokeEntitlement(ctx context.Context, userID string, ent
 
 // AdminGetMetricsSummary returns aggregated billing metrics.
 // Returns the raw SummaryResponse slice from the internal service.
-func (s *Service) AdminGetMetricsSummary(ctx context.Context, opts MetricsOptions) ([]services.SummaryResponse, error) {
+func (s *Service) AdminGetMetricsSummary(ctx context.Context, opts MetricsOptions) ([]analytics.SummaryResponse, error) {
 	cfg, err := s.requireAdminMetricsConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	svc := services.NewAdminMetricsService(cfg.ClickHouse)
-	dateRange := services.MetricsDateRange{
+	svc := analytics.NewAdminMetricsService(cfg.ClickHouse)
+	dateRange := analytics.MetricsDateRange{
 		Start: opts.DateRange.Start,
 		End:   opts.DateRange.End,
 	}
@@ -484,14 +484,14 @@ func (s *Service) AdminGetMetricsSummary(ctx context.Context, opts MetricsOption
 
 // AdminGetMetricsRevenue returns revenue time series data.
 // Returns the raw RevenueSeriesResponse slice from the internal service.
-func (s *Service) AdminGetMetricsRevenue(ctx context.Context, opts MetricsOptions) ([]services.RevenueSeriesResponse, error) {
+func (s *Service) AdminGetMetricsRevenue(ctx context.Context, opts MetricsOptions) ([]analytics.RevenueSeriesResponse, error) {
 	cfg, err := s.requireAdminMetricsConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	svc := services.NewAdminMetricsService(cfg.ClickHouse)
-	dateRange := services.MetricsDateRange{
+	svc := analytics.NewAdminMetricsService(cfg.ClickHouse)
+	dateRange := analytics.MetricsDateRange{
 		Start: opts.DateRange.Start,
 		End:   opts.DateRange.End,
 	}
@@ -501,14 +501,14 @@ func (s *Service) AdminGetMetricsRevenue(ctx context.Context, opts MetricsOption
 
 // AdminGetMetricsSubscriptions returns subscription time series data.
 // Returns the raw SubscriptionSeriesResponse slice from the internal service.
-func (s *Service) AdminGetMetricsSubscriptions(ctx context.Context, opts MetricsOptions) ([]services.SubscriptionSeriesResponse, error) {
+func (s *Service) AdminGetMetricsSubscriptions(ctx context.Context, opts MetricsOptions) ([]analytics.SubscriptionSeriesResponse, error) {
 	cfg, err := s.requireAdminMetricsConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	svc := services.NewAdminMetricsService(cfg.ClickHouse)
-	dateRange := services.MetricsDateRange{
+	svc := analytics.NewAdminMetricsService(cfg.ClickHouse)
+	dateRange := analytics.MetricsDateRange{
 		Start: opts.DateRange.Start,
 		End:   opts.DateRange.End,
 	}
@@ -518,14 +518,14 @@ func (s *Service) AdminGetMetricsSubscriptions(ctx context.Context, opts Metrics
 
 // AdminGetMetricsProcessors returns per-processor metrics.
 // Returns the raw ProcessorMetricsResponse slice from the internal service.
-func (s *Service) AdminGetMetricsProcessors(ctx context.Context, opts MetricsOptions) ([]services.ProcessorMetricsResponse, error) {
+func (s *Service) AdminGetMetricsProcessors(ctx context.Context, opts MetricsOptions) ([]analytics.ProcessorMetricsResponse, error) {
 	cfg, err := s.requireAdminMetricsConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	svc := services.NewAdminMetricsService(cfg.ClickHouse)
-	dateRange := services.MetricsDateRange{
+	svc := analytics.NewAdminMetricsService(cfg.ClickHouse)
+	dateRange := analytics.MetricsDateRange{
 		Start: opts.DateRange.Start,
 		End:   opts.DateRange.End,
 	}
@@ -535,14 +535,14 @@ func (s *Service) AdminGetMetricsProcessors(ctx context.Context, opts MetricsOpt
 
 // AdminGetMetricsChurn returns churn analysis data.
 // Returns the raw ChurnResponse slice from the internal service.
-func (s *Service) AdminGetMetricsChurn(ctx context.Context, opts MetricsOptions) ([]services.ChurnResponse, error) {
+func (s *Service) AdminGetMetricsChurn(ctx context.Context, opts MetricsOptions) ([]analytics.ChurnResponse, error) {
 	cfg, err := s.requireAdminMetricsConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	svc := services.NewAdminMetricsService(cfg.ClickHouse)
-	dateRange := services.MetricsDateRange{
+	svc := analytics.NewAdminMetricsService(cfg.ClickHouse)
+	dateRange := analytics.MetricsDateRange{
 		Start: opts.DateRange.Start,
 		End:   opts.DateRange.End,
 	}

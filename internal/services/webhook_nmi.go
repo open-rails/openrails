@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -36,7 +37,7 @@ type NMIWebhookService struct {
 	Data                         NMIWebhookEvent
 	Processor                    string
 	NMIClient                    *nmi.NMIClient
-	EventLogService              *EventLogService
+	EventLogService              *analytics.EventLogService
 	SubscriptionService          *subscriptions.SubscriptionService
 	PaymentService               *payments.PaymentService
 	CreditsService               *credits.CreditsService
@@ -330,7 +331,7 @@ func priceSnapshotFromSubscription(sub *models.Subscription) (float64, string, u
 }
 
 // logSubscriptionEvent emits a subscription event with full pricing/status context.
-func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *models.Subscription, eventType PaymentEventType, processorTransactionID *string, metadata map[string]interface{}, overrideStatus *models.SubscriptionStatus, overrideCancel *models.CancelType) {
+func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *models.Subscription, eventType analytics.PaymentEventType, processorTransactionID *string, metadata map[string]interface{}, overrideStatus *models.SubscriptionStatus, overrideCancel *models.CancelType) {
 	if s.EventLogService == nil || sub == nil {
 		return
 	}
@@ -358,7 +359,7 @@ func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *model
 		metadata = map[string]interface{}{}
 	}
 
-	event := SubscriptionEventData{
+	event := analytics.SubscriptionEventData{
 		EventID:                 uuid.New(),
 		SubscriptionID:          sub.ID,
 		UserID:                  sub.UserID,
@@ -373,7 +374,7 @@ func (s *NMIWebhookService) logSubscriptionEvent(ctx context.Context, sub *model
 		Processor:               s.Processor,
 		ProcessorSubscriptionID: procSubID,
 		ProcessorTransactionID:  processorTransactionID,
-		Metadata:                CreateMetadataJSON(metadata),
+		Metadata:                analytics.CreateMetadataJSON(metadata),
 		Timestamp:               s.now().UTC(),
 	}
 
@@ -589,7 +590,7 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		}
 		txn := transactionRef
 
-		s.logSubscriptionEvent(ctx, subscription, PaymentEventSubscriptionCreated, &txn, metadata, &statusActive, nil)
+		s.logSubscriptionEvent(ctx, subscription, analytics.PaymentEventSubscriptionCreated, &txn, metadata, &statusActive, nil)
 
 	}
 
@@ -710,7 +711,7 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 			"previous_status": string(subscription.Status),
 			"status_after":    string(statusCancelled),
 		}
-		s.logSubscriptionEvent(ctx, subscription, PaymentEventSubscriptionCancelled, nil, metadata, &statusCancelled, &cancelType)
+		s.logSubscriptionEvent(ctx, subscription, analytics.PaymentEventSubscriptionCancelled, nil, metadata, &statusCancelled, &cancelType)
 	}
 
 	return nil
@@ -945,12 +946,12 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			metadata["order_id"] = ord
 		}
 
-		subEventType := PaymentEventBillingDateChanged
+		subEventType := analytics.PaymentEventBillingDateChanged
 		switch prevStatus {
 		case models.StatusPending:
-			subEventType = PaymentEventSubscriptionCreated
+			subEventType = analytics.PaymentEventSubscriptionCreated
 		case models.StatusCancelled, models.StatusPastDue:
-			subEventType = PaymentEventSubscriptionReactivated
+			subEventType = analytics.PaymentEventSubscriptionReactivated
 		}
 		var txnPtr *string
 		if txnID != "" {
@@ -967,17 +968,17 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			amountPtr = &amountValue
 		}
 
-		paymentEvent := PaymentEventData{
+		paymentEvent := analytics.PaymentEventData{
 			EventID:        uuid.New(),
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.UserID,
-			EventType:      PaymentEventChargeSuccess,
+			EventType:      analytics.PaymentEventChargeSuccess,
 			Processor:      s.Processor,
 			Amount:         amountPtr,
 			Currency:       currencyValue,
-			BillingInfo:    CreateMetadataJSON(map[string]interface{}{}),
+			BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{}),
 			WebhookSource:  "webhook",
-			Metadata:       CreateMetadataJSON(metadata),
+			Metadata:       analytics.CreateMetadataJSON(metadata),
 			Timestamp:      s.now().UTC(),
 		}
 		if txnID != "" {
@@ -1186,17 +1187,17 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 			fallbackCurrency = subscription.Price.Currency
 		}
 		currency := normalizeNMICurrencyValue(transactionCurrency(body), fallbackCurrency)
-		paymentEvent := PaymentEventData{
+		paymentEvent := analytics.PaymentEventData{
 			EventID:        uuid.New(),
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.UserID,
-			EventType:      PaymentEventChargeFailure,
+			EventType:      analytics.PaymentEventChargeFailure,
 			Processor:      s.Processor,
 			Amount:         amountPtr,
 			Currency:       currency,
-			BillingInfo:    CreateMetadataJSON(map[string]interface{}{}),
+			BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{}),
 			WebhookSource:  "webhook",
-			Metadata:       CreateMetadataJSON(metadata),
+			Metadata:       analytics.CreateMetadataJSON(metadata),
 			Timestamp:      s.now().UTC(),
 		}
 		if txnID != "" {
@@ -1213,10 +1214,10 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 		}
 		statusAfter := subscription.Status
 		metadata["status_after"] = string(statusAfter)
-		eventType := PaymentEventChargeFailure
+		eventType := analytics.PaymentEventChargeFailure
 		var cancelOverride *models.CancelType
 		if statusAfter == models.StatusCancelled {
-			eventType = PaymentEventSubscriptionExpired
+			eventType = analytics.PaymentEventSubscriptionExpired
 			ct := models.CancelTypeExpired
 			cancelOverride = &ct
 		}
@@ -1435,13 +1436,13 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		// Fall back to basic logging if parsing fails
 		log.WithContext(ctx).WithError(err).Warn("Failed to parse chargeback batch body; logging basic event")
 		if s.EventLogService != nil {
-			chargebackEventData := ChargebackEventData{
+			chargebackEventData := analytics.ChargebackEventData{
 				EventID:   uuid.New(),
-				EventType: PaymentEventBatchProcessed,
+				EventType: analytics.PaymentEventBatchProcessed,
 				Processor: s.Processor,
 				BatchID:   s.Data.EventID,
 				Status:    "completed",
-				Metadata:  CreateMetadataJSON(map[string]interface{}{"parse_error": err.Error()}),
+				Metadata:  analytics.CreateMetadataJSON(map[string]interface{}{"parse_error": err.Error()}),
 				Timestamp: s.now(),
 			}
 			if logErr := s.EventLogService.LogChargebackEvent(ctx, chargebackEventData); logErr != nil {
@@ -1597,13 +1598,13 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		}
 
 		if s.EventLogService != nil {
-			cbEventData := ChargebackEventData{
+			cbEventData := analytics.ChargebackEventData{
 				EventID:                uuid.New(),
 				ChargebackID:           cb.ID.Trimmed(),
 				BatchID:                batchID,
 				SubscriptionID:         subscriptionID,
 				UserID:                 userID,
-				EventType:              PaymentEventChargeback,
+				EventType:              analytics.PaymentEventChargeback,
 				Processor:              s.Processor,
 				ProcessorTransactionID: processorTransactionID,
 				Amount:                 amountPtr,
@@ -1611,7 +1612,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 				ChargebackType:         "chargeback",
 				Reason:                 reasonText,
 				Status:                 cbStatus,
-				Metadata:               CreateMetadataJSON(cbMetadata),
+				Metadata:               analytics.CreateMetadataJSON(cbMetadata),
 				Timestamp:              now,
 			}
 			if err := s.EventLogService.LogChargebackEvent(ctx, cbEventData); err != nil {
@@ -1644,13 +1645,13 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			batchMetadata["processor_id"] = body.Processor.ID.Trimmed()
 			batchMetadata["processor_name"] = body.Processor.Name.Trimmed()
 		}
-		chargebackEventData := ChargebackEventData{
+		chargebackEventData := analytics.ChargebackEventData{
 			EventID:   uuid.New(),
-			EventType: PaymentEventBatchProcessed,
+			EventType: analytics.PaymentEventBatchProcessed,
 			Processor: s.Processor,
 			BatchID:   batchID,
 			Status:    "completed",
-			Metadata:  CreateMetadataJSON(batchMetadata),
+			Metadata:  analytics.CreateMetadataJSON(batchMetadata),
 			Timestamp: now,
 		}
 		if err := s.EventLogService.LogChargebackEvent(ctx, chargebackEventData); err != nil {
@@ -1839,7 +1840,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 						"previous_status":      string(subscription.Status),
 						"cancelled_via_refund": shouldTerminate,
 					}
-					s.logSubscriptionEvent(ctx, subscription, PaymentEventSubscriptionCancelled, nil, meta, &statusCancelled, &cancelType)
+					s.logSubscriptionEvent(ctx, subscription, analytics.PaymentEventSubscriptionCancelled, nil, meta, &statusCancelled, &cancelType)
 				}
 			}
 		}
@@ -1861,17 +1862,17 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		}
 
 		negativeAmount := -refundAmount
-		paymentEventData := PaymentEventData{
+		paymentEventData := analytics.PaymentEventData{
 			EventID:        uuid.New(),
 			SubscriptionID: &subscription.ID,
 			UserID:         subscription.UserID,
-			EventType:      PaymentEventRefund,
+			EventType:      analytics.PaymentEventRefund,
 			Processor:      s.Processor,
 			Amount:         &negativeAmount,
 			Currency:       currencyValue,
-			BillingInfo:    CreateMetadataJSON(map[string]interface{}{"refund": true}),
+			BillingInfo:    analytics.CreateMetadataJSON(map[string]interface{}{"refund": true}),
 			WebhookSource:  "webhook",
-			Metadata:       CreateMetadataJSON(metadata),
+			Metadata:       analytics.CreateMetadataJSON(metadata),
 			Timestamp:      now.UTC(),
 		}
 		if txnID != "" {
@@ -1914,13 +1915,13 @@ func (s *NMIWebhookService) handleRefundFailure(ctx context.Context) error {
 			"failure":        true,
 		}
 
-		paymentEventData := PaymentEventData{
+		paymentEventData := analytics.PaymentEventData{
 			EventID:       uuid.New(),
-			EventType:     PaymentEventRefundFailure,
+			EventType:     analytics.PaymentEventRefundFailure,
 			Processor:     s.Processor,
-			BillingInfo:   CreateMetadataJSON(map[string]interface{}{"refund_failure": true}),
+			BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"refund_failure": true}),
 			WebhookSource: "webhook",
-			Metadata:      CreateMetadataJSON(metadata),
+			Metadata:      analytics.CreateMetadataJSON(metadata),
 			Timestamp:     s.now().UTC(),
 		}
 		if txnID != "" {
@@ -1973,13 +1974,13 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 			"event_source":   "webhook",
 		}
 
-		paymentEventData := PaymentEventData{
+		paymentEventData := analytics.PaymentEventData{
 			EventID:       uuid.New(),
-			EventType:     PaymentEventVoid,
+			EventType:     analytics.PaymentEventVoid,
 			Processor:     s.Processor,
-			BillingInfo:   CreateMetadataJSON(map[string]interface{}{"void": true}),
+			BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"void": true}),
 			WebhookSource: "webhook",
-			Metadata:      CreateMetadataJSON(metadata),
+			Metadata:      analytics.CreateMetadataJSON(metadata),
 			Timestamp:     s.now().UTC(),
 		}
 		if txnID != "" {
@@ -2021,13 +2022,13 @@ func (s *NMIWebhookService) handleVoidFailure(ctx context.Context) error {
 			"failure":        true,
 		}
 
-		paymentEventData := PaymentEventData{
+		paymentEventData := analytics.PaymentEventData{
 			EventID:       uuid.New(),
-			EventType:     PaymentEventVoidFailure,
+			EventType:     analytics.PaymentEventVoidFailure,
 			Processor:     s.Processor,
-			BillingInfo:   CreateMetadataJSON(map[string]interface{}{"void_failure": true}),
+			BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"void_failure": true}),
 			WebhookSource: "webhook",
-			Metadata:      CreateMetadataJSON(metadata),
+			Metadata:      analytics.CreateMetadataJSON(metadata),
 			Timestamp:     s.now().UTC(),
 		}
 		if txnID != "" {
