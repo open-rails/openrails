@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/vault"
-	"github.com/open-rails/openrails/internal/processors"
 	"github.com/open-rails/openrails/pkg/api"
 )
 

@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/uptrace/bun"
 )
 

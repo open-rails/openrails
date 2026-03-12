@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/processors"
+	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
