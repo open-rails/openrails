@@ -4,9 +4,9 @@
 *.dll
 *.so
 *.dylib
-billing
-doujins-billing
-billing-server
+/billing
+/doujins-billing
+/billing-server
 *.test
 
 .secrets
@@ -31,7 +31,7 @@ go.work.sum
 dist/
 build/
 bin/
-openrails
+/openrails
 
 # IDE files
 .vscode/
