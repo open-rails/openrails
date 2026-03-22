@@ -22,9 +22,8 @@ type GenerateFlexFormURLParams struct {
 	State         string `json:"state"`
 	ZipCode       string `json:"zipcode"`
 	Country       string `json:"country"`
-
-	FlexID   string `json:"flex_id"`
-	FormName string `json:"form_name"`
+	FlexID        string `json:"flex_id"`
+	FormName      string `json:"form_name"`
 }
 
 // FlexFormResponse contains the hosted checkout URL for CCBill.
@@ -87,7 +86,7 @@ func (c *CCBillClient) GenerateFlexFormURL(params *GenerateFlexFormURLParams) (*
 	return c.flexFormResponse(params.FlexID, q), nil
 }
 
-func (c *CCBillClient) generateCCBillSignature(query url.Values) string {
+func (c *CCBillClient) computeSignature(query url.Values) string {
 	hash := sha256.Sum256([]byte(c.createSignatureInput(query)))
 	return hex.EncodeToString(hash[:])
 }
@@ -157,7 +156,7 @@ func (c *CCBillClient) baseFlexFormQuery(username, email, formName string) url.V
 		"username":     {username},
 	}
 	if c.config.Salt != "" {
-		q.Set("signature", c.generateCCBillSignature(url.Values{"username": {username}}))
+		q.Set("signature", c.computeSignature(url.Values{"username": {username}}))
 	}
 	return q
 }

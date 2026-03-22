@@ -218,7 +218,7 @@ var ReservedProcessorNames = map[string]string{
 //   - type: solana  → Solana fields (recipient_wallet, rpc_endpoint, etc.)
 //
 // Reserved names (ccbill, stripe, solana) don't need explicit type - it's implied.
-// Non-reserved names (e.g., "mobius", "acme") require type: nmi.
+// Non-reserved names (e.g., "acme") require type: nmi.
 type ProcessorConfig struct {
 	// Type specifies the processor type: "nmi", "ccbill", "stripe", "solana"
 	// Required for non-reserved processor names.
@@ -1046,12 +1046,6 @@ func Load(configPath string) (*Config, error) {
 			return "cors_origins"
 		}
 
-		// Legacy (avoid ad-hoc os.Getenv in integrations): MOBIUS_* -> processors.mobius.*
-		// Example: MOBIUS_SECURITY_KEY -> processors.mobius.security_key
-		if strings.HasPrefix(s, "mobius_") {
-			return "processors.mobius." + strings.TrimPrefix(s, "mobius_")
-		}
-
 		// FEATURE_FLAGS_* -> feature_flags.*
 		if strings.HasPrefix(s, "feature_flags_") {
 			return "feature_flags." + strings.TrimPrefix(s, "feature_flags_")
@@ -1142,6 +1136,7 @@ func Load(configPath string) (*Config, error) {
 	if cfg.Processors == nil {
 		cfg.Processors = make(map[string]*ProcessorConfig)
 	}
+
 	if len(cfg.Processors) > 0 {
 		normalized := make(map[string]*ProcessorConfig, len(cfg.Processors))
 		for name, proc := range cfg.Processors {

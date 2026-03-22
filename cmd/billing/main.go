@@ -114,8 +114,14 @@ func main() {
 	auditCmd.Flags().String("severity", "", "Filter by minimum severity: CRITICAL, HIGH, MEDIUM, LOW")
 	auditCmd.Flags().StringSlice("category", nil, "Filter by category (can be repeated)")
 
+	seedDevCatalogCmd := &cobra.Command{
+		Use:   "seed-dev-catalog",
+		Short: "Seed a minimal dev billing catalog for local migrations",
+		RunE:  seedDevCatalog,
+	}
+
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd)
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		log.WithError(err).Fatal("Failed to execute command")
