@@ -81,10 +81,9 @@ Returns the currently supported Solana tokens and live pricing:
 ```
 
 ### POST /v1/webhooks/{provider}
-Receives processor webhooks. `provider` is `ccbill`, `stripe`, or a configured NMI-backed processor such as `mobius`
-(legacy `nmi` is accepted as an alias for `mobius`).
+Receives processor webhooks. `provider` is `ccbill`, `stripe`, or a configured NMI-backed processor such as `mobius`.
 - `ccbill`: form-encoded payload, verified via source IP ranges (unless test mode).
-- NMI-backed processors (for example `mobius`): JSON body with `Webhook-Signature` (`t=...,s=...`, preferred) or legacy
+- NMI-backed processors (for example `mobius`): JSON body with `Webhook-Signature` (`t=...,s=...`, preferred) or alternate
   `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`.
 - `stripe`: JSON body with `Stripe-Signature` header (if configured).
 Returns 200 with `{ status: "accepted" }` on success, 401/403 for auth failures, 400 for unknown provider.
@@ -365,7 +364,7 @@ OpenRails does not seed products/prices/credit types in production. For checkout
 - `billing.prices`: at least one active price for that product.
 - Processor mappings on the price (`billing.prices.processors`) for any processor you intend to use:
   - Stripe: `processors.stripe.price_id` (and optionally `processors.stripe.product_id`).
-  - Mobius/NMI: `processors.mobius.plan_id` (or legacy `processors.nmi.plan_id`).
+  - NMI-backed processors: `processors.<provider>.plan_id` (for example `processors.mobius.plan_id`).
   - CCBill: `processors.ccbill.form_name` + `processors.ccbill.flex_id`.
 - Any credit types referenced by `products.credits_spec` must exist in `billing.credit_types`.
 
@@ -540,7 +539,7 @@ Monthly churn summary plus cancellation reason counts and coarse cohort retentio
 
 - **CCBill**: Must originate from the published IP ranges; the handler also validates `formName`/`flexId`
   against the price metadata.
-- **NMI-backed processors**: Supply `Webhook-Signature` (`t=...,s=...`, preferred) or legacy
+- **NMI-backed processors**: Supply `Webhook-Signature` (`t=...,s=...`, preferred) or alternate
   `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`. When test mode is enabled via config the signature
   check is bypassed.
 - **Stripe**: Uses the `Stripe-Signature` header with the configured webhook secret.

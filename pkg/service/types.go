@@ -293,7 +293,7 @@ type GetPaymentMethodsOptions struct {
 type PaymentMethod struct {
 	ID             string
 	Type           string // "card"
-	Processor      string // "mobius", "nmi", etc.
+	Processor      string // "mobius", "ccbill", "stripe", etc.
 	Created        int64  // Unix epoch seconds
 	FailureReason  *string
 	BillingDetails *BillingDetails

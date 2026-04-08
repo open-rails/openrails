@@ -129,7 +129,7 @@ func (p *Price) HasProcessor(processor Processor) bool {
 	return p.GetProcessorConfig(processor) != nil
 }
 
-// GetNMIConfig returns the legacy Mobius-keyed NMI configuration.
+// GetNMIConfig returns the Mobius-keyed NMI configuration.
 func (p *Price) GetNMIConfig() (planID, provider string, ok bool) {
 	config := p.GetProcessorConfig(ProcessorMobius)
 	if config == nil {

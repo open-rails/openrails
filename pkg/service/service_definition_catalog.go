@@ -290,7 +290,7 @@ func (s *Service) resolveProcessorMappings(ctx context.Context, product *models.
 				if formName == "" || flexID == "" {
 					return nil, fmt.Errorf("ccbill link requires processors['ccbill'].link.form_name and flex_id")
 				}
-			case "mobius", "nmi":
+			case "mobius":
 				planID := strings.TrimSpace(link[models.ProcessorKeyPlanID])
 				if planID == "" {
 					return nil, fmt.Errorf("%s link requires processors['%s'].link.plan_id", name, name)
