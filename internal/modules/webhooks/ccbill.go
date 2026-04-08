@@ -2283,7 +2283,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		return fmt.Errorf("subscription not found for logging: %s", ccBillSubID)
 	}
 
-	// Log renewal failure event to ClickHouse - standardized with NMI/Mobius
+	// Log renewal failure event to ClickHouse - standardized with NMI-backed processors
 	if s.EventLogService != nil {
 		failureCurrency := "usd"
 		if subscription.Price != nil {

@@ -271,7 +271,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		}
 	}
 
-	// Only NMI-backed processors (e.g., mobius) can be cancelled via this service
+	// Only NMI-backed processors can be cancelled via this service
 	if !processors.IsNMIBackedProcessor(subscription.Processor) {
 		return fmt.Errorf("unable to cancel subscription for processor %s", subscription.Processor)
 	}

@@ -1,6 +1,6 @@
 # Checkout Session Spec
 
-This document defines the unified checkout flow for all processors (Mobius, CCBill, Solana, Stripe).
+This document defines the unified checkout flow for all processors (NMI-backed processors such as Mobius, CCBill, Solana, Stripe).
 It replaces processor-specific endpoints with a single checkout session model.
 
 ## Goals
@@ -63,13 +63,13 @@ All endpoints require authentication.
 ### Request Rules
 - `payment.processor` is required and defines all valid fields.
 - `mode` is optional. If omitted, it is inferred from the price. If provided and invalid, return 400.
-- Mobius/Stripe: exactly one of `payment_method_id` or `payment_token`.
+- NMI-backed processors/Stripe: exactly one of `payment_method_id` or `payment_token`.
 - `payment_token` is never stored; it is consumed once to create a vault/payment method.
 - If `payment_method_id` is used, it must belong to the authenticated user.
 - Solana: `token_symbol` is required; `flow` defaults to `transfer_request`.
 - Solana is always treated as `one_off`. If `mode=subscription` is provided with Solana, return 400.
 - CCBill/Stripe: billing fields are required.
-- Mobius/Solana: billing fields are ignored.
+- NMI-backed processors/Solana: billing fields are ignored.
 
 ## Create Response
 
@@ -136,7 +136,7 @@ All endpoints require authentication.
 Solana ignores subscription semantics. If the price has `billing_cycle_days`,
 that duration defines the entitlement window for the one-off purchase.
 
-### Mobius (NMI)
+### NMI-backed Card Payments
 1) Create session with `payment_method_id` or `payment_token`.
 2) If `payment_token` is provided, create a vault and persist `payment_method_id`.
 3) Charge immediately and finalize.

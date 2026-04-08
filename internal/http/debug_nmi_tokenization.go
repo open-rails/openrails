@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"html/template"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/open-rails/openrails/config"
 )
 
-type debugMobiusTokenizationPageData struct {
+type debugNMITokenizationPageData struct {
 	Provider            string
 	Mode                string
 	TokenizationKey     string
@@ -21,12 +23,12 @@ type debugMobiusTokenizationPageData struct {
 	IsConfiguredForReal bool
 }
 
-var debugMobiusTokenizationTemplate = template.Must(template.New("debug_mobius_tokenization").Parse(`<!doctype html>
+var debugNMITokenizationTemplate = template.Must(template.New("debug_nmi_tokenization").Parse(`<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Billing Debug: Mobius Tokenization</title>
+    <title>Billing Debug: NMI Tokenization</title>
     <style>
       body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; padding: 24px; max-width: 920px; margin: 0 auto; }
       code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
@@ -44,7 +46,7 @@ var debugMobiusTokenizationTemplate = template.Must(template.New("debug_mobius_t
     </style>
   </head>
   <body>
-    <h1>Billing Debug: Mobius/NMI tokenization</h1>
+    <h1>Billing Debug: NMI tokenization</h1>
     <p class="muted">Dev-only harness page. This service never sees raw card details; Collect.js generates a <code>payment_token</code> in the browser.</p>
 
     <div class="card">
@@ -58,7 +60,7 @@ var debugMobiusTokenizationTemplate = template.Must(template.New("debug_mobius_t
         <div style="flex:1; min-width: 280px;">
           <div><a href="?mode=real">real Collect.js</a> · <a href="?mode=stub">local stub</a></div>
           <div class="muted" style="margin-top:8px;">
-            Real mode requires <code>processors.mobius.tokenization_key</code> and <code>processors.mobius.tokenization_url</code>.
+            Real mode requires <code>processors.&lt;provider&gt;.tokenization_key</code> and <code>processors.&lt;provider&gt;.tokenization_url</code>.
           </div>
         </div>
       </div>
@@ -67,7 +69,7 @@ var debugMobiusTokenizationTemplate = template.Must(template.New("debug_mobius_t
         Real tokenization is not fully configured (missing tokenization key and/or URL). Stub mode still works for wiring checks.
       </p>
       {{else}}
-      <p class="ok" style="margin-top:12px;">Real tokenization appears configured. If tokenization fails, check allowed origins in the NMI/Mobius portal.</p>
+      <p class="ok" style="margin-top:12px;">Real tokenization appears configured. If tokenization fails, check allowed origins in the NMI portal.</p>
       {{end}}
     </div>
 
@@ -157,7 +159,7 @@ var debugMobiusTokenizationTemplate = template.Must(template.New("debug_mobius_t
     <div class="card">
       <h2>3) Example API calls (copy/paste)</h2>
       <p class="muted">Replace placeholders (<code>PRICE_ID</code>, <code>PAYMENT_METHOD_ID</code>, etc.). Use <code>X-E2E-Run-ID</code> + <code>X-Idempotency-Key</code> for repeatable runs.</p>
-      <pre style="white-space: pre-wrap; background: #fafafa; padding: 12px; border-radius: 10px; border: 1px solid #eee;"><code># Create a checkout session (Mobius subscription)
+      <pre style="white-space: pre-wrap; background: #fafafa; padding: 12px; border-radius: 10px; border: 1px solid #eee;"><code># Create a checkout session (NMI-backed subscription)
 curl -fsS "https://YOUR_BILLING_HOST/v1/checkout" \
   -H "Authorization: Bearer YOUR_JWT" \
   -H "Content-Type: application/json" \
@@ -168,7 +170,7 @@ curl -fsS "https://YOUR_BILLING_HOST/v1/checkout" \
     "mode": "subscription",
     "metadata": {"e2e_run_id":"YOUR_E2E_RUN_ID"},
     "payment": {
-      "processor": "mobius",
+      "processor": "{{.Provider}}",
       "payment_method_id": "pm_PAYMENT_METHOD_UUID"
     }
   }'
@@ -288,7 +290,7 @@ curl -fsS "https://YOUR_BILLING_HOST/v1/checkout/checkout_session_UUID" \
 </html>
 `))
 
-func (s *Server) debugMobiusTokenization(c *gin.Context) {
+func (s *Server) debugNMITokenization(c *gin.Context) {
 	mode := strings.TrimSpace(strings.ToLower(c.Query("mode")))
 	if mode != "stub" {
 		mode = "real"
@@ -296,7 +298,7 @@ func (s *Server) debugMobiusTokenization(c *gin.Context) {
 
 	provider := strings.TrimSpace(strings.ToLower(c.Query("provider")))
 	if provider == "" {
-		provider = "mobius"
+		provider = defaultNMIProvider(s.cfg)
 	}
 
 	proc := s.cfg.GetProcessor(provider)
@@ -309,7 +311,7 @@ func (s *Server) debugMobiusTokenization(c *gin.Context) {
 
 	effectiveScriptURL := tokenizationURL
 	if mode == "stub" || effectiveScriptURL == "" {
-		effectiveScriptURL = "/debug/mobius/collect-stub.js"
+		effectiveScriptURL = "/debug/nmi/collect-stub.js"
 	}
 
 	hint := "(unset)"
@@ -321,7 +323,7 @@ func (s *Server) debugMobiusTokenization(c *gin.Context) {
 		}
 	}
 
-	data := debugMobiusTokenizationPageData{
+	data := debugNMITokenizationPageData{
 		Provider:            provider,
 		Mode:                mode,
 		TokenizationKey:     tokenizationKey,
@@ -334,7 +336,7 @@ func (s *Server) debugMobiusTokenization(c *gin.Context) {
 	}
 
 	var buf bytes.Buffer
-	if err := debugMobiusTokenizationTemplate.Execute(&buf, data); err != nil {
+	if err := debugNMITokenizationTemplate.Execute(&buf, data); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to render debug page"})
 		return
 	}
@@ -342,7 +344,7 @@ func (s *Server) debugMobiusTokenization(c *gin.Context) {
 	c.Data(http.StatusOK, "text/html; charset=utf-8", buf.Bytes())
 }
 
-func (s *Server) debugMobiusCollectStubJS(c *gin.Context) {
+func (s *Server) debugNMICollectStubJS(c *gin.Context) {
 	js := `(function(){
 if (window.CollectJS) return;
 var cfg = null;
@@ -363,4 +365,20 @@ window.CollectJS = {
 };
 })();`
 	c.Data(http.StatusOK, "application/javascript; charset=utf-8", []byte(js))
+}
+
+func defaultNMIProvider(cfg *config.Config) string {
+	if cfg == nil {
+		return "mobius"
+	}
+	processors := cfg.GetNMIProcessors()
+	if len(processors) == 0 {
+		return "mobius"
+	}
+	names := make([]string, 0, len(processors))
+	for name := range processors {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names[0]
 }

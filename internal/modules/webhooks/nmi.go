@@ -1462,9 +1462,9 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 
 	now := s.now()
 	batchID := s.Data.EventID
-	processor := strings.TrimSpace(strings.ToLower(s.Processor))
-	if processor == "" {
-		processor = "mobius"
+	processor, err := s.normalizedProcessor()
+	if err != nil {
+		return err
 	}
 
 	chargebackCount := len(body.Chargebacks)

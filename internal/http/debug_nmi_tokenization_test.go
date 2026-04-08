@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/config"
 )
 
-func TestRegisterDebugRoutes_MobiusTokenizationPage(t *testing.T) {
+func TestRegisterDebugRoutes_NMITokenizationPage(t *testing.T) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -31,7 +31,7 @@ func TestRegisterDebugRoutes_MobiusTokenizationPage(t *testing.T) {
 	r := gin.New()
 	srv.registerDebugRoutes(r)
 
-	req := httptest.NewRequest(http.MethodGet, "/debug/mobius/tokenization?provider=mobius&mode=real", nil)
+	req := httptest.NewRequest(http.MethodGet, "/debug/nmi/tokenization?provider=mobius&mode=real", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -41,7 +41,7 @@ func TestRegisterDebugRoutes_MobiusTokenizationPage(t *testing.T) {
 	require.Contains(t, w.Body.String(), "abc...456")
 }
 
-func TestRegisterDebugRoutes_MobiusCollectStubJS(t *testing.T) {
+func TestRegisterDebugRoutes_NMICollectStubJS(t *testing.T) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -49,7 +49,7 @@ func TestRegisterDebugRoutes_MobiusCollectStubJS(t *testing.T) {
 	r := gin.New()
 	srv.registerDebugRoutes(r)
 
-	req := httptest.NewRequest(http.MethodGet, "/debug/mobius/collect-stub.js", nil)
+	req := httptest.NewRequest(http.MethodGet, "/debug/nmi/collect-stub.js", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

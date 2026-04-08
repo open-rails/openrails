@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
@@ -26,7 +27,7 @@ type adminSubscriptionPath struct {
 	SubscriptionID string `uri:"id" binding:"required"`
 }
 
-type adminMobiusPayment struct {
+type adminNMIPayment struct {
 	VaultID       string  `json:"vault_id,omitempty"`
 	OrderID       string  `json:"order_id,omitempty"`
 	Amount        int64   `json:"amount"`
@@ -39,7 +40,7 @@ type adminMobiusPayment struct {
 	ManualExpiry  *string `json:"manual_expiry,omitempty"`
 }
 
-type adminMobiusMetrics struct {
+type adminNMIMetrics struct {
 	Successful int `json:"successful"`
 	Failed     int `json:"failed"`
 }
@@ -141,7 +142,7 @@ func GetAdminSubscription(r *httprequest.Request) {
 	r.SuccessJSON(subscription)
 }
 
-func GetAdminUserMobius(r *httprequest.Request) {
+func GetAdminUserNMI(r *httprequest.Request) {
 	var path adminUserPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -156,13 +157,13 @@ func GetAdminUserMobius(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "active subscription not found")
 		return
 	}
-	if subscription.Processor != models.ProcessorMobius {
-		r.ErrorJSON(http.StatusNotFound, "mobius subscription not found")
+	if !processors.IsNMIBackedProcessor(subscription.Processor) {
+		r.ErrorJSON(http.StatusNotFound, "nmi-backed subscription not found")
 		return
 	}
 	payment, err := r.State.PaymentService.GetLatestBySubscriptionID(r.Request.Context(), subscription.ID)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "mobius payment not found")
+		r.ErrorJSON(http.StatusNotFound, "nmi-backed payment not found")
 		return
 	}
 	var pmVault string
@@ -171,7 +172,7 @@ func GetAdminUserMobius(r *httprequest.Request) {
 			pmVault = pm.VaultID
 		}
 	}
-	resp := adminMobiusPayment{VaultID: pmVault, OrderID: subscription.ID.String(), Amount: payment.Amount, Currency: payment.Currency, TransactionID: payment.TransactionID, Status: string(subscription.Status), StartDate: subscription.StartedAt.Format(time.RFC3339), ExpiryDate: func() string {
+	resp := adminNMIPayment{VaultID: pmVault, OrderID: subscription.ID.String(), Amount: payment.Amount, Currency: payment.Currency, TransactionID: payment.TransactionID, Status: string(subscription.Status), StartDate: subscription.StartedAt.Format(time.RFC3339), ExpiryDate: func() string {
 		if subscription.CurrentPeriodEndsAt != nil {
 			return subscription.CurrentPeriodEndsAt.Format(time.RFC3339)
 		}
@@ -180,22 +181,31 @@ func GetAdminUserMobius(r *httprequest.Request) {
 	r.SuccessJSON(resp)
 }
 
-func GetAdminUserMobiusMetrics(r *httprequest.Request) {
+func GetAdminUserNMIMetrics(r *httprequest.Request) {
 	var path adminUserPath
 	if err := r.Inner().ShouldBindUri(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	if r.State.PaymentService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment service unavailable")
+	if r.State.PaymentService == nil || r.State.SubscriptionService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "payment services unavailable")
 		return
 	}
-	success, failed, err := r.State.PaymentService.CountByUserAndProcessor(r.Request.Context(), path.UserID, models.ProcessorMobius)
+	subscription, err := r.State.SubscriptionService.GetActiveSubscription(r.Request.Context(), path.UserID)
+	if err != nil {
+		r.ErrorJSON(http.StatusNotFound, "active subscription not found")
+		return
+	}
+	if !processors.IsNMIBackedProcessor(subscription.Processor) {
+		r.ErrorJSON(http.StatusNotFound, "nmi-backed subscription not found")
+		return
+	}
+	success, failed, err := r.State.PaymentService.CountByUserAndProcessor(r.Request.Context(), path.UserID, subscription.Processor)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	r.SuccessJSON(adminMobiusMetrics{Successful: success, Failed: failed})
+	r.SuccessJSON(adminNMIMetrics{Successful: success, Failed: failed})
 }
 
 func GetAdminUserCCBill(r *httprequest.Request) {

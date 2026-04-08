@@ -2,7 +2,7 @@
 
 #### Scope
 - Provides a billing-related API server for the frontend to use (signups, cancellations, etc.), and an admin-API server for the backend to use (admin cancellations).
-- Handles webhooks from supported payment processors (Stripe, NMI/Mobius, CCBill, Solana), and updates corresponding subscriptions / entitlements.
+- Handles webhooks from supported payment processors (Stripe, NMI-backed processors including Mobius, CCBill, Solana), and updates corresponding subscriptions / entitlements.
 - Runs periodic jobs to update subscriptions / entitlements.
 
 #### Interactions with other services (Intended Contract)
@@ -48,7 +48,7 @@ test_mode: false  # Production mode - use real payment endpoints
 ```
 
 **What test_mode controls:**
-- **NMI/Mobius**: Uses `sandbox.nmi.com` instead of `secure.networkmerchants.com`
+- **NMI-backed processors**: Use `sandbox.nmi.com` instead of `secure.networkmerchants.com`
 - **CCBill**: Uses `sandbox-api.ccbill.com` instead of `api.ccbill.com`
 - **Solana**: Uses devnet instead of mainnet
 - **Stripe**: Validates key prefix matches mode (`sk_test_*` vs `sk_live_*`)
@@ -481,7 +481,7 @@ Error types: `invalid_request_error`, `authentication_error`, `authorization_err
 
 ### Subscription Creation
 
-#### NMI / Mobius (Card Payments)
+#### NMI-backed Card Payments
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

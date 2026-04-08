@@ -492,7 +492,20 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 		sub.CurrentPeriodEndsAt = &ts
 	}
 
-	status := strings.TrimSpace(strings.ToLower(data.Status))
+	applyStripeSubscriptionStatus(sub, data.Status, time.Now().UTC())
+
+	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
+		return fmt.Errorf("update subscription from stripe: %w", err)
+	}
+	return nil
+}
+
+func applyStripeSubscriptionStatus(sub *models.Subscription, rawStatus string, now time.Time) {
+	if sub == nil {
+		return
+	}
+
+	status := strings.TrimSpace(strings.ToLower(rawStatus))
 	switch status {
 	case "active", "trialing":
 		sub.Status = models.StatusActive
@@ -500,9 +513,9 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 		sub.Status = models.StatusPastDue
 	case "canceled", "incomplete_expired":
 		sub.Status = models.StatusCancelled
-		now := time.Now().UTC()
 		if sub.CancelledAt == nil {
-			sub.CancelledAt = &now
+			timestamp := now
+			sub.CancelledAt = &timestamp
 		}
 		if sub.EndedAt == nil {
 			endAt := now
@@ -512,11 +525,6 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 			sub.EndedAt = &endAt
 		}
 	}
-
-	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
-		return fmt.Errorf("update subscription from stripe: %w", err)
-	}
-	return nil
 }
 
 func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, obj json.RawMessage) error {

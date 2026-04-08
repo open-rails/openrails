@@ -459,7 +459,7 @@ func (s *CheckoutService) processCCBillUpgrade(
 	}, nil
 }
 
-// processNMISubscription handles NMI-backed subscription creation (mobius, etc.)
+// processNMISubscription handles NMI-backed subscription creation.
 // subscriptionIdempotencyResult stores the cached result of a successful subscription creation
 type subscriptionIdempotencyResult struct {
 	SubscriptionID string  `json:"subscription_id"`
@@ -960,7 +960,7 @@ func timePtr(t time.Time) *time.Time {
 // This is the single source of truth for "user paid for product" logic.
 //
 // Called by:
-//   - NMI/Mobius sale (after charging card)
+//   - NMI-backed sale (after charging card)
 //   - Solana poller (after detecting on-chain payment)
 //   - CCBill webhook (after receiving payment confirmation)
 //   - Admin API (for manual grants)
@@ -1482,7 +1482,7 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 	case processor == "stripe":
 		return s.processTierChangeStripe(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
 	case processors.IsNMIBacked(processor):
-		return s.processTierChangeMobius(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
+		return s.processTierChangeNMI(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
 	case processor == "ccbill":
 		return s.processTierChangeCCBill(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
 	case processor == "solana":
@@ -1569,10 +1569,10 @@ func (s *CheckoutService) processTierChangeStripe(
 	}, nil
 }
 
-// processTierChangeMobius handles Mobius/NMI subscription tier changes.
+// processTierChangeNMI handles NMI-backed subscription tier changes.
 // Upgrades: immediate proration charge + new subscription
 // Downgrades: scheduled for end of billing period
-func (s *CheckoutService) processTierChangeMobius(
+func (s *CheckoutService) processTierChangeNMI(
 	ctx context.Context,
 	req *TierChangeRequest,
 	user *UserIdentity,

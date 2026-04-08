@@ -1243,7 +1243,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			// Update subscription status - failed payment = past_due (still trying to recover)
 			subscription.Status = models.StatusPastDue
 
-			// Dunning policy (Mobius): try every 3 days, up to 5 failures total
+			// Dunning policy for NMI-backed subscriptions: try every 3 days, up to 5 failures total
 			// Example timeline (D = day of initial failure): D+3, D+6, D+9, D+12, D+15
 			subscription.LastRetryAt = &now
 			if subscription.RetryAttempts == nil {

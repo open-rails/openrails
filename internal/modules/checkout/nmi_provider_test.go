@@ -23,7 +23,7 @@ func TestRequireNMIPlanForProcessor_UsesProviderSpecificConfig(t *testing.T) {
 	require.Equal(t, "plan_acme_123", planID)
 }
 
-func TestRequireNMIPlanForProcessor_UsesLegacyMobiusSlotWhenProviderMatches(t *testing.T) {
+func TestRequireNMIPlanForProcessor_UsesLegacyProviderSlotWhenProviderMatches(t *testing.T) {
 	price := &models.Price{
 		ID: uuid.New(),
 		Processors: map[string]map[string]string{

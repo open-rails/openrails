@@ -10,7 +10,7 @@ func (s *Server) registerDebugRoutes(e *gin.Engine) {
 	}
 
 	debug := e.Group("/debug")
-	mobius := debug.Group("/mobius")
-	mobius.GET("/tokenization", s.debugMobiusTokenization)
-	mobius.GET("/collect-stub.js", s.debugMobiusCollectStubJS)
+	nmi := debug.Group("/nmi")
+	nmi.GET("/tokenization", s.debugNMITokenization)
+	nmi.GET("/collect-stub.js", s.debugNMICollectStubJS)
 }

@@ -81,10 +81,11 @@ Returns the currently supported Solana tokens and live pricing:
 ```
 
 ### POST /v1/webhooks/{provider}
-Receives processor webhooks. `provider` is `ccbill`, `mobius`, or `stripe` (legacy `nmi` is accepted as an alias for
-`mobius`).
+Receives processor webhooks. `provider` is `ccbill`, `stripe`, or a configured NMI-backed processor such as `mobius`
+(legacy `nmi` is accepted as an alias for `mobius`).
 - `ccbill`: form-encoded payload, verified via source IP ranges (unless test mode).
-- `mobius`/NMI-backed: JSON body with `X-Signature`/`X-NMI-Signature` header.
+- NMI-backed processors (for example `mobius`): JSON body with `Webhook-Signature` (`t=...,s=...`, preferred) or legacy
+  `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`.
 - `stripe`: JSON body with `Stripe-Signature` header (if configured).
 Returns 200 with `{ status: "accepted" }` on success, 401/403 for auth failures, 400 for unknown provider.
 
@@ -430,7 +431,7 @@ Detailed subscription record including linked payments.
 
 ### POST /v1/admin/subscriptions/{id}/cancel
 Immediate cancellation of the referenced subscription. Body `{ "reason": "optional" }`.
-Currently only supports NMI-backed processors (Mobius). Subscription must be active.
+Currently only supports NMI-backed processors. Subscription must be active.
 Cancels with payment processor, updates local record, and immediately revokes entitlements.
 
 ### GET /v1/admin/payments
@@ -458,13 +459,26 @@ Initiates a refund via the underlying processor's API and records it in the data
 | Processor | Behavior |
 |-----------|----------|
 | Stripe | Issues refund via Stripe API. Supports partial refunds. |
-| Mobius/NMI | Issues refund via NMI Direct Post API. Supports partial refunds. |
+| NMI-backed processors (for example `mobius`) | Issues refund via NMI Direct Post API. Supports partial refunds. |
 | CCBill | Returns HTTP 400 with message directing to CCBill admin portal. CCBill does not expose a refund API. |
 
 **Response:** Returns the created refund payment object on success.
 
 ### GET /v1/admin/users/{user_id}
 Returns the user's billing profile: `{ user_id, subscription, entitlements, payments }`.
+
+### GET /v1/admin/users/{user_id}/nmi
+Returns billing detail for the user's active NMI-backed subscription. Response includes vault ID, billing period dates,
+latest transaction ID, and current status. Returns 404 if the user has no active NMI-backed subscription.
+
+### GET /v1/admin/users/{user_id}/nmi/metrics
+Returns `{ successful, failed }` counts for the user's active NMI-backed processor.
+
+### GET /v1/admin/users/{user_id}/ccbill
+Returns billing detail for the user's active CCBill subscription.
+
+### GET /v1/admin/users/{user_id}/ccbill/metrics
+Returns `{ successful, failed }` counts for the user's CCBill payments.
 
 ### GET /v1/admin/users/{user_id}/payments
 Lists all payments for the user. Query params: `limit`, `offset`.
@@ -526,6 +540,7 @@ Monthly churn summary plus cancellation reason counts and coarse cohort retentio
 
 - **CCBill**: Must originate from the published IP ranges; the handler also validates `formName`/`flexId`
   against the price metadata.
-- **Mobius/NMI-backed**: Supply `X-Signature`/`X-NMI-Signature`. When test mode is enabled via config the
-  signature check is bypassed.
+- **NMI-backed processors**: Supply `Webhook-Signature` (`t=...,s=...`, preferred) or legacy
+  `X-Signature`/`X-NMI-Signature`/`X-Mobius-Signature`. When test mode is enabled via config the signature
+  check is bypassed.
 - **Stripe**: Uses the `Stripe-Signature` header with the configured webhook secret.

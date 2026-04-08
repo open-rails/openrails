@@ -1,9 +1,12 @@
 package webhooks
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/stretchr/testify/require"
 )
@@ -115,6 +118,28 @@ func TestSplitNMIChargebackReason(t *testing.T) {
 	code, reason = splitNMIChargebackReason("Introductory chargeback", "204")
 	require.Equal(t, "204", code)
 	require.Equal(t, "Introductory chargeback", reason)
+}
+
+func TestHandleChargebackComplete_RequiresProcessor(t *testing.T) {
+	body, err := json.Marshal(NMIChargebackBatchEventBody{
+		Chargebacks: []NMIChargebackEntry{},
+		Batch: &NMIChargebackBatch{
+			Count: 0,
+		},
+	})
+	require.NoError(t, err)
+
+	svc := &NMIWebhookService{
+		Data: NMIWebhookEvent{
+			EventID:   uuid.New().String(),
+			EventType: string(EventTypeNMIChargebackComplete),
+			EventBody: body,
+		},
+	}
+
+	err = svc.handleChargebackComplete(context.Background())
+	require.Error(t, err)
+	require.ErrorContains(t, err, "nmi webhook processor is required")
 }
 
 func TestParseNMIChargebackDate(t *testing.T) {

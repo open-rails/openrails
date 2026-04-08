@@ -345,7 +345,7 @@ type SubscriptionEventData struct {
 }
 
 // PaymentEventType defines standardized event types for payment logging.
-// All processors (CCBill, NMI/Mobius, Solana) should use these constants
+// All processors (CCBill, NMI-backed, Solana) should use these constants
 // to ensure consistent event type values across the system.
 type PaymentEventType = string
 
