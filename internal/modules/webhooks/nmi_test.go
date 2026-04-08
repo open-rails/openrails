@@ -142,6 +142,20 @@ func TestHandleChargebackComplete_RequiresProcessor(t *testing.T) {
 	require.ErrorContains(t, err, "nmi webhook processor is required")
 }
 
+func TestShouldDeferNMIActivation(t *testing.T) {
+	now := time.Date(2026, time.April, 8, 10, 30, 0, 0, time.UTC)
+
+	if !shouldDeferNMIActivation("2026-04-09", now) {
+		t.Fatal("expected next-day charge date to defer activation")
+	}
+	if shouldDeferNMIActivation("2026-04-08", now) {
+		t.Fatal("did not expect same-day charge date to defer activation")
+	}
+	if shouldDeferNMIActivation("", now) {
+		t.Fatal("did not expect empty charge date to defer activation")
+	}
+}
+
 func TestParseNMIChargebackDate(t *testing.T) {
 	ts, ok := parseNMIChargebackDate("3/29/2020")
 	require.True(t, ok)

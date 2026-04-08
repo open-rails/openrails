@@ -115,14 +115,26 @@ func (s *CheckoutPurchaseService) GetUserProductCoverage(ctx context.Context, us
 			return nil, fmt.Errorf("failed to check subscription: %w", err)
 		}
 		if sub != nil {
-			coverage.HasCoverage = true
-			coverage.SourceType = "subscription"
-			coverage.SourceID = &sub.ID
 			if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
+				coverage.HasCoverage = true
+				coverage.SourceType = "subscription"
+				coverage.SourceID = &sub.ID
 				coverage.IsIndefinite = true
 				return coverage, nil
 			}
-			coverage.EndDate = sub.CurrentPeriodEndsAt
+			if !sub.CurrentPeriodEndsAt.After(now) {
+				log.WithFields(log.Fields{
+					"subscription_id": sub.ID,
+					"user_id":         userID,
+					"product_id":      product.ID,
+					"period_end":      sub.CurrentPeriodEndsAt,
+				}).Warn("ignoring stale subscription coverage that has already ended")
+			} else {
+				coverage.HasCoverage = true
+				coverage.SourceType = "subscription"
+				coverage.SourceID = &sub.ID
+				coverage.EndDate = sub.CurrentPeriodEndsAt
+			}
 		}
 	}
 

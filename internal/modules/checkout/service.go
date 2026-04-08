@@ -559,10 +559,12 @@ func (s *CheckoutService) processNMISubscription(
 	// Determine start date for delayed start
 	var startDate string
 	var delayedStart *time.Time
-	if coverage.HasCoverage && coverage.EndDate != nil {
+	now := s.now().UTC()
+	if coverage.HasCoverage && coverage.EndDate != nil && coverage.EndDate.After(now) {
 		// Schedule subscription to start when current coverage ends
-		startDate = coverage.EndDate.Format("20060102") // YYYYMMDD format for NMI
-		delayedStart = coverage.EndDate
+		var startAt time.Time
+		startDate, startAt = buildNMIFutureStartDate(*coverage.EndDate, now)
+		delayedStart = &startAt
 	}
 
 	// Build NMI params
@@ -631,7 +633,7 @@ func (s *CheckoutService) processNMISubscription(
 		Status:                  status,
 		Processor:               models.Processor(provider),
 		UserEmail:               emailPtr,
-		StartedAt:               *timePtr(time.Now()),
+		StartedAt:               *timePtr(now),
 	}
 
 	if req.Metadata != nil {
@@ -1076,12 +1078,18 @@ func (s *CheckoutService) processUpgrade(
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
+	if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {
+		err := errors.New("existing subscription missing current period end")
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, err
+	}
 
 	nmiPlanID, err := requireNMIPlanForProcessor(newPrice, provider)
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
+	startDate, _ := buildNMIFutureStartDate(*existingSub.CurrentPeriodEndsAt, now)
 
 	client, ok := s.NMIClients[provider]
 	if !ok {
@@ -1097,43 +1105,7 @@ func (s *CheckoutService) processUpgrade(
 		return nil, err
 	}
 
-	// Step 1: Charge prorated difference (if positive)
-	var prorationTransactionID string
-	if prorationAmount > 0 {
-		saleResp, err := client.RunSale(nmi.SaleParams{
-			CustomerVaultID:  customerVaultID,
-			Amount:           prorationAmount,
-			Currency:         newPrice.Currency,
-			OrderDescription: fmt.Sprintf("Upgrade proration: %s to %s", oldPrice.DisplayName, newPrice.DisplayName),
-			OrderID:          fmt.Sprintf("upgrade-%s-%s", existingSub.ID.String()[:8], uuid.New().String()[:8]),
-		})
-		if err != nil {
-			// Cleanup vault if we created it
-			if createdPaymentMethod != nil && s.VaultService != nil {
-				_ = s.VaultService.DeleteVault(ctx, createdPaymentMethod)
-			}
-			prorationErr := fmt.Errorf("failed to charge proration: %w", err)
-			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, prorationErr)
-			return nil, prorationErr
-		}
-		prorationTransactionID = saleResp.TransactionID
-
-		log.WithFields(log.Fields{
-			"user_id":        user.ID,
-			"transaction_id": prorationTransactionID,
-			"amount":         prorationAmount,
-			"processor":      provider,
-		}).Info("charged upgrade proration")
-	}
-
-	// Step 2: Cancel old subscription at NMI
-	if err := s.cancelNMISubscription(ctx, existingSub, provider); err != nil {
-		log.WithError(err).WithField("subscription_id", existingSub.ID).
-			Warn("failed to cancel old NMI subscription during upgrade, continuing anyway")
-		// Don't fail the upgrade - the old sub will just not renew
-	}
-
-	// Step 3: Create new subscription at NMI
+	// Step 1: Create the successor subscription at NMI before charging/cancelling.
 	newSubscriptionID := uuid.New()
 
 	params := nmi.RecurringPaymentData{
@@ -1154,8 +1126,8 @@ func (s *CheckoutService) processUpgrade(
 		OrderID:         newSubscriptionID.String(),
 		PONumber:        newSubscriptionID.String(),
 		CustomerID:      user.ID,
-		// Start date = when current period ends (so they're not double-charged)
-		StartDate: existingSub.CurrentPeriodEndsAt.Format("20060102"),
+		// Start date uses day precision and must be strictly in the future for NMI.
+		StartDate: startDate,
 	}
 
 	resp, err := client.AddRecurringSubscription(params)
@@ -1173,7 +1145,54 @@ func (s *CheckoutService) processUpgrade(
 		return nil, subErr
 	}
 
-	// Step 4: Update local database
+	rollbackNewSubscription := func() {
+		cleanupSub := &models.Subscription{ProcessorSubscriptionID: resp.SubscriptionID}
+		if cancelErr := s.cancelNMISubscription(ctx, cleanupSub, provider); cancelErr != nil {
+			log.WithError(cancelErr).WithFields(log.Fields{
+				"subscription_id":           newSubscriptionID,
+				"processor_subscription_id": resp.SubscriptionID,
+				"processor":                 provider,
+			}).Error("failed to rollback successor NMI subscription after upgrade error")
+		}
+	}
+
+	// Step 2: Charge prorated difference (if positive).
+	var prorationTransactionID string
+	if prorationAmount > 0 {
+		saleResp, err := client.RunSale(nmi.SaleParams{
+			CustomerVaultID:  customerVaultID,
+			Amount:           prorationAmount,
+			Currency:         newPrice.Currency,
+			OrderDescription: fmt.Sprintf("Upgrade proration: %s to %s", oldPrice.DisplayName, newPrice.DisplayName),
+			OrderID:          fmt.Sprintf("upgrade-%s-%s", existingSub.ID.String()[:8], uuid.New().String()[:8]),
+		})
+		if err != nil {
+			rollbackNewSubscription()
+			if createdPaymentMethod != nil && s.VaultService != nil {
+				_ = s.VaultService.DeleteVault(ctx, createdPaymentMethod)
+			}
+			prorationErr := fmt.Errorf("failed to charge proration: %w", err)
+			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, prorationErr)
+			return nil, prorationErr
+		}
+		prorationTransactionID = saleResp.TransactionID
+
+		log.WithFields(log.Fields{
+			"user_id":        user.ID,
+			"transaction_id": prorationTransactionID,
+			"amount":         prorationAmount,
+			"processor":      provider,
+		}).Info("charged upgrade proration")
+	}
+
+	// Step 3: Cancel old subscription at NMI.
+	if err := s.cancelNMISubscription(ctx, existingSub, provider); err != nil {
+		log.WithError(err).WithField("subscription_id", existingSub.ID).
+			Warn("failed to cancel old NMI subscription during upgrade, continuing anyway")
+		// Don't fail the upgrade - the old sub will just not renew.
+	}
+
+	// Step 4: Update local database.
 	// Cancel old subscription
 	cancelType := models.CancelType("upgrade")
 	existingSub.Status = models.StatusCancelled

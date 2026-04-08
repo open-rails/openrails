@@ -467,14 +467,42 @@ Initiates a refund via the underlying processor's API and records it in the data
 Returns the user's billing profile: `{ user_id, subscription, entitlements, payments }`.
 
 ### GET /v1/admin/users/{user_id}/nmi
-Returns billing detail for the user's active NMI-backed subscription. Response includes vault ID, billing period dates,
-latest transaction ID, and current status. Returns 404 if the user has no active NMI-backed subscription.
+Returns billing detail for the user's active NMI-backed subscription. Returns 404 if the user has no active
+NMI-backed subscription.
+
+Response:
+```json
+{
+  "vault_id": "vault_...",
+  "order_id": "subscription-uuid",
+  "amount": 999,
+  "currency": "usd",
+  "transaction_id": "txn_...",
+  "status": "active",
+  "start_date": "2024-01-01T00:00:00Z",
+  "expiry_date": "2024-02-01T00:00:00Z",
+  "total_so_far": 999,
+  "manual_expiry": null
+}
+```
 
 ### GET /v1/admin/users/{user_id}/nmi/metrics
 Returns `{ successful, failed }` counts for the user's active NMI-backed processor.
 
 ### GET /v1/admin/users/{user_id}/ccbill
 Returns billing detail for the user's active CCBill subscription.
+
+Response:
+```json
+{
+  "subscription_id": "processor-subscription-id",
+  "transaction_id": "txn_...",
+  "status": "active",
+  "start_date": "2024-01-01T00:00:00Z",
+  "expiry_date": "2024-02-01T00:00:00Z",
+  "manual_expiry": null
+}
+```
 
 ### GET /v1/admin/users/{user_id}/ccbill/metrics
 Returns `{ successful, failed }` counts for the user's CCBill payments.

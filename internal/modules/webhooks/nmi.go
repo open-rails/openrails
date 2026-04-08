@@ -515,6 +515,16 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		return nil
 	}
 
+	if shouldDeferNMIActivation(body.NextChargeDate.Trimmed(), s.now()) {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id":           subscription.ID,
+			"processor_subscription_id": nmiSubID,
+			"next_charge_date":          body.NextChargeDate.Trimmed(),
+			"processor":                 provider,
+		}).Info("Deferring NMI subscription activation until the first scheduled charge")
+		return nil
+	}
+
 	// Extract payment info from the plan for the initial charge
 	var amountCents int64
 	var currency string
@@ -1306,6 +1316,14 @@ func parseNMIChargebackDate(raw string) (time.Time, bool) {
 	if trimmed == "" {
 		return time.Time{}, false
 	}
+	return parseNMIDate(trimmed)
+}
+
+func parseNMIDate(raw string) (time.Time, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
 	layouts := []string{
 		"2006-01-02",
 		"2006/01/02",
@@ -1322,6 +1340,19 @@ func parseNMIChargebackDate(raw string) (time.Time, bool) {
 		return ts.UTC(), true
 	}
 	return time.Time{}, false
+}
+
+func shouldDeferNMIActivation(nextChargeDate string, now time.Time) bool {
+	target, ok := parseNMIDate(nextChargeDate)
+	if !ok {
+		return false
+	}
+	return startOfUTCDate(target).After(startOfUTCDate(now))
+}
+
+func startOfUTCDate(value time.Time) time.Time {
+	utc := value.UTC()
+	return time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func splitNMIChargebackReason(rawReason, rawReasonCode string) (string, string) {
