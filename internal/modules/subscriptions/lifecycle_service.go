@@ -442,11 +442,11 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 // If a scheduled downgrade exists (ScheduledPriceID), it will be applied on renewal.
 func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, params *RenewMembershipParams) error {
 	notifications := make([]*models.NotificationQueue, 0, 1)
+	renewalApplied := false
 
-	// Variables to capture from transaction for Payment creation
+	// Variables to capture from transaction for logging/notifications.
 	var subscriptionID uuid.UUID
 	var userID string
-	var priceID uuid.UUID
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"processor":                 params.Processor,
@@ -464,6 +464,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		notificationRepo := repo.NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil)
 		entitlementService := entitlements.NewEntitlementService(db)
+		paymentService := payments.NewPaymentService(db)
 		entitlementService.SetClock(s.Clock)
 
 		// Find subscription - use processor name for gateway lookup
@@ -544,8 +545,44 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			}
 		}
 
-		// Capture for Payment record
-		priceID = price.ID
+		amount := params.Amount
+		if amount <= 0 {
+			amount = price.Amount
+		}
+		currency := strings.TrimSpace(params.Currency)
+		if currency == "" {
+			currency = price.Currency
+		}
+
+		if params.TransactionID != "" {
+			now := s.now().UTC()
+			payment := &models.Payment{
+				ID:             uuid.New(),
+				UserID:         subscription.UserID,
+				PriceID:        price.ID,
+				SubscriptionID: &subscription.ID,
+				Processor:      params.Processor,
+				TransactionID:  params.TransactionID,
+				Amount:         amount,
+				ListAmount:     amount,
+				Currency:       currency,
+				Metadata:       params.PaymentMetadata,
+				PurchasedAt:    now,
+				CreatedAt:      now,
+			}
+			created, err := paymentService.CreateIfNotExists(ctx, payment)
+			if err != nil {
+				return fmt.Errorf("failed to persist renewal payment marker: %w", err)
+			}
+			if !created {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"transaction_id":  params.TransactionID,
+					"subscription_id": subscription.ID,
+					"processor":       params.Processor,
+				}).Info("Renewal already processed; skipping duplicate lifecycle mutation")
+				return nil
+			}
+		}
 
 		// Calculate new billing period
 		var periodStartsAt, periodEndsAt time.Time
@@ -579,6 +616,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		if err := subService.Update(ctx, subscription); err != nil {
 			return fmt.Errorf("failed to update subscription: %w", err)
 		}
+		renewalApplied = true
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id":           subscription.ID,
 			"user_id":                   subscription.UserID,
@@ -701,43 +739,8 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	if err != nil {
 		return err
 	}
-
-	// Create Payment record for the renewal (outside transaction, non-fatal if fails)
-	if s.PaymentService != nil && params.TransactionID != "" && params.Amount > 0 {
-		// Check for existing payment to prevent duplicates
-		existing, err := s.PaymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			log.WithContext(ctx).WithError(err).WithField("transaction_id", params.TransactionID).
-				Warn("Failed to check existing payment for renewal")
-		}
-		if existing == nil {
-			now := s.now()
-			payment := &models.Payment{
-				ID:             uuid.New(),
-				UserID:         userID,
-				PriceID:        priceID,
-				SubscriptionID: &subscriptionID,
-				Processor:      params.Processor,
-				TransactionID:  params.TransactionID,
-				Amount:         params.Amount,
-				ListAmount:     params.Amount,
-				Currency:       params.Currency,
-				Metadata:       params.PaymentMetadata,
-				PurchasedAt:    now.UTC(),
-				CreatedAt:      now.UTC(),
-			}
-			if err := s.PaymentService.Create(ctx, payment); err != nil {
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"transaction_id":  params.TransactionID,
-					"subscription_id": subscriptionID,
-					"user_id":         userID,
-				}).Error("Failed to create payment record for renewal")
-				// Don't fail - renewal was processed successfully
-			}
-		} else {
-			log.WithContext(ctx).WithField("transaction_id", params.TransactionID).
-				Debug("Renewal payment already recorded; skipping duplicate entry")
-		}
+	if !renewalApplied {
+		return nil
 	}
 
 	s.dispatchNotifications(ctx, notifications)

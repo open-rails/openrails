@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -288,7 +289,7 @@ func (s *CheckoutService) processSubscription(
 	case processor == "ccbill":
 		return s.processCCBillSubscription(ctx, req, user, price)
 	case processors.IsNMIBacked(processor):
-		return s.processNMISubscription(ctx, req, user, price, product, coverage)
+		return s.processNMISubscription(ctx, req, user, price, product, coverage, processor)
 	case processor == "stripe":
 		return s.processStripeSubscription(ctx, req, user, price, coverage)
 	case processor == "solana":
@@ -312,7 +313,7 @@ func (s *CheckoutService) processOneTimePurchase(
 	// This allows adding new NMI providers via config without code changes
 	switch {
 	case processors.IsNMIBacked(processor):
-		return s.processNMISale(ctx, req, user, price, product, coverage)
+		return s.processNMISale(ctx, req, user, price, product, coverage, processor)
 	case processor == "solana":
 		return s.processSolanaPurchase(ctx, req, user, price, product, coverage)
 	case processor == "ccbill":
@@ -473,11 +474,15 @@ func (s *CheckoutService) processNMISubscription(
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
+	processor string,
 ) (*CheckoutResponse, error) {
-	// Get NMI plan configuration from price
-	nmiPlanID, provider, hasNMI := price.GetNMIConfig()
-	if !hasNMI || nmiPlanID == "" {
-		return nil, fmt.Errorf("price %s is missing NMI plan configuration", price.ID)
+	provider := normalize.Lower(processor)
+	if provider == "" {
+		return nil, errors.New("processor is required")
+	}
+	nmiPlanID, err := requireNMIPlanForProcessor(price, provider)
+	if err != nil {
+		return nil, err
 	}
 
 	client, ok := s.NMIClients[provider]
@@ -624,7 +629,7 @@ func (s *CheckoutService) processNMISubscription(
 		PriceID:                 price.ID,
 		ProcessorSubscriptionID: resp.SubscriptionID,
 		Status:                  status,
-		Processor:               models.ProcessorMobius,
+		Processor:               models.Processor(provider),
 		UserEmail:               emailPtr,
 		StartedAt:               *timePtr(time.Now()),
 	}
@@ -676,7 +681,7 @@ func (s *CheckoutService) processNMISubscription(
 	/*_, err = s.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:         user.ID,
 		PriceID:        price.ID,
-		Processor:      "mobius",
+		Processor:      provider,
 		TransactionID:  resp.TransactionID,
 		Amount:         price.Amount,
 		Currency:       price.Currency,
@@ -721,13 +726,18 @@ func (s *CheckoutService) processNMISale(
 	price *models.Price,
 	product *models.Product,
 	coverage *CoverageInfo,
+	processor string,
 ) (*CheckoutResponse, error) {
 	_ = coverage
 	if s.NMISaleService == nil {
 		return nil, errors.New("NMI sale service unavailable")
 	}
 	idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "nmi_sale")
-	return s.NMISaleService.Process(ctx, req, user, price, product, idempotencyKey)
+	provider := normalize.Lower(processor)
+	if provider == "" {
+		return nil, errors.New("processor is required")
+	}
+	return s.NMISaleService.Process(ctx, req, user, price, product, idempotencyKey, provider)
 }
 
 // processSolanaPurchase handles Solana one-time purchases
@@ -992,7 +1002,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Only NMI-backed processors support programmatic upgrades
-	if processor != "mobius" {
+	if !processors.IsNMIBacked(processor) {
 		return nil, fmt.Errorf("unsupported processor for upgrades: %s", processor)
 	}
 
@@ -1060,10 +1070,15 @@ func (s *CheckoutService) processUpgrade(
 		"proration_amount": prorationAmount,
 	}).Info("calculating upgrade proration")
 
-	// Get NMI client
-	_, provider, hasNMI := newPrice.GetNMIConfig()
-	if !hasNMI {
-		err := fmt.Errorf("new price %s is missing NMI plan configuration", newPrice.ID)
+	provider := normalize.Lower(processor)
+	if provider == "" {
+		err := errors.New("processor is required for upgrades")
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, err
+	}
+
+	nmiPlanID, err := requireNMIPlanForProcessor(newPrice, provider)
+	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
@@ -1107,6 +1122,7 @@ func (s *CheckoutService) processUpgrade(
 			"user_id":        user.ID,
 			"transaction_id": prorationTransactionID,
 			"amount":         prorationAmount,
+			"processor":      provider,
 		}).Info("charged upgrade proration")
 	}
 
@@ -1119,7 +1135,6 @@ func (s *CheckoutService) processUpgrade(
 
 	// Step 3: Create new subscription at NMI
 	newSubscriptionID := uuid.New()
-	nmiPlanID, _, _ := newPrice.GetNMIConfig()
 
 	params := nmi.RecurringPaymentData{
 		CardUserData: nmi.CardUserData{
@@ -1183,7 +1198,7 @@ func (s *CheckoutService) processUpgrade(
 		PriceID:                 newPrice.ID,
 		ProcessorSubscriptionID: resp.SubscriptionID,
 		Status:                  models.StatusActive, // Active immediately since user paid proration
-		Processor:               models.ProcessorMobius,
+		Processor:               models.Processor(provider),
 		UserEmail:               emailPtr,
 		StartedAt:               now,
 		CurrentPeriodStartsAt:   existingSub.CurrentPeriodStartsAt,
@@ -1287,14 +1302,18 @@ func (s *CheckoutService) processDowngrade(
 	}
 
 	// Only NMI-backed processors support programmatic downgrades
-	if processor != "mobius" {
+	if !processors.IsNMIBacked(processor) {
 		return nil, fmt.Errorf("unsupported processor for downgrades: %s", processor)
 	}
 
+	provider := normalize.Lower(processor)
+	if provider == "" {
+		return nil, errors.New("processor is required for downgrades")
+	}
+
 	// Validate the new price has NMI configuration
-	nmiPlanID, _, hasNMI := newPrice.GetNMIConfig()
-	if !hasNMI || nmiPlanID == "" {
-		return nil, fmt.Errorf("new price %s is missing NMI plan configuration", newPrice.ID)
+	if _, err := requireNMIPlanForProcessor(newPrice, provider); err != nil {
+		return nil, err
 	}
 
 	// Check if there's already a scheduled downgrade
@@ -1692,4 +1711,26 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 	}
 
 	return tierResp
+}
+
+func requireNMIPlanForProcessor(price *models.Price, provider string) (string, error) {
+	provider = normalize.Lower(provider)
+	if provider == "" {
+		return "", errors.New("processor is required")
+	}
+	if price == nil {
+		return "", errors.New("price is required")
+	}
+	planID, ok := price.GetNMIConfigForProcessor(provider)
+	if (!ok || strings.TrimSpace(planID) == "") && provider != "" {
+		legacyPlanID, legacyProvider, legacyOK := price.GetNMIConfig()
+		if legacyOK && normalize.Lower(legacyProvider) == provider {
+			planID = legacyPlanID
+			ok = strings.TrimSpace(planID) != ""
+		}
+	}
+	if !ok || strings.TrimSpace(planID) == "" {
+		return "", fmt.Errorf("price %s is missing NMI plan configuration for processor %s", price.ID, provider)
+	}
+	return planID, nil
 }

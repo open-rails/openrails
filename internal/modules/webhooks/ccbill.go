@@ -1459,6 +1459,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		productService := catalog.NewProductService(txdb)
 		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
 		entSvc := entitlements.NewEntitlementService(txdb)
+		paymentService := payments.NewPaymentService(txdb)
 
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
@@ -1478,6 +1479,34 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			refundPercentage := (refundAmountCents * 100) / sub.Price.Amount
 			if refundPercentage >= 80 { // If refund is 80%+ of price, terminate
 				shouldTerminate = true
+			}
+		}
+
+		if refundTransactionID != "" && refundAmountCents > 0 {
+			existingRefund, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, refundTransactionID)
+			switch {
+			case lookupErr == nil && existingRefund != nil:
+				log.WithContext(ctx).WithFields(log.Fields{
+					"refund_transaction_id": refundTransactionID,
+					"payment_id":            existingRefund.ID,
+				}).Info("CCBill refund payment already exists; skipping duplicate ledger insert")
+			case lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows):
+				return fmt.Errorf("failed to check existing refund payment: %w", lookupErr)
+			default:
+				originalPayment, originalErr := paymentService.GetLatestChargeBySubscriptionID(ctx, sub.ID)
+				if originalErr != nil {
+					if !errors.Is(originalErr, sql.ErrNoRows) {
+						return fmt.Errorf("failed to resolve original payment for refund: %w", originalErr)
+					}
+					log.WithContext(ctx).WithFields(log.Fields{
+						"subscription_id":       sub.ID,
+						"refund_transaction_id": refundTransactionID,
+					}).Warn("No original payment found for CCBill refund ledger linkage")
+				} else {
+					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, refundTransactionID, refundAmountCents); refundErr != nil {
+						return fmt.Errorf("failed to persist CCBill refund payment: %w", refundErr)
+					}
+				}
 			}
 		}
 

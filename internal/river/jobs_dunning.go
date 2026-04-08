@@ -32,7 +32,7 @@ const (
 	KindDunning  = "billing.dunning"
 )
 
-const defaultNMIProcessor = "mobius"
+const defaultNMIProcessor = string(models.ProcessorMobius)
 
 // DunningArgs triggers a dunning run that processes all due past_due subscriptions.
 type DunningArgs struct{}
@@ -138,7 +138,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	failCount := 0
 
 	for _, sub := range dueSubscriptions {
-		result := w.processSubscription(ctx, &sub, lifecycle, priceSvc, paymentSvc, creditsSvc)
+		result := w.processSubscription(ctx, &sub, lifecycle, priceSvc, creditsSvc)
 		if result {
 			successCount++
 		} else {
@@ -162,7 +162,6 @@ func (w *DunningWorker) processSubscription(
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	priceSvc *catalog.PriceService,
-	paymentSvc *payments.PaymentService,
 	creditsSvc *credits.CreditsService,
 ) bool {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
@@ -180,6 +179,7 @@ func (w *DunningWorker) processSubscription(
 	periodEndISO := sub.CurrentPeriodEndsAt.Format(time.RFC3339)
 	idemKey := idempotency.GenerateKeyForRebill(sub.ID, periodEndISO)
 	var idemClaimed bool
+	processor := models.Processor(resolveSubscriptionProcessor(sub))
 
 	if w.IdempotencyService != nil {
 		rec, alreadyExists, err := w.IdempotencyService.Begin(ctx, idemOp, idemKey)
@@ -212,7 +212,7 @@ func (w *DunningWorker) processSubscription(
 			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, errors.New(reason))
 		}
 		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      models.ProcessorMobius,
+			Processor:      processor,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
 		}); err != nil {
@@ -233,7 +233,7 @@ func (w *DunningWorker) processSubscription(
 			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, err)
 		}
 		if err2 := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      models.ProcessorMobius,
+			Processor:      processor,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &msg,
 		}); err2 != nil {
@@ -251,7 +251,7 @@ func (w *DunningWorker) processSubscription(
 			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, errors.New(reason))
 		}
 		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      models.ProcessorMobius,
+			Processor:      processor,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
 		}); err != nil {
@@ -260,10 +260,23 @@ func (w *DunningWorker) processSubscription(
 		return false
 	}
 
-	// Success: renew membership window and create a payment record
+	var amount int64
+	currency := subscriptions.CurrencyUSD
+	if sub.Price != nil {
+		amount = sub.Price.Amount
+		currency = sub.Price.Currency
+	} else if p, err := priceSvc.GetByID(ctx, sub.PriceID); err == nil {
+		amount = p.Amount
+		currency = p.Currency
+	}
+
+	// Success: renew membership window and persist payment in the lifecycle flow.
 	if err := lifecycle.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-		Processor:               models.ProcessorMobius,
+		Processor:               processor,
 		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
+		TransactionID:           rebillResp.TransactionID,
+		Amount:                  amount,
+		Currency:                currency,
 	}); err != nil {
 		logEntry.WithError(err).Error("renew membership after successful rebill")
 		if idemClaimed && w.IdempotencyService != nil {
@@ -293,41 +306,10 @@ func (w *DunningWorker) processSubscription(
 		}
 	}
 
-	// Create payment record
-	var amount int64
-	currency := "usd"
-	if sub.Price != nil {
-		amount = sub.Price.Amount
-		currency = sub.Price.Currency
-	} else if p, err := priceSvc.GetByID(ctx, sub.PriceID); err == nil {
-		amount = p.Amount
-		currency = p.Currency
-	}
-
-	now := w.now()
-	paymentID := uuid.New()
-	pay := &models.Payment{
-		ID:             paymentID,
-		UserID:         sub.UserID,
-		PriceID:        sub.PriceID,
-		SubscriptionID: &sub.ID,
-		Processor:      models.ProcessorMobius,
-		TransactionID:  rebillResp.TransactionID,
-		Amount:         amount,
-		ListAmount:     amount,
-		Currency:       currency,
-		PurchasedAt:    now,
-		CreatedAt:      now,
-	}
-	if err := paymentSvc.Create(ctx, pay); err != nil {
-		logEntry.WithError(err).Warn("create payment record for rebill")
-	}
-
 	// Mark idempotency request as complete
 	if idemClaimed && w.IdempotencyService != nil {
 		cachedResult, _ := json.Marshal(rebillIdempotencyResult{
 			TransactionID: rebillResp.TransactionID,
-			PaymentID:     paymentID,
 		})
 		_ = w.IdempotencyService.Complete(ctx, idemOp, idemKey, cachedResult)
 	}

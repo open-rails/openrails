@@ -109,6 +109,8 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 	switch eventType {
 	case "invoice.paid":
 		return s.handleInvoicePaid(ctx, obj)
+	case "invoice.payment_failed":
+		return s.handleInvoicePaymentFailed(ctx, obj)
 	case "checkout.session.completed":
 		return s.handleCheckoutSessionCompleted(ctx, obj)
 	case "checkout.session.expired":
@@ -491,12 +493,48 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 	}
 
 	status := strings.TrimSpace(strings.ToLower(data.Status))
-	if status == "active" {
+	switch status {
+	case "active", "trialing":
 		sub.Status = models.StatusActive
+	case "past_due", "unpaid", "incomplete":
+		sub.Status = models.StatusPastDue
+	case "canceled", "incomplete_expired":
+		sub.Status = models.StatusCancelled
+		now := time.Now().UTC()
+		if sub.CancelledAt == nil {
+			sub.CancelledAt = &now
+		}
+		if sub.EndedAt == nil {
+			endAt := now
+			if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now) {
+				endAt = *sub.CurrentPeriodEndsAt
+			}
+			sub.EndedAt = &endAt
+		}
 	}
 
 	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
 		return fmt.Errorf("update subscription from stripe: %w", err)
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, obj json.RawMessage) error {
+	var inv stripeInvoice
+	if err := json.Unmarshal(obj, &inv); err != nil {
+		return fmt.Errorf("parse failed invoice: %w", err)
+	}
+	processorSubID := strings.TrimSpace(inv.Subscription)
+	if processorSubID == "" {
+		return nil
+	}
+	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), processorSubID)
+	if err != nil {
+		return nil
+	}
+	sub.Status = models.StatusPastDue
+	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
+		return fmt.Errorf("update stripe subscription after payment failure: %w", err)
 	}
 	return nil
 }

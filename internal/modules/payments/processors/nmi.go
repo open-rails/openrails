@@ -2,16 +2,15 @@
 package processors
 
 import (
-	"strings"
-
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // NMIBackedProcessors is the set of processors that use NMI as their underlying gateway.
 // This is derived from config at startup. The key is the lowercase processor name.
 var NMIBackedProcessors = map[string]bool{
-	"mobius": true, // Default NMI-backed processor
+	string(models.ProcessorMobius): true, // Default NMI-backed processor
 }
 
 // InitNMIBackedProcessors initializes the NMI-backed processors set from configuration.
@@ -26,7 +25,7 @@ func InitNMIBackedProcessors(cfg *config.Config) {
 
 	nmiProcessors := cfg.GetNMIProcessors()
 	for name := range nmiProcessors {
-		key := strings.TrimSpace(strings.ToLower(name))
+		key := normalize.Lower(name)
 		if key != "" {
 			NMIBackedProcessors[key] = true
 		}
@@ -34,15 +33,22 @@ func InitNMIBackedProcessors(cfg *config.Config) {
 
 	// Ensure mobius is always included as a default if nothing configured
 	if len(NMIBackedProcessors) == 0 {
-		NMIBackedProcessors["mobius"] = true
+		NMIBackedProcessors[string(models.ProcessorMobius)] = true
 	}
 }
 
 // IsNMIBacked returns true if the given processor uses NMI as its underlying gateway.
 // This is the ONLY place in the codebase that should know which processors use NMI.
 func IsNMIBacked(processor string) bool {
-	key := strings.TrimSpace(strings.ToLower(processor))
+	key := normalize.Lower(processor)
 	return NMIBackedProcessors[key]
+}
+
+func IsConfigured(cfg *config.Config, processor string) bool {
+	if cfg == nil {
+		return false
+	}
+	return cfg.GetProcessorType(normalize.Lower(processor)) != ""
 }
 
 // IsNMIBackedProcessor returns true if the given models.Processor uses NMI as its gateway.

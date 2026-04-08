@@ -54,6 +54,14 @@ func (s *NMIWebhookService) now() time.Time {
 	return time.Now()
 }
 
+func (s *NMIWebhookService) normalizedProcessor() (string, error) {
+	processor := strings.TrimSpace(strings.ToLower(s.Processor))
+	if processor == "" {
+		return "", errors.New("nmi webhook processor is required")
+	}
+	return processor, nil
+}
+
 type NMIWebhookEventType = string
 
 const (
@@ -461,9 +469,9 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		return newNMIBillingError(ErrorTypeNMIValidation, "Missing subscription ID", map[string]interface{}{}, nil)
 	}
 
-	provider := strings.TrimSpace(strings.ToLower(s.Processor))
-	if provider == "" {
-		provider = "mobius"
+	provider, err := s.normalizedProcessor()
+	if err != nil {
+		return err
 	}
 
 	var nmiPlanID string
@@ -558,7 +566,7 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 	_, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 		PriceID:                 price.ID,
 		UserID:                  subscription.UserID,
-		Processor:               models.ProcessorMobius,
+		Processor:               models.Processor(provider),
 		ProcessorSubscriptionID: &subscription.ProcessorSubscriptionID,
 		UserEmail:               subscription.UserEmail,
 		TransactionID:           transactionRef,
@@ -644,9 +652,9 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 		return err
 	}
 
-	provider := strings.TrimSpace(strings.ToLower(s.Processor))
-	if provider == "" {
-		provider = "mobius"
+	provider, err := s.normalizedProcessor()
+	if err != nil {
+		return err
 	}
 
 	nmiSubID := body.SubscriptionID.Trimmed()
@@ -680,7 +688,7 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 	}
 
 	cancelFeedback := "Cancelled via NMI webhook"
-	processor := models.ProcessorMobius
+	processor := models.Processor(provider)
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id":           subscription.ID,
 		"processor_subscription_id": nmiSubID,
@@ -728,9 +736,9 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		return err
 	}
 
-	provider := strings.TrimSpace(strings.ToLower(s.Processor))
-	if provider == "" {
-		provider = "mobius"
+	provider, err := s.normalizedProcessor()
+	if err != nil {
+		return err
 	}
 
 	nmiSubID := transactionSubscriptionID(body)
@@ -824,7 +832,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		_, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
 			PriceID:                 subscription.PriceID,
 			UserID:                  subscription.UserID,
-			Processor:               models.ProcessorMobius,
+			Processor:               models.Processor(provider),
 			ProcessorSubscriptionID: &subscription.ProcessorSubscriptionID,
 			UserEmail:               subscription.UserEmail,
 			TransactionID:           txnID,
@@ -836,7 +844,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}
 
 		if s.CreditsService != nil && s.SubscriptionService != nil {
-			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorMobius), nmiSubID)
+			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, nmiSubID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).Warn("failed to load subscription for initial credit grants (NMI)")
 			} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
@@ -875,7 +883,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 
 		// RenewMembership now creates the Payment record internally
 		if err := s.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-			Processor:               models.ProcessorMobius,
+			Processor:               models.Processor(provider),
 			ProcessorSubscriptionID: nmiSubID,
 			TransactionID:           txnID,
 			Amount:                  amountCents,
@@ -894,7 +902,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		}
 
 		if s.CreditsService != nil && s.SubscriptionService != nil {
-			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorMobius), nmiSubID)
+			updated, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, nmiSubID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).Warn("failed to load subscription for renewal credit grants (NMI)")
 			} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
@@ -1002,9 +1010,9 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 		return err
 	}
 
-	provider := strings.TrimSpace(strings.ToLower(s.Processor))
-	if provider == "" {
-		provider = "mobius"
+	provider, err := s.normalizedProcessor()
+	if err != nil {
+		return err
 	}
 
 	nmiSubID := transactionSubscriptionID(body)
@@ -1700,9 +1708,9 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	}
 	refundAmount := moneyutil.CentsToMajorUnits(refundAmountCents)
 
-	provider := strings.TrimSpace(strings.ToLower(s.Processor))
-	if provider == "" {
-		provider = "mobius"
+	provider, err := s.normalizedProcessor()
+	if err != nil {
+		return err
 	}
 
 	// Try to find subscription - refund may be for a subscription payment
@@ -1951,15 +1959,15 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	txnID := body.TransactionID.Trimmed()
 	nmiSubID := transactionSubscriptionID(body)
 
-	provider := strings.TrimSpace(strings.ToLower(s.Processor))
-	if provider == "" {
-		provider = "mobius"
+	provider, err := s.normalizedProcessor()
+	if err != nil {
+		return err
 	}
 
 	// Try to find subscription
 	var subscription *models.Subscription
 	if nmiSubID != "" {
-		subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
+		subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, nmiSubID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
 				Warn("Failed to look up subscription for void")
@@ -1970,14 +1978,14 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	if s.EventLogService != nil {
 		metadata := map[string]interface{}{
 			"transaction_id": txnID,
-			"processor":      s.Processor,
+			"processor":      provider,
 			"event_source":   "webhook",
 		}
 
 		paymentEventData := analytics.PaymentEventData{
 			EventID:       uuid.New(),
 			EventType:     analytics.PaymentEventVoid,
-			Processor:     s.Processor,
+			Processor:     provider,
 			BillingInfo:   analytics.CreateMetadataJSON(map[string]interface{}{"void": true}),
 			WebhookSource: "webhook",
 			Metadata:      analytics.CreateMetadataJSON(metadata),

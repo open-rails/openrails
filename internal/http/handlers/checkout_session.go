@@ -7,13 +7,14 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
 
 type checkoutSessionPaymentParams struct {
-	Processor       string `json:"processor" binding:"required,oneof=mobius ccbill solana stripe"`
+	Processor       string `json:"processor" binding:"required"`
 	PaymentMethodID string `json:"payment_method_id,omitempty" binding:"omitempty"`
 	PaymentToken    string `json:"payment_token,omitempty"`
 	TokenSymbol     string `json:"token_symbol,omitempty" binding:"omitempty"`
@@ -62,6 +63,10 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
+	if !processors.IsConfigured(r.State.Config, req.Payment.Processor) {
+		r.ErrorJSON(http.StatusBadRequest, "unsupported processor")
+		return
+	}
 	req.IdempotencyKey = r.GinCtx.GetHeader("X-Idempotency-Key")
 	e2eRunID := strings.TrimSpace(r.GinCtx.GetHeader("X-E2E-Run-ID"))
 	if e2eRunID != "" {
@@ -81,7 +86,6 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	}
 	r.SuccessJSON(resp)
 }
-
 func GetCheckoutSession(r *httprequest.Request) {
 	sessionID := strings.TrimSpace(r.GinCtx.Param("id"))
 	if sessionID == "" {

@@ -103,8 +103,10 @@ func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClient
 
 // CreateVault creates a NMI customer vault and stores a local PaymentMethod
 func (s *VaultService) CreateVault(ctx context.Context, userID string, req *CreateVaultRequest) (*models.PaymentMethod, error) {
-	// Currently only mobius uses NMI vaults
-	processor := "mobius"
+	processor := strings.TrimSpace(strings.ToLower(req.Provider))
+	if processor == "" {
+		return nil, errors.New("provider is required")
+	}
 
 	client, ok := s.NMIClients[processor]
 	if !ok {
@@ -143,7 +145,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
 		UserID:               userID,
-		Processor:            models.ProcessorMobius,
+		Processor:            models.Processor(processor),
 		VaultID:              nmiResponse.CustomerVaultID,
 		InitialTransactionID: "",
 		CreatedAt:            s.now(),
@@ -167,10 +169,10 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 
 // UpdateVault updates vault in NMI and updates local record timestamp
 func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod, req *UpdateVaultRequest) (*models.PaymentMethod, error) {
-	// Use processor from the payment method (mobius for NMI-backed vaults)
+	// Use processor from the payment method.
 	processor := strings.ToLower(string(pm.Processor))
 	if processor == "" {
-		processor = "mobius"
+		return nil, errors.New("payment method processor is required")
 	}
 
 	client, ok := s.NMIClients[processor]
@@ -259,7 +261,7 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 	// Use processor from the payment method
 	processor := strings.ToLower(string(pm.Processor))
 	if processor == "" {
-		processor = "mobius"
+		return errors.New("payment method processor is required")
 	}
 
 	client, ok := s.NMIClients[processor]

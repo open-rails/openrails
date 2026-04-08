@@ -52,9 +52,12 @@ func NewCheckoutNMISaleService(
 	}
 }
 
-func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string) (*CheckoutResponse, error) {
+func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string, provider string) (*CheckoutResponse, error) {
 	const idempOp = "nmi_sale"
-	provider := "mobius"
+	provider = strings.TrimSpace(strings.ToLower(provider))
+	if provider == "" {
+		return nil, errors.New("processor is required")
+	}
 
 	client, ok := s.NMIClients[provider]
 	if !ok {
@@ -118,7 +121,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 	result, err := s.PurchaseService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        user.ID,
 		PriceID:       price.ID,
-		Processor:     string(models.ProcessorMobius),
+		Processor:     provider,
 		TransactionID: saleResp.TransactionID,
 		Amount:        price.Amount,
 		Currency:      price.Currency,

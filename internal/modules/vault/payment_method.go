@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
-	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 type PaymentMethodService struct {
@@ -64,7 +64,11 @@ func (s *PaymentMethodService) ListByUserID(ctx context.Context, userID string, 
 
 // GetByVaultID finds a NMI payment method by vault ID
 func (s *PaymentMethodService) GetByVaultID(ctx context.Context, provider, vaultID string) (*models.PaymentMethod, error) {
-	pm, err := s.repo.GetByVaultID(ctx, normalize.FirstNonEmpty(normalize.Lower(provider), "mobius"), vaultID)
+	provider = strings.TrimSpace(strings.ToLower(provider))
+	if provider == "" {
+		return nil, errors.New("provider is required")
+	}
+	pm, err := s.repo.GetByVaultID(ctx, provider, vaultID)
 	if err != nil {
 		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
 			return nil, ErrPaymentMethodNotFound
@@ -76,7 +80,11 @@ func (s *PaymentMethodService) GetByVaultID(ctx context.Context, provider, vault
 
 // GetByInitialTransactionID finds a NMI payment method by initial transaction ID
 func (s *PaymentMethodService) GetByInitialTransactionID(ctx context.Context, provider, initialTransactionID string) (*models.PaymentMethod, error) {
-	pm, err := s.repo.GetByInitialTransactionID(ctx, normalize.FirstNonEmpty(normalize.Lower(provider), "mobius"), initialTransactionID)
+	provider = strings.TrimSpace(strings.ToLower(provider))
+	if provider == "" {
+		return nil, errors.New("provider is required")
+	}
+	pm, err := s.repo.GetByInitialTransactionID(ctx, provider, initialTransactionID)
 	if err != nil {
 		if errors.Is(err, repo.ErrPaymentMethodNotFound) {
 			return nil, ErrPaymentMethodNotFound
