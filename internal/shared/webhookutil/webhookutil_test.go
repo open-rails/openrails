@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,16 @@ func TestValidateNMISignature(t *testing.T) {
 	t.Run("uses php signature when present", func(t *testing.T) {
 		ts := "1700000000"
 		phpSig := fmt.Sprintf("t=%s,s=%s", ts, signNMIHeader(secret, ts, body))
+
+		sig, err := ValidateNMISignature(secret, body, phpSig)
+
+		require.NoError(t, err)
+		require.Equal(t, phpSig, sig)
+	})
+
+	t.Run("accepts uppercase quoted signature", func(t *testing.T) {
+		ts := "1700000000"
+		phpSig := fmt.Sprintf(`t="%s",s="%s"`, ts, strings.ToUpper(signNMIHeader(secret, ts, body)))
 
 		sig, err := ValidateNMISignature(secret, body, phpSig)
 

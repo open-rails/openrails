@@ -242,8 +242,12 @@ func VerifyNMISignature(secret, header string, body []byte) error {
 
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(timestamp + "." + string(body)))
-	expectedSig := hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(signature), []byte(expectedSig)) {
+	expectedSig := mac.Sum(nil)
+	providedSig, err := hex.DecodeString(strings.ToLower(signature))
+	if err != nil {
+		return fmt.Errorf("invalid webhook signature")
+	}
+	if !hmac.Equal(providedSig, expectedSig) {
 		return fmt.Errorf("invalid webhook signature")
 	}
 
@@ -263,9 +267,9 @@ func ParseNMISignatureHeader(header string) (string, string, error) {
 
 		switch strings.TrimSpace(kv[0]) {
 		case "t":
-			ts = strings.TrimSpace(kv[1])
+			ts = strings.Trim(strings.TrimSpace(kv[1]), `"'`)
 		case "s":
-			sig = strings.TrimSpace(kv[1])
+			sig = strings.Trim(strings.TrimSpace(kv[1]), `"'`)
 		}
 	}
 

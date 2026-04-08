@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -136,7 +137,7 @@ func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string)
 		return false
 	}
 	signingKey := client.GetWebhookSecret()
-	prepared, err := webhookutil.PrepareNMI(providerKey, body, signingKey, r.Request.Header.Get("Webhook-Signature"))
+	prepared, err := webhookutil.PrepareNMI(providerKey, body, signingKey, firstPresentHeader(r.Request.Header, "Webhook-Signature", "X-Signature", "X-NMI-Signature", "X-Mobius-Signature"))
 	if err != nil {
 		if errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing) || errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing) {
 			log.WithError(err).Error("Missing webhook signature for NMI webhook")
@@ -168,6 +169,15 @@ func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string)
 		return false
 	}
 	return true
+}
+
+func firstPresentHeader(header http.Header, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func readRequestBody(body io.ReadCloser) ([]byte, error) {
