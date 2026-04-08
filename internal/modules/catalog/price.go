@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
@@ -32,7 +33,10 @@ func (s *PriceService) GetByProductID(ctx context.Context, productID uuid.UUID) 
 }
 
 func (s *PriceService) GetByNMIPlan(ctx context.Context, provider, nmiPlanID string) (*models.Price, error) {
-	provider = normalize.FirstNonEmpty(normalize.Lower(provider), "mobius")
+	provider = normalize.Lower(provider)
+	if provider == "" {
+		return nil, fmt.Errorf("nmi provider is required for plan %q", normalize.Trim(nmiPlanID))
+	}
 	return s.repo.GetByNMIPlan(ctx, provider, nmiPlanID)
 }
 

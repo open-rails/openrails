@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
@@ -31,8 +31,6 @@ const (
 	QueueBilling = "billing"
 	KindDunning  = "billing.dunning"
 )
-
-const defaultNMIProcessor = string(models.ProcessorMobius)
 
 // DunningArgs triggers a dunning run that processes all due past_due subscriptions.
 type DunningArgs struct{}
@@ -320,7 +318,7 @@ func (w *DunningWorker) processSubscription(
 
 func resolveSubscriptionProcessor(sub *models.Subscription) string {
 	if sub == nil {
-		return defaultNMIProcessor
+		return ""
 	}
 
 	// Use processor field directly
@@ -332,13 +330,7 @@ func resolveSubscriptionProcessor(sub *models.Subscription) string {
 			return p
 		}
 	}
-	if sub.Price != nil {
-		_, priceProcessor, hasNMI := sub.Price.GetNMIConfig()
-		if hasNMI && priceProcessor != "" {
-			return strings.ToLower(strings.TrimSpace(priceProcessor))
-		}
-	}
-	return defaultNMIProcessor
+	return ""
 }
 
 func normalizeProcessor(value interface{}) string {
@@ -349,8 +341,7 @@ func normalizeProcessor(value interface{}) string {
 		}
 		return normalizeProcessor(*v)
 	case string:
-		trimmed := strings.TrimSpace(strings.ToLower(v))
-		return trimmed
+		return normalize.Lower(v)
 	default:
 		return ""
 	}

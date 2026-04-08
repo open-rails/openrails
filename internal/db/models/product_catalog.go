@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/uptrace/bun"
 )
 
@@ -128,17 +129,14 @@ func (p *Price) HasProcessor(processor Processor) bool {
 	return p.GetProcessorConfig(processor) != nil
 }
 
-// GetNMIConfig returns the Mobius processor configuration.
+// GetNMIConfig returns the legacy Mobius-keyed NMI configuration.
 func (p *Price) GetNMIConfig() (planID, provider string, ok bool) {
 	config := p.GetProcessorConfig(ProcessorMobius)
 	if config == nil {
 		return "", "", false
 	}
 	planID = config[ProcessorKeyPlanID]
-	provider = config[ProcessorKeyProvider]
-	if provider == "" {
-		provider = "mobius"
-	}
+	provider = normalize.FirstNonEmpty(normalize.Lower(config[ProcessorKeyProvider]), string(ProcessorMobius))
 	return planID, provider, planID != ""
 }
 
@@ -194,11 +192,10 @@ func (p *Price) SetProcessorConfig(processor Processor, config map[string]string
 
 // SetNMIConfig sets the NMI processor configuration using "mobius" as the key
 func (p *Price) SetNMIConfig(planID, provider string) {
+	provider = normalize.FirstNonEmpty(normalize.Lower(provider), string(ProcessorMobius))
 	config := map[string]string{
-		ProcessorKeyPlanID: planID,
-	}
-	if provider != "" && provider != "mobius" {
-		config[ProcessorKeyProvider] = provider
+		ProcessorKeyPlanID:   planID,
+		ProcessorKeyProvider: provider,
 	}
 	p.SetProcessorConfig(ProcessorMobius, config)
 }

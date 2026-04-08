@@ -309,7 +309,7 @@ func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
 	for name, procConfig := range nmiProcessors {
 		providerKey := strings.TrimSpace(strings.ToLower(name))
 		if providerKey == "" {
-			providerKey = "mobius"
+			return nil, fmt.Errorf("nmi provider name cannot be empty")
 		}
 
 		if _, exists := clients[providerKey]; exists {
