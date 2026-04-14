@@ -40,7 +40,7 @@ func BuildAcceptConfig(cfg *config.AuthConfig) (core.AcceptConfig, error) {
 
 		issCfg := core.IssuerAccept{Issuer: issuer}
 		if expectedAudience != "" {
-			issCfg.Audience = expectedAudience
+			issCfg.Audiences = []string{expectedAudience}
 		}
 
 		issuerAccepts = append(issuerAccepts, issCfg)
