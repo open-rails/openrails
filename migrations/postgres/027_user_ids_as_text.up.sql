@@ -19,7 +19,7 @@ ALTER TABLE billing.user_credit_balances
 ALTER TABLE billing.credit_transactions
     ALTER COLUMN user_id TYPE TEXT USING user_id::text;
 
-ALTER TABLE billing.credit_holds
+ALTER TABLE billing.credit_blocks
     ALTER COLUMN user_id TYPE TEXT USING user_id::text;
 
 ALTER TABLE billing.processor_customers

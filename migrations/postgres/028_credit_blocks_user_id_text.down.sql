@@ -1,0 +1,2 @@
+-- Intentionally left as a no-op. Converting arbitrary OIDC subjects back to UUID
+-- would be lossy and can fail for valid non-UUID users.
