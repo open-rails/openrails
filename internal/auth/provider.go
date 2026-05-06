@@ -5,7 +5,7 @@ import (
 
 	"github.com/doujins-org/ginapi/response"
 	"github.com/gin-gonic/gin"
-	authhttp "github.com/open-rails/authkit/adapters/http"
+	authhttp "github.com/open-rails/authkit/http"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	log "github.com/sirupsen/logrus"

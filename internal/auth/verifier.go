@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	authhttp "github.com/open-rails/authkit/adapters/http"
+	authhttp "github.com/open-rails/authkit/http"
 
 	"github.com/open-rails/openrails/config"
 )

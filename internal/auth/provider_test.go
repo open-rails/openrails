@@ -3,7 +3,7 @@ package auth
 import (
 	"testing"
 
-	authhttp "github.com/open-rails/authkit/adapters/http"
+	authhttp "github.com/open-rails/authkit/http"
 	"github.com/stretchr/testify/require"
 )
 
