@@ -126,13 +126,12 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// Build services once for all attempts
 	priceSvc := catalog.NewPriceService(w.DB)
 	productSvc := catalog.NewProductService(w.DB)
-	entitlementSvc := entitlements.NewEntitlementService(w.DB)
+	entitlementSvc := entitlements.NewEntitlementService(w.DB, w.Clock)
 	notifSvc := subscriptions.NewNotificationService(w.DB, nil)
-	paymentSvc := payments.NewPaymentService(w.DB)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService)
+	paymentSvc := payments.NewPaymentService(w.DB, w.Clock)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService, w.Clock)
 	lifecycle.SetConfig(w.Config) // For feature flag access
-	lifecycle.SetClock(w.Clock)   // Ensure time mocking is honored during dunning
-	creditsSvc := credits.NewCreditsService(w.DB)
+	creditsSvc := credits.NewCreditsService(w.DB, w.Clock)
 
 	successCount := 0
 	failCount := 0

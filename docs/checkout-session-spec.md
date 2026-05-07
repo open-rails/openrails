@@ -80,6 +80,7 @@ All endpoints require authentication.
   "status": "requires_action|succeeded|failed|expired",
   "mode": "one_off|subscription",
   "price_id": "price_...",
+  "url": "https://...",
   "payment": {
     "processor": "solana|mobius|ccbill|stripe",
     "reference": "...",
@@ -144,12 +145,12 @@ that duration defines the entitlement window for the one-off purchase.
 
 ### CCBill
 1) Create session with billing fields.
-2) Response includes `payment.redirect_url` and `next_action=redirect_to_url`.
+2) Response includes top-level `url`, `payment.redirect_url`, and `next_action=redirect_to_url`.
 3) Webhook finalizes payment and updates the session to `succeeded`.
 
 ### Stripe
 1) Create session with billing fields + `payment_method_id` or `payment_token` as needed.
-2) Response may include `redirect_url` for hosted checkout.
+2) Response may include top-level `url` for hosted checkout.
 3) Webhook finalizes payment and updates the session.
 
 ## Idempotency

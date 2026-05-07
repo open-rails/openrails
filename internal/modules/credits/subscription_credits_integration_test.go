@@ -117,7 +117,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	})
 
 	creditsSvc := credits.NewCreditsService(dbi)
-	creditsSvc.Clock = nil
+	creditsSvc.SetClock(nil)
 
 	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,

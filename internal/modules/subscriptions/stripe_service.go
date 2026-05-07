@@ -8,10 +8,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/config"
+	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
 
 func requireStripeProcessorConfig(cfg *config.Config) (*config.ProcessorConfig, error) {
@@ -150,6 +152,136 @@ func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptio
 		return errors.New(msg)
 	}
 	return nil
+}
+
+type stripeSubscriptionScheduleResponse struct {
+	ID     string `json:"id"`
+	Phases []struct {
+		StartDate int64 `json:"start_date"`
+		EndDate   int64 `json:"end_date"`
+		Items     []struct {
+			Price    string `json:"price"`
+			Quantity int64  `json:"quantity"`
+		} `json:"items"`
+	} `json:"phases"`
+}
+
+func (s *StripeService) ScheduleSubscriptionPriceChange(ctx context.Context, subscriptionID, currentPriceID, newPriceID string, currentPeriodStart, currentPeriodEnd time.Time, billingCycleDays *int) (string, error) {
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
+	if err != nil {
+		return "", err
+	}
+	subscriptionID = strings.TrimSpace(subscriptionID)
+	currentPriceID = strings.TrimSpace(currentPriceID)
+	newPriceID = strings.TrimSpace(newPriceID)
+	if subscriptionID == "" || currentPriceID == "" || newPriceID == "" {
+		return "", errors.New("subscription_id, current_price_id, and new_price_id are required")
+	}
+	if currentPeriodEnd.IsZero() {
+		return "", errors.New("current_period_end is required to schedule a Stripe price change")
+	}
+
+	createValues := url.Values{}
+	createValues.Set("from_subscription", subscriptionID)
+	createReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/subscription_schedules", strings.NewReader(createValues.Encode()))
+	if err != nil {
+		return "", err
+	}
+	createReq.Header.Set("Authorization", "Bearer "+secretKey)
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	createResp, err := client.Do(createReq)
+	if err != nil {
+		return "", fmt.Errorf("stripe subscription schedule create failed: %w", err)
+	}
+	defer createResp.Body.Close()
+	createBody, err := io.ReadAll(createResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read stripe subscription schedule create response: %w", err)
+	}
+	if createResp.StatusCode >= 400 {
+		msg := ParseStripeAPIError(createBody)
+		if msg == "" {
+			msg = fmt.Sprintf("stripe subscription schedule create failed (%d)", createResp.StatusCode)
+		}
+		return "", errors.New(msg)
+	}
+
+	var schedule stripeSubscriptionScheduleResponse
+	if err := json.Unmarshal(createBody, &schedule); err != nil {
+		return "", fmt.Errorf("stripe subscription schedule parse failed: %w", err)
+	}
+	if strings.TrimSpace(schedule.ID) == "" {
+		return "", errors.New("stripe subscription schedule id missing")
+	}
+
+	startDate := currentPeriodStart.Unix()
+	endDate := currentPeriodEnd.Unix()
+	quantity := int64(1)
+	if len(schedule.Phases) > 0 {
+		if schedule.Phases[0].StartDate > 0 {
+			startDate = schedule.Phases[0].StartDate
+		}
+		if schedule.Phases[0].EndDate > 0 {
+			endDate = schedule.Phases[0].EndDate
+		}
+		if len(schedule.Phases[0].Items) > 0 {
+			if strings.TrimSpace(schedule.Phases[0].Items[0].Price) != "" {
+				currentPriceID = schedule.Phases[0].Items[0].Price
+			}
+			if schedule.Phases[0].Items[0].Quantity > 0 {
+				quantity = schedule.Phases[0].Items[0].Quantity
+			}
+		}
+	}
+	if startDate <= 0 {
+		startDate = time.Now().UTC().Unix()
+	}
+
+	interval := "month"
+	intervalCount := 1
+	if billingCycleDays != nil && *billingCycleDays > 0 {
+		interval, intervalCount = sharedformat.BillingCycleDaysToInterval(*billingCycleDays)
+	}
+
+	updateValues := url.Values{}
+	updateValues.Set("end_behavior", "release")
+	updateValues.Set("proration_behavior", "none")
+	updateValues.Set("phases[0][items][0][price]", currentPriceID)
+	updateValues.Set("phases[0][items][0][quantity]", strconv.FormatInt(quantity, 10))
+	updateValues.Set("phases[0][start_date]", strconv.FormatInt(startDate, 10))
+	updateValues.Set("phases[0][end_date]", strconv.FormatInt(endDate, 10))
+	updateValues.Set("phases[1][items][0][price]", newPriceID)
+	updateValues.Set("phases[1][items][0][quantity]", "1")
+	updateValues.Set("phases[1][duration][interval]", interval)
+	updateValues.Set("phases[1][duration][interval_count]", strconv.Itoa(intervalCount))
+
+	updateReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/subscription_schedules/"+schedule.ID, strings.NewReader(updateValues.Encode()))
+	if err != nil {
+		return "", err
+	}
+	updateReq.Header.Set("Authorization", "Bearer "+secretKey)
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	updateResp, err := client.Do(updateReq)
+	if err != nil {
+		return "", fmt.Errorf("stripe subscription schedule update failed: %w", err)
+	}
+	defer updateResp.Body.Close()
+	updateBody, err := io.ReadAll(updateResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read stripe subscription schedule update response: %w", err)
+	}
+	if updateResp.StatusCode >= 400 {
+		msg := ParseStripeAPIError(updateBody)
+		if msg == "" {
+			msg = fmt.Sprintf("stripe subscription schedule update failed (%d)", updateResp.StatusCode)
+		}
+		return "", errors.New(msg)
+	}
+
+	return schedule.ID, nil
 }
 
 func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID string) error {

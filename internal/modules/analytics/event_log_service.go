@@ -27,24 +27,25 @@ type EventLogService struct {
 	clickhouseConn driver.Conn
 	config         *config.ClickHouseConfig
 	spool          *spool.Spool
-	Clock          clockwork.Clock
+	clock          clockwork.Clock
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *EventLogService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
 }
 
 // NewEventLogService creates a new event log service
-func NewEventLogService(cfg *config.ClickHouseConfig) (*EventLogService, error) {
+func NewEventLogService(cfg *config.ClickHouseConfig, clocks ...clockwork.Clock) (*EventLogService, error) {
+	clock := firstClock(clocks...)
 	// Feature gate: presence of HTTPAddr indicates intent to use CH
 	if cfg == nil || cfg.HTTPAddr == "" {
 		log.Warn("ClickHouse HTTPAddr not configured - billing events will not be logged")
 		sp, _ := spool.New("")
-		svc := &EventLogService{spool: sp}
+		svc := &EventLogService{spool: sp, clock: clock}
 		svc.startBackgroundFlush()
 		return svc, nil
 	}
@@ -54,15 +55,32 @@ func NewEventLogService(cfg *config.ClickHouseConfig) (*EventLogService, error) 
 	if err != nil {
 		log.WithError(err).Warn("ClickHouse unavailable at startup; will retry on use")
 		sp, _ := spool.New("")
-		svc := &EventLogService{clickhouseConn: nil, config: cfg, spool: sp}
+		svc := &EventLogService{clickhouseConn: nil, config: cfg, spool: sp, clock: clock}
 		svc.startBackgroundFlush()
 		return svc, nil
 	}
 
 	sp, _ := spool.New("")
-	svc := &EventLogService{clickhouseConn: conn, config: cfg, spool: sp}
+	svc := &EventLogService{clickhouseConn: conn, config: cfg, spool: sp, clock: clock}
 	svc.startBackgroundFlush()
 	return svc, nil
+}
+
+func (s *EventLogService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+}
+
+func (s *EventLogService) Clock() clockwork.Clock {
+	return s.clock
+}
+
+func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
+	for _, c := range clocks {
+		if c != nil {
+			return c
+		}
+	}
+	return clockwork.NewRealClock()
 }
 
 // ensureConn lazily (re)establishes the ClickHouse connection

@@ -369,7 +369,21 @@ Error types: `invalid_request_error`, `authentication_error`, `authorization_err
 }
 ```
 
-> **Note:** Prices are mostly immutable. Each price belongs to exactly one product. Financial fields (`amount`, `currency`, `billing_cycle_days`) cannot be changed after creation to preserve historical payment accuracy. To change pricing, create a new price and deactivate the old one. Only `display_name`, `processors`, and `is_active` can be updated.
+> **Note:** Prices are mostly immutable. Each price belongs to exactly one product. Financial fields (`unit_amount`, `currency`, `billing_cycle_days`) cannot be changed after creation to preserve historical payment accuracy. To change pricing, create a new price and deactivate the old one. Only `display_name`, `processors`, and `is_active` can be updated.
+
+---
+
+## Business Time in Tests
+
+OpenRails billing/domain logic uses an injected runtime clock so integration
+tests can advance subscription periods, entitlement windows, dunning retries,
+checkout/session expiry, and credit expiry without sleeping. Infrastructure
+timing such as cache TTLs, rate limits, signature windows, retry backoff, and
+metrics durations may still use wall-clock time.
+
+See [docs/business-time.md](docs/business-time.md) for the testing pattern,
+processor test-clock notes, and the guardrail for new `time.Now()` / SQL `NOW()`
+usage.
 
 ---
 

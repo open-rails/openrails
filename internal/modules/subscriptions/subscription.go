@@ -38,7 +38,7 @@ type GetSubscriptionsFilters struct {
 type SubscriptionService struct {
 	subscriptionRepo     *repo.SubscriptionRepo
 	notificationRepo     *repo.NotificationQueueRepo
-	Clock                clockwork.Clock
+	clock                clockwork.Clock
 	PriceService         *catalog.PriceService
 	ProductService       *catalog.ProductService
 	CCBillRESTClient     *ccbill.RESTClient
@@ -51,10 +51,18 @@ var ErrActiveSubscriptionExists = errors.New("active or pending subscription alr
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *SubscriptionService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
+}
+
+func (s *SubscriptionService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+}
+
+func (s *SubscriptionService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 const (
@@ -153,16 +161,27 @@ func NewSubscriptionService(
 	ccbillRESTClient *ccbill.RESTClient,
 	nmiClients map[string]*nmi.NMIClient,
 	paymentMethodService *vault.PaymentMethodService,
+	clocks ...clockwork.Clock,
 ) *SubscriptionService {
 	return &SubscriptionService{
 		subscriptionRepo:     repo.NewSubscriptionRepo(db),
 		notificationRepo:     repo.NewNotificationQueueRepo(db),
+		clock:                firstClock(clocks...),
 		PriceService:         priceService,
 		ProductService:       productService,
 		CCBillRESTClient:     ccbillRESTClient,
 		NMIClients:           nmiClients,
 		PaymentMethodService: paymentMethodService,
 	}
+}
+
+func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
+	for _, c := range clocks {
+		if c != nil {
+			return c
+		}
+	}
+	return clockwork.NewRealClock()
 }
 
 func (s *SubscriptionService) Create(ctx context.Context, subscription *models.Subscription) error {
@@ -215,7 +234,7 @@ func (s *SubscriptionService) GetActiveOrPendingByUserIDAndTierGroup(ctx context
 }
 
 func (s *SubscriptionService) Update(ctx context.Context, subscription *models.Subscription) error {
-	return s.subscriptionRepo.Update(ctx, subscription)
+	return s.subscriptionRepo.UpdateAt(ctx, subscription, s.now())
 }
 
 func (s *SubscriptionService) GetSubscribers(ctx context.Context, params query.QueryOptions[GetSubscriptionsFilters]) ([]*models.Subscription, int64, error) {
@@ -261,7 +280,7 @@ func (s *SubscriptionService) GetSubscriptionsByProcessorAndUserID(ctx context.C
 
 // GetActiveSubscription retrieves the active subscription for a user
 func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID string) (*models.Subscription, error) {
-	return s.subscriptionRepo.GetActiveSubscription(ctx, userID)
+	return s.subscriptionRepo.GetActiveSubscriptionAt(ctx, userID, s.now())
 }
 
 // GetByProcessorSubscriptionID finds a subscription by processor and processor_subscription_id.

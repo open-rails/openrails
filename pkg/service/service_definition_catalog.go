@@ -178,7 +178,7 @@ type CatalogPrice struct {
 	ProductID        uuid.UUID                    `json:"product_id"`
 	DisplayName      string                       `json:"display_name"`
 	IsActive         bool                         `json:"is_active"`
-	Amount           int64                        `json:"amount"`
+	UnitAmount       int64                        `json:"unit_amount"`
 	Currency         string                       `json:"currency"`
 	BillingCycleDays *int                         `json:"billing_cycle_days,omitempty"`
 	Processors       map[string]map[string]string `json:"processors,omitempty"`
@@ -194,7 +194,7 @@ type ProcessorMappingMode struct {
 type CreatePriceRequest struct {
 	ProductID        uuid.UUID                       `json:"product_id"`
 	DisplayName      string                          `json:"display_name"`
-	Amount           int64                           `json:"amount"`
+	UnitAmount       int64                           `json:"unit_amount"`
 	Currency         string                          `json:"currency"`
 	BillingCycleDays *int                            `json:"billing_cycle_days,omitempty"`
 	Processors       map[string]ProcessorMappingMode `json:"processors,omitempty"`
@@ -214,8 +214,8 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	if req.DisplayName == "" {
 		return nil, fmt.Errorf("display_name required")
 	}
-	if req.Amount <= 0 {
-		return nil, fmt.Errorf("amount must be positive")
+	if req.UnitAmount <= 0 {
+		return nil, fmt.Errorf("unit_amount must be positive")
 	}
 	if req.Currency == "" {
 		return nil, fmt.Errorf("currency required")
@@ -243,7 +243,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		ProductID:        req.ProductID,
 		DisplayName:      req.DisplayName,
 		IsActive:         active,
-		Amount:           req.Amount,
+		Amount:           req.UnitAmount,
 		Currency:         req.Currency,
 		BillingCycleDays: req.BillingCycleDays,
 		Processors:       processors,
@@ -313,7 +313,7 @@ func (s *Service) resolveProcessorMappings(ctx context.Context, product *models.
 				return nil, err
 			}
 			idKeyPrice := "openrails-price-" + priceID.String()
-			stripePriceID, err := stripeSvc.CreatePrice(ctx, stripeProductID, req.Amount, req.Currency, req.BillingCycleDays, idKeyPrice)
+			stripePriceID, err := stripeSvc.CreatePrice(ctx, stripeProductID, req.UnitAmount, req.Currency, req.BillingCycleDays, idKeyPrice)
 			if err != nil {
 				return nil, err
 			}
@@ -379,7 +379,7 @@ func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 		ProductID:        p.ProductID,
 		DisplayName:      p.DisplayName,
 		IsActive:         p.IsActive,
-		Amount:           p.Amount,
+		UnitAmount:       p.Amount,
 		Currency:         p.Currency,
 		BillingCycleDays: p.BillingCycleDays,
 		Processors:       p.Processors,

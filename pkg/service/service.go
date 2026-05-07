@@ -34,6 +34,13 @@ func New(rt *app.Runtime) (*Service, error) {
 	return &Service{rt: rt}, nil
 }
 
+func (s *Service) now() time.Time {
+	if s != nil && s.rt != nil && s.rt.Clock != nil {
+		return s.rt.Clock.Now()
+	}
+	return time.Now()
+}
+
 var ErrInsufficientCredits = credits.ErrInsufficientCredits
 var ErrCreditTypeInactive = credits.ErrCreditTypeInactive
 
@@ -289,7 +296,7 @@ func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at 
 		return nil, fmt.Errorf("user_id required")
 	}
 	if at.IsZero() {
-		at = time.Now().UTC()
+		at = s.now().UTC()
 	}
 	return s.entitlementService().ListActiveEntitlements(ctx, userID, at.UTC())
 }
@@ -314,7 +321,7 @@ func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID strin
 		return nil, fmt.Errorf("user_id required")
 	}
 	if at.IsZero() {
-		at = time.Now().UTC()
+		at = s.now().UTC()
 	}
 	records, err := s.entitlementService().ListActiveRecords(ctx, userID, at.UTC())
 	if err != nil {

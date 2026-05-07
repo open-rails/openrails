@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -35,6 +36,14 @@ type StripeWebhookService struct {
 	DeduplicationService         *DeduplicationService
 	ProcessorCustomerService     *payments.ProcessorCustomerService
 	CheckoutSessionService       webhookCheckoutSessionStore
+	Clock                        clockwork.Clock
+}
+
+func (s *StripeWebhookService) now() time.Time {
+	if s.Clock != nil {
+		return s.Clock.Now()
+	}
+	return time.Now()
 }
 
 type stripeEvent struct {
@@ -394,7 +403,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 			}
 			var expiresAt *time.Time
 			if spec.ExpiresDays != nil && *spec.ExpiresDays > 0 {
-				t := time.Now().UTC().Add(time.Duration(*spec.ExpiresDays) * 24 * time.Hour)
+				t := s.now().UTC().Add(time.Duration(*spec.ExpiresDays) * 24 * time.Hour)
 				expiresAt = &t
 			}
 			_, err = s.CreditsService.Deposit(ctx, credits.CreditDepositParams{
@@ -498,7 +507,7 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 		sub.CurrentPeriodEndsAt = &ts
 	}
 
-	applyStripeSubscriptionStatus(sub, data.Status, time.Now().UTC())
+	applyStripeSubscriptionStatus(sub, data.Status, s.now().UTC())
 
 	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
 		return fmt.Errorf("update subscription from stripe: %w", err)

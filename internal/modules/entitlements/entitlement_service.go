@@ -16,11 +16,11 @@ import (
 type EntitlementService struct {
 	db    *db.DB
 	repo  *repo.EntitlementRepo
-	Clock clockwork.Clock
+	clock clockwork.Clock
 }
 
-func NewEntitlementService(db *db.DB) *EntitlementService {
-	return &EntitlementService{db: db, repo: repo.NewEntitlementRepo(db)}
+func NewEntitlementService(db *db.DB, clocks ...clockwork.Clock) *EntitlementService {
+	return &EntitlementService{db: db, repo: repo.NewEntitlementRepo(db), clock: firstClock(clocks...)}
 }
 
 func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Context, tx bun.Tx) error) error {
@@ -39,15 +39,28 @@ func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Con
 
 // SetClock sets the clock for this service. Used for testing.
 func (s *EntitlementService) SetClock(c clockwork.Clock) {
-	s.Clock = c
+	s.clock = firstClock(c)
+}
+
+func (s *EntitlementService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *EntitlementService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
+}
+
+func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
+	for _, c := range clocks {
+		if c != nil {
+			return c
+		}
+	}
+	return clockwork.NewRealClock()
 }
 
 // IsEntitled returns true if the user currently has an active entitlement

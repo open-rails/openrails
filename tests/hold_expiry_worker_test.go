@@ -19,6 +19,7 @@ import (
 
 // createTestCreditType creates a credit type for testing
 func (suite *TestContainerSuite) createTestCreditType(name string) *models.CreditType {
+	now := suite.GetClock().Now()
 	ct := &models.CreditType{
 		ID:            uuid.New(),
 		Name:          name,
@@ -26,7 +27,7 @@ func (suite *TestContainerSuite) createTestCreditType(name string) *models.Credi
 		Unit:          "credits",
 		DecimalPlaces: 0,
 		IsActive:      true,
-		CreatedAt:     time.Now(),
+		CreatedAt:     now,
 	}
 	_, err := suite.BunDB.NewInsert().Model(ct).Exec(context.Background())
 	if err != nil {
@@ -37,7 +38,7 @@ func (suite *TestContainerSuite) createTestCreditType(name string) *models.Credi
 
 // createTestCreditBalance creates a user credit balance for testing
 func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTypeID uuid.UUID, balance, heldBalance int64) *models.UserCreditBalance {
-	now := time.Now()
+	now := suite.GetClock().Now()
 	bal := &models.UserCreditBalance{
 		ID:           uuid.New(),
 		UserID:       userID,
@@ -57,7 +58,7 @@ func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTy
 // createTestCreditHold creates a credit hold for testing.
 // Holds are stored as billing.credit_transactions rows with transaction_type='hold'.
 func (suite *TestContainerSuite) createTestCreditHold(userID string, creditTypeID uuid.UUID, amount int64, status string, expiresAt time.Time) *models.CreditTransaction {
-	now := time.Now()
+	now := suite.GetClock().Now()
 	auth := amount
 	sid := uuid.New().String()
 	hold := &models.CreditTransaction{

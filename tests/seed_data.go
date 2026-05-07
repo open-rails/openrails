@@ -635,7 +635,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.PaymentMethod {
 	suite.t.Helper()
 	ctx := context.Background()
-	now := time.Now()
+	now := suite.GetClock().Now()
 
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),

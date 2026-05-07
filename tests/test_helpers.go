@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"net/http/httptest"
 	"sync"
 	"testing"
@@ -85,8 +86,22 @@ func setupTestServer(t *testing.T) *server.Server {
 
 // setupTestSuite returns the shared test suite for tests that need direct database access.
 // Use this when you need to seed data or query the database directly.
-func setupTestSuite(t *testing.T) *TestContainerSuite {
+func setupTestSuite(t *testing.T, opts ...TestSuiteOption) *TestContainerSuite {
+	if len(opts) > 0 {
+		opts = append([]TestSuiteOption{WithSuitePort(freeTestPort(t))}, opts...)
+		suite := NewTestContainerSuite(t, opts...)
+		t.Cleanup(suite.Cleanup)
+		return suite
+	}
 	return getSharedTestSuite(t)
+}
+
+func freeTestPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+	return listener.Addr().(*net.TCPAddr).Port
 }
 
 // setupTestServerWithAuth creates a test server with a valid JWT token.

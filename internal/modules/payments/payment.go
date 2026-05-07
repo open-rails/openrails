@@ -17,21 +17,38 @@ import (
 
 type PaymentService struct {
 	repo  *repo.PaymentRepo
-	Clock clockwork.Clock
+	clock clockwork.Clock
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *PaymentService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
 }
 
 type GetPaymentsFilters = repo.PaymentFilters
 
-func NewPaymentService(db *db.DB) *PaymentService {
-	return &PaymentService{repo: repo.NewPaymentRepo(db)}
+func NewPaymentService(db *db.DB, clocks ...clockwork.Clock) *PaymentService {
+	return &PaymentService{repo: repo.NewPaymentRepo(db), clock: firstClock(clocks...)}
+}
+
+func (s *PaymentService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+}
+
+func (s *PaymentService) Clock() clockwork.Clock {
+	return s.clock
+}
+
+func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
+	for _, c := range clocks {
+		if c != nil {
+			return c
+		}
+	}
+	return clockwork.NewRealClock()
 }
 
 func (s *PaymentService) Create(ctx context.Context, payment *models.Payment) error {

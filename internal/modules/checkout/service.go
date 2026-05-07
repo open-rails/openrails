@@ -40,6 +40,7 @@ type TierChangeResponse struct {
 	Mode           string                         `json:"mode"`                      // "tier_change"
 	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
 	PriceID        string                         `json:"price_id"`                  // Target price ID
+	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
 	Payment        CheckoutSessionPaymentResponse `json:"payment"`                   // Processor info
 	SubscriptionID *string                        `json:"subscription_id,omitempty"` // Affected subscription
 	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`     // For redirects
@@ -61,16 +62,27 @@ type CheckoutService struct {
 	VaultService         *vault.VaultService
 	IdempotencyService   checkoutIdempotencyStore
 	NMIClients           map[string]*nmi.NMIClient
-	Clock                clockwork.Clock
+	clock                clockwork.Clock
 	Config               *config.Config
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *CheckoutService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
+}
+
+func (s *CheckoutService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+	if s.PurchaseService != nil {
+		s.PurchaseService.SetClock(s.clock)
+	}
+}
+
+func (s *CheckoutService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 // NewCheckoutService creates a new CheckoutService
@@ -85,19 +97,22 @@ func NewCheckoutService(
 	idempotencyService checkoutIdempotencyStore,
 	nmiClients map[string]*nmi.NMIClient,
 	cfg *config.Config,
+	clocks ...clockwork.Clock,
 ) *CheckoutService {
+	clock := firstClock(clocks...)
 	service := &CheckoutService{
 		SubscriptionService:  subscriptionService,
 		ProductService:       productService,
 		PriceService:         priceService,
 		PaymentService:       paymentService,
 		EntitlementService:   entitlementService,
-		PurchaseService:      NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService),
+		PurchaseService:      NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
 		VaultResolver:        NewCheckoutVaultService(paymentMethodService, vaultService),
 		PaymentMethodService: paymentMethodService,
 		VaultService:         vaultService,
 		IdempotencyService:   idempotencyService,
 		NMIClients:           nmiClients,
+		clock:                clock,
 		Config:               cfg,
 	}
 	service.NMISaleService = NewCheckoutNMISaleService(
@@ -782,7 +797,7 @@ func (s *CheckoutService) processStripeSubscription(
 	}
 
 	trialEnd := int64(0)
-	if coverage != nil && coverage.HasCoverage && coverage.EndDate != nil && coverage.EndDate.After(time.Now().Add(5*time.Minute)) {
+	if coverage != nil && coverage.HasCoverage && coverage.EndDate != nil && coverage.EndDate.After(s.now().Add(5*time.Minute)) {
 		trialEnd = coverage.EndDate.Unix()
 	}
 	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
@@ -1518,7 +1533,8 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 }
 
 // processTierChangeStripe handles Stripe subscription tier changes.
-// Both upgrades and downgrades are processed immediately via Stripe's API.
+// Upgrades are processed immediately. Downgrades are scheduled for period end
+// so the user keeps access to the higher tier they already paid for.
 func (s *CheckoutService) processTierChangeStripe(
 	ctx context.Context,
 	req *TierChangeRequest,
@@ -1544,12 +1560,67 @@ func (s *CheckoutService) processTierChangeStripe(
 		}
 	}
 
-	// Configure proration based on action
-	proration := "create_prorations"
-	billingAnchor := "now"
 	if action == "downgrade" {
-		proration = "none"
-		billingAnchor = "unchanged"
+		if existingSub.ScheduledPriceID != nil {
+			return &TierChangeResponse{
+				Object:  "tier_change",
+				Status:  "blocked",
+				Mode:    "tier_change",
+				Action:  action,
+				PriceID: api.FormatPriceID(newPrice.ID),
+				Payment: CheckoutSessionPaymentResponse{Processor: "stripe"},
+				Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
+			}, nil
+		}
+		currentPrice := existingSub.Price
+		if currentPrice == nil {
+			var err error
+			currentPrice, err = s.PriceService.GetByID(ctx, existingSub.PriceID)
+			if err != nil {
+				return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "current price not found"}
+			}
+		}
+		currentStripePriceID, ok := currentPrice.GetStripeConfig()
+		if !ok || strings.TrimSpace(currentStripePriceID) == "" {
+			return nil, &TierChangeError{
+				HTTPStatus: http.StatusBadRequest,
+				Message:    "current price not configured for Stripe",
+			}
+		}
+		if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {
+			return nil, &TierChangeError{
+				HTTPStatus: http.StatusBadRequest,
+				Message:    "subscription missing current period end",
+			}
+		}
+		currentPeriodStart := existingSub.StartedAt
+		if existingSub.CurrentPeriodStartsAt != nil && !existingSub.CurrentPeriodStartsAt.IsZero() {
+			currentPeriodStart = *existingSub.CurrentPeriodStartsAt
+		}
+
+		stripeService := &subscriptions.StripeService{Config: s.Config}
+		if _, err := stripeService.ScheduleSubscriptionPriceChange(ctx, existingSub.ProcessorSubscriptionID, currentStripePriceID, stripePriceID, currentPeriodStart, *existingSub.CurrentPeriodEndsAt, newPrice.BillingCycleDays); err != nil {
+			return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
+		}
+
+		existingSub.ScheduledPriceID = &newPrice.ID
+		if err := s.SubscriptionService.Update(ctx, existingSub); err != nil {
+			return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "failed to schedule downgrade"}
+		}
+
+		subID := api.FormatSubscriptionID(existingSub.ID)
+		effectiveDate := existingSub.CurrentPeriodEndsAt.Format("January 2, 2006")
+		return &TierChangeResponse{
+			Object:         "tier_change",
+			Status:         "succeeded",
+			Mode:           "tier_change",
+			Action:         action,
+			PriceID:        api.FormatPriceID(newPrice.ID),
+			Payment:        CheckoutSessionPaymentResponse{Processor: "stripe"},
+			SubscriptionID: &subID,
+			Message:        fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", newProduct.DisplayName, effectiveDate),
+			DelayedStart:   existingSub.CurrentPeriodEndsAt,
+		}, nil
 	}
 
 	// Call Stripe API
@@ -1558,7 +1629,7 @@ func (s *CheckoutService) processTierChangeStripe(
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
-	if err := stripeService.UpdateSubscriptionPrice(ctx, existingSub.ProcessorSubscriptionID, itemID, stripePriceID, proration, billingAnchor); err != nil {
+	if err := stripeService.UpdateSubscriptionPrice(ctx, existingSub.ProcessorSubscriptionID, itemID, stripePriceID, "create_prorations", "now"); err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
 
@@ -1571,10 +1642,6 @@ func (s *CheckoutService) processTierChangeStripe(
 	}
 
 	subID := api.FormatSubscriptionID(existingSub.ID)
-	msg := "Plan updated"
-	if action == "downgrade" {
-		msg = "Plan downgraded"
-	}
 
 	return &TierChangeResponse{
 		Object:         "tier_change",
@@ -1584,7 +1651,7 @@ func (s *CheckoutService) processTierChangeStripe(
 		PriceID:        api.FormatPriceID(newPrice.ID),
 		Payment:        CheckoutSessionPaymentResponse{Processor: "stripe"},
 		SubscriptionID: &subID,
-		Message:        msg,
+		Message:        "Plan updated",
 	}, nil
 }
 
@@ -1665,6 +1732,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 		Mode:           "tier_change",
 		Action:         action,
 		PriceID:        api.FormatPriceID(newPrice.ID),
+		URL:            checkoutResp.RedirectURL,
 		SubscriptionID: &subID,
 		Payment: CheckoutSessionPaymentResponse{
 			Processor:   "ccbill",
@@ -1720,6 +1788,7 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 
 	// Map redirect
 	if resp.RedirectURL != "" {
+		tierResp.URL = resp.RedirectURL
 		tierResp.Payment.RedirectURL = resp.RedirectURL
 		tierResp.NextAction = &CheckoutSessionNextAction{
 			Type: "redirect_to_url",

@@ -1011,6 +1011,51 @@
         "[ ] Race tests: capture vs release, capture vs expiry worker"
       ],
       "completed": false
+    },
+    {
+      "id": 204,
+      "name": "harden-business-time-clock-injection",
+      "description": "Improve OpenRails time-travel testability by making business-time clock usage explicit, constructor-driven, and hard to bypass.\n\n## Metadata\n\n- Category: testing-infra\n- Status: planned\n- Passes: false\n\n## Motivation\n\nOpenRails already has the right basic shape: services use `clockwork.Clock`, integration tests can install a fake clock, and tests can advance time without sleeping. The weak spots are that `SetMockClock` patches services after runtime construction, clock propagation is manual, and direct `time.Now()` / SQL `NOW()` can quietly leak into billing logic.\n\n## Goals\n\n- Business-time behavior is controlled by one runtime clock from construction time.\n- Tests can build the app with a fake clock before any service, worker, or seed data is created.\n- Billing lifecycle code does not use ambient wall-clock time accidentally.\n- Infrastructure time remains allowed where it is actually correct: cache TTLs, rate limits, signature windows, metrics durations, external quote freshness, and process backoff.\n- Stripe/NMI/CCBill-style subscription tests can advance app time deterministically and verify renewals, cancellations, dunning retries, entitlement expiry, credit expiry, and checkout/session expiry.\n\n## Non-goals\n\n- Do not monkeypatch global time.\n- Do not force infrastructure/security timing to use fake business time.\n- Do not require external processors to time-travel; processor-side test clocks/sandboxes remain separate from OpenRails app time.\n\n## Proposed design\n\n- Introduce a small runtime clock dependency that is required during app/runtime construction.\n- Prefer constructor injection over public mutable `Clock` fields.\n- Keep service-local `now()` helpers, but make them wrappers over a required clock.\n- Move repository timestamp decisions up into services where the timestamp is business-time relevant.\n- Add an allowlisted guardrail for `time.Now()` / SQL `NOW()` in domain packages.",
+      "tasks": [
+        "DISCOVERY / CLASSIFICATION:",
+        "[x] Inventory all `time.Now()`, `clockwork.NewRealClock()`, SQL `NOW()`, `CURRENT_TIMESTAMP`, and DB default timestamp usages in `internal/`, `pkg/service/`, and migrations",
+        "[x] Classify each usage as `business_time`, `infrastructure_time`, `db_audit_timestamp`, or `external_protocol_time`",
+        "[x] Document the classification rule in README or AGENTS.md: billing/domain logic uses injected business clock; infra/security/cache/metrics may use wall clock",
+        "",
+        "RUNTIME / CONSTRUCTION:",
+        "[x] Add runtime/app construction option like `WithClock(clockwork.Clock)` or equivalent config path",
+        "[x] Ensure runtime construction always has a non-nil clock, defaulting to `clockwork.NewRealClock()` at the boundary only",
+        "[x] Change test setup to build suites with `setupTestSuite(t, WithClock(fakeClock))` so fake time exists before service construction and seed data",
+        "[x] Deprecate `SetMockClock` as a post-construction patch helper; keep a compatibility wrapper only if needed while migrating tests",
+        "",
+        "SERVICE INJECTION:",
+        "[x] Convert billing/domain services from public mutable `Clock` fields to private required clocks set by constructors where practical",
+        "[x] Update `createServices(...)` and runtime wiring so every time-sensitive service receives the same runtime clock during construction",
+        "[x] Ensure River workers that make business-time decisions receive the runtime clock at registration time",
+        "[x] Ensure services created inside other services propagate the parent clock explicitly instead of falling back to real time",
+        "",
+        "REPOSITORY / QUERY CLEANUP:",
+        "[x] Replace business-time SQL `NOW()` in subscription, entitlement, credit, checkout, and dunning queries with parameters derived from the injected clock",
+        "[x] Prefer service-computed `now := clock.Now().UTC()` passed into repos for cancellation, renewal, expiry, and entitlement timestamp writes",
+        "[x] Leave DB-managed audit timestamps alone only when they are truly persistence audit time rather than business state time",
+        "",
+        "GUARDRAILS:",
+        "[x] Add a small script/test that scans business/domain paths for new `time.Now()`, SQL `NOW()`, and `CURRENT_TIMESTAMP` usages",
+        "[x] Add an allowlist file or inline comments for approved infrastructure-time usages",
+        "[x] Wire the guardrail into CI or the normal test/check command so accidental business-time leaks are caught",
+        "",
+        "TEST COVERAGE:",
+        "[x] Add integration test: build runtime with fake clock before seeding, create subscription, advance one billing period, verify renewal/expiry behavior uses fake time",
+        "[x] Add integration test: cancellation at period end revokes access only after fake time advances past period end",
+        "[x] Add integration test: dunning retries are not due before `next_retry_at`, become due exactly when fake time reaches it, and remain due afterward",
+        "[x] Add integration test: credit expiry and hold expiry workers use injected fake clock from runtime construction",
+        "[x] Add regression test proving no service created during runtime boot keeps a real clock when a fake clock is supplied",
+        "",
+        "DOCS:",
+        "[x] Document how OpenRails app time relates to processor test clocks/sandboxes: Stripe test clocks control Stripe objects; OpenRails fake clock controls app-side business logic",
+        "[x] Add examples for advancing fake time in tests without sleeps"
+      ],
+      "completed": true
     }
   ]
 }

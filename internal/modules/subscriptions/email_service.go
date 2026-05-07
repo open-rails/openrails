@@ -30,7 +30,7 @@ type EmailService struct {
 	client *sendgrid.Client
 	from   *mail.Email
 	store  *config.StoreConfig
-	Clock  clockwork.Clock
+	clock  clockwork.Clock
 
 	// Domain dependencies for building subscription emails
 	subscriptionService *SubscriptionService
@@ -51,7 +51,7 @@ type OneOffPurchaseEmailData struct {
 
 // NewEmailService wires the SendGrid SDK into the billing domain service.
 // Sender info (from_email, from_name) comes from StoreConfig.
-func NewEmailService(sendgridCfg *config.SendGridConfig, storeCfg *config.StoreConfig) (*EmailService, error) {
+func NewEmailService(sendgridCfg *config.SendGridConfig, storeCfg *config.StoreConfig, clocks ...clockwork.Clock) (*EmailService, error) {
 	if sendgridCfg == nil {
 		return nil, fmt.Errorf("sendgrid configuration not provided")
 	}
@@ -72,7 +72,15 @@ func NewEmailService(sendgridCfg *config.SendGridConfig, storeCfg *config.StoreC
 	client := sendgrid.NewSendClient(apiKey)
 	from := mail.NewEmail(fromName, fromEmail)
 
-	return &EmailService{client: client, from: from, store: storeCfg}, nil
+	return &EmailService{client: client, from: from, store: storeCfg, clock: firstClock(clocks...)}, nil
+}
+
+func (s *EmailService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+}
+
+func (s *EmailService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 // SetDomainServices configures the domain services needed for subscription emails.
@@ -91,8 +99,8 @@ func (s *EmailService) SetDomainServices(
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *EmailService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
 }

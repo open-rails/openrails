@@ -79,6 +79,7 @@ type CheckoutSessionResponse struct {
 	Status         string                         `json:"status"`
 	Mode           string                         `json:"mode"`
 	PriceID        string                         `json:"price_id"`
+	URL            string                         `json:"url,omitempty"`
 	Payment        CheckoutSessionPaymentResponse `json:"payment"`
 	PaymentID      *string                        `json:"payment_id,omitempty"`
 	SubscriptionID *string                        `json:"subscription_id,omitempty"`

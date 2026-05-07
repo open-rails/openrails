@@ -150,6 +150,7 @@ func (d *WebhookDispatcher) processStripe(ctx context.Context, event *WebhookMes
 		DeduplicationService:         d.DeduplicationService,
 		ProcessorCustomerService:     d.ProcessorCustomerService,
 		CheckoutSessionService:       d.CheckoutSessionService,
+		Clock:                        d.Clock,
 	}
 	return service.HandleStripeWebhook(ctx, event.Payload)
 }

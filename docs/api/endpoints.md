@@ -169,6 +169,7 @@ Unified tier change endpoint for upgrades and downgrades across all processors.
   "mode": "tier_change",
   "action": "upgrade|downgrade",
   "price_id": "price_...",
+  "url": "https://...",
   "payment": { "processor": "stripe|mobius|ccbill" },
   "subscription_id": "sub_...",
   "next_action": { "type": "redirect_to_url", "redirect_to_url": { "url": "..." } },
@@ -180,14 +181,14 @@ Unified tier change endpoint for upgrades and downgrades across all processors.
 **Processor behavior:**
 | Processor | Upgrade | Downgrade |
 |-----------|---------|-----------|
-| Stripe | `succeeded` (immediate with proration) | `succeeded` (immediate, no proration) |
+| Stripe | `succeeded` (immediate with proration) | `succeeded` + `delayed_start` (scheduled for period end) |
 | Mobius/NMI | `succeeded` (immediate proration charge) | `succeeded` + `delayed_start` (scheduled) |
-| CCBill | `requires_action` + redirect to FlexForm | `blocked` + message |
+| CCBill | `requires_action` + top-level `url` redirect to FlexForm | `blocked` + message |
 | Solana | HTTP 400 (not supported) | HTTP 400 (not supported) |
 
 **Notes:**
 - Target price must be in the same tier group as current subscription
-- For CCBill upgrades, client must redirect to `next_action.redirect_to_url.url`
+- For hosted processor actions, clients should redirect to top-level `url`
 - For scheduled downgrades, the change takes effect at `delayed_start`
 
 ### GET /v1/me/payments
@@ -237,7 +238,7 @@ Returns the credit balance for a single credit type (e.g. `api_credits`).
 Lists credit transactions for the credit type (including hold lifecycle rows). Query params: `limit`, `offset`.
 
 ### POST /v1/me/portal
-Creates a Stripe customer portal session. Response `{ redirect_url }`.
+Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
 
 ## Service API (Private Port 8060)
 

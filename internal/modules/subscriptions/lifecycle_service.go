@@ -28,7 +28,7 @@ import (
 type SubscriptionLifecycleService struct {
 	DB                  *db.DB
 	Config              *config.Config
-	Clock               clockwork.Clock
+	clock               clockwork.Clock
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
 	EntitlementService  *entitlements.EntitlementService
@@ -65,11 +65,11 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 }
 
 // NewSubscriptionLifecycleService creates a new instance of SubscriptionLifecycleService
-func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService NotificationEmailSender, paymentService *payments.PaymentService, eventLogService LifecycleEventLogger) *SubscriptionLifecycleService {
+func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService NotificationEmailSender, paymentService *payments.PaymentService, eventLogService LifecycleEventLogger, clocks ...clockwork.Clock) *SubscriptionLifecycleService {
 	return &SubscriptionLifecycleService{
 		DB:                  db,
-		Config:              nil,                      // Set via SetConfig if feature flags are needed
-		Clock:               clockwork.NewRealClock(), // Default to real clock, can be overridden for tests
+		Config:              nil,                   // Set via SetConfig if feature flags are needed
+		clock:               firstClock(clocks...), // Default to real clock, can be overridden for tests
 		ProductService:      productService,
 		PriceService:        priceService,
 		EntitlementService:  entitlementService,
@@ -81,7 +81,11 @@ func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductS
 
 // SetClock allows replacing the clock for testing
 func (s *SubscriptionLifecycleService) SetClock(c clockwork.Clock) {
-	s.Clock = c
+	s.clock = firstClock(c)
+}
+
+func (s *SubscriptionLifecycleService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 // SetConfig sets the config for feature flag access
@@ -91,8 +95,8 @@ func (s *SubscriptionLifecycleService) SetConfig(cfg *config.Config) {
 
 // now returns the current time from the service's clock
 func (s *SubscriptionLifecycleService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
 }
@@ -165,10 +169,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	priceService := catalog.NewPriceService(dbb)
 	productService := catalog.NewProductService(dbb)
-	entitlementService := entitlements.NewEntitlementService(dbb)
-	entitlementService.SetClock(s.Clock) // Propagate clock for testing
+	entitlementService := entitlements.NewEntitlementService(dbb, s.Clock())
+	entitlementService.SetClock(s.Clock()) // Propagate clock for testing
 	notificationRepo := repo.NewNotificationQueueRepo(dbb)
-	subService := NewSubscriptionService(dbb, priceService, productService, nil, nil, nil)
+	subService := NewSubscriptionService(dbb, priceService, productService, nil, nil, nil, s.Clock())
 
 	price, err := priceService.GetByID(ctx, params.PriceID)
 	if err != nil {
@@ -377,7 +381,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	// Create Payment record if payment info is provided
 	if params.TransactionID != "" && s.PaymentService != nil {
-		paymentService := payments.NewPaymentService(dbb)
+		paymentService := payments.NewPaymentService(dbb, s.Clock())
 		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
@@ -462,10 +466,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil)
-		entitlementService := entitlements.NewEntitlementService(db)
-		paymentService := payments.NewPaymentService(db)
-		entitlementService.SetClock(s.Clock)
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		entitlementService := entitlements.NewEntitlementService(db, s.Clock())
+		paymentService := payments.NewPaymentService(db, s.Clock())
+		entitlementService.SetClock(s.Clock())
 
 		// Find subscription - use processor name for gateway lookup
 		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), params.ProcessorSubscriptionID)
@@ -792,9 +796,9 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := NewSubscriptionService(txdb, priceService, productService, nil, nil, nil)
-		entitlementService := entitlements.NewEntitlementService(txdb)
-		entitlementService.SetClock(s.Clock)
+		subService := NewSubscriptionService(txdb, priceService, productService, nil, nil, nil, s.Clock())
+		entitlementService := entitlements.NewEntitlementService(txdb, s.Clock())
+		entitlementService.SetClock(s.Clock())
 
 		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), processorSubID)
 		if err != nil {
@@ -924,9 +928,9 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil)
-		entSvc := entitlements.NewEntitlementService(db)
-		entSvc.SetClock(s.Clock) // Propagate clock for testing
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		entSvc := entitlements.NewEntitlementService(db, s.Clock())
+		entSvc.SetClock(s.Clock()) // Propagate clock for testing
 
 		// Use processor name for gateway lookup
 		// Find subscription
@@ -1078,9 +1082,9 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil)
-		entSvc := entitlements.NewEntitlementService(db)
-		entSvc.SetClock(s.Clock) // Propagate clock for testing
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		entSvc := entitlements.NewEntitlementService(db, s.Clock())
+		entSvc.SetClock(s.Clock()) // Propagate clock for testing
 
 		subscription, err := subService.GetByID(ctx, subscriptionID)
 		if err != nil {
@@ -1212,9 +1216,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil)
-		entSvc := entitlements.NewEntitlementService(db)
-		entSvc.SetClock(s.Clock) // Propagate clock for testing
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		entSvc := entitlements.NewEntitlementService(db, s.Clock())
+		entSvc.SetClock(s.Clock()) // Propagate clock for testing
 
 		subscription, err := subService.GetByID(ctx, *params.SubscriptionID)
 		if err != nil {

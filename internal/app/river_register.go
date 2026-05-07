@@ -27,7 +27,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return err
 	}
 
-	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService}); err != nil {
+	clock := r.Clock
+	if clock == nil {
+		clock = clockwork.NewRealClock()
+	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{}); err != nil {
@@ -38,10 +42,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	// Webhook processing is now synchronous-only - no background workers needed.
 	// Payment processors (CCBill, NMI) retry failed webhooks from their end.
-	clock := r.Clock
-	if clock == nil {
-		clock = clockwork.NewRealClock()
-	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CleanupExpiredDataWorker{
 		DB:     r.DB,
 		Clock:  clock,

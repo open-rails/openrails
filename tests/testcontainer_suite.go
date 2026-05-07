@@ -58,13 +58,39 @@ type TestContainerSuite struct {
 
 	workersCancel context.CancelFunc
 	workersErrCh  chan error
+
+	clock clockwork.Clock
+	port  int
+}
+
+// TestSuiteOption customizes an integration test suite before it boots.
+type TestSuiteOption func(*TestContainerSuite)
+
+// WithSuiteClock injects a clock before the runtime, services, workers, and
+// seed helpers are created. Prefer this over SetMockClock for new tests.
+func WithSuiteClock(clock clockwork.Clock) TestSuiteOption {
+	return func(suite *TestContainerSuite) {
+		suite.clock = clock
+	}
+}
+
+// WithSuitePort sets the HTTP listen port for isolated suites.
+func WithSuitePort(port int) TestSuiteOption {
+	return func(suite *TestContainerSuite) {
+		suite.port = port
+	}
 }
 
 // NewTestContainerSuite creates a new test container suite
-func NewTestContainerSuite(t *testing.T) *TestContainerSuite {
+func NewTestContainerSuite(t *testing.T, opts ...TestSuiteOption) *TestContainerSuite {
 	suite := &TestContainerSuite{
 		t:   t,
 		ctx: context.Background(),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(suite)
+		}
 	}
 
 	suite.SetupSuite()
@@ -179,7 +205,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	suite.Config = &config.Config{
 		Env:  "dev",
 		Host: "localhost",
-		Port: 8080, // Fixed port for testing
+		Port: 8080, // Fixed port for shared test suite
 		DB: &config.DBConfig{
 			URL: postgresConnStr,
 		},
@@ -224,6 +250,9 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 				QueryURL:      "https://secure.networkmerchants.com/api/query.php",
 			},
 		},
+	}
+	if suite.port != 0 {
+		suite.Config.Port = config.FlexiblePort(suite.port)
 	}
 
 	// Initialize Redis connection
@@ -307,7 +336,9 @@ func (suite *TestContainerSuite) initializeServer() {
 	suite.t.Helper()
 
 	// Bootstrap the application (creates runtime, cache, auth verifier, etc.)
-	assembled, err := bootstrap.NewServer(suite.Config, nil)
+	assembled, err := bootstrap.NewServer(suite.Config, &bootstrap.Options{
+		Clock: suite.clock,
+	})
 	require.NoError(suite.t, err)
 	suite.App = assembled.App
 
@@ -446,6 +477,10 @@ func (suite *TestContainerSuite) ResetDatabase() {
 // SetMockClock replaces the runtime's clock with a mock clock and returns the mock.
 // This allows tests to control time for testing time-dependent logic.
 // It also updates the clock on services that use time-dependent logic.
+//
+// Deprecated: new tests should prefer NewTestContainerSuite(t, WithSuiteClock(clock))
+// or setupTestSuite(t, WithSuiteClock(clock)) so fake time is installed before
+// runtime construction and seed data.
 func (suite *TestContainerSuite) SetMockClock(t ...time.Time) *clockwork.FakeClock {
 	suite.t.Helper()
 	var mockClock *clockwork.FakeClock
@@ -465,18 +500,39 @@ func (suite *TestContainerSuite) SetMockClock(t ...time.Time) *clockwork.FakeClo
 		rt.SubscriptionLifecycleService.SetClock(mockClock)
 	}
 	if rt.SubscriptionService != nil {
-		rt.SubscriptionService.Clock = mockClock
+		rt.SubscriptionService.SetClock(mockClock)
 	}
 	if rt.EntitlementService != nil {
-		rt.EntitlementService.Clock = mockClock
+		rt.EntitlementService.SetClock(mockClock)
 	}
 	if rt.PaymentService != nil {
-		rt.PaymentService.Clock = mockClock
+		rt.PaymentService.SetClock(mockClock)
+	}
+	if rt.CreditsService != nil {
+		rt.CreditsService.SetClock(mockClock)
 	}
 
 	// Vault and payment method services
 	if rt.VaultService != nil {
-		rt.VaultService.Clock = mockClock
+		rt.VaultService.SetClock(mockClock)
+	}
+	if rt.UserSubscriptionService != nil {
+		rt.UserSubscriptionService.SetClock(mockClock)
+	}
+	if rt.AdminSubscriptionService != nil {
+		rt.AdminSubscriptionService.SetClock(mockClock)
+	}
+	if rt.CheckoutService != nil {
+		rt.CheckoutService.SetClock(mockClock)
+	}
+	if rt.CheckoutSessionService != nil {
+		rt.CheckoutSessionService.SetClock(mockClock)
+	}
+	if rt.SolanaPayService != nil {
+		rt.SolanaPayService.SetClock(mockClock)
+	}
+	if rt.SolanaTransactionService != nil {
+		rt.SolanaTransactionService.SetClock(mockClock)
 	}
 
 	// Webhook services
@@ -486,12 +542,12 @@ func (suite *TestContainerSuite) SetMockClock(t ...time.Time) *clockwork.FakeClo
 
 	// Email service (if it has a clock)
 	if rt.EmailService != nil {
-		rt.EmailService.Clock = mockClock
+		rt.EmailService.SetClock(mockClock)
 	}
 
 	// Event log service (ClickHouse audit logging)
 	if rt.EventLogService != nil {
-		rt.EventLogService.Clock = mockClock
+		rt.EventLogService.SetClock(mockClock)
 	}
 
 	return mockClock

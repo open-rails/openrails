@@ -21,7 +21,7 @@ type VaultService struct {
 	SubscriptionService  subscriptionReader
 	NMIClients           map[string]*nmi.NMIClient
 	DB                   *db.DB
-	Clock                clockwork.Clock
+	clock                clockwork.Clock
 }
 
 type subscriptionReader interface {
@@ -30,10 +30,18 @@ type subscriptionReader interface {
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *VaultService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
+}
+
+func (s *VaultService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+}
+
+func (s *VaultService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 type CreateVaultRequest struct {
@@ -93,13 +101,23 @@ func (e *VaultError) Unwrap() error {
 	return e.Err
 }
 
-func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB) *VaultService {
+func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, clocks ...clockwork.Clock) *VaultService {
 	return &VaultService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,
 		NMIClients:           nmiClients,
 		DB:                   dbx,
+		clock:                firstClock(clocks...),
 	}
+}
+
+func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
+	for _, c := range clocks {
+		if c != nil {
+			return c
+		}
+	}
+	return clockwork.NewRealClock()
 }
 
 // CreateVault creates a NMI customer vault and stores a local PaymentMethod

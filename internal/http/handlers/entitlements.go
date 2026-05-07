@@ -61,7 +61,7 @@ func ServiceGetUserEntitlements(r *httprequest.Request) {
 		}
 		at = &parsed
 	}
-	queryTime := time.Now()
+	queryTime := r.Clock.Now()
 	if at != nil {
 		queryTime = *at
 	}

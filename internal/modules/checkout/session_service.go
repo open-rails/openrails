@@ -81,7 +81,7 @@ type CheckoutSessionService struct {
 	solanaTransactionService solanaTransactionService
 	fxProvider               fx.Provider
 	config                   *config.Config
-	Clock                    clockwork.Clock
+	clock                    clockwork.Clock
 }
 
 func NewCheckoutSessionService(
@@ -95,6 +95,7 @@ func NewCheckoutSessionService(
 	solanaTransactionService solanaTransactionService,
 	fxProvider fx.Provider,
 	cfg *config.Config,
+	clocks ...clockwork.Clock,
 ) *CheckoutSessionService {
 	return &CheckoutSessionService{
 		db:                       db,
@@ -108,14 +109,23 @@ func NewCheckoutSessionService(
 		solanaTransactionService: solanaTransactionService,
 		fxProvider:               fxProvider,
 		config:                   cfg,
+		clock:                    firstClock(clocks...),
 	}
 }
 
 func (s *CheckoutSessionService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
+}
+
+func (s *CheckoutSessionService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+}
+
+func (s *CheckoutSessionService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
@@ -695,7 +705,8 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 			}
 		}
 		if val, ok := session.ProcessorState["redirect_url"].(string); ok && strings.TrimSpace(val) != "" {
-			resp.Payment.RedirectURL = val
+			resp.URL = strings.TrimSpace(val)
+			resp.Payment.RedirectURL = resp.URL
 		}
 		if val, ok := session.ProcessorState["message"].(string); ok && strings.TrimSpace(val) != "" {
 			resp.Message = strings.TrimSpace(val)

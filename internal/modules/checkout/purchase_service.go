@@ -27,7 +27,7 @@ type CheckoutPurchaseService struct {
 	PaymentService      *payments.PaymentService
 	EntitlementService  *entitlements.EntitlementService
 	SubscriptionService checkoutSubscriptionAccess
-	Clock               clockwork.Clock
+	clock               clockwork.Clock
 }
 
 func NewCheckoutPurchaseService(
@@ -36,6 +36,7 @@ func NewCheckoutPurchaseService(
 	paymentService *payments.PaymentService,
 	entitlementService *entitlements.EntitlementService,
 	subscriptionService checkoutSubscriptionAccess,
+	clocks ...clockwork.Clock,
 ) *CheckoutPurchaseService {
 	return &CheckoutPurchaseService{
 		PriceService:        priceService,
@@ -43,14 +44,32 @@ func NewCheckoutPurchaseService(
 		PaymentService:      paymentService,
 		EntitlementService:  entitlementService,
 		SubscriptionService: subscriptionService,
+		clock:               firstClock(clocks...),
 	}
 }
 
 func (s *CheckoutPurchaseService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
+}
+
+func (s *CheckoutPurchaseService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+}
+
+func (s *CheckoutPurchaseService) Clock() clockwork.Clock {
+	return s.clock
+}
+
+func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
+	for _, c := range clocks {
+		if c != nil {
+			return c
+		}
+	}
+	return clockwork.NewRealClock()
 }
 
 func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*EligibilityResult, error) {

@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/internal/db"
@@ -35,6 +36,7 @@ type BootstrapOptions struct {
 	Redis        *redis.Client
 	AuthProvider authprovider.Provider
 	Cache        cache.Cache
+	Clock        clockwork.Clock
 }
 
 // Bootstrap initialises core services, caches, and auth verifier.
@@ -96,6 +98,12 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 		Redis: func() *redis.Client {
 			if opts != nil {
 				return opts.Redis
+			}
+			return nil
+		}(),
+		Clock: func() clockwork.Clock {
+			if opts != nil {
+				return opts.Clock
 			}
 			return nil
 		}(),

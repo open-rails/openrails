@@ -24,26 +24,35 @@ type SolanaTransactionService struct {
 	cfg          *config.Config
 	priceService *catalog.PriceService
 	fxProvider   fx.Provider
-	Clock        clockwork.Clock
+	clock        clockwork.Clock
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *SolanaTransactionService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
 }
 
 // NewSolanaTransactionService creates a new transaction service.
-func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *config.Config, price *catalog.PriceService, fxProvider fx.Provider) *SolanaTransactionService {
+func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *config.Config, price *catalog.PriceService, fxProvider fx.Provider, clocks ...clockwork.Clock) *SolanaTransactionService {
 	return &SolanaTransactionService{
 		db:           db,
 		rpc:          rpc,
 		cfg:          cfg,
 		priceService: price,
 		fxProvider:   fxProvider,
+		clock:        firstClock(clocks...),
 	}
+}
+
+func (s *SolanaTransactionService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+}
+
+func (s *SolanaTransactionService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 // BuildPaymentTransaction creates a Solana transaction for payment.

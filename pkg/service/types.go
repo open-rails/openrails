@@ -39,13 +39,18 @@ type GetProductsOptions struct {
 
 // Product represents a billing product.
 type Product struct {
-	ID          string
-	Name        string
-	Description string
-	Active      bool
-	Created     int64 // Unix epoch seconds
-	Updated     int64 // Unix epoch seconds
-	Prices      []Price
+	ID               string
+	Slug             string
+	Name             string
+	Description      string
+	EntitlementsSpec map[string]*int
+	CreditsSpec      CreditsSpec
+	TierGroup        *string
+	TierRank         int
+	Active           bool
+	Created          int64 // Unix epoch seconds
+	Updated          int64 // Unix epoch seconds
+	Prices           []Price
 }
 
 // -------------------------------- Prices --------------------------------
@@ -67,15 +72,15 @@ type GetPricesOptions struct {
 
 // Price represents a billing price.
 type Price struct {
-	ID        string
-	Name      string
-	Amount    int64  // Amount in cents
-	Currency  string // e.g., "usd"
-	Type      string // "one_time" or "recurring"
-	Recurring *RecurringInfo
-	ProductID string
-	Active    bool
-	Created   int64 // Unix epoch seconds
+	ID         string
+	Name       string
+	UnitAmount int64  // Amount in the currency's smallest unit
+	Currency   string // e.g., "usd"
+	Type       string // "one_time" or "recurring"
+	Recurring  *RecurringInfo
+	ProductID  string
+	Active     bool
+	Created    int64 // Unix epoch seconds
 }
 
 // RecurringInfo describes the billing interval for recurring prices.

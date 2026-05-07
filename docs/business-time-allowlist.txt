@@ -1,0 +1,62 @@
+# path|fragment|classification|reason
+#
+# Classifications:
+# - business_time_boundary: fallback or boundary default when no runtime clock was supplied.
+# - infrastructure_time: cache, queue, rate-limit, replay, cleanup, or process timing.
+# - external_protocol_time: timestamps exchanged with external systems or freshness metadata.
+# - db_audit_timestamp: persistence audit/default timestamp, not domain state.
+
+internal/modules/payments/solana_support.go|QuotedAt: time.Now()|external_protocol_time|quote freshness metadata
+internal/modules/payments/solana_support.go|quotedAt := time.Now()|external_protocol_time|quote freshness metadata
+internal/modules/payments/processor_customer_service.go|now := time.Now().UTC()|db_audit_timestamp|processor customer record audit timestamp
+internal/modules/payments/payment.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/payments/payment.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
+internal/river/jobs_cleanup.go|clockwork.NewRealClock()|business_time_boundary|worker fallback when no runtime clock was supplied
+internal/modules/analytics/admin_metrics_service.go|clockwork.NewRealClock()|business_time_boundary|metrics service default at construction boundary
+internal/modules/analytics/admin_metrics_service.go|time.Now().UTC()|infrastructure_time|admin metrics dashboard period default
+internal/river/jobs_webhooks.go|args.ReceivedAt = time.Now()|infrastructure_time|queue receipt timestamp
+internal/modules/vault/vault_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/vault/vault_service.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
+internal/river/jobs_hold_expiry.go|clockwork.NewRealClock()|business_time_boundary|worker fallback when no runtime clock was supplied
+internal/db/repo/subscription.go|time.Now()|business_time_boundary|compatibility fallback for callers that have not passed business time
+internal/modules/analytics/event_log_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/analytics/event_log_service.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
+internal/river/jobs_dunning.go|return time.Now()|business_time_boundary|worker fallback when no runtime clock was supplied
+pkg/service/service_definition_catalog.go|time.Now().UTC()|db_audit_timestamp|catalog admin create/update timestamp
+internal/river/jobs_credit_expiry.go|clockwork.NewRealClock()|business_time_boundary|worker fallback when no runtime clock was supplied
+internal/modules/credits/credit_type_service.go|ct.CreatedAt = time.Now().UTC()|db_audit_timestamp|credit type create timestamp
+internal/river/jobs_subscription_manage.go|now := time.Now().UTC()|business_time_boundary|subscription management worker not yet clock-injected
+internal/modules/credits/credits_service.go|clockwork.NewRealClock()|business_time_boundary|service default at construction boundary
+internal/modules/credits/credits_service.go|return time.Now().UTC()|business_time_boundary|service fallback when no runtime clock was supplied
+pkg/service/service_admin.go|time.Now().UTC()|business_time_boundary|service facade fallback pending full clock plumbing
+internal/http/handlers/admin_metrics.go|now := time.Now().UTC()|infrastructure_time|dashboard query default
+pkg/service/service.go|return time.Now()|business_time_boundary|service facade fallback when no runtime clock was supplied
+internal/http/handlers/solana_supported_tokens.go|quotedAt := time.Now()|external_protocol_time|token quote metadata
+internal/modules/subscriptions/stripe_service.go|startDate = time.Now().UTC().Unix()|external_protocol_time|Stripe subscription search default
+internal/modules/webhooks/ccbill.go|return time.Now()|business_time_boundary|webhook service fallback when dispatcher clock missing
+internal/modules/checkout/session_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/subscriptions/admin_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/idempotency/service.go|time.Now()|infrastructure_time|idempotency TTL/cache lifecycle
+internal/modules/webhooks/nmi.go|return time.Now()|business_time_boundary|webhook service fallback when dispatcher clock missing
+internal/modules/subscriptions/subscription.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/subscriptions/subscription.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
+internal/modules/webhooks/replay/service.go|startTime := time.Now()|infrastructure_time|replay operation duration measurement
+internal/modules/webhooks/stripe.go|return time.Now()|business_time_boundary|webhook service fallback when dispatcher clock missing
+internal/modules/checkout/service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/checkout/purchase_service.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
+internal/modules/checkout/purchase_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/http/handlers/admin_users.go|now := time.Now()|business_time_boundary|admin handler fallback pending full request clock cleanup
+internal/modules/subscriptions/lifecycle_service.go|clockwork.NewRealClock()|business_time_boundary|service default at construction boundary
+internal/modules/subscriptions/lifecycle_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/subscriptions/email_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/subscriptions/user_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/entitlements/entitlement_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/entitlements/entitlement_service.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
+internal/modules/solana/support.go|QuotedAt: time.Now()|external_protocol_time|quote freshness metadata
+internal/modules/solana/support.go|quotedAt := time.Now()|external_protocol_time|quote freshness metadata
+internal/modules/solana/transaction.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/http/handlers/entitlements.go|queryTime := time.Now()|business_time_boundary|admin handler fallback pending full request clock cleanup
+internal/http/handlers/entitlements.go|now := time.Now()|business_time_boundary|admin handler fallback pending full request clock cleanup
+internal/modules/solana/pay.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
+internal/modules/solana/pay.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
+internal/modules/solana/poller.go|time.Now()|infrastructure_time|poller retry/backoff state

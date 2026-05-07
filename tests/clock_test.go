@@ -9,11 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 // TestClockMockBasics tests the basic functionality of the mock clock
@@ -90,6 +92,180 @@ func TestClockInTestSuite(t *testing.T) {
 		expected := fixedTime.Add(30 * 24 * time.Hour)
 		assert.Equal(t, expected, suite.App.Runtime.Clock.Now())
 	})
+}
+
+func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
+	fixedTime := time.Date(2024, 8, 1, 10, 0, 0, 0, time.UTC)
+	mockClock := clockwork.NewFakeClockAt(fixedTime)
+	suite := setupTestSuite(t, WithSuiteClock(mockClock))
+	ctx := context.Background()
+
+	rt := suite.App.Runtime
+	require.Equal(t, mockClock, rt.Clock)
+	require.Equal(t, mockClock, rt.SubscriptionLifecycleService.Clock())
+	require.Equal(t, mockClock, rt.SubscriptionService.Clock())
+	require.Equal(t, mockClock, rt.EntitlementService.Clock())
+	require.Equal(t, mockClock, rt.PaymentService.Clock())
+	require.Equal(t, mockClock, rt.VaultService.Clock())
+	require.Equal(t, mockClock, rt.WebhookDispatcher.Clock)
+	require.Equal(t, mockClock, rt.CheckoutService.Clock())
+	require.Equal(t, mockClock, rt.CheckoutSessionService.Clock())
+	require.Equal(t, mockClock, rt.CreditsService.Clock())
+	require.Equal(t, mockClock, rt.SolanaPayService.Clock())
+	require.Equal(t, mockClock, rt.SolanaTransactionService.Clock())
+	if rt.EventLogService != nil {
+		require.Equal(t, mockClock, rt.EventLogService.Clock())
+	}
+
+	products := suite.SeedProducts()
+	priceID := products[0].Prices[0].ID
+	userID := uuid.New().String()
+	periodEnd := fixedTime.Add(24 * time.Hour)
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:    userID,
+		PriceID:   priceID,
+		Status:    models.StatusActive,
+		PeriodEnd: periodEnd,
+	})
+
+	assert.Equal(t, fixedTime, sub.CreatedAt)
+	assert.Equal(t, fixedTime, sub.UpdatedAt)
+	assert.Equal(t, fixedTime, sub.StartedAt)
+
+	activeSub, err := rt.SubscriptionService.GetActiveSubscription(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, sub.ID, activeSub.ID)
+
+	mockClock.Advance(25 * time.Hour)
+	_, err = rt.SubscriptionService.GetActiveSubscription(ctx, userID)
+	require.Error(t, err, "subscription should not be active after fake time passes the period end")
+
+	sub.Status = models.StatusCancelled
+	require.NoError(t, rt.SubscriptionService.Update(ctx, sub))
+	updated := suite.GetSubscription(sub.ID)
+	assert.WithinDuration(t, mockClock.Now(), updated.UpdatedAt, time.Millisecond)
+
+	retryUserID := uuid.New().String()
+	pm := suite.CreateTestPaymentMethod(retryUserID)
+	nextRetry := mockClock.Now().Add(time.Hour)
+	retryAttempts := 1
+	processorSubID := "clock-dunning-" + uuid.New().String()[:8]
+	suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:          retryUserID,
+		PriceID:         priceID,
+		Status:          models.StatusPastDue,
+		Processor:       models.ProcessorMobius,
+		ProcessorSubID:  processorSubID,
+		PeriodStart:     mockClock.Now().Add(-30 * 24 * time.Hour),
+		PeriodEnd:       mockClock.Now().Add(-time.Hour),
+		RetryAttempts:   &retryAttempts,
+		NextRetryAt:     &nextRetry,
+		PaymentMethodID: &pm.ID,
+	})
+	countDueRetries := func() int {
+		var count int
+		err := suite.BunDB.NewSelect().
+			Model((*models.Subscription)(nil)).
+			Where("sub.processor = ?", models.ProcessorMobius).
+			Where("sub.status = ?", models.StatusPastDue).
+			Where("sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= ?", mockClock.Now()).
+			ColumnExpr("COUNT(*)").
+			Scan(ctx, &count)
+		require.NoError(t, err)
+		return count
+	}
+	assert.Equal(t, 0, countDueRetries())
+	mockClock.Advance(time.Hour)
+	assert.Equal(t, 1, countDueRetries())
+
+	cancelUserID := uuid.New().String()
+	cancelStart := mockClock.Now()
+	cancelPeriodEnd := cancelStart.Add(30 * 24 * time.Hour)
+	cancelSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:      cancelUserID,
+		PriceID:     priceID,
+		Status:      models.StatusActive,
+		Processor:   models.ProcessorMobius,
+		PeriodStart: cancelStart,
+		PeriodEnd:   cancelPeriodEnd,
+	})
+	ent := &models.Entitlement{
+		ID:          uuid.New(),
+		UserID:      cancelUserID,
+		Entitlement: "premium",
+		StartAt:     cancelStart,
+		EndAt:       nil,
+		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    &cancelSub.ID,
+		CreatedAt:   cancelStart,
+		UpdatedAt:   cancelStart,
+	}
+	_, err = suite.BunDB.NewInsert().Model(ent).Exec(ctx)
+	require.NoError(t, err)
+
+	mockClock.Advance(5 * 24 * time.Hour)
+	require.NoError(t, rt.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+		SubscriptionID: &cancelSub.ID,
+		CancelType:     models.CancelTypeUser,
+		RevokeAccess:   false,
+	}))
+	isEntitled, err := rt.EntitlementService.IsEntitled(ctx, cancelUserID, "premium", mockClock.Now())
+	require.NoError(t, err)
+	assert.True(t, isEntitled)
+
+	mockClock.Advance(cancelPeriodEnd.Add(-time.Hour).Sub(mockClock.Now()))
+	isEntitled, err = rt.EntitlementService.IsEntitled(ctx, cancelUserID, "premium", mockClock.Now())
+	require.NoError(t, err)
+	assert.True(t, isEntitled)
+
+	mockClock.Advance(2 * time.Hour)
+	isEntitled, err = rt.EntitlementService.IsEntitled(ctx, cancelUserID, "premium", mockClock.Now())
+	require.NoError(t, err)
+	assert.False(t, isEntitled)
+
+	creditType := suite.createTestCreditType("clock-expiry-" + uuid.New().String()[:8])
+	creditUserID := uuid.New().String()
+	balance := suite.createTestCreditBalance(creditUserID, creditType.ID, 100, 25)
+	holdExpiry := mockClock.Now().Add(time.Hour)
+	hold := suite.createTestCreditHold(creditUserID, creditType.ID, 25, "active", holdExpiry)
+	blockExpiry := mockClock.Now().Add(time.Hour)
+	block := &models.CreditBlock{
+		ID:              uuid.New(),
+		UserID:          creditUserID,
+		CreditTypeID:    creditType.ID,
+		OriginalAmount:  75,
+		RemainingAmount: 75,
+		ExpiresAt:       &blockExpiry,
+		CreatedAt:       mockClock.Now(),
+	}
+	_, err = suite.BunDB.NewInsert().Model(block).Exec(ctx)
+	require.NoError(t, err)
+
+	holdWorker := &riverjobs.HoldExpiryWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock}
+	creditWorker := &riverjobs.CreditExpiryWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock}
+
+	require.NoError(t, holdWorker.Work(ctx, &river.Job[riverjobs.HoldExpiryArgs]{Args: riverjobs.HoldExpiryArgs{}}))
+	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
+	assert.Equal(t, "active", suite.getCreditHold(hold.ID).Status)
+	var remaining int64
+	require.NoError(t, suite.BunDB.NewSelect().Model((*models.CreditBlock)(nil)).
+		ColumnExpr("remaining_amount").
+		Where("id = ?", block.ID).
+		Scan(ctx, &remaining))
+	assert.Equal(t, int64(75), remaining)
+
+	mockClock.Advance(2 * time.Hour)
+	require.NoError(t, holdWorker.Work(ctx, &river.Job[riverjobs.HoldExpiryArgs]{Args: riverjobs.HoldExpiryArgs{}}))
+	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
+	assert.Equal(t, "expired", suite.getCreditHold(hold.ID).Status)
+	updatedBalance := suite.getCreditBalance(balance.ID)
+	assert.Equal(t, int64(0), updatedBalance.HeldBalance)
+	assert.Equal(t, int64(25), updatedBalance.Balance)
+	require.NoError(t, suite.BunDB.NewSelect().Model((*models.CreditBlock)(nil)).
+		ColumnExpr("remaining_amount").
+		Where("id = ?", block.ID).
+		Scan(ctx, &remaining))
+	assert.Equal(t, int64(0), remaining)
 }
 
 // TestSubscriptionExpiryWithMockClock demonstrates testing subscription expiry logic

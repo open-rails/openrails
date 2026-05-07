@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -234,7 +233,7 @@ func (s *Service) GetBillingStatus(ctx context.Context, userID string) (*Billing
 
 	// Get entitlements
 	if s.rt.EntitlementService != nil {
-		ents, err := s.rt.EntitlementService.ListActiveEntitlements(ctx, userID, time.Now().UTC())
+		ents, err := s.rt.EntitlementService.ListActiveEntitlements(ctx, userID, s.now().UTC())
 		if err == nil {
 			status.Entitlements = ents
 		}
@@ -895,14 +894,34 @@ func productFromModel(p *catalog.PublicProductResponse) Product {
 		prices = append(prices, priceFromModel(pr))
 	}
 	return Product{
-		ID:          api.FormatProductID(p.ID),
-		Name:        p.DisplayName,
-		Description: p.Description,
-		Active:      p.IsActive,
-		Created:     api.ToUnix(p.CreatedAt),
-		Updated:     api.ToUnix(p.UpdatedAt),
-		Prices:      prices,
+		ID:               api.FormatProductID(p.ID),
+		Slug:             p.Slug,
+		Name:             p.DisplayName,
+		Description:      p.Description,
+		EntitlementsSpec: p.EntitlementsSpec,
+		CreditsSpec:      creditsSpecFromModel(p.CreditsSpec),
+		TierGroup:        p.TierGroup,
+		TierRank:         p.TierRank,
+		Active:           p.IsActive,
+		Created:          api.ToUnix(p.CreatedAt),
+		Updated:          api.ToUnix(p.UpdatedAt),
+		Prices:           prices,
 	}
+}
+
+func creditsSpecFromModel(in models.CreditsSpec) CreditsSpec {
+	if in == nil {
+		return nil
+	}
+	out := make(CreditsSpec, len(in))
+	for k, v := range in {
+		out[k] = CreditGrantSpec{
+			Amount:      v.Amount,
+			ExpiresDays: v.ExpiresDays,
+			Cadence:     CreditGrantCadence(v.Cadence),
+		}
+	}
+	return out
 }
 
 func priceFromModel(p *models.Price) Price {
@@ -921,15 +940,15 @@ func priceFromModel(p *models.Price) Price {
 	}
 
 	return Price{
-		ID:        api.FormatPriceID(p.ID),
-		Name:      p.DisplayName,
-		Amount:    p.Amount,
-		Currency:  p.Currency,
-		Type:      priceType,
-		Recurring: recurring,
-		ProductID: api.FormatProductID(p.ProductID),
-		Active:    p.IsActive,
-		Created:   api.ToUnix(p.CreatedAt),
+		ID:         api.FormatPriceID(p.ID),
+		Name:       p.DisplayName,
+		UnitAmount: p.Amount,
+		Currency:   p.Currency,
+		Type:       priceType,
+		Recurring:  recurring,
+		ProductID:  api.FormatProductID(p.ProductID),
+		Active:     p.IsActive,
+		Created:    api.ToUnix(p.CreatedAt),
 	}
 }
 
@@ -1071,7 +1090,9 @@ func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *Checko
 	if resp.SubscriptionID != nil {
 		result.SubscriptionID = resp.SubscriptionID
 	}
-	if resp.NextAction != nil && resp.NextAction.RedirectToURL != nil {
+	if resp.URL != "" {
+		result.URL = &resp.URL
+	} else if resp.NextAction != nil && resp.NextAction.RedirectToURL != nil {
 		result.URL = &resp.NextAction.RedirectToURL.URL
 	}
 	result.ProcessorData = map[string]any{

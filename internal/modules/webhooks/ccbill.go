@@ -180,7 +180,7 @@ func (s *CCBillWebhookService) paymentService() *payments.PaymentService {
 		return s.PaymentService
 	}
 	if s.DB != nil {
-		return payments.NewPaymentService(s.DB)
+		return payments.NewPaymentService(s.DB, s.Clock)
 	}
 	return nil
 }
@@ -748,9 +748,9 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		entitlementService := entitlements.NewEntitlementService(txdb)
-		paymentService := payments.NewPaymentService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
+		entitlementService := entitlements.NewEntitlementService(txdb, s.Clock)
+		paymentService := payments.NewPaymentService(txdb, s.Clock)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
 
 		// Find subscription by the original processor subscription ID and then transition it.
 		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), originalSubscriptionID)
@@ -1183,7 +1183,7 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
 
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
@@ -1268,7 +1268,7 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
 
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
@@ -1486,9 +1486,9 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
-		entSvc := entitlements.NewEntitlementService(txdb)
-		paymentService := payments.NewPaymentService(txdb)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		entSvc := entitlements.NewEntitlementService(txdb, s.Clock)
+		paymentService := payments.NewPaymentService(txdb, s.Clock)
 
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
@@ -1680,7 +1680,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		db := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		subService := subscriptions.NewSubscriptionService(db, priceService, productService, s.CCBillClient, nil, nil)
+		subService := subscriptions.NewSubscriptionService(db, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
 
 		// Try to find subscription by processor subscription ID
 		// Note: For voids, the subscription might not exist yet since the transaction was voided
@@ -1822,8 +1822,8 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		db := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		subService := subscriptions.NewSubscriptionService(db, priceService, productService, s.CCBillClient, nil, nil)
-		entSvc := entitlements.NewEntitlementService(db)
+		subService := subscriptions.NewSubscriptionService(db, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		entSvc := entitlements.NewEntitlementService(db, s.Clock)
 
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
@@ -2248,8 +2248,8 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
-		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil)
-		entSvc := entitlements.NewEntitlementService(txdb)
+		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		entSvc := entitlements.NewEntitlementService(txdb, s.Clock)
 		entSvc.SetClock(s.Clock)
 
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)

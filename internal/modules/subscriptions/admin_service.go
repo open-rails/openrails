@@ -38,19 +38,23 @@ type AdminSubscriptionService struct {
 	NMIClients          map[string]*nmi.NMIClient
 	StripeService       *StripeService
 	EventLogService     AdminCancellationLogger
-	Clock               clockwork.Clock
+	clock               clockwork.Clock
 	// No user directory enrichment; IdP subject is stored on subscription
 }
 
 // SetClock sets the clock for this service. Used for testing.
 func (s *AdminSubscriptionService) SetClock(c clockwork.Clock) {
-	s.Clock = c
+	s.clock = firstClock(c)
+}
+
+func (s *AdminSubscriptionService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *AdminSubscriptionService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
 }
@@ -425,6 +429,7 @@ func NewAdminSubscriptionService(
 	notificationService NotificationStore,
 	paymentService *payments.PaymentService,
 	nmiClients map[string]*nmi.NMIClient,
+	clocks ...clockwork.Clock,
 ) *AdminSubscriptionService {
 	return &AdminSubscriptionService{
 		SubscriptionService: subscriptionService,
@@ -434,5 +439,6 @@ func NewAdminSubscriptionService(
 		NotificationService: notificationService,
 		PaymentService:      paymentService,
 		NMIClients:          nmiClients,
+		clock:               firstClock(clocks...),
 	}
 }

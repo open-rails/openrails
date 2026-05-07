@@ -51,10 +51,17 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 }
 
 func (r *SubscriptionRepo) Update(ctx context.Context, s *models.Subscription) error {
+	return r.UpdateAt(ctx, s, time.Now())
+}
+
+func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription, now time.Time) error {
 	// Note: We explicitly list all columns to ensure nil values are set correctly.
 	// Bun's default behavior with nullzero tags skips nil fields, which prevents
 	// clearing fields like CancelledAt, EndedAt when reactivating subscriptions.
-	s.UpdatedAt = time.Now()
+	if now.IsZero() {
+		now = time.Now()
+	}
+	s.UpdatedAt = now
 	res, err := r.db.GetDB().NewUpdate().Model(s).
 		Column(
 			"price_id",
@@ -167,11 +174,18 @@ func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndProductID(ctx context.Co
 }
 
 func (r *SubscriptionRepo) GetActiveSubscription(ctx context.Context, userID string) (*models.Subscription, error) {
+	return r.GetActiveSubscriptionAt(ctx, userID, time.Now())
+}
+
+func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID string, now time.Time) (*models.Subscription, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
 	sub := new(models.Subscription)
 	err := r.selectWithDetails(sub).
 		Where("sub.user_id = ?", userID).
 		Where("sub.status = ?", models.StatusActive).
-		Where("(sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > NOW())").
+		Where("(sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > ?)", now).
 		Order("sub.created_at DESC").
 		Limit(1).
 		Scan(ctx)

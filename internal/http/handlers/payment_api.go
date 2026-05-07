@@ -11,7 +11,38 @@ func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
 	for i, price := range prices {
 		priceObjects[i] = PriceToAPI(price)
 	}
-	return api.ProductObject{ID: api.FormatProductID(p.ID), Object: "product", Name: p.DisplayName, Description: p.Description, Active: p.IsActive, Livemode: false, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt), Updated: api.ToUnix(p.UpdatedAt), Prices: priceObjects}
+	return api.ProductObject{
+		ID:               api.FormatProductID(p.ID),
+		Object:           "product",
+		Slug:             p.Slug,
+		Name:             p.DisplayName,
+		Description:      p.Description,
+		EntitlementsSpec: p.EntitlementsSpec,
+		CreditsSpec:      creditGrantSpecsToAPI(p.CreditsSpec),
+		TierGroup:        p.TierGroup,
+		TierRank:         p.TierRank,
+		Active:           p.IsActive,
+		Livemode:         false,
+		Metadata:         map[string]string{},
+		Created:          api.ToUnix(p.CreatedAt),
+		Updated:          api.ToUnix(p.UpdatedAt),
+		Prices:           priceObjects,
+	}
+}
+
+func creditGrantSpecsToAPI(specs models.CreditsSpec) map[string]api.CreditGrantSpecObject {
+	if len(specs) == 0 {
+		return nil
+	}
+	out := make(map[string]api.CreditGrantSpecObject, len(specs))
+	for creditType, spec := range specs {
+		out[creditType] = api.CreditGrantSpecObject{
+			Amount:      spec.Amount,
+			ExpiresDays: spec.ExpiresDays,
+			Cadence:     string(spec.Cadence),
+		}
+	}
+	return out
 }
 
 func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObject {
@@ -73,5 +104,5 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 	if recurring != nil {
 		priceType = "recurring"
 	}
-	return api.PriceObject{ID: api.FormatPriceID(p.ID), Object: "price", Name: p.DisplayName, Amount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: api.FormatProductID(p.ProductID), Active: p.IsActive, Livemode: false, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
+	return api.PriceObject{ID: api.FormatPriceID(p.ID), Object: "price", Name: p.DisplayName, UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: api.FormatProductID(p.ProductID), Active: p.IsActive, Livemode: false, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
 }

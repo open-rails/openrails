@@ -43,6 +43,7 @@ import (
 type runtimeOverrides struct {
 	DB    *db.DB
 	Redis *redis.Client
+	Clock clockwork.Clock
 }
 
 func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
@@ -50,8 +51,8 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	// This ensures IsNMIBacked() works correctly for all configured processors
 	processors.InitNMIBackedProcessors(cfg)
 
-	// Create clock early so it can be passed to services
-	clock := clockwork.NewRealClock()
+	// Create clock early so it can be passed to services.
+	clock := runtimeClock(overrides)
 
 	var (
 		database    *db.DB
@@ -133,7 +134,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 
 	var emailService *subscriptions.EmailService
 	if cfg.SendGrid != nil {
-		if es, err := subscriptions.NewEmailService(cfg.SendGrid, cfg.Store); err != nil {
+		if es, err := subscriptions.NewEmailService(cfg.SendGrid, cfg.Store, clock); err != nil {
 			log.WithError(err).Warn("EmailService init failed; email disabled")
 		} else {
 			emailService = es
@@ -202,7 +203,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 
 	if cfg.ClickHouse != nil {
-		if bes, err := analytics.NewEventLogService(cfg.ClickHouse); err != nil {
+		if bes, err := analytics.NewEventLogService(cfg.ClickHouse, clock); err != nil {
 			log.WithError(err).Warn("EventLogService init failed; analytics disabled")
 		} else {
 			runtime.EventLogService = bes
@@ -217,6 +218,13 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 
 	return runtime, nil
+}
+
+func runtimeClock(overrides *runtimeOverrides) clockwork.Clock {
+	if overrides != nil && overrides.Clock != nil {
+		return overrides.Clock
+	}
+	return clockwork.NewRealClock()
 }
 
 func buildRiverProducer(cfg *config.Config) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
@@ -437,12 +445,9 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	// NotificationService created with nil emailService - will be set later in buildRuntime
 	notificationService := subscriptions.NewNotificationService(database, nil)
 	paymentMethodService := vault.NewPaymentMethodService(database)
-	purchaseService := payments.NewPaymentService(database)
-	purchaseService.Clock = clock
-	entitlementService := entitlements.NewEntitlementService(database)
-	entitlementService.Clock = clock
-	creditsService := credits.NewCreditsService(database)
-	creditsService.Clock = clock
+	purchaseService := payments.NewPaymentService(database, clock)
+	entitlementService := entitlements.NewEntitlementService(database, clock)
+	creditsService := credits.NewCreditsService(database, clock)
 	creditTypeService := credits.NewCreditTypeService(database)
 	processorCustomerService := payments.NewProcessorCustomerService(database)
 	profileRepo := repo.NewProfileRepo(database)
@@ -453,8 +458,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
-	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider)
-	solanaPayService.Clock = clock
+	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider, clock)
 	var solanaRPC *solana.RPCClient
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
 		// Derive network from test_mode: devnet when true, mainnet when false
@@ -468,8 +472,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 			Network:      solanaNetwork,
 		})
 	}
-	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, solanaRPC, cfg, priceService, fxProvider)
-	solanaTransactionService.Clock = clock
+	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, solanaRPC, cfg, priceService, fxProvider, clock)
 
 	subscriptionLifecycleService := subscriptions.NewSubscriptionLifecycleService(
 		database,
@@ -479,8 +482,8 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		notificationService,
 		purchaseService, // For creating Payment records on renewal
 		nil,             // EventLogService - set later in buildRuntime after ClickHouse init
+		clock,
 	)
-	subscriptionLifecycleService.Clock = clock
 	subscriptionLifecycleService.SetConfig(cfg) // For feature flag access (dunning_mode, etc.)
 
 	subscriptionService := subscriptions.NewSubscriptionService(
@@ -490,11 +493,10 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		ccbillRESTClient,
 		nmiClients,
 		paymentMethodService,
+		clock,
 	)
-	subscriptionService.Clock = clock
 
-	vaultService := vault.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database)
-	vaultService.Clock = clock
+	vaultService := vault.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, clock)
 	subscriptionService.VaultService = vaultService
 	idempotencyService := idempotency.NewIdempotencyService(redisClient)
 
@@ -506,6 +508,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		notificationService,
 		entitlementService,
 		nmiClients,
+		clock,
 	)
 
 	publicSubscriptionService := catalog.NewPublicSubscriptionService(
@@ -521,6 +524,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		notificationService,
 		purchaseService,
 		nmiClients,
+		clock,
 	)
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg}
 
@@ -555,11 +559,8 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		idempotency.NewPaymentsIdempotencyAdapter(idempotencyService),
 		nmiClients,
 		cfg,
+		clock,
 	)
-	checkoutService.Clock = clock
-	if checkoutService.PurchaseService != nil {
-		checkoutService.PurchaseService.Clock = clock
-	}
 	webhookDispatcher.PurchaseRegistrar = checkoutService
 	subscriptionLifecycleService.EventLogService = nil // reset until ClickHouse init
 
@@ -574,8 +575,8 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		solanaTransactionService,
 		fxProvider,
 		cfg,
+		clock,
 	)
-	checkoutSessionService.Clock = clock
 	webhookDispatcher.CheckoutSessionService = checkoutSessionService
 	solanaPayService.SetEligibilityChecker(&solanaEligibilityAdapter{service: checkoutService})
 

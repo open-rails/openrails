@@ -92,6 +92,7 @@ tasks:
   test:
     desc: Run tests
     cmds:
+      - bash scripts/check_business_time.sh
       - echo "Running tests..."
       - go test -v -race ./...
       - echo "Running integration tests..."

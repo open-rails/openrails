@@ -66,7 +66,7 @@ type SolanaPayService struct {
 	db                 *db.DB
 	redis              *redis.Client
 	cfg                *config.Config
-	Clock              clockwork.Clock
+	clock              clockwork.Clock
 	priceService       *catalog.PriceService
 	productService     *catalog.ProductService
 	eligibilityChecker purchaseEligibilityChecker
@@ -82,6 +82,7 @@ func NewSolanaPayService(
 	productService *catalog.ProductService,
 	eligibilityChecker purchaseEligibilityChecker,
 	fxProvider fx.Provider,
+	clocks ...clockwork.Clock,
 ) *SolanaPayService {
 	return &SolanaPayService{
 		db:                 db,
@@ -91,6 +92,7 @@ func NewSolanaPayService(
 		productService:     productService,
 		eligibilityChecker: eligibilityChecker,
 		fxProvider:         fxProvider,
+		clock:              firstClock(clocks...),
 	}
 }
 
@@ -99,10 +101,27 @@ func (s *SolanaPayService) SetEligibilityChecker(checker purchaseEligibilityChec
 }
 
 func (s *SolanaPayService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
+}
+
+func (s *SolanaPayService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+}
+
+func (s *SolanaPayService) Clock() clockwork.Clock {
+	return s.clock
+}
+
+func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
+	for _, c := range clocks {
+		if c != nil {
+			return c
+		}
+	}
+	return clockwork.NewRealClock()
 }
 
 // GeneratePayment creates a new pending Solana payment and returns the Transfer Request URL.

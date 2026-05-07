@@ -14,7 +14,6 @@ import (
 	"github.com/doujins-org/ginapi/response"
 	"github.com/open-rails/openrails/internal/db/models"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -57,9 +56,10 @@ func TestGetProductsEndpoint(t *testing.T) {
 
 		require.NotNil(t, monthlyProduct, "Should find Premium Monthly product")
 		assert.Equal(t, "product", monthlyProduct.Object)
+		assert.NotEmpty(t, monthlyProduct.Slug)
 		assert.True(t, monthlyProduct.Active)
 		require.Len(t, monthlyProduct.Prices, 1, "Should have 1 price")
-		assert.Equal(t, int64(999), monthlyProduct.Prices[0].Amount, "Amount should be 999 cents")
+		assert.Equal(t, int64(999), monthlyProduct.Prices[0].UnitAmount, "UnitAmount should be 999 cents")
 		assert.Equal(t, "usd", monthlyProduct.Prices[0].Currency)
 		assert.Equal(t, "price", monthlyProduct.Prices[0].Object)
 	})
@@ -87,7 +87,7 @@ func TestGetProductsEndpoint(t *testing.T) {
 
 		require.NotNil(t, yearlyProduct, "Should find Premium Yearly product")
 		require.Len(t, yearlyProduct.Prices, 1, "Should have 1 price")
-		assert.Equal(t, int64(9999), yearlyProduct.Prices[0].Amount, "Amount should be 9999 cents")
+		assert.Equal(t, int64(9999), yearlyProduct.Prices[0].UnitAmount, "UnitAmount should be 9999 cents")
 		assert.NotNil(t, yearlyProduct.Prices[0].Recurring, "Should have recurring info")
 		assert.Equal(t, "year", yearlyProduct.Prices[0].Recurring.Interval)
 		assert.Equal(t, 1, yearlyProduct.Prices[0].Recurring.IntervalCount)
@@ -141,17 +141,19 @@ func TestGetActiveSubscriptionEndpoint(t *testing.T) {
 		require.Len(t, resp.Data, 1, "Should have 1 active subscription")
 
 		// Extract subscription data
-		var subscriptions []subscriptions.UserSubscriptionResponse
+		var subscriptions []map[string]any
 		dataBytes, err := json.Marshal(resp.Data)
 		require.NoError(t, err)
 		err = json.Unmarshal(dataBytes, &subscriptions)
 		require.NoError(t, err)
 
 		// Verify subscription data
-		assert.Equal(t, sub.ID.String(), subscriptions[0].ID.String())
-		assert.Equal(t, string(models.StatusActive), string(subscriptions[0].Status))
-		assert.NotNil(t, subscriptions[0].Price, "Should include price details")
-		assert.Equal(t, int64(999), subscriptions[0].Price.Amount, "Amount should be 999 cents")
+		assert.Equal(t, sub.ID.String(), subscriptions[0]["id"])
+		assert.Equal(t, string(models.StatusActive), subscriptions[0]["status"])
+		price, ok := subscriptions[0]["price"].(map[string]any)
+		require.True(t, ok, "Should include price details")
+		assert.Equal(t, float64(999), price["unit_amount"], "unit_amount should be 999 cents")
+		assert.NotContains(t, price, "amount", "public subscription price should not expose amount")
 	})
 
 	t.Run("requires authentication", func(t *testing.T) {

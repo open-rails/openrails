@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	sharedformat "github.com/open-rails/openrails/internal/shared/format"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
@@ -37,18 +40,22 @@ type UserSubscriptionService struct {
 	NotificationService NotificationStore
 	EntitlementService  *entitlements.EntitlementService
 	NMIClients          map[string]*nmi.NMIClient
-	Clock               clockwork.Clock
+	clock               clockwork.Clock
 }
 
 // SetClock sets the clock for this service. Used for testing.
 func (s *UserSubscriptionService) SetClock(c clockwork.Clock) {
-	s.Clock = c
+	s.clock = firstClock(c)
+}
+
+func (s *UserSubscriptionService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *UserSubscriptionService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now()
+	if s.clock != nil {
+		return s.clock.Now()
 	}
 	return time.Now()
 }
@@ -56,9 +63,113 @@ func (s *UserSubscriptionService) now() time.Time {
 // UserSubscriptionResponse represents a user's subscription with enriched data
 type UserSubscriptionResponse struct {
 	*models.Subscription
-	//	Product *models.Product  `json:"product,omitempty"`
-	Price  *models.Price    `json:"price,omitempty"`
-	Access *UserAccessGrant `json:"access,omitempty"`
+	Price            *models.Price    `json:"-"`
+	ScheduledPrice   *models.Price    `json:"-"`
+	ScheduledProduct *models.Product  `json:"-"`
+	Access           *UserAccessGrant `json:"access,omitempty"`
+}
+
+// MarshalJSON keeps user-facing subscription payloads on the same Stripe-like
+// resource contract as catalog endpoints while preserving model pointers for
+// internal service callers.
+func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
+	type userSubscriptionJSON struct {
+		*models.Subscription
+		Price            *api.PriceObject   `json:"price,omitempty"`
+		Product          *api.ProductObject `json:"product,omitempty"`
+		ScheduledPrice   *api.PriceObject   `json:"scheduled_price,omitempty"`
+		ScheduledProduct *api.ProductObject `json:"scheduled_product,omitempty"`
+		Access           *UserAccessGrant   `json:"access,omitempty"`
+	}
+
+	var subscription *models.Subscription
+	if r.Subscription != nil {
+		copy := *r.Subscription
+		copy.Price = nil
+		copy.Product = nil
+		subscription = &copy
+	}
+	out := userSubscriptionJSON{
+		Subscription: subscription,
+		Access:       r.Access,
+	}
+	if r.Price != nil {
+		price := priceToAPIObject(r.Price)
+		out.Price = &price
+	}
+	if r.Subscription != nil && r.Subscription.Product != nil {
+		product := productToAPIObject(r.Subscription.Product)
+		out.Product = &product
+	}
+	if r.ScheduledPrice != nil {
+		price := priceToAPIObject(r.ScheduledPrice)
+		out.ScheduledPrice = &price
+	}
+	if r.ScheduledProduct != nil {
+		product := productToAPIObject(r.ScheduledProduct)
+		out.ScheduledProduct = &product
+	}
+	return json.Marshal(out)
+}
+
+func priceToAPIObject(p *models.Price) api.PriceObject {
+	var recurring *api.RecurringInfo
+	if p.BillingCycleDays != nil && *p.BillingCycleDays > 0 {
+		interval, intervalCount := sharedformat.BillingCycleDaysToInterval(*p.BillingCycleDays)
+		recurring = &api.RecurringInfo{Interval: interval, IntervalCount: intervalCount}
+	}
+	priceType := "one_time"
+	if recurring != nil {
+		priceType = "recurring"
+	}
+	return api.PriceObject{
+		ID:         api.FormatPriceID(p.ID),
+		Object:     "price",
+		Name:       p.DisplayName,
+		UnitAmount: p.Amount,
+		Currency:   p.Currency,
+		Type:       priceType,
+		Recurring:  recurring,
+		Product:    api.FormatProductID(p.ProductID),
+		Active:     p.IsActive,
+		Livemode:   false,
+		Metadata:   map[string]string{},
+		Created:    api.ToUnix(p.CreatedAt),
+	}
+}
+
+func productToAPIObject(p *models.Product) api.ProductObject {
+	return api.ProductObject{
+		ID:               api.FormatProductID(p.ID),
+		Object:           "product",
+		Slug:             p.Slug,
+		Name:             p.DisplayName,
+		Description:      p.Description,
+		EntitlementsSpec: p.EntitlementsSpec,
+		CreditsSpec:      creditsSpecToAPIObject(p.CreditsSpec),
+		TierGroup:        p.TierGroup,
+		TierRank:         p.TierRank,
+		Active:           p.IsActive,
+		Livemode:         false,
+		Metadata:         map[string]string{},
+		Created:          api.ToUnix(p.CreatedAt),
+		Updated:          api.ToUnix(p.UpdatedAt),
+	}
+}
+
+func creditsSpecToAPIObject(specs models.CreditsSpec) map[string]api.CreditGrantSpecObject {
+	if len(specs) == 0 {
+		return nil
+	}
+	out := make(map[string]api.CreditGrantSpecObject, len(specs))
+	for creditType, spec := range specs {
+		out[creditType] = api.CreditGrantSpecObject{
+			Amount:      spec.Amount,
+			ExpiresDays: spec.ExpiresDays,
+			Cadence:     string(spec.Cadence),
+		}
+	}
+	return out
 }
 
 // UserAccessGrant summarizes how the user currently has premium access (subscription vs one-off entitlement).
@@ -80,16 +191,7 @@ func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userI
 	switch {
 	case err == nil:
 		resp := &UserSubscriptionResponse{Subscription: subscription, Access: accessFromSubscription(subscription)}
-		// Enrich with price and product data if available
-		if subscription.PriceID != uuid.Nil {
-			if price, err := s.PriceService.GetByID(ctx, subscription.PriceID); err == nil {
-				resp.Price = price
-
-				if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
-					resp.Product = product
-				}
-			}
-		}
+		s.enrichSubscriptionResponse(ctx, resp)
 		return resp, nil
 	case errors.Is(err, sql.ErrNoRows):
 		access, accessErr := s.activeEntitlementAccess(ctx, userID)
@@ -148,16 +250,7 @@ func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, u
 		Access:       accessFromSubscription(subscription),
 	}
 
-	// Enrich with price and product data if available
-	if subscription.PriceID != uuid.Nil {
-		if price, err := s.PriceService.GetByID(ctx, subscription.PriceID); err == nil {
-			resp.Price = price
-
-			if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
-				resp.Product = product
-			}
-		}
-	}
+	s.enrichSubscriptionResponse(ctx, resp)
 
 	return resp, nil
 }
@@ -180,20 +273,38 @@ func (s *UserSubscriptionService) GetUserSubscriptionHistory(ctx context.Context
 		responses[i] = &UserSubscriptionResponse{
 			Subscription: sub,
 		}
+		s.enrichSubscriptionResponse(ctx, responses[i])
+	}
 
-		// Enrich with price and product data if available
-		if sub.PriceID != uuid.Nil {
-			if price, err := s.PriceService.GetByID(ctx, sub.PriceID); err == nil {
-				responses[i].Price = price
+	return responses, total, nil
+}
 
+func (s *UserSubscriptionService) enrichSubscriptionResponse(ctx context.Context, resp *UserSubscriptionResponse) {
+	if resp == nil || resp.Subscription == nil {
+		return
+	}
+	if resp.Subscription.PriceID != uuid.Nil && s.PriceService != nil {
+		if price, err := s.PriceService.GetByID(ctx, resp.Subscription.PriceID); err == nil {
+			resp.Price = price
+
+			if s.ProductService != nil {
 				if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
-					responses[i].Product = product
+					resp.Subscription.Product = product
 				}
 			}
 		}
 	}
+	if resp.Subscription.ScheduledPriceID != nil && *resp.Subscription.ScheduledPriceID != uuid.Nil && s.PriceService != nil {
+		if price, err := s.PriceService.GetByID(ctx, *resp.Subscription.ScheduledPriceID); err == nil {
+			resp.ScheduledPrice = price
 
-	return responses, total, nil
+			if s.ProductService != nil {
+				if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
+					resp.ScheduledProduct = product
+				}
+			}
+		}
+	}
 }
 
 // GetUserPayments retrieves one-off purchases for a user
@@ -404,6 +515,7 @@ func NewUserSubscriptionService(
 	notificationService NotificationStore,
 	entitlementService *entitlements.EntitlementService,
 	nmiClients map[string]*nmi.NMIClient,
+	clocks ...clockwork.Clock,
 ) *UserSubscriptionService {
 	return &UserSubscriptionService{
 		NMIClients:          nmiClients,
@@ -413,5 +525,6 @@ func NewUserSubscriptionService(
 		PaymentService:      paymentService,
 		NotificationService: notificationService,
 		EntitlementService:  entitlementService,
+		clock:               firstClock(clocks...),
 	}
 }

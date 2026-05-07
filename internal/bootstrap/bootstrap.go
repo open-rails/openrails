@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	server "github.com/open-rails/openrails/internal/http"
@@ -22,6 +23,7 @@ type Options struct {
 	Redis        *redis.Client
 	AuthProvider authprovider.Provider
 	Cache        cache.Cache
+	Clock        clockwork.Clock
 }
 
 // Result holds the application graph created by the composition root.
@@ -38,6 +40,7 @@ func NewApp(cfg *config.Config, opts *Options) (*app.App, error) {
 		Redis:        optsValue(opts, func(o *Options) *redis.Client { return o.Redis }),
 		AuthProvider: optsValue(opts, func(o *Options) authprovider.Provider { return o.AuthProvider }),
 		Cache:        optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),
+		Clock:        optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

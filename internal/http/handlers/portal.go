@@ -10,7 +10,7 @@ import (
 )
 
 type portalResponse struct {
-	RedirectURL string `json:"redirect_url"`
+	URL string `json:"url"`
 }
 
 func CreatePortalSession(r *httprequest.Request) {
@@ -36,7 +36,7 @@ func CreatePortalSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.SuccessJSON(portalResponse{RedirectURL: urlStr})
+	r.SuccessJSON(portalResponse{URL: urlStr})
 }
 
 func guessBaseURLPortal(req *http.Request) string {

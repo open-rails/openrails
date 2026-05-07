@@ -21,18 +21,35 @@ var (
 
 type CreditsService struct {
 	db    *db.DB
-	Clock clockwork.Clock
+	clock clockwork.Clock
 }
 
-func NewCreditsService(database *db.DB) *CreditsService {
-	return &CreditsService{db: database, Clock: clockwork.NewRealClock()}
+func NewCreditsService(database *db.DB, clocks ...clockwork.Clock) *CreditsService {
+	return &CreditsService{db: database, clock: firstClock(clocks...)}
+}
+
+func (s *CreditsService) SetClock(c clockwork.Clock) {
+	s.clock = firstClock(c)
+}
+
+func (s *CreditsService) Clock() clockwork.Clock {
+	return s.clock
 }
 
 func (s *CreditsService) now() time.Time {
-	if s.Clock != nil {
-		return s.Clock.Now().UTC()
+	if s.clock != nil {
+		return s.clock.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
+	for _, c := range clocks {
+		if c != nil {
+			return c
+		}
+	}
+	return clockwork.NewRealClock()
 }
 
 func (s *CreditsService) GetCreditTypeByName(ctx context.Context, name string) (*models.CreditType, error) {
