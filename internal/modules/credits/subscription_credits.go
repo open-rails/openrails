@@ -78,23 +78,27 @@ func (s *CreditsService) GrantSubscriptionCredits(ctx context.Context, params Gr
 		return err
 	}
 
-	prod := new(models.Product)
-	if err := tx.NewSelect().
-		Model(prod).
-		Where("prod.id = ?", sub.ProductID).
-		Limit(1).
-		Scan(ctx); err != nil {
-		return err
+	creditsSpec := sub.CreditsSpecSnapshot
+	if len(creditsSpec) == 0 {
+		prod := new(models.Product)
+		if err := tx.NewSelect().
+			Model(prod).
+			Where("prod.id = ?", sub.ProductID).
+			Limit(1).
+			Scan(ctx); err != nil {
+			return err
+		}
+		creditsSpec = prod.CreditsSpec
 	}
 
-	if len(prod.CreditsSpec) == 0 {
+	if len(creditsSpec) == 0 {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	for creditTypeName, spec := range prod.CreditsSpec {
+	for creditTypeName, spec := range creditsSpec {
 		creditTypeName = strings.TrimSpace(creditTypeName)
 		if err := validateCreditGrantSpec(creditTypeName, spec); err != nil {
 			return err
@@ -119,13 +123,11 @@ func (s *CreditsService) GrantSubscriptionCredits(ctx context.Context, params Gr
 			return ErrCreditTypeInactive
 		}
 
-		// Deterministic idempotency key for this grant:
-		// (subscription_id, credit_type_id, period_end) -> UUID.
-		// This allows us to avoid a dedicated idempotency table.
-		grantID := uuid.NewSHA1(
-			uuid.NameSpaceOID,
-			[]byte(fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s", sub.ID, ct.ID, params.PeriodEnd.UTC().Format(time.RFC3339Nano))),
-		)
+		grantKey := fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s", cadence, sub.ID, ct.ID)
+		if cadence == models.CreditGrantCadencePerRenewal {
+			grantKey = fmt.Sprintf("%s:%s", grantKey, params.PeriodEnd.UTC().Format(time.RFC3339Nano))
+		}
+		grantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
 
 		var expiresAt *time.Time
 		if spec.ExpiresDays != nil && *spec.ExpiresDays > 0 {
@@ -137,7 +139,7 @@ func (s *CreditsService) GrantSubscriptionCredits(ctx context.Context, params Gr
 			UserID:     sub.UserID,
 			CreditType: creditTypeName,
 			Amount:     spec.Amount,
-			Source:     "subscription_credit_grant",
+			Source:     strings.TrimSpace(params.Source),
 			SourceID:   &grantID,
 			ExpiresAt:  expiresAt,
 		}); err != nil {

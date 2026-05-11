@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -32,6 +33,7 @@ type StripeWebhookService struct {
 	ProductService               *catalog.ProductService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
+	NotificationService          *subscriptions.NotificationService
 	PurchaseRegistrar            stripePurchaseRegistrar
 	PaymentService               *payments.PaymentService
 	CreditsService               *credits.CreditsService
@@ -171,7 +173,7 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 	case "charge.refunded":
 		return s.handleChargeRefunded(ctx, obj)
 	case "charge.dispute.created", "charge.dispute.closed":
-		return s.handleDispute(ctx, obj)
+		return s.handleDispute(ctx, eventType, obj)
 	default:
 		log.WithField("event_type", eventType).Info("stripe webhook ignored (not handled)")
 		return nil
@@ -257,12 +259,11 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			return fmt.Errorf("price lookup failed: %w", err)
 		}
 	}
-	product, err := s.ProductService.GetByID(ctx, price.ProductID)
-	if err != nil {
-		return fmt.Errorf("product lookup failed: %w", err)
+	if err := s.ensureStripePaidSubscriptionEntitlements(ctx, processorSubID, price); err != nil {
+		return err
 	}
 
-	if s.CreditsService != nil && len(product.CreditsSpec) > 0 {
+	if s.CreditsService != nil {
 		periodEnd := stripeInvoicePeriodEnd(inv)
 		if periodEnd.IsZero() && sub.CurrentPeriodEndsAt != nil {
 			periodEnd = sub.CurrentPeriodEndsAt.UTC()
@@ -309,6 +310,60 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 					"transaction_id":      paymentTransactionID,
 				}).Warn("failed to update checkout session from stripe invoice")
 			}
+		}
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) ensureStripePaidSubscriptionEntitlements(ctx context.Context, processorSubID string, price *models.Price) error {
+	if s == nil || s.DB == nil || s.SubscriptionService == nil {
+		return nil
+	}
+	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), processorSubID)
+	if err != nil {
+		return fmt.Errorf("load stripe subscription for paid entitlement reconciliation: %w", err)
+	}
+	entitlementsSpec := sub.EntitlementsSpecSnapshot
+	if len(entitlementsSpec) == 0 && price != nil && s.ProductService != nil {
+		product, err := s.ProductService.GetByID(ctx, price.ProductID)
+		if err != nil {
+			return fmt.Errorf("load stripe product for paid entitlement reconciliation: %w", err)
+		}
+		entitlementsSpec = product.EntitlementsSpec
+	}
+	entitlementSet := stripeEntitlementSet(entitlementsSpec)
+	if len(entitlementSet) == 0 {
+		return nil
+	}
+	entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
+	notBefore := s.now().UTC()
+	var endAt *time.Time
+	if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(notBefore) {
+		end := sub.CurrentPeriodEndsAt.UTC()
+		endAt = &end
+	}
+	for entName := range entitlementSet {
+		exists, err := entSvc.ExistsBySource(ctx, models.EntitlementSourceSubscription, sub.ID, entName)
+		if err != nil {
+			return fmt.Errorf("check stripe paid entitlement %s: %w", entName, err)
+		}
+		if exists {
+			continue
+		}
+		params := entitlements.PushNewEntitlementParams{
+			UserID:      sub.UserID,
+			Entitlement: entName,
+			NotBefore:   &notBefore,
+			SourceType:  models.EntitlementSourceSubscription,
+			SourceID:    sub.ID,
+		}
+		if endAt != nil {
+			params.EndAt = endAt
+		} else {
+			params.Indefinite = true
+		}
+		if _, err := entSvc.PushNewEntitlement(ctx, params); err != nil {
+			return fmt.Errorf("grant stripe paid entitlement %s: %w", entName, err)
 		}
 	}
 	return nil
@@ -435,19 +490,32 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		}
 	}
 
-	// Grant purchased credits based on the product's credits_spec.
-	if price == nil {
-		price, err = s.PriceService.GetByID(ctx, priceID)
-		if err != nil {
-			return fmt.Errorf("price lookup failed: %w", err)
+	// Grant purchased credits from the payment snapshot first, falling back to the
+	// current catalog only for legacy payment rows without snapshots.
+	var creditsSpec models.CreditsSpec
+	if s.PaymentService != nil {
+		payment, err := s.PaymentService.GetByID(ctx, result.PaymentID)
+		if err == nil {
+			creditsSpec = payment.CreditsSpecSnapshot
+		} else {
+			log.WithContext(ctx).WithError(err).WithField("payment_id", result.PaymentID).Warn("failed to load payment snapshot for stripe purchase credits")
 		}
 	}
-	product, err := s.ProductService.GetByID(ctx, price.ProductID)
-	if err != nil {
-		return fmt.Errorf("product lookup failed: %w", err)
+	if len(creditsSpec) == 0 {
+		if price == nil {
+			price, err = s.PriceService.GetByID(ctx, priceID)
+			if err != nil {
+				return fmt.Errorf("price lookup failed: %w", err)
+			}
+		}
+		product, err := s.ProductService.GetByID(ctx, price.ProductID)
+		if err != nil {
+			return fmt.Errorf("product lookup failed: %w", err)
+		}
+		creditsSpec = product.CreditsSpec
 	}
-	if len(product.CreditsSpec) > 0 && s.CreditsService != nil {
-		for creditType, spec := range product.CreditsSpec {
+	if len(creditsSpec) > 0 && s.CreditsService != nil {
+		for creditType, spec := range creditsSpec {
 			cadence := spec.Cadence
 			if cadence == "" {
 				cadence = models.CreditGrantCadenceOnce
@@ -555,6 +623,16 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 	if err != nil {
 		return nil
 	}
+	oldEntitlementsSpec := models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot)
+	var oldProduct *models.Product
+	if s.ProductService != nil && sub.ProductID != uuid.Nil {
+		if product, err := s.ProductService.GetByID(ctx, sub.ProductID); err == nil {
+			oldProduct = product
+		} else {
+			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warn("failed to load old product for stripe entitlement reconciliation")
+		}
+	}
+	var newProduct *models.Product
 
 	if len(data.Items.Data) > 0 {
 		stripePrice := strings.TrimSpace(data.Items.Data[0].Price.ID)
@@ -564,6 +642,15 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 				sub.PriceID = price.ID
 				sub.ProductID = price.ProductID
 				sub.ScheduledPriceID = nil
+				if s.ProductService != nil {
+					if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
+						newProduct = product
+						sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+						sub.CreditsSpecSnapshot = models.CloneCreditsSpec(product.CreditsSpec)
+					} else {
+						log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warn("failed to load new product for stripe entitlement reconciliation")
+					}
+				}
 			} else {
 				log.WithFields(log.Fields{
 					"stripe_price_id": stripePrice,
@@ -587,7 +674,72 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
 		return fmt.Errorf("update subscription from stripe: %w", err)
 	}
+	if err := s.reconcileStripeSubscriptionEntitlements(ctx, sub, oldEntitlementsSpec, oldProduct, newProduct); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s *StripeWebhookService) reconcileStripeSubscriptionEntitlements(ctx context.Context, sub *models.Subscription, oldEntitlementsSpec map[string]*int, oldProduct, newProduct *models.Product) error {
+	if s == nil || s.DB == nil || sub == nil {
+		return nil
+	}
+	entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
+	now := s.now().UTC()
+
+	if sub.Status == models.StatusCancelled && (sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.After(now)) {
+		if err := entSvc.RevokeSourcesForSubscription(ctx, sub.UserID, sub.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+			return fmt.Errorf("revoke stripe subscription entitlements after terminal update: %w", err)
+		}
+		return nil
+	}
+
+	newEntitlementsSpec := sub.EntitlementsSpecSnapshot
+	if len(oldEntitlementsSpec) == 0 && oldProduct != nil {
+		oldEntitlementsSpec = oldProduct.EntitlementsSpec
+	}
+	if len(newEntitlementsSpec) == 0 && newProduct != nil {
+		newEntitlementsSpec = newProduct.EntitlementsSpec
+	}
+	if len(oldEntitlementsSpec) == 0 && len(newEntitlementsSpec) == 0 {
+		return nil
+	}
+
+	oldEnts := stripeEntitlementSet(oldEntitlementsSpec)
+	newEnts := stripeEntitlementSet(newEntitlementsSpec)
+	sourceType := models.EntitlementSourceSubscription
+	sourceID := sub.ID
+
+	for entName := range oldEnts {
+		if newEnts[entName] {
+			continue
+		}
+		if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+			UserID:      sub.UserID,
+			Entitlement: entName,
+			SourceType:  &sourceType,
+			SourceID:    &sourceID,
+			Reason:      models.EntitlementRevokeDowngrade,
+		}); err != nil {
+			return fmt.Errorf("revoke stripe subscription entitlement %s: %w", entName, err)
+		}
+	}
+
+	return nil
+}
+
+func stripeEntitlementSet(spec map[string]*int) map[string]bool {
+	out := map[string]bool{}
+	for name := range spec {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			out[name] = true
+		}
+	}
+	if len(out) == 0 {
+		out["premium"] = true
+	}
+	return out
 }
 
 func applyStripeSubscriptionStatus(sub *models.Subscription, rawStatus string, now time.Time) {
@@ -603,6 +755,7 @@ func applyStripeSubscriptionStatus(sub *models.Subscription, rawStatus string, n
 		sub.Status = models.StatusPastDue
 	case "canceled", "incomplete_expired":
 		sub.Status = models.StatusCancelled
+		sub.ClearRetrySchedule()
 		if sub.CancelledAt == nil {
 			timestamp := now
 			sub.CancelledAt = &timestamp
@@ -654,6 +807,9 @@ func (s *StripeWebhookService) handleChargeRefunded(ctx context.Context, obj jso
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe charge.refunded missing refund data"))
 	}
 	for _, refund := range charge.Refunds.Data {
+		if strings.TrimSpace(refund.Status) == "" {
+			refund.Status = "succeeded"
+		}
 		if strings.TrimSpace(refund.Charge) == "" {
 			refund.Charge = charge.ID
 		}
@@ -671,23 +827,44 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 	if s.PaymentService == nil {
 		return fmt.Errorf("payment service is required for stripe refund")
 	}
+	if !stripeRefundSucceeded(refund.Status) {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"refund_id": refund.ID,
+			"status":    refund.Status,
+		}).Info("Stripe refund is not succeeded; skipping ledger and entitlement changes")
+		return nil
+	}
 	refundID := strings.TrimSpace(refund.ID)
 	if refundID == "" || refund.Amount <= 0 {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe refund missing id or amount"))
 	}
+	var original *models.Payment
 	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, refundID); err == nil && existing != nil {
-		return nil
+		if existing.RefundedPaymentID == nil {
+			return nil
+		}
+		original, err = s.PaymentService.GetByID(ctx, *existing.RefundedPaymentID)
+		if err != nil {
+			return fmt.Errorf("lookup original stripe payment for existing refund: %w", err)
+		}
 	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("lookup stripe refund payment: %w", err)
 	}
-	original, err := s.lookupStripeOriginalPayment(ctx, refund.Charge, refund.PaymentIntent)
+	if original == nil {
+		var err error
+		original, err = s.lookupStripeOriginalPayment(ctx, refund.Charge, refund.PaymentIntent)
+		if err != nil {
+			return err
+		}
+		if _, err := s.PaymentService.Refund(ctx, original.ID, refundID, refund.Amount); err != nil {
+			return fmt.Errorf("record stripe refund: %w", err)
+		}
+	}
+	refundedTotal, err := s.PaymentService.GetRefundTotalByPaymentID(ctx, original.ID)
 	if err != nil {
-		return err
+		return fmt.Errorf("calculate stripe refund total: %w", err)
 	}
-	if _, err := s.PaymentService.Refund(ctx, original.ID, refundID, refund.Amount); err != nil {
-		return fmt.Errorf("record stripe refund: %w", err)
-	}
-	if original.SubscriptionID != nil && refund.Amount >= original.Amount && s.SubscriptionLifecycleService != nil {
+	if original.SubscriptionID != nil && refundedTotal >= original.Amount && s.SubscriptionLifecycleService != nil {
 		processor := models.ProcessorStripe
 		reason := "Stripe refund processed"
 		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
@@ -699,14 +876,30 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		}); err != nil {
 			return fmt.Errorf("cancel subscription after stripe refund: %w", err)
 		}
+	} else if original.SubscriptionID == nil && refundedTotal >= original.Amount && s.DB != nil {
+		entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
+		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.EntitlementRevokeRefund); err != nil {
+			return fmt.Errorf("revoke one-off entitlements after stripe refund: %w", err)
+		}
 	}
 	return nil
 }
 
-func (s *StripeWebhookService) handleDispute(ctx context.Context, obj json.RawMessage) error {
+func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType string, obj json.RawMessage) error {
 	var dispute stripeDispute
 	if err := json.Unmarshal(obj, &dispute); err != nil {
 		return fmt.Errorf("parse stripe dispute: %w", err)
+	}
+	if stripeDisputeWon(eventType, dispute.Status) {
+		return s.handleStripeDisputeWon(ctx, dispute)
+	}
+	if !stripeDisputeShouldReverse(eventType, dispute.Status) {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"dispute_id": dispute.ID,
+			"event_type": eventType,
+			"status":     dispute.Status,
+		}).Info("Stripe dispute does not require reversal; skipping ledger and entitlement changes")
+		return nil
 	}
 	if s.PaymentService == nil {
 		return fmt.Errorf("payment service is required for stripe dispute")
@@ -715,17 +908,32 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, obj json.RawMe
 	if disputeID == "" || dispute.Amount <= 0 {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe dispute missing id or amount"))
 	}
+	var original *models.Payment
 	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, disputeID); err == nil && existing != nil {
-		return nil
+		if existing.RefundedPaymentID == nil {
+			return nil
+		}
+		original, err = s.PaymentService.GetByID(ctx, *existing.RefundedPaymentID)
+		if err != nil {
+			return fmt.Errorf("lookup original stripe payment for existing dispute: %w", err)
+		}
 	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("lookup stripe dispute payment: %w", err)
 	}
-	original, err := s.lookupStripeOriginalPayment(ctx, dispute.Charge, dispute.PaymentIntent)
-	if err != nil {
-		return err
-	}
-	if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, dispute.Amount); err != nil {
-		return fmt.Errorf("record stripe dispute reversal: %w", err)
+	var ledgerErr error
+	if original == nil {
+		var err error
+		original, err = s.lookupStripeOriginalPayment(ctx, dispute.Charge, dispute.PaymentIntent)
+		if err != nil {
+			return err
+		}
+		if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, dispute.Amount); err != nil {
+			ledgerErr = fmt.Errorf("record stripe dispute reversal: %w", err)
+			log.WithContext(ctx).WithError(ledgerErr).WithFields(log.Fields{
+				"dispute_id":          disputeID,
+				"original_payment_id": original.ID,
+			}).Error("Failed to record Stripe dispute reversal; continuing entitlement revocation")
+		}
 	}
 	if original.SubscriptionID != nil && s.SubscriptionLifecycleService != nil {
 		processor := models.ProcessorStripe
@@ -739,8 +947,170 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, obj json.RawMe
 		}); err != nil {
 			return fmt.Errorf("cancel subscription after stripe dispute: %w", err)
 		}
+	} else if original.SubscriptionID == nil && s.DB != nil {
+		entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
+		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.EntitlementRevokeChargeback); err != nil {
+			return fmt.Errorf("revoke one-off entitlements after stripe dispute: %w", err)
+		}
+	}
+	if ledgerErr != nil {
+		originalID := original.ID
+		if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+			Provider:          "stripe",
+			Operation:         "dispute_reversal",
+			TransactionID:     disputeID,
+			UserID:            original.UserID,
+			OriginalPaymentID: &originalID,
+			SubscriptionID:    original.SubscriptionID,
+			Err:               ledgerErr,
+			Metadata: map[string]any{
+				"event_type": eventType,
+				"status":     strings.TrimSpace(dispute.Status),
+				"reason":     strings.TrimSpace(dispute.Reason),
+			},
+		}); err != nil {
+			return fmt.Errorf("record stripe dispute ledger repair alert: %w", err)
+		}
 	}
 	return nil
+}
+
+func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispute stripeDispute) error {
+	if s.PaymentService == nil {
+		return nil
+	}
+	disputeID := strings.TrimSpace(dispute.ID)
+	if disputeID == "" {
+		return nil
+	}
+	disputeReversal, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, disputeID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("lookup stripe dispute reversal for won dispute: %w", err)
+	}
+	if disputeReversal == nil || disputeReversal.RefundedPaymentID == nil || disputeReversal.Amount >= 0 {
+		return nil
+	}
+
+	recoveryID := "dispute_won:" + disputeID
+	var existingRecovery *models.Payment
+	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, recoveryID); err == nil && existing != nil {
+		existingRecovery = existing
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("lookup stripe won dispute recovery payment: %w", err)
+	}
+
+	original, err := s.PaymentService.GetByID(ctx, *disputeReversal.RefundedPaymentID)
+	if err != nil {
+		return fmt.Errorf("lookup original stripe payment for won dispute: %w", err)
+	}
+	if existingRecovery != nil {
+		if existingRecovery.RefundedPaymentID == nil {
+			if err := s.PaymentService.LinkRefundedPayment(ctx, existingRecovery.ID, original.ID); err != nil {
+				return fmt.Errorf("link existing stripe won dispute recovery payment: %w", err)
+			}
+		} else if *existingRecovery.RefundedPaymentID != original.ID {
+			return fmt.Errorf("stripe won dispute recovery payment is linked to a different original payment")
+		}
+	} else {
+		recovery := &models.Payment{
+			ID:                uuid.New(),
+			UserID:            original.UserID,
+			PriceID:           original.PriceID,
+			SubscriptionID:    original.SubscriptionID,
+			RefundedPaymentID: &original.ID,
+			Processor:         original.Processor,
+			TransactionID:     recoveryID,
+			Amount:            -disputeReversal.Amount,
+			ListAmount:        original.ListAmount,
+			Currency:          original.Currency,
+			PurchasedAt:       s.now(),
+			CreatedAt:         s.now(),
+		}
+		if err := s.PaymentService.Create(ctx, recovery); err != nil {
+			return fmt.Errorf("record stripe won dispute recovery payment: %w", err)
+		}
+	}
+
+	if original.SubscriptionID != nil {
+		if err := s.reactivateStripeSubscriptionAfterWonDispute(ctx, *original.SubscriptionID, original); err != nil {
+			return err
+		}
+	} else if s.DB != nil {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"dispute_id":          disputeID,
+			"original_payment_id": original.ID,
+		}).Warn("Stripe dispute was won for a one-off payment; entitlement restoration requires manual review")
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx context.Context, subscriptionID uuid.UUID, original *models.Payment) error {
+	if s.SubscriptionService == nil || s.SubscriptionLifecycleService == nil || original == nil {
+		return nil
+	}
+	sub, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
+	if err != nil {
+		return fmt.Errorf("load stripe subscription for won dispute recovery: %w", err)
+	}
+	if sub.Status != models.StatusCancelled {
+		return nil
+	}
+	now := s.now().UTC()
+	var paidThrough time.Time
+	if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now) {
+		paidThrough = sub.CurrentPeriodEndsAt.UTC()
+	} else if s.PriceService != nil {
+		price, err := s.PriceService.GetByID(ctx, original.PriceID)
+		if err != nil {
+			return fmt.Errorf("load stripe price for won dispute recovery: %w", err)
+		}
+		if price.BillingCycleDays != nil && *price.BillingCycleDays > 0 {
+			paidThrough = original.PurchasedAt.UTC().Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+		}
+	}
+	if !paidThrough.After(now) {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id": sub.ID,
+			"payment_id":      original.ID,
+		}).Warn("Stripe dispute was won but no future paid-through date exists; subscription restoration requires manual review")
+		return nil
+	}
+	_, err = s.SubscriptionLifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{
+		Processor:                 models.ProcessorStripe,
+		ProcessorSubscriptionID:   sub.ProcessorSubscriptionID,
+		CurrentPeriodEndsAt:       &paidThrough,
+		AllowTerminalReactivation: true,
+	})
+	if err != nil {
+		return fmt.Errorf("reactivate stripe subscription after won dispute: %w", err)
+	}
+	return nil
+}
+
+func stripeRefundSucceeded(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "succeeded")
+}
+
+func stripeDisputeWon(eventType, status string) bool {
+	return eventType == "charge.dispute.closed" && strings.EqualFold(strings.TrimSpace(status), "won")
+}
+
+func stripeDisputeShouldReverse(eventType, status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "won" {
+		return false
+	}
+	switch eventType {
+	case "charge.dispute.created":
+		return true
+	case "charge.dispute.closed":
+		return status == "lost"
+	default:
+		return false
+	}
 }
 
 func (s *StripeWebhookService) lookupStripeOriginalPayment(ctx context.Context, chargeID, paymentIntentID string) (*models.Payment, error) {

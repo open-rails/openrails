@@ -2,7 +2,6 @@ package repo
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -154,15 +153,47 @@ func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
-	var total sql.NullInt64
+	var amounts []int64
 	if err := r.db.GetDB().NewSelect().
 		Model((*models.Payment)(nil)).
-		ColumnExpr("COALESCE(SUM(ABS(purch.amount)), 0)").
+		Column("amount").
 		Where("purch.refunded_payment_id = ?", paymentID).
-		Scan(ctx, &total); err != nil {
+		Scan(ctx, &amounts); err != nil {
 		return 0, err
 	}
-	return total.Int64, nil
+	return effectiveRefundTotalFromLinkedAmounts(amounts), nil
+}
+
+func (r *PaymentRepo) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
+	res, err := r.db.GetDB().
+		NewUpdate().
+		Model((*models.Payment)(nil)).
+		Set("refunded_payment_id = ?", originalPaymentID).
+		Where("purch.id = ?", paymentID).
+		Where("purch.refunded_payment_id IS NULL").
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
+}
+
+func effectiveRefundTotalFromLinkedAmounts(amounts []int64) int64 {
+	var total int64
+	for _, amount := range amounts {
+		total -= amount
+	}
+	if total < 0 {
+		return 0
+	}
+	return total
 }
 
 func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {

@@ -434,6 +434,10 @@ func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actu
 	if hold.Status != "active" {
 		return nil, fmt.Errorf("hold is not active")
 	}
+	now := s.now()
+	if hold.ExpiresAt != nil && !hold.ExpiresAt.After(now) {
+		return nil, fmt.Errorf("hold is expired")
+	}
 	if hold.Authorized == nil || *hold.Authorized <= 0 {
 		return nil, fmt.Errorf("hold missing authorized amount")
 	}
@@ -442,7 +446,6 @@ func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actu
 		return nil, fmt.Errorf("invalid capture amount")
 	}
 
-	now := s.now()
 	bal, err := s.lockBalance(ctx, tx, hold.UserID, hold.CreditTypeID)
 	if err != nil {
 		return nil, err
@@ -603,7 +606,14 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, userID stri
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	if _, err := tx.NewInsert().Model(bal).Exec(ctx); err != nil {
+	if _, err := tx.NewInsert().Model(bal).On("CONFLICT (user_id, credit_type_id) DO NOTHING").Exec(ctx); err != nil {
+		return nil, err
+	}
+	bal = new(models.UserCreditBalance)
+	if err := tx.NewSelect().Model(bal).
+		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
+		For("UPDATE").
+		Scan(ctx); err != nil {
 		return nil, err
 	}
 	return bal, nil
@@ -613,8 +623,25 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 	now := s.now()
 	sourceIDText := (*string)(nil)
 	if params.SourceID != nil {
+		if _, err := s.lockBalance(ctx, tx, params.UserID, creditTypeID); err != nil {
+			return nil, err
+		}
 		v := params.SourceID.String()
 		sourceIDText = &v
+		existing := new(models.CreditTransaction)
+		err := tx.NewSelect().
+			Model(existing).
+			Where("user_id = ? AND credit_type_id = ?", params.UserID, creditTypeID).
+			Where("transaction_type = 'withdrawal'").
+			Where("source = ? AND source_id = ?", params.Source, v).
+			Limit(1).
+			Scan(ctx)
+		if err == nil {
+			return existing, nil
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
 	}
 	newBal, err := s.withdrawBalanceAndBlocks(ctx, tx, params.UserID, creditTypeID, params.Amount)
 	if err != nil {

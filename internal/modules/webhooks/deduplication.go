@@ -13,7 +13,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const webhookPendingLease = 2 * time.Minute
+const (
+	webhookPendingLease   = 2 * time.Minute
+	WebhookIdempotencyTTL = 90 * 24 * time.Hour
+)
 
 // DeduplicationService provides robust webhook deduplication using the unified IdempotencyService
 type DeduplicationService struct {
@@ -131,6 +134,18 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 			}
 			if alreadyExists && rec.Status == idempotency.IdempotencyStatusPending {
 				if time.Since(rec.CreatedAt) > webhookPendingLease {
+					taken, err := s.idem.TryTakeoverPending(ctx, op, trimmedEventID, webhookPendingLease)
+					if err != nil {
+						return fmt.Errorf("failed to take over stale webhook idempotency: %w", err)
+					}
+					if !taken {
+						log.WithContext(ctx).WithFields(log.Fields{
+							"eventID":   trimmedEventID,
+							"eventType": eventType,
+							"processor": processor,
+						}).Info("Stale pending webhook was claimed by another worker")
+						return fmt.Errorf("webhook already in progress")
+					}
 					log.WithContext(ctx).WithFields(log.Fields{
 						"eventID":   trimmedEventID,
 						"eventType": eventType,

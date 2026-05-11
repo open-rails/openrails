@@ -105,6 +105,7 @@ func (s *SubscriptionService) CancelUserSubscription(ctx context.Context, userID
 	subscription.Status = models.StatusCancelled
 	subscription.CancelledAt = &now
 	subscription.CancelType = &cancelType
+	subscription.ClearRetrySchedule()
 	if feedback != "" {
 		subscription.CancelFeedback = &feedback
 	}
@@ -189,7 +190,7 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 		return errors.New("subscription is nil")
 	}
 
-	if subscription.Status == models.StatusActive || subscription.Status == models.StatusPending {
+	if subscription.Status == models.StatusActive || subscription.Status == models.StatusPending || subscription.Status == models.StatusPastDue {
 		_, err := s.GetActiveOrPendingByUserIDAndProductID(ctx, subscription.UserID, subscription.ProductID)
 		if err == nil {
 			return ErrActiveSubscriptionExists

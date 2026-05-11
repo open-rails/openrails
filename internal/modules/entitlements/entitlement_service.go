@@ -2,6 +2,8 @@ package entitlements
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -123,7 +125,8 @@ type PushNewEntitlementParams struct {
 // It does not mutate existing windows (end_at is immutable); it schedules the new window to start
 // after the current tail end (or now), optionally honoring NotBefore.
 //
-// If EndAt is provided and EndAt <= computed start_at, this is a no-op and returns (nil, nil).
+// If EndAt is provided and EndAt <= computed start_at, this is covered by the
+// existing canonical timeline and returns the covering row when one can be found.
 func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEntitlementParams) (*models.Entitlement, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("entitlement service not initialized")
@@ -176,7 +179,17 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			return err
 		}
 		if hasIndefinite {
-			return nil
+			created = new(models.Entitlement)
+			return tx.NewSelect().
+				Model(created).
+				Where("ent.user_id = ?", p.UserID).
+				Where("ent.entitlement = ?", p.Entitlement).
+				Where("ent.revoked_at IS NULL").
+				Where("ent.deleted_at IS NULL").
+				Where("ent.end_at IS NULL").
+				OrderExpr("ent.start_at ASC").
+				Limit(1).
+				Scan(ctx)
 		}
 
 		var tailEnd *time.Time
@@ -213,6 +226,25 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		case p.EndAt != nil:
 			e := p.EndAt.UTC()
 			if !e.After(start) {
+				covered := new(models.Entitlement)
+				err := tx.NewSelect().
+					Model(covered).
+					Where("ent.user_id = ?", p.UserID).
+					Where("ent.entitlement = ?", p.Entitlement).
+					Where("ent.revoked_at IS NULL").
+					Where("ent.deleted_at IS NULL").
+					Where("ent.start_at < ?", e).
+					Where("ent.end_at IS NULL OR ent.end_at >= ?", e).
+					OrderExpr("ent.end_at DESC NULLS LAST").
+					Limit(1).
+					Scan(ctx)
+				if err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						return fmt.Errorf("requested entitlement window is already covered by timeline tail but no covering row was found")
+					}
+					return err
+				}
+				created = covered
 				return nil
 			}
 			endAt = &e
@@ -236,6 +268,47 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		return nil, err
 	}
 	return created, nil
+}
+
+func (s *EntitlementService) ExtendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
+	if s == nil || s.repo == nil {
+		return fmt.Errorf("entitlement service not initialized")
+	}
+	return s.repo.ExtendActiveBySubscription(ctx, subscriptionID, endAt.UTC(), s.now().UTC())
+}
+
+func (s *EntitlementService) EndActiveByPayment(ctx context.Context, paymentID uuid.UUID, reason models.EntitlementRevokeReason) error {
+	if s == nil || s.repo == nil {
+		return fmt.Errorf("entitlement service not initialized")
+	}
+	now := s.now().UTC()
+	return s.repo.EndActiveByPayment(ctx, paymentID, now, now, &reason)
+}
+
+func (s *EntitlementService) RevokeSourcesForSubscription(ctx context.Context, userID string, subscriptionID uuid.UUID, reason models.EntitlementRevokeReason, sourceTypes ...models.EntitlementSourceType) error {
+	if s == nil || s.repo == nil {
+		return fmt.Errorf("entitlement service not initialized")
+	}
+	for _, sourceType := range sourceTypes {
+		names, err := s.ListDistinctEntitlementNamesBySource(ctx, sourceType, subscriptionID)
+		if err != nil {
+			return fmt.Errorf("list %s entitlements: %w", sourceType, err)
+		}
+		st := sourceType
+		sid := subscriptionID
+		for _, entName := range names {
+			if err := s.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
+				UserID:      userID,
+				Entitlement: entName,
+				SourceType:  &st,
+				SourceID:    &sid,
+				Reason:      reason,
+			}); err != nil {
+				return fmt.Errorf("revoke %s entitlement %s: %w", sourceType, entName, err)
+			}
+		}
+	}
+	return nil
 }
 
 type RevokeExistingEntitlementParams struct {
@@ -278,6 +351,44 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 			}
 			userID = ent.UserID
 			entitlement = ent.Entitlement
+			if err := repo.LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
+				return err
+			}
+			if ent.RevokedAt != nil || ent.DeletedAt != nil {
+				return nil
+			}
+			if p.SourceType != nil && ent.SourceType != *p.SourceType {
+				return nil
+			}
+			if p.SourceID != nil {
+				if ent.SourceID == nil || *ent.SourceID != *p.SourceID {
+					return nil
+				}
+			}
+			if ent.StartAt.After(now) {
+				_, err := tx.NewUpdate().
+					Model((*models.Entitlement)(nil)).
+					Set("deleted_at = ?", now).
+					Set("updated_at = ?", now).
+					Where("ent.id = ?", ent.ID).
+					Where("ent.revoked_at IS NULL").
+					Where("ent.deleted_at IS NULL").
+					Exec(ctx)
+				return err
+			}
+			if ent.EndAt == nil || ent.EndAt.After(now) {
+				_, err := tx.NewUpdate().
+					Model((*models.Entitlement)(nil)).
+					Set("revoked_at = ?", now).
+					Set("revoke_reason = ?", &p.Reason).
+					Set("updated_at = ?", now).
+					Where("ent.id = ?", ent.ID).
+					Where("ent.revoked_at IS NULL").
+					Where("ent.deleted_at IS NULL").
+					Exec(ctx)
+				return err
+			}
+			return nil
 		}
 
 		if err := repo.LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {

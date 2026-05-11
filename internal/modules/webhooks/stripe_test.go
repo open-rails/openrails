@@ -89,3 +89,78 @@ func TestApplyStripeSubscriptionStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestStripeRefundSucceeded(t *testing.T) {
+	tests := []struct {
+		status string
+		want   bool
+	}{
+		{status: "succeeded", want: true},
+		{status: " Succeeded ", want: true},
+		{status: "pending", want: false},
+		{status: "failed", want: false},
+		{status: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			if got := stripeRefundSucceeded(tt.status); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestStripeDisputeShouldReverse(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		status    string
+		want      bool
+	}{
+		{name: "created needs response", eventType: "charge.dispute.created", status: "needs_response", want: true},
+		{name: "created empty status is active", eventType: "charge.dispute.created", status: "", want: true},
+		{name: "created won ignored", eventType: "charge.dispute.created", status: "won", want: false},
+		{name: "closed lost", eventType: "charge.dispute.closed", status: "lost", want: true},
+		{name: "closed won", eventType: "charge.dispute.closed", status: "won", want: false},
+		{name: "closed under review", eventType: "charge.dispute.closed", status: "under_review", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripeDisputeShouldReverse(tt.eventType, tt.status); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestStripeDisputeWon(t *testing.T) {
+	if !stripeDisputeWon("charge.dispute.closed", "won") {
+		t.Fatal("expected won closed dispute to be detected")
+	}
+	if stripeDisputeWon("charge.dispute.created", "won") {
+		t.Fatal("created dispute should not be treated as won recovery")
+	}
+}
+
+func TestApplyStripeSubscriptionStatus_CancelledClearsRetrySchedule(t *testing.T) {
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	attempts := 2
+	sub := &models.Subscription{
+		Status:        models.StatusPastDue,
+		LastRetryAt:   &now,
+		RetryAttempts: &attempts,
+		NextRetryAt:   &now,
+		GraceEndsAt:   &now,
+	}
+
+	applyStripeSubscriptionStatus(sub, "canceled", now)
+
+	if sub.Status != models.StatusCancelled {
+		t.Fatalf("expected cancelled, got %s", sub.Status)
+	}
+	if sub.LastRetryAt != nil || sub.RetryAttempts != nil || sub.NextRetryAt != nil || sub.GraceEndsAt != nil {
+		t.Fatalf("expected retry schedule fields to be cleared")
+	}
+}

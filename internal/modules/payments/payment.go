@@ -159,6 +159,14 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 	return nil
 }
 
+func (s *PaymentService) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
+	return s.repo.GetRefundTotalByPaymentID(ctx, paymentID)
+}
+
+func (s *PaymentService) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
+	return s.repo.LinkRefundedPayment(ctx, paymentID, originalPaymentID)
+}
+
 func (s *PaymentService) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
 	return s.repo.GetPaginatedByUserID(ctx, userID, page, pageSize)
 }

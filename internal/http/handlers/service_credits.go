@@ -17,7 +17,7 @@ type serviceWithdrawRequest struct {
 	CreditType string     `json:"credit_type" binding:"required"`
 	Amount     int64      `json:"amount" binding:"required"`
 	Source     string     `json:"source" binding:"required"`
-	SourceID   *uuid.UUID `json:"source_id"`
+	SourceID   *uuid.UUID `json:"source_id" binding:"required"`
 }
 
 type serviceDepositRequest struct {
@@ -25,7 +25,7 @@ type serviceDepositRequest struct {
 	CreditType  string     `json:"credit_type" binding:"required"`
 	Amount      int64      `json:"amount" binding:"required"`
 	Source      string     `json:"source" binding:"required"`
-	SourceID    *uuid.UUID `json:"source_id"`
+	SourceID    *uuid.UUID `json:"source_id" binding:"required"`
 	ExpiresAt   *int64     `json:"expires_at"`
 	Description *string    `json:"description"`
 }

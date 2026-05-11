@@ -135,21 +135,21 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	depositCount, err := bunDB.NewSelect().
 		Model((*models.CreditTransaction)(nil)).
 		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
-		Where("transaction_type = 'deposit' AND source = 'subscription_credit_grant'").
+		Where("transaction_type = 'deposit' AND source = 'subscription_renewal'").
 		Count(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, depositCount)
 
 	expectedGrantID := uuid.NewSHA1(
 		uuid.NameSpaceOID,
-		[]byte(fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s", subID, creditTypeID, periodEnd.UTC().Format(time.RFC3339Nano))),
+		[]byte(fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s:%s", models.CreditGrantCadencePerRenewal, subID, creditTypeID, periodEnd.UTC().Format(time.RFC3339Nano))),
 	)
 
 	dep := new(models.CreditTransaction)
 	require.NoError(t, bunDB.NewSelect().
 		Model(dep).
 		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
-		Where("transaction_type = 'deposit' AND source = 'subscription_credit_grant'").
+		Where("transaction_type = 'deposit' AND source = 'subscription_renewal'").
 		Limit(1).
 		Scan(ctx))
 	require.NotNil(t, dep.SourceID)

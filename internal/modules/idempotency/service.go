@@ -96,6 +96,65 @@ func (s *IdempotencyService) Begin(ctx context.Context, operation, key string) (
 	return s.beginMemory(fullKey)
 }
 
+func (s *IdempotencyService) TryTakeoverPending(ctx context.Context, operation, key string, olderThan time.Duration) (bool, error) {
+	fullKey := s.buildKey(operation, key)
+	if s.client != nil {
+		return s.tryTakeoverPendingRedis(ctx, fullKey, olderThan)
+	}
+	return s.tryTakeoverPendingMemory(fullKey, olderThan), nil
+}
+
+func (s *IdempotencyService) tryTakeoverPendingRedis(ctx context.Context, redisKey string, olderThan time.Duration) (bool, error) {
+	taken := false
+	err := s.client.Watch(ctx, func(tx *redis.Tx) error {
+		record, err := s.getRedisTx(ctx, tx, redisKey)
+		if err != nil {
+			if err == redis.Nil {
+				return nil
+			}
+			return err
+		}
+		if record.Status != IdempotencyStatusPending || time.Since(record.CreatedAt) <= olderThan {
+			return nil
+		}
+		record.CreatedAt = time.Now()
+		recordJSON, err := json.Marshal(record)
+		if err != nil {
+			return fmt.Errorf("marshal record: %w", err)
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, redisKey, recordJSON, s.ttl)
+			return nil
+		})
+		if err == nil {
+			taken = true
+		}
+		return err
+	}, redisKey)
+	if err == redis.TxFailedErr {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("redis pending takeover: %w", err)
+	}
+	return taken, nil
+}
+
+func (s *IdempotencyService) tryTakeoverPendingMemory(key string, olderThan time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.memStore[key]
+	if !ok || entry == nil || entry.record == nil {
+		return false
+	}
+	if entry.record.Status != IdempotencyStatusPending || time.Since(entry.record.CreatedAt) <= olderThan {
+		return false
+	}
+	entry.record.CreatedAt = time.Now()
+	entry.expiresAt = time.Now().Add(s.ttl)
+	return true
+}
+
 func (s *IdempotencyService) beginRedis(ctx context.Context, redisKey string) (*IdempotencyRecord, bool, error) {
 	existing, err := s.getRedis(ctx, redisKey)
 	if err == nil {
@@ -227,7 +286,18 @@ func (s *IdempotencyService) getRedis(ctx context.Context, redisKey string) (*Id
 	if err != nil {
 		return nil, err
 	}
+	return decodeIdempotencyRecord(data)
+}
 
+func (s *IdempotencyService) getRedisTx(ctx context.Context, tx *redis.Tx, redisKey string) (*IdempotencyRecord, error) {
+	data, err := tx.Get(ctx, redisKey).Bytes()
+	if err != nil {
+		return nil, err
+	}
+	return decodeIdempotencyRecord(data)
+}
+
+func decodeIdempotencyRecord(data []byte) (*IdempotencyRecord, error) {
 	var record IdempotencyRecord
 	if err := json.Unmarshal(data, &record); err != nil {
 		return nil, fmt.Errorf("unmarshal record: %w", err)

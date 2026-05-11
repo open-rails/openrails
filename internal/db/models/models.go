@@ -24,6 +24,7 @@ var ModelRegistry = []any{
 	(*Price)(nil),
 	(*CheckoutSession)(nil),
 	(*Payment)(nil),
+	(*ManualRebillAttempt)(nil),
 	(*Subscription)(nil),
 	(*PaymentMethod)(nil),
 	(*NotificationQueue)(nil),

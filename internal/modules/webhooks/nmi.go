@@ -201,7 +201,14 @@ func (s *NMIWebhookService) resolveSubscriptionFromReference(ctx context.Context
 	if parseErr != nil {
 		return nil, sql.ErrNoRows
 	}
-	return s.SubscriptionService.GetByID(ctx, subID)
+	subscription, err = s.SubscriptionService.GetByID(ctx, subID)
+	if err != nil {
+		return nil, err
+	}
+	if subscription.Processor != models.Processor(provider) || subscription.Status != models.StatusPending {
+		return nil, fmt.Errorf("subscription UUID fallback is only allowed for pending subscriptions on the same processor")
+	}
+	return subscription, nil
 }
 
 func transactionActionSource(body *NMITransactionEventBody) string {
@@ -1508,6 +1515,8 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		unmatchedCount   int
 		reconcileErrors  int
 		alreadyCancelled int
+		ledgerErr        error
+		ledgerAlertErr   error
 	)
 	processedSubs := make(map[uuid.UUID]struct{})
 
@@ -1545,9 +1554,11 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 
 		cbStatus := "received"
 		var (
-			subscriptionID         *uuid.UUID
-			userID                 *string
-			processorTransactionID *string
+			subscriptionID          *uuid.UUID
+			userID                  *string
+			processorTransactionID  *string
+			entryLedgerErr          error
+			chargebackTransactionID string
 		)
 
 		if reconcileErr == nil && match == nil {
@@ -1566,6 +1577,51 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			if match.PaymentTransactionID != "" {
 				txn := match.PaymentTransactionID
 				processorTransactionID = &txn
+			}
+			if s.PaymentService == nil {
+				reconcileErrors++
+				cbMetadata["chargeback_payment_status"] = "failed"
+				cbMetadata["chargeback_payment_error"] = "payment service unavailable"
+				entryLedgerErr = fmt.Errorf("payment service unavailable for NMI chargeback ledger reversal")
+				if ledgerErr == nil {
+					ledgerErr = entryLedgerErr
+					log.WithContext(ctx).WithError(ledgerErr).Error("Failed to record NMI chargeback reversal; continuing entitlement revocation")
+				}
+			} else {
+				chargebackTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
+				if existing, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(processor), chargebackTransactionID); lookupErr == nil && existing != nil {
+					cbMetadata["chargeback_payment_status"] = "already_recorded"
+				} else if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+					reconcileErrors++
+					cbMetadata["chargeback_payment_status"] = "failed"
+					cbMetadata["chargeback_payment_error"] = lookupErr.Error()
+					entryLedgerErr = fmt.Errorf("lookup NMI chargeback reversal: %w", lookupErr)
+					if ledgerErr == nil {
+						ledgerErr = entryLedgerErr
+						log.WithContext(ctx).WithError(ledgerErr).Error("Failed to lookup NMI chargeback reversal; continuing entitlement revocation")
+					}
+				} else {
+					amountCents := match.AmountCents
+					if parsedAmount, parseErr := parseNMIChargebackAmountCents(cb.Amount); parseErr == nil && parsedAmount > 0 {
+						amountCents = parsedAmount
+					}
+					if amountCents > match.AmountCents {
+						amountCents = match.AmountCents
+					}
+					if _, refundErr := s.PaymentService.Refund(ctx, match.PaymentID, chargebackTransactionID, amountCents); refundErr != nil {
+						reconcileErrors++
+						cbMetadata["chargeback_payment_status"] = "failed"
+						cbMetadata["chargeback_payment_error"] = refundErr.Error()
+						entryLedgerErr = fmt.Errorf("record NMI chargeback reversal: %w", refundErr)
+						if ledgerErr == nil {
+							ledgerErr = entryLedgerErr
+							log.WithContext(ctx).WithError(ledgerErr).Error("Failed to record NMI chargeback reversal; continuing entitlement revocation")
+						}
+					} else {
+						cbMetadata["chargeback_payment_status"] = "recorded"
+						cbMetadata["chargeback_payment_transaction_id"] = chargebackTransactionID
+					}
+				}
 			}
 
 			if _, seen := processedSubs[match.SubscriptionID]; seen {
@@ -1629,6 +1685,40 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 							cbStatus = "completed"
 						}
 					}
+				}
+			}
+
+			if entryLedgerErr != nil {
+				paymentID := match.PaymentID
+				subID := match.SubscriptionID
+				alertTransactionID := chargebackTransactionID
+				if strings.TrimSpace(alertTransactionID) == "" {
+					alertTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
+				}
+				if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+					Provider:          processor,
+					Operation:         "chargeback_reversal",
+					TransactionID:     alertTransactionID,
+					UserID:            match.UserID,
+					OriginalPaymentID: &paymentID,
+					SubscriptionID:    &subID,
+					Err:               entryLedgerErr,
+					Metadata: map[string]any{
+						"batch_id":                        batchID,
+						"chargeback_id":                   cb.ID.Trimmed(),
+						"processor_subscription_id":       match.ProcessorSubscriptionID,
+						"original_payment_transaction_id": match.PaymentTransactionID,
+					},
+				}); err != nil {
+					reconcileErrors++
+					cbMetadata["ledger_repair_alert_status"] = "failed"
+					cbMetadata["ledger_repair_alert_error"] = err.Error()
+					if ledgerAlertErr == nil {
+						ledgerAlertErr = err
+					}
+					log.WithContext(ctx).WithError(err).Error("Failed to persist NMI chargeback ledger repair alert")
+				} else {
+					cbMetadata["ledger_repair_alert_status"] = "recorded"
 				}
 			}
 		}
@@ -1705,8 +1795,18 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		"unmatched_count":    unmatchedCount,
 		"reconcile_failures": reconcileErrors,
 	}).Warn("NMI chargeback batch processed with automated reconciliation")
-
+	if ledgerAlertErr != nil {
+		return fmt.Errorf("persist NMI chargeback ledger repair alert: %w", ledgerAlertErr)
+	}
 	return nil
+}
+
+func nmiChargebackTransactionID(chargebackID, originalTransactionID string) string {
+	chargebackID = strings.TrimSpace(chargebackID)
+	if chargebackID != "" {
+		return "chargeback:" + chargebackID
+	}
+	return "chargeback:" + strings.TrimSpace(originalTransactionID)
 }
 
 // handleRefundSuccess processes NMI refund.success webhooks
@@ -1750,6 +1850,13 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
 					Warn("Failed to look up subscription for refund (by UUID)")
+			} else if err == nil && subscription.Processor != models.Processor(provider) {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": nmiSubID,
+					"expected":        provider,
+					"actual":          subscription.Processor,
+				}).Warn("Ignoring NMI refund UUID fallback for different processor")
+				subscription = nil
 			} else if errors.Is(err, sql.ErrNoRows) {
 				log.WithContext(ctx).WithField("subscription_id", nmiSubID).
 					Warn("Received refund for unknown subscription (by UUID); continuing without lifecycle actions")
@@ -1766,18 +1873,21 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		}
 	}
 
-	// Determine if we should terminate subscription based on refund amount
+	// Determine if we should terminate subscription based on refund amount.
+	// Missing original references are not safe to complete silently because we cannot
+	// link the refund to the ledger entry that funded entitlement.
 	shouldTerminate := false
 	if subscription != nil && subscription.Price != nil && subscription.Price.Amount > 0 && originalTxnID != "" {
 		refundPercentage := (refundAmountCents * 100) / subscription.Price.Amount
 		if refundPercentage >= 80 {
 			shouldTerminate = true
 		}
-	} else if originalTxnID == "" {
+	} else if subscription != nil && originalTxnID == "" {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"refund_transaction_id": txnID,
 			"subscription_ref":      nmiSubID,
 		}).Warn("NMI refund missing original transaction ID; skipping lifecycle termination")
+		return fmt.Errorf("unable to resolve original payment for NMI refund transaction %q", txnID)
 	}
 
 	// Persist refund in the payments ledger as a negative payment linked to the original payment.
@@ -1815,6 +1925,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 					"subscription_id":         subscription.ID,
 					"original_transaction_id": originalTxnID,
 				}).Warn("Unable to resolve original payment for refund ledger linkage; skipping payment insert")
+				return fmt.Errorf("unable to resolve original payment %q for NMI refund transaction %q", originalTxnID, txnID)
 			} else {
 				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, txnID, refundAmountCents); refundErr != nil {
 					log.WithContext(ctx).WithError(refundErr).WithFields(log.Fields{

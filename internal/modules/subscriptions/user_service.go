@@ -405,6 +405,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	subscription.Status = models.StatusCancelled
 	subscription.CancelledAt = &now
 	subscription.CancelType = &cancelType
+	subscription.ClearRetrySchedule()
 	if feedback != "" {
 		subscription.CancelFeedback = &feedback
 	}

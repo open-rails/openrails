@@ -66,6 +66,8 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		Column(
 			"price_id",
 			"product_id",
+			"entitlements_spec_snapshot",
+			"credits_spec_snapshot",
 			"status",
 			"started_at",
 			"ended_at",
@@ -156,14 +158,14 @@ func (r *SubscriptionRepo) GetByUserIDAndPriceID(ctx context.Context, userID str
 	return sub, nil
 }
 
-// GetActiveOrPendingByUserIDAndProductID finds any active or pending subscription for a user and product.
+// GetActiveOrPendingByUserIDAndProductID finds any lifecycle-owning subscription for a user and product.
 // Returns the subscription with the latest period end date.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
 	sub := new(models.Subscription)
 	err := r.selectWithDetails(sub).
 		Where("sub.user_id = ?", userID).
 		Where("sub.product_id = ?", productID).
-		Where("sub.status IN (?, ?)", models.StatusActive, models.StatusPending).
+		Where("sub.status IN (?, ?, ?)", models.StatusActive, models.StatusPending, models.StatusPastDue).
 		Order("sub.current_period_ends_at DESC NULLS FIRST"). // NULLS FIRST prioritizes indefinite subscriptions
 		Limit(1).
 		Scan(ctx)

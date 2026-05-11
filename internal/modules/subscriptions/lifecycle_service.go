@@ -188,13 +188,71 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		"product_id": price.ProductID,
 	}).Info("Loaded price for membership creation")
 
+	var existingPendingSub *models.Subscription
+	if params.ProcessorSubscriptionID != nil && strings.TrimSpace(*params.ProcessorSubscriptionID) != "" {
+		found, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), strings.TrimSpace(*params.ProcessorSubscriptionID))
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("failed to check existing subscription by processor subscription ID: %w", err)
+		}
+		if err == nil && found.Status == models.StatusPending {
+			if found.UserID != params.UserID || found.ProductID != price.ProductID {
+				return nil, nil, fmt.Errorf("processor subscription belongs to a different pending subscription")
+			}
+			existingPendingSub = found
+		}
+	}
+
+	var paymentService *payments.PaymentService
+	if params.TransactionID != "" && s.PaymentService != nil {
+		paymentService = payments.NewPaymentService(dbb, s.Clock())
+		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
+		}
+		if err == nil {
+			if existingPayment.UserID != params.UserID {
+				return nil, nil, fmt.Errorf("payment transaction belongs to a different user")
+			}
+			if existingPayment.PriceID != price.ID {
+				return nil, nil, fmt.Errorf("payment transaction belongs to a different price")
+			}
+			if existingPayment.SubscriptionID == nil {
+				return nil, nil, fmt.Errorf("payment transaction is not linked to a subscription")
+			}
+			expectedAmount := params.Amount
+			if !params.AmountProvided && expectedAmount == 0 {
+				expectedAmount = price.Amount
+			}
+			expectedCurrency := strings.TrimSpace(params.Currency)
+			if expectedCurrency == "" {
+				expectedCurrency = price.Currency
+			}
+			if err := validateCompletedPayment(existingPayment, expectedAmount, expectedCurrency); err != nil {
+				return nil, nil, err
+			}
+			existingSubscription, err := subService.GetByID(ctx, *existingPayment.SubscriptionID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to load subscription for duplicate payment transaction: %w", err)
+			}
+			if existingSubscription.UserID != params.UserID {
+				return nil, nil, fmt.Errorf("payment transaction subscription belongs to a different user")
+			}
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": existingSubscription.ID,
+				"user_id":         params.UserID,
+				"payment_id":      existingPayment.ID,
+				"transaction_id":  params.TransactionID,
+			}).Info("Membership payment already exists; skipping duplicate membership creation")
+			return existingSubscription, nil, nil
+		}
+	}
+
 	activeSub, err := subService.GetActiveOrPendingByUserIDAndProductID(ctx, params.UserID, price.ProductID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, fmt.Errorf("failed to check existing subscriptions: %w", err)
 	}
 
-	// Only stop if an active subscription exists
-	if err == nil && activeSub.Status == models.StatusActive {
+	if err == nil && (existingPendingSub == nil || activeSub.ID != existingPendingSub.ID) {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"user_id":                   params.UserID,
 			"product_id":                price.ProductID,
@@ -203,16 +261,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			"existing_status":           activeSub.Status,
 			"existing_processor":        activeSub.Processor,
 			"processor_subscription_id": activeSub.ProcessorSubscriptionID,
-		}).Warn("User already has an active or pending subscription for this product; aborting membership creation")
-		return nil, nil, fmt.Errorf("user already has an active or pending subscription for this product")
-	}
-
-	existingSub, err := subService.GetByUserIDAndPriceID(ctx, params.UserID, price.ID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, fmt.Errorf("failed to check existing subscription by price: %w", err)
-	}
-	if err != nil {
-		existingSub = nil
+		}).Warn("User already has an active, pending, or past_due subscription for this product; aborting membership creation")
+		return nil, nil, fmt.Errorf("user already has an active, pending, or past_due subscription for this product")
 	}
 
 	now := s.now()
@@ -225,50 +275,67 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	} else {
 		periodEndsAt = now.Add(30 * 24 * time.Hour)
 	}
+	product, err := productService.GetByID(ctx, price.ProductID)
+	if err != nil {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"product_id": price.ProductID,
+			"user_id":    params.UserID,
+		}).WithError(err).Error("Failed to load product for membership creation")
+		return nil, nil, fmt.Errorf("failed to get product: %w", err)
+	}
 
 	var subscription *models.Subscription
-	if existingSub != nil {
+	if existingPendingSub != nil {
 		if params.UserEmail != nil && strings.TrimSpace(*params.UserEmail) != "" {
 			emailc := strings.TrimSpace(*params.UserEmail)
-			existingSub.UserEmail = &emailc
+			existingPendingSub.UserEmail = &emailc
 		}
 
-		existingSub.PriceID = price.ID
-		existingSub.Status = models.StatusActive
-		existingSub.Processor = params.Processor
+		existingPendingSub.PriceID = price.ID
+		existingPendingSub.ProductID = price.ProductID
+		existingPendingSub.Status = models.StatusActive
+		existingPendingSub.Processor = params.Processor
 		if params.ProcessorSubscriptionID != nil {
-			existingSub.ProcessorSubscriptionID = *params.ProcessorSubscriptionID
+			existingPendingSub.ProcessorSubscriptionID = *params.ProcessorSubscriptionID
 		}
 
-		existingSub.CurrentPeriodStartsAt = &periodStartsAt
-		existingSub.CurrentPeriodEndsAt = &periodEndsAt
-		existingSub.StartedAt = periodStartsAt
-		existingSub.CancelledAt = nil
-		existingSub.CancelType = nil
-		existingSub.CancelFeedback = nil
-		existingSub.EndedAt = nil
+		existingPendingSub.CurrentPeriodStartsAt = &periodStartsAt
+		existingPendingSub.CurrentPeriodEndsAt = &periodEndsAt
+		if len(existingPendingSub.EntitlementsSpecSnapshot) == 0 {
+			existingPendingSub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+		}
+		if len(existingPendingSub.CreditsSpecSnapshot) == 0 {
+			existingPendingSub.CreditsSpecSnapshot = models.CloneCreditsSpec(product.CreditsSpec)
+		}
+		existingPendingSub.StartedAt = periodStartsAt
+		existingPendingSub.CancelledAt = nil
+		existingPendingSub.CancelType = nil
+		existingPendingSub.CancelFeedback = nil
+		existingPendingSub.EndedAt = nil
 
-		if err := subService.Update(ctx, existingSub); err != nil {
+		if err := subService.Update(ctx, existingPendingSub); err != nil {
 			return nil, nil, fmt.Errorf("failed to update subscription: %w", err)
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":           existingSub.ID,
-			"user_id":                   existingSub.UserID,
-			"price_id":                  existingSub.PriceID,
-			"processor":                 existingSub.Processor,
-			"processor_subscription_id": existingSub.ProcessorSubscriptionID,
+			"subscription_id":           existingPendingSub.ID,
+			"user_id":                   existingPendingSub.UserID,
+			"price_id":                  existingPendingSub.PriceID,
+			"processor":                 existingPendingSub.Processor,
+			"processor_subscription_id": existingPendingSub.ProcessorSubscriptionID,
 			"period_start":              periodStartsAt,
 			"period_end":                periodEndsAt,
-		}).Info("Reusing existing subscription record for membership creation")
-		subscription = existingSub
+		}).Info("Activating existing pending subscription record for membership creation")
+		subscription = existingPendingSub
 	} else {
 		subscription = &models.Subscription{
-			ID:        uuid.New(),
-			UserID:    params.UserID,
-			ProductID: price.ProductID,
-			PriceID:   price.ID,
-			Status:    models.StatusActive,
-			Processor: params.Processor,
+			ID:                       uuid.New(),
+			UserID:                   params.UserID,
+			ProductID:                price.ProductID,
+			PriceID:                  price.ID,
+			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
+			CreditsSpecSnapshot:      models.CloneCreditsSpec(product.CreditsSpec),
+			Status:                   models.StatusActive,
+			Processor:                params.Processor,
 			ProcessorSubscriptionID: func() string {
 				if params.ProcessorSubscriptionID != nil {
 					return *params.ProcessorSubscriptionID
@@ -302,18 +369,13 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
 	if entitlementService != nil {
-		product, err := productService.GetByID(ctx, price.ProductID)
-		if err != nil {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"product_id": price.ProductID,
-				"user_id":    params.UserID,
-			}).WithError(err).Error("Failed to load product for entitlement grant")
-			return nil, nil, fmt.Errorf("failed to get product: %w", err)
-		}
-
 		entNames := make([]string, 0, 4)
-		if len(product.EntitlementsSpec) > 0 {
-			for name := range product.EntitlementsSpec {
+		entitlementsSpec := subscription.EntitlementsSpecSnapshot
+		if len(entitlementsSpec) == 0 {
+			entitlementsSpec = product.EntitlementsSpec
+		}
+		if len(entitlementsSpec) > 0 {
+			for name := range entitlementsSpec {
 				entNames = append(entNames, name)
 			}
 		} else {
@@ -343,7 +405,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			notBefore := periodStartsAt.UTC()
 			endAt := periodEndsAt.UTC()
 			window, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-				UserID:      params.UserID,
+				UserID:      subscription.UserID,
 				Entitlement: ent,
 				NotBefore:   &notBefore,
 				EndAt:       &endAt,
@@ -358,6 +420,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				}).WithError(err).Error("Failed to grant subscription entitlement")
 				return nil, nil, fmt.Errorf("failed to grant entitlement %s: %w", ent, err)
 			}
+			if window == nil {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+					"user_id":         subscription.UserID,
+					"entitlement":     ent,
+				}).Info("Subscription entitlement already covered by canonical timeline")
+				continue
+			}
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"user_id":         subscription.UserID,
@@ -370,7 +440,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	notification := &models.NotificationQueue{
 		ID:        uuid.New(),
-		UserID:    params.UserID,
+		UserID:    subscription.UserID,
 		EventType: models.NotificationPremiumStarted,
 	}
 	if err := notificationRepo.Create(ctx, notification); err != nil {
@@ -380,22 +450,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	// Create Payment record if payment info is provided
-	if params.TransactionID != "" && s.PaymentService != nil {
-		paymentService := payments.NewPaymentService(dbb, s.Clock())
-		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
-		}
-		if err == nil && existingPayment.UserID == subscription.UserID {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-				"user_id":         subscription.UserID,
-				"payment_id":      existingPayment.ID,
-				"transaction_id":  params.TransactionID,
-			}).Info("Payment already exists for transaction; skipping")
-			return subscription, notifications, nil
-		}
-
+	if params.TransactionID != "" && paymentService != nil {
 		// Use provided amount/currency or fall back to price defaults
 		amount := params.Amount
 		if !params.AmountProvided && amount == 0 {
@@ -407,31 +462,33 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		}
 
 		payment := &models.Payment{
-			ID:             uuid.New(),
-			UserID:         params.UserID,
-			PriceID:        price.ID,
-			SubscriptionID: &subscription.ID,
-			Processor:      params.Processor,
-			TransactionID:  params.TransactionID,
-			Amount:         amount,
-			ListAmount:     price.Amount,
-			Currency:       currency,
-			Metadata:       params.PaymentMetadata,
-			PurchasedAt:    now,
-			CreatedAt:      now,
+			ID:                       uuid.New(),
+			UserID:                   subscription.UserID,
+			PriceID:                  price.ID,
+			SubscriptionID:           &subscription.ID,
+			Processor:                params.Processor,
+			TransactionID:            params.TransactionID,
+			Amount:                   amount,
+			ListAmount:               price.Amount,
+			Currency:                 currency,
+			Metadata:                 params.PaymentMetadata,
+			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
+			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
+			PurchasedAt:              now,
+			CreatedAt:                now,
 		}
 		if err := paymentService.Create(ctx, payment); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"transaction_id":  params.TransactionID,
 				"subscription_id": subscription.ID,
-				"user_id":         params.UserID,
+				"user_id":         subscription.UserID,
 			}).Error("failed to create payment record for new membership")
-			// Don't fail the membership creation - just log the error
+			return nil, nil, fmt.Errorf("failed to create payment record for new membership: %w", err)
 		} else {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"transaction_id":  params.TransactionID,
 				"subscription_id": subscription.ID,
-				"user_id":         params.UserID,
+				"user_id":         subscription.UserID,
 				"amount_cents":    amount,
 				"currency":        currency,
 			}).Info("Recorded payment for membership creation")
@@ -508,6 +565,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		var price *models.Price
 		var oldProduct, newProduct *models.Product
 		applyingDowngrade := subscription.ScheduledPriceID != nil
+		oldEntitlementsSpec := models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot)
 
 		if applyingDowngrade {
 			// Get old product for entitlement comparison
@@ -543,12 +601,26 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			// Update subscription to new price and product
 			subscription.PriceID = price.ID
 			subscription.ProductID = price.ProductID
+			subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(newProduct.EntitlementsSpec)
+			subscription.CreditsSpecSnapshot = models.CloneCreditsSpec(newProduct.CreditsSpec)
 			subscription.ScheduledPriceID = nil // Clear the scheduled downgrade
 		} else {
 			// Normal renewal - use current price
 			price, err = priceService.GetByID(ctx, subscription.PriceID)
 			if err != nil {
 				return fmt.Errorf("failed to get price: %w", err)
+			}
+			if len(subscription.EntitlementsSpecSnapshot) == 0 || len(subscription.CreditsSpecSnapshot) == 0 {
+				product, err := productService.GetByID(ctx, price.ProductID)
+				if err != nil {
+					return fmt.Errorf("failed to get product for renewal snapshot: %w", err)
+				}
+				if len(subscription.EntitlementsSpecSnapshot) == 0 {
+					subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+				}
+				if len(subscription.CreditsSpecSnapshot) == 0 {
+					subscription.CreditsSpecSnapshot = models.CloneCreditsSpec(product.CreditsSpec)
+				}
 			}
 		}
 
@@ -564,24 +636,42 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		if params.TransactionID != "" {
 			now := s.now().UTC()
 			payment := &models.Payment{
-				ID:             uuid.New(),
-				UserID:         subscription.UserID,
-				PriceID:        price.ID,
-				SubscriptionID: &subscription.ID,
-				Processor:      params.Processor,
-				TransactionID:  params.TransactionID,
-				Amount:         amount,
-				ListAmount:     amount,
-				Currency:       currency,
-				Metadata:       params.PaymentMetadata,
-				PurchasedAt:    now,
-				CreatedAt:      now,
+				ID:                       uuid.New(),
+				UserID:                   subscription.UserID,
+				PriceID:                  price.ID,
+				SubscriptionID:           &subscription.ID,
+				Processor:                params.Processor,
+				TransactionID:            params.TransactionID,
+				Amount:                   amount,
+				ListAmount:               amount,
+				Currency:                 currency,
+				Metadata:                 params.PaymentMetadata,
+				EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
+				CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
+				PurchasedAt:              now,
+				CreatedAt:                now,
 			}
 			created, err := paymentService.CreateIfNotExists(ctx, payment)
 			if err != nil {
 				return fmt.Errorf("failed to persist renewal payment marker: %w", err)
 			}
 			if !created {
+				existingPayment, loadErr := paymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
+				if loadErr != nil {
+					return fmt.Errorf("failed to load duplicate renewal payment marker: %w", loadErr)
+				}
+				if existingPayment.SubscriptionID == nil || *existingPayment.SubscriptionID != subscription.ID {
+					return fmt.Errorf("duplicate renewal payment marker belongs to a different subscription")
+				}
+				if existingPayment.UserID != subscription.UserID {
+					return fmt.Errorf("duplicate renewal payment marker belongs to a different user")
+				}
+				if existingPayment.PriceID != price.ID {
+					return fmt.Errorf("duplicate renewal payment marker belongs to a different price")
+				}
+				if err := validateCompletedPayment(existingPayment, amount, currency); err != nil {
+					return err
+				}
 				log.WithContext(ctx).WithFields(log.Fields{
 					"transaction_id":  params.TransactionID,
 					"subscription_id": subscription.ID,
@@ -615,10 +705,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		subscription.CancelFeedback = nil
 		subscription.EndedAt = nil
 		// Clear any dunning/grace fields on successful renewal.
-		subscription.LastRetryAt = nil
-		subscription.RetryAttempts = nil
-		subscription.NextRetryAt = nil
-		subscription.GraceEndsAt = nil
+		subscription.ClearRetrySchedule()
 
 		if err := subService.Update(ctx, subscription); err != nil {
 			return fmt.Errorf("failed to update subscription: %w", err)
@@ -637,17 +724,21 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		// Append the next paid entitlement window for the subscription's entitlements.
 		// Entitlement windows are immutable: renewals create new windows instead of extending existing ones.
-		effectiveProduct := newProduct
-		if effectiveProduct == nil {
-			effectiveProduct, err = productService.GetByID(ctx, price.ProductID)
-			if err != nil {
-				return fmt.Errorf("failed to get product for renewal: %w", err)
+		entitlementsSpec := subscription.EntitlementsSpecSnapshot
+		if len(entitlementsSpec) == 0 {
+			effectiveProduct := newProduct
+			if effectiveProduct == nil {
+				effectiveProduct, err = productService.GetByID(ctx, price.ProductID)
+				if err != nil {
+					return fmt.Errorf("failed to get product for renewal: %w", err)
+				}
 			}
+			entitlementsSpec = effectiveProduct.EntitlementsSpec
 		}
-		if effectiveProduct != nil && effectiveProduct.EntitlementsSpec != nil {
+		if entitlementsSpec != nil {
 			notBefore := periodStartsAt.UTC()
 			endAt := periodEndsAt.UTC()
-			for entName := range effectiveProduct.EntitlementsSpec {
+			for entName := range entitlementsSpec {
 				// If the subscription had processor-driven grace windows (e.g. CCBill dunning),
 				// remove them before pushing the next paid window. Otherwise, the grace tail can
 				// cause the paid push to be scheduled after grace or become a no-op.
@@ -680,7 +771,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		if applyingDowngrade && oldProduct != nil && newProduct != nil {
 			// Determine which entitlements to revoke (in old but not in new)
 			oldEnts := make(map[string]bool)
-			for name := range oldProduct.EntitlementsSpec {
+			if len(oldEntitlementsSpec) == 0 {
+				oldEntitlementsSpec = oldProduct.EntitlementsSpec
+			}
+			for name := range oldEntitlementsSpec {
 				oldEnts[name] = true
 			}
 
@@ -814,9 +908,17 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 			return fmt.Errorf("failed to load subscription price: %w", err)
 		}
 
-		product, err := productService.GetByID(ctx, price.ProductID)
-		if err != nil {
-			return fmt.Errorf("failed to load subscription product: %w", err)
+		if len(subscription.EntitlementsSpecSnapshot) == 0 || len(subscription.CreditsSpecSnapshot) == 0 {
+			product, err := productService.GetByID(ctx, price.ProductID)
+			if err != nil {
+				return fmt.Errorf("failed to load subscription product: %w", err)
+			}
+			if len(subscription.EntitlementsSpecSnapshot) == 0 {
+				subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+			}
+			if len(subscription.CreditsSpecSnapshot) == 0 {
+				subscription.CreditsSpecSnapshot = models.CloneCreditsSpec(product.CreditsSpec)
+			}
 		}
 
 		periodStartsAt := now
@@ -829,19 +931,17 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		subscription.CancelType = nil
 		subscription.CancelFeedback = nil
 		subscription.EndedAt = nil
-		subscription.LastRetryAt = nil
-		subscription.RetryAttempts = nil
-		subscription.NextRetryAt = nil
-		subscription.GraceEndsAt = nil
+		subscription.ClearRetrySchedule()
 
 		if err := subService.Update(ctx, subscription); err != nil {
 			return fmt.Errorf("failed to update reactivated subscription: %w", err)
 		}
 
 		entNames := make([]string, 0)
-		if product.EntitlementsSpec != nil && len(product.EntitlementsSpec) > 0 {
-			entNames = make([]string, 0, len(product.EntitlementsSpec))
-			for name := range product.EntitlementsSpec {
+		entitlementsSpec := subscription.EntitlementsSpecSnapshot
+		if entitlementsSpec != nil && len(entitlementsSpec) > 0 {
+			entNames = make([]string, 0, len(entitlementsSpec))
+			for name := range entitlementsSpec {
 				entNames = append(entNames, name)
 			}
 		} else {
@@ -977,6 +1077,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		subscription.CancelType = &params.CancelType
 		subscription.CancelFeedback = params.CancelFeedback
 		subscription.CancelledAt = &now
+		subscription.ClearRetrySchedule()
 
 		if err := subService.Update(ctx, subscription); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
@@ -1000,26 +1101,10 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 				revokeReason = models.EntitlementRevokeChargeback
 			}
 
-			names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
-			if err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to list entitlements for cancelled subscription")
-			} else {
-				st := models.EntitlementSourceSubscription
-				sid := subscription.ID
-				for _, entName := range names {
-					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-						UserID:      subscription.UserID,
-						Entitlement: entName,
-						SourceType:  &st,
-						SourceID:    &sid,
-						Reason:      revokeReason,
-					}); err != nil {
-						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-							"subscription_id": subscription.ID,
-							"entitlement":     entName,
-						}).Error("failed to revoke entitlement during cancellation")
-					}
-				}
+			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.UserID, subscription.ID, revokeReason, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+				}).Error("failed to revoke entitlements during cancellation")
 			}
 		}
 
@@ -1099,6 +1184,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		expired := models.CancelTypeExpired
 		subscription.CancelType = &expired
 		subscription.EndedAt = &now
+		subscription.ClearRetrySchedule()
 
 		if err := subService.Update(ctx, subscription); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
@@ -1190,6 +1276,10 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 //   - "on" or "dry_run_only": Normal dunning flow - go to past_due, schedule retries
 //   - "off": Immediate cancellation - no grace period, no retries
 func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *FailMembershipParams) error {
+	if params == nil || params.SubscriptionID == nil || *params.SubscriptionID == uuid.Nil {
+		return fmt.Errorf("subscription_id is required")
+	}
+
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
 	// Variables to capture from transaction for event logging
@@ -1239,9 +1329,17 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				"user_id":         subscription.UserID,
 			}).Warn("Dunning mode is 'off'; immediately cancelling subscription (no recovery)")
 
+			expired := models.CancelTypeExpired
+			reason := normalize.FromPtr(params.FailureReason)
+			if reason == "" {
+				reason = "transaction_failure"
+			}
 			subscription.Status = models.StatusCancelled
+			subscription.CancelledAt = &now
+			subscription.CancelType = &expired
+			subscription.CancelFeedback = &reason
 			subscription.EndedAt = &now
-			// Don't set retry fields - we're not doing dunning
+			subscription.ClearRetrySchedule()
 		} else {
 			// Normal dunning flow (for "on" or "dry_run_only" modes)
 			// Update subscription status - failed payment = past_due (still trying to recover)
@@ -1259,13 +1357,17 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 			// If we've reached MaxDunningFailures, cancel; otherwise schedule next attempt in DunningInterval
 			if *subscription.RetryAttempts >= MaxDunningFailures {
-				//subscription.Status = models.StatusCancelled
-				//subscription.CancelledAt = &now
-				// Ensure EndedAt is equal to or after CancelledAt to satisfy DB constraint
-				//subscription.EndedAt = &now
-
 				expired := models.CancelTypeExpired
-				subscription.Cancel("transaction_failure", &expired)
+				reason := normalize.FromPtr(params.FailureReason)
+				if reason == "" {
+					reason = "transaction_failure"
+				}
+				subscription.Status = models.StatusCancelled
+				subscription.CancelledAt = &now
+				subscription.CancelType = &expired
+				subscription.CancelFeedback = &reason
+				subscription.EndedAt = &now
+				subscription.ClearRetrySchedule()
 			} else {
 				nextRetry := now.Add(DunningInterval)
 				subscription.NextRetryAt = &nextRetry
@@ -1437,6 +1539,23 @@ func (s *SubscriptionLifecycleService) logPaymentEvent(ctx context.Context, sub 
 			"processor":       processor,
 		}).Warn("failed to log payment event to ClickHouse")
 	}
+}
+
+func validateCompletedPayment(payment *models.Payment, expectedAmount int64, expectedCurrency string) error {
+	if payment == nil {
+		return errors.New("payment is required")
+	}
+	status := strings.TrimSpace(payment.Status)
+	if status != "" && !strings.EqualFold(status, "completed") {
+		return fmt.Errorf("payment transaction is not completed")
+	}
+	if expectedAmount > 0 && payment.Amount != expectedAmount {
+		return fmt.Errorf("payment transaction amount mismatch")
+	}
+	if expectedCurrency != "" && !strings.EqualFold(strings.TrimSpace(payment.Currency), strings.TrimSpace(expectedCurrency)) {
+		return fmt.Errorf("payment transaction currency mismatch")
+	}
+	return nil
 }
 
 // Parameter structs for lifecycle operations

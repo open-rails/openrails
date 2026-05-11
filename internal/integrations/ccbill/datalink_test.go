@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,4 +34,18 @@ func TestDataLinkClientFetchActiveMembersSendsTestMode(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, records, 1)
 	require.Equal(t, "1", <-seen)
+}
+
+func TestDataLinkClientProcessCSVDataFailsOnSkippedRows(t *testing.T) {
+	t.Parallel()
+
+	client := &DataLinkClient{}
+	records, err := client.ProcessCSVData(context.Background(), strings.Join([]string{
+		`"ACTIVEMEMBERS","123","x","456","2026-05-03","user","u@example.com","1","2026-06-03","2026-06-03"`,
+		`"ACTIVEMEMBERS","123"`,
+	}, "\n"))
+
+	require.Error(t, err)
+	require.Nil(t, records)
+	require.Contains(t, err.Error(), "skipped records")
 }

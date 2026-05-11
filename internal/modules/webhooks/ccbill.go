@@ -1200,7 +1200,6 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -1286,7 +1285,6 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 	}); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -1520,6 +1518,8 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		return err
 	}
 
+	var refundLedgerErr error
+	var refundRepairAlert *ledgerRepairAlert
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		txdb := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(txdb)
@@ -1549,29 +1549,68 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			}
 		}
 
+		var originalPayment *models.Payment
 		if refundTransactionID != "" && refundAmountCents > 0 {
-			existingRefund, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, refundTransactionID)
+			reversalID := "refund:" + strings.TrimSpace(refundTransactionID)
+			existingRefund, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, reversalID)
+			if errors.Is(lookupErr, sql.ErrNoRows) {
+				legacyRefund, legacyErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, strings.TrimSpace(refundTransactionID))
+				if legacyErr == nil && legacyRefund != nil && (legacyRefund.Amount < 0 || legacyRefund.RefundedPaymentID != nil) {
+					existingRefund = legacyRefund
+					lookupErr = nil
+				} else if legacyErr != nil && !errors.Is(legacyErr, sql.ErrNoRows) {
+					lookupErr = legacyErr
+				}
+			}
 			switch {
 			case lookupErr == nil && existingRefund != nil:
 				log.WithContext(ctx).WithFields(log.Fields{
-					"refund_transaction_id": refundTransactionID,
+					"refund_transaction_id": reversalID,
 					"payment_id":            existingRefund.ID,
 				}).Info("CCBill refund payment already exists; skipping duplicate ledger insert")
 			case lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows):
-				return fmt.Errorf("failed to check existing refund payment: %w", lookupErr)
+				err := fmt.Errorf("failed to check existing refund payment: %w", lookupErr)
+				if shouldTerminate {
+					refundLedgerErr = err
+					log.WithContext(ctx).WithError(err).Error("Failed to check CCBill refund ledger; continuing access revocation")
+				} else {
+					return err
+				}
 			default:
-				originalPayment, originalErr := paymentService.GetLatestChargeBySubscriptionID(ctx, sub.ID)
+				var originalErr error
+				originalPayment, originalErr = paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, refundTransactionID)
+				if errors.Is(originalErr, sql.ErrNoRows) {
+					originalPayment, originalErr = paymentService.GetLatestChargeBySubscriptionID(ctx, sub.ID)
+				}
 				if originalErr != nil {
 					if !errors.Is(originalErr, sql.ErrNoRows) {
-						return fmt.Errorf("failed to resolve original payment for refund: %w", originalErr)
+						err := fmt.Errorf("failed to resolve original payment for refund: %w", originalErr)
+						if shouldTerminate {
+							refundLedgerErr = err
+							log.WithContext(ctx).WithError(err).Error("Failed to resolve CCBill refund ledger payment; continuing access revocation")
+						} else {
+							return err
+						}
+						break
+					}
+					if shouldTerminate {
+						refundLedgerErr = fmt.Errorf("failed to resolve original payment for terminating CCBill refund transaction %q", refundTransactionID)
+						log.WithContext(ctx).WithError(refundLedgerErr).Error("Failed to resolve CCBill refund ledger payment; continuing access revocation")
+						break
 					}
 					log.WithContext(ctx).WithFields(log.Fields{
 						"subscription_id":       sub.ID,
 						"refund_transaction_id": refundTransactionID,
 					}).Warn("No original payment found for CCBill refund ledger linkage")
 				} else {
-					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, refundTransactionID, refundAmountCents); refundErr != nil {
-						return fmt.Errorf("failed to persist CCBill refund payment: %w", refundErr)
+					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, refundAmountCents); refundErr != nil {
+						err := fmt.Errorf("failed to persist CCBill refund payment: %w", refundErr)
+						if shouldTerminate {
+							refundLedgerErr = err
+							log.WithContext(ctx).WithError(err).Error("Failed to persist CCBill refund ledger; continuing access revocation")
+						} else {
+							return err
+						}
 					}
 				}
 			}
@@ -1592,24 +1631,32 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			if refundReason != "" {
 				sub.CancelFeedback = &refundReason
 			}
+			sub.ClearRetrySchedule()
 
-			// End entitlements for this subscription immediately
-			names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, sub.ID)
-			if err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to list entitlements for refunded subscription")
-			} else {
-				st := models.EntitlementSourceSubscription
-				sid := sub.ID
-				for _, entName := range names {
-					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-						UserID:      sub.UserID,
-						Entitlement: entName,
-						SourceType:  &st,
-						SourceID:    &sid,
-						Reason:      models.EntitlementRevokeRefund,
-					}); err != nil {
-						log.WithContext(ctx).WithError(err).WithField("entitlement", entName).Error("failed to revoke entitlement for refunded subscription")
-					}
+			// End entitlements for this subscription immediately.
+			if err := entSvc.RevokeSourcesForSubscription(ctx, sub.UserID, sub.ID, models.EntitlementRevokeRefund, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+				log.WithContext(ctx).WithError(err).Error("failed to revoke entitlements for refunded subscription")
+			}
+			if refundLedgerErr != nil {
+				var originalPaymentID *uuid.UUID
+				if originalPayment != nil {
+					id := originalPayment.ID
+					originalPaymentID = &id
+				}
+				subscriptionID := sub.ID
+				refundRepairAlert = &ledgerRepairAlert{
+					Provider:          "ccbill",
+					Operation:         "refund_reversal",
+					TransactionID:     refundTransactionID,
+					UserID:            sub.UserID,
+					OriginalPaymentID: originalPaymentID,
+					SubscriptionID:    &subscriptionID,
+					Err:               refundLedgerErr,
+					Metadata: map[string]any{
+						"processor_subscription_id": pSubscriptionID,
+						"refund_amount":             refundAmount,
+						"refund_reason":             refundReason,
+					},
 				}
 			}
 
@@ -1685,6 +1732,11 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		return nil
 	}); err != nil {
 		return err
+	}
+	if refundRepairAlert != nil {
+		if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), *refundRepairAlert); err != nil {
+			return fmt.Errorf("record CCBill refund ledger repair alert: %w", err)
+		}
 	}
 
 	return nil
@@ -1896,6 +1948,8 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var ledgerErr error
+	var chargebackRepairAlert *ledgerRepairAlert
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		db := db.NewWithTx(tx)
@@ -1903,6 +1957,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		productService := catalog.NewProductService(db)
 		subService := subscriptions.NewSubscriptionService(db, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
 		entSvc := entitlements.NewEntitlementService(db, s.Clock)
+		paymentService := payments.NewPaymentService(db, s.Clock)
 
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
@@ -1959,6 +2014,46 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		}
 
 		// No external user lookup (IdP-managed ID already on subscription)
+		originalPayment, paymentErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, chargebackTransactionID)
+		if paymentErr != nil && !errors.Is(paymentErr, sql.ErrNoRows) {
+			return fmt.Errorf("lookup original payment for CCBill chargeback: %w", paymentErr)
+		}
+		if originalPayment == nil {
+			originalPayment, paymentErr = paymentService.GetLatestChargeBySubscriptionID(ctx, sub.ID)
+			if paymentErr != nil && !errors.Is(paymentErr, sql.ErrNoRows) {
+				return fmt.Errorf("lookup latest payment for CCBill chargeback: %w", paymentErr)
+			}
+		}
+		if originalPayment != nil {
+			reversalID := "chargeback:" + strings.TrimSpace(chargebackTransactionID)
+			if reversalID == "chargeback:" {
+				reversalID += strings.TrimSpace(pSubscriptionID)
+			}
+			if existingChargeback, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, reversalID); lookupErr == nil && existingChargeback != nil {
+				log.WithContext(ctx).WithField("chargeback_transaction_id", reversalID).Info("CCBill chargeback reversal already recorded")
+			} else if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+				return fmt.Errorf("lookup existing CCBill chargeback reversal: %w", lookupErr)
+			} else {
+				amount := chargebackAmountCents
+				if amount > originalPayment.Amount {
+					amount = originalPayment.Amount
+				}
+				if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, amount); refundErr != nil {
+					ledgerErr = fmt.Errorf("record CCBill chargeback reversal: %w", refundErr)
+					log.WithContext(ctx).WithError(ledgerErr).WithFields(log.Fields{
+						"chargeback_transaction_id": reversalID,
+						"original_payment_id":       originalPayment.ID,
+					}).Error("Failed to record CCBill chargeback reversal; continuing entitlement revocation")
+				}
+			}
+		} else {
+			ledgerErr = fmt.Errorf("resolve original payment for CCBill chargeback ledger reversal")
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id":           sub.ID,
+				"processor_subscription_id": pSubscriptionID,
+				"chargeback_transaction_id": chargebackTransactionID,
+			}).Warn("Unable to resolve original payment for CCBill chargeback ledger reversal")
+		}
 
 		now := s.now()
 
@@ -1973,6 +2068,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		sub.CancelType = &cancelType
 		sub.CancelledAt = &now
 		sub.EndedAt = &now
+		sub.ClearRetrySchedule()
 
 		// Include chargeback details in feedback
 		chargebackFeedback := fmt.Sprintf("CHARGEBACK: %s (Code: %s, Dispute: %s)",
@@ -1983,23 +2079,30 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			return fmt.Errorf("failed to update subscription after chargeback: %w", err)
 		}
 
-		// Immediately end entitlements for this subscription
-		names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, sub.ID)
-		if err != nil {
-			log.WithContext(ctx).WithError(err).Error("failed to list entitlements for chargebacked subscription")
-		} else {
-			st := models.EntitlementSourceSubscription
-			sid := sub.ID
-			for _, entName := range names {
-				if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-					UserID:      sub.UserID,
-					Entitlement: entName,
-					SourceType:  &st,
-					SourceID:    &sid,
-					Reason:      models.EntitlementRevokeChargeback,
-				}); err != nil {
-					log.WithContext(ctx).WithError(err).WithField("entitlement", entName).Error("failed to revoke entitlement for chargebacked subscription")
-				}
+		// Immediately end entitlements for this subscription.
+		if err := entSvc.RevokeSourcesForSubscription(ctx, sub.UserID, sub.ID, models.EntitlementRevokeChargeback, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+			log.WithContext(ctx).WithError(err).Error("failed to revoke entitlements for chargebacked subscription")
+		}
+		if ledgerErr != nil {
+			var originalPaymentID *uuid.UUID
+			if originalPayment != nil {
+				id := originalPayment.ID
+				originalPaymentID = &id
+			}
+			subscriptionID := sub.ID
+			chargebackRepairAlert = &ledgerRepairAlert{
+				Provider:          "ccbill",
+				Operation:         "chargeback_reversal",
+				TransactionID:     chargebackTransactionID,
+				UserID:            sub.UserID,
+				OriginalPaymentID: originalPaymentID,
+				SubscriptionID:    &subscriptionID,
+				Err:               ledgerErr,
+				Metadata: map[string]any{
+					"processor_subscription_id": pSubscriptionID,
+					"chargeback_amount":         chargebackAmount,
+					"chargeback_reason":         chargebackReason,
+				},
 			}
 		}
 
@@ -2081,7 +2184,11 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-
+	if chargebackRepairAlert != nil {
+		if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), *chargebackRepairAlert); err != nil {
+			return fmt.Errorf("record CCBill chargeback ledger repair alert: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -2363,21 +2470,25 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 
 		// If grace applies, append grace windows for each entitlement granted by the subscription.
 		if graceUntil != nil {
-			subPrice := sub.Price
-			if subPrice == nil {
-				loadedPrice, err := priceService.GetByID(ctx, sub.PriceID)
-				if err != nil {
-					return fmt.Errorf("failed to load subscription price for grace entitlements: %w", err)
+			entitlementsSpec := sub.EntitlementsSpecSnapshot
+			if len(entitlementsSpec) == 0 {
+				subPrice := sub.Price
+				if subPrice == nil {
+					loadedPrice, err := priceService.GetByID(ctx, sub.PriceID)
+					if err != nil {
+						return fmt.Errorf("failed to load subscription price for grace entitlements: %w", err)
+					}
+					subPrice = loadedPrice
 				}
-				subPrice = loadedPrice
-			}
-			product, err := productService.GetByID(ctx, subPrice.ProductID)
-			if err != nil {
-				return fmt.Errorf("failed to load subscription product for grace entitlements: %w", err)
+				product, err := productService.GetByID(ctx, subPrice.ProductID)
+				if err != nil {
+					return fmt.Errorf("failed to load subscription product for grace entitlements: %w", err)
+				}
+				entitlementsSpec = product.EntitlementsSpec
 			}
 
-			names := make([]string, 0, len(product.EntitlementsSpec))
-			for entName := range product.EntitlementsSpec {
+			names := make([]string, 0, len(entitlementsSpec))
+			for entName := range entitlementsSpec {
 				names = append(names, entName)
 			}
 			if len(names) == 0 {

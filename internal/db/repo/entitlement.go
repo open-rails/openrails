@@ -276,40 +276,47 @@ func (r *EntitlementRepo) ResumeBySubscription(ctx context.Context, subscription
 	return err
 }
 
-// EndActiveByPayment ends entitlements for a one-off payment.
-// Returns an error if any entitlement would have end_at <= start_at (zero or negative duration).
+// EndActiveByPayment revokes active one-off entitlements for a payment and removes future windows.
 // The now parameter is used for updated_at and revoked_at timestamps to support mock clocks in tests.
 func (r *EntitlementRepo) EndActiveByPayment(ctx context.Context, paymentID uuid.UUID, endAt time.Time, now time.Time, reason *models.EntitlementRevokeReason) error {
-	// First, check if any entitlements would violate the start_at < end_at constraint
-	var invalidCount int
-	err := r.db.GetDB().NewSelect().
-		Model((*models.Entitlement)(nil)).
-		ColumnExpr("COUNT(*)").
-		Where("ent.source_type = ?", models.EntitlementSourceOneOff).
-		Where("ent.source_id = ?", paymentID).
-		Where("ent.end_at IS NULL").
-		Where("ent.deleted_at IS NULL").
-		Where("ent.start_at >= ?", endAt).
-		Scan(ctx, &invalidCount)
-	if err != nil {
-		return fmt.Errorf("failed to check entitlement validity: %w", err)
-	}
-	if invalidCount > 0 {
-		return fmt.Errorf("cannot set end_at to %v: %d entitlement(s) have start_at >= end_at (zero or negative duration)", endAt, invalidCount)
+	apply := func(ctx context.Context, q bun.IDB) error {
+		if _, err := q.NewUpdate().
+			Model((*models.Entitlement)(nil)).
+			Set("deleted_at = ?", now).
+			Set("updated_at = ?", now).
+			Where("ent.source_type = ?", models.EntitlementSourceOneOff).
+			Where("ent.source_id = ?", paymentID).
+			Where("ent.revoked_at IS NULL").
+			Where("ent.deleted_at IS NULL").
+			Where("ent.start_at >= ?", endAt).
+			Exec(ctx); err != nil {
+			return err
+		}
+
+		_, err := q.NewUpdate().
+			Model((*models.Entitlement)(nil)).
+			Set("end_at = ?", endAt).
+			Set("revoked_at = ?", now).
+			Set("revoke_reason = ?", reason).
+			Set("updated_at = ?", now).
+			Where("ent.source_type = ?", models.EntitlementSourceOneOff).
+			Where("ent.source_id = ?", paymentID).
+			Where("ent.revoked_at IS NULL").
+			Where("ent.deleted_at IS NULL").
+			Where("ent.start_at < ?", endAt).
+			Where("ent.end_at IS NULL OR ent.end_at > ?", endAt).
+			Exec(ctx)
+		return err
 	}
 
-	_, err = r.db.GetDB().NewUpdate().
-		Model((*models.Entitlement)(nil)).
-		Set("end_at = ?", endAt).
-		Set("revoked_at = ?", now).
-		Set("revoke_reason = ?", reason).
-		Set("updated_at = ?", now).
-		Where("ent.source_type = ?", models.EntitlementSourceOneOff).
-		Where("ent.source_id = ?", paymentID).
-		Where("ent.end_at IS NULL").
-		Where("ent.deleted_at IS NULL").
-		Exec(ctx)
-	return err
+	switch dbi := r.db.GetDB().(type) {
+	case *bun.DB:
+		return dbi.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+			return apply(ctx, tx)
+		})
+	default:
+		return apply(ctx, dbi)
+	}
 }
 
 func (r *EntitlementRepo) ExistsBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID, entitlement string) (bool, error) {

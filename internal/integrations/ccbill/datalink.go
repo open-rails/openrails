@@ -171,6 +171,7 @@ func (c *DataLinkClient) ProcessCSVData(ctx context.Context, csvData string) ([]
 
 	var records []CCBillRecord
 	recordNumber := 0
+	skippedRecords := 0
 
 	for {
 		record, err := reader.Read()
@@ -184,6 +185,7 @@ func (c *DataLinkClient) ProcessCSVData(ctx context.Context, csvData string) ([]
 		recordNumber++
 
 		if len(record) < 10 {
+			skippedRecords++
 			log.WithContext(ctx).WithFields(log.Fields{
 				"record_number": recordNumber,
 				"fields":        len(record),
@@ -193,6 +195,7 @@ func (c *DataLinkClient) ProcessCSVData(ctx context.Context, csvData string) ([]
 
 		ccbillRecord, err := c.parseRecord(record)
 		if err != nil {
+			skippedRecords++
 			log.WithContext(ctx).WithFields(log.Fields{
 				"record_number": recordNumber,
 				"error":         err.Error(),
@@ -204,9 +207,13 @@ func (c *DataLinkClient) ProcessCSVData(ctx context.Context, csvData string) ([]
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"total_records":  recordNumber,
-		"parsed_records": len(records),
+		"total_records":   recordNumber,
+		"parsed_records":  len(records),
+		"skipped_records": skippedRecords,
 	}).Info("Completed CSV processing")
+	if skippedRecords > 0 {
+		return nil, fmt.Errorf("ccbill datalink response contained %d skipped records", skippedRecords)
+	}
 
 	return records, nil
 }

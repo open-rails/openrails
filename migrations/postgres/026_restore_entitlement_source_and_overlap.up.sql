@@ -29,7 +29,7 @@ BEGIN
     ) THEN
         UPDATE billing.entitlements
         SET source_id = payment_id,
-            source_type = 'payment'
+            source_type = 'one_off'
         WHERE source_id IS NULL
           AND payment_id IS NOT NULL;
     END IF;

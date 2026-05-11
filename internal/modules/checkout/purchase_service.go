@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -235,25 +236,77 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 
 	paymentID := uuid.New()
 	payment := &models.Payment{
-		ID:               paymentID,
-		UserID:           req.UserID,
-		PriceID:          price.ID,
-		SubscriptionID:   req.SubscriptionID,
-		Processor:        models.Processor(req.Processor),
-		TransactionID:    req.TransactionID,
-		Amount:           amount,
-		ListAmount:       price.Amount,
-		Currency:         currency,
-		PurchasedAt:      purchasedAt,
-		CreatedAt:        now,
-		DiscountCode:     req.DiscountCode,
-		DiscountReason:   req.DiscountReason,
-		DiscountMetadata: req.DiscountMetadata,
-		Metadata:         req.Metadata,
+		ID:                       paymentID,
+		UserID:                   req.UserID,
+		PriceID:                  price.ID,
+		SubscriptionID:           req.SubscriptionID,
+		Processor:                models.Processor(req.Processor),
+		TransactionID:            req.TransactionID,
+		Amount:                   amount,
+		ListAmount:               price.Amount,
+		Currency:                 currency,
+		PurchasedAt:              purchasedAt,
+		CreatedAt:                now,
+		DiscountCode:             req.DiscountCode,
+		DiscountReason:           req.DiscountReason,
+		DiscountMetadata:         req.DiscountMetadata,
+		Metadata:                 req.Metadata,
+		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
+		CreditsSpecSnapshot:      models.CloneCreditsSpec(product.CreditsSpec),
 	}
 
-	if err := s.PaymentService.Create(ctx, payment); err != nil {
+	created, err := s.PaymentService.CreateIfNotExists(ctx, payment)
+	if err != nil {
 		return nil, fmt.Errorf("failed to create payment record: %w", err)
+	}
+	if !created {
+		existingPayment, err := s.PaymentService.GetByTransactionID(ctx, models.Processor(req.Processor), req.TransactionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load existing payment record: %w", err)
+		}
+		if existingPayment.UserID != req.UserID {
+			return nil, fmt.Errorf("payment transaction belongs to a different user")
+		}
+		if existingPayment.PriceID != req.PriceID {
+			return nil, fmt.Errorf("payment transaction belongs to a different price")
+		}
+		if (existingPayment.SubscriptionID == nil) != (req.SubscriptionID == nil) {
+			return nil, fmt.Errorf("payment transaction subscription linkage mismatch")
+		}
+		if existingPayment.SubscriptionID != nil && *existingPayment.SubscriptionID != *req.SubscriptionID {
+			return nil, fmt.Errorf("payment transaction belongs to a different subscription")
+		}
+		if !paymentStatusCompleted(existingPayment.Status) {
+			return nil, fmt.Errorf("payment transaction is not completed")
+		}
+		if amount > 0 && existingPayment.Amount != amount {
+			return nil, fmt.Errorf("payment transaction amount mismatch")
+		}
+		if currency != "" && !strings.EqualFold(strings.TrimSpace(existingPayment.Currency), currency) {
+			return nil, fmt.Errorf("payment transaction currency mismatch")
+		}
+
+		entitlementsSpec := existingPayment.EntitlementsSpecSnapshot
+		if len(entitlementsSpec) == 0 {
+			entitlementsSpec = product.EntitlementsSpec
+		}
+		sourceID := existingPayment.ID
+		if existingPayment.SubscriptionID != nil {
+			sourceID = *existingPayment.SubscriptionID
+		}
+		if err := s.grantProductEntitlements(ctx, req.UserID, entitlementsSpec, sourceID, coverage, existingPayment.SubscriptionID != nil, req.WalletPurchase, price.BillingCycleDays, true); err != nil {
+			return nil, fmt.Errorf("failed to repair entitlements for existing payment: %w", err)
+		}
+
+		grantedEntitlements := make([]string, 0, len(entitlementsSpec))
+		for entName := range entitlementsSpec {
+			grantedEntitlements = append(grantedEntitlements, entName)
+		}
+		log.WithFields(log.Fields{
+			"payment_id": existingPayment.ID, "user_id": req.UserID, "price_id": req.PriceID,
+			"processor": req.Processor, "transaction_id": req.TransactionID,
+		}).Info("purchase already registered; repaired entitlement state if needed")
+		return &payments.RegisterPurchaseResponse{PaymentID: existingPayment.ID, Entitlements: grantedEntitlements, Eligibility: string(eligibility.Status)}, nil
 	}
 
 	sourceID := paymentID
@@ -263,8 +316,9 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	}
 
 	var grantedEntitlements []string
-	if err := s.grantProductEntitlements(ctx, req.UserID, product, sourceID, coverage, req.SubscriptionID != nil && req.SubscriptionID.String() != "", req.WalletPurchase, price.BillingCycleDays); err != nil {
+	if err := s.grantProductEntitlements(ctx, req.UserID, product.EntitlementsSpec, sourceID, coverage, req.SubscriptionID != nil && req.SubscriptionID.String() != "", req.WalletPurchase, price.BillingCycleDays, false); err != nil {
 		log.WithError(err).WithField("payment_id", sourceID).Error("failed to grant entitlements after payment")
+		return nil, fmt.Errorf("failed to grant entitlements after payment: %w", err)
 	} else if product.EntitlementsSpec != nil {
 		for entName := range product.EntitlementsSpec {
 			grantedEntitlements = append(grantedEntitlements, entName)
@@ -285,13 +339,18 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	return &payments.RegisterPurchaseResponse{PaymentID: paymentID, Entitlements: grantedEntitlements, DelayedStart: delayedStart, Eligibility: string(eligibility.Status)}, nil
 }
 
-func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, product *models.Product, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, walletPurchase bool, billingCycleDays *int) error {
-	if s.EntitlementService == nil || product.EntitlementsSpec == nil {
+func paymentStatusCompleted(status string) bool {
+	status = strings.TrimSpace(status)
+	return status == "" || strings.EqualFold(status, "completed")
+}
+
+func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, entitlementsSpec map[string]*int, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, walletPurchase bool, billingCycleDays *int, skipExistingSource bool) error {
+	if s.EntitlementService == nil || entitlementsSpec == nil {
 		return nil
 	}
 
 	now := s.now()
-	for entitlementName, durationDays := range product.EntitlementsSpec {
+	for entitlementName, durationDays := range entitlementsSpec {
 		startAt := now
 		if coverage.HasCoverage && coverage.EndDate != nil {
 			startAt = *coverage.EndDate
@@ -313,6 +372,15 @@ func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, 
 		sourceType := models.EntitlementSourceOneOff
 		if subscription {
 			sourceType = models.EntitlementSourceSubscription
+		}
+		if skipExistingSource {
+			exists, err := s.EntitlementService.ExistsBySource(ctx, sourceType, paymentID, entitlementName)
+			if err != nil {
+				return fmt.Errorf("check existing entitlement source: %w", err)
+			}
+			if exists {
+				continue
+			}
 		}
 		notBefore := startAt
 		params := entitlements.PushNewEntitlementParams{UserID: userID, Entitlement: entitlementName, NotBefore: &notBefore, SourceType: sourceType, SourceID: paymentID}

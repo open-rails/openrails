@@ -36,6 +36,9 @@ type Payment struct {
 	DiscountMetadata map[string]any `bun:"discount_metadata,type:jsonb,nullzero" json:"discount_metadata,omitempty"`
 	Metadata         map[string]any `bun:"metadata,type:jsonb,nullzero" json:"metadata,omitempty"`
 
+	EntitlementsSpecSnapshot map[string]*int `bun:"entitlements_spec_snapshot,type:jsonb,nullzero" json:"entitlements_spec_snapshot,omitempty"`
+	CreditsSpecSnapshot      CreditsSpec     `bun:"credits_spec_snapshot,type:jsonb,nullzero" json:"credits_spec_snapshot,omitempty"`
+
 	PurchasedAt time.Time `bun:"purchased_at,notnull,default:current_timestamp" json:"purchased_at"`
 	CreatedAt   time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
 

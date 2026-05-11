@@ -43,6 +43,9 @@ type Subscription struct {
 	// Scheduled tier change (for downgrades that take effect at end of period)
 	ScheduledPriceID *uuid.UUID `bun:"scheduled_price_id,type:uuid,nullzero" json:"scheduled_price_id,omitempty"`
 
+	EntitlementsSpecSnapshot map[string]*int `bun:"entitlements_spec_snapshot,type:jsonb,nullzero" json:"entitlements_spec_snapshot,omitempty"`
+	CreditsSpecSnapshot      CreditsSpec     `bun:"credits_spec_snapshot,type:jsonb,nullzero" json:"credits_spec_snapshot,omitempty"`
+
 	Status                SubscriptionStatus `bun:"status,notnull,default:'pending'" json:"status"`
 	StartedAt             time.Time          `bun:"started_at,notnull" json:"started_at"`
 	EndedAt               *time.Time         `bun:"ended_at,nullzero" json:"ended_at"`
@@ -139,6 +142,13 @@ func (s *Subscription) ResetCurrentPeriods() error {
 	return nil
 }
 
+func (s *Subscription) ClearRetrySchedule() {
+	s.LastRetryAt = nil
+	s.RetryAttempts = nil
+	s.NextRetryAt = nil
+	s.GraceEndsAt = nil
+}
+
 func (s *Subscription) Cancel(reason string, cancelType *CancelType) error {
 	now := time.Now()
 	if err := s.ResetCurrentPeriods(); err != nil {
@@ -147,6 +157,7 @@ func (s *Subscription) Cancel(reason string, cancelType *CancelType) error {
 
 	s.CancelledAt = &now
 	s.CancelType = cancelType
+	s.ClearRetrySchedule()
 	if reason != "" {
 		s.CancelFeedback = &reason
 	}

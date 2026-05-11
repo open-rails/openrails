@@ -640,15 +640,17 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	subscription := &models.Subscription{
-		ID:                      subscriptionID,
-		UserID:                  user.ID,
-		ProductID:               price.ProductID,
-		PriceID:                 price.ID,
-		ProcessorSubscriptionID: resp.SubscriptionID,
-		Status:                  status,
-		Processor:               models.Processor(provider),
-		UserEmail:               emailPtr,
-		StartedAt:               *timePtr(now),
+		ID:                       subscriptionID,
+		UserID:                   user.ID,
+		ProductID:                price.ProductID,
+		PriceID:                  price.ID,
+		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
+		CreditsSpecSnapshot:      models.CloneCreditsSpec(product.CreditsSpec),
+		ProcessorSubscriptionID:  resp.SubscriptionID,
+		Status:                   status,
+		Processor:                models.Processor(provider),
+		UserEmail:                emailPtr,
+		StartedAt:                *timePtr(now),
 	}
 
 	if req.Metadata != nil {
@@ -1214,6 +1216,7 @@ func (s *CheckoutService) processUpgrade(
 	existingSub.CancelledAt = &now
 	existingSub.CancelType = &cancelType
 	existingSub.CancelFeedback = nil
+	existingSub.ClearRetrySchedule()
 	if err := s.SubscriptionService.Update(ctx, existingSub); err != nil {
 		log.WithError(err).WithField("subscription_id", existingSub.ID).
 			Error("failed to mark old subscription as cancelled during upgrade")
@@ -1226,17 +1229,19 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	newSubscription := &models.Subscription{
-		ID:                      newSubscriptionID,
-		UserID:                  user.ID,
-		ProductID:               newPrice.ProductID,
-		PriceID:                 newPrice.ID,
-		ProcessorSubscriptionID: resp.SubscriptionID,
-		Status:                  models.StatusActive, // Active immediately since user paid proration
-		Processor:               models.Processor(provider),
-		UserEmail:               emailPtr,
-		StartedAt:               now,
-		CurrentPeriodStartsAt:   existingSub.CurrentPeriodStartsAt,
-		CurrentPeriodEndsAt:     existingSub.CurrentPeriodEndsAt, // Keep same period end
+		ID:                       newSubscriptionID,
+		UserID:                   user.ID,
+		ProductID:                newPrice.ProductID,
+		PriceID:                  newPrice.ID,
+		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec),
+		CreditsSpecSnapshot:      models.CloneCreditsSpec(newProduct.CreditsSpec),
+		ProcessorSubscriptionID:  resp.SubscriptionID,
+		Status:                   models.StatusActive, // Active immediately since user paid proration
+		Processor:                models.Processor(provider),
+		UserEmail:                emailPtr,
+		StartedAt:                now,
+		CurrentPeriodStartsAt:    existingSub.CurrentPeriodStartsAt,
+		CurrentPeriodEndsAt:      existingSub.CurrentPeriodEndsAt, // Keep same period end
 	}
 
 	if createdPaymentMethod != nil {

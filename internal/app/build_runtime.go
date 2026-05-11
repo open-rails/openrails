@@ -499,6 +499,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	vaultService := vault.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, clock)
 	subscriptionService.VaultService = vaultService
 	idempotencyService := idempotency.NewIdempotencyService(redisClient)
+	webhookIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
 
 	userSubscriptionService := subscriptions.NewUserSubscriptionService(
 		subscriptionService,
@@ -528,8 +529,9 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	)
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg}
 
-	deduplicationService := webhooks.NewDeduplicationService(idempotencyService)
+	deduplicationService := webhooks.NewDeduplicationService(webhookIdempotencyService)
 	webhookDispatcher := &webhooks.WebhookDispatcher{
+		Config:                       cfg,
 		DB:                           database,
 		Clock:                        clock,
 		PriceService:                 priceService,

@@ -167,6 +167,9 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	if req.Source == "" {
 		return nil, fmt.Errorf("source required")
 	}
+	if req.SourceID == nil || *req.SourceID == uuid.Nil {
+		return nil, fmt.Errorf("source_id required")
+	}
 	trx, err := s.creditsService().Withdraw(ctx, credits.CreditWithdrawParams{
 		UserID:     req.UserID,
 		CreditType: req.CreditType,
@@ -221,6 +224,9 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	}
 	if req.Source == "" {
 		return nil, fmt.Errorf("source required")
+	}
+	if req.SourceID == nil || *req.SourceID == uuid.Nil {
+		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.creditsService().Deposit(ctx, credits.CreditDepositParams{
 		UserID:      req.UserID,

@@ -102,6 +102,38 @@ type CreditGrantSpec struct {
 	Cadence     CreditGrantCadence `json:"cadence,omitempty"` // once|per_renewal (default once)
 }
 
+func CloneEntitlementsSpec(spec map[string]*int) map[string]*int {
+	if len(spec) == 0 {
+		return nil
+	}
+	out := make(map[string]*int, len(spec))
+	for key, value := range spec {
+		if value == nil {
+			out[key] = nil
+			continue
+		}
+		v := *value
+		out[key] = &v
+	}
+	return out
+}
+
+func CloneCreditsSpec(spec CreditsSpec) CreditsSpec {
+	if len(spec) == 0 {
+		return nil
+	}
+	out := make(CreditsSpec, len(spec))
+	for key, value := range spec {
+		cloned := value
+		if value.ExpiresDays != nil {
+			v := *value.ExpiresDays
+			cloned.ExpiresDays = &v
+		}
+		out[key] = cloned
+	}
+	return out
+}
+
 // Price represents a specific pricing option for a product
 // This represents pricing options similar to Stripe's pricing model
 type Price struct {

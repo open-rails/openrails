@@ -2,7 +2,7 @@ package riverjobs
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -55,12 +55,6 @@ type DunningWorker struct {
 	NMIClients         map[string]*nmi.NMIClient
 	EventLogService    *analytics.EventLogService
 	IdempotencyService *idempotency.IdempotencyService
-}
-
-// rebillIdempotencyResult stores the cached result of a successful rebill for idempotency replay
-type rebillIdempotencyResult struct {
-	TransactionID string    `json:"transaction_id"`
-	PaymentID     uuid.UUID `json:"payment_id"`
 }
 
 func (DunningWorker) Kind() string { return KindDunning }
@@ -172,44 +166,22 @@ func (w *DunningWorker) processSubscription(
 		return false
 	}
 
-	// Generate idempotency key using subscription ID and period end
-	// This ensures we don't double-bill for the same billing period
-	const idemOp = "nmi_rebill"
-	periodEndISO := sub.CurrentPeriodEndsAt.Format(time.RFC3339)
-	idemKey := idempotency.GenerateKeyForRebill(sub.ID, periodEndISO)
-	var idemClaimed bool
-	processor := models.Processor(resolveSubscriptionProcessor(sub))
-
-	if w.IdempotencyService != nil {
-		rec, alreadyExists, err := w.IdempotencyService.Begin(ctx, idemOp, idemKey)
-		if err != nil {
-			logEntry.WithError(err).Warn("idempotency check failed, proceeding without idempotency")
-		} else if alreadyExists {
-			switch rec.Status {
-			case idempotency.IdempotencyStatusSuccess:
-				// Already rebilled successfully for this period
-				logEntry.Info("Dunning: rebill already completed for this period (idempotent)")
-				return true
-			case idempotency.IdempotencyStatusPending:
-				// Another rebill is in progress
-				logEntry.Info("Dunning: rebill already in progress for this period")
-				return false
-			case idempotency.IdempotencyStatusFailed:
-				// Previous attempt failed, allow retry
-				logEntry.Info("Dunning: previous rebill attempt failed, retrying")
-				idemClaimed = true
-			}
-		} else {
-			idemClaimed = true
-		}
+	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
+		logEntry.Warn("Dunning: past_due subscription has no current period end; skipping rebill")
+		return false
 	}
+
+	periodEnd := sub.CurrentPeriodEndsAt.UTC()
+	orderReference := rebillOrderReference(sub)
+	if orderReference == "" {
+		logEntry.Warn("Dunning: unable to build rebill order reference; skipping rebill")
+		return false
+	}
+	processor := models.Processor(resolveSubscriptionProcessor(sub))
 
 	claimed, err := w.claimDunningAttempt(ctx, sub, w.now())
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: failed to claim subscription for rebill")
-		if idemClaimed && w.IdempotencyService != nil {
-			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, err)
-		}
 		return false
 	}
 	if !claimed {
@@ -217,13 +189,29 @@ func (w *DunningWorker) processSubscription(
 		return false
 	}
 
+	attempt, attemptClaimed, err := w.claimManualRebillAttempt(ctx, sub.ID, periodEnd, processor, orderReference, w.now())
+	if err != nil {
+		logEntry.WithError(err).Warn("Dunning: failed to claim durable manual rebill attempt")
+		return false
+	}
+	if !attemptClaimed {
+		if attempt.Status == models.ManualRebillAttemptSucceeded && attempt.TransactionID != nil && sub.Status == models.StatusPastDue {
+			logEntry.WithField("manual_rebill_attempt_id", attempt.ID).Warn("Dunning: repairing local lifecycle from durable successful rebill attempt")
+			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, creditsSvc, processor, *attempt.TransactionID)
+		}
+		if attempt.Status == models.ManualRebillAttemptSucceeded {
+			logEntry.WithField("manual_rebill_attempt_id", attempt.ID).Info("Dunning: rebill already completed for this period")
+			return true
+		}
+		logEntry.WithField("manual_rebill_attempt_id", attempt.ID).Info("Dunning: durable manual rebill attempt is already resolved or needs reconciliation")
+		return false
+	}
+
 	// Validate payment method
 	pm := sub.PaymentMethod
 	if pm == nil || pm.VaultID == "" || pm.BillingID == nil || *pm.BillingID == "" {
 		reason := "payment method unavailable for rebill"
-		if idemClaimed && w.IdempotencyService != nil {
-			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, errors.New(reason))
-		}
+		_ = w.markManualRebillFailed(ctx, attempt.ID, reason)
 		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      processor,
 			SubscriptionID: &sub.ID,
@@ -239,21 +227,15 @@ func (w *DunningWorker) processSubscription(
 		VaultID:        pm.VaultID,
 		BillingID:      *pm.BillingID,
 		SubscriptionID: sub.ProcessorSubscriptionID,
-		OrderID:        rebillOrderReference(sub),
-		PONumber:       rebillOrderReference(sub),
+		OrderID:        orderReference,
+		PONumber:       orderReference,
 	})
 	if err != nil {
 		msg := fmt.Sprintf("manual rebill request failed: %v", err)
-		if idemClaimed && w.IdempotencyService != nil {
-			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, err)
+		if err2 := w.markManualRebillUnknown(ctx, attempt.ID, msg); err2 != nil {
+			logEntry.WithError(err2).Warn("Dunning: failed to mark manual rebill attempt unknown")
 		}
-		if err2 := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      processor,
-			SubscriptionID: &sub.ID,
-			FailureReason:  &msg,
-		}); err2 != nil {
-			logEntry.WithError(err2).Warn("record rebill failure")
-		}
+		logEntry.WithError(err).Warn("Dunning: manual rebill request status unknown; not scheduling another automatic charge")
 		return false
 	}
 
@@ -262,9 +244,7 @@ func (w *DunningWorker) processSubscription(
 		if rebillResp != nil && rebillResp.ErrorMessage != "" {
 			reason = rebillResp.ErrorMessage
 		}
-		if idemClaimed && w.IdempotencyService != nil {
-			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, errors.New(reason))
-		}
+		_ = w.markManualRebillFailed(ctx, attempt.ID, reason)
 		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      processor,
 			SubscriptionID: &sub.ID,
@@ -275,6 +255,23 @@ func (w *DunningWorker) processSubscription(
 		return false
 	}
 
+	if err := w.markManualRebillSucceeded(ctx, attempt.ID, rebillResp.TransactionID); err != nil {
+		logEntry.WithError(err).Error("Dunning: failed to mark manual rebill attempt succeeded after processor approval")
+		return false
+	}
+	return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, creditsSvc, processor, rebillResp.TransactionID)
+}
+
+func (w *DunningWorker) applySuccessfulRebill(
+	ctx context.Context,
+	logEntry *log.Entry,
+	sub *models.Subscription,
+	lifecycle *subscriptions.SubscriptionLifecycleService,
+	priceSvc *catalog.PriceService,
+	creditsSvc *credits.CreditsService,
+	processor models.Processor,
+	transactionID string,
+) bool {
 	var amount int64
 	currency := subscriptions.CurrencyUSD
 	if sub.Price != nil {
@@ -289,14 +286,11 @@ func (w *DunningWorker) processSubscription(
 	if err := lifecycle.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 		Processor:               processor,
 		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
-		TransactionID:           rebillResp.TransactionID,
+		TransactionID:           transactionID,
 		Amount:                  amount,
 		Currency:                currency,
 	}); err != nil {
 		logEntry.WithError(err).Error("renew membership after successful rebill")
-		if idemClaimed && w.IdempotencyService != nil {
-			_ = w.IdempotencyService.Fail(ctx, idemOp, idemKey, err)
-		}
 		return false
 	}
 
@@ -321,16 +315,125 @@ func (w *DunningWorker) processSubscription(
 		}
 	}
 
-	// Mark idempotency request as complete
-	if idemClaimed && w.IdempotencyService != nil {
-		cachedResult, _ := json.Marshal(rebillIdempotencyResult{
-			TransactionID: rebillResp.TransactionID,
-		})
-		_ = w.IdempotencyService.Complete(ctx, idemOp, idemKey, cachedResult)
-	}
-
 	logEntry.Info("Dunning: rebill successful")
 	return true
+}
+
+func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscriptionID uuid.UUID, periodEnd time.Time, processor models.Processor, orderReference string, now time.Time) (*models.ManualRebillAttempt, bool, error) {
+	if w == nil || w.DB == nil {
+		return nil, false, errors.New("dunning worker database is required")
+	}
+	claimedUntil := now.UTC().Add(dunningAttemptLease)
+	var attempt *models.ManualRebillAttempt
+	claimed := false
+
+	err := w.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		attempt = new(models.ManualRebillAttempt)
+		err := tx.NewSelect().
+			Model(attempt).
+			Where("subscription_id = ?", subscriptionID).
+			Where("period_end = ?", periodEnd.UTC()).
+			For("UPDATE").
+			Scan(ctx)
+		if errors.Is(err, sql.ErrNoRows) {
+			attempt = &models.ManualRebillAttempt{
+				ID:             uuid.New(),
+				SubscriptionID: subscriptionID,
+				PeriodEnd:      periodEnd.UTC(),
+				Processor:      processor,
+				OrderReference: orderReference,
+				Status:         models.ManualRebillAttemptPending,
+				ClaimedUntil:   &claimedUntil,
+				CreatedAt:      now.UTC(),
+				UpdatedAt:      now.UTC(),
+			}
+			if _, err := tx.NewInsert().Model(attempt).Exec(ctx); err != nil {
+				return fmt.Errorf("create manual rebill attempt: %w", err)
+			}
+			claimed = true
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("load manual rebill attempt: %w", err)
+		}
+
+		switch attempt.Status {
+		case models.ManualRebillAttemptSucceeded, models.ManualRebillAttemptUnknown:
+			return nil
+		case models.ManualRebillAttemptPending:
+			if attempt.ClaimedUntil != nil && attempt.ClaimedUntil.After(now.UTC()) {
+				return nil
+			}
+			// A stale pending attempt may have crashed after processor approval. Mark it unknown
+			// and require reconciliation rather than risking a duplicate charge.
+			reason := "manual rebill attempt expired before completion; requires reconciliation"
+			attempt.Status = models.ManualRebillAttemptUnknown
+			attempt.FailureReason = &reason
+			attempt.ClaimedUntil = nil
+			attempt.UpdatedAt = now.UTC()
+			_, err := tx.NewUpdate().Model(attempt).
+				Column("status", "failure_reason", "claimed_until", "updated_at").
+				WherePK().
+				Exec(ctx)
+			if err != nil {
+				return fmt.Errorf("mark stale manual rebill attempt unknown: %w", err)
+			}
+			return nil
+		case models.ManualRebillAttemptFailed:
+			attempt.Status = models.ManualRebillAttemptPending
+			attempt.FailureReason = nil
+			attempt.TransactionID = nil
+			attempt.ClaimedUntil = &claimedUntil
+			attempt.UpdatedAt = now.UTC()
+			_, err := tx.NewUpdate().Model(attempt).
+				Column("status", "failure_reason", "transaction_id", "claimed_until", "updated_at").
+				WherePK().
+				Exec(ctx)
+			if err != nil {
+				return fmt.Errorf("claim failed manual rebill attempt: %w", err)
+			}
+			claimed = true
+			return nil
+		default:
+			return fmt.Errorf("unknown manual rebill attempt status %q", attempt.Status)
+		}
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return attempt, claimed, nil
+}
+
+func (w *DunningWorker) markManualRebillSucceeded(ctx context.Context, attemptID uuid.UUID, transactionID string) error {
+	return w.updateManualRebillAttempt(ctx, attemptID, models.ManualRebillAttemptSucceeded, &transactionID, nil)
+}
+
+func (w *DunningWorker) markManualRebillFailed(ctx context.Context, attemptID uuid.UUID, reason string) error {
+	return w.updateManualRebillAttempt(ctx, attemptID, models.ManualRebillAttemptFailed, nil, &reason)
+}
+
+func (w *DunningWorker) markManualRebillUnknown(ctx context.Context, attemptID uuid.UUID, reason string) error {
+	return w.updateManualRebillAttempt(ctx, attemptID, models.ManualRebillAttemptUnknown, nil, &reason)
+}
+
+func (w *DunningWorker) updateManualRebillAttempt(ctx context.Context, attemptID uuid.UUID, status models.ManualRebillAttemptStatus, transactionID *string, reason *string) error {
+	if w == nil || w.DB == nil {
+		return errors.New("dunning worker database is required")
+	}
+	now := w.now().UTC()
+	_, err := w.DB.GetDB().NewUpdate().
+		Model((*models.ManualRebillAttempt)(nil)).
+		Set("status = ?", status).
+		Set("transaction_id = ?", transactionID).
+		Set("failure_reason = ?", reason).
+		Set("claimed_until = NULL").
+		Set("updated_at = ?", now).
+		Where("id = ?", attemptID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("update manual rebill attempt: %w", err)
+	}
+	return nil
 }
 
 func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Subscription, now time.Time) (bool, error) {

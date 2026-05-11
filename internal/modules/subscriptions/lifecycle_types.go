@@ -117,8 +117,11 @@ func TerminalCancelReason(subscription *models.Subscription) (string, bool) {
 	if subscription.Status != models.StatusCancelled {
 		return "", false
 	}
-	if subscription.CancelType != nil && *subscription.CancelType == models.CancelTypeChargeback {
-		return "cancel_type=chargeback", true
+	if subscription.CancelType != nil {
+		switch *subscription.CancelType {
+		case models.CancelTypeChargeback, models.CancelTypeUser, models.CancelTypeMerchant:
+			return fmt.Sprintf("cancel_type=%s", *subscription.CancelType), true
+		}
 	}
 	feedback := normalize.FromPtr(subscription.CancelFeedback)
 	if feedback != "" && strings.Contains(strings.ToUpper(feedback), "CHARGEBACK") {

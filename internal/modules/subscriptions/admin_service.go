@@ -236,6 +236,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 	subscription.Status = models.StatusCancelled
 	subscription.CancelledAt = &now
 	subscription.CancelType = &cancelType
+	subscription.ClearRetrySchedule()
 	if reason != "" {
 		subscription.CancelFeedback = &reason
 	}
@@ -246,32 +247,12 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 
 	// End entitlements for this subscription now
 	if s.EntitlementService != nil {
-		names, err := s.EntitlementService.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
-		if err != nil {
+		if err := s.EntitlementService.RevokeSourcesForSubscription(ctx, subscription.UserID, subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 			log.WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"user_id":         subscription.UserID,
 				"error":           err.Error(),
-			}).Error("Failed to list entitlements for subscription during admin cancellation")
-		} else {
-			for _, entName := range names {
-				st := models.EntitlementSourceSubscription
-				sid := subscription.ID
-				if err := s.EntitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-					UserID:      subscription.UserID,
-					Entitlement: entName,
-					SourceType:  &st,
-					SourceID:    &sid,
-					Reason:      models.EntitlementRevokeAdmin,
-				}); err != nil {
-					log.WithFields(log.Fields{
-						"subscription_id": subscription.ID,
-						"user_id":         subscription.UserID,
-						"entitlement":     entName,
-						"error":           err.Error(),
-					}).Error("Failed to revoke entitlement during admin subscription cancellation")
-				}
-			}
+			}).Error("Failed to revoke entitlements during admin subscription cancellation")
 		}
 	}
 
@@ -338,6 +319,11 @@ func (s *AdminSubscriptionService) ExtendSubscriptionByDuration(ctx context.Cont
 
 	if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
 		return fmt.Errorf("failed to update subscription: %w", err)
+	}
+	if s.EntitlementService != nil && subscription.CurrentPeriodEndsAt != nil {
+		if err := s.EntitlementService.ExtendActiveBySubscription(ctx, subscription.ID, *subscription.CurrentPeriodEndsAt); err != nil {
+			return fmt.Errorf("failed to extend subscription entitlements: %w", err)
+		}
 	}
 
 	// Admin actions don't generate user notifications - this is purely for admin operations

@@ -22,6 +22,23 @@ func TestAssertActiveTransitionAllowed_BlocksChargebackCancelType(t *testing.T) 
 	require.True(t, IsTerminalTransitionBlocked(err))
 }
 
+func TestAssertActiveTransitionAllowed_BlocksUserAndMerchantCancelTypes(t *testing.T) {
+	t.Parallel()
+
+	svc := &SubscriptionLifecycleService{}
+	for _, cancelType := range []models.CancelType{models.CancelTypeUser, models.CancelTypeMerchant} {
+		cancelType := cancelType
+		t.Run(string(cancelType), func(t *testing.T) {
+			t.Parallel()
+			sub := &models.Subscription{ID: uuid.New(), Processor: models.ProcessorStripe, Status: models.StatusCancelled, CancelType: &cancelType}
+
+			err := svc.assertActiveTransitionAllowed(context.Background(), sub, "renewal", false)
+			require.Error(t, err)
+			require.True(t, IsTerminalTransitionBlocked(err))
+		})
+	}
+}
+
 func TestReactivateMembership_RequiresFuturePaidThroughDate(t *testing.T) {
 	t.Parallel()
 
