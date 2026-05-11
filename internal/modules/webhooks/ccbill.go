@@ -1808,6 +1808,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 				"void_transaction_id": voidTransactionID,
 				"subscription_id":     sub.ID,
 			}).Warn("Unable to resolve original payment for CCBill void")
+			return fmt.Errorf("unable to resolve original payment for CCBill void transaction %q", voidTransactionID)
 		}
 
 		// Log void event to ClickHouse

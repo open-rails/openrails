@@ -532,7 +532,7 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		}, nil)
 	}
 
-	price, err := s.PriceService.GetByNMIPlan(ctx, provider, nmiPlanID)
+	_, err = s.PriceService.GetByNMIPlan(ctx, provider, nmiPlanID)
 	if err != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id": nmiSubID,
@@ -574,95 +574,6 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		"processor_subscription_id": nmiSubID,
 		"processor":                 provider,
 	}).Info("NMI subscription add recorded; waiting for transaction.sale.success before activation")
-	return nil
-
-	// Extract payment info from the plan for the initial charge
-	var amountCents int64
-	var currency string
-
-	// Get amount from plan (in dollars as string, e.g., "19.00")
-	if body.Plan != nil && body.Plan.Amount.Trimmed() != "" {
-		parsedAmountCents, amountErr := moneyutil.ParseDecimalToCents(body.Plan.Amount.Trimmed())
-		if amountErr != nil {
-			log.WithContext(ctx).
-				WithError(amountErr).
-				WithField("plan_amount", body.Plan.Amount.Trimmed()).
-				Warn("Failed to parse plan amount; falling back to price amount")
-		} else {
-			amountCents = parsedAmountCents
-		}
-	}
-
-	// Fall back to price amount if plan amount not available
-	if amountCents == 0 && price.Amount > 0 {
-		amountCents = price.Amount
-	}
-
-	// Use price currency or default to USD (NMI doesn't include currency in subscription add events)
-	currency = strings.ToLower(strings.TrimSpace(price.Currency))
-	if currency == "" {
-		currency = "usd"
-	}
-
-	// Note: NMI subscription add events don't include a transaction ID.
-	// The initial transaction will come separately via transaction.sale.success webhook.
-	// Namespace synthetic references so they cannot be mistaken for refundable NMI transaction IDs.
-	transactionRef := "sub:" + nmiSubID
-
-	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id":             subscription.ID,
-		"processor_subscription_id":   nmiSubID,
-		"plan_id":                     nmiPlanID,
-		"price_id":                    price.ID,
-		"amount_cents":                amountCents,
-		"currency":                    currency,
-		"transaction_reference":       transactionRef,
-		"user_id":                     subscription.UserID,
-		"subscription_status":         subscription.Status,
-		"price_amount_cents":          price.Amount,
-		"price_currency":              price.Currency,
-		"subscription_lifecycle_step": "create_membership_from_subscription_add",
-	}).Info("Creating membership for NMI subscription add event")
-
-	_, err = s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-		PriceID:                 price.ID,
-		UserID:                  subscription.UserID,
-		Processor:               models.Processor(provider),
-		ProcessorSubscriptionID: &subscription.ProcessorSubscriptionID,
-		UserEmail:               subscription.UserEmail,
-		TransactionID:           transactionRef,
-		Amount:                  amountCents,
-		Currency:                currency,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create membership: %w", err)
-	}
-
-	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id":           subscription.ID,
-		"processor_subscription_id": nmiSubID,
-		"user_id":                   subscription.UserID,
-		"transaction_reference":     transactionRef,
-	}).Info("Membership created for NMI subscription add event")
-
-	statusActive := models.StatusActive
-	if s.EventLogService != nil {
-		metadata := map[string]interface{}{
-			"event_type":        s.Data.EventType,
-			"processor":         provider,
-			"plan_id":           nmiPlanID,
-			"transaction_ref":   transactionRef,
-			"subscription_id":   subscription.ID.String(),
-			"previous_status":   string(subscription.Status),
-			"lifecycle_step":    "create_membership_from_subscription_add",
-			"processor_account": s.Processor,
-		}
-		txn := transactionRef
-
-		s.logSubscriptionEvent(ctx, subscription, analytics.PaymentEventSubscriptionCreated, &txn, metadata, &statusActive, nil)
-
-	}
-
 	return nil
 }
 
@@ -2120,6 +2031,9 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 			}
 		} else {
 			log.WithContext(ctx).WithField("transaction_id", txnID).Warn("Unable to resolve original payment for NMI void")
+			if subscription != nil {
+				return fmt.Errorf("unable to resolve original payment for NMI void transaction %q", txnID)
+			}
 		}
 	}
 	if voidedSubscriptionID != nil && s.SubscriptionLifecycleService != nil {
