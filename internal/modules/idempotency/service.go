@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -89,10 +88,9 @@ func (s *IdempotencyService) Begin(ctx context.Context, operation, key string) (
 	if s.client != nil {
 		record, exists, err := s.beginRedis(ctx, fullKey)
 		if err != nil {
-			log.WithError(err).Warn("Redis idempotency failed, falling back to in-memory")
-		} else {
-			return record, exists, nil
+			return nil, false, fmt.Errorf("redis idempotency begin failed: %w", err)
 		}
+		return record, exists, nil
 	}
 
 	return s.beginMemory(fullKey)
@@ -168,10 +166,9 @@ func (s *IdempotencyService) Complete(ctx context.Context, operation, key string
 
 	if s.client != nil {
 		if err := s.setRedis(ctx, fullKey, record); err != nil {
-			log.WithError(err).Warn("Redis complete failed, updating in-memory")
-		} else {
-			return nil
+			return fmt.Errorf("redis idempotency complete failed: %w", err)
 		}
+		return nil
 	}
 
 	s.setMemory(fullKey, record)
@@ -199,10 +196,9 @@ func (s *IdempotencyService) Fail(ctx context.Context, operation, key string, fa
 
 	if s.client != nil {
 		if err := s.setRedisWithTTL(ctx, fullKey, record, failureTTL); err != nil {
-			log.WithError(err).Warn("Redis fail failed, updating in-memory")
-		} else {
-			return nil
+			return fmt.Errorf("redis idempotency fail failed: %w", err)
 		}
+		return nil
 	}
 
 	s.setMemoryWithTTL(fullKey, record, failureTTL)
@@ -218,8 +214,9 @@ func (s *IdempotencyService) Get(ctx context.Context, operation, key string) (*I
 			return record, nil
 		}
 		if err != redis.Nil {
-			log.WithError(err).Warn("Redis get failed, checking in-memory")
+			return nil, fmt.Errorf("redis idempotency get failed: %w", err)
 		}
+		return nil, nil
 	}
 
 	return s.getMemory(fullKey), nil

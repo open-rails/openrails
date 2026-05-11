@@ -398,7 +398,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 		// Use provided amount/currency or fall back to price defaults
 		amount := params.Amount
-		if amount == 0 {
+		if !params.AmountProvided && amount == 0 {
 			amount = price.Amount
 		}
 		currency := params.Currency
@@ -553,7 +553,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		}
 
 		amount := params.Amount
-		if amount <= 0 {
+		if !params.AmountProvided && amount <= 0 {
 			amount = price.Amount
 		}
 		currency := strings.TrimSpace(params.Currency)

@@ -21,6 +21,7 @@ var (
 	ErrWebhookEventIDMissing      = errors.New("missing webhook event id")
 	ErrWebhookEventTypeMissing    = errors.New("missing webhook event type")
 	ErrWebhookPayloadInvalid      = errors.New("invalid webhook payload")
+	ErrWebhookEventTypeMismatch   = errors.New("webhook event type mismatch")
 	ErrWebhookSignatureInvalid    = errors.New("invalid webhook signature")
 	ErrWebhookSignatureMissing    = errors.New("missing webhook signature")
 	ErrWebhookSignatureRequired   = errors.New("webhook signature required")
@@ -79,12 +80,33 @@ func PrepareCCBill(body []byte, eventType string) (Prepared, error) {
 	if eventType == "" {
 		return Prepared{}, ErrWebhookEventTypeMissing
 	}
+	if bodyEventType, ok, err := ccbillBodyEventType(normalizedBody); err != nil {
+		return Prepared{}, fmt.Errorf("%w: %v", ErrWebhookPayloadInvalid, err)
+	} else if ok && !strings.EqualFold(strings.TrimSpace(bodyEventType), eventType) {
+		return Prepared{}, fmt.Errorf("%w: query eventType %q does not match body eventType %q", ErrWebhookEventTypeMismatch, eventType, bodyEventType)
+	}
 
 	return Prepared{
 		Provider:  subscriptions.ProcessorCCBill,
 		EventType: eventType,
 		Body:      normalizedBody,
 	}, nil
+}
+
+func ccbillBodyEventType(body []byte) (string, bool, error) {
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return "", false, nil
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", false, err
+	}
+	value, ok := payload["eventType"]
+	if !ok || value == nil {
+		return "", false, nil
+	}
+	return strings.TrimSpace(fmt.Sprint(value)), true, nil
 }
 
 func PrepareStripe(body []byte, secret, header string, tolerance time.Duration) (Prepared, error) {

@@ -68,7 +68,7 @@ services:
       - ./config/clickhouse-keeper.xml:/etc/clickhouse-keeper/keeper_config.xml:ro
       - clickhouse_keeper_data:/var/lib/clickhouse
     ports:
-      - "9181:9181" # Keeper port
+      - "127.0.0.1:9181:9181" # Keeper port
     networks:
       - local-openrails
     healthcheck:
@@ -205,7 +205,7 @@ services:
       clickhouse:
         condition: service_healthy
     ports:
-      - "2053:2053"  # API (public endpoints + admin endpoints with JWT auth)
+      - "127.0.0.1:2053:2053"  # API (public endpoints + admin endpoints with JWT auth)
     # Note: Port 8060 (private service API with X-API-Key auth) is exposed internally
     # via Docker network only - not mapped to host. Other containers in local-openrails
     # network can reach it at openrails:8060 for server-to-server calls.
@@ -279,7 +279,7 @@ services:
       AUTHKIT_DEV_MODE: "true"
       AUTHKIT_DEV_MINT_SECRET: "${AUTHKIT_DEV_MINT_SECRET:-dev-mint-secret-localhost-only}"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - issuer_postgres_data:/var/lib/postgresql/data
       - issuer_runtime_keys:/.runtime/authkit

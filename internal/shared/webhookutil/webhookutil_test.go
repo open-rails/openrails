@@ -154,6 +154,9 @@ func TestPrepareCCBill(t *testing.T) {
 
 	_, err = PrepareCCBill([]byte(`{"ok":true}`), " ")
 	require.ErrorIs(t, err, ErrWebhookEventTypeMissing)
+
+	_, err = PrepareCCBill([]byte(`{"eventType":"Cancellation","subscriptionId":"123"}`), "RenewalSuccess")
+	require.ErrorIs(t, err, ErrWebhookEventTypeMismatch)
 }
 
 func TestPrepareStripe(t *testing.T) {

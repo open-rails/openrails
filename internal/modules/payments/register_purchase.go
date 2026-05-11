@@ -12,6 +12,7 @@ type RegisterPurchaseRequest struct {
 	Processor        string
 	TransactionID    string
 	Amount           int64
+	AmountProvided   bool
 	Currency         string
 	SubscriptionID   *uuid.UUID
 	WalletPurchase   bool

@@ -1,9 +1,12 @@
 package webhooks
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,4 +38,19 @@ func TestStableDedupeEventKey_IsStableForNonTransactionEvent(t *testing.T) {
 	keyB := svcB.stableDedupeEventKey()
 	require.Equal(t, keyA, keyB)
 	require.Contains(t, keyA, "ccbill:event:")
+}
+
+func TestHandleCCBillWebhook_RejectsAccountMismatch(t *testing.T) {
+	body := []byte(`{"subscriptionId":"sub_123","transactionId":"txn_123","timestamp":"2026-02-17 12:00:00","clientAccnum":"wrong","clientSubacc":"0000"}`)
+	svc := &CCBillWebhookService{
+		Data: CCBillWebhookEvent{EventType: EventTypeRenewalSuccess, EventBody: body},
+		CCBillClient: ccbill.NewRESTClient(&config.CCBillConfig{
+			ClientAccNum: "945280",
+			ClientSubAcc: "0000",
+		}),
+	}
+
+	err := svc.HandleCCBillWebhook(context.Background())
+	require.Error(t, err)
+	require.True(t, IsWebhookErrorNonRetryable(err))
 }

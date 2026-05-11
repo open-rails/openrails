@@ -1,6 +1,7 @@
 package webhooks
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -27,6 +28,20 @@ func TestStripeInvoicePeriodEnd(t *testing.T) {
 	}
 	if end.Unix() != 200 {
 		t.Fatalf("expected unix=200, got %d", end.Unix())
+	}
+}
+
+func TestWebhookDispatcher_RejectsUnsignedStripeJob(t *testing.T) {
+	d := &WebhookDispatcher{}
+	err := d.Process(context.Background(), &WebhookMessage{
+		Processor: "stripe",
+		Payload:   []byte(`{"id":"evt_1","type":"invoice.paid","data":{"object":{}}}`),
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !IsWebhookErrorNonRetryable(err) {
+		t.Fatalf("expected non-retryable error, got %v", err)
 	}
 }
 

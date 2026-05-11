@@ -158,6 +158,27 @@ func transactionSubscriptionID(body *NMITransactionEventBody) string {
 	return ""
 }
 
+func explicitTransactionSubscriptionID(body *NMITransactionEventBody) string {
+	if body == nil {
+		return ""
+	}
+	if body.Subscription != nil && !body.Subscription.SubscriptionID.IsEmpty() {
+		return body.Subscription.SubscriptionID.Trimmed()
+	}
+	if body.TransactionDetail != nil && body.TransactionDetail.Subscription != nil && !body.TransactionDetail.Subscription.SubscriptionID.IsEmpty() {
+		return body.TransactionDetail.Subscription.SubscriptionID.Trimmed()
+	}
+	return ""
+}
+
+func nmiAmountMatchesExpected(amountCents, expectedAmountCents int64) bool {
+	if expectedAmountCents <= 0 {
+		return true
+	}
+	tolerance := int64(float64(expectedAmountCents) * 0.02)
+	return amountCents >= expectedAmountCents-tolerance && amountCents <= expectedAmountCents+tolerance
+}
+
 func (s *NMIWebhookService) resolveSubscriptionFromReference(ctx context.Context, provider, reference string) (*models.Subscription, error) {
 	if s.SubscriptionService == nil {
 		return nil, fmt.Errorf("subscription service is required")
@@ -470,7 +491,7 @@ func (s *NMIWebhookService) handleWebhook(ctx context.Context) error {
 			"processor":  s.Processor,
 			"event_type": s.Data.EventType,
 		}).Warn("Unsupported NMI webhook event type")
-		return fmt.Errorf("unsupported event type: %s", s.Data.EventType)
+		return MarkWebhookErrorNonRetryable(fmt.Errorf("unsupported event type: %s", s.Data.EventType))
 	}
 }
 
@@ -547,6 +568,13 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		}).Info("Deferring NMI subscription activation until the first scheduled charge")
 		return nil
 	}
+
+	log.WithContext(ctx).WithFields(log.Fields{
+		"subscription_id":           subscription.ID,
+		"processor_subscription_id": nmiSubID,
+		"processor":                 provider,
+	}).Info("NMI subscription add recorded; waiting for transaction.sale.success before activation")
+	return nil
 
 	// Extract payment info from the plan for the initial charge
 	var amountCents int64
@@ -774,6 +802,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		return err
 	}
 
+	explicitSubID := explicitTransactionSubscriptionID(body)
 	nmiSubID := transactionSubscriptionID(body)
 	if nmiSubID == "" {
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -804,27 +833,44 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		return fmt.Errorf("failed to load subscription for transaction event: %w", err)
 	}
 	prevStatus := subscription.Status
+	if explicitSubID == "" && subscription.Status != models.StatusPending {
+		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Non-recurring transaction cannot mutate active subscription", map[string]interface{}{
+			"subscription_reference": nmiSubID,
+			"subscription_status":    string(subscription.Status),
+		}, nil))
+	}
 
 	parsedAmountCents, amountErr := transactionAmountCents(body)
+	if amountErr != nil {
+		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Invalid transaction amount", map[string]interface{}{
+			"subscription_reference": nmiSubID,
+		}, amountErr))
+	}
 	currency := transactionCurrency(body)
+	if strings.TrimSpace(currency) == "" {
+		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Missing transaction currency", map[string]interface{}{
+			"subscription_reference": nmiSubID,
+		}, nil))
+	}
 	txnID := body.TransactionID.Trimmed()
 	if txnID == "" && body.TransactionDetail != nil {
 		txnID = body.TransactionDetail.TransactionID.Trimmed()
 	}
+	if txnID == "" {
+		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Missing transaction ID", map[string]interface{}{
+			"subscription_reference": nmiSubID,
+		}, nil))
+	}
+	if subscription.Price != nil && !nmiAmountMatchesExpected(parsedAmountCents, subscription.Price.Amount) {
+		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Transaction amount does not match expected price", map[string]interface{}{
+			"subscription_reference": nmiSubID,
+			"transaction_amount":     parsedAmountCents,
+			"expected_amount":        subscription.Price.Amount,
+		}, nil))
+	}
 
 	// Calculate amount in cents for Payment record
-	var amountCents int64
-	if amountErr != nil {
-		log.WithContext(ctx).
-			WithField("transaction_id", txnID).
-			WithError(amountErr).
-			Warn("Failed to parse NMI transaction amount; falling back to price amount")
-		if subscription.Price != nil && subscription.Price.Amount > 0 {
-			amountCents = subscription.Price.Amount
-		}
-	} else {
-		amountCents = parsedAmountCents
-	}
+	amountCents := parsedAmountCents
 
 	fallbackCurrency := ""
 	if subscription.Price != nil {
@@ -870,6 +916,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			UserEmail:               subscription.UserEmail,
 			TransactionID:           txnID,
 			Amount:                  amountCents,
+			AmountProvided:          true,
 			Currency:                currencyValue,
 		})
 		if err != nil {
@@ -920,6 +967,7 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 			ProcessorSubscriptionID: nmiSubID,
 			TransactionID:           txnID,
 			Amount:                  amountCents,
+			AmountProvided:          true,
 			Currency:                currencyValue,
 		}); err != nil {
 			if subscriptions.IsTerminalTransitionBlocked(err) {
@@ -1048,6 +1096,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 		return err
 	}
 
+	explicitSubID := explicitTransactionSubscriptionID(body)
 	nmiSubID := transactionSubscriptionID(body)
 	if nmiSubID == "" {
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -1090,6 +1139,12 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 	var prevStatus models.SubscriptionStatus
 	if subscription != nil {
 		prevStatus = subscription.Status
+		if explicitSubID == "" && subscription.Status != models.StatusPending {
+			return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Non-recurring transaction failure cannot mutate active subscription", map[string]interface{}{
+				"subscription_reference": nmiSubID,
+				"subscription_status":    string(subscription.Status),
+			}, nil))
+		}
 	}
 
 	txnID := body.TransactionID.Trimmed()
@@ -1802,11 +1857,16 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 
 	// Determine if we should terminate subscription based on refund amount
 	shouldTerminate := false
-	if subscription != nil && subscription.Price != nil && subscription.Price.Amount > 0 {
+	if subscription != nil && subscription.Price != nil && subscription.Price.Amount > 0 && originalTxnID != "" {
 		refundPercentage := (refundAmountCents * 100) / subscription.Price.Amount
 		if refundPercentage >= 80 {
 			shouldTerminate = true
 		}
+	} else if originalTxnID == "" {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"refund_transaction_id": txnID,
+			"subscription_ref":      nmiSubID,
+		}).Warn("NMI refund missing original transaction ID; skipping lifecycle termination")
 	}
 
 	// Persist refund in the payments ledger as a negative payment linked to the original payment.
@@ -1838,18 +1898,11 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			}
 
 			if originalPayment == nil {
-				originalPayment, originalLookupErr = s.PaymentService.GetLatestChargeBySubscriptionID(ctx, subscription.ID)
-				if originalLookupErr != nil && !errors.Is(originalLookupErr, sql.ErrNoRows) {
-					log.WithContext(ctx).WithError(originalLookupErr).WithField("subscription_id", subscription.ID).
-						Warn("Failed to resolve original payment by subscription fallback for refund")
-					return fmt.Errorf("resolve original payment by subscription fallback: %w", originalLookupErr)
-				}
-			}
-
-			if originalPayment == nil {
+				shouldTerminate = false
 				log.WithContext(ctx).WithFields(log.Fields{
-					"refund_transaction_id": txnID,
-					"subscription_id":       subscription.ID,
+					"refund_transaction_id":   txnID,
+					"subscription_id":         subscription.ID,
+					"original_transaction_id": originalTxnID,
 				}).Warn("Unable to resolve original payment for refund ledger linkage; skipping payment insert")
 			} else {
 				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, txnID, refundAmountCents); refundErr != nil {
@@ -2035,6 +2088,51 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
 				Warn("Failed to look up subscription for void")
+		}
+	}
+	var voidedSubscriptionID *uuid.UUID
+	if s.PaymentService != nil && txnID != "" {
+		originalPayment, paymentErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(s.Processor), txnID)
+		if paymentErr != nil && !errors.Is(paymentErr, sql.ErrNoRows) {
+			return fmt.Errorf("lookup original payment for void: %w", paymentErr)
+		}
+		if originalPayment != nil {
+			reversalID := "void:" + txnID
+			if existingVoid, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(s.Processor), reversalID); lookupErr == nil && existingVoid != nil {
+				log.WithContext(ctx).WithField("void_transaction_id", reversalID).Info("NMI void reversal already recorded")
+			} else if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+				return fmt.Errorf("lookup existing void reversal: %w", lookupErr)
+			} else {
+				amount := originalPayment.Amount
+				if amount <= 0 {
+					amount = originalPayment.ListAmount
+				}
+				if amount <= 0 {
+					return MarkWebhookErrorNonRetryable(fmt.Errorf("cannot void payment with non-positive amount"))
+				}
+				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, reversalID, amount); refundErr != nil {
+					return fmt.Errorf("record void reversal: %w", refundErr)
+				}
+			}
+			if originalPayment.SubscriptionID != nil {
+				id := *originalPayment.SubscriptionID
+				voidedSubscriptionID = &id
+			}
+		} else {
+			log.WithContext(ctx).WithField("transaction_id", txnID).Warn("Unable to resolve original payment for NMI void")
+		}
+	}
+	if voidedSubscriptionID != nil && s.SubscriptionLifecycleService != nil {
+		processor := models.Processor(s.Processor)
+		reason := "NMI void processed"
+		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+			SubscriptionID: voidedSubscriptionID,
+			Processor:      &processor,
+			CancelType:     models.CancelTypeMerchant,
+			CancelFeedback: &reason,
+			RevokeAccess:   true,
+		}); err != nil {
+			return fmt.Errorf("cancel membership after NMI void: %w", err)
 		}
 	}
 

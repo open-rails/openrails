@@ -20,6 +20,7 @@ type CreateMembershipParams struct {
 	CurrentPeriodEndsAt     *time.Time
 	TransactionID           string
 	Amount                  int64
+	AmountProvided          bool
 	Currency                string
 	PaymentMetadata         map[string]any
 }
@@ -30,6 +31,7 @@ type RenewMembershipParams struct {
 	CurrentPeriodEndsAt       *time.Time
 	TransactionID             string
 	Amount                    int64
+	AmountProvided            bool
 	Currency                  string
 	PaymentMetadata           map[string]any
 	AllowTerminalReactivation bool

@@ -63,6 +63,14 @@ func (w WebhookProcessWorker) Work(ctx context.Context, job *river.Job[WebhookPr
 	}
 
 	if err := w.Dispatcher.Process(ctx, msg); err != nil {
+		if webhooks.IsWebhookErrorNonRetryable(err) {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"provider": provider,
+				"event_id": msg.EventID,
+				"kind":     KindWebhookProcess,
+			}).Warn("webhook processing failed with non-retryable error")
+			return nil
+		}
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"provider": provider,
 			"event_id": msg.EventID,

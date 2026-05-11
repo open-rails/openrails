@@ -133,7 +133,8 @@ func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T)
 			return nil
 		},
 	)
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "webhook already in progress")
 	require.Equal(t, int32(1), attempts.Load(), "pending duplicate should not run processing function")
 
 	close(release)

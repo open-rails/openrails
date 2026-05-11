@@ -2,7 +2,9 @@ package webhooks
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -85,6 +87,8 @@ type stripeInvoice struct {
 type stripeCheckoutSession struct {
 	ID            string            `json:"id"`
 	Mode          string            `json:"mode"`
+	Status        string            `json:"status"`
+	PaymentStatus string            `json:"payment_status"`
 	Subscription  string            `json:"subscription"`
 	Customer      string            `json:"customer"`
 	CustomerEmail string            `json:"customer_email"`
@@ -92,6 +96,36 @@ type stripeCheckoutSession struct {
 	Metadata      map[string]string `json:"metadata"`
 	AmountTotal   int64             `json:"amount_total"`
 	Currency      string            `json:"currency"`
+}
+
+type stripeRefund struct {
+	ID            string `json:"id"`
+	Charge        string `json:"charge"`
+	PaymentIntent string `json:"payment_intent"`
+	Amount        int64  `json:"amount"`
+	Currency      string `json:"currency"`
+	Status        string `json:"status"`
+}
+
+type stripeCharge struct {
+	ID             string `json:"id"`
+	PaymentIntent  string `json:"payment_intent"`
+	Amount         int64  `json:"amount"`
+	AmountRefunded int64  `json:"amount_refunded"`
+	Currency       string `json:"currency"`
+	Refunds        struct {
+		Data []stripeRefund `json:"data"`
+	} `json:"refunds"`
+}
+
+type stripeDispute struct {
+	ID            string `json:"id"`
+	Charge        string `json:"charge"`
+	PaymentIntent string `json:"payment_intent"`
+	Amount        int64  `json:"amount"`
+	Currency      string `json:"currency"`
+	Status        string `json:"status"`
+	Reason        string `json:"reason"`
 }
 
 func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload []byte) error {
@@ -122,12 +156,22 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 		return s.handleInvoicePaymentFailed(ctx, obj)
 	case "checkout.session.completed":
 		return s.handleCheckoutSessionCompleted(ctx, obj)
+	case "checkout.session.async_payment_succeeded":
+		return s.handleCheckoutSessionCompleted(ctx, obj)
+	case "checkout.session.async_payment_failed":
+		return s.handleCheckoutSessionAsyncPaymentFailed(ctx, obj)
 	case "checkout.session.expired":
 		return s.handleCheckoutSessionExpired(ctx, obj)
 	case "customer.subscription.updated":
 		return s.handleSubscriptionUpdated(ctx, obj)
 	case "customer.subscription.deleted":
 		return s.handleSubscriptionDeleted(ctx, obj)
+	case "refund.created", "refund.updated":
+		return s.handleRefund(ctx, obj)
+	case "charge.refunded":
+		return s.handleChargeRefunded(ctx, obj)
+	case "charge.dispute.created", "charge.dispute.closed":
+		return s.handleDispute(ctx, obj)
 	default:
 		log.WithField("event_type", eventType).Info("stripe webhook ignored (not handled)")
 		return nil
@@ -178,6 +222,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			ProcessorSubscriptionID: &processorSubID,
 			TransactionID:           paymentTransactionID,
 			Amount:                  inv.AmountPaid,
+			AmountProvided:          true,
 			Currency:                inv.Currency,
 			PaymentMetadata:         paymentMetadata,
 		})
@@ -191,6 +236,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			ProcessorSubscriptionID: processorSubID,
 			TransactionID:           paymentTransactionID,
 			Amount:                  inv.AmountPaid,
+			AmountProvided:          true,
 			Currency:                inv.Currency,
 			PaymentMetadata:         paymentMetadata,
 		}); err != nil {
@@ -336,6 +382,16 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	if sess.Mode != "payment" {
 		return nil
 	}
+	paymentStatus := strings.TrimSpace(sess.PaymentStatus)
+	paymentSettled := paymentStatus == "paid" || (sess.AmountTotal == 0 && paymentStatus == "no_payment_required")
+	if !paymentSettled || strings.TrimSpace(sess.Status) != "complete" {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"checkout_session_id": sess.ID,
+			"status":              sess.Status,
+			"payment_status":      sess.PaymentStatus,
+		}).Info("Stripe checkout session not paid; waiting for async payment success")
+		return nil
+	}
 	priceID, price, err := s.resolvePriceFromMetadata(ctx, sess.Metadata, nil)
 	if err != nil {
 		return err
@@ -349,13 +405,14 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	}
 
 	result, err := s.PurchaseRegistrar.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		UserID:        userID,
-		PriceID:       priceID,
-		Processor:     string(models.ProcessorStripe),
-		TransactionID: paymentTransactionID,
-		Amount:        sess.AmountTotal,
-		Currency:      sess.Currency,
-		Metadata:      stripeCheckoutPaymentMetadata(sess),
+		UserID:         userID,
+		PriceID:        priceID,
+		Processor:      string(models.ProcessorStripe),
+		TransactionID:  paymentTransactionID,
+		Amount:         sess.AmountTotal,
+		AmountProvided: true,
+		Currency:       sess.Currency,
+		Metadata:       stripeCheckoutPaymentMetadata(sess),
 	})
 	if err != nil {
 		return fmt.Errorf("register purchase: %w", err)
@@ -418,6 +475,24 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 				return fmt.Errorf("grant purchased credits (%s): %w", creditType, err)
 			}
 		}
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) handleCheckoutSessionAsyncPaymentFailed(ctx context.Context, obj json.RawMessage) error {
+	var sess stripeCheckoutSession
+	if err := json.Unmarshal(obj, &sess); err != nil {
+		return fmt.Errorf("parse checkout session: %w", err)
+	}
+	if s.CheckoutSessionService == nil {
+		return nil
+	}
+	sessionID := parseCheckoutSessionID(sess.Metadata)
+	if sessionID == uuid.Nil {
+		return nil
+	}
+	if err := s.CheckoutSessionService.MarkFailed(ctx, sessionID, "stripe async payment failed", "async_payment_failed"); err != nil {
+		return fmt.Errorf("mark stripe checkout failed: %w", err)
 	}
 	return nil
 }
@@ -560,6 +635,128 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 		return fmt.Errorf("update stripe subscription after payment failure: %w", err)
 	}
 	return nil
+}
+
+func (s *StripeWebhookService) handleRefund(ctx context.Context, obj json.RawMessage) error {
+	var refund stripeRefund
+	if err := json.Unmarshal(obj, &refund); err != nil {
+		return fmt.Errorf("parse stripe refund: %w", err)
+	}
+	return s.recordStripeRefund(ctx, refund)
+}
+
+func (s *StripeWebhookService) handleChargeRefunded(ctx context.Context, obj json.RawMessage) error {
+	var charge stripeCharge
+	if err := json.Unmarshal(obj, &charge); err != nil {
+		return fmt.Errorf("parse stripe charge: %w", err)
+	}
+	if len(charge.Refunds.Data) == 0 {
+		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe charge.refunded missing refund data"))
+	}
+	for _, refund := range charge.Refunds.Data {
+		if strings.TrimSpace(refund.Charge) == "" {
+			refund.Charge = charge.ID
+		}
+		if strings.TrimSpace(refund.PaymentIntent) == "" {
+			refund.PaymentIntent = charge.PaymentIntent
+		}
+		if err := s.recordStripeRefund(ctx, refund); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund stripeRefund) error {
+	if s.PaymentService == nil {
+		return fmt.Errorf("payment service is required for stripe refund")
+	}
+	refundID := strings.TrimSpace(refund.ID)
+	if refundID == "" || refund.Amount <= 0 {
+		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe refund missing id or amount"))
+	}
+	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, refundID); err == nil && existing != nil {
+		return nil
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("lookup stripe refund payment: %w", err)
+	}
+	original, err := s.lookupStripeOriginalPayment(ctx, refund.Charge, refund.PaymentIntent)
+	if err != nil {
+		return err
+	}
+	if _, err := s.PaymentService.Refund(ctx, original.ID, refundID, refund.Amount); err != nil {
+		return fmt.Errorf("record stripe refund: %w", err)
+	}
+	if original.SubscriptionID != nil && refund.Amount >= original.Amount && s.SubscriptionLifecycleService != nil {
+		processor := models.ProcessorStripe
+		reason := "Stripe refund processed"
+		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+			SubscriptionID: original.SubscriptionID,
+			Processor:      &processor,
+			CancelType:     models.CancelTypeMerchant,
+			CancelFeedback: &reason,
+			RevokeAccess:   true,
+		}); err != nil {
+			return fmt.Errorf("cancel subscription after stripe refund: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) handleDispute(ctx context.Context, obj json.RawMessage) error {
+	var dispute stripeDispute
+	if err := json.Unmarshal(obj, &dispute); err != nil {
+		return fmt.Errorf("parse stripe dispute: %w", err)
+	}
+	if s.PaymentService == nil {
+		return fmt.Errorf("payment service is required for stripe dispute")
+	}
+	disputeID := strings.TrimSpace(dispute.ID)
+	if disputeID == "" || dispute.Amount <= 0 {
+		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe dispute missing id or amount"))
+	}
+	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, disputeID); err == nil && existing != nil {
+		return nil
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("lookup stripe dispute payment: %w", err)
+	}
+	original, err := s.lookupStripeOriginalPayment(ctx, dispute.Charge, dispute.PaymentIntent)
+	if err != nil {
+		return err
+	}
+	if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, dispute.Amount); err != nil {
+		return fmt.Errorf("record stripe dispute reversal: %w", err)
+	}
+	if original.SubscriptionID != nil && s.SubscriptionLifecycleService != nil {
+		processor := models.ProcessorStripe
+		reason := fmt.Sprintf("STRIPE DISPUTE: %s status=%s", strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
+		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+			SubscriptionID: original.SubscriptionID,
+			Processor:      &processor,
+			CancelType:     models.CancelTypeChargeback,
+			CancelFeedback: &reason,
+			RevokeAccess:   true,
+		}); err != nil {
+			return fmt.Errorf("cancel subscription after stripe dispute: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) lookupStripeOriginalPayment(ctx context.Context, chargeID, paymentIntentID string) (*models.Payment, error) {
+	for _, candidate := range []string{strings.TrimSpace(chargeID), strings.TrimSpace(paymentIntentID)} {
+		if candidate == "" {
+			continue
+		}
+		payment, err := s.PaymentService.GetByTransactionID(ctx, models.ProcessorStripe, candidate)
+		if err == nil {
+			return payment, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("lookup stripe original payment: %w", err)
+		}
+	}
+	return nil, fmt.Errorf("stripe original payment not found for charge/payment_intent")
 }
 
 func (s *StripeWebhookService) resolvePriceFromMetadata(ctx context.Context, metadata map[string]string, lines []stripeInvoiceLineItem) (uuid.UUID, *models.Price, error) {

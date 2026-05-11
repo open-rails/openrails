@@ -317,6 +317,23 @@ func wrapCCBillWebhookErrorForRetry(err error) error {
 }
 
 func (s *CCBillWebhookService) HandleCCBillWebhook(ctx context.Context) error {
+	if err := s.validateWebhookAuth(ctx); err != nil {
+		return MarkWebhookErrorNonRetryable(err)
+	}
+	if s.Data.EventType != EventTypeNewSaleSuccess && s.Data.EventType != EventTypeRenewalSuccess && s.DeduplicationService != nil {
+		return s.DeduplicationService.ProcessWebhook(
+			ctx,
+			s.stableDedupeEventKey(),
+			string(s.Data.EventType),
+			models.ProcessorCCBill,
+			s.Data,
+			s.handleCCBillWebhookDispatch,
+		)
+	}
+	return s.handleCCBillWebhookDispatch(ctx)
+}
+
+func (s *CCBillWebhookService) handleCCBillWebhookDispatch(ctx context.Context) error {
 	switch s.Data.EventType {
 	case EventTypeNewSaleSuccess:
 		return s.handleNewSaleSuccess(ctx)
@@ -351,8 +368,30 @@ func (s *CCBillWebhookService) HandleCCBillWebhook(ctx context.Context) error {
 			"processor":  "ccbill",
 			"event_type": s.Data.EventType,
 		}).Warn("Unsupported CCBill webhook event type")
-		return fmt.Errorf("unsupported event type: %s", s.Data.EventType)
+		return MarkWebhookErrorNonRetryable(fmt.Errorf("unsupported event type: %s", s.Data.EventType))
 	}
+}
+
+func (s *CCBillWebhookService) validateWebhookAuth(ctx context.Context) error {
+	if s.CCBillClient == nil {
+		return nil
+	}
+
+	var common CCBillCommonFields
+	if err := json.Unmarshal(s.Data.EventBody, &common); err != nil {
+		return fmt.Errorf("parse ccbill webhook auth fields: %w", err)
+	}
+	clientAccnum := common.ClientAccnum.Trimmed()
+	clientSubacc := strings.TrimSpace(common.ClientSubacc)
+	if err := s.CCBillClient.ValidateWebhookAuth(clientAccnum, clientSubacc); err != nil {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"event_type":        s.Data.EventType,
+			"client_accnum_set": clientAccnum != "",
+			"client_subacc_set": clientSubacc != "",
+		}).Warn("CCBill webhook rejected due to account mismatch")
+		return fmt.Errorf("ccbill webhook auth failed: %w", err)
+	}
+	return nil
 }
 
 func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
@@ -460,6 +499,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		CurrentPeriodEndsAt:     paidTermEnd,
 		TransactionID:           transactionID,
 		Amount:                  billedAmountCents,
+		AmountProvided:          true,
 		Currency:                currencyValue,
 	})
 	if err != nil {
@@ -681,7 +721,6 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -939,7 +978,6 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -1675,12 +1713,14 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var voidedSubscriptionID *uuid.UUID
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		db := db.NewWithTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		subService := subscriptions.NewSubscriptionService(db, priceService, productService, s.CCBillClient, nil, nil, s.Clock)
+		paymentService := payments.NewPaymentService(db)
 
 		// Try to find subscription by processor subscription ID
 		// Note: For voids, the subscription might not exist yet since the transaction was voided
@@ -1732,15 +1772,43 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
 
-		// Subscription exists - void doesn't terminate it, just log the event
-		// Voids typically happen before settlement, so the subscription remains as-is
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":        sub.ID,
 			"userID":                sub.UserID,
 			"voidAmount":            voidAmount,
 			"voidTransactionID":     voidTransactionID,
 			"originalTransactionID": voidTransactionID,
-		}).Info("Void event for existing subscription - no subscription changes made")
+		}).Info("Void event for existing subscription")
+
+		originalPayment, paymentErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, voidTransactionID)
+		if paymentErr != nil && !errors.Is(paymentErr, sql.ErrNoRows) {
+			return fmt.Errorf("lookup original payment for void: %w", paymentErr)
+		}
+		if originalPayment != nil {
+			reversalID := "void:" + voidTransactionID
+			if existingVoid, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, reversalID); lookupErr == nil && existingVoid != nil {
+				log.WithContext(ctx).WithField("void_transaction_id", reversalID).Info("Void reversal already recorded")
+			} else if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+				return fmt.Errorf("lookup existing void reversal: %w", lookupErr)
+			} else {
+				amount := voidAmountCents
+				if amount > originalPayment.Amount {
+					amount = originalPayment.Amount
+				}
+				if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, amount); refundErr != nil {
+					return fmt.Errorf("record void reversal: %w", refundErr)
+				}
+			}
+			if originalPayment.SubscriptionID != nil {
+				id := *originalPayment.SubscriptionID
+				voidedSubscriptionID = &id
+			}
+		} else {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"void_transaction_id": voidTransactionID,
+				"subscription_id":     sub.ID,
+			}).Warn("Unable to resolve original payment for CCBill void")
+		}
 
 		// Log void event to ClickHouse
 		if s.EventLogService != nil {
@@ -1776,19 +1844,29 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 			}
 		}
 
-		// No subscription modifications needed for voids - they're just transaction cleanup
-		// The subscription remains in its current state
-
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":    sub.ID,
 			"userID":            sub.UserID,
 			"voidAmount":        voidAmount,
 			"voidTransactionID": voidTransactionID,
-		}).Info("Processed void successfully - no subscription changes")
+		}).Info("Processed void successfully")
 
 		return nil
 	}); err != nil {
 		return err
+	}
+	if voidedSubscriptionID != nil && s.SubscriptionLifecycleService != nil {
+		processor := models.ProcessorCCBill
+		reason := "CCBill void processed"
+		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+			SubscriptionID: voidedSubscriptionID,
+			Processor:      &processor,
+			CancelType:     models.CancelTypeMerchant,
+			CancelFeedback: &reason,
+			RevokeAccess:   true,
+		}); err != nil {
+			return fmt.Errorf("cancel membership after CCBill void: %w", err)
+		}
 	}
 
 	return nil
@@ -2084,6 +2162,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		CurrentPeriodEndsAt:     paidTermEnd,
 		TransactionID:           transactionID,
 		Amount:                  billedAmountCents,
+		AmountProvided:          true,
 		Currency:                currencyValue,
 	}); err != nil {
 		if subscriptions.IsTerminalTransitionBlocked(err) {
@@ -2537,6 +2616,14 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			return fmt.Errorf("subscription not found for processor subscription ID: %s", ccBillSubID)
 		}
 		return fmt.Errorf("failed to get subscription: %w", err)
+	}
+	if subscription.Status == models.StatusActive && subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(s.now()) {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id":           subscription.ID,
+			"processor_subscription_id": ccBillSubID,
+			"current_period_ends_at":    subscription.CurrentPeriodEndsAt,
+		}).Warn("Ignoring CCBill expiration for active paid-through subscription")
+		return nil
 	}
 
 	// Use SubscriptionLifecycleService to expire membership

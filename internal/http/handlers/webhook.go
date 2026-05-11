@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,10 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
+
+const maxWebhookBodyBytes int64 = 1 << 20
+
+var errWebhookBodyTooLarge = errors.New("webhook body too large")
 
 func Webhook(r *httprequest.Request) {
 	provider := webhookutil.CanonicalProvider(r.Param("provider"))
@@ -63,6 +68,10 @@ func Webhook(r *httprequest.Request) {
 func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {
 	body, err := readRequestBody(r.Request.Body)
 	if err != nil {
+		if errors.Is(err, errWebhookBodyTooLarge) {
+			r.ErrorJSON(http.StatusRequestEntityTooLarge, "Webhook payload too large")
+			return false
+		}
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
 		return false
 	}
@@ -73,6 +82,8 @@ func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {
 			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
 		case errors.Is(err, webhookutil.ErrWebhookEventTypeMissing):
 			r.ErrorJSON(http.StatusBadRequest, "Missing eventType parameter")
+		case errors.Is(err, webhookutil.ErrWebhookEventTypeMismatch):
+			r.ErrorJSON(http.StatusBadRequest, "Webhook event type mismatch")
 		default:
 			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
 		}
@@ -90,6 +101,10 @@ func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {
 func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 	body, err := readRequestBody(r.Request.Body)
 	if err != nil {
+		if errors.Is(err, errWebhookBodyTooLarge) {
+			r.ErrorJSON(http.StatusRequestEntityTooLarge, "Webhook payload too large")
+			return false
+		}
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
 		return false
 	}
@@ -123,6 +138,9 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 }
 
 func enqueueWebhookJob(r *httprequest.Request, args riverjobs.WebhookProcessArgs) error {
+	if r.State == nil || r.State.RiverProducer == nil {
+		return fmt.Errorf("river producer is not configured")
+	}
 	opts := &river.InsertOpts{Queue: riverjobs.QueueWebhooks, UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true}}
 	_, err := r.State.RiverProducer.Insert(r.Request.Context(), args, opts)
 	return err
@@ -131,6 +149,10 @@ func enqueueWebhookJob(r *httprequest.Request, args riverjobs.WebhookProcessArgs
 func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string) bool {
 	body, err := readRequestBody(r.Request.Body)
 	if err != nil {
+		if errors.Is(err, errWebhookBodyTooLarge) {
+			r.ErrorJSON(http.StatusRequestEntityTooLarge, "Webhook payload too large")
+			return false
+		}
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
 		return false
 	}
@@ -189,5 +211,13 @@ func readRequestBody(body io.ReadCloser) ([]byte, error) {
 		return []byte{}, nil
 	}
 	defer body.Close()
-	return io.ReadAll(body)
+	var buf bytes.Buffer
+	limited := io.LimitReader(body, maxWebhookBodyBytes+1)
+	if _, err := buf.ReadFrom(limited); err != nil {
+		return nil, err
+	}
+	if int64(buf.Len()) > maxWebhookBodyBytes {
+		return nil, errWebhookBodyTooLarge
+	}
+	return buf.Bytes(), nil
 }

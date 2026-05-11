@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	log "github.com/sirupsen/logrus"
 )
+
+const webhookPendingLease = 2 * time.Minute
 
 // DeduplicationService provides robust webhook deduplication using the unified IdempotencyService
 type DeduplicationService struct {
@@ -49,7 +52,7 @@ func MarkWebhookErrorNonRetryable(err error) error {
 	return &NonRetryableWebhookError{Err: err}
 }
 
-func isWebhookErrorNonRetryable(err error) bool {
+func IsWebhookErrorNonRetryable(err error) bool {
 	var nonRetryable *NonRetryableWebhookError
 	return errors.As(err, &nonRetryable)
 }
@@ -127,20 +130,30 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				return nil
 			}
 			if alreadyExists && rec.Status == idempotency.IdempotencyStatusPending {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"eventID":   trimmedEventID,
-					"eventType": eventType,
-					"processor": processor,
-				}).Info("Webhook already in progress, skipping concurrent duplicate")
-				return nil
+				if time.Since(rec.CreatedAt) > webhookPendingLease {
+					log.WithContext(ctx).WithFields(log.Fields{
+						"eventID":   trimmedEventID,
+						"eventType": eventType,
+						"processor": processor,
+					}).Warn("Taking over stale pending webhook idempotency record")
+					shouldRecordOutcome = true
+				} else {
+					log.WithContext(ctx).WithFields(log.Fields{
+						"eventID":   trimmedEventID,
+						"eventType": eventType,
+						"processor": processor,
+					}).Info("Webhook already in progress, skipping concurrent duplicate")
+					return fmt.Errorf("webhook already in progress")
+				}
+			} else {
+				shouldRecordOutcome = rec == nil || rec.Status != idempotency.IdempotencyStatusSuccess
 			}
-			shouldRecordOutcome = rec == nil || rec.Status != idempotency.IdempotencyStatusSuccess
 		}
 	}
 
 	processingErr := processingFunc(ctx)
 	if processingErr != nil {
-		nonRetryable := isWebhookErrorNonRetryable(processingErr)
+		nonRetryable := IsWebhookErrorNonRetryable(processingErr)
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"eventID":   trimmedEventID,
@@ -152,7 +165,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 		if shouldRecordOutcome && trimmedEventID != "" {
 			if nonRetryable {
 				if err := s.idem.Complete(ctx, op, trimmedEventID, payloadBytes); err != nil {
-					log.WithContext(ctx).WithError(err).Warn("failed to mark non-retryable webhook idempotency as complete")
+					return fmt.Errorf("failed to mark non-retryable webhook idempotency as complete: %w", err)
 				}
 			} else {
 				if err := s.idem.Fail(ctx, op, trimmedEventID, processingErr); err != nil {
@@ -175,7 +188,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 
 	if shouldRecordOutcome && trimmedEventID != "" {
 		if err := s.idem.Complete(ctx, op, trimmedEventID, payloadBytes); err != nil {
-			log.WithContext(ctx).WithError(err).Warn("failed to mark webhook idempotency as complete")
+			return fmt.Errorf("failed to mark webhook idempotency as complete: %w", err)
 		}
 	}
 

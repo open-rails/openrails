@@ -110,6 +110,9 @@ func (d *WebhookDispatcher) processCCBill(ctx context.Context, event *WebhookMes
 }
 
 func (d *WebhookDispatcher) processNMI(ctx context.Context, event *WebhookMessage) error {
+	if !webhookSignatureVerified(event) {
+		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi webhook signature was not verified before processing"))
+	}
 	var payload NMIWebhookEvent
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return fmt.Errorf("parse nmi webhook payload: %w", err)
@@ -138,6 +141,9 @@ func (d *WebhookDispatcher) processNMI(ctx context.Context, event *WebhookMessag
 }
 
 func (d *WebhookDispatcher) processStripe(ctx context.Context, event *WebhookMessage) error {
+	if !webhookSignatureVerified(event) {
+		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe webhook signature was not verified before processing"))
+	}
 	service := StripeWebhookService{
 		DB:                           d.DB,
 		PriceService:                 d.PriceService,
@@ -153,4 +159,8 @@ func (d *WebhookDispatcher) processStripe(ctx context.Context, event *WebhookMes
 		Clock:                        d.Clock,
 	}
 	return service.HandleStripeWebhook(ctx, event.Payload)
+}
+
+func webhookSignatureVerified(event *WebhookMessage) bool {
+	return event != nil && event.SignatureValid != nil && *event.SignatureValid
 }

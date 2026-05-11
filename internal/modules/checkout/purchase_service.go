@@ -219,7 +219,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	}
 
 	amount := req.Amount
-	if amount == 0 {
+	if !req.AmountProvided && amount == 0 {
 		amount = price.Amount
 	}
 	currency := req.Currency

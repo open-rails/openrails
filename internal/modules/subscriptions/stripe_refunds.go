@@ -78,6 +78,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Idempotency-Key", stripeRefundIdempotencyKey(chargeID, params.Amount, reason))
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -104,6 +105,14 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	}
 
 	return &result, nil
+}
+
+func stripeRefundIdempotencyKey(chargeID string, amount int64, reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "unspecified"
+	}
+	return fmt.Sprintf("openrails-refund:%s:%d:%s", strings.TrimSpace(chargeID), amount, reason)
 }
 
 func ResolveStripeRefundTarget(payment *models.Payment) (string, error) {
