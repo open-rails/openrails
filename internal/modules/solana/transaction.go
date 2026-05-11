@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -55,53 +54,41 @@ func (s *SolanaTransactionService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-// BuildPaymentTransaction creates a Solana transaction for payment.
-func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*TransactionBuildResponse, error) {
+// BuildPaymentTransactionFromQuote creates a payment transaction from the quote already bound to a checkout session.
+func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.Context, req *PaymentTransactionBuildRequest) (*TransactionBuildResponse, error) {
 	if s.rpc == nil {
 		return nil, fmt.Errorf("solana rpc client unavailable")
 	}
-
-	price, err := s.priceService.GetByID(ctx, priceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get price: %w", err)
+	if req == nil {
+		return nil, fmt.Errorf("payment transaction request is required")
 	}
-
-	solanaProc, err := RequireSolanaProcessorConfig(s.cfg)
-	if err != nil {
-		return nil, err
+	if strings.TrimSpace(req.UserWallet) == "" {
+		return nil, fmt.Errorf("user wallet is required")
 	}
-
-	tokenCfg, ok := solanaProc.SupportedTokens[tokenSymbol]
-	if !ok || !tokenCfg.Enabled {
-		return nil, fmt.Errorf("token %s not supported", tokenSymbol)
-	}
-
-	merchantWallet := solanaProc.RecipientWallet
-	if merchantWallet == "" {
+	if strings.TrimSpace(req.Recipient) == "" {
 		return nil, fmt.Errorf("merchant wallet not configured")
 	}
-
-	quote, err := CalculateTokenQuote(ctx, tokenCfg, price.Amount, price.Currency, s.fxProvider)
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculate token amount: %w", err)
+	if req.TokenAmount == 0 {
+		return nil, fmt.Errorf("token amount is required")
 	}
-	tokenAmount := quote.Units
-	tokenAmountDecimal := quote.Decimal
-	if tokenAmount == 0 {
-		return nil, fmt.Errorf("calculated token amount is zero")
+	if !isNativeTokenSymbol(req.TokenSymbol) && strings.TrimSpace(req.TokenMint) == "" {
+		return nil, fmt.Errorf("token mint is required")
+	}
+	if !isNativeTokenSymbol(req.TokenSymbol) && IsNativeSOLMint(req.TokenMint) {
+		return nil, fmt.Errorf("non-SOL token cannot use native SOL mint")
 	}
 
 	referenceStr := ""
-	if reference != nil {
-		referenceStr = strings.TrimSpace(*reference)
+	if req.Reference != nil {
+		referenceStr = strings.TrimSpace(*req.Reference)
 	}
 
 	txResp, err := s.rpc.BuildTransferTransaction(ctx, solanarpc.TransferRequest{
-		FromWallet:  userWallet,
-		ToWallet:    merchantWallet,
-		TokenSymbol: tokenSymbol,
-		TokenMint:   tokenCfg.Mint,
-		Amount:      tokenAmount,
+		FromWallet:  strings.TrimSpace(req.UserWallet),
+		ToWallet:    strings.TrimSpace(req.Recipient),
+		TokenSymbol: strings.TrimSpace(req.TokenSymbol),
+		TokenMint:   strings.TrimSpace(req.TokenMint),
+		Amount:      req.TokenAmount,
 		Reference:   referenceStr,
 	})
 	if err != nil {
@@ -111,23 +98,27 @@ func (s *SolanaTransactionService) BuildPaymentTransaction(ctx context.Context, 
 	expiresAt := s.now().Add(10 * time.Minute)
 
 	log.WithFields(log.Fields{
-		"user_id":      userID,
-		"price_id":     priceID,
-		"token":        tokenSymbol,
-		"amount_cents": price.Amount,
-		"token_amount": tokenAmountDecimal,
-		"from_wallet":  userWallet,
-		"to_wallet":    merchantWallet,
-	}).Info("Built Solana payment transaction")
+		"user_id":      req.UserID,
+		"price_id":     req.PriceID,
+		"token":        req.TokenSymbol,
+		"amount_cents": req.Amount,
+		"token_amount": req.TokenAmount,
+		"from_wallet":  req.UserWallet,
+		"to_wallet":    req.Recipient,
+	}).Info("Built Solana payment transaction from checkout quote")
 
 	return &TransactionBuildResponse{
 		TransactionBase64: txResp.TransactionBase64,
-		Amount:            price.Amount,
-		TokenAmount:       tokenAmount,
-		TokenSymbol:       tokenSymbol,
+		Amount:            req.Amount,
+		TokenAmount:       req.TokenAmount,
+		TokenSymbol:       req.TokenSymbol,
 		ExpiresAt:         expiresAt,
-		Instructions:      fmt.Sprintf("Sign this transaction to pay %s %s using %s", moneyutil.FormatCentsDecimal(price.Amount), price.Currency, tokenSymbol),
+		Instructions:      fmt.Sprintf("Sign this transaction to pay %s %s using %s", moneyutil.FormatCentsDecimal(req.Amount), req.Currency, req.TokenSymbol),
 	}, nil
+}
+
+func isNativeTokenSymbol(symbol string) bool {
+	return strings.EqualFold(strings.TrimSpace(symbol), "SOL")
 }
 
 // VerifyTransactionWithContent verifies a transaction against expected recipient, amount, and reference.

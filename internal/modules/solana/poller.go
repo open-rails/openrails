@@ -78,9 +78,17 @@ func NewSolanaPayPoller(
 ) *SolanaPayPoller {
 	var rpc *solanarpc.RPCClient
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
+		solanaNetwork := strings.ToLower(strings.TrimSpace(solanaProc.Network))
+		if solanaNetwork == "" {
+			solanaNetwork = "mainnet"
+			if cfg.IsTestMode() {
+				solanaNetwork = "devnet"
+			}
+		}
 		rpc = solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
-			Endpoint: solanaProc.RPCEndpoint,
-			Network:  solanaProc.Network,
+			Endpoint:     solanaProc.RPCEndpoint,
+			HeliusAPIKey: solanaProc.HeliusAPIKey,
+			Network:      solanaNetwork,
 		})
 	}
 

@@ -66,7 +66,7 @@ type solanaPaymentService interface {
 }
 
 type solanaTransactionService interface {
-	BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*solanamodule.TransactionBuildResponse, error)
+	BuildPaymentTransactionFromQuote(ctx context.Context, req *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error)
 	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string) error
 }
 type CheckoutSessionService struct {
@@ -454,6 +454,9 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 	tokenMint := tokenCfg.Mint
 	if strings.EqualFold(solanaProc.Network, "mainnet") && tokenCfg.MainnetMint != "" {
 		tokenMint = tokenCfg.MainnetMint
+	}
+	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(tokenMint) {
+		return fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutSessionValidation)
 	}
 
 	switch flow {
@@ -855,6 +858,9 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if storedTokenMint == "" {
 		return nil, fmt.Errorf("%w: token_mint missing", ErrCheckoutSessionValidation)
 	}
+	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(storedTokenMint) {
+		return nil, fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutSessionValidation)
+	}
 	if !strings.EqualFold(storedTokenMint, tokenMint) {
 		return nil, fmt.Errorf("%w: token_mint mismatch", ErrCheckoutSessionValidation)
 	}
@@ -895,22 +901,51 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		return nil, err
 	}
 
+	signature := strings.TrimSpace(req.Payment.Signature)
+	if s.db != nil {
+		if existingPayment, err := repo.NewPaymentRepo(s.db).GetByTransactionID(ctx, models.ProcessorSolana, signature); err == nil {
+			if err := validateSolanaPaymentMatchesSession(existingPayment, session, referenceValue); err != nil {
+				return nil, err
+			}
+			if err := s.MarkSucceeded(ctx, session.ID, existingPayment.ID, signature); err != nil {
+				return nil, err
+			}
+			if err := s.finalizeSolanaTransferReference(ctx, session, signature); err != nil {
+				return nil, err
+			}
+			updated, err := s.repo.GetByID(ctx, session.ID)
+			if err != nil {
+				return nil, err
+			}
+			return s.sessionToResponse(updated), nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("failed checking existing solana payment: %w", err)
+		}
+	}
+
 	result, err := s.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        session.UserID,
 		PriceID:       session.PriceID,
 		Processor:     "solana",
-		TransactionID: strings.TrimSpace(req.Payment.Signature),
+		TransactionID: signature,
 		Amount:        session.Amount,
 		Currency:      session.Currency,
+		Metadata: map[string]any{
+			"solana_reference":    referenceValue,
+			"checkout_session_id": session.ID.String(),
+		},
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	if err := s.MarkSucceeded(ctx, session.ID, result.PaymentID, strings.TrimSpace(req.Payment.Signature)); err != nil {
+	if err := s.verifyRegisteredSolanaPayment(ctx, result.PaymentID, session, referenceValue); err != nil {
 		return nil, err
 	}
-	if err := s.finalizeSolanaTransferReference(ctx, session, strings.TrimSpace(req.Payment.Signature)); err != nil {
+
+	if err := s.MarkSucceeded(ctx, session.ID, result.PaymentID, signature); err != nil {
+		return nil, err
+	}
+	if err := s.finalizeSolanaTransferReference(ctx, session, signature); err != nil {
 		return nil, err
 	}
 
@@ -919,6 +954,33 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		return nil, err
 	}
 	return s.sessionToResponse(updated), nil
+}
+
+func (s *CheckoutSessionService) verifyRegisteredSolanaPayment(ctx context.Context, paymentID uuid.UUID, session *models.CheckoutSession, reference string) error {
+	if paymentID == uuid.Nil || session == nil || s.db == nil {
+		return nil
+	}
+	payment, err := repo.NewPaymentRepo(s.db).GetByID(ctx, paymentID)
+	if err != nil {
+		return fmt.Errorf("failed to verify registered solana payment: %w", err)
+	}
+	return validateSolanaPaymentMatchesSession(payment, session, reference)
+}
+
+func validateSolanaPaymentMatchesSession(payment *models.Payment, session *models.CheckoutSession, reference string) error {
+	if payment == nil || session == nil {
+		return fmt.Errorf("%w: solana payment does not match checkout session", ErrCheckoutSessionConflict)
+	}
+	if payment.UserID != session.UserID || payment.PriceID != session.PriceID || payment.Amount != session.Amount || !strings.EqualFold(payment.Currency, session.Currency) {
+		return fmt.Errorf("%w: solana payment does not match checkout session", ErrCheckoutSessionConflict)
+	}
+	if strings.TrimSpace(fmt.Sprint(payment.Metadata["solana_reference"])) != strings.TrimSpace(reference) {
+		return fmt.Errorf("%w: solana signature already belongs to a different reference", ErrCheckoutSessionConflict)
+	}
+	if strings.TrimSpace(fmt.Sprint(payment.Metadata["checkout_session_id"])) != session.ID.String() {
+		return fmt.Errorf("%w: solana signature already belongs to a different checkout session", ErrCheckoutSessionConflict)
+	}
+	return nil
 }
 
 func (s *CheckoutSessionService) MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error {
@@ -1215,11 +1277,6 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 	if s.solanaTransactionService == nil {
 		return nil, fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutSessionValidation)
 	}
-	solanaProc, err := solanamodule.RequireSolanaProcessorConfig(s.config)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
-	}
-
 	account = strings.TrimSpace(account)
 	if account == "" {
 		return nil, fmt.Errorf("%w: account is required", ErrCheckoutSessionValidation)
@@ -1262,16 +1319,13 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		}
 		session.Reference = &reference
 	}
+	buildReq, err := solanaBuildRequestFromSession(session, account, tokenSymbol)
+	if err != nil {
+		return nil, err
+	}
 
-	// Build the transaction
-	txResp, err := s.solanaTransactionService.BuildPaymentTransaction(
-		ctx,
-		session.UserID,
-		session.PriceID,
-		tokenSymbol,
-		account,
-		session.Reference,
-	)
+	// Build the transaction from the quote already persisted on the checkout session.
+	txResp, err := s.solanaTransactionService.BuildPaymentTransactionFromQuote(ctx, buildReq)
 	if err != nil {
 		return nil, err
 	}
@@ -1281,9 +1335,6 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		session.ProcessorState = map[string]any{}
 	}
 	session.ProcessorState["payer"] = account
-	session.ProcessorState["token_amount"] = txResp.TokenAmount
-	session.ProcessorState["recipient"] = solanaProc.RecipientWallet
-	session.ExpiresAt = &txResp.ExpiresAt
 
 	if err := s.repo.Update(ctx, session); err != nil {
 		return nil, fmt.Errorf("failed to update session: %w", err)
@@ -1298,5 +1349,39 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 	return &solanamodule.PayTransactionResponse{
 		TransactionBase64: txResp.TransactionBase64,
 		Message:           message,
+	}, nil
+}
+
+func solanaBuildRequestFromSession(session *models.CheckoutSession, account, tokenSymbol string) (*solanamodule.PaymentTransactionBuildRequest, error) {
+	if session == nil {
+		return nil, fmt.Errorf("%w: session is required", ErrCheckoutSessionValidation)
+	}
+	tokenAmount := getUint64Field(session.ProcessorState, "token_amount")
+	if tokenAmount == 0 {
+		return nil, fmt.Errorf("%w: token_amount missing from session", ErrCheckoutSessionValidation)
+	}
+	tokenMint := getStringField(session.ProcessorState, "token_mint")
+	if tokenMint == "" {
+		return nil, fmt.Errorf("%w: token_mint missing from session", ErrCheckoutSessionValidation)
+	}
+	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(tokenMint) {
+		return nil, fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutSessionValidation)
+	}
+	recipient := getStringField(session.ProcessorState, "recipient")
+	if recipient == "" {
+		return nil, fmt.Errorf("%w: recipient missing from session", ErrCheckoutSessionValidation)
+	}
+
+	return &solanamodule.PaymentTransactionBuildRequest{
+		UserID:      session.UserID,
+		PriceID:     session.PriceID,
+		TokenSymbol: tokenSymbol,
+		UserWallet:  account,
+		Reference:   session.Reference,
+		TokenAmount: tokenAmount,
+		TokenMint:   tokenMint,
+		Recipient:   recipient,
+		Amount:      session.Amount,
+		Currency:    session.Currency,
 	}, nil
 }

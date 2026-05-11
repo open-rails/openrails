@@ -1,6 +1,10 @@
 package solana
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type PayResult struct {
 	URL            string
@@ -27,6 +31,19 @@ type TransactionBuildResponse struct {
 	TokenSymbol       string
 	ExpiresAt         time.Time
 	Instructions      string
+}
+
+type PaymentTransactionBuildRequest struct {
+	UserID      string
+	PriceID     uuid.UUID
+	TokenSymbol string
+	UserWallet  string
+	Reference   *string
+	TokenAmount uint64
+	TokenMint   string
+	Recipient   string
+	Amount      int64
+	Currency    string
 }
 
 type PaySessionInfo struct {

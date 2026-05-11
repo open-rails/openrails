@@ -46,6 +46,18 @@ type runtimeOverrides struct {
 	Clock clockwork.Clock
 }
 
+func effectiveSolanaNetwork(cfg *config.Config, proc *config.ProcessorConfig) string {
+	if proc != nil {
+		if network := strings.ToLower(strings.TrimSpace(proc.Network)); network != "" {
+			return network
+		}
+	}
+	if cfg != nil && cfg.IsTestMode() {
+		return "devnet"
+	}
+	return "mainnet"
+}
+
 func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
 	// Initialize NMI-backed processors from config BEFORE creating clients
 	// This ensures IsNMIBacked() works correctly for all configured processors
@@ -93,6 +105,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	// Initialize Solana token registry (must be done here since createServices doesn't return errors)
 	var solanaTokenRegistry *jupiter.TokenRegistry
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
+		solanaProc.Network = effectiveSolanaNetwork(cfg, solanaProc)
 		solanaTokenRegistry = jupiter.NewTokenRegistry()
 		jupiterAPIKey := cfg.GetJupiterAPIKey()
 
@@ -116,8 +129,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 			err := solanaTokenRegistry.LoadFromJupiter(ctx, jupiterAPIKey, solanaProc.EnabledTokens)
 			cancel()
 			if err != nil {
-				log.WithError(err).Warn("Failed to load tokens from Jupiter; using default token set")
-				loadStaticTokens(config.TokensForNetwork(solanaProc.Network))
+				return nil, fmt.Errorf("failed to load configured Solana enabled_tokens from Jupiter: %w", err)
 			}
 		} else {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -461,11 +473,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider, clock)
 	var solanaRPC *solana.RPCClient
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
-		// Derive network from test_mode: devnet when true, mainnet when false
-		solanaNetwork := "mainnet"
-		if cfg.IsTestMode() {
-			solanaNetwork = "devnet"
-		}
+		solanaNetwork := effectiveSolanaNetwork(cfg, solanaProc)
 		solanaRPC = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
 			Endpoint:     solanaProc.RPCEndpoint,
 			HeliusAPIKey: solanaProc.HeliusAPIKey,

@@ -296,6 +296,9 @@ func findTransferMatch(tx *solanago.Transaction, txResult *rpc.GetTransactionRes
 
 		switch {
 		case programID.Equals(system.ProgramID):
+			if !isNativeSOLMint(expectedMintNorm) {
+				continue
+			}
 			sysInstr, err := system.DecodeInstruction(accounts, inst.Data)
 			if err != nil {
 				continue
@@ -382,8 +385,10 @@ func evaluateTokenTransfer(txResult *rpc.GetTransactionResult, accounts []*solan
 		return nil
 	}
 	mint := mintForAccount(txResult, accountIdx)
-	if expectedMint != "" && mint != "" && !mintMatches(expectedMint, mint) {
-		return nil
+	if expectedMint != "" {
+		if mint == "" || !mintMatches(expectedMint, mint) {
+			return nil
+		}
 	}
 	if *amountPtr < expectedAmount {
 		return nil
@@ -417,8 +422,10 @@ func evaluateTokenTransferChecked(txResult *rpc.GetTransactionResult, accounts [
 	if mint == "" {
 		mint = mintForAccount(txResult, accountIdx)
 	}
-	if expectedMint != "" && mint != "" && !mintMatches(expectedMint, mint) {
-		return nil
+	if expectedMint != "" {
+		if mint == "" || !mintMatches(expectedMint, mint) {
+			return nil
+		}
 	}
 	if *amountPtr < expectedAmount {
 		return nil

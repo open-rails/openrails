@@ -23,6 +23,13 @@ func RequireSolanaProcessorConfig(cfg *config.Config) (*config.ProcessorConfig, 
 	return proc, nil
 }
 
+const WrappedSOLMint = "So11111111111111111111111111111111111111112"
+
+func IsNativeSOLMint(tokenMint string) bool {
+	mint := strings.TrimSpace(tokenMint)
+	return mint == "" || strings.EqualFold(mint, WrappedSOLMint)
+}
+
 // TokenQuote represents a complete quote for converting fiat to a Solana token.
 // It includes all the information needed to audit and verify the quote.
 type TokenQuote struct {

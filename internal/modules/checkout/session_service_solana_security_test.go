@@ -246,6 +246,45 @@ func TestSessionToResponse_TransactionRequestSolanaPayURLUsesCanonicalV1Path(t *
 	}
 }
 
+func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
+	t.Parallel()
+
+	ref := "11111111111111111111111111111112"
+	priceID := uuid.New()
+	session := &models.CheckoutSession{
+		ID:        uuid.New(),
+		UserID:    "user_123",
+		PriceID:   priceID,
+		Amount:    10000,
+		Currency:  "usd",
+		Reference: &ref,
+		ProcessorState: map[string]any{
+			"token_symbol": "USDC",
+			"token_mint":   devnetUSDCMint,
+			"token_amount": uint64(100_000_000),
+			"recipient":    testRecipientWallet,
+		},
+	}
+
+	req, err := solanaBuildRequestFromSession(session, "payer_wallet", "USDC")
+	require.NoError(t, err)
+	require.Equal(t, "user_123", req.UserID)
+	require.Equal(t, priceID, req.PriceID)
+	require.Equal(t, "USDC", req.TokenSymbol)
+	require.Equal(t, "payer_wallet", req.UserWallet)
+	require.Equal(t, &ref, req.Reference)
+	require.Equal(t, uint64(100_000_000), req.TokenAmount)
+	require.Equal(t, devnetUSDCMint, req.TokenMint)
+	require.Equal(t, testRecipientWallet, req.Recipient)
+	require.Equal(t, int64(10000), req.Amount)
+	require.Equal(t, "usd", req.Currency)
+
+	session.ProcessorState["token_amount"] = uint64(1_000_000)
+	req, err = solanaBuildRequestFromSession(session, "payer_wallet", "USDC")
+	require.NoError(t, err)
+	require.Equal(t, uint64(1_000_000), req.TokenAmount)
+}
+
 const (
 	devnetUSDCMint      = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
 	testRecipientWallet = "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh"
@@ -274,7 +313,7 @@ func testSolanaCheckoutConfig() *config.Config {
 
 type stubSolanaTransactionService struct{}
 
-func (s *stubSolanaTransactionService) BuildPaymentTransaction(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol, userWallet string, reference *string) (*solanamodule.TransactionBuildResponse, error) {
+func (s *stubSolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.Context, req *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error) {
 	return nil, nil
 }
 
