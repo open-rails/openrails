@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,4 +30,17 @@ func TestAdminRefundMetadataIncludesIdempotencyAndProviderRefund(t *testing.T) {
 	require.Equal(t, int64(500), metadata["admin_refund_amount"])
 	require.Equal(t, "requested_by_customer", metadata["admin_refund_reason"])
 	require.Equal(t, "re_123", metadata["provider_refund_id"])
+}
+
+func TestAdminRefundMatchesRequest(t *testing.T) {
+	existing := &models.Payment{
+		Amount: -500,
+		Metadata: map[string]any{
+			"admin_refund_reason": "requested_by_customer",
+		},
+	}
+
+	require.True(t, adminRefundMatchesRequest(existing, refundRequest{Amount: 500, Reason: " requested_by_customer "}))
+	require.False(t, adminRefundMatchesRequest(existing, refundRequest{Amount: 400, Reason: "requested_by_customer"}))
+	require.False(t, adminRefundMatchesRequest(existing, refundRequest{Amount: 500, Reason: "duplicate"}))
 }

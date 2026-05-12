@@ -651,7 +651,7 @@ func (s *CheckoutService) processNMISubscription(
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, wrappedErr)
 		return nil, wrappedErr
 	}
-	completedAttempt, err := s.PaymentService.CompleteProviderAttempt(ctx, attempt.ID, resp.TransactionID, nmiSubscriptionAttemptMetadata(idempotencyKey, orderID, "completed", resp.SubscriptionID, resp.TransactionID, subscriptionID, paymentMethodID, delayedStart, req.Metadata))
+	completedAttempt, err := s.PaymentService.CompleteProviderAttemptInPlace(ctx, attempt.ID, nmiSubscriptionAttemptMetadata(idempotencyKey, orderID, "completed", resp.SubscriptionID, resp.TransactionID, subscriptionID, paymentMethodID, delayedStart, req.Metadata))
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, fmt.Errorf("subscription created but failed to record provider attempt: %w", err)
@@ -669,8 +669,9 @@ func (s *CheckoutService) recoverNMISubscriptionAttempt(ctx context.Context, req
 	if err != nil {
 		return nil, err
 	}
-	if !payments.PaymentStatusCompleted(attempt.Status) {
-		if strings.EqualFold(strings.TrimSpace(attempt.Status), payments.PaymentStatusPendingValue) {
+	attemptStatus := nmiSubscriptionAttemptStatusFromPayment(attempt)
+	if attemptStatus != payments.PaymentStatusCompletedValue {
+		if attemptStatus == payments.PaymentStatusPendingValue {
 			return nil, errors.New("NMI subscription attempt is already pending, please wait")
 		}
 		return nil, errors.New("previous NMI subscription attempt failed, retry with a new idempotency key")
@@ -850,6 +851,16 @@ func metadataString(metadata map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(s)
+}
+
+func nmiSubscriptionAttemptStatusFromPayment(attempt *models.Payment) string {
+	if attempt == nil {
+		return ""
+	}
+	if status := strings.ToLower(metadataString(attempt.Metadata, "nmi_attempt_status")); status != "" {
+		return status
+	}
+	return strings.ToLower(strings.TrimSpace(attempt.Status))
 }
 
 // upgradeIdempotencyResult stores the cached result of a successful upgrade for idempotency replay

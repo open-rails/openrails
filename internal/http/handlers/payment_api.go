@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strings"
+
 	"github.com/open-rails/openrails/internal/db/models"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
@@ -54,10 +56,12 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 	var amountRefunded int64
 	var refundObjects []api.PaymentObject
 	for _, r := range refunds {
-		if r.Amount < 0 {
-			amountRefunded += -r.Amount
-		} else {
-			amountRefunded += r.Amount
+		if refundStatusCountsTowardAPIAmount(r.Status) {
+			if r.Amount < 0 {
+				amountRefunded += -r.Amount
+			} else {
+				amountRefunded += r.Amount
+			}
 		}
 		refundObjects = append(refundObjects, PaymentToAPI(r, nil))
 	}
@@ -65,7 +69,6 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 	status := paymentAPIStatus(p.Status)
 	captured := status == "succeeded" || status == "refunded" || status == "partially_refunded"
 	if p.RefundedPaymentID != nil || p.Amount < 0 {
-		status = "succeeded"
 		object = "refund"
 		captured = false
 	}
@@ -87,6 +90,15 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 		payment.Price = &priceObj
 	}
 	return payment
+}
+
+func refundStatusCountsTowardAPIAmount(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "", "completed":
+		return true
+	default:
+		return false
+	}
 }
 
 func paymentAPIStatus(status string) string {

@@ -238,6 +238,13 @@ func (s *PaymentService) CompleteProviderAttempt(ctx context.Context, attemptID 
 	return s.GetByID(ctx, attemptID)
 }
 
+func (s *PaymentService) CompleteProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) (*models.Payment, error) {
+	if err := s.repo.CompleteProviderAttemptInPlace(ctx, attemptID, metadata); err != nil {
+		return nil, err
+	}
+	return s.GetByID(ctx, attemptID)
+}
+
 func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Payment, amount int64) error {
 	if orig == nil {
 		return errors.New("original payment is required")

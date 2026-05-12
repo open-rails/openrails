@@ -61,3 +61,61 @@ func TestPaymentToAPIRefundObjectNotCaptured(t *testing.T) {
 	require.Equal(t, "succeeded", got.Status)
 	require.False(t, got.Captured)
 }
+
+func TestPaymentToAPIRefundObjectPreservesPendingAndFailedStatus(t *testing.T) {
+	originalID := uuid.New()
+	for _, tt := range []struct {
+		status string
+		want   string
+	}{
+		{status: "pending", want: "pending"},
+		{status: "failed", want: "failed"},
+	} {
+		t.Run(tt.status, func(t *testing.T) {
+			refund := &models.Payment{
+				ID:                uuid.New(),
+				UserID:            uuid.NewString(),
+				PriceID:           uuid.New(),
+				RefundedPaymentID: &originalID,
+				Processor:         models.ProcessorMobius,
+				TransactionID:     "refund_123",
+				Amount:            -500,
+				Currency:          "usd",
+				Status:            tt.status,
+			}
+
+			got := PaymentToAPI(refund, nil)
+			require.Equal(t, "refund", got.Object)
+			require.Equal(t, tt.want, got.Status)
+			require.False(t, got.Captured)
+		})
+	}
+}
+
+func TestPaymentToAPIAmountRefundedCountsOnlyCompletedRefunds(t *testing.T) {
+	originalID := uuid.New()
+	payment := &models.Payment{
+		ID:            originalID,
+		UserID:        uuid.NewString(),
+		PriceID:       uuid.New(),
+		Processor:     models.ProcessorMobius,
+		TransactionID: "txn_123",
+		Amount:        1000,
+		Currency:      "usd",
+		Status:        "completed",
+		CreatedAt:     time.Unix(100, 0),
+	}
+	refunds := []*models.Payment{
+		{ID: uuid.New(), UserID: payment.UserID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_completed", Amount: -300, Currency: "usd", Status: "completed"},
+		{ID: uuid.New(), UserID: payment.UserID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_pending", Amount: -400, Currency: "usd", Status: "pending"},
+		{ID: uuid.New(), UserID: payment.UserID, PriceID: payment.PriceID, RefundedPaymentID: &originalID, Processor: payment.Processor, TransactionID: "refund_failed", Amount: -500, Currency: "usd", Status: "failed"},
+	}
+
+	got := PaymentToAPI(payment, refunds)
+	require.Equal(t, int64(300), got.AmountRefunded)
+	require.Equal(t, "partially_refunded", got.Status)
+	require.NotNil(t, got.Refunds)
+	require.Len(t, got.Refunds.Data, 3)
+	require.Equal(t, "pending", got.Refunds.Data[1].Status)
+	require.Equal(t, "failed", got.Refunds.Data[2].Status)
+}

@@ -163,6 +163,9 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 		return nil, adminRefundHTTPError(http.StatusNotFound, "payment not found")
 	}
 	if existing, err := paymentService.GetRefundByAdminIdempotencyKey(ctx, paymentID, idempotencyKey); err == nil {
+		if !adminRefundMatchesRequest(existing, req) {
+			return nil, adminRefundHTTPError(http.StatusConflict, "idempotency key was already used for a different refund request")
+		}
 		switch strings.ToLower(strings.TrimSpace(existing.Status)) {
 		case "", "completed":
 			return &adminRefundPrepared{existing: existing}, nil
@@ -210,6 +213,35 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 	}
 	prepared.reservation = reservation
 	return prepared, nil
+}
+
+func adminRefundMatchesRequest(existing *models.Payment, req refundRequest) bool {
+	if existing == nil {
+		return false
+	}
+	amount := existing.Amount
+	if amount < 0 {
+		amount = -amount
+	}
+	if amount != req.Amount {
+		return false
+	}
+	return strings.TrimSpace(adminRefundMetadataString(existing.Metadata, "admin_refund_reason")) == strings.TrimSpace(req.Reason)
+}
+
+func adminRefundMetadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return ""
+	}
+	str, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return str
 }
 
 func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, paymentService *payments.PaymentService, prepared *adminRefundPrepared, req refundRequest, idempotencyKey string) (*models.Payment, string, error) {

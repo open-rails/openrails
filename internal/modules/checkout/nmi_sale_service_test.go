@@ -5,11 +5,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNMISaleAttemptTransactionIDIsStable(t *testing.T) {
 	require.Equal(t, "nmi_sale_attempt:sale_123", nmiSaleAttemptTransactionID(" sale_123 "))
+}
+
+func TestNMISubscriptionAttemptTransactionIDIsStableAndSynthetic(t *testing.T) {
+	require.Equal(t, "nmi_sub_attempt:sub_123", nmiSubscriptionAttemptTransactionID(" sub_123 "))
+	require.NotEqual(t, "txn_123", nmiSubscriptionAttemptTransactionID("sub_123"))
 }
 
 func TestNMISaleAttemptMetadata(t *testing.T) {
@@ -48,6 +55,23 @@ func TestNMISubscriptionAttemptMetadata(t *testing.T) {
 	require.Equal(t, paymentMethodID.String(), metadata["payment_method_id"])
 	require.Equal(t, delayedStart.Format(time.RFC3339), metadata["delayed_start"])
 	require.Equal(t, "run-1", metadata["e2e_run_id"])
+}
+
+func TestNMISubscriptionAttemptStatusPrefersMetadata(t *testing.T) {
+	attempt := &models.Payment{
+		Status: payments.PaymentStatusPendingValue,
+		Metadata: map[string]any{
+			"nmi_attempt_status": payments.PaymentStatusCompletedValue,
+		},
+	}
+
+	require.Equal(t, payments.PaymentStatusCompletedValue, nmiSubscriptionAttemptStatusFromPayment(attempt))
+}
+
+func TestNMISubscriptionAttemptStatusFallsBackToPaymentStatus(t *testing.T) {
+	attempt := &models.Payment{Status: payments.PaymentStatusPendingValue}
+
+	require.Equal(t, payments.PaymentStatusPendingValue, nmiSubscriptionAttemptStatusFromPayment(attempt))
 }
 
 func TestNMISubscriptionStartDate(t *testing.T) {

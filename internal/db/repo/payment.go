@@ -34,6 +34,8 @@ type PaymentRepo struct {
 	db *db.DB
 }
 
+const internalNMISubscriptionAttemptMetadataKey = "nmi_subscription_order_id"
+
 func NewPaymentRepo(d *db.DB) *PaymentRepo { return &PaymentRepo{db: d} }
 
 func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error {
@@ -108,7 +110,9 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 
 func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
 	payments := []*models.Payment{}
-	if err := r.db.GetDB().NewSelect().Model(&payments).Where("purch.user_id = ?", userID).OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
+	q := r.db.GetDB().NewSelect().Model(&payments).Where("purch.user_id = ?", userID)
+	q = excludeInternalPaymentAttempts(q)
+	if err := q.OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
 		return nil, err
 	}
 	return payments, nil
@@ -124,7 +128,9 @@ func (r *PaymentRepo) GetByTransactionID(ctx context.Context, processor models.P
 
 func (r *PaymentRepo) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Payment, error) {
 	payments := []*models.Payment{}
-	if err := r.db.GetDB().NewSelect().Model(&payments).Where("purch.price_id = ?", priceID).OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
+	q := r.db.GetDB().NewSelect().Model(&payments).Where("purch.price_id = ?", priceID)
+	q = excludeInternalPaymentAttempts(q)
+	if err := q.OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
 		return nil, err
 	}
 	return payments, nil
@@ -132,7 +138,9 @@ func (r *PaymentRepo) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*m
 
 func (r *PaymentRepo) GetByProcessor(ctx context.Context, processor models.Processor) ([]*models.Payment, error) {
 	payments := []*models.Payment{}
-	if err := r.db.GetDB().NewSelect().Model(&payments).Where("purch.processor = ?", processor).OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
+	q := r.db.GetDB().NewSelect().Model(&payments).Where("purch.processor = ?", processor)
+	q = excludeInternalPaymentAttempts(q)
+	if err := q.OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
 		return nil, err
 	}
 	return payments, nil
@@ -286,16 +294,41 @@ func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uui
 	return nil
 }
 
+func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) error {
+	res, err := r.db.GetDB().NewUpdate().
+		Model((*models.Payment)(nil)).
+		Set("metadata = ?", metadata).
+		Where("purch.id = ?", attemptID).
+		Where("purch.amount > 0").
+		Where("purch.status = ?", "pending").
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
+}
+
 func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
 	payments := []*models.Payment{}
 	offset := (page - 1) * pageSize
 
-	count, err := r.db.GetDB().NewSelect().Model((*models.Payment)(nil)).Where("purch.user_id = ?", userID).Count(ctx)
+	countQ := r.db.GetDB().NewSelect().Model((*models.Payment)(nil)).Where("purch.user_id = ?", userID)
+	countQ = excludeInternalPaymentAttempts(countQ)
+	count, err := countQ.Count(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	if err := r.db.GetDB().NewSelect().Model(&payments).Where("purch.user_id = ?", userID).OrderExpr("purch.purchased_at DESC").Limit(pageSize).Offset(offset).Scan(ctx); err != nil {
+	q := r.db.GetDB().NewSelect().Model(&payments).Where("purch.user_id = ?", userID)
+	q = excludeInternalPaymentAttempts(q)
+	if err := q.OrderExpr("purch.purchased_at DESC").Limit(pageSize).Offset(offset).Scan(ctx); err != nil {
 		return nil, 0, err
 	}
 
@@ -305,6 +338,7 @@ func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, p
 func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[PaymentFilters]) ([]*models.Payment, int64, error) {
 	payments := []*models.Payment{}
 	q := r.db.GetDB().NewSelect().Model(&payments)
+	q = excludeInternalPaymentAttempts(q)
 
 	q = q.Relation("Price").Relation("Price.Product").Relation("Subscription")
 
@@ -358,14 +392,19 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 	return payments, int64(total), nil
 }
 
+func excludeInternalPaymentAttempts(q *bun.SelectQuery) *bun.SelectQuery {
+	return q.Where("COALESCE(purch.metadata ->> ?, '') = ''", internalNMISubscriptionAttemptMetadataKey)
+}
+
 func (r *PaymentRepo) GetLatestByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (*models.Payment, error) {
 	payment := new(models.Payment)
-	err := r.db.GetDB().
+	q := r.db.GetDB().
 		NewSelect().
 		Model(payment).
 		Where("purch.user_id = ?", userID).
-		Where("purch.processor = ?", processor).
-		OrderExpr("purch.purchased_at DESC").
+		Where("purch.processor = ?", processor)
+	q = excludeInternalPaymentAttempts(q)
+	err := q.OrderExpr("purch.purchased_at DESC").
 		Limit(1).
 		Scan(ctx)
 	if err != nil {
@@ -412,26 +451,28 @@ func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string
 	}
 
 	// Successful payments (positive amount)
-	successful, err = r.db.GetDB().
+	successQ := r.db.GetDB().
 		NewSelect().
 		Model((*models.Payment)(nil)).
 		Where("purch.user_id = ?", userID).
 		Where("purch.processor = ?", processor).
 		Where("purch.amount > 0").
-		Where("COALESCE(purch.status::text, 'completed') = ?", "completed").
-		Count(ctx)
+		Where("COALESCE(purch.status::text, 'completed') = ?", "completed")
+	successQ = excludeInternalPaymentAttempts(successQ)
+	successful, err = successQ.Count(ctx)
 	if err != nil {
 		return
 	}
 
 	// Failed/negative/zero payments
-	failed, err = r.db.GetDB().
+	failedQ := r.db.GetDB().
 		NewSelect().
 		Model((*models.Payment)(nil)).
 		Where("purch.user_id = ?", userID).
 		Where("purch.processor = ?", processor).
-		Where("COALESCE(purch.status::text, 'completed') = ?", "failed").
-		Count(ctx)
+		Where("COALESCE(purch.status::text, 'completed') = ?", "failed")
+	failedQ = excludeInternalPaymentAttempts(failedQ)
+	failed, err = failedQ.Count(ctx)
 	if err != nil {
 		return
 	}
