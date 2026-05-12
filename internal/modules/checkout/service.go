@@ -384,6 +384,7 @@ func (s *CheckoutService) processCCBillSubscription(
 		Country:       req.Country,
 		FlexID:        flexID,
 		FormName:      formName,
+		ReservationID: req.CheckoutSessionID,
 	}
 
 	response, err := ccbillClient.GenerateFlexFormURL(flexFormParams)
@@ -508,6 +509,8 @@ func (s *CheckoutService) processNMISubscription(
 	// Get idempotency key (client-provided or generated)
 	const idempOp = "nmi_subscription"
 	idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, idempOp)
+	orderID := nmiSubscriptionOrderID(idempotencyKey, req.Metadata)
+	poNumber := orderID
 
 	// Check idempotency - have we already processed this request?
 	idempRec, alreadyExists, err := s.IdempotencyService.Begin(ctx, idempOp, idempotencyKey)
@@ -547,6 +550,11 @@ func (s *CheckoutService) processNMISubscription(
 		case IdempotencyStatusPending:
 			return nil, errors.New("subscription creation already in progress, please wait")
 		case IdempotencyStatusFailed:
+			if recovered, recoverErr := s.recoverNMISubscriptionAttempt(ctx, req, user, price, product, coverage, provider, orderID, idempOp, idempotencyKey); recoverErr == nil && recovered != nil {
+				return recovered, nil
+			} else if recoverErr != nil && !errors.Is(recoverErr, sql.ErrNoRows) {
+				return nil, recoverErr
+			}
 			return nil, errors.New("previous subscription attempt failed, please try again")
 		}
 	}
@@ -558,28 +566,45 @@ func (s *CheckoutService) processNMISubscription(
 		return nil, err
 	}
 
+	// Determine start date for delayed start
+	now := s.now().UTC()
+	startDate, delayedStart := nmiSubscriptionStartDate(coverage, now)
+
+	if recovered, recoverErr := s.recoverNMISubscriptionAttempt(ctx, req, user, price, product, coverage, provider, orderID, idempOp, idempotencyKey); recoverErr == nil && recovered != nil {
+		return recovered, nil
+	} else if recoverErr != nil && !errors.Is(recoverErr, sql.ErrNoRows) {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, recoverErr)
+		return nil, fmt.Errorf("recover NMI subscription attempt: %w", recoverErr)
+	}
+
 	// Build subscription ID
 	subscriptionID := uuid.New()
-
-	// Optional E2E tracing (forwarded from checkout session metadata)
-	orderID := subscriptionID.String()
-	poNumber := subscriptionID.String()
-	if req.Metadata != nil {
-		if runID := strings.TrimSpace(req.Metadata["e2e_run_id"]); runID != "" {
-			orderID = fmt.Sprintf("e2e_%s_%s", runID, subscriptionID.String())
-			poNumber = orderID
+	var paymentMethodID *uuid.UUID
+	if createdPaymentMethod != nil {
+		paymentMethodID = &createdPaymentMethod.ID
+	} else if req.PaymentMethodID != "" {
+		if pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID); err == nil {
+			paymentMethodID = &pmID
+		} else {
+			log.WithError(err).Warn("failed to parse payment_method_id while preparing subscription attempt")
 		}
 	}
 
-	// Determine start date for delayed start
-	var startDate string
-	var delayedStart *time.Time
-	now := s.now().UTC()
-	if coverage.HasCoverage && coverage.EndDate != nil && coverage.EndDate.After(now) {
-		// Schedule subscription to start when current coverage ends
-		var startAt time.Time
-		startDate, startAt = buildNMIFutureStartDate(*coverage.EndDate, now)
-		delayedStart = &startAt
+	attempt, err := s.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
+		ID:            uuid.New(),
+		UserID:        user.ID,
+		PriceID:       price.ID,
+		Processor:     models.Processor(provider),
+		TransactionID: nmiSubscriptionAttemptTransactionID(orderID),
+		Amount:        price.Amount,
+		ListAmount:    price.Amount,
+		Currency:      price.Currency,
+		Status:        payments.PaymentStatusPendingValue,
+		Metadata:      nmiSubscriptionAttemptMetadata(idempotencyKey, orderID, "pending", "", "", subscriptionID, paymentMethodID, delayedStart, req.Metadata),
+	})
+	if err != nil {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, fmt.Errorf("reserve NMI subscription attempt: %w", err)
 	}
 
 	// Build NMI params
@@ -607,6 +632,7 @@ func (s *CheckoutService) processNMISubscription(
 	// Create subscription with NMI
 	resp, err := client.AddRecurringSubscription(params)
 	if err != nil {
+		_ = s.PaymentService.MarkFailed(ctx, attempt.ID)
 		wrappedErr := fmt.Errorf("failed to create subscription: %w", err)
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {
@@ -625,20 +651,69 @@ func (s *CheckoutService) processNMISubscription(
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, wrappedErr)
 		return nil, wrappedErr
 	}
-
-	// Determine initial status
-	status := models.StatusPending
-	if startDate != "" {
-		// Delayed start - subscription won't charge until start date
-		status = models.StatusPending
+	completedAttempt, err := s.PaymentService.CompleteProviderAttempt(ctx, attempt.ID, resp.TransactionID, nmiSubscriptionAttemptMetadata(idempotencyKey, orderID, "completed", resp.SubscriptionID, resp.TransactionID, subscriptionID, paymentMethodID, delayedStart, req.Metadata))
+	if err != nil {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, fmt.Errorf("subscription created but failed to record provider attempt: %w", err)
+	}
+	providerSubscriptionID := metadataString(completedAttempt.Metadata, "provider_subscription_id")
+	if providerSubscriptionID == "" {
+		providerSubscriptionID = resp.SubscriptionID
 	}
 
-	// Create subscription record
+	return s.completeNMISubscriptionRegistration(ctx, req, user, price, product, provider, subscriptionID, providerSubscriptionID, resp.TransactionID, delayedStart, orderID, paymentMethodID, idempOp, idempotencyKey)
+}
+
+func (s *CheckoutService) recoverNMISubscriptionAttempt(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, coverage *CoverageInfo, provider string, orderID string, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
+	attempt, err := s.PaymentService.GetByMetadataValue(ctx, "nmi_subscription_order_id", orderID)
+	if err != nil {
+		return nil, err
+	}
+	if !payments.PaymentStatusCompleted(attempt.Status) {
+		if strings.EqualFold(strings.TrimSpace(attempt.Status), payments.PaymentStatusPendingValue) {
+			return nil, errors.New("NMI subscription attempt is already pending, please wait")
+		}
+		return nil, errors.New("previous NMI subscription attempt failed, retry with a new idempotency key")
+	}
+	providerSubscriptionID := metadataString(attempt.Metadata, "provider_subscription_id")
+	if providerSubscriptionID == "" {
+		return nil, errors.New("completed NMI subscription attempt is missing provider subscription id")
+	}
+	transactionID := metadataString(attempt.Metadata, "provider_transaction_id")
+	if transactionID == "" {
+		transactionID = attempt.TransactionID
+	}
+	subscriptionID := uuid.New()
+	if rawID := metadataString(attempt.Metadata, "local_subscription_id"); rawID != "" {
+		if parsedID, err := uuid.Parse(rawID); err == nil {
+			subscriptionID = parsedID
+		}
+	}
+	var paymentMethodID *uuid.UUID
+	if rawID := metadataString(attempt.Metadata, "payment_method_id"); rawID != "" {
+		if parsedID, err := uuid.Parse(rawID); err == nil {
+			paymentMethodID = &parsedID
+		}
+	}
+	delayedStart := nmiSubscriptionDelayedStartFromMetadata(attempt.Metadata)
+	if delayedStart == nil {
+		_, delayedStart = nmiSubscriptionStartDate(coverage, s.now().UTC())
+	}
+	return s.completeNMISubscriptionRegistration(ctx, req, user, price, product, provider, subscriptionID, providerSubscriptionID, transactionID, delayedStart, orderID, paymentMethodID, idempOp, idempotencyKey)
+}
+
+func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, provider string, subscriptionID uuid.UUID, providerSubscriptionID string, transactionID string, delayedStart *time.Time, orderID string, paymentMethodID *uuid.UUID, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
+	if existing, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, providerSubscriptionID); err == nil {
+		return s.nmiSubscriptionResponse(ctx, existing.ID, transactionID, delayedStart, idempOp, idempotencyKey)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("load existing subscription: %w", err)
+	}
+
+	now := s.now().UTC()
 	var emailPtr *string
 	if req.Email != "" {
 		emailPtr = &req.Email
 	}
-
 	subscription := &models.Subscription{
 		ID:                       subscriptionID,
 		UserID:                   user.ID,
@@ -646,37 +721,36 @@ func (s *CheckoutService) processNMISubscription(
 		PriceID:                  price.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
 		CreditsSpecSnapshot:      models.CloneCreditsSpec(product.CreditsSpec),
-		ProcessorSubscriptionID:  resp.SubscriptionID,
-		Status:                   status,
+		ProcessorSubscriptionID:  providerSubscriptionID,
+		Status:                   models.StatusPending,
 		Processor:                models.Processor(provider),
 		UserEmail:                emailPtr,
 		StartedAt:                *timePtr(now),
+		PaymentMethodID:          paymentMethodID,
 	}
-
+	metadata := map[string]any{"order_id": orderID, "provider_transaction_id": transactionID}
 	if req.Metadata != nil {
 		if runID := strings.TrimSpace(req.Metadata["e2e_run_id"]); runID != "" {
-			if payload, err := json.Marshal(map[string]any{"e2e_run_id": runID, "order_id": orderID}); err == nil {
-				subscription.Metadata = payload
-			}
+			metadata["e2e_run_id"] = runID
 		}
 	}
-
-	if createdPaymentMethod != nil {
-		subscription.PaymentMethodID = &createdPaymentMethod.ID
-	} else if req.PaymentMethodID != "" {
-		if pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID); err == nil {
-			subscription.PaymentMethodID = &pmID
-		} else {
-			log.WithError(err).Warn("failed to parse payment_method_id while persisting subscription")
-		}
+	if payload, err := json.Marshal(metadata); err == nil {
+		subscription.Metadata = payload
 	}
 
 	if err := s.SubscriptionService.Create(ctx, subscription); err != nil {
+		if errors.Is(err, subscriptions.ErrActiveSubscriptionExists) {
+			if existing, loadErr := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, providerSubscriptionID); loadErr == nil {
+				return s.nmiSubscriptionResponse(ctx, existing.ID, transactionID, delayedStart, idempOp, idempotencyKey)
+			}
+		}
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, fmt.Errorf("failed to save subscription: %w", err)
 	}
+	return s.nmiSubscriptionResponse(ctx, subscriptionID, transactionID, delayedStart, idempOp, idempotencyKey)
+}
 
-	// Cache successful result for idempotency replay
+func (s *CheckoutService) nmiSubscriptionResponse(ctx context.Context, subscriptionID uuid.UUID, transactionID string, delayedStart *time.Time, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
 	var delayedStartStr *string
 	if delayedStart != nil {
 		ds := delayedStart.Format(time.RFC3339)
@@ -684,50 +758,98 @@ func (s *CheckoutService) processNMISubscription(
 	}
 	cachedResult, _ := json.Marshal(subscriptionIdempotencyResult{
 		SubscriptionID: subscriptionID.String(),
-		TransactionID:  resp.TransactionID,
+		TransactionID:  transactionID,
 		DelayedStart:   delayedStartStr,
 	})
 	_ = s.IdempotencyService.Complete(ctx, idempOp, idempotencyKey, cachedResult)
 
-	statusMsg := "pending"
 	message := "Subscription created successfully"
 	if delayedStart != nil {
 		message = fmt.Sprintf("Subscription scheduled to start on %s", delayedStart.Format("2006-01-02"))
 	}
-
-	// Leaving RegisterPurchase for immediate starts only,
-	// TODO - Test in production to see when NMI charges the card.
-	/*_, err = s.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		UserID:         user.ID,
-		PriceID:        price.ID,
-		Processor:      provider,
-		TransactionID:  resp.TransactionID,
-		Amount:         price.Amount,
-		Currency:       price.Currency,
-		SubscriptionID: &subscriptionID,
-		Metadata: func() map[string]any {
-			if req.Metadata == nil {
-				return nil
-			}
-			if runID := strings.TrimSpace(req.Metadata["e2e_run_id"]); runID != "" {
-				return map[string]any{"e2e_run_id": runID, "order_id": orderID}
-			}
-			return nil
-		}(),
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to register purchase: %w", err)
-	}*/
-
 	return &CheckoutResponse{
-		Status:         statusMsg,
+		Status:         "pending",
 		Action:         "new",
 		Message:        message,
 		SubscriptionID: &subscriptionID,
-		TransactionID:  resp.TransactionID,
+		TransactionID:  transactionID,
 		DelayedStart:   delayedStart,
 	}, nil
+}
+
+func nmiSubscriptionOrderID(idempotencyKey string, metadata map[string]string) string {
+	orderID := nmiIdempotentOrderID("sub", idempotencyKey)
+	if orderID == "" {
+		orderID = uuid.New().String()
+	}
+	if runID := strings.TrimSpace(metadata["e2e_run_id"]); runID != "" {
+		orderID = fmt.Sprintf("e2e_%s_%s", runID, orderID)
+	}
+	return orderID
+}
+
+func nmiSubscriptionAttemptTransactionID(orderID string) string {
+	return "nmi_sub_attempt:" + strings.TrimSpace(orderID)
+}
+
+func nmiSubscriptionStartDate(coverage *CoverageInfo, now time.Time) (string, *time.Time) {
+	if coverage == nil || !coverage.HasCoverage || coverage.EndDate == nil || !coverage.EndDate.After(now) {
+		return "", nil
+	}
+	startDate, startAt := buildNMIFutureStartDate(*coverage.EndDate, now)
+	return startDate, &startAt
+}
+
+func nmiSubscriptionAttemptMetadata(idempotencyKey string, orderID string, status string, providerSubscriptionID string, transactionID string, subscriptionID uuid.UUID, paymentMethodID *uuid.UUID, delayedStart *time.Time, requestMetadata map[string]string) map[string]any {
+	metadata := map[string]any{
+		"checkout_idempotency_key":  strings.TrimSpace(idempotencyKey),
+		"nmi_subscription_order_id": strings.TrimSpace(orderID),
+		"nmi_attempt_status":        status,
+		"local_subscription_id":     subscriptionID.String(),
+	}
+	if paymentMethodID != nil && *paymentMethodID != uuid.Nil {
+		metadata["payment_method_id"] = paymentMethodID.String()
+	}
+	if delayedStart != nil {
+		metadata["delayed_start"] = delayedStart.Format(time.RFC3339)
+	}
+	if providerSubscriptionID != "" {
+		metadata["provider_subscription_id"] = providerSubscriptionID
+	}
+	if transactionID != "" {
+		metadata["provider_transaction_id"] = transactionID
+	}
+	if runID := strings.TrimSpace(requestMetadata["e2e_run_id"]); runID != "" {
+		metadata["e2e_run_id"] = runID
+	}
+	return metadata
+}
+
+func nmiSubscriptionDelayedStartFromMetadata(metadata map[string]any) *time.Time {
+	raw := metadataString(metadata, "delayed_start")
+	if raw == "" {
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil
+	}
+	return &parsed
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	value, ok := metadata[key]
+	if !ok {
+		return ""
+	}
+	s, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
 }
 
 // upgradeIdempotencyResult stores the cached result of a successful upgrade for idempotency replay

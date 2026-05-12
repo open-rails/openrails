@@ -276,7 +276,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		if existingPayment.SubscriptionID != nil && *existingPayment.SubscriptionID != *req.SubscriptionID {
 			return nil, fmt.Errorf("payment transaction belongs to a different subscription")
 		}
-		if !paymentStatusCompleted(existingPayment.Status) {
+		if !payments.PaymentStatusCompleted(existingPayment.Status) {
 			return nil, fmt.Errorf("payment transaction is not completed")
 		}
 		if amount > 0 && existingPayment.Amount != amount {
@@ -337,11 +337,6 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	}).Info("registered purchase")
 
 	return &payments.RegisterPurchaseResponse{PaymentID: paymentID, Entitlements: grantedEntitlements, DelayedStart: delayedStart, Eligibility: string(eligibility.Status)}, nil
-}
-
-func paymentStatusCompleted(status string) bool {
-	status = strings.TrimSpace(status)
-	return status == "" || strings.EqualFold(status, "completed")
 }
 
 func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, entitlementsSpec map[string]*int, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, walletPurchase bool, billingCycleDays *int, skipExistingSource bool) error {

@@ -1,12 +1,21 @@
 package handlers
 
 import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -15,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
+	"github.com/uptrace/bun"
 )
 
 type paymentPath struct {
@@ -24,6 +34,23 @@ type paymentPath struct {
 type refundRequest struct {
 	Amount int64  `json:"amount" binding:"required,gt=0"`
 	Reason string `json:"reason,omitempty"`
+}
+
+const adminRefundIdempotencyHeader = "X-Idempotency-Key"
+
+var adminRefundLocks sync.Map
+
+func lockAdminRefund(paymentID string) func() {
+	value, _ := adminRefundLocks.LoadOrStore(paymentID, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+func adminRefundLockKey(paymentID string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("admin_refund:" + paymentID))
+	return int64(h.Sum64())
 }
 
 type adminOffChannelPaymentPath struct {
@@ -56,57 +83,201 @@ func AdminRefundPayment(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	ctx := r.Request.Context()
-	payment, err := r.State.PaymentService.GetByID(ctx, paymentID)
+	idempotencyKey := strings.TrimSpace(r.GinCtx.GetHeader(adminRefundIdempotencyHeader))
+	if idempotencyKey == "" {
+		r.ErrorJSON(http.StatusBadRequest, adminRefundIdempotencyHeader+" is required")
+		return
+	}
+	unlock := lockAdminRefund(paymentID.String())
+	defer unlock()
+
+	refund, refundTransactionID, err := executeAdminRefund(r.Request.Context(), r, paymentID, req, idempotencyKey)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "payment not found")
-		return
-	}
-	if err := r.State.PaymentService.ValidateRefund(ctx, payment, req.Amount); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	var refundTransactionID string
-	switch {
-	case payment.Processor == models.ProcessorCCBill:
-		r.ErrorJSON(http.StatusBadRequest, "CCBill refunds must be processed through CCBill's admin portal. After issuing the refund in CCBill, it will be recorded automatically via webhook.")
-		return
-	case payment.Processor == models.ProcessorStripe:
-		refundTargetID, err := subscriptions.ResolveStripeRefundTarget(payment)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
-			return
+		status, message := adminRefundErrorResponse(err)
+		if refundTransactionID != "" && status == http.StatusInternalServerError {
+			message = fmt.Sprintf("refund issued (ID: %s) but failed to record: %s", refundTransactionID, err.Error())
 		}
-		stripeService := &subscriptions.StripeRefundService{Config: r.State.Config}
-		result, err := stripeService.CreateRefund(ctx, subscriptions.RefundParams{ChargeID: refundTargetID, Amount: req.Amount, Reason: req.Reason})
-		if err != nil {
-			r.ErrorJSON(http.StatusBadGateway, fmt.Sprintf("stripe refund failed: %s", err.Error()))
-			return
-		}
-		refundTransactionID = result.ID
-	case processors.IsNMIBackedProcessor(payment.Processor):
-		providerName := strings.ToLower(string(payment.Processor))
-		nmiClient, ok := r.State.NMIClients[providerName]
-		if !ok {
-			r.ErrorJSON(http.StatusInternalServerError, fmt.Sprintf("NMI client not configured for processor: %s", payment.Processor))
-			return
-		}
-		result, err := nmiClient.Refund(nmi.RefundParams{TransactionID: payment.TransactionID, Amount: req.Amount})
-		if err != nil {
-			r.ErrorJSON(http.StatusBadGateway, fmt.Sprintf("refund failed: %s", err.Error()))
-			return
-		}
-		refundTransactionID = result.TransactionID
-	default:
-		r.ErrorJSON(http.StatusBadRequest, fmt.Sprintf("refunds not supported for processor: %s", payment.Processor))
-		return
-	}
-	refund, err := r.State.PaymentService.Refund(ctx, paymentID, refundTransactionID, req.Amount)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, fmt.Sprintf("refund issued (ID: %s) but failed to record: %s", refundTransactionID, err.Error()))
+		r.ErrorJSON(status, message)
 		return
 	}
 	r.Inner().JSON(http.StatusCreated, PaymentToAPI(refund, nil))
+}
+
+func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*models.Payment, string, error) {
+	if r.State.DB == nil {
+		prepared, err := prepareAdminRefund(ctx, r, r.State.PaymentService, paymentID, req, idempotencyKey)
+		if err != nil {
+			return nil, "", err
+		}
+		return issuePreparedAdminRefund(ctx, r, r.State.PaymentService, prepared, req, idempotencyKey)
+	}
+	var prepared *adminRefundPrepared
+	err := r.State.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(?)", adminRefundLockKey(paymentID.String())); err != nil {
+			return fmt.Errorf("lock refund: %w", err)
+		}
+		paymentService := payments.NewPaymentService(db.NewWithTx(tx), r.Clock)
+		result, err := prepareAdminRefund(ctx, r, paymentService, paymentID, req, idempotencyKey)
+		if err != nil {
+			return err
+		}
+		prepared = result
+		return nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return issuePreparedAdminRefund(ctx, r, r.State.PaymentService, prepared, req, idempotencyKey)
+}
+
+type adminRefundStatusError struct {
+	Status  int
+	Message string
+}
+
+func (e *adminRefundStatusError) Error() string { return e.Message }
+
+func adminRefundHTTPError(status int, message string) error {
+	return &adminRefundStatusError{Status: status, Message: message}
+}
+
+func adminRefundErrorResponse(err error) (int, string) {
+	var statusErr *adminRefundStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.Status, statusErr.Message
+	}
+	return http.StatusInternalServerError, err.Error()
+}
+
+type adminRefundPrepared struct {
+	existing             *models.Payment
+	payment              *models.Payment
+	reservation          *models.Payment
+	stripeRefundTargetID string
+	nmiClient            *nmi.NMIClient
+}
+
+func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentService *payments.PaymentService, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*adminRefundPrepared, error) {
+	payment, err := paymentService.GetByID(ctx, paymentID)
+	if err != nil {
+		return nil, adminRefundHTTPError(http.StatusNotFound, "payment not found")
+	}
+	if existing, err := paymentService.GetRefundByAdminIdempotencyKey(ctx, paymentID, idempotencyKey); err == nil {
+		switch strings.ToLower(strings.TrimSpace(existing.Status)) {
+		case "", "completed":
+			return &adminRefundPrepared{existing: existing}, nil
+		case "pending":
+			return nil, adminRefundHTTPError(http.StatusConflict, "refund request is already pending")
+		default:
+			return nil, adminRefundHTTPError(http.StatusConflict, "refund request already failed; retry with a new idempotency key")
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("load existing refund request: %w", err)
+	}
+	if err := paymentService.ValidateRefund(ctx, payment, req.Amount); err != nil {
+		return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	prepared := &adminRefundPrepared{payment: payment}
+	var stripeRefundTargetID string
+	var nmiClient *nmi.NMIClient
+	switch {
+	case payment.Processor == models.ProcessorCCBill:
+		return nil, adminRefundHTTPError(http.StatusBadRequest, "CCBill refunds must be processed through CCBill's admin portal. After issuing the refund in CCBill, it will be recorded automatically via webhook.")
+	case payment.Processor == models.ProcessorStripe:
+		refundTargetID, err := subscriptions.ResolveStripeRefundTarget(payment)
+		if err != nil {
+			return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
+		}
+		stripeRefundTargetID = refundTargetID
+	case processors.IsNMIBackedProcessor(payment.Processor):
+		providerName := strings.ToLower(string(payment.Processor))
+		client, ok := r.State.NMIClients[providerName]
+		if !ok {
+			return nil, adminRefundHTTPError(http.StatusInternalServerError, fmt.Sprintf("NMI client not configured for processor: %s", payment.Processor))
+		}
+		nmiClient = client
+	default:
+		return nil, adminRefundHTTPError(http.StatusBadRequest, fmt.Sprintf("refunds not supported for processor: %s", payment.Processor))
+	}
+	prepared.stripeRefundTargetID = stripeRefundTargetID
+	prepared.nmiClient = nmiClient
+
+	reservationMetadata := adminRefundMetadata(idempotencyKey, req, "pending", "")
+	reservation, err := paymentService.ReserveRefund(ctx, paymentID, adminRefundReservationTransactionID(paymentID, idempotencyKey), req.Amount, reservationMetadata)
+	if err != nil {
+		return nil, fmt.Errorf("reserve refund: %w", err)
+	}
+	prepared.reservation = reservation
+	return prepared, nil
+}
+
+func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, paymentService *payments.PaymentService, prepared *adminRefundPrepared, req refundRequest, idempotencyKey string) (*models.Payment, string, error) {
+	if prepared == nil {
+		return nil, "", errors.New("refund preparation is required")
+	}
+	if prepared.existing != nil {
+		return prepared.existing, prepared.existing.TransactionID, nil
+	}
+	if prepared.payment == nil || prepared.reservation == nil {
+		return nil, "", errors.New("refund preparation is incomplete")
+	}
+
+	var refundTransactionID string
+	switch {
+	case prepared.payment.Processor == models.ProcessorStripe:
+		stripeService := &subscriptions.StripeRefundService{Config: r.State.Config}
+		result, err := stripeService.CreateRefund(ctx, subscriptions.RefundParams{ChargeID: prepared.stripeRefundTargetID, Amount: req.Amount, Reason: req.Reason, IdempotencyKey: adminRefundProviderIdempotencyKey(prepared.payment.ID, idempotencyKey)})
+		if err != nil {
+			_ = paymentService.MarkFailed(ctx, prepared.reservation.ID)
+			return nil, "", adminRefundHTTPError(http.StatusBadGateway, fmt.Sprintf("stripe refund failed: %s", err.Error()))
+		}
+		refundTransactionID = result.ID
+	case processors.IsNMIBackedProcessor(prepared.payment.Processor):
+		result, err := prepared.nmiClient.Refund(nmi.RefundParams{TransactionID: prepared.payment.TransactionID, Amount: req.Amount})
+		if err != nil {
+			_ = paymentService.MarkFailed(ctx, prepared.reservation.ID)
+			return nil, "", adminRefundHTTPError(http.StatusBadGateway, fmt.Sprintf("refund failed: %s", err.Error()))
+		}
+		refundTransactionID = result.TransactionID
+	default:
+		_ = paymentService.MarkFailed(ctx, prepared.reservation.ID)
+		return nil, "", adminRefundHTTPError(http.StatusBadRequest, fmt.Sprintf("refunds not supported for processor: %s", prepared.payment.Processor))
+	}
+
+	refund, err := paymentService.CompleteRefundReservation(ctx, prepared.reservation.ID, refundTransactionID, adminRefundMetadata(idempotencyKey, req, "completed", refundTransactionID))
+	if err != nil {
+		return nil, refundTransactionID, err
+	}
+	return refund, refundTransactionID, nil
+}
+
+func adminRefundReservationTransactionID(paymentID uuid.UUID, idempotencyKey string) string {
+	return "admin_refund_reservation:" + paymentID.String() + ":" + adminRefundHash(idempotencyKey)
+}
+
+func adminRefundProviderIdempotencyKey(paymentID uuid.UUID, idempotencyKey string) string {
+	return "admin_refund:" + paymentID.String() + ":" + adminRefundHash(idempotencyKey)
+}
+
+func adminRefundHash(value string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(value)))
+	return hex.EncodeToString(sum[:16])
+}
+
+func adminRefundMetadata(idempotencyKey string, req refundRequest, status string, refundTransactionID string) map[string]any {
+	metadata := map[string]any{
+		"admin_refund_idempotency_key": strings.TrimSpace(idempotencyKey),
+		"admin_refund_status":          status,
+		"admin_refund_amount":          req.Amount,
+	}
+	if reason := strings.TrimSpace(req.Reason); reason != "" {
+		metadata["admin_refund_reason"] = reason
+	}
+	if refundTransactionID != "" {
+		metadata["provider_refund_id"] = refundTransactionID
+	}
+	return metadata
 }
 
 func GetAdminPayments(r *httprequest.Request) {

@@ -526,11 +526,12 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	}
 
 	if s.CheckoutSessionService != nil {
-		session, err := s.CheckoutSessionService.FindOpenByUserPriceProcessor(ctx, userID, price.ID, models.ProcessorCCBill)
+		session, err := s.findCCBillCheckoutSession(ctx, data.ReservationID, userID, price.ID)
 		if err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"user_id":  userID,
-				"price_id": price.ID,
+				"user_id":        userID,
+				"price_id":       price.ID,
+				"reservation_id": data.ReservationID,
 			}).Warn("failed to locate checkout session for CCBill webhook")
 		} else if session != nil {
 			paymentID := uuid.Nil
@@ -609,6 +610,19 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 	}
 
 	return nil
+}
+
+func (s *CCBillWebhookService) findCCBillCheckoutSession(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutSession, error) {
+	if s.CheckoutSessionService == nil {
+		return nil, sql.ErrNoRows
+	}
+	if strings.TrimSpace(reservationID) != "" {
+		session, err := s.CheckoutSessionService.FindOpenCCBillReservation(ctx, reservationID, userID, priceID)
+		if err == nil || !errors.Is(err, sql.ErrNoRows) {
+			return session, err
+		}
+	}
+	return s.CheckoutSessionService.FindOpenByUserPriceProcessor(ctx, userID, priceID, models.ProcessorCCBill)
 }
 
 func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
@@ -690,11 +704,12 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 		}
 
 		if s.CheckoutSessionService != nil && price != nil {
-			session, err := s.CheckoutSessionService.FindOpenByUserPriceProcessor(ctx, userID, price.ID, models.ProcessorCCBill)
+			session, err := s.findCCBillCheckoutSession(ctx, data.ReservationID, userID, price.ID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"user_id":  userID,
-					"price_id": price.ID,
+					"user_id":        userID,
+					"price_id":       price.ID,
+					"reservation_id": data.ReservationID,
 				}).Warn("failed to locate checkout session for CCBill failure")
 			} else if session != nil {
 				message := strings.TrimSpace(failureReason)

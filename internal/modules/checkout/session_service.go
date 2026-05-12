@@ -2,7 +2,9 @@ package checkout
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,6 +49,11 @@ type IdempotencyRecord struct {
 	Result    json.RawMessage
 	Error     string
 	CreatedAt time.Time
+}
+
+type checkoutSessionIdempotencyResult struct {
+	RequestFingerprint string                   `json:"request_fingerprint"`
+	Response           *CheckoutSessionResponse `json:"response"`
 }
 
 type sessionIdempotencyStore interface {
@@ -136,6 +143,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 		return nil, fmt.Errorf("%w: request is required", ErrCheckoutSessionValidation)
 	}
 
+	fingerprint := checkoutSessionRequestFingerprint(req)
 	req.IdempotencyKey = scopeIdempotencyKey(user.ID, req.IdempotencyKey)
 
 	claimed := false
@@ -147,11 +155,11 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 		if exists {
 			switch rec.Status {
 			case IdempotencyStatusSuccess:
-				var cached CheckoutSessionResponse
-				if err := json.Unmarshal(rec.Result, &cached); err != nil {
-					return nil, fmt.Errorf("failed to decode cached response: %w", err)
+				cached, err := decodeCheckoutSessionIdempotencyResult(rec.Result, fingerprint)
+				if err != nil {
+					return nil, err
 				}
-				return &cached, nil
+				return cached, nil
 			case IdempotencyStatusPending:
 				return nil, ErrCheckoutSessionPending
 			case IdempotencyStatusFailed:
@@ -170,11 +178,47 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	}
 
 	if claimed && s.idempotencyService != nil && strings.TrimSpace(req.IdempotencyKey) != "" {
-		payload, _ := json.Marshal(resp)
+		payload, _ := json.Marshal(checkoutSessionIdempotencyResult{RequestFingerprint: fingerprint, Response: resp})
 		_ = s.idempotencyService.Complete(ctx, checkoutSessionIdempotencyOp, req.IdempotencyKey, payload)
 	}
 
 	return resp, nil
+}
+
+func checkoutSessionRequestFingerprint(req *CheckoutSessionCreateRequest) string {
+	if req == nil {
+		return ""
+	}
+	payload, _ := json.Marshal(struct {
+		PriceID  string
+		Mode     string
+		Payment  CheckoutSessionPaymentRequest
+		Metadata map[string]string
+	}{
+		PriceID:  strings.TrimSpace(req.PriceID),
+		Mode:     strings.TrimSpace(req.Mode),
+		Payment:  req.Payment,
+		Metadata: normalizeMetadata(req.Metadata),
+	})
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
+}
+
+func decodeCheckoutSessionIdempotencyResult(payload json.RawMessage, fingerprint string) (*CheckoutSessionResponse, error) {
+	var cached checkoutSessionIdempotencyResult
+	if err := json.Unmarshal(payload, &cached); err == nil && cached.Response != nil {
+		if cached.RequestFingerprint != "" && fingerprint != "" && cached.RequestFingerprint != fingerprint {
+			return nil, fmt.Errorf("%w: idempotency key reused with different checkout session parameters", ErrCheckoutSessionConflict)
+		}
+		return cached.Response, nil
+	}
+
+	// Backward-compatible decode for records written before request fingerprints existed.
+	var legacy CheckoutSessionResponse
+	if err := json.Unmarshal(payload, &legacy); err != nil {
+		return nil, fmt.Errorf("failed to decode cached response: %w", err)
+	}
+	return &legacy, nil
 }
 
 func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
@@ -380,16 +424,7 @@ func (s *CheckoutSessionService) validatePayment(ctx context.Context, processor 
 			return fmt.Errorf("%w: provide either payment_token or payment_method_id", ErrCheckoutSessionValidation)
 		}
 		if hasMethod {
-			pmID, err := api.ParsePaymentMethodID(payment.PaymentMethodID)
-			if err != nil {
-				return fmt.Errorf("%w: invalid payment_method_id", ErrCheckoutSessionValidation)
-			}
-			if s.paymentMethodService == nil {
-				return fmt.Errorf("%w: payment method service unavailable", ErrCheckoutSessionValidation)
-			}
-			if err := s.paymentMethodService.ValidateOwnership(ctx, pmID, user.ID); err != nil {
-				return fmt.Errorf("%w: payment method not authorized", ErrCheckoutSessionValidation)
-			}
+			return fmt.Errorf("%w: saved payment methods are not supported for stripe checkout", ErrCheckoutSessionValidation)
 		}
 		if err := requireBillingFields(payment); err != nil {
 			return err
@@ -552,10 +587,10 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 
 	if session.IdempotencyKey != nil {
 		if key := strings.TrimSpace(*session.IdempotencyKey); key != "" {
-			req.IdempotencyKey = fmt.Sprintf("checkout_session:%s:%s", session.ID, key)
+			req.IdempotencyKey = fmt.Sprintf("checkout_session:%s", key)
 		}
 	}
-	if session.Processor == models.ProcessorStripe {
+	if session.Processor == models.ProcessorStripe || session.Processor == models.ProcessorCCBill {
 		req.CheckoutSessionID = api.FormatCheckoutSessionID(session.ID)
 	}
 
@@ -992,9 +1027,11 @@ func (s *CheckoutSessionService) MarkSucceeded(ctx context.Context, sessionID uu
 		if session.Status == models.CheckoutSessionStatusSucceeded {
 			return nil
 		}
-		if session.Status != models.CheckoutSessionStatusExpired {
-			return ErrCheckoutSessionConflict
-		}
+		return ErrCheckoutSessionConflict
+	}
+	if s.isExpired(session) {
+		_ = s.MarkExpired(ctx, session.ID, "checkout session expired")
+		return ErrCheckoutSessionExpired
 	}
 
 	session.Status = models.CheckoutSessionStatusSucceeded
@@ -1072,9 +1109,11 @@ func (s *CheckoutSessionService) MarkSucceededWithSubscription(ctx context.Conte
 		if session.Status == models.CheckoutSessionStatusSucceeded {
 			return nil
 		}
-		if session.Status != models.CheckoutSessionStatusExpired {
-			return ErrCheckoutSessionConflict
-		}
+		return ErrCheckoutSessionConflict
+	}
+	if s.isExpired(session) {
+		_ = s.MarkExpired(ctx, session.ID, "checkout session expired")
+		return ErrCheckoutSessionExpired
 	}
 
 	session.Status = models.CheckoutSessionStatusSucceeded
@@ -1102,6 +1141,31 @@ func (s *CheckoutSessionService) FindOpenByUserPriceProcessor(ctx context.Contex
 			return nil, nil
 		}
 		return nil, err
+	}
+	return session, nil
+}
+
+func (s *CheckoutSessionService) FindOpenCCBillReservation(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutSession, error) {
+	if s.repo == nil {
+		return nil, ErrCheckoutSessionNotFound
+	}
+	reservationID = strings.TrimSpace(reservationID)
+	if reservationID == "" {
+		return nil, sql.ErrNoRows
+	}
+	sessionID, err := api.ParseCheckoutSessionID(reservationID)
+	if err != nil {
+		return nil, err
+	}
+	session, err := s.repo.GetByID(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session.UserID != userID || session.PriceID != priceID || session.Processor != models.ProcessorCCBill {
+		return nil, ErrCheckoutSessionConflict
+	}
+	if s.isTerminal(session.Status) || s.isExpired(session) {
+		return nil, ErrCheckoutSessionExpired
 	}
 	return session, nil
 }

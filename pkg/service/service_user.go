@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
@@ -368,6 +369,12 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if sub.UserID != userID {
 		return nil, fmt.Errorf("subscription does not belong to user")
 	}
+	if !processors.IsNMIBackedProcessor(sub.Processor) {
+		return nil, fmt.Errorf("only NMI-backed subscriptions can have their payment method updated")
+	}
+	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
+		return nil, fmt.Errorf("cannot update payment method for subscription status %s", sub.Status)
+	}
 
 	pm, err := paymentMethods.GetByID(ctx, pmID)
 	if err != nil {
@@ -375,6 +382,20 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	}
 	if pm.UserID != userID {
 		return nil, fmt.Errorf("payment method does not belong to user")
+	}
+	if !processors.IsNMIBackedProcessor(pm.Processor) {
+		return nil, fmt.Errorf("only NMI-backed payment methods can be used")
+	}
+	if !processors.SameProcessor(pm.Processor, sub.Processor) {
+		return nil, fmt.Errorf("payment method belongs to a different payment provider")
+	}
+	processorName := strings.ToLower(string(sub.Processor))
+	nmiClient, ok := s.rt.NMIClients[processorName]
+	if !ok {
+		return nil, fmt.Errorf("payment processor not available")
+	}
+	if err := nmiClient.UpdateSubscriptionPaymentSource(sub.ProcessorSubscriptionID, pm.VaultID); err != nil {
+		return nil, fmt.Errorf("update payment method with processor: %w", err)
 	}
 
 	// Update subscription payment method
@@ -553,6 +574,9 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 		Company:      req.Company,
 		Address2:     req.Address2,
 		Provider:     req.Provider,
+		LastFour:     req.LastFour,
+		CardType:     req.CardType,
+		ExpiryDate:   req.ExpiryDate,
 	}
 
 	pm, err = vaults.UpdateVault(ctx, pm, updateReq)

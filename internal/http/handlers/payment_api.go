@@ -61,14 +61,9 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 		}
 		refundObjects = append(refundObjects, PaymentToAPI(r, nil))
 	}
-	status := "succeeded"
-	if p.Status == "failed" {
-		status = "failed"
-	} else if p.Status == "refunded" {
-		status = "refunded"
-	}
 	object := "charge"
-	captured := true
+	status := paymentAPIStatus(p.Status)
+	captured := status == "succeeded" || status == "refunded" || status == "partially_refunded"
 	if p.RefundedPaymentID != nil || p.Amount < 0 {
 		status = "succeeded"
 		object = "refund"
@@ -92,6 +87,21 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 		payment.Price = &priceObj
 	}
 	return payment
+}
+
+func paymentAPIStatus(status string) string {
+	switch status {
+	case "completed", "":
+		return "succeeded"
+	case "pending":
+		return "pending"
+	case "failed":
+		return "failed"
+	case "refunded":
+		return "refunded"
+	default:
+		return status
+	}
 }
 
 func PriceToAPI(p *models.Price) api.PriceObject {

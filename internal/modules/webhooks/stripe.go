@@ -451,6 +451,18 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	if err != nil {
 		return err
 	}
+	if price == nil {
+		price, err = s.PriceService.GetByID(ctx, priceID)
+		if err != nil {
+			return fmt.Errorf("price lookup failed: %w", err)
+		}
+	}
+	if sess.AmountTotal != price.Amount {
+		return fmt.Errorf("stripe checkout amount mismatch: got %d, want %d", sess.AmountTotal, price.Amount)
+	}
+	if !strings.EqualFold(strings.TrimSpace(sess.Currency), strings.TrimSpace(price.Currency)) {
+		return fmt.Errorf("stripe checkout currency mismatch: got %s, want %s", sess.Currency, price.Currency)
+	}
 	paymentTransactionID := normalize.FirstNonEmpty("", sess.PaymentIntent)
 	if paymentTransactionID == "" {
 		if sess.AmountTotal != 0 || strings.TrimSpace(sess.ID) == "" {

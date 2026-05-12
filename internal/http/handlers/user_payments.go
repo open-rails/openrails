@@ -6,6 +6,7 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
@@ -48,5 +49,10 @@ func GetUserPayments(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSONPaginated(payments, queryOpts.TotalItems, limit, offset)
+	data := make([]api.PaymentObject, len(payments))
+	for i, payment := range payments {
+		data[i] = PaymentToAPI(payment, nil)
+	}
+
+	r.SuccessJSONPaginated(data, queryOpts.TotalItems, limit, offset)
 }

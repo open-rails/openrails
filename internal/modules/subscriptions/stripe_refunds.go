@@ -23,9 +23,10 @@ type StripeRefundService struct {
 }
 
 type RefundParams struct {
-	ChargeID string
-	Amount   int64
-	Reason   string
+	ChargeID       string
+	Amount         int64
+	Reason         string
+	IdempotencyKey string
 }
 
 type RefundResult struct {
@@ -78,7 +79,11 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Idempotency-Key", stripeRefundIdempotencyKey(chargeID, params.Amount, reason))
+	idempotencyKey := strings.TrimSpace(params.IdempotencyKey)
+	if idempotencyKey == "" {
+		idempotencyKey = stripeRefundIdempotencyKey(chargeID, params.Amount, reason)
+	}
+	req.Header.Set("Idempotency-Key", idempotencyKey)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

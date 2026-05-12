@@ -61,6 +61,9 @@ type updatePaymentMethodRequest struct {
 	Company      *string `json:"company"`
 	Address2     *string `json:"address2"`
 	Provider     *string `json:"provider"`
+	LastFour     *string `json:"last_four" binding:"omitempty"`
+	CardType     *string `json:"card_type" binding:"omitempty"`
+	ExpiryDate   *string `json:"expiry_date" binding:"omitempty"`
 }
 
 type subscriptionSummary struct {
@@ -241,6 +244,9 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		Email:        body.Email,
 		Company:      body.Company,
 		Address2:     body.Address2,
+		LastFour:     body.LastFour,
+		CardType:     body.CardType,
+		ExpiryDate:   body.ExpiryDate,
 	}
 
 	ctx, cancel := context.WithTimeout(r.Request.Context(), 10*time.Second)

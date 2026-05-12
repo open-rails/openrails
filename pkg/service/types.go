@@ -381,6 +381,9 @@ type UpdatePaymentMethodRequest struct {
 	Company      *string
 	Address2     *string
 	Provider     *string
+	LastFour     *string
+	CardType     *string
+	ExpiryDate   *string
 }
 
 // -------------------------------- Notifications --------------------------------

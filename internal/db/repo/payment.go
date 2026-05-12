@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -153,15 +154,15 @@ func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
-	var amounts []int64
+	var refunds []refundTotalRow
 	if err := r.db.GetDB().NewSelect().
 		Model((*models.Payment)(nil)).
-		Column("amount").
+		Column("amount", "status").
 		Where("purch.refunded_payment_id = ?", paymentID).
-		Scan(ctx, &amounts); err != nil {
+		Scan(ctx, &refunds); err != nil {
 		return 0, err
 	}
-	return effectiveRefundTotalFromLinkedAmounts(amounts), nil
+	return effectiveRefundTotalFromLinkedRows(refunds), nil
 }
 
 func (r *PaymentRepo) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
@@ -185,15 +186,104 @@ func (r *PaymentRepo) LinkRefundedPayment(ctx context.Context, paymentID, origin
 	return nil
 }
 
-func effectiveRefundTotalFromLinkedAmounts(amounts []int64) int64 {
+type refundTotalRow struct {
+	Amount int64  `bun:"amount"`
+	Status string `bun:"status"`
+}
+
+func effectiveRefundTotalFromLinkedRows(refunds []refundTotalRow) int64 {
 	var total int64
-	for _, amount := range amounts {
-		total -= amount
+	for _, refund := range refunds {
+		if !RefundStatusCountsTowardTotal(refund.Status) {
+			continue
+		}
+		total -= refund.Amount
 	}
 	if total < 0 {
 		return 0
 	}
 	return total
+}
+
+func RefundStatusCountsTowardTotal(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "failed":
+		return false
+	default:
+		return true
+	}
+}
+
+func (r *PaymentRepo) GetRefundByAdminIdempotencyKey(ctx context.Context, originalPaymentID uuid.UUID, key string) (*models.Payment, error) {
+	payment := new(models.Payment)
+	if err := r.db.GetDB().NewSelect().
+		Model(payment).
+		Where("purch.refunded_payment_id = ?", originalPaymentID).
+		Where("purch.metadata ->> 'admin_refund_idempotency_key' = ?", strings.TrimSpace(key)).
+		Limit(1).
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	return payment, nil
+}
+
+func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservationID uuid.UUID, refundTransactionID string, metadata map[string]any) error {
+	res, err := r.db.GetDB().NewUpdate().
+		Model((*models.Payment)(nil)).
+		Set("transaction_id = ?", refundTransactionID).
+		Set("status = ?", "completed").
+		Set("metadata = ?", metadata).
+		Where("purch.id = ?", reservationID).
+		Where("purch.refunded_payment_id IS NOT NULL").
+		Where("purch.amount < 0").
+		Where("purch.status = ?", "pending").
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
+}
+
+func (r *PaymentRepo) GetByMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
+	payment := new(models.Payment)
+	if err := r.db.GetDB().NewSelect().
+		Model(payment).
+		Where("purch.metadata ->> ? = ?", strings.TrimSpace(key), strings.TrimSpace(value)).
+		Limit(1).
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	return payment, nil
+}
+
+func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) error {
+	res, err := r.db.GetDB().NewUpdate().
+		Model((*models.Payment)(nil)).
+		Set("transaction_id = ?", strings.TrimSpace(providerTransactionID)).
+		Set("status = ?", "completed").
+		Set("metadata = ?", metadata).
+		Where("purch.id = ?", attemptID).
+		Where("purch.amount > 0").
+		Where("purch.status = ?", "pending").
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows < 1 {
+		return errors.New("no rows affected")
+	}
+	return nil
 }
 
 func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
@@ -306,6 +396,7 @@ func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subsc
 		Model(payment).
 		Where("purch.subscription_id = ?", subscriptionID).
 		Where("purch.amount > 0").
+		Where("COALESCE(purch.status::text, 'completed') = ?", "completed").
 		OrderExpr("purch.purchased_at DESC").
 		Limit(1).
 		Scan(ctx)

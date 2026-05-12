@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
@@ -68,6 +69,7 @@ func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceProcessor(ctx context.Cont
 		Where("cs.price_id = ?", priceID).
 		Where("cs.processor = ?", processor).
 		Where("cs.status IN (?)", bun.In(openStatuses)).
+		Where("(cs.expires_at IS NULL OR cs.expires_at > ?)", time.Now()).
 		OrderExpr("cs.created_at DESC").
 		Limit(1).
 		Scan(ctx); err != nil {

@@ -78,6 +78,9 @@ type UpdateVaultRequest struct {
 	Email        *string
 	Company      *string
 	Address2     *string
+	LastFour     *string
+	CardType     *string
+	ExpiryDate   *string
 }
 
 // VaultError carries additional context for vault creation failures, including localization codes.
@@ -251,10 +254,12 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 
 	upd := nmi.UpdateCustomerVaultData{CustomerVaultID: pm.VaultID}
 
+	paymentTokenUpdated := false
 	if req.PaymentToken != nil {
 		trimmed := strings.TrimSpace(*req.PaymentToken)
 		if trimmed != "" {
 			upd.PaymentToken = trimmed
+			paymentTokenUpdated = true
 		}
 	}
 
@@ -298,6 +303,9 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 	}
 
 	pm.FailureReason = nil
+	if paymentTokenUpdated {
+		applyUpdatedCardMetadata(pm, req)
+	}
 	pm.UpdatedAt = s.now()
 	if err := s.PaymentMethodService.Update(ctx, pm); err != nil {
 		log.WithError(err).WithField("vault_id", pm.VaultID).Error("Failed to update local vault record")
@@ -305,6 +313,19 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 	}
 	log.WithField("vault_id", pm.VaultID).Info("Successfully updated payment vault")
 	return pm, nil
+}
+
+func applyUpdatedCardMetadata(pm *models.PaymentMethod, req *UpdateVaultRequest) {
+	pm.LastFour = sanitizedStringPtr(req.LastFour, sanitizeLastFour)
+	pm.CardType = sanitizedStringPtr(req.CardType, sanitizeCardType)
+	pm.ExpiryDate = sanitizedStringPtr(req.ExpiryDate, sanitizeExpiryDate)
+}
+
+func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
+	if value == nil {
+		return nil
+	}
+	return stringPtrOrNil(sanitize(*value))
 }
 
 // DeleteVault deletes the vault remotely after ensuring no active subscriptions use it; deactivates locally

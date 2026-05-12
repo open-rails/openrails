@@ -24,6 +24,7 @@ type GenerateFlexFormURLParams struct {
 	Country       string `json:"country"`
 	FlexID        string `json:"flex_id"`
 	FormName      string `json:"form_name"`
+	ReservationID string `json:"reservation_id"`
 }
 
 // FlexFormResponse contains the hosted checkout URL for CCBill.
@@ -82,6 +83,9 @@ func (c *CCBillClient) GenerateFlexFormURL(params *GenerateFlexFormURLParams) (*
 	q.Set("state", params.State)
 	q.Set("zipcode", params.ZipCode)
 	q.Set("country", params.Country)
+	if reservationID := strings.TrimSpace(params.ReservationID); reservationID != "" {
+		q.Set("reservationId", reservationID)
+	}
 
 	return c.flexFormResponse(params.FlexID, q), nil
 }
