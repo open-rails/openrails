@@ -21,8 +21,8 @@ import (
 	repo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/fx"
-	"github.com/open-rails/openrails/internal/integrations/jupiter"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/integrations/pyth"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -56,6 +56,88 @@ func effectiveSolanaNetwork(cfg *config.Config, proc *config.ProcessorConfig) st
 		return "devnet"
 	}
 	return "mainnet"
+}
+
+func configureSolanaProcessor(cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+	proc := cfg.GetSolanaProcessor()
+	if proc == nil {
+		return nil
+	}
+	proc.Network = effectiveSolanaNetwork(cfg, proc)
+	if len(proc.Tokens) == 0 {
+		proc.Tokens = config.TokensForNetwork(proc.Network)
+	}
+
+	priceFeeds := config.DefaultPythPriceFeeds()
+	if cfg.Pyth != nil {
+		for symbol, feedID := range cfg.Pyth.PriceFeeds {
+			priceFeeds[strings.ToUpper(strings.TrimSpace(symbol))] = strings.TrimSpace(feedID)
+		}
+	}
+
+	normalized := make(map[string]config.TokenConfig, len(proc.Tokens))
+	for symbol, token := range proc.Tokens {
+		normalizedSymbol := strings.ToUpper(strings.TrimSpace(symbol))
+		if normalizedSymbol == "" {
+			return fmt.Errorf("solana token symbol cannot be empty")
+		}
+		if strings.TrimSpace(token.Mint) == "" {
+			return fmt.Errorf("solana token %s missing mint", normalizedSymbol)
+		}
+		if token.Decimals < 0 {
+			return fmt.Errorf("solana token %s has invalid decimals", normalizedSymbol)
+		}
+		if strings.TrimSpace(token.Name) == "" {
+			token.Name = normalizedSymbol
+		}
+		if strings.TrimSpace(priceFeeds[normalizedSymbol]) == "" {
+			return fmt.Errorf("solana token %s missing pyth price feed", normalizedSymbol)
+		}
+		normalized[normalizedSymbol] = token
+	}
+	proc.Tokens = normalized
+	return nil
+}
+
+func createPythPriceProvider(cfg *config.Config) (solanamodule.TokenPriceProvider, error) {
+	if cfg == nil || cfg.GetSolanaProcessor() == nil {
+		return nil, nil
+	}
+	hermesURL := config.DefaultPythHermesURL
+	maxPriceAgeText := config.DefaultPythMaxPriceAge
+	maxConfidenceBPS := config.DefaultPythMaxConfidenceBPS
+	priceFeeds := config.DefaultPythPriceFeeds()
+	if cfg.Pyth != nil {
+		if strings.TrimSpace(cfg.Pyth.HermesURL) != "" {
+			hermesURL = cfg.Pyth.HermesURL
+		}
+		if strings.TrimSpace(cfg.Pyth.MaxPriceAge) != "" {
+			maxPriceAgeText = cfg.Pyth.MaxPriceAge
+		}
+		if cfg.Pyth.MaxConfidenceBPS > 0 {
+			maxConfidenceBPS = cfg.Pyth.MaxConfidenceBPS
+		}
+		for symbol, feedID := range cfg.Pyth.PriceFeeds {
+			priceFeeds[strings.ToUpper(strings.TrimSpace(symbol))] = strings.TrimSpace(feedID)
+		}
+	}
+	maxPriceAge, err := time.ParseDuration(strings.TrimSpace(maxPriceAgeText))
+	if err != nil {
+		return nil, fmt.Errorf("parse pyth max price age: %w", err)
+	}
+	client, err := pyth.NewClient(pyth.Config{
+		HermesURL:        hermesURL,
+		MaxPriceAge:      maxPriceAge,
+		MaxConfidenceBPS: maxConfidenceBPS,
+		PriceFeeds:       priceFeeds,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create pyth client: %w", err)
+	}
+	return client, nil
 }
 
 func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
@@ -100,49 +182,15 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		return nil, fmt.Errorf("failed to create nmi clients: %w", err)
 	}
 
-	serviceInstances := createServices(database, cfg, ccbillRESTClient, nmiClients, redisClient, clock)
-
-	// Initialize Solana token registry (must be done here since createServices doesn't return errors)
-	var solanaTokenRegistry *jupiter.TokenRegistry
-	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
-		solanaProc.Network = effectiveSolanaNetwork(cfg, solanaProc)
-		solanaTokenRegistry = jupiter.NewTokenRegistry()
-		jupiterAPIKey := cfg.GetJupiterAPIKey()
-
-		loadStaticTokens := func(tokens map[string]config.TokenConfig) {
-			resolved := make(map[string]jupiter.TokenConfig, len(tokens))
-			for symbol, t := range tokens {
-				resolved[symbol] = jupiter.TokenConfig{
-					Symbol:      t.Symbol,
-					Name:        t.Name,
-					Mint:        t.Mint,
-					MainnetMint: t.MainnetMint,
-					Decimals:    t.Decimals,
-					Enabled:     t.Enabled,
-				}
-			}
-			solanaTokenRegistry.LoadTokens(resolved)
-		}
-
-		if len(solanaProc.EnabledTokens) > 0 {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			err := solanaTokenRegistry.LoadFromJupiter(ctx, jupiterAPIKey, solanaProc.EnabledTokens)
-			cancel()
-			if err != nil {
-				return nil, fmt.Errorf("failed to load configured Solana enabled_tokens from Jupiter: %w", err)
-			}
-		} else {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			err := solanaTokenRegistry.LoadFromJupiter(ctx, jupiterAPIKey, nil)
-			cancel()
-			if err != nil {
-				log.WithError(err).Warn("Failed to load default tokens from Jupiter - using default token set")
-				loadStaticTokens(config.TokensForNetwork(solanaProc.Network))
-			}
-		}
-
-		solanaProc.SupportedTokens = solanaTokenRegistry.SupportedTokens(solanaProc.Network)
+	if err := configureSolanaProcessor(cfg); err != nil {
+		return nil, err
 	}
+	solanaPriceProvider, err := createPythPriceProvider(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	serviceInstances := createServices(database, cfg, ccbillRESTClient, nmiClients, redisClient, clock, solanaPriceProvider)
 
 	var emailService *subscriptions.EmailService
 	if cfg.SendGrid != nil {
@@ -185,7 +233,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		SolanaPayPoller:          serviceInstances.SolanaPayPoller,
 		SolanaTransactionService: serviceInstances.SolanaTransactionService,
 		SolanaRPC:                serviceInstances.SolanaRPC,
-		SolanaTokenRegistry:      solanaTokenRegistry,
+		SolanaPriceProvider:      solanaPriceProvider,
 		FXProvider:               serviceInstances.FXProvider,
 
 		UserSubscriptionService:   serviceInstances.UserSubscriptionService,
@@ -433,6 +481,7 @@ type servicesInstances struct {
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
 	SolanaRPC                *solana.RPCClient
+	SolanaPriceProvider      solanamodule.TokenPriceProvider
 	FXProvider               fx.Provider
 
 	UserSubscriptionService   *subscriptions.UserSubscriptionService
@@ -451,7 +500,7 @@ type servicesInstances struct {
 	ProcessorCustomerService *payments.ProcessorCustomerService
 }
 
-func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock) *servicesInstances {
+func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbill.RESTClient, nmiClients map[string]*nmi.NMIClient, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) *servicesInstances {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -470,7 +519,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
-	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider, clock)
+	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
 	var solanaRPC *solana.RPCClient
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
 		solanaNetwork := effectiveSolanaNetwork(cfg, solanaProc)
@@ -584,6 +633,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		solanaPayService,
 		solanaTransactionService,
 		fxProvider,
+		solanaPriceProvider,
 		cfg,
 		clock,
 	)
@@ -615,6 +665,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		SolanaPayPoller:              solanaPayPoller,
 		SolanaTransactionService:     solanaTransactionService,
 		SolanaRPC:                    solanaRPC,
+		SolanaPriceProvider:          solanaPriceProvider,
 		FXProvider:                   fxProvider,
 		UserSubscriptionService:      userSubscriptionService,
 		PublicSubscriptionService:    publicSubscriptionService,

@@ -71,6 +71,7 @@ type SolanaPayService struct {
 	productService     *catalog.ProductService
 	eligibilityChecker purchaseEligibilityChecker
 	fxProvider         fx.Provider
+	priceProvider      TokenPriceProvider
 }
 
 // NewSolanaPayService creates a new SolanaPayService
@@ -82,6 +83,7 @@ func NewSolanaPayService(
 	productService *catalog.ProductService,
 	eligibilityChecker purchaseEligibilityChecker,
 	fxProvider fx.Provider,
+	priceProvider TokenPriceProvider,
 	clocks ...clockwork.Clock,
 ) *SolanaPayService {
 	return &SolanaPayService{
@@ -92,6 +94,7 @@ func NewSolanaPayService(
 		productService:     productService,
 		eligibilityChecker: eligibilityChecker,
 		fxProvider:         fxProvider,
+		priceProvider:      priceProvider,
 		clock:              firstClock(clocks...),
 	}
 }
@@ -127,6 +130,11 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 // GeneratePayment creates a new pending Solana payment and returns the Transfer Request URL.
 // It first checks purchase eligibility to prevent duplicate purchases.
 func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*PayResult, error) {
+	tokenSymbol = strings.ToUpper(strings.TrimSpace(tokenSymbol))
+	if tokenSymbol == "" {
+		return nil, fmt.Errorf("token symbol is required")
+	}
+
 	// Check purchase eligibility BEFORE generating the payment URL
 	if s.eligibilityChecker != nil {
 		eligibility, err := s.eligibilityChecker.CheckPurchaseEligibility(ctx, userID, priceID)
@@ -170,13 +178,13 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	if err != nil {
 		return nil, err
 	}
-	tokenCfg, ok := solanaProc.SupportedTokens[tokenSymbol]
-	if !ok || !tokenCfg.Enabled {
+	tokenCfg, ok := solanaProc.Tokens[tokenSymbol]
+	if !ok {
 		return nil, fmt.Errorf("invalid or unsupported token: %s", tokenSymbol)
 	}
 
 	// Calculate token amount from fiat price with FX conversion if needed
-	quote, err := CalculateTokenQuote(ctx, tokenCfg, price.Amount, price.Currency, s.fxProvider)
+	quote, err := CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, price.Amount, price.Currency, s.fxProvider, s.priceProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate token quote: %w", err)
 	}
@@ -199,9 +207,6 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 
 	// Get token mint
 	tokenMint := tokenCfg.Mint
-	if solanaProc.Network == "mainnet" && tokenCfg.MainnetMint != "" {
-		tokenMint = tokenCfg.MainnetMint
-	}
 
 	now := s.now()
 	expiresAt := now.Add(pendingPaymentTTL)
@@ -258,7 +263,7 @@ func (s *SolanaPayService) buildTransferRequestURL(recipient string, amount uint
 	if err != nil {
 		return baseURL // fallback without params if not configured
 	}
-	tokenCfg := solanaProc.SupportedTokens[tokenSymbol]
+	tokenCfg := solanaProc.Tokens[tokenSymbol]
 
 	// Format amount with proper decimals
 	formattedAmount := formatTokenAmount(amount, tokenCfg.Decimals)

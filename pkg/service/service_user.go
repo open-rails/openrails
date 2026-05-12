@@ -858,20 +858,22 @@ func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResul
 		return nil, fmt.Errorf("solana not configured")
 	}
 
-	// This would need to call the Jupiter price API like the handler does
-	// For now, return configured tokens without live prices
 	tokens := make([]SolanaToken, 0)
-	for _, t := range solanaProc.SupportedTokens {
+	for symbol, t := range solanaProc.Tokens {
+		symbol = strings.ToUpper(strings.TrimSpace(symbol))
+		if symbol == "" {
+			continue
+		}
 		name := t.Name
 		if name == "" {
-			name = t.Symbol
+			name = symbol
 		}
 		tokens = append(tokens, SolanaToken{
-			Symbol:   t.Symbol,
+			Symbol:   symbol,
 			Name:     name,
 			Mint:     t.Mint,
 			Decimals: t.Decimals,
-			Price:    0, // Would need Jupiter API call
+			Price:    0,
 		})
 	}
 

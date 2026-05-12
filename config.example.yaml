@@ -139,6 +139,19 @@ auth:
   expected_audience: "openrails-app"
 
 # =============================================================================
+# PYTH PRICE FEEDS
+# =============================================================================
+
+pyth:
+  hermes_url: "https://hermes.pyth.network"
+  max_price_age: "2m"
+  max_confidence_bps: 100
+  price_feeds:
+    SOL: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d"
+    USDC: "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a"
+    PYUSD: "c1da1b73d7f01e7ddd54b3766cf7fcd644395ad14f70aa706ec5384c59e76692"
+
+# =============================================================================
 # PAYMENT PROCESSORS
 # =============================================================================
 # All processors are configured under a single "processors" map.
@@ -218,34 +231,22 @@ processors:
     # rpc_endpoint: "https://your-rpc-provider.com"
 
     # -------------------------------------------------------------------------
-    # Token Configuration (choose one approach)
+    # Token Configuration
     # -------------------------------------------------------------------------
     #
-    # OPTION 1: Simple enabled_tokens list (RECOMMENDED)
-    # Just list token symbols - metadata fetched from Jupiter at startup
-    # Only verified tokens from Jupiter strict list are supported
-    #
-    enabled_tokens: ["SOL", "USDC", "PYUSD"]
-    #
-    # Add any Jupiter-verified token:
-    # enabled_tokens: ["SOL", "USDC", "PYUSD", "BONK", "JUP", "USDT"]
-    #
-    # OPTION 2: Legacy supported_tokens map (for custom/unverified tokens)
-    # Use this if you need non-Jupiter tokens or custom configuration
-    #
-    # supported_tokens:
-    #   SOL:
-    #     mint: ""  # Native SOL has no mint address
-    #     symbol: "SOL"
-    #     name: "Solana"
-    #     decimals: 9
-    #     enabled: true
-    #   USDC:
-    #     mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-    #     symbol: "USDC"
-    #     name: "USD Coin"
-    #     decimals: 6
-    #     enabled: true
+    tokens:
+      SOL:
+        mint: "So11111111111111111111111111111111111111112"
+        name: "Solana"
+        decimals: 9
+      USDC:
+        mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+        name: "USD Coin (Devnet)"
+        decimals: 6
+      PYUSD:
+        mint: "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM"
+        name: "PayPal USD (Devnet)"
+        decimals: 6
 
 # =============================================================================
 # ANALYTICS (ClickHouse)

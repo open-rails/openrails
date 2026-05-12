@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/fx"
-	"github.com/open-rails/openrails/internal/integrations/jupiter"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/analytics"
@@ -72,7 +71,7 @@ type Runtime struct {
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
 	SolanaTransactionService *solanamodule.SolanaTransactionService
 	SolanaRPC                *solana.RPCClient
-	SolanaTokenRegistry      *jupiter.TokenRegistry
+	SolanaPriceProvider      solanamodule.TokenPriceProvider
 	FXProvider               fx.Provider
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService

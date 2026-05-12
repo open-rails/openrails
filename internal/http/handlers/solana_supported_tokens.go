@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	jupiter "github.com/open-rails/openrails/internal/integrations/jupiter"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
@@ -72,44 +71,43 @@ func GetSupportedTokens(r *httprequest.Request) {
 		return
 	}
 
-	var tokenMap map[string]config.SolanaToken
-
-	if r.State.SolanaTokenRegistry != nil {
-		registryTokens := r.State.SolanaTokenRegistry.SupportedTokens(solanaProc.Network)
-		if len(registryTokens) > 0 {
-			tokenMap = registryTokens
-		}
+	tokenMap := normalizeTokenMap(solanaProc.Tokens)
+	if len(tokenMap) == 0 {
+		tokenMap = normalizeTokenMap(config.TokensForNetwork(solanaProc.Network))
 	}
 
-	if tokenMap == nil {
-		tokenMap = config.TokensForNetwork(solanaProc.Network)
-	}
-
-	mainnetMintSet := make(map[string]struct{})
+	mintSet := make(map[string]struct{})
 	symbols := make([]string, 0, len(tokenMap))
 	for symbol, t := range tokenMap {
-		symbols = append(symbols, symbol)
-		mint := t.MainnetMint
-		if mint == "" {
-			mint = t.Mint
+		normalizedSymbol := strings.ToUpper(strings.TrimSpace(symbol))
+		if normalizedSymbol == "" {
+			continue
 		}
-		if mint != "" {
-			mainnetMintSet[mint] = struct{}{}
+		symbols = append(symbols, normalizedSymbol)
+		if mint := strings.TrimSpace(t.Mint); mint != "" {
+			mintSet[mint] = struct{}{}
 		}
 	}
 
-	mainnetMints := make([]string, 0, len(mainnetMintSet))
-	for mint := range mainnetMintSet {
-		mainnetMints = append(mainnetMints, mint)
+	mints := make([]string, 0, len(mintSet))
+	for mint := range mintSet {
+		mints = append(mints, mint)
 	}
 
 	ctx, cancel := context.WithTimeout(r.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	prices, err := jupiter.FetchJupiterPrices(ctx, mainnetMints)
-	if err != nil {
-		log.WithError(err).Warn("Failed to fetch Solana token prices from Jupiter")
-		prices = map[string]float64{}
+	prices := make(map[string]float64, len(symbols))
+	for _, symbol := range symbols {
+		if r.State.SolanaPriceProvider == nil {
+			continue
+		}
+		price, err := r.State.SolanaPriceProvider.PriceUSD(ctx, symbol)
+		if err != nil {
+			log.WithError(err).WithField("token", symbol).Warn("Failed to fetch Solana token price from Pyth")
+			continue
+		}
+		prices[symbol] = price
 	}
 
 	var priceAmount int64
@@ -126,7 +124,7 @@ func GetSupportedTokens(r *httprequest.Request) {
 	var solBalance uint64
 	var walletError string
 	if query.Wallet != "" {
-		balances, solBalance, walletError = fetchWalletBalances(ctx, r, query.Wallet, mainnetMints)
+		balances, solBalance, walletError = fetchWalletBalances(ctx, r, query.Wallet, mints)
 	}
 
 	sort.Strings(symbols)
@@ -138,28 +136,25 @@ func GetSupportedTokens(r *httprequest.Request) {
 		t := tokenMap[symbol]
 		name := t.Name
 		if name == "" {
-			name = t.Symbol
+			name = symbol
 		}
-		mainnetMint := t.MainnetMint
-		if mainnetMint == "" {
-			mainnetMint = t.Mint
-		}
-		price := prices[mainnetMint]
+		mint := strings.TrimSpace(t.Mint)
+		price := prices[symbol]
 
 		tokenInfo := TokenInfo{
-			Symbol:   t.Symbol,
+			Symbol:   symbol,
 			Name:     name,
-			Mint:     t.Mint,
+			Mint:     mint,
 			Decimals: t.Decimals,
 			Price:    price,
 		}
 
 		if priceAmount > 0 && price > 0 && quoteError == "" {
-			tokenInfo.Quote = calculateQuoteForToken(ctx, r, t, priceAmount, priceCurrency, price, quotedAt, quoteExpiry)
+			tokenInfo.Quote = calculateQuoteForToken(ctx, r, symbol, t, priceAmount, priceCurrency, quotedAt, quoteExpiry)
 		}
 
 		if query.Wallet != "" && walletError == "" {
-			tokenInfo.Balance = calculateBalanceForToken(t, mainnetMint, balances, solBalance)
+			tokenInfo.Balance = calculateBalanceForToken(symbol, t, mint, balances, solBalance)
 			if tokenInfo.Quote != nil && tokenInfo.Balance != nil {
 				tokenInfo.Balance.Sufficient = tokenInfo.Balance.Units >= tokenInfo.Quote.Units
 			}
@@ -169,6 +164,18 @@ func GetSupportedTokens(r *httprequest.Request) {
 	}
 
 	r.SuccessJSON(SupportedTokensResponse{Tokens: tokens})
+}
+
+func normalizeTokenMap(tokens map[string]config.SolanaToken) map[string]config.SolanaToken {
+	normalized := make(map[string]config.SolanaToken, len(tokens))
+	for symbol, token := range tokens {
+		normalizedSymbol := strings.ToUpper(strings.TrimSpace(symbol))
+		if normalizedSymbol == "" {
+			continue
+		}
+		normalized[normalizedSymbol] = token
+	}
+	return normalized
 }
 
 func resolvePriceFromID(ctx context.Context, r *httprequest.Request, priceIDStr string) (int64, string, string) {
@@ -241,10 +248,10 @@ func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr 
 	return balances, solBalance, ""
 }
 
-func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenCfg config.SolanaToken, amountCents int64, currency string, tokenPriceUSD float64, quotedAt, expiresAt time.Time) *TokenQuote {
-	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenCfg, amountCents, currency, r.State.FXProvider)
+func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSymbol string, tokenCfg config.SolanaToken, amountCents int64, currency string, quotedAt, expiresAt time.Time) *TokenQuote {
+	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, amountCents, currency, r.State.FXProvider, r.State.SolanaPriceProvider)
 	if err != nil {
-		log.WithError(err).WithField("token", tokenCfg.Symbol).Warn("Failed to calculate token quote")
+		log.WithError(err).WithField("token", tokenSymbol).Warn("Failed to calculate token quote")
 		return nil
 	}
 
@@ -259,10 +266,10 @@ func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenCf
 	}
 }
 
-func calculateBalanceForToken(tokenCfg config.SolanaToken, mint string, balances map[string]uint64, solBalance uint64) *TokenBalance {
+func calculateBalanceForToken(tokenSymbol string, tokenCfg config.SolanaToken, mint string, balances map[string]uint64, solBalance uint64) *TokenBalance {
 	var units uint64
 
-	if tokenCfg.Symbol == "SOL" {
+	if strings.EqualFold(tokenSymbol, "SOL") {
 		units = solBalance
 	} else {
 		units = balances[mint]

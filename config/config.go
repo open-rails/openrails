@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/knadh/koanf/parsers/yaml"
@@ -121,7 +122,7 @@ type Config struct {
 	ClickHouse   *ClickHouseConfig `koanf:"clickhouse,omitempty"`
 	Logger       *LoggerConfig     `koanf:"logger,omitempty"`
 	SendGrid     *SendGridConfig   `koanf:"sendgrid,omitempty"`
-	Jupiter      *JupiterConfig    `koanf:"jupiter,omitempty"`
+	Pyth         *PythConfig       `koanf:"pyth,omitempty"`
 	CorsOrigins  []string          `koanf:"cors_origins,omitempty"`
 	RateLimits   *RateLimitsConfig `koanf:"rate_limits,omitempty"`
 	FeatureFlags *FeatureFlags     `koanf:"feature_flags,omitempty"`
@@ -254,8 +255,7 @@ type ProcessorConfig struct {
 	HeliusAPIKey    string                 `koanf:"helius_api_key"`
 	Network         string                 `koanf:"network"`
 	RecipientWallet string                 `koanf:"recipient_wallet"`
-	SupportedTokens map[string]TokenConfig `koanf:"supported_tokens"`
-	EnabledTokens   []string               `koanf:"enabled_tokens"`
+	Tokens          map[string]TokenConfig `koanf:"tokens"`
 }
 
 // GetEffectiveType returns the processor type, inferring from reserved names if needed.
@@ -338,8 +338,7 @@ func (p *ProcessorConfig) ToSolanaConfig() *SolanaConfig {
 		HeliusAPIKey:    p.HeliusAPIKey,
 		Network:         p.Network,
 		RecipientWallet: p.RecipientWallet,
-		SupportedTokens: p.SupportedTokens,
-		EnabledTokens:   p.EnabledTokens,
+		Tokens:          p.Tokens,
 	}
 }
 
@@ -390,16 +389,14 @@ type SolanaConfig struct {
 	Network         string `koanf:"network"` // mainnet, devnet, testnet
 	RecipientWallet string `koanf:"recipient_wallet"`
 
-	SupportedTokens map[string]TokenConfig `koanf:"supported_tokens,omitempty"`
-
-	// EnabledTokens is a simplified token configuration (alternative to SupportedTokens).
-	// Use symbol strings for verified tokens from Jupiter Tokens V2: ["SOL", "USDC", "BONK"].
-	// If not set, defaults to ["SOL", "USDC", "PYUSD"].
-	EnabledTokens []string `koanf:"enabled_tokens,omitempty"`
+	Tokens map[string]TokenConfig `koanf:"tokens,omitempty"`
 }
 
-type JupiterConfig struct {
-	APIKey string `koanf:"api_key"`
+type PythConfig struct {
+	HermesURL        string            `koanf:"hermes_url"`
+	MaxPriceAge      string            `koanf:"max_price_age"`
+	MaxConfidenceBPS int               `koanf:"max_confidence_bps"`
+	PriceFeeds       map[string]string `koanf:"price_feeds"`
 }
 
 type CloudflaredConfig struct {
@@ -413,13 +410,9 @@ type CloudflaredConfig struct {
 
 // TokenConfig defines configuration for a specific Solana token
 type TokenConfig struct {
-	Mint        string  `json:"mint" koanf:"mint"`         // Token mint address
-	Symbol      string  `json:"symbol" koanf:"symbol"`     // Token symbol (e.g., "SOL", "USDC")
-	Name        string  `json:"name" koanf:"name"`         // Token name
-	Decimals    int     `json:"decimals" koanf:"decimals"` // Token decimal places
-	Price       float64 `json:"price"`                     // Price in USD (fetched from Jupiter at runtime, not loaded from config)
-	Enabled     bool    `json:"enabled" koanf:"enabled"`   // Whether this token is enabled
-	MainnetMint string  `json:"mainnet_mint,omitempty" koanf:"mainnet_mint"`
+	Mint     string `json:"mint" koanf:"mint"`         // Token mint address accepted on the configured Solana network.
+	Name     string `json:"name" koanf:"name"`         // Token name.
+	Decimals int    `json:"decimals" koanf:"decimals"` // Token decimal places.
 }
 
 // RateLimitsConfig is a map of endpoint identifier -> rate limit config
@@ -634,7 +627,7 @@ func validateProcessors(cfg *Config, isDev bool) error {
 				return err
 			}
 		case ProcessorTypeSolana:
-			if err := validateSolanaProcessor(name, proc, isDev); err != nil {
+			if err := validateSolanaProcessor(cfg, name, proc, isDev); err != nil {
 				return err
 			}
 		default:
@@ -711,9 +704,27 @@ func validateStripeProcessor(name string, proc *ProcessorConfig, isDev bool) err
 }
 
 // validateSolanaProcessor validates a Solana-type processor
-func validateSolanaProcessor(name string, proc *ProcessorConfig, isDev bool) error {
+func validateSolanaProcessor(cfg *Config, name string, proc *ProcessorConfig, isDev bool) error {
 	if strings.TrimSpace(proc.RecipientWallet) == "" {
 		log.Warnf("processor '%s' (solana): recipient_wallet not configured; Solana payments disabled", name)
+	}
+	if cfg == nil || cfg.Pyth == nil {
+		return fmt.Errorf("processor '%s' (solana): pyth configuration is required", name)
+	}
+	if strings.TrimSpace(cfg.Pyth.HermesURL) == "" {
+		return fmt.Errorf("processor '%s' (solana): pyth.hermes_url is required", name)
+	}
+	if _, err := time.ParseDuration(strings.TrimSpace(cfg.Pyth.MaxPriceAge)); err != nil {
+		return fmt.Errorf("processor '%s' (solana): invalid pyth.max_price_age: %w", name, err)
+	}
+	for symbol := range proc.Tokens {
+		normalized := strings.ToUpper(strings.TrimSpace(symbol))
+		if normalized == "" {
+			return fmt.Errorf("processor '%s' (solana): token symbol cannot be empty", name)
+		}
+		if strings.TrimSpace(cfg.Pyth.PriceFeeds[normalized]) == "" {
+			return fmt.Errorf("processor '%s' (solana): missing pyth.price_feeds.%s", name, normalized)
+		}
 	}
 
 	return nil
@@ -766,14 +777,6 @@ func (cfg *Config) GetSolanaProcessor() *ProcessorConfig {
 		return proc
 	}
 	return nil
-}
-
-// GetJupiterAPIKey returns the configured Jupiter API key, if any.
-func (cfg *Config) GetJupiterAPIKey() string {
-	if cfg == nil || cfg.Jupiter == nil {
-		return ""
-	}
-	return strings.TrimSpace(cfg.Jupiter.APIKey)
 }
 
 // GetProcessor returns a processor config by name from the Processors map.
@@ -946,6 +949,12 @@ func GetDefaultBillingConfig() *Config {
 		Logger: &LoggerConfig{
 			Level: "info", // Default to info level (options: debug, info, warn, error, fatal, panic)
 		},
+		Pyth: &PythConfig{
+			HermesURL:        DefaultPythHermesURL,
+			MaxPriceAge:      DefaultPythMaxPriceAge,
+			MaxConfidenceBPS: DefaultPythMaxConfidenceBPS,
+			PriceFeeds:       DefaultPythPriceFeeds(),
+		},
 		RateLimits: &RateLimitsConfig{
 			"subscribe": &RateLimit{
 				RequestsPerMinute: 10, // Very restrictive for payment endpoints
@@ -1001,6 +1010,44 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 		}
 	}
 	return nil
+}
+
+func applyPythDefaults(cfg *Config) {
+	if cfg.Pyth == nil {
+		cfg.Pyth = &PythConfig{}
+	}
+	if strings.TrimSpace(cfg.Pyth.HermesURL) == "" {
+		cfg.Pyth.HermesURL = DefaultPythHermesURL
+	}
+	if strings.TrimSpace(cfg.Pyth.MaxPriceAge) == "" {
+		cfg.Pyth.MaxPriceAge = DefaultPythMaxPriceAge
+	}
+	if cfg.Pyth.MaxConfidenceBPS <= 0 {
+		cfg.Pyth.MaxConfidenceBPS = DefaultPythMaxConfidenceBPS
+	}
+
+	defaults := DefaultPythPriceFeeds()
+	if cfg.Pyth.PriceFeeds == nil {
+		cfg.Pyth.PriceFeeds = defaults
+		return
+	}
+	for symbol, feedID := range cfg.Pyth.PriceFeeds {
+		normalized := strings.ToUpper(strings.TrimSpace(symbol))
+		if normalized == "" {
+			delete(cfg.Pyth.PriceFeeds, symbol)
+			continue
+		}
+		trimmedFeedID := strings.TrimSpace(feedID)
+		if normalized != symbol {
+			delete(cfg.Pyth.PriceFeeds, symbol)
+		}
+		cfg.Pyth.PriceFeeds[normalized] = trimmedFeedID
+	}
+	for symbol, feedID := range defaults {
+		if strings.TrimSpace(cfg.Pyth.PriceFeeds[symbol]) == "" {
+			cfg.Pyth.PriceFeeds[symbol] = feedID
+		}
+	}
 }
 
 func Load(configPath string) (*Config, error) {
@@ -1148,18 +1195,6 @@ func Load(configPath string) (*Config, error) {
 			}
 			return mapped, out
 		}
-		if strings.HasSuffix(mapped, ".enabled_tokens") && strings.Contains(v, ",") {
-			parts := strings.Split(v, ",")
-			out := make([]string, 0, len(parts))
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					out = append(out, p)
-				}
-			}
-			return mapped, out
-		}
-
 		return mapped, v
 	}
 
@@ -1182,6 +1217,7 @@ func Load(configPath string) (*Config, error) {
 	if cfg.Store.LogoURL == "" {
 		cfg.Store.LogoURL = DefaultLogoURL
 	}
+	applyPythDefaults(cfg)
 
 	// Initialize and normalize Processors map
 	if cfg.Processors == nil {

@@ -298,12 +298,10 @@ func testSolanaCheckoutConfig() *config.Config {
 				Type:            config.ProcessorTypeSolana,
 				Network:         "devnet",
 				RecipientWallet: testRecipientWallet,
-				SupportedTokens: map[string]config.TokenConfig{
+				Tokens: map[string]config.TokenConfig{
 					"USDC": {
-						Symbol:   "USDC",
 						Mint:     devnetUSDCMint,
 						Decimals: 6,
-						Enabled:  true,
 					},
 				},
 			},

@@ -9,7 +9,6 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/fx"
-	jupiter "github.com/open-rails/openrails/internal/integrations/jupiter"
 )
 
 func RequireSolanaProcessorConfig(cfg *config.Config) (*config.ProcessorConfig, error) {
@@ -42,10 +41,18 @@ type TokenQuote struct {
 	QuotedAt      time.Time
 }
 
+type TokenPriceProvider interface {
+	PriceUSD(ctx context.Context, symbol string) (float64, error)
+}
+
 // CalculateTokenQuote converts a fiat amount into token units based on live prices.
-func CalculateTokenQuote(ctx context.Context, tokenCfg config.SolanaToken, amountCents int64, currency string, fxProvider fx.Provider) (*TokenQuote, error) {
+func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg config.SolanaToken, amountCents int64, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider) (*TokenQuote, error) {
 	if amountCents <= 0 {
 		return &TokenQuote{Units: 0, Decimal: 0, FXRate: 1.0, FXCurrency: strings.ToLower(currency), QuotedAt: time.Now()}, nil
+	}
+	tokenSymbol = strings.ToUpper(strings.TrimSpace(tokenSymbol))
+	if tokenSymbol == "" {
+		return nil, fmt.Errorf("token symbol is required")
 	}
 
 	currency = strings.ToLower(strings.TrimSpace(currency))
@@ -73,24 +80,19 @@ func CalculateTokenQuote(ctx context.Context, tokenCfg config.SolanaToken, amoun
 		amountUSD = amountInCurrency * fxRate
 	}
 
-	mint := tokenCfg.MainnetMint
-	if mint == "" {
-		mint = tokenCfg.Mint
+	if strings.TrimSpace(tokenCfg.Mint) == "" {
+		return nil, fmt.Errorf("token %s missing mint configuration", tokenSymbol)
 	}
-	if mint == "" {
-		return nil, fmt.Errorf("token %s missing mint configuration", tokenCfg.Symbol)
+	if priceProvider == nil {
+		return nil, fmt.Errorf("token price provider is not configured")
 	}
-
-	prices, err := jupiter.FetchJupiterPrices(ctx, []string{mint})
+	tokenPriceUSD, err := priceProvider.PriceUSD(ctx, tokenSymbol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch token price: %w", err)
 	}
-
-	tokenPriceUSD, ok := prices[mint]
-	if !ok || tokenPriceUSD <= 0 {
-		return nil, fmt.Errorf("token price unavailable for %s", tokenCfg.Symbol)
+	if tokenPriceUSD <= 0 {
+		return nil, fmt.Errorf("token price unavailable for %s", tokenSymbol)
 	}
-	tokenPriceUSD = normalizeStablecoinPrice(tokenCfg.Symbol, tokenPriceUSD)
 
 	scale := math.Pow10(tokenCfg.Decimals)
 	tokenAmountFloat := amountUSD / tokenPriceUSD
@@ -117,25 +119,4 @@ func currencyMinorUnits(currency string) int {
 	default:
 		return 2
 	}
-}
-
-var stablecoinSymbols = map[string]bool{
-	"USDC":  true,
-	"USDT":  true,
-	"PYUSD": true,
-	"USDP":  true,
-	"BUSD":  true,
-	"DAI":   true,
-}
-
-const stablecoinTolerance = 0.02
-
-func normalizeStablecoinPrice(symbol string, price float64) float64 {
-	if !stablecoinSymbols[strings.ToUpper(symbol)] {
-		return price
-	}
-	if price >= (1.0-stablecoinTolerance) && price <= (1.0+stablecoinTolerance) {
-		return 1.0
-	}
-	return price
 }

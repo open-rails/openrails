@@ -237,7 +237,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			"solana": {
 				Type:            config.ProcessorTypeSolana,
 				RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
-				SupportedTokens: config.DefaultDevnetTokens(),
+				Tokens:          config.DefaultDevnetTokens(),
 				// RPCEndpoint and Network are derived from test_mode
 			},
 			// NMI demo account for real API integration tests

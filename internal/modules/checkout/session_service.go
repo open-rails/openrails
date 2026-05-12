@@ -87,6 +87,7 @@ type CheckoutSessionService struct {
 	solanaPayService         solanaPaymentService
 	solanaTransactionService solanaTransactionService
 	fxProvider               fx.Provider
+	priceProvider            solanamodule.TokenPriceProvider
 	config                   *config.Config
 	clock                    clockwork.Clock
 }
@@ -101,6 +102,7 @@ func NewCheckoutSessionService(
 	solanaPayService solanaPaymentService,
 	solanaTransactionService solanaTransactionService,
 	fxProvider fx.Provider,
+	priceProvider solanamodule.TokenPriceProvider,
 	cfg *config.Config,
 	clocks ...clockwork.Clock,
 ) *CheckoutSessionService {
@@ -115,6 +117,7 @@ func NewCheckoutSessionService(
 		solanaPayService:         solanaPayService,
 		solanaTransactionService: solanaTransactionService,
 		fxProvider:               fxProvider,
+		priceProvider:            priceProvider,
 		config:                   cfg,
 		clock:                    firstClock(clocks...),
 	}
@@ -472,7 +475,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
 
-	tokenSymbol := strings.TrimSpace(payment.TokenSymbol)
+	tokenSymbol := strings.ToUpper(strings.TrimSpace(payment.TokenSymbol))
 	if tokenSymbol == "" {
 		return fmt.Errorf("%w: token_symbol is required", ErrCheckoutSessionValidation)
 	}
@@ -482,14 +485,11 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		flow = "transfer_request"
 	}
 
-	tokenCfg, ok := solanaProc.SupportedTokens[tokenSymbol]
-	if !ok || !tokenCfg.Enabled {
+	tokenCfg, ok := solanaProc.Tokens[tokenSymbol]
+	if !ok {
 		return fmt.Errorf("%w: unsupported token", ErrCheckoutSessionValidation)
 	}
 	tokenMint := tokenCfg.Mint
-	if strings.EqualFold(solanaProc.Network, "mainnet") && tokenCfg.MainnetMint != "" {
-		tokenMint = tokenCfg.MainnetMint
-	}
 	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(tokenMint) {
 		return fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutSessionValidation)
 	}
@@ -547,7 +547,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		session.ProcessorState["token_symbol"] = tokenSymbol
 		session.ProcessorState["token_mint"] = tokenMint
 		session.ProcessorState["recipient"] = recipient
-		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenCfg, session.Amount, session.Currency, s.fxProvider)
+		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, session.Amount, session.Currency, s.fxProvider, s.priceProvider)
 		if err != nil {
 			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutSessionValidation, err)
 		}
@@ -876,19 +876,16 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	}
 
 	// Get token symbol from ProcessorState (where initializeSolanaSession stores it)
-	tokenSymbol := getStringField(session.ProcessorState, "token_symbol")
+	tokenSymbol := strings.ToUpper(strings.TrimSpace(getStringField(session.ProcessorState, "token_symbol")))
 	if tokenSymbol == "" {
 		return nil, fmt.Errorf("%w: token_symbol missing", ErrCheckoutSessionValidation)
 	}
 
-	tokenCfg, ok := solanaProc.SupportedTokens[tokenSymbol]
-	if !ok || !tokenCfg.Enabled {
+	tokenCfg, ok := solanaProc.Tokens[tokenSymbol]
+	if !ok {
 		return nil, fmt.Errorf("%w: unsupported token", ErrCheckoutSessionValidation)
 	}
 	tokenMint := tokenCfg.Mint
-	if strings.EqualFold(solanaProc.Network, "mainnet") && tokenCfg.MainnetMint != "" {
-		tokenMint = tokenCfg.MainnetMint
-	}
 	storedTokenMint := getStringField(session.ProcessorState, "token_mint")
 	if storedTokenMint == "" {
 		return nil, fmt.Errorf("%w: token_mint missing", ErrCheckoutSessionValidation)
