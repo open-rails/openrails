@@ -11,8 +11,7 @@ import (
 
 func ServiceCreateProduct(r *httprequest.Request) {
 	var req billingservice.CreateProductRequest
-	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request")
+	if !r.BindJSON(&req) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -22,7 +21,7 @@ func ServiceCreateProduct(r *httprequest.Request) {
 	}
 	out, err := svc.CreateProduct(r.Request.Context(), req)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(http.StatusBadRequest, "invalid product definition")
 		return
 	}
 	r.GinCtx.JSON(http.StatusOK, out)
@@ -35,8 +34,7 @@ func ServiceUpdateProduct(r *httprequest.Request) {
 		return
 	}
 	var req billingservice.UpdateProductRequest
-	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request")
+	if !r.BindJSON(&req) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -46,7 +44,7 @@ func ServiceUpdateProduct(r *httprequest.Request) {
 	}
 	out, err := svc.UpdateProduct(r.Request.Context(), id, req)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(http.StatusBadRequest, "invalid product update")
 		return
 	}
 	r.GinCtx.JSON(http.StatusOK, out)
@@ -54,8 +52,7 @@ func ServiceUpdateProduct(r *httprequest.Request) {
 
 func ServiceCreatePrice(r *httprequest.Request) {
 	var req billingservice.CreatePriceRequest
-	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request")
+	if !r.BindJSON(&req) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -65,7 +62,7 @@ func ServiceCreatePrice(r *httprequest.Request) {
 	}
 	out, err := svc.CreatePrice(r.Request.Context(), req)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(http.StatusBadRequest, "invalid price definition")
 		return
 	}
 	r.GinCtx.JSON(http.StatusOK, out)
@@ -78,8 +75,7 @@ func ServiceUpdatePrice(r *httprequest.Request) {
 		return
 	}
 	var req billingservice.UpdatePriceRequest
-	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request")
+	if !r.BindJSON(&req) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -89,7 +85,7 @@ func ServiceUpdatePrice(r *httprequest.Request) {
 	}
 	out, err := svc.UpdatePrice(r.Request.Context(), id, req)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(http.StatusBadRequest, "invalid price update")
 		return
 	}
 	r.GinCtx.JSON(http.StatusOK, out)

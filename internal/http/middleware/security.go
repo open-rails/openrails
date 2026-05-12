@@ -12,6 +12,37 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const DefaultMaxBodyBytes int64 = 1 << 20
+
+// BodyLimit caps request bodies before handlers bind JSON or read forms.
+func BodyLimit(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if isWebhookPath(c.Request.URL.Path) {
+			c.Next()
+			return
+		}
+		if maxBytes > 0 && c.Request != nil && c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		}
+		c.Next()
+	}
+}
+
+func isWebhookPath(path string) bool {
+	path = strings.ToLower(path)
+	if strings.HasPrefix(path, "/billing") {
+		path = strings.TrimPrefix(path, "/billing")
+		if path == "" {
+			path = "/"
+		}
+	}
+	return strings.HasPrefix(path, "/v1/webhooks")
+}
+
+func isDebugNMITokenizationPath(path string) bool {
+	return strings.EqualFold(path, "/debug/nmi/tokenization")
+}
+
 // CORS middleware with billing service specific settings
 func CORS(allowedOrigins []string) gin.HandlerFunc {
 	corsConfig := cors.DefaultConfig()
@@ -164,7 +195,9 @@ func SecurityHeaders() gin.HandlerFunc {
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-XSS-Protection", "1; mode=block")
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
-		c.Header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'")
+		if !isDebugNMITokenizationPath(c.Request.URL.Path) {
+			c.Header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'")
+		}
 
 		// Remove server information
 		c.Header("Server", "")

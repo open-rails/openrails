@@ -95,6 +95,10 @@ func (r *Request) Bind(data any) error {
 
 func (r *Request) BindJSON(data any) bool {
 	if err := r.GinCtx.ShouldBindJSON(data); err != nil {
+		if isRequestBodyTooLarge(err) {
+			r.ErrorJSON(http.StatusRequestEntityTooLarge, "request body too large")
+			return false
+		}
 		r.ErrorJSON(http.StatusBadRequest, normaliseBindError(err))
 		return false
 	}
@@ -227,4 +231,8 @@ func normaliseBindError(err error) string {
 		return "empty_request_body"
 	}
 	return "invalid_request"
+}
+
+func isRequestBodyTooLarge(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "request body too large")
 }

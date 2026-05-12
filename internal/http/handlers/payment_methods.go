@@ -174,7 +174,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, code, vaultErr.Error()))
 			return
 		}
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(http.StatusBadRequest, "failed to create payment method")
 		return
 	}
 
@@ -255,7 +255,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	updated, err := r.State.VaultService.UpdateVault(ctx, pm, updateReq)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"payment_method_id": methodID, "user_id": user.ID}).Error("Failed to update payment method")
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(http.StatusBadRequest, "failed to update payment method")
 		return
 	}
 

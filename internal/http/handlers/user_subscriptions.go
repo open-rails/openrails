@@ -50,7 +50,7 @@ func listSubscriptionsForUser(r *httprequest.Request, userID string) {
 		queryOpts,
 	)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscriptions")
 		return
 	}
 

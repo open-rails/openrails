@@ -43,7 +43,7 @@ func GetMyBillingStatus(r *httprequest.Request) {
 	if r.State.EntitlementService != nil {
 		list, err := r.State.EntitlementService.ListByUser(r.Request.Context(), user.ID)
 		if err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, err.Error())
+			r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve entitlements")
 			return
 		}
 		ents = list

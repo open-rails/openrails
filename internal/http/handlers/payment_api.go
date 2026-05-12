@@ -92,6 +92,41 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 	return payment
 }
 
+type userPaymentObject struct {
+	ID             string           `json:"id"`
+	Object         string           `json:"object"`
+	Status         string           `json:"status,omitempty"`
+	Amount         int64            `json:"amount"`
+	AmountRefunded int64            `json:"amount_refunded"`
+	Currency       string           `json:"currency"`
+	User           string           `json:"user"`
+	Subscription   *string          `json:"subscription,omitempty"`
+	Processor      string           `json:"processor"`
+	Refunded       bool             `json:"refunded"`
+	Captured       bool             `json:"captured,omitempty"`
+	Created        int64            `json:"created"`
+	Price          *api.PriceObject `json:"price,omitempty"`
+}
+
+func PaymentToUserAPI(p *models.Payment) userPaymentObject {
+	payment := PaymentToAPI(p, nil)
+	return userPaymentObject{
+		ID:             payment.ID,
+		Object:         payment.Object,
+		Status:         payment.Status,
+		Amount:         payment.Amount,
+		AmountRefunded: payment.AmountRefunded,
+		Currency:       payment.Currency,
+		User:           payment.User,
+		Subscription:   payment.Subscription,
+		Processor:      payment.Processor,
+		Refunded:       payment.Refunded,
+		Captured:       payment.Captured,
+		Created:        payment.Created,
+		Price:          payment.Price,
+	}
+}
+
 func refundStatusCountsTowardAPIAmount(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "", "completed":

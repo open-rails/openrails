@@ -45,8 +45,7 @@ type serviceCaptureRequest struct {
 
 func ServiceDepositCredits(r *httprequest.Request) {
 	var req serviceDepositRequest
-	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request")
+	if !r.BindJSON(&req) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -83,8 +82,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 
 func ServiceWithdrawCredits(r *httprequest.Request) {
 	var req serviceWithdrawRequest
-	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request")
+	if !r.BindJSON(&req) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -116,8 +114,7 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 
 func ServiceHoldCredits(r *httprequest.Request) {
 	var req serviceHoldRequest
-	if err := r.GinCtx.ShouldBindJSON(&req); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request")
+	if !r.BindJSON(&req) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -155,8 +152,7 @@ func ServiceCaptureHold(r *httprequest.Request) {
 		return
 	}
 	var req serviceCaptureRequest
-	if err = r.GinCtx.ShouldBindJSON(&req); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request")
+	if !r.BindJSON(&req) {
 		return
 	}
 	svc, err := billingservice.New(r.State)

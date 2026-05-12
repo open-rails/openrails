@@ -159,16 +159,26 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Public API server (user/admin JWT auth)
 	publicSrv := &http.Server{
-		Handler: embeddedApp.Handler(),
-		Addr:    fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Handler:           embeddedApp.Handler(),
+		Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// Private/Service API server (X-API-KEY auth for server-to-server calls)
 	var privateSrv *http.Server
 	if cfg.PrivatePort > 0 {
 		privateSrv = &http.Server{
-			Handler: embeddedApp.ServiceHandler(),
-			Addr:    fmt.Sprintf("%s:%d", cfg.Host, cfg.PrivatePort),
+			Handler:           embeddedApp.ServiceHandler(),
+			Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.PrivatePort),
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			MaxHeaderBytes:    1 << 20,
 		}
 	}
 

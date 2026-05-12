@@ -58,7 +58,7 @@ func GetProducts(r *httprequest.Request) {
 		req.Offset,
 	)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve products")
 		return
 	}
 
@@ -117,7 +117,7 @@ func GetPrices(r *httprequest.Request) {
 		req.Offset,
 	)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve prices")
 		return
 	}
 

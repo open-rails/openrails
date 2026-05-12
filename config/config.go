@@ -551,11 +551,17 @@ func Validate(cfg *Config) error {
 		if cfg.Auth == nil || len(cfg.Auth.Issuers) == 0 {
 			return fmt.Errorf("auth issuers must be configured outside development")
 		}
+		if strings.TrimSpace(cfg.Auth.ExpectedAudience) == "" {
+			return fmt.Errorf("auth expected_audience must be configured outside development")
+		}
 		for _, issuer := range cfg.Auth.Issuers {
 			issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 			if issuer == "" || issuer == "http://localhost:8080" || issuer == "http://api:2052" || issuer == "http://issuer:8080" {
 				return fmt.Errorf("default auth issuer is not allowed outside development")
 			}
+		}
+		if len(cfg.CorsOrigins) == 0 {
+			return fmt.Errorf("cors_origins must be configured outside development")
 		}
 	}
 

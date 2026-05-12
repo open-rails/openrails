@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	authhttp "github.com/open-rails/authkit/http"
@@ -27,6 +28,7 @@ func NewVerifier(cfg *config.AuthConfig) (Verifier, error) {
 	expectedAudience := strings.TrimSpace(cfg.ExpectedAudience)
 	v := authhttp.NewVerifier()
 
+	addedIssuers := 0
 	for _, issuer := range cfg.Issuers {
 		issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 		if issuer == "" {
@@ -36,9 +38,15 @@ func NewVerifier(cfg *config.AuthConfig) (Verifier, error) {
 		if expectedAudience != "" {
 			audiences = []string{expectedAudience}
 		}
-		_ = v.AddIssuer(issuer, audiences, authhttp.IssuerOptions{
+		if err := v.AddIssuer(issuer, audiences, authhttp.IssuerOptions{
 			JWKSURL: issuer + "/.well-known/jwks.json",
-		})
+		}); err != nil {
+			return nil, fmt.Errorf("add auth issuer %q: %w", issuer, err)
+		}
+		addedIssuers++
+	}
+	if addedIssuers == 0 {
+		return nil, errors.New("at least one non-empty auth issuer is required")
 	}
 
 	return v, nil

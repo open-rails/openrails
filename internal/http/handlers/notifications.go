@@ -42,7 +42,7 @@ func GetNotifications(r *httprequest.Request) {
 
 	items, _, err := r.State.UserSubscriptionService.GetUserNotifications(r.Request.Context(), user.ID, q)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve notifications")
 		return
 	}
 
@@ -58,7 +58,7 @@ func MarkNotificationRead(r *httprequest.Request) {
 		return
 	}
 	if err := r.State.UserSubscriptionService.MarkNotificationRead(r.Request.Context(), user.ID, id); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.ErrorJSON(http.StatusInternalServerError, "failed to mark notification read")
 		return
 	}
 	r.SuccessJSONMessage("notification marked as read")
@@ -73,7 +73,7 @@ func GetUnreadNotificationCount(r *httprequest.Request) {
 		Filters: subscriptions.GetNotificationsFilters{UserID: user.ID, Seen: &f},
 	}
 	if _, _, err := r.State.UserSubscriptionService.GetUserNotifications(r.Request.Context(), user.ID, q); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve notifications")
 		return
 	}
 	r.SuccessJSON(map[string]any{"unread_count": q.TotalItems})

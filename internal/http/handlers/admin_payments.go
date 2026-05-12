@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
+	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 )
 
@@ -95,8 +96,13 @@ func AdminRefundPayment(r *httprequest.Request) {
 	if err != nil {
 		status, message := adminRefundErrorResponse(err)
 		if refundTransactionID != "" && status == http.StatusInternalServerError {
-			message = fmt.Sprintf("refund issued (ID: %s) but failed to record: %s", refundTransactionID, err.Error())
+			message = "refund issued but failed to record"
 		}
+		log.WithError(err).WithFields(log.Fields{
+			"payment_id":            paymentID,
+			"status":                status,
+			"refund_transaction_id": refundTransactionID,
+		}).Warn("admin refund request failed")
 		r.ErrorJSON(status, message)
 		return
 	}
@@ -146,7 +152,7 @@ func adminRefundErrorResponse(err error) (int, string) {
 	if errors.As(err, &statusErr) {
 		return statusErr.Status, statusErr.Message
 	}
-	return http.StatusInternalServerError, err.Error()
+	return http.StatusInternalServerError, "refund request failed"
 }
 
 type adminRefundPrepared struct {
@@ -190,14 +196,14 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 	case payment.Processor == models.ProcessorStripe:
 		refundTargetID, err := subscriptions.ResolveStripeRefundTarget(payment)
 		if err != nil {
-			return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
+			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded")
 		}
 		stripeRefundTargetID = refundTargetID
 	case processors.IsNMIBackedProcessor(payment.Processor):
 		providerName := strings.ToLower(string(payment.Processor))
 		client, ok := r.State.NMIClients[providerName]
 		if !ok {
-			return nil, adminRefundHTTPError(http.StatusInternalServerError, fmt.Sprintf("NMI client not configured for processor: %s", payment.Processor))
+			return nil, adminRefundHTTPError(http.StatusInternalServerError, "payment processor not configured")
 		}
 		nmiClient = client
 	default:
@@ -262,14 +268,14 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 		result, err := stripeService.CreateRefund(ctx, subscriptions.RefundParams{ChargeID: prepared.stripeRefundTargetID, Amount: req.Amount, Reason: req.Reason, IdempotencyKey: adminRefundProviderIdempotencyKey(prepared.payment.ID, idempotencyKey)})
 		if err != nil {
 			_ = paymentService.MarkFailed(ctx, prepared.reservation.ID)
-			return nil, "", adminRefundHTTPError(http.StatusBadGateway, fmt.Sprintf("stripe refund failed: %s", err.Error()))
+			return nil, "", adminRefundHTTPError(http.StatusBadGateway, "refund failed")
 		}
 		refundTransactionID = result.ID
 	case processors.IsNMIBackedProcessor(prepared.payment.Processor):
 		result, err := prepared.nmiClient.Refund(nmi.RefundParams{TransactionID: prepared.payment.TransactionID, Amount: req.Amount})
 		if err != nil {
 			_ = paymentService.MarkFailed(ctx, prepared.reservation.ID)
-			return nil, "", adminRefundHTTPError(http.StatusBadGateway, fmt.Sprintf("refund failed: %s", err.Error()))
+			return nil, "", adminRefundHTTPError(http.StatusBadGateway, "refund failed")
 		}
 		refundTransactionID = result.TransactionID
 	default:

@@ -127,7 +127,9 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	e.Use(gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: []string{"/health/live", "/health/ready", "/healthz", "/readyz", "/health"},
 	}))
+	e.Use(middleware.SecurityHeaders())
 	e.Use(middleware.CORS(s.cfg.CorsOrigins))
+	e.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
 	e.Use(middleware.RateLimit(s.cfg.RateLimits, s.rdb))
 	return e
 }
@@ -136,6 +138,7 @@ func (s *Server) setupPrivateHandler() {
 	s.privateHandler = gin.New()
 	s.privateHandler.Use(gin.Recovery())
 	s.privateHandler.Use(gin.Logger())
+	s.privateHandler.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
 	// No CORS needed for internal service-to-service calls.
 }
 

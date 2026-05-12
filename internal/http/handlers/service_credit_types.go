@@ -39,7 +39,7 @@ func ServiceCreateCreditType(r *httprequest.Request) {
 		DecimalPlaces: req.DecimalPlaces,
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(http.StatusBadRequest, "invalid credit type definition")
 		return
 	}
 	r.GinCtx.JSON(http.StatusOK, out)
@@ -93,7 +93,7 @@ func ServiceUpdateCreditType(r *httprequest.Request) {
 		IsActive:    req.IsActive,
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(http.StatusBadRequest, "invalid credit type update")
 		return
 	}
 	r.GinCtx.JSON(http.StatusOK, out)
@@ -111,7 +111,7 @@ func ServiceDeactivateCreditType(r *httprequest.Request) {
 		return
 	}
 	if err := svc.DeactivateCreditType(r.Request.Context(), name); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(http.StatusBadRequest, "failed to deactivate credit type")
 		return
 	}
 	r.GinCtx.JSON(http.StatusOK, map[string]any{"ok": true})
@@ -129,7 +129,7 @@ func ServiceActivateCreditType(r *httprequest.Request) {
 		return
 	}
 	if err := svc.ActivateCreditType(r.Request.Context(), name); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorJSON(http.StatusBadRequest, "failed to activate credit type")
 		return
 	}
 	r.GinCtx.JSON(http.StatusOK, map[string]any{"ok": true})

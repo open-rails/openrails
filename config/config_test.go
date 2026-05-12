@@ -243,10 +243,44 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
+		cfg.CorsOrigins = []string{"https://app.example.com"}
 		cfg.ClickHouse.Username = "prod_analytics"
 		cfg.ClickHouse.Password = "production-clickhouse-password"
 		assembleDBURL(cfg)
 		assert.NoError(t, Validate(cfg))
+	})
+
+	t.Run("prod env rejects missing auth audience", func(t *testing.T) {
+		falseBool := false
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "prod"
+		cfg.TestMode = &falseBool
+		cfg.APIKey = "production-service-key"
+		cfg.DB.Username = "billing_app"
+		cfg.DB.Password = "production-db-password"
+		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
+		cfg.Auth.ExpectedAudience = ""
+		cfg.CorsOrigins = []string{"https://app.example.com"}
+		cfg.ClickHouse.Username = "prod_analytics"
+		cfg.ClickHouse.Password = "production-clickhouse-password"
+		assembleDBURL(cfg)
+		assert.ErrorContains(t, Validate(cfg), "auth expected_audience must be configured outside development")
+	})
+
+	t.Run("prod env rejects missing cors origins", func(t *testing.T) {
+		falseBool := false
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "prod"
+		cfg.TestMode = &falseBool
+		cfg.APIKey = "production-service-key"
+		cfg.DB.Username = "billing_app"
+		cfg.DB.Password = "production-db-password"
+		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
+		cfg.CorsOrigins = nil
+		cfg.ClickHouse.Username = "prod_analytics"
+		cfg.ClickHouse.Password = "production-clickhouse-password"
+		assembleDBURL(cfg)
+		assert.ErrorContains(t, Validate(cfg), "cors_origins must be configured outside development")
 	})
 
 	t.Run("prod env rejects default api key", func(t *testing.T) {

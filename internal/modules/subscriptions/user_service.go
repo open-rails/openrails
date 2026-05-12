@@ -74,42 +74,69 @@ type UserSubscriptionResponse struct {
 // internal service callers.
 func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 	type userSubscriptionJSON struct {
-		*models.Subscription
-		Price            *api.PriceObject   `json:"price,omitempty"`
-		Product          *api.ProductObject `json:"product,omitempty"`
-		ScheduledPrice   *api.PriceObject   `json:"scheduled_price,omitempty"`
-		ScheduledProduct *api.ProductObject `json:"scheduled_product,omitempty"`
-		Access           *UserAccessGrant   `json:"access,omitempty"`
+		ID                    uuid.UUID                 `json:"id,omitempty"`
+		UserID                string                    `json:"user_id,omitempty"`
+		ProductID             uuid.UUID                 `json:"product_id,omitempty"`
+		PriceID               uuid.UUID                 `json:"price_id,omitempty"`
+		ScheduledPriceID      *uuid.UUID                `json:"scheduled_price_id,omitempty"`
+		Status                models.SubscriptionStatus `json:"status,omitempty"`
+		StartedAt             time.Time                 `json:"started_at,omitempty"`
+		EndedAt               *time.Time                `json:"ended_at,omitempty"`
+		CurrentPeriodStartsAt *time.Time                `json:"current_period_starts_at,omitempty"`
+		CurrentPeriodEndsAt   *time.Time                `json:"current_period_ends_at,omitempty"`
+		Processor             models.Processor          `json:"processor,omitempty"`
+		CancelFeedback        *string                   `json:"cancel_feedback,omitempty"`
+		CancelType            *models.CancelType        `json:"cancel_type,omitempty"`
+		CancelledAt           *time.Time                `json:"cancelled_at,omitempty"`
+		CreatedAt             time.Time                 `json:"created_at,omitempty"`
+		UpdatedAt             time.Time                 `json:"updated_at,omitempty"`
+		Price                 *api.PriceObject          `json:"price,omitempty"`
+		Product               *api.ProductObject        `json:"product,omitempty"`
+		ScheduledPrice        *api.PriceObject          `json:"scheduled_price,omitempty"`
+		ScheduledProduct      *api.ProductObject        `json:"scheduled_product,omitempty"`
+		Access                *UserAccessGrant          `json:"access,omitempty"`
 	}
 
-	var subscription *models.Subscription
 	if r.Subscription != nil {
-		copy := *r.Subscription
-		copy.Price = nil
-		copy.Product = nil
-		subscription = &copy
+		out := userSubscriptionJSON{
+			ID:                    r.Subscription.ID,
+			UserID:                r.Subscription.UserID,
+			ProductID:             r.Subscription.ProductID,
+			PriceID:               r.Subscription.PriceID,
+			ScheduledPriceID:      r.Subscription.ScheduledPriceID,
+			Status:                r.Subscription.Status,
+			StartedAt:             r.Subscription.StartedAt,
+			EndedAt:               r.Subscription.EndedAt,
+			CurrentPeriodStartsAt: r.Subscription.CurrentPeriodStartsAt,
+			CurrentPeriodEndsAt:   r.Subscription.CurrentPeriodEndsAt,
+			Processor:             r.Subscription.Processor,
+			CancelFeedback:        r.Subscription.CancelFeedback,
+			CancelType:            r.Subscription.CancelType,
+			CancelledAt:           r.Subscription.CancelledAt,
+			CreatedAt:             r.Subscription.CreatedAt,
+			UpdatedAt:             r.Subscription.UpdatedAt,
+			Access:                r.Access,
+		}
+		if r.Price != nil {
+			price := priceToAPIObject(r.Price)
+			out.Price = &price
+		}
+		if r.Subscription.Product != nil {
+			product := productToAPIObject(r.Subscription.Product)
+			out.Product = &product
+		}
+		if r.ScheduledPrice != nil {
+			price := priceToAPIObject(r.ScheduledPrice)
+			out.ScheduledPrice = &price
+		}
+		if r.ScheduledProduct != nil {
+			product := productToAPIObject(r.ScheduledProduct)
+			out.ScheduledProduct = &product
+		}
+		return json.Marshal(out)
 	}
-	out := userSubscriptionJSON{
-		Subscription: subscription,
-		Access:       r.Access,
-	}
-	if r.Price != nil {
-		price := priceToAPIObject(r.Price)
-		out.Price = &price
-	}
-	if r.Subscription != nil && r.Subscription.Product != nil {
-		product := productToAPIObject(r.Subscription.Product)
-		out.Product = &product
-	}
-	if r.ScheduledPrice != nil {
-		price := priceToAPIObject(r.ScheduledPrice)
-		out.ScheduledPrice = &price
-	}
-	if r.ScheduledProduct != nil {
-		product := productToAPIObject(r.ScheduledProduct)
-		out.ScheduledProduct = &product
-	}
-	return json.Marshal(out)
+
+	return json.Marshal(userSubscriptionJSON{Access: r.Access})
 }
 
 func priceToAPIObject(p *models.Price) api.PriceObject {
@@ -180,7 +207,7 @@ type UserAccessGrant struct {
 	SourceID                *uuid.UUID                    `json:"source_id,omitempty"`
 	SubscriptionID          *uuid.UUID                    `json:"subscription_id,omitempty"`
 	Processor               string                        `json:"processor,omitempty"`
-	ProcessorSubscriptionID *string                       `json:"processor_subscription_id,omitempty"`
+	ProcessorSubscriptionID *string                       `json:"-"`
 	StartAt                 time.Time                     `json:"start_at"`
 	EndAt                   *time.Time                    `json:"end_at,omitempty"`
 }
