@@ -12,10 +12,25 @@ import (
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 )
 
 type cancelSubscriptionRequest struct {
 	Feedback string `json:"feedback" validate:"max=500"`
+}
+
+func subscriptionLifecycleUniqueOpts() river.UniqueOpts {
+	return river.UniqueOpts{
+		ByArgs:  true,
+		ByQueue: true,
+		ByState: []rivertype.JobState{
+			rivertype.JobStateAvailable,
+			rivertype.JobStatePending,
+			rivertype.JobStateRunning,
+			rivertype.JobStateRetryable,
+			rivertype.JobStateScheduled,
+		},
+	}
 }
 
 func CancelSubscription(r *httprequest.Request) {
@@ -70,7 +85,10 @@ func CancelSubscription(r *httprequest.Request) {
 		UserID:         uc.UserID,
 		SubscriptionID: subscriptionID,
 		Feedback:       req.Feedback,
-	}, &river.InsertOpts{Queue: riverjobs.QueueBilling})
+	}, &river.InsertOpts{
+		Queue:      riverjobs.QueueBilling,
+		UniqueOpts: subscriptionLifecycleUniqueOpts(),
+	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to enqueue cancellation")
 		return
@@ -126,7 +144,10 @@ func ResumeSubscription(r *httprequest.Request) {
 	if _, err := r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.ResumeSubscriptionArgs{
 		UserID:         uc.UserID,
 		SubscriptionID: subscriptionID,
-	}, &river.InsertOpts{Queue: riverjobs.QueueBilling}); err != nil {
+	}, &river.InsertOpts{
+		Queue:      riverjobs.QueueBilling,
+		UniqueOpts: subscriptionLifecycleUniqueOpts(),
+	}); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to enqueue resume")
 		return
 	}

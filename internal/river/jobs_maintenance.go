@@ -65,6 +65,7 @@ func (w IdempotencyCleanupWorker) Work(ctx context.Context, job *river.Job[Idemp
 	const retentionDays = 90
 
 	idempotencyService := idempotency.NewIdempotencyService(redisClient)
+	defer idempotencyService.Close()
 	dedupeService := webhooks.NewDeduplicationService(idempotencyService)
 	deletedRows, err := dedupeService.CleanupOldWebhooks(ctx, retentionDays)
 	if err != nil {
@@ -122,7 +123,6 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 	}
 	localByProcessorID := make(map[string]struct{}, len(localActive))
 	missingRemote := 0
-	expiredLocal := 0
 	for _, sub := range localActive {
 		processorSubID := strings.TrimSpace(sub.ProcessorSubscriptionID)
 		if processorSubID == "" {
@@ -135,11 +135,7 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 				"subscription_id":           sub.ID,
 				"processor_subscription_id": processorSubID,
 				"user_id":                   sub.UserID,
-			}).Warn("CCBillReconcile: expiring local active subscription missing from DataLink active members")
-			if err := lifecycleService.ExpireMembership(ctx, sub.ID); err != nil {
-				return fmt.Errorf("expire local ccbill subscription %s: %w", sub.ID, err)
-			}
-			expiredLocal++
+			}).Warn("CCBillReconcile: local active subscription missing from DataLink active members; quarantine for manual review")
 		}
 	}
 	missingLocal := 0
@@ -205,9 +201,8 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 		"local_active_count":   len(localActive),
 		"missing_remote_count": missingRemote,
 		"missing_local_count":  missingLocal,
-		"expired_local_count":  expiredLocal,
 		"reactivated_count":    reactivatedLocal,
-		"reconcile_mode":       "guarded_repair",
+		"reconcile_mode":       "guarded_repair_no_destructive_expiry",
 	}).Info("CCBillReconcile: completed guarded repair scan")
 	return nil
 }

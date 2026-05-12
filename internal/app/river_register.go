@@ -34,7 +34,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{}); err != nil {
+	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{Config: r.Config}); err != nil {
 		return fmt.Errorf("add idempotency cleanup worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CCBillReconcileWorker{DB: r.DB, DataLink: r.CCBillDataLink}); err != nil {
@@ -125,7 +125,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		river.PeriodicInterval(4*time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.DunningArgs{}, &river.InsertOpts{
-				Queue: riverjobs.QueueBilling,
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 4 * time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
@@ -136,7 +137,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		river.PeriodicInterval(24*time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.IdempotencyCleanupArgs{}, &river.InsertOpts{
-				Queue: riverjobs.QueueBilling,
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},
@@ -147,7 +149,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		river.PeriodicInterval(6*time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.CCBillReconcileArgs{}, &river.InsertOpts{
-				Queue: riverjobs.QueueBilling,
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
@@ -161,7 +164,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		river.PeriodicInterval(time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.CleanupExpiredDataArgs{}, &river.InsertOpts{
-				Queue: riverjobs.QueueBilling,
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
@@ -172,7 +176,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		river.PeriodicInterval(time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.CreditExpiryArgs{}, &river.InsertOpts{
-				Queue: riverjobs.QueueBilling,
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
@@ -184,7 +189,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		river.PeriodicInterval(5*time.Minute),
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.HoldExpiryArgs{}, &river.InsertOpts{
-				Queue: riverjobs.QueueBilling,
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

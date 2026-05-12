@@ -22,16 +22,16 @@ const (
 )
 
 type CancelSubscriptionArgs struct {
-	UserID         string    `json:"user_id"`
-	SubscriptionID uuid.UUID `json:"subscription_id,omitempty"`
+	UserID         string    `json:"user_id" river:"unique"`
+	SubscriptionID uuid.UUID `json:"subscription_id,omitempty" river:"unique"`
 	Feedback       string    `json:"feedback,omitempty"`
 }
 
 func (CancelSubscriptionArgs) Kind() string { return KindSubscriptionCancel }
 
 type ResumeSubscriptionArgs struct {
-	UserID         string    `json:"user_id"`
-	SubscriptionID uuid.UUID `json:"subscription_id,omitempty"`
+	UserID         string    `json:"user_id" river:"unique"`
+	SubscriptionID uuid.UUID `json:"subscription_id,omitempty" river:"unique"`
 }
 
 func (ResumeSubscriptionArgs) Kind() string { return KindSubscriptionResume }

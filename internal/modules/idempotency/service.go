@@ -37,6 +37,8 @@ type IdempotencyService struct {
 
 	mu       sync.RWMutex
 	memStore map[string]*memEntry
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 type memEntry struct {
@@ -49,6 +51,7 @@ func NewIdempotencyService(redisClient *redis.Client) *IdempotencyService {
 		client:   redisClient,
 		ttl:      DefaultIdempotencyTTL,
 		memStore: make(map[string]*memEntry),
+		stopCh:   make(chan struct{}),
 	}
 
 	go s.cleanupLoop()
@@ -61,6 +64,7 @@ func NewIdempotencyServiceWithTTL(redisClient *redis.Client, ttl time.Duration) 
 		client:   redisClient,
 		ttl:      ttl,
 		memStore: make(map[string]*memEntry),
+		stopCh:   make(chan struct{}),
 	}
 	go s.cleanupLoop()
 	return s
@@ -70,16 +74,33 @@ func (s *IdempotencyService) cleanupLoop() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		s.mu.Lock()
-		now := time.Now()
-		for key, entry := range s.memStore {
-			if now.After(entry.expiresAt) {
-				delete(s.memStore, key)
+	for {
+		select {
+		case <-ticker.C:
+			s.mu.Lock()
+			now := time.Now()
+			for key, entry := range s.memStore {
+				if now.After(entry.expiresAt) {
+					delete(s.memStore, key)
+				}
 			}
+			s.mu.Unlock()
+		case <-s.stopCh:
+			return
 		}
-		s.mu.Unlock()
 	}
+}
+
+func (s *IdempotencyService) Close() {
+	if s == nil {
+		return
+	}
+	if s.stopCh == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+	})
 }
 
 func (s *IdempotencyService) Begin(ctx context.Context, operation, key string) (*IdempotencyRecord, bool, error) {

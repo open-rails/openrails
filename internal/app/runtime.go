@@ -130,6 +130,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("failed to close billing event service: %w", err))
 		}
 	}
+	if r.IdempotencyService != nil {
+		r.IdempotencyService.Close()
+	}
 	if r.RedisClient != nil {
 		if err := r.RedisClient.Close(); err != nil {
 			// Make shutdown idempotent: Close can be called multiple times across layers.

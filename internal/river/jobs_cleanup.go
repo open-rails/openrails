@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -66,26 +67,30 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 
 	now := clock.Now()
 	result := CleanupResult{}
-	var err error
+	var cleanupErr error
 
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
 	logger.Info("Starting cleanup of expired data")
 
 	// 1. Expire checkout sessions that have passed their TTL
+	var err error
 	result.CheckoutSessionsExpired, err = w.expireCheckoutSessions(ctx, now)
 	if err != nil {
 		logger.WithError(err).Error("Failed to expire checkout sessions")
+		cleanupErr = errors.Join(cleanupErr, err)
 	}
 
 	// 2. Clean up old notifications (seen ones first with shorter retention)
 	result.NotificationsSeen, err = w.cleanupSeenNotifications(ctx, now, config.NotificationSeenRetention)
 	if err != nil {
 		logger.WithError(err).Error("Failed to cleanup seen notifications")
+		cleanupErr = errors.Join(cleanupErr, err)
 	}
 
 	result.NotificationsAll, err = w.cleanupOldNotifications(ctx, now, config.NotificationUnseenRetention)
 	if err != nil {
 		logger.WithError(err).Error("Failed to cleanup old notifications")
+		cleanupErr = errors.Join(cleanupErr, err)
 	}
 
 	logger.WithFields(log.Fields{
@@ -94,6 +99,9 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 		"notifications_unseen":      result.NotificationsAll,
 	}).Info("Cleanup completed")
 
+	if cleanupErr != nil {
+		return fmt.Errorf("cleanup expired data: %w", cleanupErr)
+	}
 	return nil
 }
 
