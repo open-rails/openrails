@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -55,14 +56,13 @@ func (s *Spool) Enqueue(rec *Record) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	// Enforce capacity before creating a temp file so temp files are not counted
+	// as committed records or accidentally deleted as old records.
+	if err := s.enforceCapacity(int64(len(data)), 1); err != nil {
 		return err
 	}
-	// Enforce capacity before making the file visible
-	if err := s.enforceCapacity(int64(len(data)), 1); err != nil {
-		// If enforcement fails, drop the new record by removing tmp and return error
-		_ = os.Remove(tmp)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
@@ -79,7 +79,7 @@ func (s *Spool) List(limit int) ([]string, error) {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() || !isRecordName(e.Name()) {
 			continue
 		}
 		names = append(names, e.Name())
@@ -133,7 +133,7 @@ func (s *Spool) enforceCapacity(newSize int64, newFiles int) error {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() && isRecordName(e.Name()) {
 			names = append(names, e.Name())
 		}
 	}
@@ -183,6 +183,10 @@ func (s *Spool) enforceCapacity(newSize int64, newFiles int) error {
 		return fmt.Errorf("spool record exceeds max files cap")
 	}
 	return nil
+}
+
+func isRecordName(name string) bool {
+	return strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".tmp")
 }
 
 func errorsIs(err error, target error) bool {

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -24,14 +25,20 @@ import (
 
 // EventLogService handles logging billing events to ClickHouse
 type EventLogService struct {
+	mu             sync.Mutex
 	clickhouseConn driver.Conn
 	config         *config.ClickHouseConfig
 	spool          *spool.Spool
+	clockMu        sync.RWMutex
 	clock          clockwork.Clock
+	flushCancel    context.CancelFunc
+	flushWG        sync.WaitGroup
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *EventLogService) now() time.Time {
+	s.clockMu.RLock()
+	defer s.clockMu.RUnlock()
 	if s.clock != nil {
 		return s.clock.Now()
 	}
@@ -44,33 +51,39 @@ func NewEventLogService(cfg *config.ClickHouseConfig, clocks ...clockwork.Clock)
 	// Feature gate: presence of HTTPAddr indicates intent to use CH
 	if cfg == nil || cfg.HTTPAddr == "" {
 		log.Warn("ClickHouse HTTPAddr not configured - billing events will not be logged")
-		sp, _ := spool.New("")
-		svc := &EventLogService{spool: sp, clock: clock}
-		svc.startBackgroundFlush()
-		return svc, nil
+		return &EventLogService{clock: clock}, nil
+	}
+
+	sp, err := spool.New("")
+	if err != nil {
+		return nil, fmt.Errorf("create analytics spool: %w", err)
 	}
 
 	// Try connect; if it fails, return service with nil conn so it can retry later
-	conn, err := initClickHouseConnection(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := initClickHouseConnection(ctx, cfg)
 	if err != nil {
 		log.WithError(err).Warn("ClickHouse unavailable at startup; will retry on use")
-		sp, _ := spool.New("")
 		svc := &EventLogService{clickhouseConn: nil, config: cfg, spool: sp, clock: clock}
 		svc.startBackgroundFlush()
 		return svc, nil
 	}
 
-	sp, _ := spool.New("")
 	svc := &EventLogService{clickhouseConn: conn, config: cfg, spool: sp, clock: clock}
 	svc.startBackgroundFlush()
 	return svc, nil
 }
 
 func (s *EventLogService) SetClock(c clockwork.Clock) {
+	s.clockMu.Lock()
+	defer s.clockMu.Unlock()
 	s.clock = firstClock(c)
 }
 
 func (s *EventLogService) Clock() clockwork.Clock {
+	s.clockMu.RLock()
+	defer s.clockMu.RUnlock()
 	return s.clock
 }
 
@@ -85,6 +98,14 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 
 // ensureConn lazily (re)establishes the ClickHouse connection
 func (s *EventLogService) ensureConn(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ensureConnLocked(ctx)
+}
+
+// ensureConnLocked lazily (re)establishes the ClickHouse connection.
+// s.mu must be held by the caller.
+func (s *EventLogService) ensureConnLocked(ctx context.Context) error {
 	if s.config == nil || s.config.HTTPAddr == "" {
 		return fmt.Errorf("ClickHouse HTTPAddr not configured")
 	}
@@ -98,7 +119,7 @@ func (s *EventLogService) ensureConn(ctx context.Context) error {
 		_ = s.clickhouseConn.Close()
 		s.clickhouseConn = nil
 	}
-	conn, err := initClickHouseConnection(s.config)
+	conn, err := initClickHouseConnection(ctx, s.config)
 	if err != nil {
 		return err
 	}
@@ -120,7 +141,9 @@ func (s *EventLogService) Ready(ctx context.Context) error {
 // SubscriptionEventExists checks if a subscription event of the given type already exists.
 // Used to avoid emitting duplicate lifecycle events when multiple webhooks report the same state change.
 func (s *EventLogService) SubscriptionEventExists(ctx context.Context, subscriptionID uuid.UUID, eventType string) (bool, error) {
-	if err := s.ensureConn(ctx); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensureConnLocked(ctx); err != nil {
 		return false, err
 	}
 
@@ -142,13 +165,24 @@ func (s *EventLogService) startBackgroundFlush() {
 	if s.spool == nil {
 		return
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.flushCancel = cancel
+	s.flushWG.Add(1)
 	go func() {
+		defer s.flushWG.Done()
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = s.flushOnce(ctx, 200)
-			cancel()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				flushCtx, flushCancel := context.WithTimeout(ctx, 5*time.Second)
+				if err := s.flushOnce(flushCtx, 200); err != nil && flushCtx.Err() == nil {
+					log.WithError(err).Warn("analytics spool flush failed")
+				}
+				flushCancel()
+			}
 		}
 	}()
 }
@@ -157,11 +191,16 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 	if s.spool == nil {
 		return nil
 	}
-	if err := s.ensureConn(ctx); err != nil {
-		return err
-	}
 	paths, err := s.spool.List(limit)
 	if err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensureConnLocked(ctx); err != nil {
 		return err
 	}
 	// Buckets by kind
@@ -301,7 +340,9 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 	// Batch insert helpers
 	removeAll := func(files []fileRec) {
 		for _, f := range files {
-			_ = s.spool.Remove(f.path)
+			if err := s.spool.Remove(f.path); err != nil {
+				log.WithError(err).Warnf("remove analytics spool %s", filepath.Base(f.path))
+			}
 		}
 	}
 	if len(subs) > 0 {
@@ -336,8 +377,23 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 
 // Close closes the ClickHouse connection
 func (s *EventLogService) Close() error {
+	if s.flushCancel != nil {
+		s.flushCancel()
+		s.flushWG.Wait()
+	}
+	if s.spool != nil && s.config != nil && s.config.HTTPAddr != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := s.flushOnce(ctx, 200); err != nil && ctx.Err() == nil {
+			log.WithError(err).Warn("analytics spool final flush failed")
+		}
+		cancel()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.clickhouseConn != nil {
-		return s.clickhouseConn.Close()
+		err := s.clickhouseConn.Close()
+		s.clickhouseConn = nil
+		return err
 	}
 	return nil
 }
@@ -488,12 +544,9 @@ func redactAndTruncate(s string, max int) string {
 
 // LogSubscriptionEvent logs a subscription lifecycle event
 func (s *EventLogService) LogSubscriptionEvent(ctx context.Context, data SubscriptionEventData) error {
-	if err := s.ensureConn(ctx); err != nil {
-		log.WithError(err).Warn("ClickHouse not available - spooling subscription event")
-		s.enqueue("subscription", data)
+	if s == nil || s.config == nil || s.config.HTTPAddr == "" {
 		return nil
 	}
-
 	if data.EventID == uuid.Nil {
 		data.EventID = uuid.New()
 	}
@@ -501,16 +554,23 @@ func (s *EventLogService) LogSubscriptionEvent(ctx context.Context, data Subscri
 		data.Timestamp = s.now().UTC()
 	}
 
-	err := s.insertSubscription(ctx, data)
+	s.mu.Lock()
+	err := s.ensureConnLocked(ctx)
+	if err == nil {
+		err = s.insertSubscription(ctx, data)
+	}
+	s.mu.Unlock()
 	if err != nil {
+		if err := s.enqueue("subscription", data); err != nil {
+			return fmt.Errorf("failed to log subscription event and enqueue spool record: %w", err)
+		}
 		log.WithError(err).WithFields(log.Fields{
 			"event_id":        data.EventID,
 			"subscription_id": data.SubscriptionID,
 			"event_type":      data.EventType,
 			"processor":       data.Processor,
-		}).Error("Failed to log subscription event to ClickHouse; spooling")
-		s.enqueue("subscription", data)
-		return fmt.Errorf("failed to log subscription event: %w", err)
+		}).Warn("Failed to log subscription event to ClickHouse; spooled")
+		return nil
 	}
 
 	log.WithFields(log.Fields{
@@ -525,12 +585,9 @@ func (s *EventLogService) LogSubscriptionEvent(ctx context.Context, data Subscri
 
 // LogPaymentEvent logs a payment transaction event
 func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEventData) error {
-	if err := s.ensureConn(ctx); err != nil {
-		log.WithError(err).Warn("ClickHouse not available - spooling payment event")
-		s.enqueue("payment", data)
+	if s == nil || s.config == nil || s.config.HTTPAddr == "" {
 		return nil
 	}
-
 	if data.EventID == uuid.Nil {
 		data.EventID = uuid.New()
 	}
@@ -541,16 +598,23 @@ func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEvent
 		data.Currency = "usd"
 	}
 
-	err := s.insertPayment(ctx, data)
+	s.mu.Lock()
+	err := s.ensureConnLocked(ctx)
+	if err == nil {
+		err = s.insertPayment(ctx, data)
+	}
+	s.mu.Unlock()
 	if err != nil {
+		if err := s.enqueue("payment", data); err != nil {
+			return fmt.Errorf("failed to log payment event and enqueue spool record: %w", err)
+		}
 		log.WithError(err).WithFields(log.Fields{
 			"event_id":   data.EventID,
 			"user_id":    data.UserID,
 			"event_type": data.EventType,
 			"processor":  data.Processor,
-		}).Error("Failed to log payment event to ClickHouse; spooling")
-		s.enqueue("payment", data)
-		return fmt.Errorf("failed to log payment event: %w", err)
+		}).Warn("Failed to log payment event to ClickHouse; spooled")
+		return nil
 	}
 
 	log.WithFields(log.Fields{
@@ -566,12 +630,9 @@ func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEvent
 // LogTransactionEvent logs a transaction event
 func (s *EventLogService) LogTransactionEvent(ctx context.Context, data TransactionEventData) error {
 	// Map transaction event into payment_events to avoid separate table.
-	if err := s.ensureConn(ctx); err != nil {
-		log.WithError(err).Warn("ClickHouse not available - spooling transaction event")
-		s.enqueue("transaction", data)
+	if s == nil || s.config == nil || s.config.HTTPAddr == "" {
 		return nil
 	}
-
 	if data.EventID == uuid.Nil {
 		data.EventID = uuid.New()
 	}
@@ -580,6 +641,13 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 	}
 	if data.Currency == "" {
 		data.Currency = "usd"
+	}
+	if err := s.ensureConn(ctx); err != nil {
+		if err := s.enqueue("transaction", data); err != nil {
+			return fmt.Errorf("failed to enqueue transaction event: %w", err)
+		}
+		log.WithError(err).Warn("ClickHouse not available - spooled transaction event")
+		return nil
 	}
 
 	evt := strings.ToLower(data.EventType)
@@ -624,12 +692,9 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 
 // LogACUEvent logs an Automatic Card Updater event
 func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) error {
-	if err := s.ensureConn(ctx); err != nil {
-		log.WithError(err).Warn("ClickHouse not available - spooling ACU event")
-		s.enqueue("acu", data)
+	if s == nil || s.config == nil || s.config.HTTPAddr == "" {
 		return nil
 	}
-
 	if data.EventID == uuid.Nil {
 		data.EventID = uuid.New()
 	}
@@ -648,30 +713,37 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 
-	err := s.clickhouseConn.Exec(ctx, query,
-		data.EventID,
-		data.SubscriptionID,
-		data.UserID,
-		data.EventType,
-		data.Processor,
-		data.ProcessorSubscriptionID,
-		data.CardInfo,
-		data.UpdateStatus,
-		data.RequiresAction,
-		data.Reason,
-		data.Metadata,
-		data.Timestamp,
-	)
+	s.mu.Lock()
+	err := s.ensureConnLocked(ctx)
+	if err == nil {
+		err = s.clickhouseConn.Exec(ctx, query,
+			data.EventID,
+			data.SubscriptionID,
+			data.UserID,
+			data.EventType,
+			data.Processor,
+			data.ProcessorSubscriptionID,
+			data.CardInfo,
+			data.UpdateStatus,
+			data.RequiresAction,
+			data.Reason,
+			data.Metadata,
+			data.Timestamp,
+		)
+	}
+	s.mu.Unlock()
 
 	if err != nil {
+		if err := s.enqueue("acu", data); err != nil {
+			return fmt.Errorf("failed to log ACU event and enqueue spool record: %w", err)
+		}
 		log.WithError(err).WithFields(log.Fields{
 			"event_id":      data.EventID,
 			"event_type":    data.EventType,
 			"processor":     data.Processor,
 			"update_status": data.UpdateStatus,
-		}).Error("Failed to log ACU event to ClickHouse; spooling")
-		s.enqueue("acu", data)
-		return fmt.Errorf("failed to log ACU event: %w", err)
+		}).Warn("Failed to log ACU event to ClickHouse; spooled")
+		return nil
 	}
 
 	log.WithFields(log.Fields{
@@ -686,12 +758,9 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 
 // LogChargebackEvent logs a chargeback event
 func (s *EventLogService) LogChargebackEvent(ctx context.Context, data ChargebackEventData) error {
-	if err := s.ensureConn(ctx); err != nil {
-		log.WithError(err).Warn("ClickHouse not available - spooling chargeback event")
-		s.enqueue("chargeback", data)
+	if s == nil || s.config == nil || s.config.HTTPAddr == "" {
 		return nil
 	}
-
 	if data.EventID == uuid.Nil {
 		data.EventID = uuid.New()
 	}
@@ -710,34 +779,41 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	err := s.clickhouseConn.Exec(ctx, query,
-		data.EventID,
-		data.ChargebackID,
-		data.BatchID,
-		nullableUUID(data.SubscriptionID),
-		nullableString2(data.UserID),
-		data.EventType,
-		data.Processor,
-		nullableString2(data.ProcessorTransactionID),
-		data.Amount,
-		data.Currency,
-		data.ChargebackType,
-		data.Reason,
-		data.Status,
-		data.Metadata,
-		data.Timestamp,
-	)
+	s.mu.Lock()
+	err := s.ensureConnLocked(ctx)
+	if err == nil {
+		err = s.clickhouseConn.Exec(ctx, query,
+			data.EventID,
+			data.ChargebackID,
+			data.BatchID,
+			nullableUUID(data.SubscriptionID),
+			nullableString2(data.UserID),
+			data.EventType,
+			data.Processor,
+			nullableString2(data.ProcessorTransactionID),
+			data.Amount,
+			data.Currency,
+			data.ChargebackType,
+			data.Reason,
+			data.Status,
+			data.Metadata,
+			data.Timestamp,
+		)
+	}
+	s.mu.Unlock()
 
 	if err != nil {
+		if err := s.enqueue("chargeback", data); err != nil {
+			return fmt.Errorf("failed to log chargeback event and enqueue spool record: %w", err)
+		}
 		log.WithError(err).WithFields(log.Fields{
 			"event_id":        data.EventID,
 			"chargeback_id":   data.ChargebackID,
 			"event_type":      data.EventType,
 			"processor":       data.Processor,
 			"chargeback_type": data.ChargebackType,
-		}).Error("Failed to log chargeback event to ClickHouse; spooling")
-		s.enqueue("chargeback", data)
-		return fmt.Errorf("failed to log chargeback event: %w", err)
+		}).Warn("Failed to log chargeback event to ClickHouse; spooled")
+		return nil
 	}
 
 	log.WithFields(log.Fields{
@@ -903,15 +979,18 @@ func (s *EventLogService) LogLifecycleFailure(ctx context.Context, subscriptionI
 }
 
 // enqueue helper
-func (s *EventLogService) enqueue(kind string, v interface{}) {
+func (s *EventLogService) enqueue(kind string, v interface{}) error {
 	if s.spool == nil {
-		return
+		return fmt.Errorf("analytics spool unavailable")
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
-		return
+		return fmt.Errorf("marshal analytics event: %w", err)
 	}
-	_ = s.spool.Enqueue(&spool.Record{Kind: kind, Data: b})
+	if err := s.spool.Enqueue(&spool.Record{Kind: kind, Data: b}); err != nil {
+		return fmt.Errorf("enqueue analytics spool record: %w", err)
+	}
+	return nil
 }
 
 // insert helpers used by both direct logging and background flush
@@ -1035,7 +1114,7 @@ func (s *EventLogService) insertChargebackBatch(ctx context.Context, rows []Char
 }
 
 // initClickHouseConnection creates a connection to ClickHouse
-func initClickHouseConnection(cfg *config.ClickHouseConfig) (driver.Conn, error) {
+func initClickHouseConnection(ctx context.Context, cfg *config.ClickHouseConfig) (driver.Conn, error) {
 	if cfg.HTTPAddr == "" {
 		return nil, fmt.Errorf("ClickHouse HTTPAddr not configured")
 	}
@@ -1088,7 +1167,7 @@ func initClickHouseConnection(cfg *config.ClickHouseConfig) (driver.Conn, error)
 	}
 
 	// Test the connection
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	if err := conn.Ping(ctx); err != nil {
