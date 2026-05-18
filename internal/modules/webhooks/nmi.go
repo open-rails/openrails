@@ -539,7 +539,7 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		}, nil)
 	}
 
-	_, err = s.PriceService.GetByNMIPlan(ctx, provider, nmiPlanID)
+	price, err := s.PriceService.GetByNMIPlan(ctx, provider, nmiPlanID)
 	if err != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id": nmiSubID,
@@ -566,21 +566,48 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		return nil
 	}
 
-	if shouldDeferNMIActivation(body.NextChargeDate.Trimmed(), s.now()) {
+	transactionID, err := s.nmiSubscriptionAddTransactionID(ctx, subscription, nmiSubID)
+	if err != nil {
+		return err
+	}
+	if transactionID == "" {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id":           subscription.ID,
 			"processor_subscription_id": nmiSubID,
 			"next_charge_date":          body.NextChargeDate.Trimmed(),
 			"processor":                 provider,
-		}).Info("Deferring NMI subscription activation until the first scheduled charge")
+		}).Info("NMI subscription add recorded without settled transaction metadata; waiting for transaction.sale.success before activation")
 		return nil
+	}
+
+	var currentPeriodEndsAt *time.Time
+	if nextChargeDate, ok := parseNMIDate(body.NextChargeDate.Trimmed()); ok && nextChargeDate.After(s.now()) {
+		end := nextChargeDate.UTC()
+		currentPeriodEndsAt = &end
+	}
+
+	if _, err := s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
+		PriceID:                 subscription.PriceID,
+		UserID:                  subscription.UserID,
+		Processor:               models.Processor(provider),
+		ProcessorSubscriptionID: &subscription.ProcessorSubscriptionID,
+		UserEmail:               subscription.UserEmail,
+		CurrentPeriodEndsAt:     currentPeriodEndsAt,
+		TransactionID:           transactionID,
+		Amount:                  price.Amount,
+		AmountProvided:          true,
+		Currency:                price.Currency,
+	}); err != nil {
+		return fmt.Errorf("activate NMI subscription from add event: %w", err)
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id":           subscription.ID,
 		"processor_subscription_id": nmiSubID,
 		"processor":                 provider,
-	}).Info("NMI subscription add recorded; waiting for transaction.sale.success before activation")
+		"transaction_id":            transactionID,
+		"next_charge_date":          body.NextChargeDate.Trimmed(),
+	}).Info("NMI subscription activated from add event with settled transaction metadata")
 	return nil
 }
 
@@ -1338,17 +1365,71 @@ func parseNMIDate(raw string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func shouldDeferNMIActivation(nextChargeDate string, now time.Time) bool {
-	target, ok := parseNMIDate(nextChargeDate)
-	if !ok {
-		return false
-	}
-	return startOfUTCDate(target).After(startOfUTCDate(now))
-}
-
 func startOfUTCDate(value time.Time) time.Time {
 	utc := value.UTC()
 	return time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func (s *NMIWebhookService) nmiSubscriptionAddTransactionID(ctx context.Context, subscription *models.Subscription, nmiSubID string) (string, error) {
+	if transactionID := nmiProviderTransactionIDFromMetadata(subscription.Metadata); transactionID != "" {
+		return transactionID, nil
+	}
+	if s.PaymentService == nil {
+		return "", nil
+	}
+	attempt, err := s.PaymentService.GetByMetadataValue(ctx, "provider_subscription_id", nmiSubID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("lookup NMI subscription attempt metadata: %w", err)
+	}
+	if attempt == nil {
+		return "", nil
+	}
+	return nmiProviderTransactionIDFromMap(attempt.Metadata), nil
+}
+
+func nmiProviderTransactionIDFromMetadata(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	metadata := map[string]any{}
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return ""
+	}
+	return nmiProviderTransactionIDFromMap(metadata)
+}
+
+func nmiProviderTransactionIDFromMap(metadata map[string]any) string {
+	for _, key := range []string{"provider_transaction_id", "transaction_id"} {
+		value, ok := metadata[key]
+		if !ok {
+			continue
+		}
+		transactionID, ok := value.(string)
+		if !ok {
+			continue
+		}
+		transactionID = strings.TrimSpace(transactionID)
+		if isRealNMIProviderTransactionID(transactionID) {
+			return transactionID
+		}
+	}
+	return ""
+}
+
+func isRealNMIProviderTransactionID(transactionID string) bool {
+	transactionID = strings.TrimSpace(transactionID)
+	if transactionID == "" {
+		return false
+	}
+	for _, prefix := range []string{"sub:", "nmi_sub_attempt:", "nmi_sale_attempt:"} {
+		if strings.HasPrefix(transactionID, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 func splitNMIChargebackReason(rawReason, rawReasonCode string) (string, string) {

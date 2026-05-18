@@ -16,7 +16,7 @@ import (
 
 // RPCEndpoint represents a single RPC endpoint with metadata.
 type RPCEndpoint struct {
-	Name     string // Human-readable name (e.g., "Helius", "Ankr", "Solana Public")
+	Name     string // Human-readable name (e.g., "Helius", "Solana Public")
 	URL      string // Full RPC URL
 	Priority int    // Lower = higher priority
 }
@@ -59,14 +59,6 @@ func DefaultMainnetEndpoints(heliusAPIKey string) []RPCEndpoint {
 		priority++
 	}
 
-	// Ankr (free, no rate limits advertised)
-	endpoints = append(endpoints, RPCEndpoint{
-		Name:     "Ankr",
-		URL:      "https://rpc.ankr.com/solana",
-		Priority: priority,
-	})
-	priority++
-
 	// Solana public (fallback, rate-limited)
 	endpoints = append(endpoints, RPCEndpoint{
 		Name:     "Solana Public",
@@ -91,14 +83,6 @@ func DefaultDevnetEndpoints(heliusAPIKey string) []RPCEndpoint {
 		})
 		priority++
 	}
-
-	// Ankr devnet
-	endpoints = append(endpoints, RPCEndpoint{
-		Name:     "Ankr Devnet",
-		URL:      "https://rpc.ankr.com/solana_devnet",
-		Priority: priority,
-	})
-	priority++
 
 	// Solana public devnet
 	endpoints = append(endpoints, RPCEndpoint{

@@ -378,12 +378,12 @@ type AuthConfig struct {
 
 type SolanaConfig struct {
 	// RPCEndpoint is a custom RPC endpoint override. If set, it bypasses the fallback chain entirely.
-	// Leave empty to use the automatic fallback chain: Helius (if configured) → Ankr → Solana public.
+	// Leave empty to use the automatic fallback chain: Helius (if configured) → Solana public.
 	RPCEndpoint string `koanf:"rpc_endpoint"`
 
 	// HeliusAPIKey enables Helius as the primary RPC provider (recommended for production).
 	// Get a free API key at https://helius.dev (100k requests/day on free tier).
-	// If not set, falls back to Ankr → Solana public endpoints.
+	// If not set, falls back to Solana public endpoints.
 	HeliusAPIKey string `koanf:"helius_api_key"`
 
 	Network         string `koanf:"network"` // mainnet, devnet, testnet
