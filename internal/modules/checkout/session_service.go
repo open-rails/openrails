@@ -349,19 +349,18 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 			return nil, ErrCheckoutSessionConflict
 		}
 	}
-	if s.isExpired(session) {
-		if !s.isTerminal(session.Status) {
-			_ = s.MarkExpired(ctx, session.ID, "checkout session expired")
-		}
-		return nil, ErrCheckoutSessionExpired
-	}
-
 	processor := strings.ToLower(strings.TrimSpace(req.Payment.Processor))
 	if processor == "" {
 		return nil, fmt.Errorf("%w: payment.processor is required", ErrCheckoutSessionValidation)
 	}
 	if processor != strings.ToLower(string(session.Processor)) {
 		return nil, fmt.Errorf("%w: processor mismatch", ErrCheckoutSessionValidation)
+	}
+	if s.isExpired(session) && processor != string(models.ProcessorSolana) {
+		if !s.isTerminal(session.Status) {
+			_ = s.MarkExpired(ctx, session.ID, "checkout session expired")
+		}
+		return nil, ErrCheckoutSessionExpired
 	}
 
 	switch processor {
@@ -1047,9 +1046,14 @@ func (s *CheckoutSessionService) MarkSucceeded(ctx context.Context, sessionID uu
 		if session.Status == models.CheckoutSessionStatusSucceeded {
 			return nil
 		}
-		return ErrCheckoutSessionConflict
+		if session.Status == models.CheckoutSessionStatusExpired && session.Processor == models.ProcessorSolana && paymentID != uuid.Nil && strings.TrimSpace(transactionID) != "" {
+			// A wallet may broadcast before expiry but the app may confirm after expiry.
+			// The caller has already verified the signature against the session-bound quote.
+		} else {
+			return ErrCheckoutSessionConflict
+		}
 	}
-	if s.isExpired(session) {
+	if s.isExpired(session) && session.Processor != models.ProcessorSolana {
 		_ = s.MarkExpired(ctx, session.ID, "checkout session expired")
 		return ErrCheckoutSessionExpired
 	}
@@ -1395,7 +1399,14 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		return nil, fmt.Errorf("%w: token_symbol missing from session", ErrCheckoutSessionValidation)
 	}
 
-	// Generate reference if not already set
+	if session.ProcessorState == nil {
+		session.ProcessorState = map[string]any{}
+	}
+	if existingPayer := strings.TrimSpace(getStringField(session.ProcessorState, "payer")); existingPayer != "" && existingPayer != account {
+		return nil, fmt.Errorf("%w: solana checkout session is already bound to a different payer", ErrCheckoutSessionConflict)
+	}
+
+	// Generate and persist the payment binding before returning a transaction to the wallet.
 	if session.Reference == nil || *session.Reference == "" {
 		reference, err := solana.GenerateReference()
 		if err != nil {
@@ -1403,6 +1414,11 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		}
 		session.Reference = &reference
 	}
+	session.ProcessorState["payer"] = account
+	if err := s.repo.BindSolanaTransactionRequest(ctx, session, account, s.now()); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionConflict, err)
+	}
+
 	buildReq, err := solanaBuildRequestFromSession(session, account, tokenSymbol)
 	if err != nil {
 		return nil, err
@@ -1412,16 +1428,6 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 	txResp, err := s.solanaTransactionService.BuildPaymentTransactionFromQuote(ctx, buildReq)
 	if err != nil {
 		return nil, err
-	}
-
-	// Update session with payer wallet and transaction info
-	if session.ProcessorState == nil {
-		session.ProcessorState = map[string]any{}
-	}
-	session.ProcessorState["payer"] = account
-
-	if err := s.repo.Update(ctx, session); err != nil {
-		return nil, fmt.Errorf("failed to update session: %w", err)
 	}
 
 	// Build message for wallet

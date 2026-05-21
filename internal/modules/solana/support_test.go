@@ -143,4 +143,20 @@ func TestSolanaPaymentMatchesPendingRequiresSameReferenceAndSession(t *testing.T
 
 	payment.Metadata["checkout_session_id"] = "other_session"
 	require.False(t, solanaPaymentMatchesPending(payment, "reference_123", pending))
+
+	payment.Metadata["checkout_session_id"] = "session_123"
+	pending.SessionID = ""
+	require.False(t, solanaPaymentMatchesPending(payment, "reference_123", pending))
+}
+
+func TestGeneratePaymentRequiresCheckoutSession(t *testing.T) {
+	svc := &SolanaPayService{}
+	_, err := svc.GeneratePayment(context.Background(), "user_123", uuid.New(), "USDC", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "checkout session id is required")
+
+	nilID := uuid.Nil
+	_, err = svc.GeneratePayment(context.Background(), "user_123", uuid.New(), "USDC", &nilID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "checkout session id is required")
 }

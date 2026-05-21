@@ -197,18 +197,43 @@ func (s *NMIWebhookService) resolveSubscriptionFromReference(ctx context.Context
 	}
 
 	// Fallback lookup: UUID if the reference is a local subscription ID.
-	subID, parseErr := uuid.Parse(ref)
-	if parseErr != nil {
-		return nil, sql.ErrNoRows
+	if subID, parseErr := uuid.Parse(ref); parseErr == nil {
+		subscription, err = s.SubscriptionService.GetByID(ctx, subID)
+		if err == nil {
+			if subscription.Processor != models.Processor(provider) || subscription.Status != models.StatusPending {
+				return nil, fmt.Errorf("subscription UUID fallback is only allowed for pending subscriptions on the same processor")
+			}
+			return subscription, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
 	}
-	subscription, err = s.SubscriptionService.GetByID(ctx, subID)
-	if err != nil {
-		return nil, err
+
+	// NMI/Mobius transaction.sale.success may only include the original order/PO.
+	// Resolve those references through local subscription metadata before granting access.
+	subscription, err = s.SubscriptionService.GetByProcessorMetadataValue(ctx, provider, "order_id", ref)
+	if err == nil {
+		return subscription, nil
 	}
-	if subscription.Processor != models.Processor(provider) || subscription.Status != models.StatusPending {
-		return nil, fmt.Errorf("subscription UUID fallback is only allowed for pending subscriptions on the same processor")
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("load subscription by NMI order metadata: %w", err)
 	}
-	return subscription, nil
+
+	if s.PaymentService != nil {
+		attempt, lookupErr := s.PaymentService.GetByMetadataValue(ctx, "nmi_subscription_order_id", ref)
+		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			return nil, fmt.Errorf("load NMI subscription attempt by order metadata: %w", lookupErr)
+		}
+		if lookupErr == nil && attempt != nil {
+			providerSubID := strings.TrimSpace(fmt.Sprint(attempt.Metadata["provider_subscription_id"]))
+			if providerSubID != "" {
+				return s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, providerSubID)
+			}
+		}
+	}
+
+	return nil, sql.ErrNoRows
 }
 
 func transactionActionSource(body *NMITransactionEventBody) string {
@@ -577,6 +602,15 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 			"next_charge_date":          body.NextChargeDate.Trimmed(),
 			"processor":                 provider,
 		}).Info("NMI subscription add recorded without settled transaction metadata; waiting for transaction.sale.success before activation")
+		return nil
+	}
+	if delayedStart := nmiDelayedStartFromSubscriptionMetadata(subscription.Metadata); delayedStart != nil && delayedStart.After(s.now().UTC()) {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id":           subscription.ID,
+			"processor_subscription_id": nmiSubID,
+			"delayed_start":             delayedStart.UTC().Format(time.RFC3339),
+			"processor":                 provider,
+		}).Info("NMI subscription add has settled transaction metadata but checkout delayed_start is in the future; keeping pending")
 		return nil
 	}
 
@@ -1399,6 +1433,26 @@ func nmiProviderTransactionIDFromMetadata(raw json.RawMessage) string {
 		return ""
 	}
 	return nmiProviderTransactionIDFromMap(metadata)
+}
+
+func nmiDelayedStartFromSubscriptionMetadata(raw json.RawMessage) *time.Time {
+	if len(raw) == 0 {
+		return nil
+	}
+	metadata := map[string]any{}
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return nil
+	}
+	rawDelayedStart, ok := metadata["delayed_start"].(string)
+	if !ok || strings.TrimSpace(rawDelayedStart) == "" {
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(rawDelayedStart))
+	if err != nil {
+		return nil
+	}
+	parsed = parsed.UTC()
+	return &parsed
 }
 
 func nmiProviderTransactionIDFromMap(metadata map[string]any) string {

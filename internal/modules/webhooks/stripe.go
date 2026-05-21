@@ -84,6 +84,9 @@ type stripeInvoice struct {
 	Lines         struct {
 		Data []stripeInvoiceLineItem `json:"data"`
 	} `json:"lines"`
+	SubscriptionDetails struct {
+		Metadata map[string]string `json:"metadata"`
+	} `json:"subscription_details"`
 }
 
 type stripeCheckoutSession struct {
@@ -185,7 +188,8 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	if err := json.Unmarshal(obj, &inv); err != nil {
 		return fmt.Errorf("parse invoice: %w", err)
 	}
-	userID := normalize.FirstNonEmpty(inv.Metadata["user_id"], inv.Metadata["userId"], inv.Metadata["uid"])
+	metadata := stripeInvoiceEffectiveMetadata(inv)
+	userID := normalize.FirstNonEmpty(metadata["user_id"], metadata["userId"], metadata["uid"])
 	if userID == "" {
 		return fmt.Errorf("stripe invoice missing user_id metadata")
 	}
@@ -195,8 +199,17 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			_ = s.ProcessorCustomerService.Upsert(ctx, userID, string(models.ProcessorStripe), customerID)
 		}
 	}
-	priceID, price, err := s.resolvePriceFromMetadata(ctx, inv.Metadata, inv.Lines.Data)
+	priceID, price, err := s.resolvePriceFromMetadata(ctx, metadata, inv.Lines.Data)
 	if err != nil {
+		return err
+	}
+	if price == nil {
+		price, err = s.PriceService.GetByID(ctx, priceID)
+		if err != nil {
+			return fmt.Errorf("price lookup failed: %w", err)
+		}
+	}
+	if err := validateStripeInvoicePrice(inv, price); err != nil {
 		return err
 	}
 	paymentTransactionID := normalize.FirstNonEmpty(inv.Charge, inv.PaymentIntent)
@@ -253,12 +266,6 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		}
 	}
 
-	if price == nil {
-		price, err = s.PriceService.GetByID(ctx, priceID)
-		if err != nil {
-			return fmt.Errorf("price lookup failed: %w", err)
-		}
-	}
 	if err := s.ensureStripePaidSubscriptionEntitlements(ctx, processorSubID, price); err != nil {
 		return err
 	}
@@ -1156,6 +1163,30 @@ func (s *StripeWebhookService) resolvePriceFromMetadata(ctx context.Context, met
 		return price.ID, price, nil
 	}
 	return uuid.Nil, nil, fmt.Errorf("unable to resolve price")
+}
+
+func stripeInvoiceEffectiveMetadata(inv stripeInvoice) map[string]string {
+	metadata := map[string]string{}
+	for key, value := range inv.SubscriptionDetails.Metadata {
+		metadata[key] = value
+	}
+	for key, value := range inv.Metadata {
+		metadata[key] = value
+	}
+	return metadata
+}
+
+func validateStripeInvoicePrice(inv stripeInvoice, price *models.Price) error {
+	if price == nil {
+		return fmt.Errorf("stripe invoice price is required for validation")
+	}
+	if !strings.EqualFold(strings.TrimSpace(inv.Currency), strings.TrimSpace(price.Currency)) {
+		return fmt.Errorf("stripe invoice currency mismatch: got %s, want %s", inv.Currency, price.Currency)
+	}
+	if inv.AmountPaid != price.Amount {
+		return fmt.Errorf("stripe invoice amount mismatch: got %d, want %d", inv.AmountPaid, price.Amount)
+	}
+	return nil
 }
 
 func ptrProcessor(p models.Processor) *models.Processor {

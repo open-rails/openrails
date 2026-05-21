@@ -130,6 +130,9 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 // GeneratePayment creates a new pending Solana payment and returns the Transfer Request URL.
 // It first checks purchase eligibility to prevent duplicate purchases.
 func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*PayResult, error) {
+	if sessionID == nil || *sessionID == uuid.Nil {
+		return nil, fmt.Errorf("checkout session id is required for solana payments")
+	}
 	tokenSymbol = strings.ToUpper(strings.TrimSpace(tokenSymbol))
 	if tokenSymbol == "" {
 		return nil, fmt.Errorf("token symbol is required")

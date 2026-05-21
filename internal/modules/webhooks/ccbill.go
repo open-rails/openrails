@@ -150,6 +150,22 @@ func requireCCBillCurrency(currencyCode Stringish, fieldName string) (string, er
 	return normalized, nil
 }
 
+func validateCCBillCurrencyMatches(actualCurrency, expectedCurrency string, contextFields map[string]interface{}) error {
+	actual := strings.ToLower(strings.TrimSpace(actualCurrency))
+	expected := strings.ToLower(strings.TrimSpace(expectedCurrency))
+	if expected == "" || actual == expected {
+		return nil
+	}
+	billingErr := newBillingError(ErrorTypeValidation, "Billed currency does not match expected price", map[string]interface{}{
+		"billed_currency":   actual,
+		"expected_currency": expected,
+	}, nil)
+	for key, value := range contextFields {
+		billingErr.Context[key] = value
+	}
+	return billingErr
+}
+
 func (s *CCBillWebhookService) ensureFlexFormMatches(price *models.Price, flexID, formName string) error {
 	expectedFormName, expectedFlexID, ok := price.GetCCBillFlexForm()
 	if !ok {
@@ -425,13 +441,16 @@ func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context, data *CCBillNewSaleSuccessEvent) error {
 	email := data.Email
 	formID := data.FlexID
+	transactionID := strings.TrimSpace(data.TransactionID)
+	if transactionID == "" {
+		return newBillingError(ErrorTypeValidation, "missing required field: transactionId", map[string]interface{}{"field": "transactionId"}, nil)
+	}
 	userID, err := s.resolveUserID(ctx, data.Username)
 	if err != nil {
 		return err
 	}
 	formName := data.FormName
 	ccBillSubID := data.SubscriptionID
-	transactionID := data.TransactionID
 	billedAmountStr := data.BilledInitialPrice
 
 	billedAmountCents, err := parseCCBillPositiveAmountCents(billedAmountStr, "billedInitialPrice", "billedAmount")
@@ -468,6 +487,13 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 
 	currencyValue, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode")
 	if err != nil {
+		return err
+	}
+	if err := validateCCBillCurrencyMatches(currencyValue, price.Currency, map[string]interface{}{
+		"price_id":        price.ID.String(),
+		"ccbill_price_id": data.FlexID,
+		"transaction_id":  transactionID,
+	}); err != nil {
 		return err
 	}
 	paidTermEnd, err := parseCCBillDateUsingTimestamp(data.NextRenewalDate)
@@ -2237,7 +2263,10 @@ func (s *CCBillWebhookService) handleRenewalSuccess(ctx context.Context) error {
 
 func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context, data *CCBillRenewalSuccessEvent) error {
 	ccBillSubID := data.SubscriptionID
-	transactionID := data.TransactionID
+	transactionID := strings.TrimSpace(data.TransactionID)
+	if transactionID == "" {
+		return newBillingError(ErrorTypeValidation, "missing required field: transactionId", map[string]interface{}{"field": "transactionId"}, nil)
+	}
 	billedAmountStr := data.BilledAmount
 
 	billedAmountCents, err := parseCCBillPositiveAmountCents(billedAmountStr, "billedAmount", "billedAmount")
@@ -2258,6 +2287,14 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	prevStatus := prevSub.Status
 	if prevSub.Price == nil {
 		return fmt.Errorf("subscription price is required for CCBill renewal amount validation")
+	}
+	if err := validateCCBillCurrencyMatches(currencyValue, prevSub.Price.Currency, map[string]interface{}{
+		"price_id":                  prevSub.Price.ID.String(),
+		"processor_subscription_id": ccBillSubID,
+		"subscription_id":           prevSub.ID.String(),
+		"transaction_id":            transactionID,
+	}); err != nil {
+		return err
 	}
 	if err := validateCCBillBilledAmount(ctx, s, billedAmountCents, prevSub.Price.Amount, map[string]interface{}{
 		"price_id":                     prevSub.Price.ID.String(),

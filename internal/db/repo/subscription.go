@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -206,6 +207,18 @@ func (r *SubscriptionRepo) GetByProcessorSubscriptionID(ctx context.Context, pro
 
 	err := query.Scan(ctx)
 	if err != nil {
+		return nil, err
+	}
+	return sub, nil
+}
+
+func (r *SubscriptionRepo) GetByProcessorMetadataValue(ctx context.Context, processor, key, value string) (*models.Subscription, error) {
+	sub := new(models.Subscription)
+	if err := r.selectWithDetails(sub).
+		Where("sub.processor = ?", strings.TrimSpace(processor)).
+		Where("sub.gateway_response ->> ? = ?", strings.TrimSpace(key), strings.TrimSpace(value)).
+		Limit(1).
+		Scan(ctx); err != nil {
 		return nil, err
 	}
 	return sub, nil

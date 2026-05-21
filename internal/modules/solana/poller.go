@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	redis "github.com/redis/go-redis/v9"
@@ -206,9 +208,27 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 		return
 	}
 	if pending == nil {
-		// Payment expired, clean up the set
+		pending, err = p.pendingPaymentFromCheckoutSession(ctx, reference)
+		if err != nil {
+			log.WithError(err).WithField("reference", reference).Warn("Failed to recover pending Solana payment from checkout session")
+			p.deferRetry(reference, err)
+			return
+		}
+		if pending == nil {
+			// Payment expired and no durable checkout-session record can process it.
+			if err := p.solanaPayService.RemovePendingPayment(ctx, reference); err != nil {
+				log.WithError(err).WithField("reference", reference).Warn("Failed to remove expired pending payment")
+				p.deferRetry(reference, err)
+				return
+			}
+			p.clearRetry(reference)
+			return
+		}
+	}
+	if strings.TrimSpace(pending.SessionID) == "" {
+		log.WithField("reference", reference).Warn("Removing non-checkout-backed Solana pending payment")
 		if err := p.solanaPayService.RemovePendingPayment(ctx, reference); err != nil {
-			log.WithError(err).WithField("reference", reference).Warn("Failed to remove expired pending payment")
+			log.WithError(err).WithField("reference", reference).Warn("Failed to remove non-checkout-backed Solana pending payment")
 			p.deferRetry(reference, err)
 			return
 		}
@@ -286,6 +306,97 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 
 	// Signatures exist, but none were usable for this pending record yet; avoid hot-looping.
 	p.deferRetryFor(reference, solanaUnmatchedTxRetryInterval)
+}
+
+func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context, reference string) (*PendingSolanaPayment, error) {
+	if p.db == nil {
+		return nil, nil
+	}
+	session, err := dbrepo.NewCheckoutSessionRepo(p.db).GetByReference(ctx, reference)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if session.Processor != models.ProcessorSolana {
+		return nil, nil
+	}
+	switch session.Status {
+	case models.CheckoutSessionStatusRequiresAction, models.CheckoutSessionStatusExpired, models.CheckoutSessionStatusCreated:
+	case models.CheckoutSessionStatusSucceeded:
+		return nil, nil
+	default:
+		return nil, nil
+	}
+	token := strings.ToUpper(strings.TrimSpace(solanaStateString(session.ProcessorState, "token_symbol")))
+	tokenMint := strings.TrimSpace(solanaStateString(session.ProcessorState, "token_mint"))
+	recipient := strings.TrimSpace(solanaStateString(session.ProcessorState, "recipient"))
+	tokenAmount := solanaStateUint64(session.ProcessorState, "token_amount")
+	if token == "" || tokenMint == "" || recipient == "" || tokenAmount == 0 {
+		return nil, fmt.Errorf("checkout session %s is missing solana payment state", session.ID)
+	}
+	return &PendingSolanaPayment{
+		UserID:      session.UserID,
+		PriceID:     session.PriceID.String(),
+		SessionID:   session.ID.String(),
+		Amount:      session.Amount,
+		Currency:    session.Currency,
+		Token:       token,
+		TokenMint:   tokenMint,
+		TokenAmount: tokenAmount,
+		Recipient:   recipient,
+		CreatedAt:   session.CreatedAt,
+	}, nil
+}
+
+func solanaStateString(state map[string]any, key string) string {
+	if state == nil {
+		return ""
+	}
+	value, ok := state[key]
+	if !ok || value == nil {
+		return ""
+	}
+	if s, ok := value.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
+func solanaStateUint64(state map[string]any, key string) uint64 {
+	if state == nil {
+		return 0
+	}
+	value, ok := state[key]
+	if !ok || value == nil {
+		return 0
+	}
+	switch v := value.(type) {
+	case uint64:
+		return v
+	case uint32:
+		return uint64(v)
+	case uint:
+		return uint64(v)
+	case int64:
+		if v > 0 {
+			return uint64(v)
+		}
+	case int:
+		if v > 0 {
+			return uint64(v)
+		}
+	case float64:
+		if v > 0 {
+			return uint64(v)
+		}
+	case string:
+		if parsed, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
+			return parsed
+		}
+	}
+	return 0
 }
 
 func (p *SolanaPayPoller) shouldAttempt(reference string) bool {
@@ -467,6 +578,9 @@ func solanaPaymentMatchesPending(payment *models.Payment, reference string, pend
 	if payment == nil || pending == nil {
 		return false
 	}
+	if strings.TrimSpace(pending.SessionID) == "" {
+		return false
+	}
 	priceID, err := uuid.Parse(strings.TrimSpace(pending.PriceID))
 	if err != nil {
 		return false
@@ -477,7 +591,7 @@ func solanaPaymentMatchesPending(payment *models.Payment, reference string, pend
 	if strings.TrimSpace(fmt.Sprint(payment.Metadata["solana_reference"])) != strings.TrimSpace(reference) {
 		return false
 	}
-	if pending.SessionID != "" && strings.TrimSpace(fmt.Sprint(payment.Metadata["checkout_session_id"])) != strings.TrimSpace(pending.SessionID) {
+	if strings.TrimSpace(fmt.Sprint(payment.Metadata["checkout_session_id"])) != strings.TrimSpace(pending.SessionID) {
 		return false
 	}
 	return true

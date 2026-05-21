@@ -3,6 +3,7 @@ package webhooks
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,37 @@ func TestStripeInvoicePeriodEnd(t *testing.T) {
 	}
 	if end.Unix() != 200 {
 		t.Fatalf("expected unix=200, got %d", end.Unix())
+	}
+}
+
+func TestStripeInvoiceEffectiveMetadataUsesSubscriptionDetailsFallback(t *testing.T) {
+	inv := stripeInvoice{
+		Metadata: map[string]string{"user_id": "invoice_user"},
+	}
+	inv.SubscriptionDetails.Metadata = map[string]string{
+		"user_id":  "subscription_user",
+		"price_id": "price_123",
+	}
+
+	metadata := stripeInvoiceEffectiveMetadata(inv)
+	if metadata["user_id"] != "invoice_user" {
+		t.Fatalf("expected invoice metadata to win, got %q", metadata["user_id"])
+	}
+	if metadata["price_id"] != "price_123" {
+		t.Fatalf("expected subscription_details metadata fallback")
+	}
+}
+
+func TestValidateStripeInvoicePrice(t *testing.T) {
+	price := &models.Price{Amount: 2399, Currency: "USD"}
+	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 2399, Currency: "usd"}, price); err != nil {
+		t.Fatalf("expected valid invoice: %v", err)
+	}
+	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 2300, Currency: "usd"}, price); err == nil || !strings.Contains(err.Error(), "amount mismatch") {
+		t.Fatalf("expected amount mismatch, got %v", err)
+	}
+	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 2399, Currency: "eur"}, price); err == nil || !strings.Contains(err.Error(), "currency mismatch") {
+		t.Fatalf("expected currency mismatch, got %v", err)
 	}
 }
 

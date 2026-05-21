@@ -730,6 +730,9 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 		PaymentMethodID:          paymentMethodID,
 	}
 	metadata := map[string]any{"order_id": orderID, "provider_transaction_id": transactionID}
+	if delayedStart != nil {
+		metadata["delayed_start"] = delayedStart.UTC().Format(time.RFC3339)
+	}
 	if req.Metadata != nil {
 		if runID := strings.TrimSpace(req.Metadata["e2e_run_id"]); runID != "" {
 			metadata["e2e_run_id"] = runID

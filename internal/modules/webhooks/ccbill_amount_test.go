@@ -30,6 +30,35 @@ func TestValidateCCBillBilledAmount(t *testing.T) {
 	require.Equal(t, "sub_123", billingErr.Context["subscription_id"])
 }
 
+func TestValidateCCBillCurrencyMatches(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validateCCBillCurrencyMatches("USD", "usd", nil))
+	require.NoError(t, validateCCBillCurrencyMatches("eur", "", nil))
+
+	err := validateCCBillCurrencyMatches("eur", "usd", map[string]interface{}{"subscription_id": "sub_123"})
+	require.Error(t, err)
+	var billingErr *BillingError
+	require.True(t, errors.As(err, &billingErr))
+	require.Equal(t, ErrorTypeValidation, billingErr.Type)
+	require.Equal(t, "eur", billingErr.Context["billed_currency"])
+	require.Equal(t, "usd", billingErr.Context["expected_currency"])
+	require.Equal(t, "sub_123", billingErr.Context["subscription_id"])
+}
+
+func TestCCBillSuccessRequiresTransactionID(t *testing.T) {
+	t.Parallel()
+
+	svc := &CCBillWebhookService{}
+	err := svc.handleNewSaleSuccessInternal(context.Background(), &CCBillNewSaleSuccessEvent{})
+	require.Error(t, err)
+	require.True(t, shouldTreatCCBillErrorAsNonRetryable(err))
+
+	err = svc.handleRenewalSuccessInternal(context.Background(), &CCBillRenewalSuccessEvent{})
+	require.Error(t, err)
+	require.True(t, shouldTreatCCBillErrorAsNonRetryable(err))
+}
+
 func TestCapCCBillRetryAt(t *testing.T) {
 	t.Parallel()
 

@@ -289,6 +289,10 @@ func (s *SubscriptionService) GetByProcessorSubscriptionID(ctx context.Context, 
 	return s.subscriptionRepo.GetByProcessorSubscriptionID(ctx, processor, processorSubscriptionID)
 }
 
+func (s *SubscriptionService) GetByProcessorMetadataValue(ctx context.Context, processor, key, value string) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetByProcessorMetadataValue(ctx, processor, key, value)
+}
+
 // GetActiveSubscriptionsByProcessor gets all active subscriptions for a processor
 func (s *SubscriptionService) GetActiveSubscriptionsByProcessor(ctx context.Context, processor string) ([]*models.Subscription, error) {
 	return s.subscriptionRepo.GetActiveSubscriptionsByProcessor(ctx, processor)
