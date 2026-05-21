@@ -58,7 +58,6 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	price := &models.Price{
 		ID:        priceID,
 		ProductID: productID,
-		Slug:      "test_price_1",
 		Status:    models.CatalogStatusActive,
 		Amount:    1000,
 		Currency:  "USD",
@@ -191,7 +190,6 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	price := &models.Price{
 		ID:        priceID,
 		ProductID: productID,
-		Slug:      "test_price_2",
 		Status:    models.CatalogStatusActive,
 		Amount:    1500,
 		Currency:  "USD",

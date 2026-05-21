@@ -284,7 +284,6 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	price := &models.Price{
 		ID:        priceID,
 		ProductID: productID,
-		Slug:      "test_price_1",
 		Status:    models.CatalogStatusActive,
 		Amount:    2399,
 		Currency:  "USD",

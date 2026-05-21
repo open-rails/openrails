@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -110,11 +111,12 @@ type autoCreateContext struct {
 	PriceID   uuid.UUID
 	ProductID uuid.UUID
 	Product   *models.Product
-	// ProductSlug / PriceSlug are the CONTENT identity of this price. They (not
-	// the row UUIDs) drive the deterministic Stripe lookup_key + the metadata
-	// content keys, so find-or-create survives a DB rebuild.
+	// ProductSlug is the product's stable identity. Together with the immutable
+	// money terms (UnitAmount / Currency / BillingCycleDays) it forms the CONTENT
+	// identity of this price, which drives the deterministic Stripe lookup_key +
+	// the metadata content keys — so find-or-create survives a DB rebuild that
+	// regenerates row UUIDs.
 	ProductSlug      string
-	PriceSlug        string
 	UnitAmount       int64
 	Currency         string
 	BillingCycleDays *int
@@ -133,23 +135,50 @@ func (s *Service) providerAdapters() map[string]providerAdapter {
 	}
 }
 
-// internalStripeLookupKey is the deterministic Stripe lookup_key OpenRails
-// assigns to every price it auto-creates. It is content-addressed — derived
-// from the OpenRails product slug + price slug, NOT the row UUIDs — so it is
-// stable across DB rebuilds, collision-free within an account, and
-// reconstructable without the caller supplying anything. Dots are safe because
-// slugs are constrained to [a-z0-9-]. Callers never pass a lookup_key.
-//
-// Format: "openrails.<product_slug>.<price_slug>".
-func internalStripeLookupKey(productSlug, priceSlug string) string {
-	return "openrails." + strings.TrimSpace(productSlug) + "." + strings.TrimSpace(priceSlug)
+// priceCycleToken renders the billing cycle component of a price content key.
+// A recurring price (cycle > 0) renders the day count; a one-time price (nil or
+// 0 cycle) renders the literal "onetime". This keeps the key unambiguous and
+// human-readable while still distinguishing one_time from recurring.
+func priceCycleToken(billingCycleDays *int) string {
+	if billingCycleDays != nil && *billingCycleDays > 0 {
+		return strconv.Itoa(*billingCycleDays)
+	}
+	return "onetime"
 }
 
-// openRailsPriceContentKey is the symmetric price content key stamped on the
-// Stripe Price's metadata (StripeMetadataOpenRailsPriceKey):
-// "<product_slug>.<price_slug>".
-func openRailsPriceContentKey(productSlug, priceSlug string) string {
-	return strings.TrimSpace(productSlug) + "." + strings.TrimSpace(priceSlug)
+// openRailsPriceContentKey is the content key derived from a price's FINANCIAL
+// SUBSTANCE — the product's stable slug plus the immutable money terms
+// (currency, unit amount, billing cycle). It is NOT derived from any row UUID,
+// so it survives a DB wipe + resync: re-seeding the same product+price terms
+// reproduces byte-identical keys and re-attaches to the existing provider
+// objects rather than duplicating them.
+//
+// Because the amount lives IN the key, a different amount yields a different key
+// and therefore a different price — a price change is modeled as create-new +
+// archive-old, never an in-place mutation/transfer.
+//
+// Format: "<product_slug>.<currency>.<unit_amount>.<cycle>" where <cycle> is the
+// billing_cycle_days for a recurring price or "onetime" for a one-time price.
+// Example: "pro.usd.2900.30" or "pro.usd.500.onetime".
+func openRailsPriceContentKey(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {
+	return strings.Join([]string{
+		strings.TrimSpace(productSlug),
+		strings.ToLower(strings.TrimSpace(currency)),
+		strconv.FormatInt(unitAmount, 10),
+		priceCycleToken(billingCycleDays),
+	}, ".")
+}
+
+// internalStripeLookupKey is the deterministic Stripe lookup_key OpenRails
+// assigns to every price it auto-creates. It is the price content key prefixed
+// with "openrails." so OpenRails-owned prices are unmistakable on the Stripe
+// account. Content-addressed (see openRailsPriceContentKey), so it is stable
+// across DB rebuilds and reconstructable without the caller supplying anything.
+//
+// Format: "openrails.<product_slug>.<currency>.<unit_amount>.<cycle>".
+// Example: "openrails.pro.usd.2900.30".
+func internalStripeLookupKey(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {
+	return "openrails." + openRailsPriceContentKey(productSlug, currency, unitAmount, billingCycleDays)
 }
 
 // resolveProviders walks the declared `providers` + `provider_links` from a
@@ -225,23 +254,21 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			continue
 		}
 		// Otherwise dispatch AutoCreate. The lookup_key + content keys are
-		// derived from the catalog slugs (product + price), not the row UUIDs,
-		// so re-syncing after a DB wipe finds the same Stripe objects.
+		// derived from the product slug + the immutable money terms, not the row
+		// UUIDs, so re-syncing after a DB wipe finds the same Stripe objects.
 		productSlug := ""
 		if product != nil {
 			productSlug = strings.TrimSpace(product.Slug)
 		}
-		priceSlug := strings.TrimSpace(req.Slug)
 		ids, createErr := adapter.AutoCreate(ctx, autoCreateContext{
 			PriceID:          priceID,
 			ProductID:        req.ProductID,
 			Product:          product,
 			ProductSlug:      productSlug,
-			PriceSlug:        priceSlug,
 			UnitAmount:       req.UnitAmount,
 			Currency:         req.Currency,
 			BillingCycleDays: req.BillingCycleDays,
-			LookupKey:        internalStripeLookupKey(productSlug, priceSlug),
+			LookupKey:        internalStripeLookupKey(productSlug, req.Currency, req.UnitAmount, req.BillingCycleDays),
 		})
 		switch {
 		case errors.Is(createErr, errPendingManualLink):

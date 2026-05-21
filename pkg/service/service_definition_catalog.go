@@ -243,6 +243,25 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 	return productToCatalogProduct(p), nil
 }
 
+// propagateProductActiveToStripe pushes the product's active flag to its Stripe
+// Product, if one exists. Used by the lifecycle paths (activate / deactivate /
+// SetProductStatus) so a status change reaches Stripe — UpdateProduct already
+// handles the display_name/description/active propagation for definition edits,
+// but the dedicated lifecycle entrypoints bypass it. Best-effort: failures are
+// swallowed (drift surfaces on the next product reconcile).
+func (s *Service) propagateProductActiveToStripe(ctx context.Context, productID uuid.UUID, active bool) {
+	if s.rt == nil || s.rt.Config == nil {
+		return
+	}
+	stripeProductID := s.lookupStripeProductID(ctx, productID)
+	if stripeProductID == "" {
+		return
+	}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
+	a := active
+	_ = stripeSvc.UpdateProduct(ctx, stripeProductID, catalog.UpdateProductParams{Active: &a})
+}
+
 // lookupStripeProductID returns the Stripe Product ID associated with the
 // given OpenRails product by scanning its prices for processors.stripe.product_id.
 // Returns "" if no associated price has a Stripe Product link.
@@ -296,7 +315,6 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 type CatalogPrice struct {
 	ID               uuid.UUID            `json:"id"`
 	ProductID        uuid.UUID            `json:"product_id"`
-	Slug             string               `json:"slug"`
 	Status           models.CatalogStatus `json:"status"`
 	UnitAmount       int64                `json:"unit_amount"`
 	Currency         string               `json:"currency"`
@@ -330,11 +348,11 @@ type CatalogPrice struct {
 //     what to do.
 type CreatePriceRequest struct {
 	ProductID uuid.UUID `json:"product_id"`
-	// Slug is the price's stable, per-product identity (e.g. "pro_monthly").
-	// Required on create. It is the substance the content-based provider keys
-	// are derived from, so it must be stable across DB rebuilds and unique
-	// within the product. Slugs are [a-z0-9-]; never changed after create.
-	Slug             string `json:"slug"`
+	// A price's identity IS its financial substance — the product slug plus
+	// these immutable money terms. There is no price slug: the content-based
+	// provider keys are derived from (product_slug, currency, unit_amount,
+	// billing_cycle_days), so they are stable across DB rebuilds and a different
+	// amount is, by construction, a different price.
 	UnitAmount       int64  `json:"unit_amount"`
 	Currency         string `json:"currency"`
 	BillingCycleDays *int   `json:"billing_cycle_days,omitempty"`
@@ -367,11 +385,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	if req.ProductID == uuid.Nil {
 		return nil, fmt.Errorf("product_id required")
 	}
-	req.Slug = strings.TrimSpace(req.Slug)
 	req.Currency = strings.ToLower(strings.TrimSpace(req.Currency))
-	if req.Slug == "" {
-		return nil, fmt.Errorf("slug required")
-	}
 	if req.UnitAmount <= 0 {
 		return nil, fmt.Errorf("unit_amount must be positive")
 	}
@@ -413,7 +427,6 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	price := &models.Price{
 		ID:               priceID,
 		ProductID:        req.ProductID,
-		Slug:             req.Slug,
 		Status:           status,
 		Amount:           req.UnitAmount,
 		Currency:         req.Currency,
@@ -575,7 +588,6 @@ func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 	cp := &CatalogPrice{
 		ID:               p.ID,
 		ProductID:        p.ProductID,
-		Slug:             p.Slug,
 		Status:           p.Status,
 		UnitAmount:       p.Amount,
 		Currency:         p.Currency,

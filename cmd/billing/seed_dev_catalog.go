@@ -54,7 +54,6 @@ func seedDevCatalog(cmd *cobra.Command, _ []string) error {
 	}
 	mobiusPrice, err := ensureRecurringPrice(ctx, runtime.PriceService, runtime.ProductService, recurringPriceSpec{
 		ProductID: mobiusProduct.ID,
-		Slug:      devMobiusProductSlug + "_daily",
 		Amount:    devMobiusAmountCents,
 		Currency:  devCurrency,
 		CycleDays: devMobiusCycleDays,
@@ -78,7 +77,6 @@ func seedDevCatalog(cmd *cobra.Command, _ []string) error {
 	}
 	ccbillPrice, err := ensureRecurringPrice(ctx, runtime.PriceService, runtime.ProductService, recurringPriceSpec{
 		ProductID: ccbillProduct.ID,
-		Slug:      devCCBillProductSlug + "_monthly",
 		Amount:    devCCBillAmountCents,
 		Currency:  devCurrency,
 		CycleDays: devCCBillCycleDays,
@@ -105,7 +103,6 @@ func seedDevCatalog(cmd *cobra.Command, _ []string) error {
 
 type recurringPriceSpec struct {
 	ProductID  uuid.UUID
-	Slug       string
 	Amount     int64
 	Currency   string
 	CycleDays  int
@@ -172,7 +169,6 @@ func ensureRecurringPrice(ctx context.Context, priceSvc interface {
 		cycleDays := spec.CycleDays
 		price = &models.Price{
 			ProductID:        spec.ProductID,
-			Slug:             spec.Slug,
 			Status:           models.CatalogStatusActive,
 			Amount:           spec.Amount,
 			Currency:         spec.Currency,

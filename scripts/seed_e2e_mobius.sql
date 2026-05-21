@@ -16,33 +16,33 @@ BEGIN
 END $$;
 
 -- Create product (idempotent by slug)
-INSERT INTO billing.products (slug, display_name, description, tier_group, tier_rank, is_active)
-VALUES ('e2e_mobius', 'E2E Mobius Plan', 'Local E2E product for Mobius/NMI sandbox', 'e2e', 1, true)
+INSERT INTO billing.products (slug, display_name, description, tier_group, tier_rank, status)
+VALUES ('e2e_mobius', 'E2E Mobius Plan', 'Local E2E product for Mobius/NMI sandbox', 'e2e', 1, 'active')
 ON CONFLICT (slug) DO UPDATE
 SET display_name = EXCLUDED.display_name,
     description = EXCLUDED.description,
     tier_group = EXCLUDED.tier_group,
     tier_rank = EXCLUDED.tier_rank,
-    is_active = true,
+    status = 'active',
     updated_at = current_timestamp;
 
--- Create price (idempotent by unique constraint)
+-- Create price (idempotent by financial-substance unique constraint). There is
+-- no price slug: a price's identity is (product, amount, currency, cycle).
 WITH p AS (
   SELECT id AS product_id FROM billing.products WHERE slug = 'e2e_mobius'
 )
-INSERT INTO billing.prices (product_id, slug, amount, currency, billing_cycle_days, processors, is_active)
+INSERT INTO billing.prices (product_id, amount, currency, billing_cycle_days, processors, status)
 SELECT
   p.product_id,
-  'e2e_mobius_daily',
   999,
   'usd',
   1,
   jsonb_build_object('mobius', jsonb_build_object('plan_id', :'mobius_plan_id', 'provider', 'mobius')),
-  true
+  'active'
 FROM p
 ON CONFLICT (product_id, amount, currency, billing_cycle_days) DO UPDATE
 SET processors = EXCLUDED.processors,
-    is_active = true,
+    status = 'active',
     updated_at = current_timestamp;
 
 -- Output IDs for copy/paste.

@@ -192,9 +192,11 @@ func computeStripeDriftJob(
 	stripePriceIDs := make(map[string]string)
 	for _, pr := range priceRows {
 		priceByID[pr.ID.String()] = pr
-		// Content key = "<product_slug>.<price_slug>"; needs the owning product.
+		// Content key = "<product_slug>.<currency>.<unit_amount>.<cycle>"; needs
+		// the owning product for its slug.
 		if prod := productByID[pr.ProductID.String()]; prod != nil {
-			if ck := openRailsPriceContentKeyJob(prod.Slug, pr.Slug); ck != "." {
+			if slug := strings.TrimSpace(prod.Slug); slug != "" {
+				ck := openRailsPriceContentKeyJob(prod.Slug, pr.Currency, pr.Amount, pr.BillingCycleDays)
 				priceByContentKey[ck] = pr
 			}
 		}
@@ -276,16 +278,26 @@ func computeStripeDriftJob(
 }
 
 // openRailsPriceContentKeyJob mirrors pkg/service.openRailsPriceContentKey:
-// "<product_slug>.<price_slug>".
-func openRailsPriceContentKeyJob(productSlug, priceSlug string) string {
-	return strings.TrimSpace(productSlug) + "." + strings.TrimSpace(priceSlug)
+// the financial content key "<product_slug>.<currency>.<unit_amount>.<cycle>"
+// where <cycle> is the billing_cycle_days for a recurring price or "onetime".
+func openRailsPriceContentKeyJob(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {
+	cycle := "onetime"
+	if billingCycleDays != nil && *billingCycleDays > 0 {
+		cycle = strconv.Itoa(*billingCycleDays)
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(productSlug),
+		strings.ToLower(strings.TrimSpace(currency)),
+		strconv.FormatInt(unitAmount, 10),
+		cycle,
+	}, ".")
 }
 
 // stripePriceContentKeyJob mirrors pkg/service.stripePriceContentKey: extract
-// the OpenRails content key from a Stripe Price, preferring the
+// the OpenRails financial content key from a Stripe Price, preferring the
 // openrails_price_key metadata and falling back to deriving it from the
-// lookup_key ("openrails.<product_slug>.<price_slug>"). Returns "" for prices
-// OpenRails doesn't own.
+// lookup_key ("openrails.<content_key>"). Returns "" for prices OpenRails
+// doesn't own.
 func stripePriceContentKeyJob(sp catalog.StripePrice) string {
 	if k := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsPriceKey]); k != "" {
 		return k

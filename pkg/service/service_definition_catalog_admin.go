@@ -115,6 +115,9 @@ func (s *Service) ActivateProduct(ctx context.Context, productID uuid.UUID) (*Ca
 	if err != nil {
 		return nil, err
 	}
+	// Propagate the active flag to Stripe so re-activating an OpenRails product
+	// re-activates its Stripe Product (best-effort).
+	s.propagateProductActiveToStripe(ctx, productID, true)
 	return productToCatalogProduct(updated), nil
 }
 
@@ -135,6 +138,8 @@ func (s *Service) DeactivateProduct(ctx context.Context, productID uuid.UUID) (*
 	if err != nil {
 		return nil, err
 	}
+	// Propagate the active flag to Stripe (archived -> Stripe active=false).
+	s.propagateProductActiveToStripe(ctx, productID, false)
 	return productToCatalogProduct(updated), nil
 }
 
@@ -260,6 +265,8 @@ func (s *Service) SetProductStatus(ctx context.Context, productID uuid.UUID, sta
 	if err != nil {
 		return nil, err
 	}
+	// active -> Stripe active=true; draft/archived -> active=false.
+	s.propagateProductActiveToStripe(ctx, productID, status == models.CatalogStatusActive)
 	return productToCatalogProduct(updated), nil
 }
 
@@ -434,49 +441,19 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 			if perr != nil {
 				return nil, perr
 			}
-			if _, perr := s.remintStripePrice(ctx, prices, prod, local, priceID, state.IDs[models.ProcessorKeyStripeProductID]); perr != nil {
+			if _, perr := s.recreateStripePrice(ctx, prices, prod, local, priceID, state.IDs[models.ProcessorKeyStripeProductID]); perr != nil {
 				return nil, perr
 			}
 			actions[name] = "recreated_remote"
 			mutated = true
 		case SyncStatusDrifted:
-			// Stripe prices are immutable on price terms. If an immutable field
-			// (amount/currency) drifted, we cannot UPDATE the remote price — mint a
-			// new one (CreatePrice transfers the lookup_key off the old price) and
-			// archive the old. Mutable-only drift (active) is propagated normally.
-			immutableDrift := hasImmutablePriceDrift(state.Drift)
-			if name == "stripe" && immutableDrift {
-				if !opts.Recreate {
-					actions[name] = "drifted_no_recreate"
-					continue
-				}
-				if opts.DryRun {
-					actions[name] = "would_recreate_remote"
-					continue
-				}
-				product, _, perr := s.requireCatalogServices()
-				if perr != nil {
-					return nil, perr
-				}
-				prod, perr := product.GetByID(ctx, local.ProductID)
-				if perr != nil {
-					return nil, perr
-				}
-				oldStripePriceID := strings.TrimSpace(state.IDs[models.ProcessorKeyStripePriceID])
-				if _, perr := s.remintStripePrice(ctx, prices, prod, local, priceID, state.IDs[models.ProcessorKeyStripeProductID]); perr != nil {
-					return nil, perr
-				}
-				if oldStripePriceID != "" {
-					inactive := false
-					stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
-					if perr := stripeSvc.UpdatePrice(ctx, oldStripePriceID, catalog.UpdatePriceParams{Active: &inactive}); perr != nil {
-						return nil, perr
-					}
-				}
-				actions[name] = "recreated_remote"
-				mutated = true
-				continue
-			}
+			// Prices are immutable on their financial terms (amount/currency/cycle):
+			// those fields are baked into the content key, so any change is a
+			// different price minted upstream (create-new + archive-old), never an
+			// in-place mutation or lookup_key transfer here. The only mutable field
+			// reconcile propagates is the active flag — push it via the adapter.
+			// Any immutable-field drift surfaced by Verify is informational; we do
+			// not attempt to "fix" it by reminting.
 			adapter, ok := adapters[strings.ToLower(strings.TrimSpace(name))]
 			if !ok {
 				actions[name] = "unsupported"
@@ -518,43 +495,111 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 	return &ReconcileResult{Providers: finalStates, Actions: actions}, nil
 }
 
-// hasImmutablePriceDrift reports whether any of the drifted fields are immutable
-// price terms (unit_amount / currency). Stripe and NMI prices cannot be edited
-// on these fields in place, so a true result forces the re-mint path (create a
-// new price + transfer_lookup_key + archive the old) rather than a plain Update.
-// Pure predicate so the reconcile decision is unit-testable without a live
-// Stripe account or the DB harness.
-func hasImmutablePriceDrift(drift []DriftField) bool {
-	for _, df := range drift {
-		if df.Field == "unit_amount" || df.Field == "currency" {
-			return true
-		}
-	}
-	return false
+// ProductReconcileResult is the response of a ReconcileProduct call.
+type ProductReconcileResult struct {
+	// SyncStatus is the product's Stripe sync state after the pass
+	// (in_sync / drifted / missing / sync_disabled / unknown).
+	SyncStatus SyncStatus `json:"sync_status"`
+	// Drift carries the field-level divergence observed (pre-reconcile on DryRun,
+	// otherwise the residual after the push).
+	Drift []DriftField `json:"drift,omitempty"`
+	// Action is what reconcile did (or would do): "no_op", "updated_remote",
+	// "would_update_remote" (dry_run), "missing" (no Stripe product to update),
+	// "sync_disabled" (stripe not configured).
+	Action string `json:"action"`
 }
 
-// remintStripePrice mints a fresh Stripe Price for the OpenRails price under its
-// content lookup_key and repoints the local processors map at the new id. Stripe
-// prices are immutable on price terms, so this is the only way to apply an
-// amount/currency/cycle change or to replace a 404'd price. CreatePrice sets
-// transfer_lookup_key, so the lookup_key atomically moves from any prior holder
-// to the new price; callers archive the old price when one still exists.
-func (s *Service) remintStripePrice(ctx context.Context, prices *catalog.PriceService, prod *models.Product, local *models.Price, priceID uuid.UUID, stripeProductID string) (string, error) {
-	priceContentKey := openRailsPriceContentKey(prod.Slug, local.Slug)
-	cycle := 0
-	if local.BillingCycleDays != nil {
-		cycle = *local.BillingCycleDays
+// ReconcileProduct re-applies the OpenRails product's mutable fields
+// (display_name, description, active) to its Stripe Product when drift is
+// detected. OpenRails is authoritative. Unlike prices, products have no row-level
+// provider link — the Stripe Product id is discovered via the product's prices.
+// This is the product-level analog of ReconcilePrice.
+func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opts ReconcileOptions) (*ProductReconcileResult, error) {
+	products, err := s.requireProductService()
+	if err != nil {
+		return nil, err
 	}
+	if productID == uuid.Nil {
+		return nil, fmt.Errorf("product_id required")
+	}
+	local, err := products.GetByID(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	stripeProductID := s.lookupStripeProductID(ctx, productID)
+	if stripeProductID == "" {
+		// No Stripe Product is associated with this OpenRails product (no price
+		// has a Stripe link). Nothing to reconcile.
+		return &ProductReconcileResult{SyncStatus: SyncStatusUnknown, Action: "missing"}, nil
+	}
+
+	adapter := &stripeAdapter{svc: s}
+	drift, missing, configured, verifyErr := adapter.verifyStripeProduct(ctx, stripeProductID, local)
+	if !configured {
+		return &ProductReconcileResult{SyncStatus: SyncStatusSyncDisabled, Action: "sync_disabled"}, nil
+	}
+	if verifyErr != nil {
+		return nil, verifyErr
+	}
+	if missing {
+		// The Stripe Product 404'd. Product recreate is out of scope here (it
+		// would orphan the prices that reference the old product id); surface it.
+		return &ProductReconcileResult{SyncStatus: SyncStatusMissing, Action: "missing"}, nil
+	}
+	if len(drift) == 0 {
+		return &ProductReconcileResult{SyncStatus: SyncStatusInSync, Action: "no_op"}, nil
+	}
+	if opts.DryRun {
+		return &ProductReconcileResult{SyncStatus: SyncStatusDrifted, Drift: drift, Action: "would_update_remote"}, nil
+	}
+
+	// Push OpenRails values to Stripe: name, description, and the active flag.
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
+	name := strings.TrimSpace(local.DisplayName)
+	desc := strings.TrimSpace(local.Description)
+	active := local.IsPurchasable()
+	if err := stripeSvc.UpdateProduct(ctx, stripeProductID, catalog.UpdateProductParams{
+		Name:        &name,
+		Description: &desc,
+		Active:      &active,
+	}); err != nil {
+		return nil, err
+	}
+
+	// Re-verify so the residual drift (should be empty) is reflected.
+	residual, _, _, _ := adapter.verifyStripeProduct(ctx, stripeProductID, local)
+	syncStatus := SyncStatusInSync
+	if len(residual) > 0 {
+		syncStatus = SyncStatusDrifted
+	}
+	// Resolving via reconcile auto-closes open product drift events.
+	if _, derr := s.ResolveDriftForResource(ctx, models.CatalogDriftResourceProduct, productID.String()); derr != nil {
+		_ = derr
+	}
+	return &ProductReconcileResult{SyncStatus: syncStatus, Drift: residual, Action: "updated_remote"}, nil
+}
+
+// recreateStripePrice mints a fresh Stripe Price for the OpenRails price under
+// its content lookup_key and repoints the local processors map at the new id.
+// This is the missing→recreate path: the stored Stripe price 404'd, so we
+// re-mint one carrying the SAME content lookup_key + metadata (derived from the
+// product slug + the price's immutable money terms) and point the row at it.
+//
+// There is no amount-drift / transfer_lookup_key path: a price's financial
+// terms are baked into its content key, so a change is a different price minted
+// upstream (create-new + archive-old), never an in-place re-mint+transfer.
+func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.PriceService, prod *models.Product, local *models.Price, priceID uuid.UUID, stripeProductID string) (string, error) {
+	priceContentKey := openRailsPriceContentKey(prod.Slug, local.Currency, local.Amount, local.BillingCycleDays)
 	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
 	newPriceID, err := stripeSvc.CreatePrice(ctx, catalog.CreatePriceParams{
 		StripeProductID:  stripeProductID,
 		UnitAmount:       local.Amount,
 		Currency:         local.Currency,
 		BillingCycleDays: local.BillingCycleDays,
-		LookupKey:        internalStripeLookupKey(prod.Slug, local.Slug),
-		// Financial terms in the idempotency key so an amount/currency/cycle
-		// change mints a NEW price rather than replaying the prior create.
-		IdempotencyKey: fmt.Sprintf("openrails-price-remint-%s-%d-%s-%d", priceContentKey, local.Amount, strings.ToLower(strings.TrimSpace(local.Currency)), cycle),
+		LookupKey:        internalStripeLookupKey(prod.Slug, local.Currency, local.Amount, local.BillingCycleDays),
+		// Content key is the idempotency key: replaying recreate for the same
+		// price terms returns the same Stripe object rather than duplicating.
+		IdempotencyKey: "openrails-price-" + priceContentKey,
 		Metadata: map[string]string{
 			catalog.StripeMetadataOpenRailsPriceKey:   priceContentKey,
 			catalog.StripeMetadataOpenRailsProductKey: strings.TrimSpace(prod.Slug),

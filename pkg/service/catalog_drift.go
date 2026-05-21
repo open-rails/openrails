@@ -55,9 +55,9 @@ type nmiPlanLister interface {
 //
 // Stripe matching is CONTENT-keyed: Stripe objects are reverse-matched to
 // OpenRails rows by the product slug (from metadata openrails_product_key) and
-// the price content key (from the Stripe price lookup_key / metadata
-// openrails_price_key), NOT by the row UUIDs. This makes drift matching survive
-// a DB rebuild that regenerates UUIDs.
+// the price's financial content key — product slug + immutable money terms
+// (from the Stripe price lookup_key / metadata openrails_price_key), NOT by the
+// row UUIDs. This makes drift matching survive a DB rebuild that regenerates UUIDs.
 type localCatalogSnapshot struct {
 	// productByID maps OpenRails product UUID (string) -> product row.
 	productByID map[string]*models.Product
@@ -65,7 +65,8 @@ type localCatalogSnapshot struct {
 	priceByID map[string]*models.Price
 	// productBySlug maps OpenRails product slug -> product row (content key).
 	productBySlug map[string]*models.Product
-	// priceByContentKey maps "<product_slug>.<price_slug>" -> price row (content key).
+	// priceByContentKey maps the financial content key
+	// "<product_slug>.<currency>.<unit_amount>.<cycle>" -> price row.
 	priceByContentKey map[string]*models.Price
 	// stripeProductIDs is the set of stripe product ids OpenRails believes it owns.
 	stripeProductIDs map[string]string // stripe product id -> openrails product id
@@ -188,11 +189,12 @@ func computeCatalogDrift(
 	return events
 }
 
-// stripePriceContentKey extracts the OpenRails content key
-// ("<product_slug>.<price_slug>") from a Stripe Price for reverse-matching.
-// It prefers the openrails_price_key metadata, falling back to deriving it from
-// the lookup_key ("openrails.<product_slug>.<price_slug>" -> strip the prefix).
-// Returns "" when neither is present (a Stripe-native price OpenRails doesn't own).
+// stripePriceContentKey extracts the OpenRails financial content key
+// ("<product_slug>.<currency>.<unit_amount>.<cycle>") from a Stripe Price for
+// reverse-matching. It prefers the openrails_price_key metadata, falling back to
+// deriving it from the lookup_key ("openrails.<content_key>" -> strip the
+// prefix). Returns "" when neither is present (a Stripe-native price OpenRails
+// doesn't own).
 func stripePriceContentKey(sp catalog.StripePrice) string {
 	if k := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsPriceKey]); k != "" {
 		return k
@@ -535,9 +537,11 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 	}
 	for _, pr := range priceRows {
 		snap.priceByID[pr.ID.String()] = pr
-		// Content key = "<product_slug>.<price_slug>"; needs the owning product.
+		// Content key = "<product_slug>.<currency>.<unit_amount>.<cycle>"; needs
+		// the owning product for its slug.
 		if prod := snap.productByID[pr.ProductID.String()]; prod != nil {
-			if ck := openRailsPriceContentKey(prod.Slug, pr.Slug); strings.TrimSpace(ck) != "." {
+			if slug := strings.TrimSpace(prod.Slug); slug != "" {
+				ck := openRailsPriceContentKey(prod.Slug, pr.Currency, pr.Amount, pr.BillingCycleDays)
 				snap.priceByContentKey[ck] = pr
 			}
 		}

@@ -54,7 +54,6 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	_, err = suite.BunDB.NewInsert().Model(&models.Price{
 		ID:               priceID,
 		ProductID:        productID,
-		Slug:             "test_price_1",
 		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
@@ -222,7 +221,6 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	_, err = suite.BunDB.NewInsert().Model(&models.Price{
 		ID:               priceID,
 		ProductID:        productID,
-		Slug:             "test_price_2",
 		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",

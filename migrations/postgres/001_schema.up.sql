@@ -95,7 +95,6 @@ COMMENT ON COLUMN billing.products.tier_rank         IS 'Tier ranking within gro
 CREATE TABLE IF NOT EXISTS billing.prices (
     id                  UUID         PRIMARY KEY DEFAULT uuidv7(),
     product_id          UUID         NOT NULL REFERENCES billing.products(id) ON DELETE RESTRICT,
-    slug                TEXT         NOT NULL,                         -- stable per-product identity (e.g. "pro_monthly"); content key for provider dedup
     amount              BIGINT       NOT NULL,                        -- smallest currency unit (cents)
     currency            TEXT         NOT NULL,
     billing_cycle_days  INTEGER,                                      -- 30=monthly, 365=yearly, NULL=one-time
@@ -104,10 +103,11 @@ CREATE TABLE IF NOT EXISTS billing.prices (
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp,
 
+    -- A price's identity IS its financial substance. The content key derived from
+    -- (product_slug, currency, amount, billing_cycle_days) is the provider dedup
+    -- key + Stripe lookup_key; the natural uniqueness below enforces it locally.
     CONSTRAINT unique_prices_product_amount_cycle
-        UNIQUE (product_id, amount, currency, billing_cycle_days),
-    CONSTRAINT unique_prices_product_slug
-        UNIQUE (product_id, slug)
+        UNIQUE (product_id, amount, currency, billing_cycle_days)
 );
 
 CREATE INDEX IF NOT EXISTS idx_prices_product_id  ON billing.prices(product_id);

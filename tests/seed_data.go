@@ -60,7 +60,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 1.1: Monthly USD recurring
 					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222222"),
-					Slug:             "seed_price_1",
 					Amount:           999, // Amount in cents ($9.99)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
@@ -81,7 +80,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 1.2: Quarterly USD recurring (discounted)
 					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222223"),
-					Slug:             "seed_price_2",
 					Amount:           2499, // Amount in cents ($24.99, ~17% discount)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(90),
@@ -101,7 +99,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 1.3: Monthly EUR recurring
 					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222224"),
-					Slug:             "seed_price_3",
 					Amount:           899, // Amount in cents (€8.99)
 					Currency:         "eur",
 					BillingCycleDays: intPtr(30),
@@ -118,7 +115,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 1.4: Monthly JPY recurring
 					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222225"),
-					Slug:             "seed_price_4",
 					Amount:           1200, // Amount in yen (no decimals for JPY)
 					Currency:         "jpy",
 					BillingCycleDays: intPtr(30),
@@ -132,7 +128,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 1.5: Yearly USD recurring (heavily discounted)
 					ID:               uuid.MustParse("22222222-2222-2222-2222-222222222226"),
-					Slug:             "seed_price_5",
 					Amount:           7999, // Amount in cents ($79.99, ~33% discount)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(365),
@@ -168,7 +163,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 2.1: Monthly USD recurring
 					ID:               uuid.MustParse("44444444-4444-4444-4444-444444444444"),
-					Slug:             "seed_price_6",
 					Amount:           1999, // Amount in cents ($19.99)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
@@ -188,7 +182,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 2.2: Yearly USD recurring
 					ID:               uuid.MustParse("44444444-4444-4444-4444-444444444445"),
-					Slug:             "seed_price_7",
 					Amount:           14999, // Amount in cents ($149.99)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(365),
@@ -208,7 +201,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 2.3: Monthly EUR recurring
 					ID:               uuid.MustParse("44444444-4444-4444-4444-444444444446"),
-					Slug:             "seed_price_8",
 					Amount:           1799, // Amount in cents (€17.99)
 					Currency:         "eur",
 					BillingCycleDays: intPtr(30),
@@ -240,7 +232,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 3.1: One-time USD purchase (no billing cycle)
 					ID:               uuid.MustParse("66666666-6666-6666-6666-666666666666"),
-					Slug:             "seed_price_9",
 					Amount:           29999, // Amount in cents ($299.99)
 					Currency:         "usd",
 					BillingCycleDays: nil, // One-time purchase, no recurring billing
@@ -260,7 +251,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 3.2: One-time EUR purchase
 					ID:               uuid.MustParse("66666666-6666-6666-6666-666666666667"),
-					Slug:             "seed_price_10",
 					Amount:           26999, // Amount in cents (€269.99)
 					Currency:         "eur",
 					BillingCycleDays: nil, // One-time purchase
@@ -277,7 +267,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 3.3: One-time JPY purchase
 					ID:               uuid.MustParse("66666666-6666-6666-6666-666666666668"),
-					Slug:             "seed_price_11",
 					Amount:           39800, // Amount in yen
 					Currency:         "jpy",
 					BillingCycleDays: nil, // One-time purchase
@@ -305,7 +294,6 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 				{
 					// Price 4.1: Monthly USD - NMI only (no CCBill)
 					ID:               uuid.MustParse("88888888-8888-8888-8888-888888888888"),
-					Slug:             "seed_price_12",
 					Amount:           499, // Amount in cents ($4.99)
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
@@ -382,7 +370,6 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 			Prices: []*models.Price{
 				{
 					ID:               uuid.MustParse("aaaa2222-2222-2222-2222-222222222222"),
-					Slug:             "seed_price_13",
 					Amount:           1000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
@@ -411,7 +398,6 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 			Prices: []*models.Price{
 				{
 					ID:               uuid.MustParse("bbbb2222-2222-2222-2222-222222222222"),
-					Slug:             "seed_price_14",
 					Amount:           2000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),
@@ -441,7 +427,6 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 			Prices: []*models.Price{
 				{
 					ID:               uuid.MustParse("cccc2222-2222-2222-2222-222222222222"),
-					Slug:             "seed_price_15",
 					Amount:           3000,
 					Currency:         "usd",
 					BillingCycleDays: intPtr(30),

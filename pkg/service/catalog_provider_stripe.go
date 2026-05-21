@@ -69,11 +69,11 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string) (map
 //     (+ informational openrails_product_id) and an idempotency key derived
 //     from the product slug.
 //  3. With the Product in hand, find-or-create the Stripe Price under the
-//     deterministic content lookup_key ("openrails.<product_slug>.<price_slug>").
-//     If a price with the same lookup_key already exists, attach to it
-//     (transfer_lookup_key=true keeps the contract). Otherwise mint a new one
-//     carrying openrails_price_key (+ informational openrails_price_id) and the
-//     lookup_key.
+//     deterministic content lookup_key
+//     ("openrails.<product_slug>.<currency>.<unit_amount>.<cycle>"). If a price
+//     with the same lookup_key already exists, attach to it. Otherwise mint a
+//     new one carrying openrails_price_key (+ informational openrails_price_id)
+//     and the lookup_key.
 //
 // Returns the canonical ids to persist on processors["stripe"].
 func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
@@ -89,7 +89,7 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config}
 
 	productSlug := strings.TrimSpace(in.ProductSlug)
-	priceContentKey := openRailsPriceContentKey(in.ProductSlug, in.PriceSlug)
+	priceContentKey := openRailsPriceContentKey(in.ProductSlug, in.Currency, in.UnitAmount, in.BillingCycleDays)
 
 	// Step 1: discover an existing Stripe Product for this OpenRails product,
 	// matching on the content key (product slug) so it survives DB wipes.

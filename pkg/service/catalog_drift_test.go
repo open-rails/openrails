@@ -93,11 +93,8 @@ func prod(id uuid.UUID, name, desc string, active bool) *models.Product {
 	return &models.Product{ID: id, Slug: "prod-slug", DisplayName: name, Description: desc, Status: catalogStatusFromActive(active)}
 }
 
-func price(id, productID uuid.UUID, slug string, amount int64, currency string, active bool, stripePriceID, stripeProductID string) *models.Price {
-	if slug == "" {
-		slug = "price-slug"
-	}
-	p := &models.Price{ID: id, ProductID: productID, Slug: slug, Amount: amount, Currency: currency, Status: catalogStatusFromActive(active)}
+func price(id, productID uuid.UUID, _ string, amount int64, currency string, active bool, stripePriceID, stripeProductID string) *models.Price {
+	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: currency, Status: catalogStatusFromActive(active)}
 	if stripePriceID != "" || stripeProductID != "" {
 		p.Processors = map[string]map[string]string{"stripe": {}}
 		if stripePriceID != "" {
@@ -113,7 +110,7 @@ func price(id, productID uuid.UUID, slug string, amount int64, currency string, 
 // nmiPrice builds an OpenRails price linked to an NMI plan via the mobius
 // processor map.
 func nmiPrice(id, productID uuid.UUID, _ string, amount int64, planID string) *models.Price {
-	p := &models.Price{ID: id, ProductID: productID, Slug: "nmi-price-slug", Amount: amount, Currency: "usd", Status: models.CatalogStatusActive}
+	p := &models.Price{ID: id, ProductID: productID, Amount: amount, Currency: "usd", Status: models.CatalogStatusActive}
 	if planID != "" {
 		p.Processors = map[string]map[string]string{
 			string(models.ProcessorMobius): {models.ProcessorKeyPlanID: planID, models.ProcessorKeyProvider: "mobius"},
@@ -189,7 +186,10 @@ func TestComputeCatalogDriftFieldDrift(t *testing.T) {
 	}
 	stripePrices := []catalog.StripePrice{
 		{ID: "price_1", UnitAmount: 2000, Currency: "eur", Active: false, Nickname: "Yearly", Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.Monthly",
+			// Content key reverse-matches the LOCAL row's financial key
+			// (prod-slug, usd, 1000, one-time); the Stripe object's own
+			// amount/currency/active diverge -> field drift.
+			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.usd.1000.onetime",
 		}},
 	}
 	snap := snapFromRows(products, prices)
@@ -218,7 +218,7 @@ func TestComputeCatalogDriftNoDriftWhenInSync(t *testing.T) {
 	}
 	stripePrices := []catalog.StripePrice{
 		{ID: "price_1", UnitAmount: 1000, Currency: "usd", Active: true, Nickname: "Monthly", Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.Monthly",
+			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.usd.1000.onetime",
 		}},
 	}
 	snap := snapFromRows(products, prices)

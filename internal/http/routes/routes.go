@@ -102,6 +102,7 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	adminProducts.PATCH("/:id", wrap(httphandlers.AdminUpdateProduct))
 	adminProducts.POST("/:id/activate", wrap(httphandlers.AdminActivateProduct))
 	adminProducts.POST("/:id/deactivate", wrap(httphandlers.AdminDeactivateProduct))
+	adminProducts.POST("/:id/reconcile", wrap(httphandlers.AdminReconcileProduct))
 
 	adminPrices := adminCatalog.Group("/prices")
 	adminPrices.POST("", wrap(httphandlers.AdminCreatePrice))

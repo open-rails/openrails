@@ -178,7 +178,6 @@ type Price struct {
 
 	ID        uuid.UUID     `bun:"id,pk,type:uuid" json:"id"`
 	ProductID uuid.UUID     `bun:"product_id,notnull" json:"product_id"`
-	Slug      string        `bun:"slug,notnull" json:"slug"`
 	Status    CatalogStatus `bun:"status,notnull,default:'active'" json:"status"`
 	Amount    int64         `bun:"amount,notnull" json:"amount"`
 	Currency  string        `bun:"currency,notnull" json:"currency"`

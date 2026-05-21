@@ -1368,6 +1368,29 @@
         "[ ] go build ./... + go test ./... green; DDL handed to user"
       ],
       "completed": false
+    },
+    {
+      "id": 211,
+      "name": "catalog-as-code apply: immutable content-addressed prices, active reconcile, change log + dry-run",
+      "description": "Make the manual catalog sync (`tools sync-product-catalog`, run by an operator like `terraform apply`) a fully authoritative declarative apply, AND fix the price-identity model: prices are IMMUTABLE and content-addressed (no slug); changing a price means creating a NEW price + archiving the old; catalog-active products/prices are un-archived on apply; the run prints a clear per-object change plan. Manual apply = operator consent (mutates providers aggressively); the continuous background drift/reconcile job stays alert-only.\n\n## Price identity (the core change)\n- A price's identity IS its financial substance. NO slug on prices.\n  - PK = uuidv7 (just a primary key, never used for matching).\n  - Dedup / idempotency / Stripe lookup_key = a CONTENT KEY over (product_slug, currency, unit_amount, billing_cycle_days, type[recurring|one_off]). MUST use the product's stable SLUG, not product_id -- the UUID regenerates on a DB wipe and would break dedup (the exact problem being solved).\n  - Readable composite form, e.g. `openrails.pro.usd.2900.30`, doubles as the Stripe lookup_key (eyeball-able in the dashboard).\n- Prices are IMMUTABLE on financial terms (amount/currency/cycle). Lifecycle (active <-> archived) IS mutable -- you can archive AND un-archive a price.\n- 'Raise Pro $29 -> $39' = a NEW price (new content key) + archive the old. Different amounts -> different keys -> inherently different prices. Existing subs stay on their immutable $29 price; new signups get the active $39. Archived = grandfathered (keeps billing existing subs, hidden from new purchases).\n- Subscriptions point at a specific immutable price, so 'what does this sub pay?' is always unambiguous.\n\n## Reverts recent work\nv0.9.9/v0.9.10 added a price `slug` + `unique_prices_product_slug` + lookup_key `openrails.<product_slug>.<price_slug>`. This issue REPLACES that: drop the price slug + that constraint and derive the Stripe key from the financial content key. Products KEEP their slug (their stable identity). The pre-existing `unique_prices_product_amount_cycle` already captures price uniqueness.\n\n## Postures (two different tools)\n- Operator-invoked APPLY: authoritative + aggressive (un-archive, create new prices, archive removed). The human running it is the consent.\n- Continuous background drift/reconcile job: alert-only, never auto-mutates (unchanged).\n\n## Bug this fixes\nChanging a price amount in the YAML currently fails: the sync matches by amount, so a changed amount looks brand-new and CreatePrice hits unique_prices_product_slug (duplicate slug, SQLSTATE 23505). Under the content-key model a new amount is simply a new price -- no collision.",
+      "tasks": [
+        "[ ] OpenRails: drop the price `slug` column + `unique_prices_product_slug` constraint (added in v0.9.9); remove the slug field from CatalogPrice/CreatePriceRequest",
+        "[ ] OpenRails: derive Stripe lookup_key + dedup from a financial CONTENT KEY over (product_slug, currency, unit_amount, billing_cycle_days, type) -- NOT product_id, NOT a slug. Readable form e.g. `openrails.pro.usd.2900.30`",
+        "[ ] OpenRails: keep prices IMMUTABLE on financial terms (no amount/currency/cycle mutation); `unique_prices_product_amount_cycle` remains the natural uniqueness",
+        "[ ] OpenRails: price lifecycle stays mutable -- support archive AND un-archive (active <-> archived), propagated to the provider",
+        "[ ] OpenRails: apply re-asserts product `active` from catalog status (un-archive a catalog-active product archived in the provider); add a product-level reconcile path (products have none today)",
+        "[ ] OpenRails: keep the continuous drift/reconcile job alert-only; aggressive provider push only on operator-invoked apply",
+        "[ ] OpenRails: drift detection + reconciliation + AutoCreate match on the financial content key (replace the slug-based key)",
+        "[ ] OpenRails: tests -- content-key determinism over (product_slug + financial terms) survives UUID regeneration; new amount = new price; price archive/unarchive round-trip",
+        "[ ] OpenRails: tag/bump release",
+        "[ ] cozy-art YAML: remove price slugs (a price is identified by its terms now)",
+        "[ ] cozy-art sync: match existing price by financial content key (product_slug+currency+amount+cycle+type); a changed amount => create new price + archive old; never mutate a price's terms",
+        "[ ] cozy-art sync: Terraform-style change log -- per object created / archived / unchanged (a price change shows 'archived $12, created $13')",
+        "[ ] cozy-art sync: --dry-run / plan flag -- print the plan without mutating OpenRails or providers",
+        "[ ] cozy-art: bump OpenRails pin once released",
+        "[ ] Verify end-to-end: bump starter $12 -> $13 in YAML, run apply, confirm a new $13 Stripe price (active) + old $12 archived (still billing existing subs), content keys correct, change log shows the diff"
+      ],
+      "completed": false
     }
   ]
 }

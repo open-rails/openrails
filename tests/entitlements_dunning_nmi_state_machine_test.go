@@ -54,7 +54,6 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	_, err = suite.BunDB.NewInsert().Model(&models.Price{
 		ID:               priceID,
 		ProductID:        productID,
-		Slug:             "test_price_1",
 		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
