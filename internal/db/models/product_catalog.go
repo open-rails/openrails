@@ -176,12 +176,12 @@ func CloneCreditsSpec(spec CreditsSpec) CreditsSpec {
 type Price struct {
 	bun.BaseModel `bun:"table:billing.prices,alias:price"`
 
-	ID          uuid.UUID     `bun:"id,pk,type:uuid" json:"id"`
-	ProductID   uuid.UUID     `bun:"product_id,notnull" json:"product_id"`
-	DisplayName string        `bun:"display_name,notnull" json:"display_name"`
-	Status      CatalogStatus `bun:"status,notnull,default:'active'" json:"status"`
-	Amount      int64         `bun:"amount,notnull" json:"amount"`
-	Currency    string        `bun:"currency,notnull" json:"currency"`
+	ID        uuid.UUID     `bun:"id,pk,type:uuid" json:"id"`
+	ProductID uuid.UUID     `bun:"product_id,notnull" json:"product_id"`
+	Slug      string        `bun:"slug,notnull" json:"slug"`
+	Status    CatalogStatus `bun:"status,notnull,default:'active'" json:"status"`
+	Amount    int64         `bun:"amount,notnull" json:"amount"`
+	Currency  string        `bun:"currency,notnull" json:"currency"`
 
 	// Billing interval in days (nullable for one-time purchases)
 	// 30 = monthly, 365 = yearly, null = one-time purchase

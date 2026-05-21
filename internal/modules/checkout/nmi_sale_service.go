@@ -149,7 +149,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		CustomerVaultID:  customerVaultID,
 		Amount:           price.Amount,
 		Currency:         price.Currency,
-		OrderDescription: fmt.Sprintf("Purchase: %s - %s", product.DisplayName, price.DisplayName),
+		OrderDescription: fmt.Sprintf("Purchase: %s", product.DisplayName),
 		OrderID:          orderID,
 	})
 	if err != nil {

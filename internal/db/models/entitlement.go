@@ -35,7 +35,7 @@ const (
 type Entitlement struct {
 	bun.BaseModel `bun:"table:billing.entitlements,alias:ent"`
 
-	ID          uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
+	ID          uuid.UUID `bun:"id,pk,type:uuid,default:uuidv7()" json:"id"`
 	UserID      string    `bun:"user_id,notnull" json:"user_id"`
 	Entitlement string    `bun:"entitlement,notnull" json:"entitlement"`
 

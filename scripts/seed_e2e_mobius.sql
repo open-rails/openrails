@@ -30,10 +30,10 @@ SET display_name = EXCLUDED.display_name,
 WITH p AS (
   SELECT id AS product_id FROM billing.products WHERE slug = 'e2e_mobius'
 )
-INSERT INTO billing.prices (product_id, display_name, amount, currency, billing_cycle_days, processors, is_active)
+INSERT INTO billing.prices (product_id, slug, amount, currency, billing_cycle_days, processors, is_active)
 SELECT
   p.product_id,
-  'E2E Mobius Monthly (1 day cadence recommended for rebill tests)',
+  'e2e_mobius_daily',
   999,
   'usd',
   1,

@@ -44,18 +44,16 @@ const providerLookupKey = "lookup_key"
 var errPendingManualLink = errors.New("provider requires a manual link")
 
 // mutableUpdate carries the post-create mutable fields that Update propagates
-// to attached providers (display name, active flag). Currency / amount /
-// billing cycle are immutable in OpenRails so they're not represented here.
+// to attached providers (active flag). Currency / amount / billing cycle are
+// immutable in OpenRails so they're not represented here.
 type mutableUpdate struct {
-	DisplayName *string
-	IsActive    *bool
+	IsActive *bool
 }
 
 // priceVerifyContext is the OpenRails-side snapshot used by Verify to compute
 // per-field drift against the remote object. Adapters compare each populated
 // field on this struct against the corresponding remote field.
 type priceVerifyContext struct {
-	DisplayName      string
 	IsActive         bool
 	UnitAmount       int64
 	Currency         string
@@ -105,14 +103,18 @@ type providerAdapter interface {
 }
 
 // autoCreateContext is the input to AutoCreate. It carries enough OpenRails-side
-// context for an adapter to mint a coherent remote object — display name, money
-// fields, the OpenRails price/product IDs (for metadata stamping), and the
-// optional lookup_key.
+// context for an adapter to mint a coherent remote object — money fields, the
+// OpenRails price/product IDs (for metadata stamping and product-derived labels),
+// and the optional lookup_key.
 type autoCreateContext struct {
-	PriceID          uuid.UUID
-	ProductID        uuid.UUID
-	Product          *models.Product
-	DisplayName      string
+	PriceID   uuid.UUID
+	ProductID uuid.UUID
+	Product   *models.Product
+	// ProductSlug / PriceSlug are the CONTENT identity of this price. They (not
+	// the row UUIDs) drive the deterministic Stripe lookup_key + the metadata
+	// content keys, so find-or-create survives a DB rebuild.
+	ProductSlug      string
+	PriceSlug        string
 	UnitAmount       int64
 	Currency         string
 	BillingCycleDays *int
@@ -132,11 +134,22 @@ func (s *Service) providerAdapters() map[string]providerAdapter {
 }
 
 // internalStripeLookupKey is the deterministic Stripe lookup_key OpenRails
-// assigns to every price it auto-creates. It is derived solely from the
-// OpenRails price UUID so it is stable, collision-free, and reconstructable
-// without the caller supplying anything. Callers no longer pass a lookup_key.
-func internalStripeLookupKey(priceID uuid.UUID) string {
-	return "openrails_" + priceID.String()
+// assigns to every price it auto-creates. It is content-addressed — derived
+// from the OpenRails product slug + price slug, NOT the row UUIDs — so it is
+// stable across DB rebuilds, collision-free within an account, and
+// reconstructable without the caller supplying anything. Dots are safe because
+// slugs are constrained to [a-z0-9-]. Callers never pass a lookup_key.
+//
+// Format: "openrails.<product_slug>.<price_slug>".
+func internalStripeLookupKey(productSlug, priceSlug string) string {
+	return "openrails." + strings.TrimSpace(productSlug) + "." + strings.TrimSpace(priceSlug)
+}
+
+// openRailsPriceContentKey is the symmetric price content key stamped on the
+// Stripe Price's metadata (StripeMetadataOpenRailsPriceKey):
+// "<product_slug>.<price_slug>".
+func openRailsPriceContentKey(productSlug, priceSlug string) string {
+	return strings.TrimSpace(productSlug) + "." + strings.TrimSpace(priceSlug)
 }
 
 // resolveProviders walks the declared `providers` + `provider_links` from a
@@ -211,16 +224,24 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			}
 			continue
 		}
-		// Otherwise dispatch AutoCreate.
+		// Otherwise dispatch AutoCreate. The lookup_key + content keys are
+		// derived from the catalog slugs (product + price), not the row UUIDs,
+		// so re-syncing after a DB wipe finds the same Stripe objects.
+		productSlug := ""
+		if product != nil {
+			productSlug = strings.TrimSpace(product.Slug)
+		}
+		priceSlug := strings.TrimSpace(req.Slug)
 		ids, createErr := adapter.AutoCreate(ctx, autoCreateContext{
 			PriceID:          priceID,
 			ProductID:        req.ProductID,
 			Product:          product,
-			DisplayName:      strings.TrimSpace(req.DisplayName),
+			ProductSlug:      productSlug,
+			PriceSlug:        priceSlug,
 			UnitAmount:       req.UnitAmount,
 			Currency:         req.Currency,
 			BillingCycleDays: req.BillingCycleDays,
-			LookupKey:        internalStripeLookupKey(priceID),
+			LookupKey:        internalStripeLookupKey(productSlug, priceSlug),
 		})
 		switch {
 		case errors.Is(createErr, errPendingManualLink):

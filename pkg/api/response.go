@@ -32,16 +32,15 @@ type CreditGrantSpecObject struct {
 
 // PriceObject represents a price resource
 type PriceObject struct {
-	ID         string            `json:"id"`
-	Object     string            `json:"object"` // Always "price"
-	Name       string            `json:"name"`
-	UnitAmount int64             `json:"unit_amount"` // In the currency's smallest unit
-	Currency   string            `json:"currency"`
-	Type       string            `json:"type,omitempty"`      // one_time or recurring
-	Recurring  *RecurringInfo    `json:"recurring,omitempty"` // null for one-time purchases
-	Product    string            `json:"product"`             // Product ID
-	Active     bool              `json:"active"`
-	Livemode   bool              `json:"livemode,omitempty"`
+	ID         string         `json:"id"`
+	Object     string         `json:"object"`      // Always "price"
+	UnitAmount int64          `json:"unit_amount"` // In the currency's smallest unit
+	Currency   string         `json:"currency"`
+	Type       string         `json:"type,omitempty"`      // one_time or recurring
+	Recurring  *RecurringInfo `json:"recurring,omitempty"` // null for one-time purchases
+	Product    string         `json:"product"`             // Product ID
+	Active     bool           `json:"active"`
+	Livemode   bool           `json:"livemode,omitempty"`
 	// Providers lists the payment processors this price can be paid through
 	// (e.g. ["stripe","ccbill"]), sorted. Lets clients render per-provider
 	// checkout actions and choose which processor to send at checkout time.

@@ -1313,7 +1313,7 @@ func (s *CheckoutService) processUpgrade(
 			CustomerVaultID:  customerVaultID,
 			Amount:           prorationAmount,
 			Currency:         newPrice.Currency,
-			OrderDescription: fmt.Sprintf("Upgrade proration: %s to %s", oldPrice.DisplayName, newPrice.DisplayName),
+			OrderDescription: fmt.Sprintf("Upgrade proration: %s", newProduct.DisplayName),
 			OrderID:          fmt.Sprintf("upgrade-%s-%s", existingSub.ID.String()[:8], uuid.New().String()[:8]),
 		})
 		if err != nil {

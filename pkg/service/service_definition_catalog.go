@@ -296,7 +296,7 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 type CatalogPrice struct {
 	ID               uuid.UUID            `json:"id"`
 	ProductID        uuid.UUID            `json:"product_id"`
-	DisplayName      string               `json:"display_name"`
+	Slug             string               `json:"slug"`
 	Status           models.CatalogStatus `json:"status"`
 	UnitAmount       int64                `json:"unit_amount"`
 	Currency         string               `json:"currency"`
@@ -329,11 +329,15 @@ type CatalogPrice struct {
 //     that provider; the response carries a PendingAction telling the operator
 //     what to do.
 type CreatePriceRequest struct {
-	ProductID        uuid.UUID `json:"product_id"`
-	DisplayName      string    `json:"display_name"`
-	UnitAmount       int64     `json:"unit_amount"`
-	Currency         string    `json:"currency"`
-	BillingCycleDays *int      `json:"billing_cycle_days,omitempty"`
+	ProductID uuid.UUID `json:"product_id"`
+	// Slug is the price's stable, per-product identity (e.g. "pro_monthly").
+	// Required on create. It is the substance the content-based provider keys
+	// are derived from, so it must be stable across DB rebuilds and unique
+	// within the product. Slugs are [a-z0-9-]; never changed after create.
+	Slug             string `json:"slug"`
+	UnitAmount       int64  `json:"unit_amount"`
+	Currency         string `json:"currency"`
+	BillingCycleDays *int   `json:"billing_cycle_days,omitempty"`
 
 	// Providers is the list of provider names to attach (e.g. ["stripe",
 	// "ccbill", "mobius"]). Empty means "DB-only price with no external
@@ -363,10 +367,10 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	if req.ProductID == uuid.Nil {
 		return nil, fmt.Errorf("product_id required")
 	}
-	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	req.Slug = strings.TrimSpace(req.Slug)
 	req.Currency = strings.ToLower(strings.TrimSpace(req.Currency))
-	if req.DisplayName == "" {
-		return nil, fmt.Errorf("display_name required")
+	if req.Slug == "" {
+		return nil, fmt.Errorf("slug required")
 	}
 	if req.UnitAmount <= 0 {
 		return nil, fmt.Errorf("unit_amount must be positive")
@@ -409,7 +413,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	price := &models.Price{
 		ID:               priceID,
 		ProductID:        req.ProductID,
-		DisplayName:      req.DisplayName,
+		Slug:             req.Slug,
 		Status:           status,
 		Amount:           req.UnitAmount,
 		Currency:         req.Currency,
@@ -455,8 +459,6 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 // existing map). To clear a provider entirely, supply an empty inner map for
 // it and set ReplaceProviderLinks=true.
 type UpdatePriceRequest struct {
-	DisplayName *string `json:"display_name,omitempty"`
-
 	// ProviderLinks merges per-provider link maps into the existing processors
 	// map. Supply only the providers you want to add or rotate. Each map's
 	// values are validated through the matching provider adapter's Attach.
@@ -483,11 +485,6 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	}
 	if priceID == uuid.Nil {
 		return nil, fmt.Errorf("price_id required")
-	}
-	if req.DisplayName != nil {
-		if err := prices.UpdateDisplayName(ctx, priceID, strings.TrimSpace(*req.DisplayName)); err != nil {
-			return nil, err
-		}
 	}
 	// Declarative provider link rotation. ReplaceProviderLinks=true overwrites
 	// the entire processors map; otherwise the supplied entries are merged
@@ -551,10 +548,8 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	// Propagate mutable changes to every attached provider via its adapter.
 	// Only when the caller did not opt out via SkipProcessorSync. Failures are
 	// logged-and-swallowed: drift will surface on the next ?verify=true read.
-	if !req.SkipProcessorSync && (req.DisplayName != nil || req.Status != nil) {
-		mutable := mutableUpdate{
-			DisplayName: req.DisplayName,
-		}
+	if !req.SkipProcessorSync && req.Status != nil {
+		mutable := mutableUpdate{}
 		if req.Status != nil {
 			active := *req.Status == models.CatalogStatusActive
 			mutable.IsActive = &active
@@ -580,7 +575,7 @@ func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 	cp := &CatalogPrice{
 		ID:               p.ID,
 		ProductID:        p.ProductID,
-		DisplayName:      p.DisplayName,
+		Slug:             p.Slug,
 		Status:           p.Status,
 		UnitAmount:       p.Amount,
 		Currency:         p.Currency,

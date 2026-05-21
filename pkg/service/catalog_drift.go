@@ -52,11 +52,21 @@ type nmiPlanLister interface {
 
 // localCatalogSnapshot is the OpenRails-side view the diffs compare against.
 // Built from the products + prices tables.
+//
+// Stripe matching is CONTENT-keyed: Stripe objects are reverse-matched to
+// OpenRails rows by the product slug (from metadata openrails_product_key) and
+// the price content key (from the Stripe price lookup_key / metadata
+// openrails_price_key), NOT by the row UUIDs. This makes drift matching survive
+// a DB rebuild that regenerates UUIDs.
 type localCatalogSnapshot struct {
 	// productByID maps OpenRails product UUID (string) -> product row.
 	productByID map[string]*models.Product
 	// priceByID maps OpenRails price UUID (string) -> price row.
 	priceByID map[string]*models.Price
+	// productBySlug maps OpenRails product slug -> product row (content key).
+	productBySlug map[string]*models.Product
+	// priceByContentKey maps "<product_slug>.<price_slug>" -> price row (content key).
+	priceByContentKey map[string]*models.Price
 	// stripeProductIDs is the set of stripe product ids OpenRails believes it owns.
 	stripeProductIDs map[string]string // stripe product id -> openrails product id
 	// stripePriceIDs is the set of stripe price ids OpenRails believes it owns.
@@ -85,10 +95,12 @@ func computeCatalogDrift(
 	seenStripePriceIDs := make(map[string]struct{}, len(stripePrices))
 
 	// --- Stripe Products: orphan + field drift ---
+	// Match on the CONTENT key (product slug from openrails_product_key) so the
+	// match survives a DB rebuild that regenerates row UUIDs.
 	for _, sp := range stripeProducts {
 		seenStripeProductIDs[sp.ID] = struct{}{}
-		orProductID := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsProductID])
-		if orProductID == "" {
+		productKey := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsProductKey])
+		if productKey == "" {
 			// No marker at all -> a Stripe-native product OpenRails doesn't track.
 			events = append(events, models.CatalogDriftEvent{
 				Provider:              models.CatalogDriftProviderStripe,
@@ -99,14 +111,14 @@ func computeCatalogDrift(
 			})
 			continue
 		}
-		local, ok := snap.productByID[orProductID]
+		local, ok := snap.productBySlug[productKey]
 		if !ok {
-			// Marker points at an OpenRails product that doesn't exist.
+			// Marker points at an OpenRails product slug that doesn't exist.
 			events = append(events, models.CatalogDriftEvent{
 				Provider:              models.CatalogDriftProviderStripe,
 				Kind:                  models.CatalogDriftOrphanInStripe,
 				OpenRailsResourceType: models.CatalogDriftResourceProduct,
-				OpenRailsResourceID:   orProductID,
+				OpenRailsResourceID:   productKey,
 				ExternalResourceID:    sp.ID,
 				DetectedAt:            now,
 			})
@@ -116,10 +128,13 @@ func computeCatalogDrift(
 	}
 
 	// --- Stripe Prices: orphan + field drift ---
+	// Match on the CONTENT key: prefer the price's lookup_key
+	// ("openrails.<product_slug>.<price_slug>"), falling back to the
+	// openrails_price_key metadata ("<product_slug>.<price_slug>").
 	for _, sp := range stripePrices {
 		seenStripePriceIDs[sp.ID] = struct{}{}
-		orPriceID := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsPriceID])
-		if orPriceID == "" {
+		priceKey := stripePriceContentKey(sp)
+		if priceKey == "" {
 			events = append(events, models.CatalogDriftEvent{
 				Provider:              models.CatalogDriftProviderStripe,
 				Kind:                  models.CatalogDriftOrphanInStripe,
@@ -129,13 +144,13 @@ func computeCatalogDrift(
 			})
 			continue
 		}
-		local, ok := snap.priceByID[orPriceID]
+		local, ok := snap.priceByContentKey[priceKey]
 		if !ok {
 			events = append(events, models.CatalogDriftEvent{
 				Provider:              models.CatalogDriftProviderStripe,
 				Kind:                  models.CatalogDriftOrphanInStripe,
 				OpenRailsResourceType: models.CatalogDriftResourcePrice,
-				OpenRailsResourceID:   orPriceID,
+				OpenRailsResourceID:   priceKey,
 				ExternalResourceID:    sp.ID,
 				DetectedAt:            now,
 			})
@@ -171,6 +186,22 @@ func computeCatalogDrift(
 	}
 
 	return events
+}
+
+// stripePriceContentKey extracts the OpenRails content key
+// ("<product_slug>.<price_slug>") from a Stripe Price for reverse-matching.
+// It prefers the openrails_price_key metadata, falling back to deriving it from
+// the lookup_key ("openrails.<product_slug>.<price_slug>" -> strip the prefix).
+// Returns "" when neither is present (a Stripe-native price OpenRails doesn't own).
+func stripePriceContentKey(sp catalog.StripePrice) string {
+	if k := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsPriceKey]); k != "" {
+		return k
+	}
+	const lookupPrefix = "openrails."
+	if lk := strings.TrimSpace(sp.LookupKey); strings.HasPrefix(lk, lookupPrefix) {
+		return strings.TrimPrefix(lk, lookupPrefix)
+	}
+	return ""
 }
 
 // diffProductFields compares an OpenRails product against its Stripe mirror and
@@ -226,9 +257,6 @@ func diffPriceFields(local *models.Price, sp catalog.StripePrice, now time.Time)
 	}
 	if localActive := local.IsPurchasable(); localActive != sp.Active {
 		emit("active", strconv.FormatBool(localActive), strconv.FormatBool(sp.Active))
-	}
-	if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(sp.Nickname) {
-		emit("nickname", local.DisplayName, sp.Nickname)
 	}
 	return out
 }
@@ -346,13 +374,10 @@ func computeNMICatalogDrift(
 			events = append(events, ev)
 			continue
 		}
-		// Matched: diff name + amount only (frequency is immutable, not drift).
+		// Matched: diff amount only (frequency is immutable, not drift).
 		local := snap.priceByID[orPriceID]
 		if local == nil {
 			continue
-		}
-		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(plan.PlanName) {
-			events = append(events, nmiFieldDriftEvent(local.ID.String(), plan.PlanID, "plan_name", local.DisplayName, plan.PlanName, now))
 		}
 		if local.Amount != plan.AmountCents {
 			events = append(events, nmiFieldDriftEvent(local.ID.String(), plan.PlanID, "plan_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(plan.AmountCents, 10), now))
@@ -496,15 +521,26 @@ func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Pr
 	snap := localCatalogSnapshot{
 		productByID:               make(map[string]*models.Product, len(productRows)),
 		priceByID:                 make(map[string]*models.Price, len(priceRows)),
+		productBySlug:             make(map[string]*models.Product, len(productRows)),
+		priceByContentKey:         make(map[string]*models.Price, len(priceRows)),
 		stripeProductIDs:          make(map[string]string),
 		stripePriceIDs:            make(map[string]string),
 		nmiPlanIDByOpenRailsPrice: make(map[string]string),
 	}
 	for _, p := range productRows {
 		snap.productByID[p.ID.String()] = p
+		if slug := strings.TrimSpace(p.Slug); slug != "" {
+			snap.productBySlug[slug] = p
+		}
 	}
 	for _, pr := range priceRows {
 		snap.priceByID[pr.ID.String()] = pr
+		// Content key = "<product_slug>.<price_slug>"; needs the owning product.
+		if prod := snap.productByID[pr.ProductID.String()]; prod != nil {
+			if ck := openRailsPriceContentKey(prod.Slug, pr.Slug); strings.TrimSpace(ck) != "." {
+				snap.priceByContentKey[ck] = pr
+			}
+		}
 		if stripe := pr.Processors["stripe"]; stripe != nil {
 			if id := strings.TrimSpace(stripe[models.ProcessorKeyStripePriceID]); id != "" {
 				snap.stripePriceIDs[id] = pr.ID.String()

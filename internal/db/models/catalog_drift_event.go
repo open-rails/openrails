@@ -64,7 +64,7 @@ const (
 type CatalogDriftEvent struct {
 	bun.BaseModel `bun:"table:billing.catalog_drift_events,alias:cde"`
 
-	ID uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
+	ID uuid.UUID `bun:"id,pk,type:uuid,default:uuidv7()" json:"id"`
 	// Provider is "stripe" or "nmi"; it disambiguates the shared field_drift kind.
 	Provider CatalogDriftProvider `bun:"provider,notnull" json:"provider"`
 	Kind     CatalogDriftKind     `bun:"kind,notnull" json:"kind"`

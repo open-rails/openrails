@@ -463,7 +463,6 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 	if err != nil {
 		return nil, fmt.Errorf("failed to get price: %w", err)
 	}
-	priceName := strings.TrimSpace(price.DisplayName)
 
 	productName := ""
 	if s.productService != nil {
@@ -499,7 +498,6 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 		Username:       username,
 		SubscriptionID: subscription.ID,
 		ProductName:    productName,
-		PriceName:      priceName,
 		Amount:         price.Amount,
 		Currency:       price.Currency,
 		PeriodStart:    periodStart,

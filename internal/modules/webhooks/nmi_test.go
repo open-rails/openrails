@@ -282,12 +282,12 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 		UpdatedAt: now,
 	}
 	price := &models.Price{
-		ID:          priceID,
-		ProductID:   productID,
-		DisplayName: "Premium Monthly",
-		Status:      models.CatalogStatusActive,
-		Amount:      2399,
-		Currency:    "USD",
+		ID:        priceID,
+		ProductID: productID,
+		Slug:      "test_price_1",
+		Status:    models.CatalogStatusActive,
+		Amount:    2399,
+		Currency:  "USD",
 		BillingCycleDays: func() *int {
 			days := 30
 			return &days

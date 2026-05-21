@@ -92,7 +92,7 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 
 	priceID := uuid.New()
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: priceID, DisplayName: "Premium", UnitAmount: 999, BillingCycleDays: intPtr(30),
+		PriceID: priceID, UnitAmount: 999, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -124,7 +124,7 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: priceID, DisplayName: "Premium", UnitAmount: 999, BillingCycleDays: intPtr(30),
+		PriceID: priceID, UnitAmount: 999, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -134,49 +134,14 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	}
 }
 
-func TestMobiusAdapter_UpdatePropagatesDisplayName(t *testing.T) {
-	var editName string
-	var editCalled bool
+func TestMobiusAdapter_UpdateIsNoop(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		switch r.Form.Get("recurring") {
-		case "edit_plan":
-			editCalled = true
-			editName = r.Form.Get("plan_name")
-			// amount must be replayed (immutable), not zeroed.
-			if got := r.Form.Get("plan_amount"); got != "9.99" {
-				t.Errorf("edit replayed amount: got %q want 9.99", got)
-			}
-			_, _ = w.Write([]byte("response=1"))
-		default:
-			_, _ = w.Write([]byte("<nm_response><plan><plan_id>p</plan_id>" +
-				"<plan_name>Old</plan_name><plan_amount>9.99</plan_amount></plan></nm_response>"))
-		}
+		t.Error("no NMI request expected: NMI plan Update is a no-op")
 	}))
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids := map[string]string{models.ProcessorKeyPlanID: "p", models.ProcessorKeyProvider: "mobius"}
-	err := a.Update(context.Background(), ids, mutableUpdate{DisplayName: strPtr("New Name")})
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if !editCalled {
-		t.Fatal("expected EditRecurringPlan to be called")
-	}
-	if editName != "New Name" {
-		t.Fatalf("plan_name not propagated: got %q", editName)
-	}
-}
-
-func TestMobiusAdapter_UpdateNoMutableFieldsIsNoop(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("no NMI request expected when there is nothing mutable to push")
-	}))
-	t.Cleanup(server.Close)
-	a := newMobiusAdapterWithServer(t, server.URL)
-
-	ids := map[string]string{models.ProcessorKeyPlanID: "p"}
 	if err := a.Update(context.Background(), ids, mutableUpdate{}); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -192,7 +157,7 @@ func TestMobiusAdapter_VerifyDetectsDrift(t *testing.T) {
 
 	ids := map[string]string{models.ProcessorKeyPlanID: "p", models.ProcessorKeyProvider: "mobius"}
 	drift, missing, err := a.Verify(context.Background(), ids, &priceVerifyContext{
-		DisplayName: "Local Name", UnitAmount: 999,
+		UnitAmount: 999,
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -203,9 +168,6 @@ func TestMobiusAdapter_VerifyDetectsDrift(t *testing.T) {
 	fields := map[string]string{}
 	for _, d := range drift {
 		fields[d.Field] = d.RemoteValue
-	}
-	if fields["display_name"] != "Remote Name" {
-		t.Fatalf("expected display_name drift, got %v", drift)
 	}
 	if fields["unit_amount"] != "500" {
 		t.Fatalf("expected unit_amount drift (cents), got %v", drift)

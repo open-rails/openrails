@@ -306,10 +306,9 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 		return nil, nil
 	}
 	local := &priceVerifyContext{
-		DisplayName: p.DisplayName,
-		IsActive:    p.Status == models.CatalogStatusActive,
-		UnitAmount:  p.Amount,
-		Currency:    p.Currency,
+		IsActive:   p.Status == models.CatalogStatusActive,
+		UnitAmount: p.Amount,
+		Currency:   p.Currency,
 	}
 	adapters := s.providerAdapters()
 	out := make(map[string]ProviderState, len(p.Processors))
@@ -435,33 +434,55 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 			if perr != nil {
 				return nil, perr
 			}
-			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
-			newPriceID, perr := stripeSvc.CreatePrice(ctx, catalog.CreatePriceParams{
-				StripeProductID:  state.IDs[models.ProcessorKeyStripeProductID],
-				UnitAmount:       local.Amount,
-				Currency:         local.Currency,
-				BillingCycleDays: local.BillingCycleDays,
-				LookupKey:        state.LookupKey,
-				IdempotencyKey:   "openrails-price-recreate-" + priceID.String(),
-				Metadata: map[string]string{
-					catalog.StripeMetadataOpenRailsPriceID:   priceID.String(),
-					catalog.StripeMetadataOpenRailsProductID: prod.ID.String(),
-				},
-			})
-			if perr != nil {
+			if _, perr := s.remintStripePrice(ctx, prices, prod, local, priceID, state.IDs[models.ProcessorKeyStripeProductID]); perr != nil {
 				return nil, perr
-			}
-			newProcessors := cloneProcessors(local.Processors)
-			if newProcessors[name] == nil {
-				newProcessors[name] = map[string]string{}
-			}
-			newProcessors[name][models.ProcessorKeyStripePriceID] = newPriceID
-			if err := prices.UpdateProcessors(ctx, priceID, newProcessors); err != nil {
-				return nil, err
 			}
 			actions[name] = "recreated_remote"
 			mutated = true
 		case SyncStatusDrifted:
+			// Stripe prices are immutable on price terms. If an immutable field
+			// (amount/currency) drifted, we cannot UPDATE the remote price — mint a
+			// new one (CreatePrice transfers the lookup_key off the old price) and
+			// archive the old. Mutable-only drift (active) is propagated normally.
+			immutableDrift := false
+			for _, df := range state.Drift {
+				if df.Field == "unit_amount" || df.Field == "currency" {
+					immutableDrift = true
+					break
+				}
+			}
+			if name == "stripe" && immutableDrift {
+				if !opts.Recreate {
+					actions[name] = "drifted_no_recreate"
+					continue
+				}
+				if opts.DryRun {
+					actions[name] = "would_recreate_remote"
+					continue
+				}
+				product, _, perr := s.requireCatalogServices()
+				if perr != nil {
+					return nil, perr
+				}
+				prod, perr := product.GetByID(ctx, local.ProductID)
+				if perr != nil {
+					return nil, perr
+				}
+				oldStripePriceID := strings.TrimSpace(state.IDs[models.ProcessorKeyStripePriceID])
+				if _, perr := s.remintStripePrice(ctx, prices, prod, local, priceID, state.IDs[models.ProcessorKeyStripeProductID]); perr != nil {
+					return nil, perr
+				}
+				if oldStripePriceID != "" {
+					inactive := false
+					stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
+					if perr := stripeSvc.UpdatePrice(ctx, oldStripePriceID, catalog.UpdatePriceParams{Active: &inactive}); perr != nil {
+						return nil, perr
+					}
+				}
+				actions[name] = "recreated_remote"
+				mutated = true
+				continue
+			}
 			adapter, ok := adapters[strings.ToLower(strings.TrimSpace(name))]
 			if !ok {
 				actions[name] = "unsupported"
@@ -471,11 +492,9 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 				actions[name] = "would_update_remote"
 				continue
 			}
-			displayName := local.DisplayName
 			active := local.Status == models.CatalogStatusActive
 			if err := adapter.Update(ctx, state.IDs, mutableUpdate{
-				DisplayName: &displayName,
-				IsActive:    &active,
+				IsActive: &active,
 			}); err != nil {
 				return nil, err
 			}
@@ -503,6 +522,50 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 		}
 	}
 	return &ReconcileResult{Providers: finalStates, Actions: actions}, nil
+}
+
+// remintStripePrice mints a fresh Stripe Price for the OpenRails price under its
+// content lookup_key and repoints the local processors map at the new id. Stripe
+// prices are immutable on price terms, so this is the only way to apply an
+// amount/currency/cycle change or to replace a 404'd price. CreatePrice sets
+// transfer_lookup_key, so the lookup_key atomically moves from any prior holder
+// to the new price; callers archive the old price when one still exists.
+func (s *Service) remintStripePrice(ctx context.Context, prices *catalog.PriceService, prod *models.Product, local *models.Price, priceID uuid.UUID, stripeProductID string) (string, error) {
+	priceContentKey := openRailsPriceContentKey(prod.Slug, local.Slug)
+	cycle := 0
+	if local.BillingCycleDays != nil {
+		cycle = *local.BillingCycleDays
+	}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
+	newPriceID, err := stripeSvc.CreatePrice(ctx, catalog.CreatePriceParams{
+		StripeProductID:  stripeProductID,
+		UnitAmount:       local.Amount,
+		Currency:         local.Currency,
+		BillingCycleDays: local.BillingCycleDays,
+		LookupKey:        internalStripeLookupKey(prod.Slug, local.Slug),
+		// Financial terms in the idempotency key so an amount/currency/cycle
+		// change mints a NEW price rather than replaying the prior create.
+		IdempotencyKey: fmt.Sprintf("openrails-price-remint-%s-%d-%s-%d", priceContentKey, local.Amount, strings.ToLower(strings.TrimSpace(local.Currency)), cycle),
+		Metadata: map[string]string{
+			catalog.StripeMetadataOpenRailsPriceKey:   priceContentKey,
+			catalog.StripeMetadataOpenRailsProductKey: strings.TrimSpace(prod.Slug),
+			// Informational only — not used for matching.
+			catalog.StripeMetadataOpenRailsPriceID:   priceID.String(),
+			catalog.StripeMetadataOpenRailsProductID: prod.ID.String(),
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	newProcessors := cloneProcessors(local.Processors)
+	if newProcessors["stripe"] == nil {
+		newProcessors["stripe"] = map[string]string{}
+	}
+	newProcessors["stripe"][models.ProcessorKeyStripePriceID] = newPriceID
+	if err := prices.UpdateProcessors(ctx, priceID, newProcessors); err != nil {
+		return "", err
+	}
+	return newPriceID, nil
 }
 
 // cloneProcessors returns a shallow-deep copy of a processors map. Used by

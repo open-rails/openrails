@@ -70,9 +70,9 @@ func (s *PriceService) ListPaginated(ctx context.Context, filter PriceFilter, li
 
 // Update is not supported - prices are immutable to preserve historical payment accuracy.
 // To change pricing, create a new price and deactivate the old one.
-// Use UpdateDisplayName() or UpdateProcessors() for non-financial fields.
+// Use UpdateProcessors() for non-financial fields.
 func (s *PriceService) Update(ctx context.Context, price *models.Price) error {
-	return errors.New("prices are immutable; use UpdateDisplayName(), UpdateProcessors(), or Deactivate() for allowed changes")
+	return errors.New("prices are immutable; use UpdateProcessors() or Deactivate() for allowed changes")
 }
 
 // Delete is not supported - prices are immutable to preserve historical payment accuracy.
@@ -103,16 +103,6 @@ func (s *PriceService) SetStatus(ctx context.Context, id uuid.UUID, status model
 		return err
 	}
 	price.Status = status
-	return s.repo.Update(ctx, price)
-}
-
-// UpdateDisplayName updates only the display name (cosmetic, does not affect historical data).
-func (s *PriceService) UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error {
-	price, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	price.DisplayName = displayName
 	return s.repo.Update(ctx, price)
 }
 

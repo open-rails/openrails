@@ -63,11 +63,10 @@ func TestCatalogStatus_CreateAsArchivedInOneStep(t *testing.T) {
 	require.Equal(t, models.CatalogStatusArchived, product.Status)
 
 	price, err := svc.CreatePrice(ctx, billingservice.CreatePriceRequest{
-		ProductID:   product.ID,
-		DisplayName: "Legacy Monthly",
-		UnitAmount:  1999,
-		Currency:    "usd",
-		Status:      models.CatalogStatusArchived,
+		ProductID:  product.ID,
+		UnitAmount: 1999,
+		Currency:   "usd",
+		Status:     models.CatalogStatusArchived,
 	})
 	require.NoError(t, err)
 	require.Equal(t, models.CatalogStatusArchived, price.Status)
@@ -95,11 +94,10 @@ func TestCatalogStatus_DraftHiddenAndNotPurchasable(t *testing.T) {
 	require.Equal(t, models.CatalogStatusDraft, product.Status)
 
 	price, err := svc.CreatePrice(ctx, billingservice.CreatePriceRequest{
-		ProductID:   product.ID,
-		DisplayName: "Draft Price",
-		UnitAmount:  500,
-		Currency:    "usd",
-		Status:      models.CatalogStatusDraft,
+		ProductID:  product.ID,
+		UnitAmount: 500,
+		Currency:   "usd",
+		Status:     models.CatalogStatusDraft,
 	})
 	require.NoError(t, err)
 	require.Equal(t, models.CatalogStatusDraft, price.Status)

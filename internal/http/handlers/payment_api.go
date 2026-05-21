@@ -170,5 +170,5 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 		}
 		sort.Strings(providers)
 	}
-	return api.PriceObject{ID: api.FormatPriceID(p.ID), Object: "price", Name: p.DisplayName, UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: api.FormatProductID(p.ProductID), Active: p.IsPurchasable(), Livemode: false, Providers: providers, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
+	return api.PriceObject{ID: api.FormatPriceID(p.ID), Object: "price", UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: api.FormatProductID(p.ProductID), Active: p.IsPurchasable(), Livemode: false, Providers: providers, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
 }

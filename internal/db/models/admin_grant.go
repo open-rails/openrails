@@ -13,7 +13,7 @@ import (
 type AdminGrant struct {
 	bun.BaseModel `bun:"table:billing.admin_grants,alias:ag"`
 
-	ID        uuid.UUID  `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
+	ID        uuid.UUID  `bun:"id,pk,type:uuid,default:uuidv7()" json:"id"`
 	UserID    string     `bun:"user_id,notnull" json:"user_id"`                        // User receiving the grant
 	PriceID   *uuid.UUID `bun:"price_id,type:uuid,nullzero" json:"price_id,omitempty"` // Optional: Price/Product being granted
 	GrantedBy string     `bun:"granted_by,notnull" json:"granted_by"`                  // Admin user ID who made the grant

@@ -6,7 +6,8 @@
 CREATE SCHEMA IF NOT EXISTS billing;
 
 -- Install required extensions in public schema.
--- Billing currently relies on pgcrypto for gen_random_uuid().
+-- Billing generates ids with the Postgres 18 built-in uuidv7() (no extension
+-- needed). pgcrypto is kept for any incidental hashing/random needs.
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
 -- Create migratekit migrations tracking table

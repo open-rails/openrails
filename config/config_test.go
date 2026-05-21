@@ -215,12 +215,29 @@ func TestProductionTestModeValidation(t *testing.T) {
 		assert.ErrorContains(t, Validate(cfg), "test_mode=true is not allowed outside development")
 	})
 
-	t.Run("prod env requires explicit test_mode false", func(t *testing.T) {
+	t.Run("prod env treats unset test_mode as live", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
 		cfg.TestMode = nil
+		cfg.APIKey = "production-service-key"
+		cfg.DB.Username = "billing_app"
+		cfg.DB.Password = "production-db-password"
+		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
+		cfg.CorsOrigins = []string{"https://app.example.com"}
+		cfg.ClickHouse.Username = "prod_analytics"
+		cfg.ClickHouse.Password = "production-clickhouse-password"
 		assembleDBURL(cfg)
-		assert.ErrorContains(t, Validate(cfg), "test_mode must be explicitly set to false outside development")
+		assert.False(t, cfg.IsTestMode(), "unset test_mode in prod should be live")
+		assert.NoError(t, Validate(cfg))
+	})
+
+	t.Run("dev env treats unset test_mode as sandbox", func(t *testing.T) {
+		cfg := GetDefaultBillingConfig()
+		cfg.Env = "dev"
+		cfg.TestMode = nil
+		assembleDBURL(cfg)
+		assert.True(t, cfg.IsTestMode(), "unset test_mode in dev should be sandbox")
+		assert.NoError(t, Validate(cfg))
 	})
 
 	t.Run("dev env can have test_mode false", func(t *testing.T) {

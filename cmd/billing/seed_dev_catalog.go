@@ -20,12 +20,10 @@ const (
 	devMobiusProductSlug       = "e2e_mobius"
 	devMobiusProductName       = "E2E Mobius Plan"
 	devMobiusProductDesc       = "Local E2E product for Mobius/NMI sandbox"
-	devMobiusPriceName         = "E2E Mobius Monthly (1 day cadence recommended for rebill tests)"
 	devMobiusPlanID            = "nmi_premium_monthly"
 	devCCBillProductSlug       = "basic"
 	devCCBillProductName       = "Basic"
 	devCCBillProductDesc       = "Local dev basic monthly subscription"
-	devCCBillPriceName         = "basic-monthly"
 	devCCBillFormName          = "basic"
 	devCCBillFlexID            = "681cb38f-afb9-4665-931f-2b896072178a"
 	devCCBillAmountCents int64 = 999
@@ -55,11 +53,11 @@ func seedDevCatalog(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("ensure mobius product: %w", err)
 	}
 	mobiusPrice, err := ensureRecurringPrice(ctx, runtime.PriceService, runtime.ProductService, recurringPriceSpec{
-		ProductID:   mobiusProduct.ID,
-		DisplayName: devMobiusPriceName,
-		Amount:      devMobiusAmountCents,
-		Currency:    devCurrency,
-		CycleDays:   devMobiusCycleDays,
+		ProductID: mobiusProduct.ID,
+		Slug:      devMobiusProductSlug + "_daily",
+		Amount:    devMobiusAmountCents,
+		Currency:  devCurrency,
+		CycleDays: devMobiusCycleDays,
 		Processors: map[string]map[string]string{
 			"mobius": {
 				models.ProcessorKeyPlanID:   devMobiusPlanID,
@@ -79,11 +77,11 @@ func seedDevCatalog(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("ensure ccbill product: %w", err)
 	}
 	ccbillPrice, err := ensureRecurringPrice(ctx, runtime.PriceService, runtime.ProductService, recurringPriceSpec{
-		ProductID:   ccbillProduct.ID,
-		DisplayName: strings.TrimSpace(devCCBillPriceName),
-		Amount:      devCCBillAmountCents,
-		Currency:    devCurrency,
-		CycleDays:   devCCBillCycleDays,
+		ProductID: ccbillProduct.ID,
+		Slug:      devCCBillProductSlug + "_monthly",
+		Amount:    devCCBillAmountCents,
+		Currency:  devCurrency,
+		CycleDays: devCCBillCycleDays,
 		Processors: map[string]map[string]string{
 			"ccbill": {
 				models.ProcessorKeyCCBillFormName: devCCBillFormName,
@@ -106,13 +104,13 @@ func seedDevCatalog(cmd *cobra.Command, _ []string) error {
 }
 
 type recurringPriceSpec struct {
-	ProductID   uuid.UUID
-	DisplayName string
-	Amount      int64
-	Currency    string
-	CycleDays   int
-	Processors  map[string]map[string]string
-	Lookup      func(context.Context) (*models.Price, error)
+	ProductID  uuid.UUID
+	Slug       string
+	Amount     int64
+	Currency   string
+	CycleDays  int
+	Processors map[string]map[string]string
+	Lookup     func(context.Context) (*models.Price, error)
 }
 
 func ensureProduct(ctx context.Context, svc interface {
@@ -162,7 +160,6 @@ func ensureProduct(ctx context.Context, svc interface {
 func ensureRecurringPrice(ctx context.Context, priceSvc interface {
 	Create(context.Context, *models.Price) error
 	Activate(context.Context, uuid.UUID) error
-	UpdateDisplayName(context.Context, uuid.UUID, string) error
 	UpdateProcessors(context.Context, uuid.UUID, map[string]map[string]string) error
 }, productSvc interface {
 	GetByID(context.Context, uuid.UUID) (*models.Product, error)
@@ -175,7 +172,7 @@ func ensureRecurringPrice(ctx context.Context, priceSvc interface {
 		cycleDays := spec.CycleDays
 		price = &models.Price{
 			ProductID:        spec.ProductID,
-			DisplayName:      spec.DisplayName,
+			Slug:             spec.Slug,
 			Status:           models.CatalogStatusActive,
 			Amount:           spec.Amount,
 			Currency:         spec.Currency,
@@ -202,11 +199,6 @@ func ensureRecurringPrice(ctx context.Context, priceSvc interface {
 	}
 	if price.Amount != spec.Amount || !strings.EqualFold(price.Currency, spec.Currency) || price.BillingCycleDays == nil || *price.BillingCycleDays != spec.CycleDays {
 		return nil, fmt.Errorf("existing price %s has immutable values that do not match requested seed", price.ID)
-	}
-	if price.DisplayName != spec.DisplayName {
-		if err := priceSvc.UpdateDisplayName(ctx, price.ID, spec.DisplayName); err != nil {
-			return nil, err
-		}
 	}
 	if err := priceSvc.UpdateProcessors(ctx, price.ID, spec.Processors); err != nil {
 		return nil, err

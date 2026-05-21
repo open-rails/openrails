@@ -43,7 +43,6 @@ type SubscriptionEmailData struct {
 	Username       string
 	SubscriptionID uuid.UUID
 	ProductName    string
-	PriceName      string
 	Amount         int64
 	Currency       string
 	PeriodStart    time.Time

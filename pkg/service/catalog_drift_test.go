@@ -90,11 +90,14 @@ func catalogStatusFromActive(active bool) models.CatalogStatus {
 
 // helper builders
 func prod(id uuid.UUID, name, desc string, active bool) *models.Product {
-	return &models.Product{ID: id, DisplayName: name, Description: desc, Status: catalogStatusFromActive(active)}
+	return &models.Product{ID: id, Slug: "prod-slug", DisplayName: name, Description: desc, Status: catalogStatusFromActive(active)}
 }
 
-func price(id, productID uuid.UUID, name string, amount int64, currency string, active bool, stripePriceID, stripeProductID string) *models.Price {
-	p := &models.Price{ID: id, ProductID: productID, DisplayName: name, Amount: amount, Currency: currency, Status: catalogStatusFromActive(active)}
+func price(id, productID uuid.UUID, slug string, amount int64, currency string, active bool, stripePriceID, stripeProductID string) *models.Price {
+	if slug == "" {
+		slug = "price-slug"
+	}
+	p := &models.Price{ID: id, ProductID: productID, Slug: slug, Amount: amount, Currency: currency, Status: catalogStatusFromActive(active)}
 	if stripePriceID != "" || stripeProductID != "" {
 		p.Processors = map[string]map[string]string{"stripe": {}}
 		if stripePriceID != "" {
@@ -109,8 +112,8 @@ func price(id, productID uuid.UUID, name string, amount int64, currency string, 
 
 // nmiPrice builds an OpenRails price linked to an NMI plan via the mobius
 // processor map.
-func nmiPrice(id, productID uuid.UUID, name string, amount int64, planID string) *models.Price {
-	p := &models.Price{ID: id, ProductID: productID, DisplayName: name, Amount: amount, Currency: "usd", Status: models.CatalogStatusActive}
+func nmiPrice(id, productID uuid.UUID, _ string, amount int64, planID string) *models.Price {
+	p := &models.Price{ID: id, ProductID: productID, Slug: "nmi-price-slug", Amount: amount, Currency: "usd", Status: models.CatalogStatusActive}
 	if planID != "" {
 		p.Processors = map[string]map[string]string{
 			string(models.ProcessorMobius): {models.ProcessorKeyPlanID: planID, models.ProcessorKeyProvider: "mobius"},
@@ -181,20 +184,20 @@ func TestComputeCatalogDriftFieldDrift(t *testing.T) {
 
 	stripeProducts := []catalog.StripeProduct{
 		{ID: "prod_1", Name: "Premium Plus", Description: "new desc", Active: false, Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsProductID: productID.String(),
+			catalog.StripeMetadataOpenRailsProductKey: "prod-slug",
 		}},
 	}
 	stripePrices := []catalog.StripePrice{
 		{ID: "price_1", UnitAmount: 2000, Currency: "eur", Active: false, Nickname: "Yearly", Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsPriceID: priceID.String(),
+			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.Monthly",
 		}},
 	}
 	snap := snapFromRows(products, prices)
 	events := computeCatalogDrift(stripeProducts, stripePrices, snap, now)
 	driftCount := countKind(events, models.CatalogDriftFieldDrift)
-	// product: name, description, active = 3. price: unit_amount, currency, active, nickname = 4.
-	if driftCount != 7 {
-		t.Fatalf("expected 7 field_drift events, got %d (events=%+v)", driftCount, events)
+	// product: name, description, active = 3. price: unit_amount, currency, active = 3.
+	if driftCount != 6 {
+		t.Fatalf("expected 6 field_drift events, got %d (events=%+v)", driftCount, events)
 	}
 	if countKind(events, models.CatalogDriftMissingInStripe) != 0 {
 		t.Fatalf("expected no missing events when stripe ids are present")
@@ -210,12 +213,12 @@ func TestComputeCatalogDriftNoDriftWhenInSync(t *testing.T) {
 
 	stripeProducts := []catalog.StripeProduct{
 		{ID: "prod_1", Name: "Premium", Description: "desc", Active: true, Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsProductID: productID.String(),
+			catalog.StripeMetadataOpenRailsProductKey: "prod-slug",
 		}},
 	}
 	stripePrices := []catalog.StripePrice{
 		{ID: "price_1", UnitAmount: 1000, Currency: "usd", Active: true, Nickname: "Monthly", Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsPriceID: priceID.String(),
+			catalog.StripeMetadataOpenRailsPriceKey: "prod-slug.Monthly",
 		}},
 	}
 	snap := snapFromRows(products, prices)
@@ -351,11 +354,11 @@ func TestComputeNMIDriftFieldDrift(t *testing.T) {
 	planID := "openrails-" + priceID.String()
 	prices := []*models.Price{nmiPrice(priceID, productID, "Premium", 999, planID)}
 	snap := snapFromRows(nil, prices)
-	// NMI plan disagrees on both name and amount.
+	// NMI plan disagrees on amount (plan_name is no longer tracked for prices).
 	plans := []nmiPlan{{PlanID: planID, PlanName: "Premium Plus", AmountCents: 1999}}
 	events := computeNMICatalogDrift(plans, snap, now)
-	if got := countKind(events, models.CatalogDriftFieldDrift); got != 2 {
-		t.Fatalf("expected 2 field_drift (plan_name+plan_amount), got %d (%+v)", got, events)
+	if got := countKind(events, models.CatalogDriftFieldDrift); got != 1 {
+		t.Fatalf("expected 1 field_drift (plan_amount), got %d (%+v)", got, events)
 	}
 	for _, e := range events {
 		if e.Provider != models.CatalogDriftProviderNMI {

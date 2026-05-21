@@ -86,7 +86,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	_, err = bunDB.NewInsert().Model(&models.Price{
 		ID:               priceID,
 		ProductID:        productID,
-		DisplayName:      "Test Monthly",
+		Slug:             "test_price_1",
 		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",

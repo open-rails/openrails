@@ -66,7 +66,7 @@ END$$;
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.products (
-    id                 UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                 UUID         PRIMARY KEY DEFAULT uuidv7(),
     slug               TEXT         NOT NULL UNIQUE,
     display_name       TEXT         NOT NULL,
     description        TEXT,
@@ -93,9 +93,9 @@ COMMENT ON COLUMN billing.products.tier_rank         IS 'Tier ranking within gro
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.prices (
-    id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                  UUID         PRIMARY KEY DEFAULT uuidv7(),
     product_id          UUID         NOT NULL REFERENCES billing.products(id) ON DELETE RESTRICT,
-    display_name        TEXT         NOT NULL,
+    slug                TEXT         NOT NULL,                         -- stable per-product identity (e.g. "pro_monthly"); content key for provider dedup
     amount              BIGINT       NOT NULL,                        -- smallest currency unit (cents)
     currency            TEXT         NOT NULL,
     billing_cycle_days  INTEGER,                                      -- 30=monthly, 365=yearly, NULL=one-time
@@ -105,7 +105,9 @@ CREATE TABLE IF NOT EXISTS billing.prices (
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp,
 
     CONSTRAINT unique_prices_product_amount_cycle
-        UNIQUE (product_id, amount, currency, billing_cycle_days)
+        UNIQUE (product_id, amount, currency, billing_cycle_days),
+    CONSTRAINT unique_prices_product_slug
+        UNIQUE (product_id, slug)
 );
 
 CREATE INDEX IF NOT EXISTS idx_prices_product_id  ON billing.prices(product_id);
@@ -121,7 +123,7 @@ COMMENT ON TABLE billing.prices IS 'Pricing tiers for products with processor-sp
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.catalog_drift_events (
-    id                       UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                       UUID         PRIMARY KEY DEFAULT uuidv7(),
     provider                 TEXT         NOT NULL CHECK (provider IN ('stripe','nmi')),
     kind                     TEXT         NOT NULL CHECK (kind IN ('orphan_in_stripe','missing_in_stripe','orphan_in_nmi','missing_in_nmi','field_drift')),
     openrails_resource_type  TEXT         NOT NULL CHECK (openrails_resource_type IN ('product','price')),
@@ -152,7 +154,7 @@ COMMENT ON TABLE billing.catalog_drift_events IS 'Alert-only drift/orphan record
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.payment_methods (
-    id                      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                      UUID          PRIMARY KEY DEFAULT uuidv7(),
     user_id                 TEXT          NOT NULL,                      -- AuthKit/OIDC subject
     processor               VARCHAR(50)   NOT NULL,                      -- 'mobius', 'ccbill', 'stripe', 'nmi', ...
     vault_id                VARCHAR(255)  NOT NULL,                      -- primary identifier in processor's system
@@ -182,7 +184,7 @@ COMMENT ON COLUMN billing.payment_methods.vault_id  IS 'Primary payment method i
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.subscriptions (
-    id                          UUID                         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                          UUID                         PRIMARY KEY DEFAULT uuidv7(),
     user_id                     TEXT                         NOT NULL,                              -- AuthKit/OIDC subject
     price_id                    UUID                         REFERENCES billing.prices(id),
     product_id                  UUID                         NOT NULL REFERENCES billing.products(id),
@@ -280,7 +282,7 @@ COMMENT ON COLUMN billing.subscriptions.scheduled_price_id IS 'Price ID for sche
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.entitlements (
-    id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID         PRIMARY KEY DEFAULT uuidv7(),
     user_id         TEXT         NOT NULL,
     entitlement     TEXT         NOT NULL,
     start_at        TIMESTAMPTZ  NOT NULL,
@@ -344,7 +346,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_entitlements_active
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.payments (
-    id                          UUID                     PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                          UUID                     PRIMARY KEY DEFAULT uuidv7(),
     user_id                     TEXT                     NOT NULL,
     price_id                    UUID                     NOT NULL REFERENCES billing.prices(id),
     processor                   billing.processor_type   NOT NULL,
@@ -390,7 +392,7 @@ COMMENT ON COLUMN billing.payments.subscription_id IS 'Links a payment to the su
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.admin_grants (
-    id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID         PRIMARY KEY DEFAULT uuidv7(),
     user_id         TEXT         NOT NULL,
     price_id        UUID         REFERENCES billing.prices(id),                  -- nullable: admin can grant entitlements without a backing price
     granted_by      TEXT         NOT NULL,
@@ -417,7 +419,7 @@ COMMENT ON COLUMN billing.admin_grants.duration_days IS 'Override entitlement du
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.notification_queue (
-    id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id           UUID         PRIMARY KEY DEFAULT uuidv7(),
     user_id      TEXT         NOT NULL,
     event_type   TEXT         NOT NULL,                                          -- premium_started, payment_failed, ...
     data         JSONB        NOT NULL,
@@ -437,7 +439,7 @@ COMMENT ON TABLE billing.notification_queue IS 'Queue for user notifications rel
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.processor_customers (
-    id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id           UUID         PRIMARY KEY DEFAULT uuidv7(),
     user_id      TEXT         NOT NULL,
     processor    TEXT         NOT NULL,
     customer_id  TEXT         NOT NULL,
@@ -459,7 +461,7 @@ CREATE INDEX IF NOT EXISTS idx_processor_customers_user ON billing.processor_cus
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.credit_types (
-    id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID         PRIMARY KEY DEFAULT uuidv7(),
     name            TEXT         NOT NULL UNIQUE,
     display_name    TEXT         NOT NULL,
     unit            TEXT         NOT NULL DEFAULT 'usd',
@@ -473,7 +475,7 @@ CREATE TABLE IF NOT EXISTS billing.credit_types (
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.credit_transactions (
-    id                 UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                 UUID         PRIMARY KEY DEFAULT uuidv7(),
     user_id            TEXT         NOT NULL,
     credit_type_id     UUID         NOT NULL REFERENCES billing.credit_types(id),
     amount             BIGINT       NOT NULL,                                    -- + deposit, - withdrawal
@@ -516,7 +518,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_credit_withdrawal_idem
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.credit_blocks (
-    id                     UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                     UUID         PRIMARY KEY DEFAULT uuidv7(),
     user_id                TEXT         NOT NULL,
     credit_type_id         UUID         NOT NULL REFERENCES billing.credit_types(id),
     original_amount        BIGINT       NOT NULL,
@@ -536,7 +538,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_blocks_user_expires_created
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.user_credit_balances (
-    id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID         PRIMARY KEY DEFAULT uuidv7(),
     user_id         TEXT         NOT NULL,
     credit_type_id  UUID         NOT NULL REFERENCES billing.credit_types(id),
     balance         BIGINT       NOT NULL DEFAULT 0,                             -- total available (rolls up credit_blocks.remaining_amount)
@@ -559,7 +561,7 @@ CREATE INDEX IF NOT EXISTS idx_user_credit_balances_user
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.checkout_sessions (
-    id                 UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                 UUID         PRIMARY KEY DEFAULT uuidv7(),
     user_id            TEXT         NOT NULL,
     price_id           UUID         NOT NULL REFERENCES billing.prices(id),
     mode               TEXT         NOT NULL CHECK (mode IN ('one_off', 'subscription')),
@@ -596,7 +598,7 @@ CREATE INDEX IF NOT EXISTS checkout_sessions_expires_at_idx
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.manual_rebill_attempts (
-    id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    id               UUID         PRIMARY KEY DEFAULT uuidv7(),
     subscription_id  UUID         NOT NULL REFERENCES billing.subscriptions(id),
     period_end       TIMESTAMPTZ  NOT NULL,
     processor        TEXT         NOT NULL,

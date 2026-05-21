@@ -57,17 +57,23 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string) (map
 	return out, nil
 }
 
-// AutoCreate implements the find-or-create flow for Stripe. The discovery
-// chain (in order):
+// AutoCreate implements the find-or-create flow for Stripe. Identity is
+// CONTENT-based (catalog slugs), so it is wipe-safe — re-syncing after a DB
+// rebuild finds the same Stripe objects rather than duplicating them. The
+// discovery chain (in order):
 //
 //  1. If a Stripe Product already exists for this OpenRails product (via
-//     metadata search on openrails_product_id), reuse it.
-//  2. Otherwise create a new Stripe Product carrying the openrails_product_id
-//     metadata + an idempotency key derived from the OpenRails product ID.
+//     metadata search on the content key openrails_product_key=<product_slug>),
+//     reuse it.
+//  2. Otherwise create a new Stripe Product carrying openrails_product_key
+//     (+ informational openrails_product_id) and an idempotency key derived
+//     from the product slug.
 //  3. With the Product in hand, find-or-create the Stripe Price under the
-//     deterministic lookup_key. If a price with the same lookup_key already
-//     exists, attach to it (transfer_lookup_key=true keeps the contract).
-//     Otherwise mint a new one carrying openrails_price_id + the lookup_key.
+//     deterministic content lookup_key ("openrails.<product_slug>.<price_slug>").
+//     If a price with the same lookup_key already exists, attach to it
+//     (transfer_lookup_key=true keeps the contract). Otherwise mint a new one
+//     carrying openrails_price_key (+ informational openrails_price_id) and the
+//     lookup_key.
 //
 // Returns the canonical ids to persist on processors["stripe"].
 func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
@@ -82,31 +88,37 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config}
 
-	// Step 1: discover an existing Stripe Product for this OpenRails product.
+	productSlug := strings.TrimSpace(in.ProductSlug)
+	priceContentKey := openRailsPriceContentKey(in.ProductSlug, in.PriceSlug)
+
+	// Step 1: discover an existing Stripe Product for this OpenRails product,
+	// matching on the content key (product slug) so it survives DB wipes.
 	stripeProductID := ""
-	if existing, err := stripeSvc.SearchProductsByMetadata(ctx, catalog.StripeMetadataOpenRailsProductID, in.ProductID.String()); err == nil {
-		for _, p := range existing {
-			if strings.TrimSpace(p.ID) != "" {
-				stripeProductID = p.ID
-				break
+	if productSlug != "" {
+		if existing, err := stripeSvc.SearchProductsByMetadata(ctx, catalog.StripeMetadataOpenRailsProductKey, productSlug); err == nil {
+			for _, p := range existing {
+				if strings.TrimSpace(p.ID) != "" {
+					stripeProductID = p.ID
+					break
+				}
 			}
 		}
 	}
 	// Step 2: create the Stripe Product if discovery did not find one.
 	if stripeProductID == "" {
-		name := in.DisplayName
+		name := ""
 		desc := ""
 		if in.Product != nil {
-			if strings.TrimSpace(in.Product.DisplayName) != "" {
-				name = in.Product.DisplayName
-			}
+			name = in.Product.DisplayName
 			desc = in.Product.Description
 		}
 		id, err := stripeSvc.CreateProduct(ctx, catalog.CreateProductParams{
 			Name:           name,
 			Description:    desc,
-			IdempotencyKey: "openrails-product-" + in.ProductID.String(),
+			IdempotencyKey: "openrails-product-" + productSlug,
 			Metadata: map[string]string{
+				catalog.StripeMetadataOpenRailsProductKey: productSlug,
+				// Informational only — not used for matching.
 				catalog.StripeMetadataOpenRailsProductID: in.ProductID.String(),
 			},
 		})
@@ -116,7 +128,7 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		stripeProductID = id
 	}
 
-	// Step 3: find-or-create the Stripe Price under lookup_key.
+	// Step 3: find-or-create the Stripe Price under the content lookup_key.
 	stripePriceID := ""
 	if lookup := strings.TrimSpace(in.LookupKey); lookup != "" {
 		if existing, err := stripeSvc.ListPricesByLookupKey(ctx, lookup); err == nil {
@@ -135,8 +147,11 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 			Currency:         in.Currency,
 			BillingCycleDays: in.BillingCycleDays,
 			LookupKey:        in.LookupKey,
-			IdempotencyKey:   "openrails-price-" + in.PriceID.String(),
+			IdempotencyKey:   "openrails-price-" + priceContentKey,
 			Metadata: map[string]string{
+				catalog.StripeMetadataOpenRailsPriceKey:   priceContentKey,
+				catalog.StripeMetadataOpenRailsProductKey: productSlug,
+				// Informational only — not used for matching.
 				catalog.StripeMetadataOpenRailsPriceID:   in.PriceID.String(),
 				catalog.StripeMetadataOpenRailsProductID: in.ProductID.String(),
 			},
@@ -181,13 +196,6 @@ func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local
 	}
 	drift := []DriftField{}
 	if local != nil {
-		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(remote.Nickname) {
-			drift = append(drift, DriftField{
-				Field:          "display_name",
-				OpenRailsValue: local.DisplayName,
-				RemoteValue:    remote.Nickname,
-			})
-		}
 		if local.IsActive != remote.Active {
 			drift = append(drift, DriftField{
 				Field:          "is_active",
@@ -265,7 +273,7 @@ func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID
 	return drift, false, true, nil
 }
 
-// Update propagates mutable fields (display name, active) to the Stripe Price.
+// Update propagates mutable fields (active) to the Stripe Price.
 func (a *stripeAdapter) Update(ctx context.Context, ids map[string]string, mutable mutableUpdate) error {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return nil
@@ -280,10 +288,6 @@ func (a *stripeAdapter) Update(ctx context.Context, ids map[string]string, mutab
 	}
 	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config}
 	params := catalog.UpdatePriceParams{}
-	if mutable.DisplayName != nil {
-		nickname := strings.TrimSpace(*mutable.DisplayName)
-		params.Nickname = &nickname
-	}
 	if mutable.IsActive != nil {
 		active := *mutable.IsActive
 		params.Active = &active

@@ -152,7 +152,6 @@ func priceToAPIObject(p *models.Price) api.PriceObject {
 	return api.PriceObject{
 		ID:         api.FormatPriceID(p.ID),
 		Object:     "price",
-		Name:       p.DisplayName,
 		UnitAmount: p.Amount,
 		Currency:   p.Currency,
 		Type:       priceType,

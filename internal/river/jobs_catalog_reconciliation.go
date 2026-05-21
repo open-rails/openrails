@@ -179,14 +179,25 @@ func computeStripeDriftJob(
 	now time.Time,
 ) []models.CatalogDriftEvent {
 	productByID := make(map[string]*models.Product, len(productRows))
+	productBySlug := make(map[string]*models.Product, len(productRows))
 	for _, p := range productRows {
 		productByID[p.ID.String()] = p
+		if slug := strings.TrimSpace(p.Slug); slug != "" {
+			productBySlug[slug] = p
+		}
 	}
 	priceByID := make(map[string]*models.Price, len(priceRows))
+	priceByContentKey := make(map[string]*models.Price, len(priceRows))
 	stripeProductIDs := make(map[string]string)
 	stripePriceIDs := make(map[string]string)
 	for _, pr := range priceRows {
 		priceByID[pr.ID.String()] = pr
+		// Content key = "<product_slug>.<price_slug>"; needs the owning product.
+		if prod := productByID[pr.ProductID.String()]; prod != nil {
+			if ck := openRailsPriceContentKeyJob(prod.Slug, pr.Slug); ck != "." {
+				priceByContentKey[ck] = pr
+			}
+		}
 		stripe := pr.Processors["stripe"]
 		if stripe == nil {
 			continue
@@ -203,16 +214,17 @@ func computeStripeDriftJob(
 	seenProducts := make(map[string]struct{}, len(stripeProducts))
 	seenPrices := make(map[string]struct{}, len(stripePrices))
 
+	// Match on the CONTENT key (product slug) so it survives DB rebuilds.
 	for _, sp := range stripeProducts {
 		seenProducts[sp.ID] = struct{}{}
-		orID := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsProductID])
-		if orID == "" {
+		productKey := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsProductKey])
+		if productKey == "" {
 			events = append(events, stripeOrphan(models.CatalogDriftResourceProduct, "", sp.ID, now))
 			continue
 		}
-		local, ok := productByID[orID]
+		local, ok := productBySlug[productKey]
 		if !ok {
-			events = append(events, stripeOrphan(models.CatalogDriftResourceProduct, orID, sp.ID, now))
+			events = append(events, stripeOrphan(models.CatalogDriftResourceProduct, productKey, sp.ID, now))
 			continue
 		}
 		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(sp.Name) {
@@ -226,16 +238,17 @@ func computeStripeDriftJob(
 		}
 	}
 
+	// Match on the CONTENT key (lookup_key / openrails_price_key).
 	for _, sp := range stripePrices {
 		seenPrices[sp.ID] = struct{}{}
-		orID := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsPriceID])
-		if orID == "" {
+		priceKey := stripePriceContentKeyJob(sp)
+		if priceKey == "" {
 			events = append(events, stripeOrphan(models.CatalogDriftResourcePrice, "", sp.ID, now))
 			continue
 		}
-		local, ok := priceByID[orID]
+		local, ok := priceByContentKey[priceKey]
 		if !ok {
-			events = append(events, stripeOrphan(models.CatalogDriftResourcePrice, orID, sp.ID, now))
+			events = append(events, stripeOrphan(models.CatalogDriftResourcePrice, priceKey, sp.ID, now))
 			continue
 		}
 		if local.Amount != sp.UnitAmount {
@@ -246,9 +259,6 @@ func computeStripeDriftJob(
 		}
 		if localActive := local.IsPurchasable(); localActive != sp.Active {
 			events = append(events, stripeFieldDrift(models.CatalogDriftResourcePrice, local.ID.String(), sp.ID, "active", strconv.FormatBool(localActive), strconv.FormatBool(sp.Active), now))
-		}
-		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(sp.Nickname) {
-			events = append(events, stripeFieldDrift(models.CatalogDriftResourcePrice, local.ID.String(), sp.ID, "nickname", local.DisplayName, sp.Nickname, now))
 		}
 	}
 
@@ -263,6 +273,28 @@ func computeStripeDriftJob(
 		}
 	}
 	return events
+}
+
+// openRailsPriceContentKeyJob mirrors pkg/service.openRailsPriceContentKey:
+// "<product_slug>.<price_slug>".
+func openRailsPriceContentKeyJob(productSlug, priceSlug string) string {
+	return strings.TrimSpace(productSlug) + "." + strings.TrimSpace(priceSlug)
+}
+
+// stripePriceContentKeyJob mirrors pkg/service.stripePriceContentKey: extract
+// the OpenRails content key from a Stripe Price, preferring the
+// openrails_price_key metadata and falling back to deriving it from the
+// lookup_key ("openrails.<product_slug>.<price_slug>"). Returns "" for prices
+// OpenRails doesn't own.
+func stripePriceContentKeyJob(sp catalog.StripePrice) string {
+	if k := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsPriceKey]); k != "" {
+		return k
+	}
+	const lookupPrefix = "openrails."
+	if lk := strings.TrimSpace(sp.LookupKey); strings.HasPrefix(lk, lookupPrefix) {
+		return strings.TrimPrefix(lk, lookupPrefix)
+	}
+	return ""
 }
 
 func stripeOrphan(rt models.CatalogDriftResourceType, orID, stripeID string, now time.Time) models.CatalogDriftEvent {
@@ -382,9 +414,6 @@ func computeNMIDriftJob(plans []nmiPlanJob, priceRows []*models.Price, now time.
 		local := priceByID[orPriceID]
 		if local == nil {
 			continue
-		}
-		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(plan.PlanName) {
-			events = append(events, nmiFieldDriftJob(local.ID.String(), plan.PlanID, "plan_name", local.DisplayName, plan.PlanName, now))
 		}
 		if local.Amount != plan.AmountCents {
 			events = append(events, nmiFieldDriftJob(local.ID.String(), plan.PlanID, "plan_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(plan.AmountCents, 10), now))

@@ -67,7 +67,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	_, err = bunDB.NewInsert().Model(&models.Price{
 		ID:               priceID,
 		ProductID:        productID,
-		DisplayName:      "Test Monthly",
+		Slug:             "test_price_1",
 		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
@@ -209,7 +209,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	_, err = bunDB.NewInsert().Model(&models.Price{
 		ID:               priceID,
 		ProductID:        productID,
-		DisplayName:      "Test Monthly",
+		Slug:             "test_price_2",
 		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",

@@ -549,10 +549,9 @@ func Validate(cfg *Config) error {
 	// Skip strict validation in development environments
 	isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""
 	if !isDev {
-		if cfg.TestMode == nil {
-			return fmt.Errorf("test_mode must be explicitly set to false outside development")
-		}
-		if *cfg.TestMode {
+		// Unset test_mode outside development means live (see IsTestMode).
+		// Only an explicit test_mode=true is rejected — sandbox isn't allowed in prod.
+		if cfg.TestMode != nil && *cfg.TestMode {
 			return fmt.Errorf("test_mode=true is not allowed outside development")
 		}
 		apiKey := strings.TrimSpace(cfg.APIKey)
@@ -835,11 +834,11 @@ func (cfg *Config) IsNMIProcessor(name string) bool {
 }
 
 // IsTestMode returns true if payment processors should use sandbox/test environments.
-// This is a simple accessor - TestMode defaults to true for safety.
-// Note: This is orthogonal to Env. Env controls logging/debug, TestMode controls payments.
+// An explicit TestMode always wins. When unset it follows the environment:
+// sandbox in development, live in production.
 func (cfg *Config) IsTestMode() bool {
 	if cfg.TestMode == nil {
-		return true // Default to test mode for safety
+		return cfg.IsDev()
 	}
 	return *cfg.TestMode
 }

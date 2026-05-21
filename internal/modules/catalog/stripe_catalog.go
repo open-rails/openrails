@@ -23,7 +23,22 @@ type stripeObject struct {
 
 // Stripe metadata keys used by OpenRails to mark catalog items it owns.
 // These are read on both reconciliation and orphan-discovery paths.
+//
+// Identity / matching keys are CONTENT-based (derived from catalog slugs) so
+// they survive a DB rebuild (which regenerates row UUIDs). The *ID keys are
+// retained as informational breadcrumbs only — never used for matching.
 const (
+	// StripeMetadataOpenRailsProductKey is the content key stamped on a Stripe
+	// Product: the OpenRails product slug. This is the field SEARCHED on to
+	// find-or-create the Stripe Product, so it must be stable across DB wipes.
+	StripeMetadataOpenRailsProductKey = "openrails_product_key"
+	// StripeMetadataOpenRailsPriceKey is the content key stamped on a Stripe
+	// Price for symmetry: "<product_slug>.<price_slug>".
+	StripeMetadataOpenRailsPriceKey = "openrails_price_key"
+
+	// StripeMetadataOpenRailsProductID / ...PriceID carry the OpenRails row
+	// UUIDs as informational breadcrumbs. They change on every DB rebuild and
+	// are NOT used for identity or matching.
 	StripeMetadataOpenRailsProductID = "openrails_product_id"
 	StripeMetadataOpenRailsPriceID   = "openrails_price_id"
 )

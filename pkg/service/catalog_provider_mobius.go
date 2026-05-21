@@ -105,7 +105,10 @@ func (a *mobiusAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map
 	}
 
 	planID := mobiusDeterministicPlanID(in.PriceID)
-	planName := strings.TrimSpace(in.DisplayName)
+	planName := ""
+	if in.Product != nil {
+		planName = strings.TrimSpace(in.Product.DisplayName)
+	}
 	if planName == "" {
 		planName = planID
 	}
@@ -141,7 +144,7 @@ func (a *mobiusAdapter) Verify(_ context.Context, ids map[string]string, local *
 	if planID == "" {
 		return nil, false, fmt.Errorf("mobius plan_id missing on local processors map")
 	}
-	found, remoteName, remoteAmountCents, err := client.GetRecurringPlanByID(planID)
+	found, _, remoteAmountCents, err := client.GetRecurringPlanByID(planID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -150,13 +153,6 @@ func (a *mobiusAdapter) Verify(_ context.Context, ids map[string]string, local *
 	}
 	drift := []DriftField{}
 	if local != nil {
-		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(remoteName) {
-			drift = append(drift, DriftField{
-				Field:          "display_name",
-				OpenRailsValue: local.DisplayName,
-				RemoteValue:    remoteName,
-			})
-		}
 		if local.UnitAmount != remoteAmountCents {
 			drift = append(drift, DriftField{
 				Field:          "unit_amount",
@@ -168,34 +164,10 @@ func (a *mobiusAdapter) Verify(_ context.Context, ids map[string]string, local *
 	return drift, false, nil
 }
 
-// Update propagates the mutable display_name to the NMI plan via
-// EditRecurringPlan. NMI plan amount and frequency are immutable post-create
-// (parallel to Stripe Price financials), so financial changes are rejected.
-func (a *mobiusAdapter) Update(_ context.Context, ids map[string]string, mutable mutableUpdate) error {
-	provider := strings.TrimSpace(ids[models.ProcessorKeyProvider])
-	client, ok := a.nmiClient(provider)
-	if !ok || client == nil {
-		// No write API available (NMI not configured): no-op.
-		return nil
-	}
-	planID := strings.TrimSpace(ids[models.ProcessorKeyPlanID])
-	if planID == "" {
-		return nil
-	}
-	if mutable.DisplayName == nil {
-		// Nothing mutable to propagate. is_active is not representable on NMI
-		// plans, and amount/frequency are immutable, so this is a no-op.
-		return nil
-	}
-	name := strings.TrimSpace(*mutable.DisplayName)
-	// Re-read the current amount so EditRecurringPlan does not zero it out;
-	// the amount is immutable so we replay the existing value verbatim.
-	found, _, amountCents, err := client.GetRecurringPlanByID(planID)
-	if err != nil {
-		return fmt.Errorf("lookup recurring plan before update: %w", err)
-	}
-	if !found {
-		return fmt.Errorf("mobius plan %q not found; cannot propagate update", planID)
-	}
-	return client.EditRecurringPlan(planID, name, amountCents)
+// Update is a no-op for NMI plans. is_active is not representable on NMI plans,
+// and amount/frequency are immutable post-create (parallel to Stripe Price
+// financials). With the price display_name removed there are no mutable fields
+// left to propagate.
+func (a *mobiusAdapter) Update(_ context.Context, _ map[string]string, _ mutableUpdate) error {
+	return nil
 }

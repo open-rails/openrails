@@ -56,14 +56,14 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 		UpdatedAt: now,
 	}
 	price := &models.Price{
-		ID:          priceID,
-		ProductID:   productID,
-		DisplayName: "One-time Test Price",
-		Status:      models.CatalogStatusActive,
-		Amount:      1000,
-		Currency:    "USD",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:        priceID,
+		ProductID: productID,
+		Slug:      "test_price_1",
+		Status:    models.CatalogStatusActive,
+		Amount:    1000,
+		Currency:  "USD",
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	_, err = bunDB.NewInsert().Model(product).Exec(ctx)
@@ -189,14 +189,14 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 		UpdatedAt: now,
 	}
 	price := &models.Price{
-		ID:          priceID,
-		ProductID:   productID,
-		DisplayName: "Recurring Grandfather Price",
-		Status:      models.CatalogStatusActive,
-		Amount:      1500,
-		Currency:    "USD",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:        priceID,
+		ProductID: productID,
+		Slug:      "test_price_2",
+		Status:    models.CatalogStatusActive,
+		Amount:    1500,
+		Currency:  "USD",
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	_, err = bunDB.NewInsert().Model(product).Exec(ctx)

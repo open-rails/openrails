@@ -967,7 +967,6 @@ func priceFromModel(p *models.Price) Price {
 
 	return Price{
 		ID:         api.FormatPriceID(p.ID),
-		Name:       p.DisplayName,
 		UnitAmount: p.Amount,
 		Currency:   p.Currency,
 		Type:       priceType,
