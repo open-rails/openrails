@@ -208,6 +208,25 @@ func (s *Service) ListPrices(ctx context.Context, filter catalog.PriceFilter, li
 }
 
 // ActivatePrice sets status=active on a price.
+// propagatePriceActiveToStripe pushes a price's active flag to its linked Stripe
+// price (best-effort), mirroring propagateProductActiveToStripe — so archiving or
+// re-activating a price in OpenRails is reflected in Stripe.
+func (s *Service) propagatePriceActiveToStripe(ctx context.Context, price *models.Price, active bool) {
+	if s.rt == nil || s.rt.Config == nil || price == nil {
+		return
+	}
+	var stripePriceID string
+	if m := price.Processors["stripe"]; m != nil {
+		stripePriceID = strings.TrimSpace(m[models.ProcessorKeyStripePriceID])
+	}
+	if stripePriceID == "" {
+		return
+	}
+	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
+	a := active
+	_ = stripeSvc.UpdatePrice(ctx, stripePriceID, catalog.UpdatePriceParams{Active: &a})
+}
+
 func (s *Service) ActivatePrice(ctx context.Context, priceID uuid.UUID) (*CatalogPrice, error) {
 	prices, err := s.requirePriceService()
 	if err != nil {
@@ -223,6 +242,7 @@ func (s *Service) ActivatePrice(ctx context.Context, priceID uuid.UUID) (*Catalo
 	if err != nil {
 		return nil, err
 	}
+	s.propagatePriceActiveToStripe(ctx, updated, true)
 	return priceToCatalogPrice(updated), nil
 }
 
@@ -243,6 +263,7 @@ func (s *Service) DeactivatePrice(ctx context.Context, priceID uuid.UUID) (*Cata
 	if err != nil {
 		return nil, err
 	}
+	s.propagatePriceActiveToStripe(ctx, updated, false)
 	return priceToCatalogPrice(updated), nil
 }
 
@@ -289,6 +310,7 @@ func (s *Service) SetPriceStatus(ctx context.Context, priceID uuid.UUID, status 
 	if err != nil {
 		return nil, err
 	}
+	s.propagatePriceActiveToStripe(ctx, updated, status == models.CatalogStatusActive)
 	return priceToCatalogPrice(updated), nil
 }
 
