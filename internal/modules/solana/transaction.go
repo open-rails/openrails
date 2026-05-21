@@ -122,7 +122,7 @@ func isNativeTokenSymbol(symbol string) bool {
 }
 
 // VerifyTransactionWithContent verifies a transaction against expected recipient, amount, and reference.
-func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string) error {
+func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, processedNotAfter *time.Time) error {
 	if s.rpc == nil {
 		return fmt.Errorf("solana rpc client unavailable")
 	}
@@ -148,5 +148,6 @@ func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Cont
 		ExpectedTokenMint: strings.TrimSpace(expectedTokenMint),
 		ExpectedPayer:     strings.TrimSpace(expectedPayer),
 		ExpectedReference: reference,
+		ProcessedNotAfter: processedNotAfter,
 	})
 }

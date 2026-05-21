@@ -59,6 +59,7 @@ type PendingSolanaPayment struct {
 	TokenAmount uint64    `json:"token_amount"` // token base units
 	Recipient   string    `json:"recipient"`    // merchant wallet
 	CreatedAt   time.Time `json:"created_at"`
+	ExpiresAt   time.Time `json:"expires_at,omitempty"`
 }
 
 // SolanaPayService handles Solana Pay Transfer Request flow
@@ -225,6 +226,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		TokenAmount: tokenUnits,
 		Recipient:   recipient,
 		CreatedAt:   now,
+		ExpiresAt:   expiresAt,
 	}
 	if sessionID != nil && *sessionID != uuid.Nil {
 		pending.SessionID = sessionID.String()

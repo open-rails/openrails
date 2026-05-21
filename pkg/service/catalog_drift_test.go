@@ -79,8 +79,7 @@ func TestFetchStripeCatalogPaginates(t *testing.T) {
 	}
 }
 
-// catalogStatusFromActive maps a legacy active boolean to a lifecycle status:
-// true -> active, false -> archived (grandfathered, the prior is_active=false meaning).
+// catalogStatusFromActive maps provider active booleans to lifecycle status.
 func catalogStatusFromActive(active bool) models.CatalogStatus {
 	if active {
 		return models.CatalogStatusActive

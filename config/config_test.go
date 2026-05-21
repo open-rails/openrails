@@ -25,22 +25,6 @@ func TestLoad_APIKeyFromEnv(t *testing.T) {
 		assert.Equal(t, "test-api-key", cfg.APIKey)
 	})
 
-	t.Run("loads api_key from legacy BILLING_API_KEY", func(t *testing.T) {
-		t.Setenv("BILLING_API_KEY", "test-billing-api-key")
-
-		cfg, err := Load("nonexistent-config.yaml")
-		assert.NoError(t, err)
-		assert.Equal(t, "test-billing-api-key", cfg.APIKey)
-	})
-
-	t.Run("loads api_key from legacy BILLING_INTERNAL_API_KEY", func(t *testing.T) {
-		t.Setenv("BILLING_INTERNAL_API_KEY", "test-internal-api-key")
-
-		cfg, err := Load("nonexistent-config.yaml")
-		assert.NoError(t, err)
-		assert.Equal(t, "test-internal-api-key", cfg.APIKey)
-	})
-
 	t.Run("loads nested keys via single underscore (db.url)", func(t *testing.T) {
 		t.Setenv("DB_URL", "postgres://u:p@localhost:5432/db?sslmode=disable")
 
@@ -49,30 +33,12 @@ func TestLoad_APIKeyFromEnv(t *testing.T) {
 		assert.Equal(t, "postgres://u:p@localhost:5432/db?sslmode=disable", cfg.DB.URL)
 	})
 
-	t.Run("loads legacy DATABASE_URL as db.url", func(t *testing.T) {
-		t.Setenv("DATABASE_URL", "postgres://legacy:p@localhost:5432/db?sslmode=disable")
-
-		cfg, err := Load("nonexistent-config.yaml")
-		assert.NoError(t, err)
-		assert.Equal(t, "postgres://legacy:p@localhost:5432/db?sslmode=disable", cfg.DB.URL)
-	})
-
 	t.Run("loads JSON arrays for slices (auth.issuers)", func(t *testing.T) {
 		t.Setenv("AUTH_ISSUERS", `["http://a.test","http://b.test"]`)
 
 		cfg, err := Load("nonexistent-config.yaml")
 		assert.NoError(t, err)
 		assert.Equal(t, []string{"http://a.test", "http://b.test"}, cfg.Auth.Issuers)
-	})
-
-	t.Run("loads legacy JWT issuer variables", func(t *testing.T) {
-		t.Setenv("JWT_ISSUER", "http://legacy-issuer.test")
-		t.Setenv("JWT_AUDIENCE", "legacy-audience")
-
-		cfg, err := Load("nonexistent-config.yaml")
-		assert.NoError(t, err)
-		assert.Equal(t, []string{"http://legacy-issuer.test"}, cfg.Auth.Issuers)
-		assert.Equal(t, "legacy-audience", cfg.Auth.ExpectedAudience)
 	})
 
 }
@@ -131,12 +97,12 @@ processors:
 	assert.ErrorContains(t, err, "processor 'acme' must declare a type")
 }
 
-func TestLoad_DefaultsLegacyMobiusProcessorToNMI(t *testing.T) {
+func TestLoad_MobiusProcessorRequiresExplicitType(t *testing.T) {
 	t.Setenv("PROCESSORS_MOBIUS_SECURITY_KEY", "test-key")
 
-	cfg, err := Load("nonexistent-config.yaml")
-	assert.NoError(t, err)
-	assert.Equal(t, ProcessorTypeNMI, cfg.Processors["mobius"].Type)
+	_, err := Load("nonexistent-config.yaml")
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "processor 'mobius' must declare a type")
 }
 
 func TestLoad_EnvTrimming(t *testing.T) {

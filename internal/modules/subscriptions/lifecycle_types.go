@@ -3,12 +3,10 @@ package subscriptions
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 type CreateMembershipParams struct {
@@ -122,10 +120,6 @@ func TerminalCancelReason(subscription *models.Subscription) (string, bool) {
 		case models.CancelTypeChargeback, models.CancelTypeUser, models.CancelTypeMerchant:
 			return fmt.Sprintf("cancel_type=%s", *subscription.CancelType), true
 		}
-	}
-	feedback := normalize.FromPtr(subscription.CancelFeedback)
-	if feedback != "" && strings.Contains(strings.ToUpper(feedback), "CHARGEBACK") {
-		return "legacy_chargeback_feedback", true
 	}
 	return "", false
 }

@@ -23,20 +23,20 @@ func TestRequireNMIPlanForProcessor_UsesProviderSpecificConfig(t *testing.T) {
 	require.Equal(t, "plan_acme_123", planID)
 }
 
-func TestRequireNMIPlanForProcessor_UsesLegacyProviderSlotWhenProviderMatches(t *testing.T) {
+func TestRequireNMIPlanForProcessor_RejectsProviderFromDifferentProcessorSlot(t *testing.T) {
 	price := &models.Price{
 		ID: uuid.New(),
 		Processors: map[string]map[string]string{
 			"mobius": {
-				models.ProcessorKeyPlanID:   "legacy_plan_456",
+				models.ProcessorKeyPlanID:   "mobius_plan_456",
 				models.ProcessorKeyProvider: "acme",
 			},
 		},
 	}
 
-	planID, err := requireNMIPlanForProcessor(price, "acme")
-	require.NoError(t, err)
-	require.Equal(t, "legacy_plan_456", planID)
+	_, err := requireNMIPlanForProcessor(price, "acme")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing NMI plan configuration")
 }
 
 func TestRequireNMIPlanForProcessor_RejectsMissingProviderConfig(t *testing.T) {

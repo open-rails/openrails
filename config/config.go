@@ -382,9 +382,9 @@ type AuthConfig struct {
 	ExpectedAudience string   `koanf:"expected_audience"` // Accept token only if it contains this audience (e.g., "openrails-app")
 
 	// OperatorOrgSlug, when set, switches admin auth (all /admin/* routes) from
-	// the legacy global "admin" role check to an AuthKit-org-claim check:
+	// the global "admin" role check to an AuthKit-org-claim check:
 	// the caller must have UserContext.Org == OperatorOrgSlug AND hold one of
-	// OperatorOrgAdminRoles within that org. When empty (default), the legacy
+	// OperatorOrgAdminRoles within that org. When empty (default), the
 	// global "admin" role check from profiles.user_roles is used.
 	//
 	// Use this for multi-org AuthKit deployments where a single org owns the
@@ -1126,35 +1126,26 @@ func Load(configPath string) (*Config, error) {
 	envKeyToConfigKey := func(s string) string {
 		s = strings.ToLower(s)
 
-		// Special case: ENVIRONMENT -> env (back-compat with some .env templates)
-		if s == "environment" {
-			return "env"
-		}
-
 		// Special case: API_URL -> api_url (top-level, not nested api.url)
 		if s == "api_url" {
 			return "api_url"
 		}
-		if s == "database_url" {
-			return "db.url"
-		}
 
 		// Special case: API_KEY/OPENRAILS_API_KEY -> api_key (top-level, not api.key)
 		// Used for private/service API auth (X-API-KEY header).
-		if s == "api_key" || s == "openrails_api_key" || s == "billing_api_key" || s == "billing_internal_api_key" {
+		if s == "api_key" || s == "openrails_api_key" {
 			return "api_key"
 		}
 
-		// Special case: TEST_MODE/OPENRAILS_TEST_MODE/BILLING_TEST_MODE -> test_mode (top-level)
-		if s == "test_mode" || s == "openrails_test_mode" || s == "billing_test_mode" {
+		// Special case: TEST_MODE/OPENRAILS_TEST_MODE -> test_mode (top-level)
+		if s == "test_mode" || s == "openrails_test_mode" {
 			return "test_mode"
 		}
 
-		// Back-compat for legacy JWT_* variables and singular AUTH_ISSUER.
-		if s == "auth_issuer" || s == "jwt_issuer" || s == "jwt_issuers" {
+		if s == "auth_issuers" {
 			return "auth.issuers"
 		}
-		if s == "jwt_expected_audience" || s == "jwt_audience" || s == "auth_audience" {
+		if s == "auth_expected_audience" {
 			return "auth.expected_audience"
 		}
 
@@ -1274,11 +1265,6 @@ func Load(configPath string) (*Config, error) {
 
 			if existing, exists := normalized[key]; exists && existing != nil {
 				log.Warnf("duplicate processor configuration detected for key '%s'; overriding previous value", key)
-			}
-
-			// Preserve legacy/env-only Mobius configuration as the default NMI processor.
-			if key == "mobius" && strings.TrimSpace(proc.Type) == "" {
-				proc.Type = ProcessorTypeNMI
 			}
 
 			// Non-reserved processor names must declare an explicit type.

@@ -189,6 +189,16 @@ func TestNMIDelayedStartFromSubscriptionMetadata(t *testing.T) {
 	require.Nil(t, nmiDelayedStartFromSubscriptionMetadata(raw))
 }
 
+func TestNMIFutureDelayedStart(t *testing.T) {
+	delayedStart := time.Date(2026, time.June, 17, 0, 0, 0, 0, time.UTC)
+	raw, err := json.Marshal(map[string]any{"delayed_start": delayedStart.Format(time.RFC3339)})
+	require.NoError(t, err)
+
+	require.Equal(t, delayedStart, *nmiFutureDelayedStart(raw, delayedStart.Add(-time.Hour)))
+	require.Nil(t, nmiFutureDelayedStart(raw, delayedStart))
+	require.Nil(t, nmiFutureDelayedStart(raw, delayedStart.Add(time.Hour)))
+}
+
 func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t *testing.T) {
 	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
 	if dsn == "" {

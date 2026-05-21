@@ -235,6 +235,11 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 		p.clearRetry(reference)
 		return
 	}
+	if err := p.attachCheckoutExpiry(ctx, reference, pending); err != nil {
+		log.WithError(err).WithField("reference", reference).Warn("Failed to load checkout expiry for Solana pending payment")
+		p.deferRetry(reference, err)
+		return
+	}
 
 	// Query blockchain for transactions with this reference
 	if err := solanarpc.ValidateAddress(reference); err != nil {
@@ -308,6 +313,30 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 	p.deferRetryFor(reference, solanaUnmatchedTxRetryInterval)
 }
 
+func (p *SolanaPayPoller) attachCheckoutExpiry(ctx context.Context, reference string, pending *PendingSolanaPayment) error {
+	if p.db == nil || pending == nil || !pending.ExpiresAt.IsZero() {
+		return nil
+	}
+	sessionID, err := uuid.Parse(strings.TrimSpace(pending.SessionID))
+	if err != nil {
+		return fmt.Errorf("invalid checkout session id %q: %w", pending.SessionID, err)
+	}
+	session, err := dbrepo.NewCheckoutSessionRepo(p.db).GetByID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session.Processor != models.ProcessorSolana {
+		return fmt.Errorf("checkout session %s is not a solana session", session.ID)
+	}
+	if session.Reference == nil || strings.TrimSpace(*session.Reference) != strings.TrimSpace(reference) {
+		return fmt.Errorf("checkout session %s reference does not match pending reference", session.ID)
+	}
+	if session.ExpiresAt != nil {
+		pending.ExpiresAt = session.ExpiresAt.UTC()
+	}
+	return nil
+}
+
 func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context, reference string) (*PendingSolanaPayment, error) {
 	if p.db == nil {
 		return nil, nil
@@ -336,7 +365,7 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 	if token == "" || tokenMint == "" || recipient == "" || tokenAmount == 0 {
 		return nil, fmt.Errorf("checkout session %s is missing solana payment state", session.ID)
 	}
-	return &PendingSolanaPayment{
+	pending := &PendingSolanaPayment{
 		UserID:      session.UserID,
 		PriceID:     session.PriceID.String(),
 		SessionID:   session.ID.String(),
@@ -347,7 +376,11 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 		TokenAmount: tokenAmount,
 		Recipient:   recipient,
 		CreatedAt:   session.CreatedAt,
-	}, nil
+	}
+	if session.ExpiresAt != nil {
+		pending.ExpiresAt = session.ExpiresAt.UTC()
+	}
+	return pending, nil
 }
 
 func solanaStateString(state map[string]any, key string) string {
@@ -479,6 +512,7 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, reference string, s
 		expectedMint,
 		"",
 		refPtr,
+		solanaPaymentExpiryDeadline(pending),
 	); err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"reference": reference,
@@ -488,6 +522,14 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, reference string, s
 	}
 
 	return true
+}
+
+func solanaPaymentExpiryDeadline(pending *PendingSolanaPayment) *time.Time {
+	if pending == nil || pending.ExpiresAt.IsZero() {
+		return nil
+	}
+	expiresAt := pending.ExpiresAt.UTC()
+	return &expiresAt
 }
 
 // processConfirmedPayment uses CheckoutService.RegisterPurchase to record payment and grant entitlements

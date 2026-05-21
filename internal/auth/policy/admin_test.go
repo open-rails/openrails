@@ -17,7 +17,7 @@ func init() {
 }
 
 // TestOperatorAdminRequired_OperatorOrgMode focuses on the multi-org branch.
-// The legacy global-`admin` branch is exercised by existing
+// The global-`admin` branch is exercised by existing
 // admin_subscription_test.go and friends.
 func TestOperatorAdminRequired_OperatorOrgMode(t *testing.T) {
 	cfg := &config.Config{
@@ -142,7 +142,7 @@ func TestOperatorAdminRequired_OperatorOrgMode(t *testing.T) {
 
 // TestIsOperatorAdmin_MultiOrg covers the helper that admin handlers like
 // catalog.go use to gate inactive-product visibility for read paths. It only
-// covers the multi-org branch — the legacy branch consults the live DB.
+// covers the multi-org branch — the single-org branch consults the live DB.
 func TestIsOperatorAdmin_MultiOrg(t *testing.T) {
 	cfg := &config.Config{
 		Auth: &config.AuthConfig{

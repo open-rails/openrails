@@ -54,7 +54,7 @@ func TestReactivateMembership_RequiresFuturePaidThroughDate(t *testing.T) {
 	require.Contains(t, err.Error(), "reactivation requires a future paid-through period end")
 }
 
-func TestAssertActiveTransitionAllowed_BlocksLegacyChargebackFeedback(t *testing.T) {
+func TestAssertActiveTransitionAllowed_IgnoresChargebackFeedbackWithoutCancelType(t *testing.T) {
 	t.Parallel()
 
 	svc := &SubscriptionLifecycleService{}
@@ -62,8 +62,7 @@ func TestAssertActiveTransitionAllowed_BlocksLegacyChargebackFeedback(t *testing
 	sub := &models.Subscription{ID: uuid.New(), Processor: models.ProcessorCCBill, Status: models.StatusCancelled, CancelFeedback: &feedback}
 
 	err := svc.assertActiveTransitionAllowed(context.Background(), sub, "reactivation", false)
-	require.Error(t, err)
-	require.True(t, IsTerminalTransitionBlocked(err))
+	require.NoError(t, err)
 }
 
 func TestAssertActiveTransitionAllowed_AllowsExpiredCancelType(t *testing.T) {

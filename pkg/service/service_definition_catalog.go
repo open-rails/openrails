@@ -309,10 +309,8 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 	}
 }
 
-// CatalogPrice is the OpenRails-side view of a price. Per issue #208 the
-// declarative `providers` shape is the only surface; the legacy raw
-// `processors` map and the per-processor `link|create` request shape are
-// removed entirely (no transitional fields, no compat helpers).
+// CatalogPrice is the OpenRails-side view of a price. The declarative
+// `providers` shape is the only processor configuration surface.
 type CatalogPrice struct {
 	ID               uuid.UUID            `json:"id"`
 	ProductID        uuid.UUID            `json:"product_id"`
@@ -467,9 +465,8 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	return out, nil
 }
 
-// UpdatePriceRequest is the declarative-shape PATCH for a price (issue #208).
-// The legacy `processors` / `set_processors` fields are gone; the only way to
-// add or rotate provider links is via `provider_links` (partial merge into the
+// UpdatePriceRequest is the declarative-shape PATCH for a price. Add or rotate
+// provider links via `provider_links` (partial merge into the
 // existing map). To clear a provider entirely, supply an empty inner map for
 // it and set ReplaceProviderLinks=true.
 type UpdatePriceRequest struct {

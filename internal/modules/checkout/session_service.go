@@ -75,7 +75,7 @@ type solanaPaymentService interface {
 
 type solanaTransactionService interface {
 	BuildPaymentTransactionFromQuote(ctx context.Context, req *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error)
-	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string) error
+	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, processedNotAfter *time.Time) error
 }
 type CheckoutSessionService struct {
 	db                       *db.DB
@@ -216,13 +216,7 @@ func decodeCheckoutSessionIdempotencyResult(payload json.RawMessage, fingerprint
 		}
 		return cached.Response, nil
 	}
-
-	// Backward-compatible decode for records written before request fingerprints existed.
-	var legacy CheckoutSessionResponse
-	if err := json.Unmarshal(payload, &legacy); err != nil {
-		return nil, fmt.Errorf("failed to decode cached response: %w", err)
-	}
-	return &legacy, nil
+	return nil, fmt.Errorf("failed to decode cached checkout session response")
 }
 
 func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
@@ -869,14 +863,6 @@ func (s *CheckoutSessionService) getAPIBaseURL() string {
 	}
 	apiURL := strings.TrimSpace(s.config.APIURL)
 	if apiURL == "" {
-		// Fallback for older configs/tests that set Host as a full URL.
-		// Only accept values that look like a URL to avoid accidentally emitting
-		// unusable links like "0.0.0.0".
-		if strings.Contains(s.config.Host, "://") {
-			apiURL = strings.TrimSpace(s.config.Host)
-		}
-	}
-	if apiURL == "" {
 		return ""
 	}
 	// Ensure it doesn't end with a slash (we add the version path later)
@@ -952,6 +938,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 		storedTokenMint,
 		expectedPayer,
 		reference,
+		session.ExpiresAt,
 	); err != nil {
 		return nil, err
 	}

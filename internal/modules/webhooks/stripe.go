@@ -299,7 +299,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	}
 
 	if s.CheckoutSessionService != nil {
-		sessionID := parseCheckoutSessionID(inv.Metadata)
+		sessionID := parseCheckoutSessionID(metadata)
 		if sessionID == uuid.Nil {
 			if session, err := s.CheckoutSessionService.FindOpenByUserPriceProcessor(ctx, userID, priceID, models.ProcessorStripe); err == nil && session != nil {
 				sessionID = session.ID
@@ -510,8 +510,6 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		}
 	}
 
-	// Grant purchased credits from the payment snapshot first, falling back to the
-	// current catalog only for legacy payment rows without snapshots.
 	var creditsSpec models.CreditsSpec
 	if s.PaymentService != nil {
 		payment, err := s.PaymentService.GetByID(ctx, result.PaymentID)
@@ -520,19 +518,6 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		} else {
 			log.WithContext(ctx).WithError(err).WithField("payment_id", result.PaymentID).Warn("failed to load payment snapshot for stripe purchase credits")
 		}
-	}
-	if len(creditsSpec) == 0 {
-		if price == nil {
-			price, err = s.PriceService.GetByID(ctx, priceID)
-			if err != nil {
-				return fmt.Errorf("price lookup failed: %w", err)
-			}
-		}
-		product, err := s.ProductService.GetByID(ctx, price.ProductID)
-		if err != nil {
-			return fmt.Errorf("product lookup failed: %w", err)
-		}
-		creditsSpec = product.CreditsSpec
 	}
 	if len(creditsSpec) > 0 && s.CreditsService != nil {
 		for creditType, spec := range creditsSpec {
@@ -1185,9 +1170,16 @@ func validateStripeInvoicePrice(inv stripeInvoice, price *models.Price) error {
 		return fmt.Errorf("stripe invoice currency mismatch: got %s, want %s", inv.Currency, price.Currency)
 	}
 	if inv.AmountPaid != price.Amount {
+		if inv.AmountPaid == 0 && stripeInvoiceHasNoRefundableTransaction(inv) {
+			return nil
+		}
 		return fmt.Errorf("stripe invoice amount mismatch: got %d, want %d", inv.AmountPaid, price.Amount)
 	}
 	return nil
+}
+
+func stripeInvoiceHasNoRefundableTransaction(inv stripeInvoice) bool {
+	return strings.TrimSpace(inv.Charge) == "" && strings.TrimSpace(inv.PaymentIntent) == ""
 }
 
 func ptrProcessor(p models.Processor) *models.Processor {

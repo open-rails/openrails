@@ -356,15 +356,6 @@ func (s *AdminSubscriptionService) UpdateProduct(ctx context.Context, productID 
 			if desc, ok := value.(string); ok {
 				product.Description = desc
 			}
-		case "is_active":
-			// Legacy boolean: true -> active, false -> archived (grandfathered).
-			if active, ok := value.(bool); ok {
-				if active {
-					product.Status = models.CatalogStatusActive
-				} else {
-					product.Status = models.CatalogStatusArchived
-				}
-			}
 		case "status":
 			if raw, ok := value.(string); ok {
 				st := models.CatalogStatus(raw)

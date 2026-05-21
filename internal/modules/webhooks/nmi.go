@@ -197,20 +197,6 @@ func (s *NMIWebhookService) resolveSubscriptionFromReference(ctx context.Context
 		return nil, fmt.Errorf("load subscription by processor subscription ID: %w", err)
 	}
 
-	// Fallback lookup: UUID if the reference is a local subscription ID.
-	if subID, parseErr := uuid.Parse(ref); parseErr == nil {
-		subscription, err = s.SubscriptionService.GetByID(ctx, subID)
-		if err == nil {
-			if subscription.Processor != models.Processor(provider) || subscription.Status != models.StatusPending {
-				return nil, fmt.Errorf("subscription UUID fallback is only allowed for pending subscriptions on the same processor")
-			}
-			return subscription, nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
-		}
-	}
-
 	// NMI/Mobius transaction.sale.success may only include the original order/PO.
 	// Resolve those references through local subscription metadata before granting access.
 	subscription, err = s.SubscriptionService.GetByProcessorMetadataValue(ctx, provider, "order_id", ref)
@@ -605,7 +591,7 @@ func (s *NMIWebhookService) handleAddSubscription(ctx context.Context) error {
 		}).Info("NMI subscription add recorded without settled transaction metadata; waiting for transaction.sale.success before activation")
 		return nil
 	}
-	if delayedStart := nmiDelayedStartFromSubscriptionMetadata(subscription.Metadata); delayedStart != nil && delayedStart.After(s.now().UTC()) {
+	if delayedStart := nmiFutureDelayedStart(subscription.Metadata, s.now().UTC()); delayedStart != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id":           subscription.ID,
 			"processor_subscription_id": nmiSubID,
@@ -863,6 +849,17 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 	// Activate or renew subscription based on current status
 	switch subscription.Status {
 	case models.StatusPending:
+		if delayedStart := nmiFutureDelayedStart(subscription.Metadata, s.now().UTC()); delayedStart != nil {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id":           subscription.ID,
+				"processor_subscription_id": subscription.ProcessorSubscriptionID,
+				"transaction_id":            txnID,
+				"delayed_start":             delayedStart.UTC().Format(time.RFC3339),
+				"processor":                 provider,
+			}).Info("NMI transaction success has checkout delayed_start in the future; keeping subscription pending")
+			return nil
+		}
+
 		if s.DB != nil {
 			removed, err := subscriptions.RemoveCancelledSubscriptionsForActivation(ctx, s.DB, subscription.UserID, subscription.ProductID, subscription.ID)
 			if err != nil {
@@ -1456,6 +1453,17 @@ func nmiDelayedStartFromSubscriptionMetadata(raw json.RawMessage) *time.Time {
 	return &parsed
 }
 
+func nmiFutureDelayedStart(raw json.RawMessage, now time.Time) *time.Time {
+	delayedStart := nmiDelayedStartFromSubscriptionMetadata(raw)
+	if delayedStart == nil {
+		return nil
+	}
+	if delayedStart.UTC().After(now.UTC()) {
+		return delayedStart
+	}
+	return nil
+}
+
 func nmiProviderTransactionIDFromMap(metadata map[string]any) string {
 	for _, key := range []string{"provider_transaction_id", "transaction_id"} {
 		value, ok := metadata[key]
@@ -1980,32 +1988,13 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	// Try to find subscription - refund may be for a subscription payment
 	var subscription *models.Subscription
 	if nmiSubID != "" {
-		subID, parseErr := uuid.Parse(nmiSubID)
-		if parseErr == nil {
-			subscription, err = s.SubscriptionService.GetByID(ctx, subID)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
-					Warn("Failed to look up subscription for refund (by UUID)")
-			} else if err == nil && subscription.Processor != models.Processor(provider) {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": nmiSubID,
-					"expected":        provider,
-					"actual":          subscription.Processor,
-				}).Warn("Ignoring NMI refund UUID fallback for different processor")
-				subscription = nil
-			} else if errors.Is(err, sql.ErrNoRows) {
-				log.WithContext(ctx).WithField("subscription_id", nmiSubID).
-					Warn("Received refund for unknown subscription (by UUID); continuing without lifecycle actions")
-			}
-		} else {
-			subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
-					Warn("Failed to look up subscription for refund (by processor_subscription_id)")
-			} else if errors.Is(err, sql.ErrNoRows) {
-				log.WithContext(ctx).WithField("processor_subscription_id", nmiSubID).
-					Warn("Received refund for unknown subscription (by processor_subscription_id); continuing without lifecycle actions")
-			}
+		subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
+				Warn("Failed to look up subscription for refund (by processor_subscription_id)")
+		} else if errors.Is(err, sql.ErrNoRows) {
+			log.WithContext(ctx).WithField("processor_subscription_id", nmiSubID).
+				Warn("Received refund for unknown subscription (by processor_subscription_id); continuing without lifecycle actions")
 		}
 	}
 

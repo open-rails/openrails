@@ -30,7 +30,7 @@ func IsAdmin(ctx context.Context, db bun.IDB, userID string) (bool, error) {
 // IsOperatorAdmin reports whether the given UserContext is an admin under the
 // deployment's configured policy:
 //
-//   - When cfg.Auth.OperatorOrgSlug is empty (single-org / legacy deployments):
+//   - When cfg.Auth.OperatorOrgSlug is empty (single-org deployments):
 //     equivalent to IsAdmin — checks the live `admin` role in profiles.user_roles.
 //
 //   - When cfg.Auth.OperatorOrgSlug is set (multi-org AuthKit deployments):
@@ -39,7 +39,7 @@ func IsAdmin(ctx context.Context, db bun.IDB, userID string) (bool, error) {
 //     The OpenRails DB is not consulted in this mode — the AuthKit JWT claims
 //     are the source of truth, with revocation handled by short JWT TTL.
 //
-// `db` is only consulted in legacy mode; pass nil in multi-org mode if convenient.
+// `db` is only consulted in single-org mode; pass nil in multi-org mode if convenient.
 func IsOperatorAdmin(ctx context.Context, cfg *config.Config, db bun.IDB, uc authprovider.UserContext) (bool, error) {
 	if cfg != nil && cfg.Auth.OperatorOrgEnabled() {
 		operatorSlug := strings.TrimSpace(cfg.Auth.OperatorOrgSlug)
@@ -59,7 +59,7 @@ func IsOperatorAdmin(ctx context.Context, cfg *config.Config, db bun.IDB, uc aut
 //
 // Gates all /admin/* routes. Behavior depends on config.Auth.OperatorOrgSlug:
 //
-//   - Unset (default): legacy global-`admin`-role check against profiles.user_roles.
+//   - Unset (default): global-`admin`-role check against profiles.user_roles.
 //     Returns 403 "admin_required" on denial. Use case: cozy.art embedded, doujins
 //     / hentai0 self-hosted, any deployment whose AuthKit is single-org.
 //
@@ -72,7 +72,7 @@ func IsOperatorAdmin(ctx context.Context, cfg *config.Config, db bun.IDB, uc aut
 //
 // In both modes, an unauthenticated caller gets 401 "authentication required".
 //
-// `cfg` may be nil — that case is treated as legacy mode.
+// `cfg` may be nil — that case is treated as single-org mode.
 func OperatorAdminRequired(cfg *config.Config, db bun.IDB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uc, ok := authprovider.UserContextFromGin(c)
@@ -116,7 +116,7 @@ func OperatorAdminRequired(cfg *config.Config, db bun.IDB) gin.HandlerFunc {
 			return
 		}
 
-		// Legacy single-org mode: live DB role check.
+		// Single-org mode: live DB role check.
 		isAdmin, err := IsAdmin(c.Request.Context(), db, uc.UserID)
 		if err != nil {
 			log.WithError(err).Error("failed to check admin role")

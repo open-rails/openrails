@@ -169,7 +169,6 @@ go func() {
 The embedded instance provides HTTP handlers suitable for mounting into your host app.
 
 Canonical embedded contract: routes live under `/billing/v1/*`.
-For backwards compatibility, the handler also accepts `/v1/*` (useful if your host still mounts it under `/billing` via `http.StripPrefix`).
 
 ```go
 // Full public billing API (health + user + admin + webhooks; debug routes in dev only)

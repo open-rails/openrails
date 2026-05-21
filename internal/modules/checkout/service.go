@@ -1968,13 +1968,6 @@ func requireNMIPlanForProcessor(price *models.Price, provider string) (string, e
 		return "", errors.New("price is required")
 	}
 	planID, ok := price.GetNMIConfigForProcessor(provider)
-	if (!ok || strings.TrimSpace(planID) == "") && provider != "" {
-		legacyPlanID, legacyProvider, legacyOK := price.GetNMIConfig()
-		if legacyOK && normalize.Lower(legacyProvider) == provider {
-			planID = legacyPlanID
-			ok = strings.TrimSpace(planID) != ""
-		}
-	}
 	if !ok || strings.TrimSpace(planID) == "" {
 		return "", fmt.Errorf("price %s is missing NMI plan configuration for processor %s", price.ID, provider)
 	}

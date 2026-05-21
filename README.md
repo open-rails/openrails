@@ -557,8 +557,8 @@ admin-equivalent identity. The check is performed by `policy.OperatorAdminRequir
 which has two modes selected by the `auth.operator_org_slug` config:
 
 - **Single-org mode** (default — `operator_org_slug` unset). The caller must
-  have the global `admin` role in `profiles.user_roles`. This is the legacy
-  behavior and applies to embedded deployments where AuthKit is single-org
+  have the global `admin` role in `profiles.user_roles`. This applies to
+  embedded deployments where AuthKit is single-org
   (cozy.art), to self-hosted standalone deployments (doujins / hentai0), and to
   any deployment whose AuthKit instance does not use organizations.
 
@@ -572,7 +572,7 @@ which has two modes selected by the `auth.operator_org_slug` config:
 
 Host apps populate `UserContext.Org` and `UserContext.OrgRoles` from the
 AuthKit JWT in their auth-bridge middleware before forwarding requests into
-OpenRails handlers. Empty `Org` is fine for legacy single-org mode.
+OpenRails handlers. Empty `Org` is fine for single-org mode.
 
 Subscription / payment / user admin endpoints:
 
@@ -885,32 +885,6 @@ out, err = svc.UpdatePrice(ctx, priceID, service.UpdatePriceRequest{
 
 ---
 
-### Legacy Endpoints (Deprecated)
-
-These endpoints are kept for backwards compatibility but will be removed:
-
-| Old Endpoint | New Endpoint |
-|--------------|--------------|
-| `GET /v1/subscriptions/products` | `GET /v1/products` |
-| `GET /v1/subscriptions/active` | `GET /v1/me/subscriptions?status=active` |
-| `GET /v1/subscriptions/history` | `GET /v1/me/subscriptions?status=all` |
-| `GET /v1/subscriptions/purchases` | `GET /v1/me/payments` |
-| `POST /v1/subscriptions/cancel` | `POST /v1/me/subscriptions/cancel` |
-| `GET /v1/payment-methods` | `GET /v1/me/payment-methods` |
-| `POST /v1/payment-methods` | `POST /v1/me/payment-methods` |
-| `PUT /v1/payment-methods/:id` | `PUT /v1/me/payment-methods/:id` |
-| `DELETE /v1/payment-methods/:id` | `DELETE /v1/me/payment-methods/:id` |
-| `PUT /v1/payment-methods/:id/activate` | `PUT /v1/me/payment-methods/:id/activate` |
-| `GET /v1/notifications` | `GET /v1/me/notifications` |
-| `GET /v1/notifications/unread-count` | `GET /v1/me/notifications/unread-count` |
-| `POST /v1/notifications/:id/read` | `POST /v1/me/notifications/:id/read` |
-| `POST /v1/solana/generate` | `POST /v1/payment-intents` |
-| `POST /v1/solana/qr` | `POST /v1/payment-intents/qr` |
-| `GET /v1/solana/check?reference=...` | `GET /v1/payment-intents/:id` |
-| `POST /v1/solana/submit` | `POST /v1/payment-intents/:id/confirm` |
-
----
-
 Networking
 - Public: port `2053` is published to the host.
 - Private: port `8060` is exposed to the Docker network for intra-service communication (same host, no TLS needed).
@@ -918,7 +892,7 @@ Networking
 Service API access
 - Shared secret: private service API routes (port `8060`) are protected by header `X-API-KEY: <token>`.
 - Default (dev): `change-me-in-dev`.
-- Override via env `BILLING_API_KEY` or config `api_key`.
+- Override via env `OPENRAILS_API_KEY` or config `api_key`.
 
 Private “definition” surface (host-owned catalog + credits)
 - OpenRails does **not** seed products/prices/credit types in production. Hosts should define them via:

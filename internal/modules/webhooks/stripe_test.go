@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
@@ -58,8 +59,25 @@ func TestValidateStripeInvoicePrice(t *testing.T) {
 	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 2300, Currency: "usd"}, price); err == nil || !strings.Contains(err.Error(), "amount mismatch") {
 		t.Fatalf("expected amount mismatch, got %v", err)
 	}
+	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 0, Currency: "usd"}, price); err != nil {
+		t.Fatalf("expected zero-amount trial invoice without charge to be valid: %v", err)
+	}
+	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 0, PaymentIntent: "pi_123", Currency: "usd"}, price); err == nil || !strings.Contains(err.Error(), "amount mismatch") {
+		t.Fatalf("expected zero paid invoice with payment intent to fail amount validation, got %v", err)
+	}
 	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 2399, Currency: "eur"}, price); err == nil || !strings.Contains(err.Error(), "currency mismatch") {
 		t.Fatalf("expected currency mismatch, got %v", err)
+	}
+}
+
+func TestParseCheckoutSessionIDUsesEffectiveMetadata(t *testing.T) {
+	checkoutID := "cs_0189f3e6-62c6-77b6-9ae9-c17ecb90f466"
+	inv := stripeInvoice{}
+	inv.SubscriptionDetails.Metadata = map[string]string{"checkout_session_id": checkoutID}
+
+	metadata := stripeInvoiceEffectiveMetadata(inv)
+	if got := parseCheckoutSessionID(metadata); got == uuid.Nil {
+		t.Fatalf("expected checkout session id from subscription_details metadata")
 	}
 }
 

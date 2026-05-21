@@ -1,7 +1,6 @@
 package models
 
 import (
-	"encoding/json"
 	"strings"
 	"time"
 
@@ -22,7 +21,7 @@ const (
 	CatalogStatusDraft CatalogStatus = "draft"
 	// CatalogStatusActive: live. Purchasable, shown in the catalog, billed normally.
 	CatalogStatusActive CatalogStatus = "active"
-	// CatalogStatusArchived: retired/legacy. Not purchasable, hidden from the
+	// CatalogStatusArchived: retired. Not purchasable, hidden from the
 	// public catalog, but existing subscriptions are grandfathered and bill
 	// indefinitely. Stripe active=false.
 	CatalogStatusArchived CatalogStatus = "archived"
@@ -83,48 +82,6 @@ func (p *Product) IsBillable() bool { return p.Status != CatalogStatusDraft }
 // Keys are credit type names (billing.credit_types.name). Amounts are stored as BIGINT in the
 // credit type's base units (unit-agnostic), not USD cents.
 type CreditsSpec map[string]CreditGrantSpec
-
-// UnmarshalJSON decodes the current map-based credits_spec schema and the
-// legacy promo_amount_cents shape documented for older deployments.
-func (c *CreditsSpec) UnmarshalJSON(b []byte) error {
-	if len(b) == 0 || string(b) == "null" {
-		*c = nil
-		return nil
-	}
-
-	var v2 map[string]CreditGrantSpec
-	if err := json.Unmarshal(b, &v2); err == nil {
-		*c = v2
-		return nil
-	}
-
-	var legacy struct {
-		PromoAmountCents int64  `json:"promo_amount_cents"`
-		PromoExpiresDays *int   `json:"promo_expires_days"`
-		GrantOn          string `json:"grant_on"`
-	}
-	if err := json.Unmarshal(b, &legacy); err != nil {
-		return err
-	}
-	if legacy.PromoAmountCents <= 0 {
-		*c = nil
-		return nil
-	}
-
-	cadence := CreditGrantCadenceOnce
-	switch normalize.Lower(legacy.GrantOn) {
-	case "renewal", "per_renewal", "recurring":
-		cadence = CreditGrantCadencePerRenewal
-	}
-	*c = CreditsSpec{
-		"api_credits": {
-			Amount:      legacy.PromoAmountCents,
-			ExpiresDays: legacy.PromoExpiresDays,
-			Cadence:     cadence,
-		},
-	}
-	return nil
-}
 
 type CreditGrantCadence string
 
@@ -233,17 +190,6 @@ func (p *Price) HasProcessor(processor Processor) bool {
 	return p.GetProcessorConfig(processor) != nil
 }
 
-// GetNMIConfig returns the Mobius-keyed NMI configuration.
-func (p *Price) GetNMIConfig() (planID, provider string, ok bool) {
-	config := p.GetProcessorConfig(ProcessorMobius)
-	if config == nil {
-		return "", "", false
-	}
-	planID = config[ProcessorKeyPlanID]
-	provider = normalize.FirstNonEmpty(normalize.Lower(config[ProcessorKeyProvider]), string(ProcessorMobius))
-	return planID, provider, planID != ""
-}
-
 // GetNMIConfigForProcessor returns the NMI config for a specific processor (e.g., "mobius", "acme")
 // This allows support for multiple NMI-backed processors with different plan IDs
 func (p *Price) GetNMIConfigForProcessor(processorName string) (planID string, ok bool) {
@@ -263,9 +209,6 @@ func (p *Price) GetCCBillFlexForm() (formName, flexID string, ok bool) {
 	}
 	formName = strings.TrimSpace(config[ProcessorKeyCCBillFormName])
 	flexID = strings.TrimSpace(config[ProcessorKeyCCBillFlexID])
-	if flexID == "" {
-		flexID = strings.TrimSpace(config[ProcessorKeyStripePriceID])
-	}
 	if formName == "" || flexID == "" {
 		return "", "", false
 	}

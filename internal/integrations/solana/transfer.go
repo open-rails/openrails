@@ -39,6 +39,7 @@ type VerifyTransferRequest struct {
 	ExpectedTokenMint string
 	ExpectedPayer     string
 	ExpectedReference string
+	ProcessedNotAfter *time.Time
 }
 
 // BuildTransferTransaction constructs a transfer transaction and returns its base64 encoding.
@@ -148,6 +149,9 @@ func (c *RPCClient) VerifyTransfer(ctx context.Context, req VerifyTransferReques
 	if err != nil {
 		return err
 	}
+	if err := validateTransferProcessedNotAfter(txResult, req.ProcessedNotAfter); err != nil {
+		return err
+	}
 
 	reference := expectedReference
 	if err := validateTransactionContent(txResult, req.ExpectedAmount, expectedRecipient, req.ExpectedTokenMint, req.ExpectedPayer, &reference); err != nil {
@@ -186,6 +190,20 @@ func (c *RPCClient) fetchConfirmedTransaction(ctx context.Context, signature str
 	}
 
 	return txResult, nil
+}
+
+func validateTransferProcessedNotAfter(txResult *rpc.GetTransactionResult, notAfter *time.Time) error {
+	if notAfter == nil || notAfter.IsZero() {
+		return nil
+	}
+	if txResult == nil || txResult.BlockTime == nil {
+		return fmt.Errorf("transaction block time not available for expiry validation")
+	}
+	processedAt := txResult.BlockTime.Time().UTC()
+	if processedAt.After(notAfter.UTC()) {
+		return fmt.Errorf("transaction processed after payment expiry: processed_at=%s expires_at=%s", processedAt.Format(time.RFC3339), notAfter.UTC().Format(time.RFC3339))
+	}
+	return nil
 }
 
 func validateTransactionContent(txResult *rpc.GetTransactionResult, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string) error {

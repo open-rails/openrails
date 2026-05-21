@@ -200,11 +200,11 @@ func classifyBucket(path, method string) string {
 	switch {
 	case strings.HasPrefix(path, "/v1/webhooks"):
 		return "webhook"
-	case strings.HasPrefix(path, "/v1/payment-methods") || strings.HasPrefix(path, "/v1/me/payment-methods"):
+	case strings.HasPrefix(path, "/v1/me/payment-methods"):
 		return "payment-methods"
-	case (strings.HasPrefix(path, "/v1/subscriptions") || strings.HasPrefix(path, "/v1/me/subscriptions")) && (method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete):
+	case strings.HasPrefix(path, "/v1/me/subscriptions") && (method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete):
 		return "subscriptions"
-	case (strings.HasPrefix(path, "/v1/checkout") || strings.HasPrefix(path, "/v1/me/checkout")) && method == http.MethodPost:
+	case strings.HasPrefix(path, "/v1/checkout") && method == http.MethodPost:
 		return "checkout"
 	default:
 		return "default"

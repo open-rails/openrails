@@ -351,8 +351,6 @@ Host policy defaults (current behavior):
 - Upgrades/downgrades do not trigger an immediate extra credit grant; recurring credits are granted on the next confirmed renewal.
 - Refunds do not claw back previously granted credits (no automatic negative adjustments).
 
-Legacy migration note: older deployments may have stored `{promo_amount_cents, promo_expires_days, grant_on}`. OpenRails translates this to a v2 map entry keyed by `api_credits` for backwards compatibility; the host must still define that credit type if it wants the legacy grants to work.
-
 ### PATCH /v1/catalog/products/{id}
 Update product definition fields (display_name, description, entitlements_spec, credits_spec, tier_group/tier_rank, is_active).
 

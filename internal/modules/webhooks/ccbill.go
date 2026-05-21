@@ -1595,15 +1595,6 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		if refundTransactionID != "" && refundAmountCents > 0 {
 			reversalID := "refund:" + strings.TrimSpace(refundTransactionID)
 			existingRefund, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, reversalID)
-			if errors.Is(lookupErr, sql.ErrNoRows) {
-				legacyRefund, legacyErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, strings.TrimSpace(refundTransactionID))
-				if legacyErr == nil && legacyRefund != nil && (legacyRefund.Amount < 0 || legacyRefund.RefundedPaymentID != nil) {
-					existingRefund = legacyRefund
-					lookupErr = nil
-				} else if legacyErr != nil && !errors.Is(legacyErr, sql.ErrNoRows) {
-					lookupErr = legacyErr
-				}
-			}
 			switch {
 			case lookupErr == nil && existingRefund != nil:
 				log.WithContext(ctx).WithFields(log.Fields{
