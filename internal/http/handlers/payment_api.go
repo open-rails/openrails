@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
@@ -161,5 +162,13 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 	if recurring != nil {
 		priceType = "recurring"
 	}
-	return api.PriceObject{ID: api.FormatPriceID(p.ID), Object: "price", Name: p.DisplayName, UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: api.FormatProductID(p.ProductID), Active: p.IsPurchasable(), Livemode: false, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
+	var providers []string
+	if len(p.Processors) > 0 {
+		providers = make([]string, 0, len(p.Processors))
+		for name := range p.Processors {
+			providers = append(providers, name)
+		}
+		sort.Strings(providers)
+	}
+	return api.PriceObject{ID: api.FormatPriceID(p.ID), Object: "price", Name: p.DisplayName, UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: api.FormatProductID(p.ProductID), Active: p.IsPurchasable(), Livemode: false, Providers: providers, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
 }

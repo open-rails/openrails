@@ -42,8 +42,12 @@ type PriceObject struct {
 	Product    string            `json:"product"`             // Product ID
 	Active     bool              `json:"active"`
 	Livemode   bool              `json:"livemode,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-	Created    int64             `json:"created"`
+	// Providers lists the payment processors this price can be paid through
+	// (e.g. ["stripe","ccbill"]), sorted. Lets clients render per-provider
+	// checkout actions and choose which processor to send at checkout time.
+	Providers []string          `json:"providers,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	Created   int64             `json:"created"`
 }
 
 // RecurringInfo describes the billing interval for recurring prices
