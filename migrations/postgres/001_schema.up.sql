@@ -74,13 +74,13 @@ CREATE TABLE IF NOT EXISTS billing.products (
     credits_spec       JSONB,                                         -- bundled promo credits (amount, expiry, cadence)
     tier_group         VARCHAR(100),                                  -- mutually-exclusive group; products in same group require upgrade/downgrade
     tier_rank          INT          NOT NULL DEFAULT 0,               -- higher = more premium
-    is_active          BOOLEAN      NOT NULL DEFAULT TRUE,
+    status             TEXT         NOT NULL DEFAULT 'active' CHECK (status IN ('draft','active','archived')),  -- draft=not launched, active=purchasable, archived=retired (existing subs grandfathered)
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp,
     updated_at         TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp
 );
 
 CREATE INDEX IF NOT EXISTS idx_products_slug       ON billing.products(slug);
-CREATE INDEX IF NOT EXISTS idx_products_is_active  ON billing.products(is_active);
+CREATE INDEX IF NOT EXISTS idx_products_status     ON billing.products(status);
 CREATE INDEX IF NOT EXISTS idx_products_tier_group ON billing.products(tier_group) WHERE tier_group IS NOT NULL;
 
 COMMENT ON TABLE  billing.products                   IS 'Product definitions that can be purchased or subscribed to';
@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS billing.prices (
     currency            TEXT         NOT NULL,
     billing_cycle_days  INTEGER,                                      -- 30=monthly, 365=yearly, NULL=one-time
     processors          JSONB,                                        -- {"stripe": {...}, "ccbill": {...}}
-    is_active           BOOLEAN      NOT NULL DEFAULT TRUE,
+    status              TEXT         NOT NULL DEFAULT 'active' CHECK (status IN ('draft','active','archived')),  -- draft=not launched, active=purchasable, archived=retired (existing subs grandfathered, billed indefinitely)
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp,
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp,
 
@@ -110,9 +110,42 @@ CREATE TABLE IF NOT EXISTS billing.prices (
 
 CREATE INDEX IF NOT EXISTS idx_prices_product_id  ON billing.prices(product_id);
 CREATE INDEX IF NOT EXISTS idx_prices_processors  ON billing.prices USING GIN (processors);
-CREATE INDEX IF NOT EXISTS idx_prices_is_active   ON billing.prices(is_active);
+CREATE INDEX IF NOT EXISTS idx_prices_status      ON billing.prices(status);
 
 COMMENT ON TABLE billing.prices IS 'Pricing tiers for products with processor-specific identifiers';
+
+-- -----------------------------------------------------------------------------
+-- billing.catalog_drift_events — alert-only drift/orphan records from the
+-- catalog reconciliation loop (Stripe + NMI). Never mutates the catalog;
+-- operators resolve via the per-price reconcile endpoint.
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS billing.catalog_drift_events (
+    id                       UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider                 TEXT         NOT NULL CHECK (provider IN ('stripe','nmi')),
+    kind                     TEXT         NOT NULL CHECK (kind IN ('orphan_in_stripe','missing_in_stripe','orphan_in_nmi','missing_in_nmi','field_drift')),
+    openrails_resource_type  TEXT         NOT NULL CHECK (openrails_resource_type IN ('product','price')),
+    openrails_resource_id    TEXT,
+    external_resource_id     TEXT,
+    field                    TEXT,
+    openrails_value          TEXT,
+    external_value           TEXT,
+    detected_at              TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp,
+    resolved_at              TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_drift_events_open
+    ON billing.catalog_drift_events (detected_at DESC) WHERE resolved_at IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_catalog_drift_open
+    ON billing.catalog_drift_events (
+        provider, kind, openrails_resource_type,
+        COALESCE(openrails_resource_id, ''),
+        COALESCE(external_resource_id, ''),
+        COALESCE(field, '')
+    ) WHERE resolved_at IS NULL;
+
+COMMENT ON TABLE billing.catalog_drift_events IS 'Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.';
 
 -- -----------------------------------------------------------------------------
 -- billing.payment_methods — stored vault entries per processor

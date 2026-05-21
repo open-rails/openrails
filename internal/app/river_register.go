@@ -88,8 +88,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add webhook process worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CatalogReconciliationPullWorker{
-		DB:     r.DB,
-		Config: r.Config,
+		DB:         r.DB,
+		Config:     r.Config,
+		NMIClients: r.NMIClients,
 	}); err != nil {
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
 	}

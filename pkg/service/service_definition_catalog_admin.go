@@ -99,7 +99,7 @@ func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (i
 	return out, total, nil
 }
 
-// ActivateProduct sets is_active=true on a product.
+// ActivateProduct sets status=active on a product.
 func (s *Service) ActivateProduct(ctx context.Context, productID uuid.UUID) (*CatalogProduct, error) {
 	products, err := s.requireProductService()
 	if err != nil {
@@ -118,7 +118,8 @@ func (s *Service) ActivateProduct(ctx context.Context, productID uuid.UUID) (*Ca
 	return productToCatalogProduct(updated), nil
 }
 
-// DeactivateProduct sets is_active=false on a product.
+// DeactivateProduct archives a product (status=archived). Existing subscriptions
+// on its prices are grandfathered and keep billing.
 func (s *Service) DeactivateProduct(ctx context.Context, productID uuid.UUID) (*CatalogProduct, error) {
 	products, err := s.requireProductService()
 	if err != nil {
@@ -201,7 +202,7 @@ func (s *Service) ListPrices(ctx context.Context, filter catalog.PriceFilter, li
 	return out, total, nil
 }
 
-// ActivatePrice sets is_active=true on a price.
+// ActivatePrice sets status=active on a price.
 func (s *Service) ActivatePrice(ctx context.Context, priceID uuid.UUID) (*CatalogPrice, error) {
 	prices, err := s.requirePriceService()
 	if err != nil {
@@ -220,7 +221,8 @@ func (s *Service) ActivatePrice(ctx context.Context, priceID uuid.UUID) (*Catalo
 	return priceToCatalogPrice(updated), nil
 }
 
-// DeactivatePrice sets is_active=false on a price.
+// DeactivatePrice archives a price (status=archived). Existing subscriptions on
+// this price are grandfathered and keep billing; new purchases are rejected.
 func (s *Service) DeactivatePrice(ctx context.Context, priceID uuid.UUID) (*CatalogPrice, error) {
 	prices, err := s.requirePriceService()
 	if err != nil {
@@ -230,6 +232,50 @@ func (s *Service) DeactivatePrice(ctx context.Context, priceID uuid.UUID) (*Cata
 		return nil, fmt.Errorf("price_id required")
 	}
 	if err := prices.Deactivate(ctx, priceID); err != nil {
+		return nil, err
+	}
+	updated, err := prices.GetByID(ctx, priceID)
+	if err != nil {
+		return nil, err
+	}
+	return priceToCatalogPrice(updated), nil
+}
+
+// SetProductStatus explicitly transitions a product to draft|active|archived.
+func (s *Service) SetProductStatus(ctx context.Context, productID uuid.UUID, status models.CatalogStatus) (*CatalogProduct, error) {
+	products, err := s.requireProductService()
+	if err != nil {
+		return nil, err
+	}
+	if productID == uuid.Nil {
+		return nil, fmt.Errorf("product_id required")
+	}
+	if !status.Valid() {
+		return nil, fmt.Errorf("invalid status %q", status)
+	}
+	if err := products.SetStatus(ctx, productID, status); err != nil {
+		return nil, err
+	}
+	updated, err := products.GetByID(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	return productToCatalogProduct(updated), nil
+}
+
+// SetPriceStatus explicitly transitions a price to draft|active|archived.
+func (s *Service) SetPriceStatus(ctx context.Context, priceID uuid.UUID, status models.CatalogStatus) (*CatalogPrice, error) {
+	prices, err := s.requirePriceService()
+	if err != nil {
+		return nil, err
+	}
+	if priceID == uuid.Nil {
+		return nil, fmt.Errorf("price_id required")
+	}
+	if !status.Valid() {
+		return nil, fmt.Errorf("invalid status %q", status)
+	}
+	if err := prices.SetStatus(ctx, priceID, status); err != nil {
 		return nil, err
 	}
 	updated, err := prices.GetByID(ctx, priceID)
@@ -261,7 +307,7 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 	}
 	local := &priceVerifyContext{
 		DisplayName: p.DisplayName,
-		IsActive:    p.IsActive,
+		IsActive:    p.Status == models.CatalogStatusActive,
 		UnitAmount:  p.Amount,
 		Currency:    p.Currency,
 	}
@@ -426,7 +472,7 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 				continue
 			}
 			displayName := local.DisplayName
-			active := local.IsActive
+			active := local.Status == models.CatalogStatusActive
 			if err := adapter.Update(ctx, state.IDs, mutableUpdate{
 				DisplayName: &displayName,
 				IsActive:    &active,

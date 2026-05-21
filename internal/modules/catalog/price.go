@@ -76,29 +76,33 @@ func (s *PriceService) Update(ctx context.Context, price *models.Price) error {
 }
 
 // Delete is not supported - prices are immutable to preserve historical payment accuracy.
-// To retire a price, set is_active = false via Deactivate().
+// To retire a price, archive it via Deactivate() (sets status=archived).
 func (s *PriceService) Delete(ctx context.Context, id uuid.UUID) error {
 	return errors.New("prices cannot be deleted; use Deactivate() instead to preserve historical data")
 }
 
-// Deactivate marks a price as inactive so it won't appear in product listings.
-// Existing subscriptions and payments referencing this price are unaffected.
+// Deactivate archives a price (status=archived) so it won't appear in product
+// listings and cannot be purchased by new customers. Existing subscriptions and
+// payments referencing this price are grandfathered and keep billing.
 func (s *PriceService) Deactivate(ctx context.Context, id uuid.UUID) error {
-	price, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	price.IsActive = false
-	return s.repo.Update(ctx, price)
+	return s.SetStatus(ctx, id, models.CatalogStatusArchived)
 }
 
 // Activate marks a price as active so it appears in product listings.
 func (s *PriceService) Activate(ctx context.Context, id uuid.UUID) error {
+	return s.SetStatus(ctx, id, models.CatalogStatusActive)
+}
+
+// SetStatus sets the lifecycle status (draft|active|archived) on a price.
+func (s *PriceService) SetStatus(ctx context.Context, id uuid.UUID, status models.CatalogStatus) error {
+	if !status.Valid() {
+		return fmt.Errorf("invalid catalog status %q", status)
+	}
 	price, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	price.IsActive = true
+	price.Status = status
 	return s.repo.Update(ctx, price)
 }
 

@@ -254,10 +254,10 @@ func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID
 				RemoteValue:    remote.Description,
 			})
 		}
-		if local.IsActive != remote.Active {
+		if localActive := local.IsPurchasable(); localActive != remote.Active {
 			drift = append(drift, DriftField{
 				Field:          "is_active",
-				OpenRailsValue: strconv.FormatBool(local.IsActive),
+				OpenRailsValue: strconv.FormatBool(localActive),
 				RemoteValue:    strconv.FormatBool(remote.Active),
 			})
 		}

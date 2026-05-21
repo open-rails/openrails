@@ -352,7 +352,7 @@ Error types: `invalid_request_error`, `authentication_error`, `authorization_err
 }
 ```
 
-> **Note:** Products cannot be deleted. Set `active: false` to hide from listings. Only `display_name`, `description`, and `is_active` can be updated.
+> **Note:** Products cannot be deleted. Set `status` to `archived` to hide from listings (grandfathers existing subscribers). Only `display_name`, `description`, and `status` can be updated. (The public Stripe-style object exposes a derived `active` boolean: `true` only when `status=active`.)
 
 **Price Object:**
 ```json
@@ -369,7 +369,7 @@ Error types: `invalid_request_error`, `authentication_error`, `authorization_err
 }
 ```
 
-> **Note:** Prices are mostly immutable. Each price belongs to exactly one product. Financial fields (`unit_amount`, `currency`, `billing_cycle_days`) cannot be changed after creation to preserve historical payment accuracy. To change pricing, create a new price and deactivate the old one. Only `display_name`, `provider_links` (per-provider link maps), and `is_active` can be updated.
+> **Note:** Prices are mostly immutable. Each price belongs to exactly one product. Financial fields (`unit_amount`, `currency`, `billing_cycle_days`) cannot be changed after creation to preserve historical payment accuracy. To change pricing, create a new price and archive the old one. Only `display_name`, `provider_links` (per-provider link maps), and `status` can be updated. Archiving keeps billing existing subscribers indefinitely. (The public object exposes a derived `active` boolean: `true` only when `status=active`.)
 
 ---
 
@@ -617,6 +617,28 @@ and `billing.prices`. Host apps must not write to those tables directly or
 reach into `catalog.ProductService` / `catalog.PriceService` — those become
 implementation details once this surface ships.
 
+**Status lifecycle (issue #210).** Products and prices carry a `status` enum
+instead of a bare `is_active` boolean, so a not-yet-launched item is distinct
+from a retired-but-grandfathered one:
+
+| status | in public catalog / purchasable? | existing subscriptions | Stripe |
+|---|---|---|---|
+| `draft` | no | none yet | not created in Stripe |
+| `active` | yes | bill normally | `active: true` |
+| `archived` | no | **grandfathered — bill forever** | `active: false` |
+
+- `status` is optional on create (`POST /admin/catalog/products` and `.../prices`),
+  defaulting to `active`. A historical plan with existing subscribers can be
+  created `archived` in one step — no purchasable gap.
+- `activate` sets `status=active`; `deactivate` sets `status=archived`. Set
+  `status` explicitly (including `draft`) via `PATCH` to transition between states.
+- **Grandfather guarantee:** archiving a price hides it from the public catalog
+  and rejects *new* purchases, but **existing subscriptions on an archived price
+  keep renewing and billing the stored amount indefinitely.** The renewal/rebill
+  path loads the price by ID with no status filter — only the public catalog and
+  new-purchase paths gate on `status=active`. Processor lookups used by renewal
+  webhooks resolve any non-`draft` price for the same reason.
+
 **Declarative provider attachment (issue #208).** On `POST /admin/catalog/prices`,
 admins declare *intent* — which providers a price should exist in — and the
 system picks the right mechanism per provider:
@@ -631,10 +653,13 @@ system picks the right mechanism per provider:
   "providers": ["stripe", "ccbill", "mobius"],
   "provider_links": {
     "ccbill": {"form_name": "premium", "flex_id": "abc-123"}
-  },
-  "lookup_key": "app.premium.monthly.usd.999.month.1"
+  }
 }
 ```
+
+> The Stripe `lookup_key` is **not** a request field. OpenRails assigns it
+> internally as `openrails_<price_uuid>` (deterministic, strongly-consistent,
+> reconstructable) so callers never construct one.
 
 Behavior matrix:
 
@@ -710,35 +735,58 @@ downstream projection.
   implicitly manages the Stripe Product mirror.
 - **A background reconciliation loop surfaces drift, but never fixes it
   automatically (issue #209).** In addition to lazy `?verify=true` detection, a
-  periodic job pulls the full Stripe catalog and records divergence (see
-  "Catalog reconciliation loop" below). It is strictly alert-only: it writes to
-  `billing.catalog_drift_events` and never mutates Stripe or the catalog rows.
-  Correction stays explicit (per-price reconcile), avoiding the silent-mutation
-  scar tissue that hits two-source-of-truth systems. Document for your team:
-  editing catalog directly in the Stripe Dashboard will surface as drift and be
+  periodic job pulls the full Stripe catalog **and** the NMI recurring-plan
+  catalog and records divergence (see "Catalog reconciliation loop" below). It is
+  strictly alert-only: it writes to `billing.catalog_drift_events` and never
+  mutates Stripe, NMI, or the catalog rows. Correction stays explicit (per-price
+  reconcile), avoiding the silent-mutation scar tissue that hits
+  two-source-of-truth systems. Document for your team: editing catalog directly
+  in the Stripe Dashboard or the NMI control center will surface as drift and be
   reverted only on an explicit reconcile.
 
 ##### Catalog reconciliation loop (issue #209)
 
-A background River job (`billing.catalog_reconciliation_pull`) periodically
-enumerates the entire Stripe catalog (Products + Prices via the List API) and
-diffs it against OpenRails. It records three kinds of divergence as **open**
-rows in `billing.catalog_drift_events`:
+A background River job (`billing.catalog_reconciliation_pull`) periodically runs
+two passes in a single scheduled run and diffs each against OpenRails:
 
-| `kind`              | Meaning |
-|---------------------|---------|
-| `orphan_in_stripe`  | A Stripe object with no matching OpenRails row (missing/dangling `openrails_*_id` metadata marker). |
-| `missing_in_stripe` | An OpenRails row stores a Stripe object ID that was absent from the pulled Stripe catalog (deleted/archived in Stripe). |
-| `field_drift`       | An OpenRails row and its Stripe mirror disagree on a mutable field (`name`/`description`/`active` for products; `unit_amount`/`currency`/`active`/`nickname` for prices). |
+- **Stripe pass:** enumerates the entire Stripe catalog (Products + Prices via
+  the List API) and matches OpenRails rows by their `openrails_*_id` metadata.
+- **NMI pass:** enumerates all NMI Recurring Plans via the Query API
+  (`recurring_plans`) and matches OpenRails prices by their stored
+  `provider_links.mobius.plan_id`.
 
-The loop is **alert-only** — it never mutates Stripe or the catalog rows. It is
-idempotent: rerunning produces no new rows for unchanged divergence (dedupe on
-`(kind, resource_type, openrails_resource_id, stripe_resource_id, field)`), and
-it auto-resolves (sets `resolved_at`) any open event whose divergence has
-disappeared. Each detected event is also emitted as a structured `WARN` log with
-`event=catalog_drift` and stable fields for downstream alerting; open counts per
-kind are available via the in-process `Service.CountOpenDriftByKind` for a
-`openrails_catalog_drift_open_count{kind}` metric.
+Each pass is **independently skipped** when that processor is unconfigured (no
+Stripe secret key / no `mobius` NMI client), so a Stripe-only or NMI-only
+deployment works without configuration.
+
+It records divergence as **open** rows in `billing.catalog_drift_events`. Every
+row carries a `provider` column (`stripe` | `nmi`) that disambiguates the shared
+`field_drift` kind:
+
+| `kind`              | `provider` | Meaning |
+|---------------------|-----------|---------|
+| `orphan_in_stripe`  | `stripe`  | A Stripe object with no matching OpenRails row (missing/dangling `openrails_*_id` metadata marker). |
+| `missing_in_stripe` | `stripe`  | An OpenRails row stores a Stripe object ID that was absent from the pulled Stripe catalog (deleted/archived in Stripe). |
+| `orphan_in_nmi`     | `nmi`     | An NMI plan on the account with no matching OpenRails price. Plans whose `plan_id` carries the deterministic `openrails-<price_uuid>` prefix (the NMI analog of Stripe's metadata marker) are tagged with the extracted OpenRails price id so operators can tell an orphaned-but-ours plan from an operator-hand-made one. |
+| `missing_in_nmi`    | `nmi`     | An OpenRails price references a `plan_id` that no longer exists on the NMI account (deleted upstream). |
+| `field_drift`       | `stripe`  | An OpenRails row and its Stripe mirror disagree on a mutable field (`name`/`description`/`active` for products; `unit_amount`/`currency`/`active`/`nickname` for prices). |
+| `field_drift`       | `nmi`     | An OpenRails price and its NMI plan disagree on `plan_name` or `plan_amount`. NMI's plan model is flat (no separate product, frequency immutable), so name + amount is the entire drift surface. |
+
+**CCBill is intentionally NOT reconciled.** CCBill has no catalog-list API —
+FlexForms are write-only redirect URLs, webhooks are inbound, and DataLink only
+exports members/subscriptions (not catalog forms) — so enumeration is
+structurally impossible. CCBill catalog links stay manual-only forever and never
+appear in any drift surface.
+
+The loop is **alert-only** — it never mutates Stripe, NMI, or the catalog rows.
+It is idempotent: rerunning produces no new rows for unchanged divergence (dedupe
+on `(provider, kind, resource_type, openrails_resource_id, external_resource_id,
+field)`), and it auto-resolves (sets `resolved_at`) any open event whose
+divergence has disappeared. Each detected event is also emitted as a structured
+`WARN` log with `event=catalog_drift` (carrying `provider`) and stable fields for
+downstream alerting; open counts per (provider, kind) are available via the
+in-process `Service.CountOpenDriftByKind` for a
+`openrails_catalog_drift_open_count{provider,kind}` metric.
 
 **Schedule / disabling.** Default interval is **1h**. Override with the
 `OPENRAILS_CATALOG_RECONCILIATION_INTERVAL` env var (a Go duration, e.g. `30m`,
@@ -748,23 +796,30 @@ kind are available via the in-process `Service.CountOpenDriftByKind` for a
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/v1/admin/catalog/drift` | List open drift events (filters: `kind`, `resource_type`, `limit`, `offset`). |
-| GET | `/v1/admin/catalog/stripe/orphans` | Operator-friendly alias for `?kind=orphan_in_stripe`. |
-| POST | `/v1/admin/catalog/drift/refresh` | Run the pull-and-diff pass synchronously and return the resulting open drift set. |
+| GET | `/v1/admin/catalog/drift` | List open drift events (filters: `provider`, `kind`, `resource_type`, `limit`, `offset`). |
+| GET | `/v1/admin/catalog/orphans` | List open orphan events across providers; `?provider=stripe\|nmi` scopes to one. |
+| GET | `/v1/admin/catalog/stripe/orphans` | Convenience alias for `/orphans?provider=stripe`. |
+| POST | `/v1/admin/catalog/drift/refresh` | Run the pull-and-diff pass (both providers) synchronously and return the resulting open drift set. |
 | POST | `/v1/admin/catalog/drift/reconcile-all` | Alias for `drift/refresh` (spec-named on-demand trigger). |
 
 **Operator runbook — "there's drift in production, what do I do?"**
 
 1. `GET /v1/admin/catalog/drift` (or `POST /v1/admin/catalog/drift/refresh` first
-   for an immediate fresh scan). Inspect the `kind` and `field` of each event.
-2. For `field_drift` / `missing_in_stripe` on a price: resolve it with the
-   existing `POST /v1/admin/catalog/prices/:id/reconcile` (add `?recreate=true`
-   when the Stripe Price was deleted). OpenRails is authoritative, so reconcile
-   re-applies OpenRails values to Stripe. Resolving a price this way
-   **auto-closes** its matching open drift events.
-3. For `orphan_in_stripe`: decide whether the Stripe-only object should be
-   imported (attach it via `PATCH /admin/catalog/prices/:id` `provider_links`)
-   or deleted in the Stripe Dashboard. The loop will not touch it for you.
+   for an immediate fresh scan). Inspect the `provider`, `kind`, and `field` of
+   each event. Filter by `?provider=nmi` to triage one processor at a time.
+2. For `field_drift` / `missing_in_stripe` / `missing_in_nmi` on a price: resolve
+   it with the existing `POST /v1/admin/catalog/prices/:id/reconcile` (add
+   `?recreate=true` when the Stripe Price was deleted). OpenRails is
+   authoritative, so reconcile re-applies OpenRails values to the provider (it
+   re-applies `display_name` to NMI via `edit_plan`; NMI plan amount/frequency
+   are immutable). Resolving a price this way **auto-closes** its matching open
+   drift events.
+3. For `orphan_in_stripe` / `orphan_in_nmi`: decide whether the upstream-only
+   object should be imported (attach it via `PATCH /admin/catalog/prices/:id`
+   `provider_links`) or deleted upstream (Stripe Dashboard / NMI control center).
+   The loop will not touch it for you. An `orphan_in_nmi` row tagged with an
+   OpenRails price id (the `openrails-<uuid>` plan_id prefix) is one OpenRails
+   created but whose price row was since removed.
 4. Re-run `GET /v1/admin/catalog/drift` to confirm the event has cleared.
 
 **NMI / Mobius create-mode (issue #207).** NMI is a first-class create-capable
@@ -816,7 +871,6 @@ out, err := svc.CreatePrice(ctx, service.CreatePriceRequest{
     ProviderLinks: map[string]map[string]string{
         "ccbill": {"form_name": "premium", "flex_id": "abc-123"},
     },
-    LookupKey: "app.premium.monthly.usd.999.month.1",
 })
 // out.Providers["stripe"].Status == "linked"   (auto-created)
 // out.Providers["ccbill"].Status == "linked"   (linked from supplied IDs)

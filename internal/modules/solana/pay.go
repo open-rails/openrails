@@ -158,7 +158,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	if err != nil {
 		return nil, fmt.Errorf("price not found: %w", err)
 	}
-	if !price.IsActive {
+	if !price.IsPurchasable() {
 		return nil, fmt.Errorf("price is not active")
 	}
 
@@ -168,7 +168,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		if err != nil {
 			return nil, fmt.Errorf("product not found: %w", err)
 		}
-		if !product.IsActive {
+		if !product.IsPurchasable() {
 			return nil, fmt.Errorf("product is not active")
 		}
 	}

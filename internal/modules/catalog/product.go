@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
@@ -60,24 +61,28 @@ func (s *ProductService) GetBySlug(ctx context.Context, slug string) (*models.Pr
 	return s.repo.GetBySlug(ctx, slug)
 }
 
-// Deactivate marks a product as inactive so it won't appear in product listings.
-// Existing subscriptions and payments referencing this product's prices are unaffected.
+// Deactivate archives a product (status=archived) so it won't appear in product
+// listings and cannot be purchased. Existing subscriptions referencing this
+// product's prices are grandfathered and keep billing.
 func (s *ProductService) Deactivate(ctx context.Context, id uuid.UUID) error {
-	product, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	product.IsActive = false
-	return s.repo.Update(ctx, product)
+	return s.SetStatus(ctx, id, models.CatalogStatusArchived)
 }
 
 // Activate marks a product as active so it appears in product listings.
 func (s *ProductService) Activate(ctx context.Context, id uuid.UUID) error {
+	return s.SetStatus(ctx, id, models.CatalogStatusActive)
+}
+
+// SetStatus sets the lifecycle status (draft|active|archived) on a product.
+func (s *ProductService) SetStatus(ctx context.Context, id uuid.UUID, status models.CatalogStatus) error {
+	if !status.Valid() {
+		return fmt.Errorf("invalid catalog status %q", status)
+	}
 	product, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	product.IsActive = true
+	product.Status = status
 	return s.repo.Update(ctx, product)
 }
 
@@ -111,7 +116,7 @@ type ProductDefinitionUpdateParams struct {
 	TierGroup        *string
 	SetTierGroup     bool
 	TierRank         *int
-	IsActive         *bool
+	Status           *models.CatalogStatus
 }
 
 // UpdateDefinition updates host-configurable fields on a product (catalog definition surface).
@@ -137,8 +142,11 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 	if params.TierRank != nil {
 		product.TierRank = *params.TierRank
 	}
-	if params.IsActive != nil {
-		product.IsActive = *params.IsActive
+	if params.Status != nil {
+		if !params.Status.Valid() {
+			return nil, fmt.Errorf("invalid catalog status %q", *params.Status)
+		}
+		product.Status = *params.Status
 	}
 	if params.SetCredits {
 		product.CreditsSpec = params.CreditsSpec

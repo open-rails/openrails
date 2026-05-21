@@ -240,14 +240,14 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if err != nil {
 		return nil, fmt.Errorf("%w: price not found", ErrCheckoutSessionValidation)
 	}
-	if !price.IsActive {
+	if !price.IsPurchasable() {
 		return nil, fmt.Errorf("%w: price is not active", ErrCheckoutSessionValidation)
 	}
 	product, err := s.productService.GetByID(ctx, price.ProductID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: product not found", ErrCheckoutSessionValidation)
 	}
-	if !product.IsActive {
+	if !product.IsPurchasable() {
 		return nil, fmt.Errorf("%w: product is not active", ErrCheckoutSessionValidation)
 	}
 

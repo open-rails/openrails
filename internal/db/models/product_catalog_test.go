@@ -62,3 +62,46 @@ func TestPrice_GetCCBillFlexForm_LegacyPriceIDFallback(t *testing.T) {
 		t.Fatalf("unexpected CCBill config: form=%q flex=%q", formName, flexID)
 	}
 }
+
+func TestCatalogStatus_Valid(t *testing.T) {
+	for _, s := range []CatalogStatus{CatalogStatusDraft, CatalogStatusActive, CatalogStatusArchived} {
+		if !s.Valid() {
+			t.Fatalf("expected %q to be valid", s)
+		}
+	}
+	for _, s := range []CatalogStatus{"", "live", "deleted", "ACTIVE"} {
+		if s.Valid() {
+			t.Fatalf("expected %q to be invalid", s)
+		}
+	}
+}
+
+func TestCatalogStatus_PurchasableAndBillable(t *testing.T) {
+	cases := []struct {
+		status          CatalogStatus
+		wantPurchasable bool
+		wantBillable    bool
+	}{
+		{CatalogStatusDraft, false, false},
+		{CatalogStatusActive, true, true},
+		// archived: not purchasable (new buyers blocked) but still billable
+		// (existing subscriptions are grandfathered and bill forever).
+		{CatalogStatusArchived, false, true},
+	}
+	for _, c := range cases {
+		prod := &Product{Status: c.status}
+		if got := prod.IsPurchasable(); got != c.wantPurchasable {
+			t.Fatalf("Product(%q).IsPurchasable()=%v want %v", c.status, got, c.wantPurchasable)
+		}
+		if got := prod.IsBillable(); got != c.wantBillable {
+			t.Fatalf("Product(%q).IsBillable()=%v want %v", c.status, got, c.wantBillable)
+		}
+		price := &Price{Status: c.status}
+		if got := price.IsPurchasable(); got != c.wantPurchasable {
+			t.Fatalf("Price(%q).IsPurchasable()=%v want %v", c.status, got, c.wantPurchasable)
+		}
+		if got := price.IsBillable(); got != c.wantBillable {
+			t.Fatalf("Price(%q).IsBillable()=%v want %v", c.status, got, c.wantBillable)
+		}
+	}
+}

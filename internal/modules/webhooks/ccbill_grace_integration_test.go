@@ -58,7 +58,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 		EntitlementsSpec: map[string]*int{
 			"premium": nil,
 		},
-		IsActive:  true,
+		Status:    models.CatalogStatusActive,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}).Exec(ctx)
@@ -68,7 +68,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 		ID:               priceID,
 		ProductID:        productID,
 		DisplayName:      "Test Monthly",
-		IsActive:         true,
+		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
 		BillingCycleDays: &billingDays,
@@ -200,7 +200,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 		EntitlementsSpec: map[string]*int{
 			"premium": nil,
 		},
-		IsActive:  true,
+		Status:    models.CatalogStatusActive,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}).Exec(ctx)
@@ -210,7 +210,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 		ID:               priceID,
 		ProductID:        productID,
 		DisplayName:      "Test Monthly",
-		IsActive:         true,
+		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
 		BillingCycleDays: &billingDays,

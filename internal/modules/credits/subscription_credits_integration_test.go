@@ -72,7 +72,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		CreditsSpec: models.CreditsSpec{
 			creditTypeName: {Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
 		},
-		IsActive:  true,
+		Status:    models.CatalogStatusActive,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}).Exec(ctx)
@@ -84,7 +84,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		ID:               priceID,
 		ProductID:        productID,
 		DisplayName:      "Test Price",
-		IsActive:         true,
+		Status:           models.CatalogStatusActive,
 		Amount:           100,
 		Currency:         "USD",
 		BillingCycleDays: &cycle,
@@ -240,7 +240,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 			ctOnceName:  {Amount: 10, Cadence: models.CreditGrantCadenceOnce},
 			ctRenewName: {Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
 		},
-		IsActive:  true,
+		Status:    models.CatalogStatusActive,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}).Exec(ctx)
@@ -252,7 +252,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 		ID:               priceID,
 		ProductID:        productID,
 		DisplayName:      "Test Price",
-		IsActive:         true,
+		Status:           models.CatalogStatusActive,
 		Amount:           100,
 		Currency:         "USD",
 		BillingCycleDays: &cycle,

@@ -23,7 +23,7 @@ func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
 		CreditsSpec:      creditGrantSpecsToAPI(p.CreditsSpec),
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
-		Active:           p.IsActive,
+		Active:           p.IsPurchasable(),
 		Livemode:         false,
 		Metadata:         map[string]string{},
 		Created:          api.ToUnix(p.CreatedAt),
@@ -161,5 +161,5 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 	if recurring != nil {
 		priceType = "recurring"
 	}
-	return api.PriceObject{ID: api.FormatPriceID(p.ID), Object: "price", Name: p.DisplayName, UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: api.FormatProductID(p.ProductID), Active: p.IsActive, Livemode: false, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
+	return api.PriceObject{ID: api.FormatPriceID(p.ID), Object: "price", Name: p.DisplayName, UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: api.FormatProductID(p.ProductID), Active: p.IsPurchasable(), Livemode: false, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
 }

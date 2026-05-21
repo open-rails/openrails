@@ -377,7 +377,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 				},
 				TierGroup: &premiumGroup,
 				TierRank:  1,
-				IsActive:  true,
+				Status:    models.CatalogStatusActive,
 			},
 			Prices: []*models.Price{
 				{
@@ -406,7 +406,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 				},
 				TierGroup: &premiumGroup,
 				TierRank:  2,
-				IsActive:  true,
+				Status:    models.CatalogStatusActive,
 			},
 			Prices: []*models.Price{
 				{
@@ -436,7 +436,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 				},
 				TierGroup: &premiumGroup,
 				TierRank:  3,
-				IsActive:  true,
+				Status:    models.CatalogStatusActive,
 			},
 			Prices: []*models.Price{
 				{

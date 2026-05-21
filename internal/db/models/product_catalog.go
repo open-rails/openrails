@@ -10,6 +10,34 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// CatalogStatus is the lifecycle state of a catalog product or price. It
+// replaces the previous is_active boolean so that "draft (not yet launched)"
+// and "archived (retired but grandfathered)" — both formerly is_active=false —
+// are distinct, first-class states.
+type CatalogStatus string
+
+const (
+	// CatalogStatusDraft: created but not launched. Not purchasable, hidden from
+	// the public catalog, not created in Stripe. No subscribers yet.
+	CatalogStatusDraft CatalogStatus = "draft"
+	// CatalogStatusActive: live. Purchasable, shown in the catalog, billed normally.
+	CatalogStatusActive CatalogStatus = "active"
+	// CatalogStatusArchived: retired/legacy. Not purchasable, hidden from the
+	// public catalog, but existing subscriptions are grandfathered and bill
+	// indefinitely. Stripe active=false.
+	CatalogStatusArchived CatalogStatus = "archived"
+)
+
+// Valid reports whether the status is one of the known lifecycle values.
+func (s CatalogStatus) Valid() bool {
+	switch s {
+	case CatalogStatusDraft, CatalogStatusActive, CatalogStatusArchived:
+		return true
+	default:
+		return false
+	}
+}
+
 // Product represents a product offering (e.g., Premium Membership)
 // This represents our product catalog concept
 type Product struct {
@@ -32,13 +60,22 @@ type Product struct {
 	TierGroup *string `bun:"tier_group,nullzero" json:"tier_group,omitempty"`
 	TierRank  int     `bun:"tier_rank,notnull,default:0" json:"tier_rank"`
 
-	IsActive  bool      `bun:"is_active,notnull,default:true" json:"is_active"`
-	CreatedAt time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt time.Time `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	Status    CatalogStatus `bun:"status,notnull,default:'active'" json:"status"`
+	CreatedAt time.Time     `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt time.Time     `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
 
 	// Relationships
 	Prices []*Price `bun:"rel:has-many,join:id=product_id" json:"prices,omitempty"`
 }
+
+// IsPurchasable reports whether the product can be bought by a new customer
+// (shown in the public catalog). Only active products are purchasable.
+func (p *Product) IsPurchasable() bool { return p.Status == CatalogStatusActive }
+
+// IsBillable reports whether existing subscriptions on this product may still
+// be billed. Archived products are grandfathered, so anything that is not a
+// draft remains billable.
+func (p *Product) IsBillable() bool { return p.Status != CatalogStatusDraft }
 
 // CreditsSpec defines bundled credit grants for a product (e.g., promo credits on signup,
 // or a recurring monthly stipend on renewals).
@@ -139,12 +176,12 @@ func CloneCreditsSpec(spec CreditsSpec) CreditsSpec {
 type Price struct {
 	bun.BaseModel `bun:"table:billing.prices,alias:price"`
 
-	ID          uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
-	ProductID   uuid.UUID `bun:"product_id,notnull" json:"product_id"`
-	DisplayName string    `bun:"display_name,notnull" json:"display_name"`
-	IsActive    bool      `bun:"is_active,notnull,default:true" json:"is_active"`
-	Amount      int64     `bun:"amount,notnull" json:"amount"`
-	Currency    string    `bun:"currency,notnull" json:"currency"`
+	ID          uuid.UUID     `bun:"id,pk,type:uuid" json:"id"`
+	ProductID   uuid.UUID     `bun:"product_id,notnull" json:"product_id"`
+	DisplayName string        `bun:"display_name,notnull" json:"display_name"`
+	Status      CatalogStatus `bun:"status,notnull,default:'active'" json:"status"`
+	Amount      int64         `bun:"amount,notnull" json:"amount"`
+	Currency    string        `bun:"currency,notnull" json:"currency"`
 
 	// Billing interval in days (nullable for one-time purchases)
 	// 30 = monthly, 365 = yearly, null = one-time purchase
@@ -164,6 +201,15 @@ type Price struct {
 	Subscriptions []Subscription `bun:"rel:has-many,join:id=price_id" json:"-"`
 	Payments      []Payment      `bun:"rel:has-many,join:id=price_id" json:"-"`
 }
+
+// IsPurchasable reports whether the price can be bought by a new customer
+// (shown in the public catalog). Only active prices are purchasable.
+func (p *Price) IsPurchasable() bool { return p.Status == CatalogStatusActive }
+
+// IsBillable reports whether existing subscriptions on this price may still be
+// billed. Archived prices are grandfathered, so the renewal/rebill path keeps
+// charging them indefinitely — anything that is not a draft remains billable.
+func (p *Price) IsBillable() bool { return p.Status != CatalogStatusDraft }
 
 // Processor config key constants (used in the Processors JSONB map)
 const (

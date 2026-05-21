@@ -40,7 +40,7 @@ func (r *PriceRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Price, e
 
 func (r *PriceRepo) GetByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
 	prices := []*models.Price{}
-	if err := r.db.GetDB().NewSelect().Model(&prices).Where("price.product_id = ?", productID).Where("price.is_active = ?", true).Scan(ctx); err != nil {
+	if err := r.db.GetDB().NewSelect().Model(&prices).Where("price.product_id = ?", productID).Where("price.status = ?", models.CatalogStatusActive).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return prices, nil
@@ -48,7 +48,7 @@ func (r *PriceRepo) GetByProductID(ctx context.Context, productID uuid.UUID) ([]
 
 func (r *PriceRepo) GetActiveByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
 	prices := []*models.Price{}
-	if err := r.db.GetDB().NewSelect().Model(&prices).Where("price.product_id = ?", productID).Where("price.is_active = ?", true).OrderExpr("price.amount ASC").Scan(ctx); err != nil {
+	if err := r.db.GetDB().NewSelect().Model(&prices).Where("price.product_id = ?", productID).Where("price.status = ?", models.CatalogStatusActive).OrderExpr("price.amount ASC").Scan(ctx); err != nil {
 		return nil, err
 	}
 	return prices, nil
@@ -56,7 +56,7 @@ func (r *PriceRepo) GetActiveByProductID(ctx context.Context, productID uuid.UUI
 
 func (r *PriceRepo) GetAllActive(ctx context.Context) ([]*models.Price, error) {
 	prices := []*models.Price{}
-	if err := r.db.GetDB().NewSelect().Model(&prices).Relation("Product").Where("price.is_active = ?", true).OrderExpr("price.amount ASC").Scan(ctx); err != nil {
+	if err := r.db.GetDB().NewSelect().Model(&prices).Relation("Product").Where("price.status = ?", models.CatalogStatusActive).OrderExpr("price.amount ASC").Scan(ctx); err != nil {
 		return nil, err
 	}
 	return prices, nil
@@ -72,10 +72,11 @@ func (r *PriceRepo) GetAll(ctx context.Context) ([]*models.Price, error) {
 
 // PriceFilter contains optional filters for listing prices
 type PriceFilter struct {
-	Active    *bool      // Filter by active status
-	Currency  string     // Filter by currency (e.g., "usd")
-	ProductID *uuid.UUID // Filter by product ID
-	Type      string     // Filter by "recurring" or "one_time"
+	Active    *bool                 // Filter by active status (true=status='active', false=status<>'active')
+	Status    *models.CatalogStatus // Filter by exact lifecycle status (admin)
+	Currency  string                // Filter by currency (e.g., "usd")
+	ProductID *uuid.UUID            // Filter by product ID
+	Type      string                // Filter by "recurring" or "one_time"
 }
 
 // ListPaginated returns prices with pagination and optional filters
@@ -86,9 +87,18 @@ func (r *PriceRepo) ListPaginated(ctx context.Context, filter PriceFilter, limit
 		Relation("Product").
 		Order("price.created_at DESC")
 
-	// Apply filters
+	// Apply filters. Active is interpreted against the status enum:
+	//   Active=true  -> status = 'active' (purchasable)
+	//   Active=false -> status <> 'active' (draft or archived; admin-only view)
 	if filter.Active != nil {
-		query = query.Where("price.is_active = ?", *filter.Active)
+		if *filter.Active {
+			query = query.Where("price.status = ?", models.CatalogStatusActive)
+		} else {
+			query = query.Where("price.status <> ?", models.CatalogStatusActive)
+		}
+	}
+	if filter.Status != nil {
+		query = query.Where("price.status = ?", *filter.Status)
 	}
 	if filter.Currency != "" {
 		query = query.Where("LOWER(price.currency) = LOWER(?)", filter.Currency)
@@ -112,8 +122,10 @@ func (r *PriceRepo) ListPaginated(ctx context.Context, filter PriceFilter, limit
 func (r *PriceRepo) GetByNMIPlan(ctx context.Context, provider, nmiPlanID string) (*models.Price, error) {
 	price := new(models.Price)
 
+	// Resolve any non-draft price (active or archived). Archived prices must
+	// still resolve here so grandfathered subscriptions keep billing.
 	query := r.db.GetDB().NewSelect().Model(price).
-		Where("price.is_active = ?", true)
+		Where("price.status <> ?", models.CatalogStatusDraft)
 	if provider == "nmi" {
 		query = query.Where("price.processors -> ? ->> ? = ?", provider, "plan_id", nmiPlanID)
 	} else {
@@ -130,7 +142,7 @@ func (r *PriceRepo) GetByCCBillPriceID(ctx context.Context, ccbillPriceID string
 	price := new(models.Price)
 	if err := r.db.GetDB().NewSelect().Model(price).Relation("Product").
 		Where("price.processors->'ccbill'->>'flex_id' = ?", ccbillPriceID).
-		Where("price.is_active = ?", true).
+		Where("price.status <> ?", models.CatalogStatusDraft).
 		Scan(ctx); err != nil {
 		return nil, err
 	}
@@ -141,7 +153,7 @@ func (r *PriceRepo) GetByStripePriceID(ctx context.Context, stripePriceID string
 	price := new(models.Price)
 	if err := r.db.GetDB().NewSelect().Model(price).Relation("Product").
 		Where("price.processors->'stripe'->>'price_id' = ?", stripePriceID).
-		Where("price.is_active = ?", true).
+		Where("price.status <> ?", models.CatalogStatusDraft).
 		Scan(ctx); err != nil {
 		return nil, err
 	}

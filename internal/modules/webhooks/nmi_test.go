@@ -277,7 +277,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 		EntitlementsSpec: map[string]*int{
 			"premium": &durationDays,
 		},
-		IsActive:  true,
+		Status:    models.CatalogStatusActive,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -285,7 +285,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 		ID:          priceID,
 		ProductID:   productID,
 		DisplayName: "Premium Monthly",
-		IsActive:    true,
+		Status:      models.CatalogStatusActive,
 		Amount:      2399,
 		Currency:    "USD",
 		BillingCycleDays: func() *int {

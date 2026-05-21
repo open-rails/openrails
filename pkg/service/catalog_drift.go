@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,21 +12,29 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
 // Catalog reconciliation loop (issue #209).
 //
 // This file implements an alert-only, pull-based drift + orphan detector for
-// the Stripe catalog. It NEVER mutates Stripe or the OpenRails catalog rows —
-// it only records divergence into billing.catalog_drift_events. Operators
-// resolve drift via the existing per-price reconcile action
-// (POST /admin/catalog/prices/:id/reconcile from issue #205), which auto-closes
-// matching open drift events.
+// BOTH the Stripe catalog and the NMI recurring-plan catalog. It NEVER mutates
+// Stripe, NMI, or the OpenRails catalog rows — it only records divergence into
+// billing.catalog_drift_events. Operators resolve drift via the existing
+// per-price reconcile action (POST /admin/catalog/prices/:id/reconcile from
+// issue #205), which auto-closes matching open drift events.
 //
-// The diff itself (computeCatalogDrift) is a pure function over fetched inputs
-// so it is unit-testable without a Stripe account or a database. The DB I/O
-// (fetch local rows, persist events, dedupe) is layered on top.
+// CCBill is intentionally NOT reconciled: CCBill has no catalog-list API
+// (FlexForms are write-only redirect URLs, webhooks are inbound, DataLink only
+// exports members/subscriptions — not catalog forms), so enumeration is
+// structurally impossible. CCBill catalog links stay manual-only forever.
+//
+// The diffs (computeCatalogDrift / computeNMICatalogDrift) are pure functions
+// over fetched inputs so they are unit-testable without a Stripe/NMI account or
+// a database. The DB I/O (fetch local rows, persist events, dedupe) is layered
+// on top, and a single pass runs both providers (each independently skipped if
+// that processor is unconfigured).
 
 // stripeProductLister is the subset of StripeCatalogService the loop needs.
 // Defining it as an interface lets unit tests inject fixture pages without a
@@ -35,23 +44,34 @@ type stripeProductLister interface {
 	ListPrices(ctx context.Context, startingAfter string) ([]catalog.StripePrice, string, error)
 }
 
-// localCatalogSnapshot is the OpenRails-side view the diff compares against.
+// nmiPlanLister is the subset of the NMI client the loop needs. Defining it as
+// an interface lets unit tests inject fixture XML without a live NMI account.
+type nmiPlanLister interface {
+	GetRecurringPlanData() (string, error)
+}
+
+// localCatalogSnapshot is the OpenRails-side view the diffs compare against.
 // Built from the products + prices tables.
 type localCatalogSnapshot struct {
 	// productByID maps OpenRails product UUID (string) -> product row.
 	productByID map[string]*models.Product
 	// priceByID maps OpenRails price UUID (string) -> price row.
 	priceByID map[string]*models.Price
-	// stripeProductIDByOpenRailsPrice maps OpenRails price id -> stored stripe product id.
 	// stripeProductIDs is the set of stripe product ids OpenRails believes it owns.
 	stripeProductIDs map[string]string // stripe product id -> openrails product id
 	// stripePriceIDs is the set of stripe price ids OpenRails believes it owns.
 	stripePriceIDs map[string]string // stripe price id -> openrails price id
+	// nmiPlanIDByOpenRailsPrice maps OpenRails price id -> stored mobius plan_id.
+	nmiPlanIDByOpenRailsPrice map[string]string
 }
 
-// computeCatalogDrift is the pure diff: given the full Stripe product+price
-// lists and the OpenRails snapshot, it returns the set of drift events that
-// should be open. Idempotent and side-effect-free.
+// ---------------------------------------------------------------------------
+// Stripe pass
+// ---------------------------------------------------------------------------
+
+// computeCatalogDrift is the pure Stripe diff: given the full Stripe
+// product+price lists and the OpenRails snapshot, it returns the set of Stripe
+// drift events that should be open. Idempotent and side-effect-free.
 func computeCatalogDrift(
 	stripeProducts []catalog.StripeProduct,
 	stripePrices []catalog.StripePrice,
@@ -71,9 +91,10 @@ func computeCatalogDrift(
 		if orProductID == "" {
 			// No marker at all -> a Stripe-native product OpenRails doesn't track.
 			events = append(events, models.CatalogDriftEvent{
+				Provider:              models.CatalogDriftProviderStripe,
 				Kind:                  models.CatalogDriftOrphanInStripe,
 				OpenRailsResourceType: models.CatalogDriftResourceProduct,
-				StripeResourceID:      sp.ID,
+				ExternalResourceID:    sp.ID,
 				DetectedAt:            now,
 			})
 			continue
@@ -82,10 +103,11 @@ func computeCatalogDrift(
 		if !ok {
 			// Marker points at an OpenRails product that doesn't exist.
 			events = append(events, models.CatalogDriftEvent{
+				Provider:              models.CatalogDriftProviderStripe,
 				Kind:                  models.CatalogDriftOrphanInStripe,
 				OpenRailsResourceType: models.CatalogDriftResourceProduct,
 				OpenRailsResourceID:   orProductID,
-				StripeResourceID:      sp.ID,
+				ExternalResourceID:    sp.ID,
 				DetectedAt:            now,
 			})
 			continue
@@ -99,9 +121,10 @@ func computeCatalogDrift(
 		orPriceID := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsPriceID])
 		if orPriceID == "" {
 			events = append(events, models.CatalogDriftEvent{
+				Provider:              models.CatalogDriftProviderStripe,
 				Kind:                  models.CatalogDriftOrphanInStripe,
 				OpenRailsResourceType: models.CatalogDriftResourcePrice,
-				StripeResourceID:      sp.ID,
+				ExternalResourceID:    sp.ID,
 				DetectedAt:            now,
 			})
 			continue
@@ -109,10 +132,11 @@ func computeCatalogDrift(
 		local, ok := snap.priceByID[orPriceID]
 		if !ok {
 			events = append(events, models.CatalogDriftEvent{
+				Provider:              models.CatalogDriftProviderStripe,
 				Kind:                  models.CatalogDriftOrphanInStripe,
 				OpenRailsResourceType: models.CatalogDriftResourcePrice,
 				OpenRailsResourceID:   orPriceID,
-				StripeResourceID:      sp.ID,
+				ExternalResourceID:    sp.ID,
 				DetectedAt:            now,
 			})
 			continue
@@ -124,10 +148,11 @@ func computeCatalogDrift(
 	for stripeProductID, orProductID := range snap.stripeProductIDs {
 		if _, seen := seenStripeProductIDs[stripeProductID]; !seen {
 			events = append(events, models.CatalogDriftEvent{
+				Provider:              models.CatalogDriftProviderStripe,
 				Kind:                  models.CatalogDriftMissingInStripe,
 				OpenRailsResourceType: models.CatalogDriftResourceProduct,
 				OpenRailsResourceID:   orProductID,
-				StripeResourceID:      stripeProductID,
+				ExternalResourceID:    stripeProductID,
 				DetectedAt:            now,
 			})
 		}
@@ -135,10 +160,11 @@ func computeCatalogDrift(
 	for stripePriceID, orPriceID := range snap.stripePriceIDs {
 		if _, seen := seenStripePriceIDs[stripePriceID]; !seen {
 			events = append(events, models.CatalogDriftEvent{
+				Provider:              models.CatalogDriftProviderStripe,
 				Kind:                  models.CatalogDriftMissingInStripe,
 				OpenRailsResourceType: models.CatalogDriftResourcePrice,
 				OpenRailsResourceID:   orPriceID,
-				StripeResourceID:      stripePriceID,
+				ExternalResourceID:    stripePriceID,
 				DetectedAt:            now,
 			})
 		}
@@ -153,13 +179,14 @@ func diffProductFields(local *models.Product, sp catalog.StripeProduct, now time
 	var out []models.CatalogDriftEvent
 	emit := func(field, orVal, stripeVal string) {
 		out = append(out, models.CatalogDriftEvent{
+			Provider:              models.CatalogDriftProviderStripe,
 			Kind:                  models.CatalogDriftFieldDrift,
 			OpenRailsResourceType: models.CatalogDriftResourceProduct,
 			OpenRailsResourceID:   local.ID.String(),
-			StripeResourceID:      sp.ID,
+			ExternalResourceID:    sp.ID,
 			Field:                 field,
 			OpenRailsValue:        orVal,
-			StripeValue:           stripeVal,
+			ExternalValue:         stripeVal,
 			DetectedAt:            now,
 		})
 	}
@@ -169,8 +196,8 @@ func diffProductFields(local *models.Product, sp catalog.StripeProduct, now time
 	if strings.TrimSpace(local.Description) != strings.TrimSpace(sp.Description) {
 		emit("description", local.Description, sp.Description)
 	}
-	if local.IsActive != sp.Active {
-		emit("active", strconv.FormatBool(local.IsActive), strconv.FormatBool(sp.Active))
+	if localActive := local.IsPurchasable(); localActive != sp.Active {
+		emit("active", strconv.FormatBool(localActive), strconv.FormatBool(sp.Active))
 	}
 	return out
 }
@@ -180,13 +207,14 @@ func diffPriceFields(local *models.Price, sp catalog.StripePrice, now time.Time)
 	var out []models.CatalogDriftEvent
 	emit := func(field, orVal, stripeVal string) {
 		out = append(out, models.CatalogDriftEvent{
+			Provider:              models.CatalogDriftProviderStripe,
 			Kind:                  models.CatalogDriftFieldDrift,
 			OpenRailsResourceType: models.CatalogDriftResourcePrice,
 			OpenRailsResourceID:   local.ID.String(),
-			StripeResourceID:      sp.ID,
+			ExternalResourceID:    sp.ID,
 			Field:                 field,
 			OpenRailsValue:        orVal,
-			StripeValue:           stripeVal,
+			ExternalValue:         stripeVal,
 			DetectedAt:            now,
 		})
 	}
@@ -196,8 +224,8 @@ func diffPriceFields(local *models.Price, sp catalog.StripePrice, now time.Time)
 	if !strings.EqualFold(strings.TrimSpace(local.Currency), strings.TrimSpace(sp.Currency)) {
 		emit("currency", local.Currency, sp.Currency)
 	}
-	if local.IsActive != sp.Active {
-		emit("active", strconv.FormatBool(local.IsActive), strconv.FormatBool(sp.Active))
+	if localActive := local.IsPurchasable(); localActive != sp.Active {
+		emit("active", strconv.FormatBool(localActive), strconv.FormatBool(sp.Active))
 	}
 	if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(sp.Nickname) {
 		emit("nickname", local.DisplayName, sp.Nickname)
@@ -205,15 +233,195 @@ func diffPriceFields(local *models.Price, sp catalog.StripePrice, now time.Time)
 	return out
 }
 
+// ---------------------------------------------------------------------------
+// NMI pass
+// ---------------------------------------------------------------------------
+
+// nmiPlan is the parsed shape of one NMI recurring plan from the Query API
+// (recurring_plans report). NMI's plan model is flat — there is no separate
+// product object — so the drift surface is just name + amount. Amount is parsed
+// from NMI's dollar string into integer cents to match OpenRails storage.
+type nmiPlan struct {
+	PlanID      string
+	PlanName    string
+	AmountCents int64
+}
+
+// nmiRecurringPlansXML mirrors the XML returned by the NMI Query API for the
+// recurring_plans report type. Only the fields the diff needs are mapped. (The
+// nmi package has an unexported equivalent; we re-declare here because the
+// public client method returns the raw XML string.)
+type nmiRecurringPlansXML struct {
+	XMLName xml.Name `xml:"nm_response"`
+	Plans   []struct {
+		PlanID     string `xml:"plan_id"`
+		PlanName   string `xml:"plan_name"`
+		PlanAmount string `xml:"plan_amount"`
+	} `xml:"plan"`
+}
+
+// parseNMIPlans parses the raw recurring_plans XML payload returned by
+// GetRecurringPlanData() into a slice of nmiPlan.
+func parseNMIPlans(raw string) ([]nmiPlan, error) {
+	var parsed nmiRecurringPlansXML
+	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
+		return nil, fmt.Errorf("parse nmi recurring plans: %w", err)
+	}
+	out := make([]nmiPlan, 0, len(parsed.Plans))
+	for _, p := range parsed.Plans {
+		cents := dollarStringToCents(p.PlanAmount)
+		out = append(out, nmiPlan{
+			PlanID:      strings.TrimSpace(p.PlanID),
+			PlanName:    p.PlanName,
+			AmountCents: cents,
+		})
+	}
+	return out, nil
+}
+
+// dollarStringToCents converts an NMI dollar amount string (e.g. "9.99") into
+// integer cents, rounding to the nearest cent. Unparseable values yield 0.
+func dollarStringToCents(dollars string) int64 {
+	trimmed := strings.TrimSpace(dollars)
+	if trimmed == "" {
+		return 0
+	}
+	f, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil {
+		return 0
+	}
+	if f < 0 {
+		return -int64(-f*100 + 0.5)
+	}
+	return int64(f*100 + 0.5)
+}
+
+// nmiOpenRailsPlanPrefix is the deterministic plan_id prefix the mobius adapter
+// stamps on OpenRails-created NMI plans (mobiusDeterministicPlanID). It is the
+// NMI analog of Stripe's openrails_*_id metadata: a clean ownership signal that
+// distinguishes OpenRails-owned plans from operator-hand-made ones.
+const nmiOpenRailsPlanPrefix = "openrails-"
+
+// computeNMICatalogDrift is the pure NMI diff: given the full list of NMI
+// recurring plans and the OpenRails snapshot, it returns the NMI drift events
+// that should be open. NMI plans are matched to OpenRails prices by the stored
+// mobius plan_id. Idempotent and side-effect-free.
+func computeNMICatalogDrift(
+	plans []nmiPlan,
+	snap localCatalogSnapshot,
+	now time.Time,
+) []models.CatalogDriftEvent {
+	var events []models.CatalogDriftEvent
+
+	// Build a lookup of plan_id -> OpenRails price id from the snapshot.
+	priceByPlanID := make(map[string]string, len(snap.nmiPlanIDByOpenRailsPrice))
+	for orPriceID, planID := range snap.nmiPlanIDByOpenRailsPrice {
+		if planID != "" {
+			priceByPlanID[planID] = orPriceID
+		}
+	}
+
+	seenPlanIDs := make(map[string]struct{}, len(plans))
+	for _, plan := range plans {
+		if plan.PlanID == "" {
+			continue
+		}
+		seenPlanIDs[plan.PlanID] = struct{}{}
+		orPriceID, matched := priceByPlanID[plan.PlanID]
+		if !matched {
+			// Plan on the NMI account with no matching OpenRails price.
+			// OpenRailsResourceID carries the openrails price id IF this looks
+			// OpenRails-owned (openrails-<uuid> prefix) so operators can tell an
+			// orphaned-but-ours plan from an operator-hand-made one.
+			ev := models.CatalogDriftEvent{
+				Provider:              models.CatalogDriftProviderNMI,
+				Kind:                  models.CatalogDriftOrphanInNMI,
+				OpenRailsResourceType: models.CatalogDriftResourcePrice,
+				ExternalResourceID:    plan.PlanID,
+				DetectedAt:            now,
+			}
+			if uuidPart, ok := openRailsPriceIDFromPlanID(plan.PlanID); ok {
+				ev.OpenRailsResourceID = uuidPart
+			}
+			events = append(events, ev)
+			continue
+		}
+		// Matched: diff name + amount only (frequency is immutable, not drift).
+		local := snap.priceByID[orPriceID]
+		if local == nil {
+			continue
+		}
+		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(plan.PlanName) {
+			events = append(events, nmiFieldDriftEvent(local.ID.String(), plan.PlanID, "plan_name", local.DisplayName, plan.PlanName, now))
+		}
+		if local.Amount != plan.AmountCents {
+			events = append(events, nmiFieldDriftEvent(local.ID.String(), plan.PlanID, "plan_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(plan.AmountCents, 10), now))
+		}
+	}
+
+	// --- OpenRails prices referencing a plan_id absent from the pull -> missing_in_nmi ---
+	for orPriceID, planID := range snap.nmiPlanIDByOpenRailsPrice {
+		if planID == "" {
+			continue
+		}
+		if _, seen := seenPlanIDs[planID]; !seen {
+			events = append(events, models.CatalogDriftEvent{
+				Provider:              models.CatalogDriftProviderNMI,
+				Kind:                  models.CatalogDriftMissingInNMI,
+				OpenRailsResourceType: models.CatalogDriftResourcePrice,
+				OpenRailsResourceID:   orPriceID,
+				ExternalResourceID:    planID,
+				DetectedAt:            now,
+			})
+		}
+	}
+
+	return events
+}
+
+// openRailsPriceIDFromPlanID extracts the OpenRails price UUID from a
+// deterministic openrails-<uuid> plan_id, returning ok=false for operator-made
+// plans that don't carry the prefix.
+func openRailsPriceIDFromPlanID(planID string) (string, bool) {
+	if !strings.HasPrefix(planID, nmiOpenRailsPlanPrefix) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(planID, nmiOpenRailsPlanPrefix)
+	if _, err := uuid.Parse(rest); err != nil {
+		return "", false
+	}
+	return rest, true
+}
+
+func nmiFieldDriftEvent(orPriceID, planID, field, orVal, nmiVal string, now time.Time) models.CatalogDriftEvent {
+	return models.CatalogDriftEvent{
+		Provider:              models.CatalogDriftProviderNMI,
+		Kind:                  models.CatalogDriftFieldDrift,
+		OpenRailsResourceType: models.CatalogDriftResourcePrice,
+		OpenRailsResourceID:   orPriceID,
+		ExternalResourceID:    planID,
+		Field:                 field,
+		OpenRailsValue:        orVal,
+		ExternalValue:         nmiVal,
+		DetectedAt:            now,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Dedupe + persistence
+// ---------------------------------------------------------------------------
+
 // driftDedupeKey is the natural key used to dedupe events across reruns. Two
 // events with the same key represent the same divergence and must collapse to
-// one open row.
+// one open row. The provider is part of the key so the shared field_drift kind
+// is unambiguous across Stripe and NMI.
 func driftDedupeKey(e models.CatalogDriftEvent) string {
 	return strings.Join([]string{
+		string(e.Provider),
 		string(e.Kind),
 		string(e.OpenRailsResourceType),
 		e.OpenRailsResourceID,
-		e.StripeResourceID,
+		e.ExternalResourceID,
 		e.Field,
 	}, "|")
 }
@@ -223,6 +431,8 @@ type CatalogDriftReport struct {
 	// ScannedProducts / ScannedPrices is the number of Stripe objects examined.
 	ScannedProducts int `json:"scanned_products"`
 	ScannedPrices   int `json:"scanned_prices"`
+	// ScannedNMIPlans is the number of NMI recurring plans examined.
+	ScannedNMIPlans int `json:"scanned_nmi_plans"`
 	// OpenEvents is the full set of currently-open drift events after the pass.
 	OpenEvents []CatalogDriftEventView `json:"open_events"`
 	// NewEvents is how many events this pass inserted (idempotency signal).
@@ -235,13 +445,14 @@ type CatalogDriftReport struct {
 // CatalogDriftEventView is the API-facing shape of a drift event.
 type CatalogDriftEventView struct {
 	ID                    uuid.UUID  `json:"id"`
+	Provider              string     `json:"provider"`
 	Kind                  string     `json:"kind"`
 	OpenRailsResourceType string     `json:"openrails_resource_type"`
 	OpenRailsResourceID   string     `json:"openrails_resource_id,omitempty"`
-	StripeResourceID      string     `json:"stripe_resource_id,omitempty"`
+	ExternalResourceID    string     `json:"external_resource_id,omitempty"`
 	Field                 string     `json:"field,omitempty"`
 	OpenRailsValue        string     `json:"openrails_value,omitempty"`
-	StripeValue           string     `json:"stripe_value,omitempty"`
+	ExternalValue         string     `json:"external_value,omitempty"`
 	DetectedAt            time.Time  `json:"detected_at"`
 	ResolvedAt            *time.Time `json:"resolved_at,omitempty"`
 }
@@ -249,20 +460,21 @@ type CatalogDriftEventView struct {
 func driftEventToView(e *models.CatalogDriftEvent) CatalogDriftEventView {
 	return CatalogDriftEventView{
 		ID:                    e.ID,
+		Provider:              string(e.Provider),
 		Kind:                  string(e.Kind),
 		OpenRailsResourceType: string(e.OpenRailsResourceType),
 		OpenRailsResourceID:   e.OpenRailsResourceID,
-		StripeResourceID:      e.StripeResourceID,
+		ExternalResourceID:    e.ExternalResourceID,
 		Field:                 e.Field,
 		OpenRailsValue:        e.OpenRailsValue,
-		StripeValue:           e.StripeValue,
+		ExternalValue:         e.ExternalValue,
 		DetectedAt:            e.DetectedAt,
 		ResolvedAt:            e.ResolvedAt,
 	}
 }
 
 // buildLocalCatalogSnapshot loads the full OpenRails catalog (products + prices)
-// into the in-memory snapshot the diff consumes.
+// into the in-memory snapshot the diffs consume.
 func (s *Service) buildLocalCatalogSnapshot(ctx context.Context) (localCatalogSnapshot, error) {
 	products, prices, err := s.requireCatalogServices()
 	if err != nil {
@@ -276,31 +488,39 @@ func (s *Service) buildLocalCatalogSnapshot(ctx context.Context) (localCatalogSn
 	if err != nil {
 		return localCatalogSnapshot{}, fmt.Errorf("load prices: %w", err)
 	}
+	return buildSnapshotFromRows(productRows, priceRows), nil
+}
 
+// buildSnapshotFromRows is the pure builder shared by the service and tests.
+func buildSnapshotFromRows(productRows []*models.Product, priceRows []*models.Price) localCatalogSnapshot {
 	snap := localCatalogSnapshot{
-		productByID:      make(map[string]*models.Product, len(productRows)),
-		priceByID:        make(map[string]*models.Price, len(priceRows)),
-		stripeProductIDs: make(map[string]string),
-		stripePriceIDs:   make(map[string]string),
+		productByID:               make(map[string]*models.Product, len(productRows)),
+		priceByID:                 make(map[string]*models.Price, len(priceRows)),
+		stripeProductIDs:          make(map[string]string),
+		stripePriceIDs:            make(map[string]string),
+		nmiPlanIDByOpenRailsPrice: make(map[string]string),
 	}
 	for _, p := range productRows {
 		snap.productByID[p.ID.String()] = p
 	}
 	for _, pr := range priceRows {
 		snap.priceByID[pr.ID.String()] = pr
-		stripe := pr.Processors["stripe"]
-		if stripe == nil {
-			continue
+		if stripe := pr.Processors["stripe"]; stripe != nil {
+			if id := strings.TrimSpace(stripe[models.ProcessorKeyStripePriceID]); id != "" {
+				snap.stripePriceIDs[id] = pr.ID.String()
+			}
+			if id := strings.TrimSpace(stripe[models.ProcessorKeyStripeProductID]); id != "" {
+				// Map back to the OpenRails product the price belongs to.
+				snap.stripeProductIDs[id] = pr.ProductID.String()
+			}
 		}
-		if id := strings.TrimSpace(stripe[models.ProcessorKeyStripePriceID]); id != "" {
-			snap.stripePriceIDs[id] = pr.ID.String()
-		}
-		if id := strings.TrimSpace(stripe[models.ProcessorKeyStripeProductID]); id != "" {
-			// Map back to the OpenRails product the price belongs to.
-			snap.stripeProductIDs[id] = pr.ProductID.String()
+		if mobius := pr.Processors[string(models.ProcessorMobius)]; mobius != nil {
+			if planID := strings.TrimSpace(mobius[models.ProcessorKeyPlanID]); planID != "" {
+				snap.nmiPlanIDByOpenRailsPrice[pr.ID.String()] = planID
+			}
 		}
 	}
-	return snap, nil
+	return snap
 }
 
 // fetchStripeCatalog pages through all Stripe products and prices.
@@ -334,46 +554,91 @@ func fetchStripeCatalog(ctx context.Context, lister stripeProductLister) ([]cata
 	return products, prices, nil
 }
 
-// RunCatalogReconciliation performs one full pull-and-diff pass: it enumerates
-// the Stripe catalog, diffs against OpenRails, and persists drift events
-// (inserting new divergences, auto-resolving ones that have disappeared). It is
-// idempotent — a second consecutive run with no underlying change inserts zero
-// new rows. Alert-only: it never mutates Stripe or the catalog rows.
+// fetchNMIPlans pulls and parses all NMI recurring plans.
+func fetchNMIPlans(lister nmiPlanLister) ([]nmiPlan, error) {
+	raw, err := lister.GetRecurringPlanData()
+	if err != nil {
+		return nil, fmt.Errorf("list nmi recurring plans: %w", err)
+	}
+	return parseNMIPlans(raw)
+}
+
+// RunCatalogReconciliation performs one full pull-and-diff pass across both the
+// Stripe and NMI catalogs, diffs them against OpenRails, and persists drift
+// events (inserting new divergences, auto-resolving ones that have disappeared).
+// Each provider pass is independently skipped when that processor is
+// unconfigured. It is idempotent — a second consecutive run with no underlying
+// change inserts zero new rows. Alert-only: it never mutates Stripe, NMI, or the
+// catalog rows.
 func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftReport, error) {
 	cfg, err := s.requireConfig()
 	if err != nil {
 		return nil, err
 	}
-	stripeProc := cfg.GetStripeProcessor()
-	if stripeProc == nil || stripeProc.SecretKey == "" {
-		return nil, fmt.Errorf("stripe is not configured")
+
+	var stripeLister stripeProductLister
+	if stripeProc := cfg.GetStripeProcessor(); stripeProc != nil && stripeProc.SecretKey != "" {
+		stripeLister = &catalog.StripeCatalogService{Config: cfg}
 	}
-	lister := &catalog.StripeCatalogService{Config: cfg}
-	return s.runCatalogReconciliationWith(ctx, lister)
+
+	var nmiLister nmiPlanLister
+	if s.rt != nil && s.rt.NMIClients != nil {
+		if client, ok := s.rt.NMIClients["mobius"]; ok && client != nil {
+			nmiLister = client
+		}
+	}
+
+	if stripeLister == nil && nmiLister == nil {
+		return nil, fmt.Errorf("neither stripe nor nmi is configured")
+	}
+	return s.runCatalogReconciliationWith(ctx, stripeLister, nmiLister)
 }
 
-// runCatalogReconciliationWith is the testable core: the Stripe lister is
-// injected so unit tests can supply fixture pages.
-func (s *Service) runCatalogReconciliationWith(ctx context.Context, lister stripeProductLister) (*CatalogDriftReport, error) {
-	products, prices, err := fetchStripeCatalog(ctx, lister)
-	if err != nil {
-		return nil, err
-	}
+// runCatalogReconciliationWith is the testable core: the Stripe + NMI listers
+// are injected so unit tests can supply fixture data. A nil lister skips that
+// provider's pass.
+func (s *Service) runCatalogReconciliationWith(ctx context.Context, stripeLister stripeProductLister, nmiLister nmiPlanLister) (*CatalogDriftReport, error) {
 	snap, err := s.buildLocalCatalogSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
 	now := s.now().UTC()
-	desired := computeCatalogDrift(products, prices, snap, now)
+
+	var (
+		desired         []models.CatalogDriftEvent
+		scannedProducts int
+		scannedPrices   int
+		scannedNMIPlans int
+	)
+
+	if stripeLister != nil {
+		products, prices, ferr := fetchStripeCatalog(ctx, stripeLister)
+		if ferr != nil {
+			return nil, ferr
+		}
+		scannedProducts = len(products)
+		scannedPrices = len(prices)
+		desired = append(desired, computeCatalogDrift(products, prices, snap, now)...)
+	}
+
+	if nmiLister != nil {
+		plans, ferr := fetchNMIPlans(nmiLister)
+		if ferr != nil {
+			return nil, ferr
+		}
+		scannedNMIPlans = len(plans)
+		desired = append(desired, computeNMICatalogDrift(plans, snap, now)...)
+	}
 
 	for i := range desired {
 		e := desired[i]
 		log.WithContext(ctx).WithFields(log.Fields{
 			"event":                   "catalog_drift",
+			"provider":                string(e.Provider),
 			"kind":                    string(e.Kind),
 			"openrails_resource_type": string(e.OpenRailsResourceType),
 			"openrails_resource_id":   e.OpenRailsResourceID,
-			"stripe_resource_id":      e.StripeResourceID,
+			"external_resource_id":    e.ExternalResourceID,
 			"field":                   e.Field,
 		}).Warn("catalog reconciliation detected drift")
 	}
@@ -387,8 +652,9 @@ func (s *Service) runCatalogReconciliationWith(ctx context.Context, lister strip
 		return nil, err
 	}
 	report := &CatalogDriftReport{
-		ScannedProducts: len(products),
-		ScannedPrices:   len(prices),
+		ScannedProducts: scannedProducts,
+		ScannedPrices:   scannedPrices,
+		ScannedNMIPlans: scannedNMIPlans,
 		OpenEvents:      open,
 		NewEvents:       newCount,
 		ResolvedEvents:  resolvedCount,
@@ -453,6 +719,7 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 
 // CatalogDriftFilter narrows the open-drift listing.
 type CatalogDriftFilter struct {
+	Provider     string
 	Kind         string
 	ResourceType string
 	Limit        int
@@ -460,7 +727,7 @@ type CatalogDriftFilter struct {
 }
 
 // ListCatalogDrift returns open (unresolved) drift events with pagination and
-// optional kind / resource_type filters. Total is the unpaginated count.
+// optional provider / kind / resource_type filters. Total is the unpaginated count.
 func (s *Service) ListCatalogDrift(ctx context.Context, filter CatalogDriftFilter) (items []CatalogDriftEventView, total int64, err error) {
 	dbi, err := s.requireDB()
 	if err != nil {
@@ -477,6 +744,9 @@ func (s *Service) ListCatalogDrift(ctx context.Context, filter CatalogDriftFilte
 	}
 
 	q := idb.NewSelect().Model((*models.CatalogDriftEvent)(nil)).Where("resolved_at IS NULL")
+	if p := strings.TrimSpace(filter.Provider); p != "" {
+		q = q.Where("provider = ?", p)
+	}
 	if k := strings.TrimSpace(filter.Kind); k != "" {
 		q = q.Where("kind = ?", k)
 	}
@@ -530,8 +800,9 @@ func (s *Service) ResolveDriftForResource(ctx context.Context, resourceType mode
 	return int(n), nil
 }
 
-// CountOpenDriftByKind returns open drift counts grouped by kind, for the
-// openrails_catalog_drift_open_count{kind} metric.
+// CountOpenDriftByKind returns open drift counts grouped by (provider, kind),
+// for the openrails_catalog_drift_open_count{provider,kind} metric. The map key
+// is "<provider>/<kind>".
 func (s *Service) CountOpenDriftByKind(ctx context.Context) (map[string]int64, error) {
 	dbi, err := s.requireDB()
 	if err != nil {
@@ -539,23 +810,27 @@ func (s *Service) CountOpenDriftByKind(ctx context.Context) (map[string]int64, e
 	}
 	idb := dbi.GetDB()
 	var rows []struct {
-		Kind string `bun:"kind"`
-		N    int64  `bun:"n"`
+		Provider string `bun:"provider"`
+		Kind     string `bun:"kind"`
+		N        int64  `bun:"n"`
 	}
 	if err := idb.NewSelect().Model((*models.CatalogDriftEvent)(nil)).
-		Column("kind").
+		Column("provider", "kind").
 		ColumnExpr("count(*) AS n").
 		Where("resolved_at IS NULL").
-		Group("kind").
+		Group("provider", "kind").
 		Scan(ctx, &rows); err != nil {
 		return nil, fmt.Errorf("count open drift: %w", err)
 	}
 	out := make(map[string]int64, len(rows))
 	for _, r := range rows {
-		out[r.Kind] = r.N
+		out[r.Provider+"/"+r.Kind] = r.N
 	}
 	return out, nil
 }
 
-// compile-time assertion that StripeCatalogService satisfies the lister contract.
-var _ stripeProductLister = (*catalog.StripeCatalogService)(nil)
+// compile-time assertions that the concrete clients satisfy the lister contracts.
+var (
+	_ stripeProductLister = (*catalog.StripeCatalogService)(nil)
+	_ nmiPlanLister       = (*nmi.NMIClient)(nil)
+)

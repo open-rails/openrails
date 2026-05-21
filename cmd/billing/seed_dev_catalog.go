@@ -133,7 +133,7 @@ func ensureProduct(ctx context.Context, svc interface {
 			Description: description,
 			TierGroup:   &tierGroup,
 			TierRank:    tierRank,
-			IsActive:    true,
+			Status:      models.CatalogStatusActive,
 		}
 		if err := svc.Create(ctx, product); err != nil {
 			return nil, err
@@ -141,7 +141,7 @@ func ensureProduct(ctx context.Context, svc interface {
 		return svc.GetBySlug(ctx, slug)
 	}
 
-	if !product.IsActive {
+	if !product.IsPurchasable() {
 		if err := svc.Activate(ctx, product.ID); err != nil {
 			return nil, err
 		}
@@ -176,7 +176,7 @@ func ensureRecurringPrice(ctx context.Context, priceSvc interface {
 		price = &models.Price{
 			ProductID:        spec.ProductID,
 			DisplayName:      spec.DisplayName,
-			IsActive:         true,
+			Status:           models.CatalogStatusActive,
 			Amount:           spec.Amount,
 			Currency:         spec.Currency,
 			BillingCycleDays: &cycleDays,
@@ -188,7 +188,7 @@ func ensureRecurringPrice(ctx context.Context, priceSvc interface {
 		return spec.Lookup(ctx)
 	}
 
-	if !price.IsActive {
+	if !price.IsPurchasable() {
 		if err := priceSvc.Activate(ctx, price.ID); err != nil {
 			return nil, err
 		}

@@ -98,17 +98,17 @@ type DriftField struct {
 // operations. There is no product-level provider field, no product-level
 // verify/reconcile, no product-level reconcile route.
 type CatalogProduct struct {
-	ID               uuid.UUID       `json:"id"`
-	Slug             string          `json:"slug"`
-	DisplayName      string          `json:"display_name"`
-	Description      string          `json:"description"`
-	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
-	CreditsSpec      CreditsSpec     `json:"credits_spec,omitempty"`
-	TierGroup        *string         `json:"tier_group,omitempty"`
-	TierRank         int             `json:"tier_rank"`
-	IsActive         bool            `json:"is_active"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	ID               uuid.UUID            `json:"id"`
+	Slug             string               `json:"slug"`
+	DisplayName      string               `json:"display_name"`
+	Description      string               `json:"description"`
+	EntitlementsSpec map[string]*int      `json:"entitlements_spec,omitempty"`
+	CreditsSpec      CreditsSpec          `json:"credits_spec,omitempty"`
+	TierGroup        *string              `json:"tier_group,omitempty"`
+	TierRank         int                  `json:"tier_rank"`
+	Status           models.CatalogStatus `json:"status"`
+	CreatedAt        time.Time            `json:"created_at"`
+	UpdatedAt        time.Time            `json:"updated_at"`
 }
 
 type CreateProductRequest struct {
@@ -119,7 +119,10 @@ type CreateProductRequest struct {
 	CreditsSpec      CreditsSpec     `json:"credits_spec,omitempty"`
 	TierGroup        *string         `json:"tier_group,omitempty"`
 	TierRank         int             `json:"tier_rank,omitempty"`
-	IsActive         *bool           `json:"is_active,omitempty"`
+	// Status is the optional initial lifecycle state (draft|active|archived).
+	// Defaults to active. Creating archived directly supports migrating
+	// historical plans that already have subscribers (no purchasable gap).
+	Status models.CatalogStatus `json:"status,omitempty"`
 }
 
 func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
@@ -138,9 +141,12 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	}
 
 	now := time.Now().UTC()
-	active := true
-	if req.IsActive != nil {
-		active = *req.IsActive
+	status := req.Status
+	if status == "" {
+		status = models.CatalogStatusActive
+	}
+	if !status.Valid() {
+		return nil, fmt.Errorf("invalid status %q", status)
 	}
 	p := &models.Product{
 		ID:               uuid.New(),
@@ -151,7 +157,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 		CreditsSpec:      toModelCreditsSpec(req.CreditsSpec),
 		TierGroup:        req.TierGroup,
 		TierRank:         req.TierRank,
-		IsActive:         active,
+		Status:           status,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -171,7 +177,9 @@ type UpdateProductRequest struct {
 	TierGroup        *string         `json:"tier_group,omitempty"`
 	SetTierGroup     bool            `json:"set_tier_group,omitempty"`
 	TierRank         *int            `json:"tier_rank,omitempty"`
-	IsActive         *bool           `json:"is_active,omitempty"`
+	// Status sets the lifecycle state (draft|active|archived). archived/draft
+	// propagate to Stripe as active=false; active propagates as active=true.
+	Status *models.CatalogStatus `json:"status,omitempty"`
 	// SkipProcessorSync, when true, suppresses any propagation of this update to
 	// configured external processors (Stripe etc.). The DB row is updated as usual.
 	// Use sparingly — drift introduced this way will appear as sync_status="drifted"
@@ -197,7 +205,7 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 		TierGroup:        req.TierGroup,
 		SetTierGroup:     req.SetTierGroup,
 		TierRank:         req.TierRank,
-		IsActive:         req.IsActive,
+		Status:           req.Status,
 	})
 	if err != nil {
 		return nil, err
@@ -208,7 +216,7 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 	// it lives on associated prices' processors.stripe.product_id. Look up one
 	// such price to find it; if no prices have a Stripe link yet, there is
 	// nothing to propagate (no Stripe Product exists for this OpenRails product).
-	if !req.SkipProcessorSync && (req.DisplayName != nil || req.Description != nil || req.IsActive != nil) && s.rt.Config != nil {
+	if !req.SkipProcessorSync && (req.DisplayName != nil || req.Description != nil || req.Status != nil) && s.rt.Config != nil {
 		stripeProductID := s.lookupStripeProductID(ctx, productID)
 		if stripeProductID != "" {
 			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config}
@@ -221,8 +229,9 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 				desc := strings.TrimSpace(*req.Description)
 				params.Description = &desc
 			}
-			if req.IsActive != nil {
-				active := *req.IsActive
+			if req.Status != nil {
+				// active -> Stripe active=true; draft/archived -> active=false.
+				active := *req.Status == models.CatalogStatusActive
 				params.Active = &active
 			}
 			// Best-effort propagation: log on failure, do not roll back the DB change.
@@ -274,7 +283,7 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 		CreditsSpec:      credits,
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
-		IsActive:         p.IsActive,
+		Status:           p.Status,
 		CreatedAt:        p.CreatedAt,
 		UpdatedAt:        p.UpdatedAt,
 	}
@@ -285,15 +294,15 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 // `processors` map and the per-processor `link|create` request shape are
 // removed entirely (no transitional fields, no compat helpers).
 type CatalogPrice struct {
-	ID               uuid.UUID `json:"id"`
-	ProductID        uuid.UUID `json:"product_id"`
-	DisplayName      string    `json:"display_name"`
-	IsActive         bool      `json:"is_active"`
-	UnitAmount       int64     `json:"unit_amount"`
-	Currency         string    `json:"currency"`
-	BillingCycleDays *int      `json:"billing_cycle_days,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               uuid.UUID            `json:"id"`
+	ProductID        uuid.UUID            `json:"product_id"`
+	DisplayName      string               `json:"display_name"`
+	Status           models.CatalogStatus `json:"status"`
+	UnitAmount       int64                `json:"unit_amount"`
+	Currency         string               `json:"currency"`
+	BillingCycleDays *int                 `json:"billing_cycle_days,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
+	UpdatedAt        time.Time            `json:"updated_at"`
 
 	// Providers carries the typed per-provider attachment state for every
 	// processor this price is linked to. Always populated when at least one
@@ -340,14 +349,10 @@ type CreatePriceRequest struct {
 	// attach set even if absent from Providers.
 	ProviderLinks map[string]map[string]string `json:"provider_links,omitempty"`
 
-	IsActive *bool `json:"is_active,omitempty"`
-
-	// LookupKey, when non-empty, is set on the Stripe Price for the
-	// auto-create path and used to find-or-attach to an existing Stripe Price
-	// under the same key (strongly consistent lookup via Stripe's
-	// list-by-lookup_keys API). Recommended format:
-	// "<app_namespace>.<tier_group>.<product>.<price>.<currency>.<amount>.<interval>.<count>".
-	LookupKey string `json:"lookup_key,omitempty"`
+	// Status is the optional initial lifecycle state (draft|active|archived).
+	// Defaults to active. draft prices are not created in the external provider;
+	// archived can be created directly to migrate a historical plan in one step.
+	Status models.CatalogStatus `json:"status,omitempty"`
 }
 
 func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*CatalogPrice, error) {
@@ -376,22 +381,36 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		return nil, fmt.Errorf("product not found")
 	}
 
-	priceID := uuid.New()
-	processors, providerStates, pending, err := s.resolveProviders(ctx, product, req, priceID)
-	if err != nil {
-		return nil, err
+	status := req.Status
+	if status == "" {
+		status = models.CatalogStatusActive
+	}
+	if !status.Valid() {
+		return nil, fmt.Errorf("invalid status %q", status)
 	}
 
-	active := true
-	if req.IsActive != nil {
-		active = *req.IsActive
+	priceID := uuid.New()
+
+	// Draft prices are not created in any external provider — they have no
+	// subscribers and are not purchasable, so there is nothing to mint remotely.
+	var (
+		processors     map[string]map[string]string
+		providerStates map[string]ProviderState
+		pending        []PendingAction
+	)
+	if status != models.CatalogStatusDraft {
+		processors, providerStates, pending, err = s.resolveProviders(ctx, product, req, priceID)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	now := time.Now().UTC()
 	price := &models.Price{
 		ID:               priceID,
 		ProductID:        req.ProductID,
 		DisplayName:      req.DisplayName,
-		IsActive:         active,
+		Status:           status,
 		Amount:           req.UnitAmount,
 		Currency:         req.Currency,
 		BillingCycleDays: req.BillingCycleDays,
@@ -401,6 +420,20 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	}
 	if err := prices.Create(ctx, price); err != nil {
 		return nil, err
+	}
+	// Created-as-archived: the providers were auto-created active above, so
+	// propagate active=false to match the archived lifecycle (best-effort; drift
+	// surfaces on next verify if a provider rejects it).
+	if status == models.CatalogStatusArchived && len(processors) > 0 {
+		inactive := false
+		adapters := s.providerAdapters()
+		for provider, ids := range processors {
+			adapter, ok := adapters[strings.ToLower(strings.TrimSpace(provider))]
+			if !ok {
+				continue
+			}
+			_ = adapter.Update(ctx, ids, mutableUpdate{IsActive: &inactive})
+		}
 	}
 	out := priceToCatalogPrice(price)
 	// Overlay the dispatcher-computed states (they carry the freshly-minted
@@ -435,7 +468,9 @@ type UpdatePriceRequest struct {
 	// not mentioned are left alone.
 	ReplaceProviderLinks bool `json:"replace_provider_links,omitempty"`
 
-	IsActive *bool `json:"is_active,omitempty"`
+	// Status sets the lifecycle state (draft|active|archived). active propagates
+	// to providers as active=true; draft/archived as active=false.
+	Status *models.CatalogStatus `json:"status,omitempty"`
 
 	// See UpdateProductRequest.SkipProcessorSync.
 	SkipProcessorSync bool `json:"skip_processor_sync,omitempty"`
@@ -500,15 +535,12 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 			return nil, err
 		}
 	}
-	if req.IsActive != nil {
-		if *req.IsActive {
-			if err := prices.Activate(ctx, priceID); err != nil {
-				return nil, err
-			}
-		} else {
-			if err := prices.Deactivate(ctx, priceID); err != nil {
-				return nil, err
-			}
+	if req.Status != nil {
+		if !req.Status.Valid() {
+			return nil, fmt.Errorf("invalid status %q", *req.Status)
+		}
+		if err := prices.SetStatus(ctx, priceID, *req.Status); err != nil {
+			return nil, err
 		}
 	}
 	updated, err := prices.GetByID(ctx, priceID)
@@ -519,10 +551,13 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	// Propagate mutable changes to every attached provider via its adapter.
 	// Only when the caller did not opt out via SkipProcessorSync. Failures are
 	// logged-and-swallowed: drift will surface on the next ?verify=true read.
-	if !req.SkipProcessorSync && (req.DisplayName != nil || req.IsActive != nil) {
+	if !req.SkipProcessorSync && (req.DisplayName != nil || req.Status != nil) {
 		mutable := mutableUpdate{
 			DisplayName: req.DisplayName,
-			IsActive:    req.IsActive,
+		}
+		if req.Status != nil {
+			active := *req.Status == models.CatalogStatusActive
+			mutable.IsActive = &active
 		}
 		adapters := s.providerAdapters()
 		for provider, ids := range updated.Processors {
@@ -546,7 +581,7 @@ func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 		ID:               p.ID,
 		ProductID:        p.ProductID,
 		DisplayName:      p.DisplayName,
-		IsActive:         p.IsActive,
+		Status:           p.Status,
 		UnitAmount:       p.Amount,
 		Currency:         p.Currency,
 		BillingCycleDays: p.BillingCycleDays,

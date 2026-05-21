@@ -77,7 +77,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		CreditsSpec: models.CreditsSpec{
 			creditTypeName: {Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
 		},
-		IsActive:  true,
+		Status:    models.CatalogStatusActive,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}).Exec(ctx)
@@ -87,7 +87,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		ID:               priceID,
 		ProductID:        productID,
 		DisplayName:      "Test Monthly",
-		IsActive:         true,
+		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
 		BillingCycleDays: &billingDays,

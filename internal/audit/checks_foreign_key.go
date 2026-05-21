@@ -36,10 +36,10 @@ func (c *CheckOrphanSubscriptionProduct) Run(ctx context.Context, db bun.IDB, op
 			sub.user_id,
 			sub.product_id,
 			CASE WHEN prod.id IS NOT NULL THEN true ELSE false END as prod_exists,
-			prod.is_active as prod_active
+			(prod.status = 'active') as prod_active
 		FROM billing.subscriptions sub
 		LEFT JOIN billing.products prod ON sub.product_id = prod.id
-		WHERE prod.id IS NULL OR prod.is_active = false
+		WHERE prod.id IS NULL OR prod.status <> 'active'
 	`).Scan(ctx, &results)
 
 	if err != nil {
@@ -103,10 +103,10 @@ func (c *CheckOrphanSubscriptionPrice) Run(ctx context.Context, db bun.IDB, opts
 			sub.user_id,
 			sub.price_id,
 			CASE WHEN price.id IS NOT NULL THEN true ELSE false END as price_exists,
-			price.is_active as price_active
+			(price.status = 'active') as price_active
 		FROM billing.subscriptions sub
 		LEFT JOIN billing.prices price ON sub.price_id = price.id
-		WHERE price.id IS NULL OR price.is_active = false
+		WHERE price.id IS NULL OR price.status <> 'active'
 	`).Scan(ctx, &results)
 
 	if err != nil {

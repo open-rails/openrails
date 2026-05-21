@@ -40,7 +40,7 @@ func (r *ProductRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Produc
 
 func (r *ProductRepo) GetActive(ctx context.Context) ([]*models.Product, error) {
 	products := []*models.Product{}
-	if err := r.db.GetDB().NewSelect().Model(&products).Where("prod.is_active = ?", true).Scan(ctx); err != nil {
+	if err := r.db.GetDB().NewSelect().Model(&products).Where("prod.status = ?", models.CatalogStatusActive).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return products, nil
@@ -59,7 +59,7 @@ func (r *ProductRepo) GetActivePaginated(ctx context.Context, limit, offset int)
 	products := []*models.Product{}
 	count, err := r.db.GetDB().NewSelect().
 		Model(&products).
-		Where("prod.is_active = ?", true).
+		Where("prod.status = ?", models.CatalogStatusActive).
 		Order("prod.created_at DESC").
 		Limit(limit).
 		Offset(offset).

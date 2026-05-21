@@ -113,12 +113,16 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	adminPrices.POST("/:id/reconcile", wrap(httphandlers.AdminReconcilePrice))
 
 	// Catalog reconciliation loop drift surface (issue #209). Alert-only:
-	// these endpoints never mutate Stripe or the catalog rows. Operators
-	// resolve drift via the per-price reconcile action above.
+	// these endpoints never mutate Stripe, NMI, or the catalog rows. Operators
+	// resolve drift via the per-price reconcile action above. CCBill is never
+	// reconciled (no catalog-list API), so it never appears in these surfaces.
 	adminCatalog.GET("/drift", wrap(httphandlers.AdminListCatalogDrift))
 	adminCatalog.POST("/drift/refresh", wrap(httphandlers.AdminRefreshCatalogDrift))
 	// reconcile-all is the spec-named alias for an on-demand synchronous pull.
 	adminCatalog.POST("/drift/reconcile-all", wrap(httphandlers.AdminRefreshCatalogDrift))
+	// /orphans is provider-filterable (?provider=stripe|nmi); /stripe/orphans is
+	// the operator-friendly convenience alias scoped to Stripe.
+	adminCatalog.GET("/orphans", wrap(httphandlers.AdminListCatalogOrphans))
 	adminCatalog.GET("/stripe/orphans", wrap(httphandlers.AdminListStripeOrphans))
 
 	group.GET("/metrics/summary", wrap(httphandlers.GetAdminMetricsSummary))

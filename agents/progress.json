@@ -1213,7 +1213,9 @@
         "[x] Delete `POST /admin/catalog/products/:id/reconcile` route registration",
         "[x] Delete `?verify=true` query handling on product GET handlers (only prices support verify)",
         "[x] Keep `lookupStripeProductID` as a private helper for internal UpdateProduct \u2192 Stripe propagation",
-        "[x] README must explicitly state: 'Reconciliation is a price-level operation; products are OpenRails-only concepts'"
+        "[x] README must explicitly state: 'Reconciliation is a price-level operation; products are OpenRails-only concepts'",
+        "",
+        "[x] FIELD MINIMIZATION (post-landing): removed LookupKey from CreatePriceRequest (Stripe lookup_key now generated internally as openrails_<price_uuid> in the provider dispatcher); removed IsActive from CreatePriceRequest (prices always create active; use /deactivate to stage); SkipProcessorSync was never on create (Update-only). Wired mobiusAdapter{svc} so #207 NMI create-mode dispatches live. README + examples updated."
       ],
       "completed": false
     },
@@ -1318,6 +1320,52 @@
         "[ ] `GET /admin/catalog/orphans` (renamed from stripe-specific) filterable by provider; keep `GET /admin/catalog/stripe/orphans` as a convenience alias",
         "[ ] CCBill: explicitly NOT reconciled \u2014 add a code comment + README note explaining why (no catalog-list API)",
         "[ ] Unit tests for the NMI pull-and-diff with fixture plan data (orphan, missing, drift, openrails-prefix discrimination)"
+      ],
+      "completed": false
+    },
+    {
+      "id": 210,
+      "name": "catalog-status-lifecycle (replace product/price is_active boolean with draft|active|archived enum)",
+      "description": "Replace the bare `is_active boolean` on `billing.products` and `billing.prices` with a first-class lifecycle `status` enum, so 'legacy/retired but grandfathered' is a real state distinct from 'draft/not-yet-launched'. Both are currently `is_active=false`, which a boolean cannot disambiguate.\n\n## Status semantics\n\n| status | purchasable (shown in public catalog)? | existing subscriptions | meaning |\n|---|---|---|---|\n| `draft` | no | n/a (none yet) | created, not launched |\n| `active` | yes | bill normally | live |\n| `archived` | no | **grandfathered \u2014 bill indefinitely** | retired / legacy |\n\nThe load-bearing invariant (already verified working with the boolean): an `archived` price must keep billing existing subscriptions forever. The renewal/rebill path (`lifecycle_service.go:177`) loads the price via `priceService.GetByID` with NO status filter and bills `price.Amount` \u2014 that behavior MUST be preserved. Only the *public catalog* and *new-purchase* paths gate on status.\n\n## Why an enum, not the boolean\n\n- `draft` vs `archived` are both 'not purchasable' but opposite lifecycle ends; reporting ('how many users on legacy prices?') needs to tell them apart.\n- One-step create-as-legacy: migrating historical plans that already have subscribers can be created `archived` directly \u2014 no purchasable gap (the Task-#18 removal of `IsActive` from create left only create-active-then-deactivate, which has a race window).\n\n## Scope discipline\n\nONLY `billing.products` and `billing.prices` change. `is_active` on credit_types, profiles, payment_methods, etc. is unrelated and stays a boolean \u2014 do NOT touch those.\n\n## Migration ownership\n\nThe user is mid-consolidation of migrations into `001_schema.up.sql`. Do NOT create or edit migration files. Update the Go model + all code to expect the `status` column, and hand back the exact DDL change so the user folds it into the consolidation.",
+      "tasks": [
+        "MODEL:",
+        "[ ] Add a `CatalogStatus` string type with consts `draft`, `active`, `archived` in internal/db/models",
+        "[ ] Replace `Product.IsActive bool` with `Product.Status CatalogStatus`; same for `Price`",
+        "[ ] Add helpers: `IsPurchasable()` (status==active), `IsBillable()` (status!=draft \u2014 archived still bills)",
+        "",
+        "DDL (hand to user \u2014 do NOT create a migration file):",
+        "[ ] Provide the DDL replacing `is_active boolean` with `status text NOT NULL DEFAULT 'active' CHECK (status IN ('draft','active','archived'))` on billing.products + billing.prices, including the data-migration clause mapping existing is_active=true\u2192'active', false\u2192'archived'",
+        "",
+        "REPO + CATALOG SERVICES:",
+        "[ ] Update repo/product.go + repo/price.go queries: `WHERE is_active = true` \u2192 `WHERE status = 'active'`; pagination/active-list helpers operate on status='active'",
+        "[ ] catalog/product.go + price.go: `Activate` \u2192 set status=active; `Deactivate` \u2192 set status=archived; add `SetStatus(id, status)` for explicit transitions (incl. archive)",
+        "[ ] Keep `GetByID` status-agnostic (renewal depends on it)",
+        "",
+        "FACADE (pkg/service):",
+        "[ ] CreateProductRequest + CreatePriceRequest accept optional `status` (default `active`); allow creating `draft` or `archived` directly",
+        "[ ] CatalogProduct + CatalogPrice responses expose `status` (replace the `is_active` field)",
+        "[ ] ActivateProduct/Price \u2192 status=active; DeactivateProduct/Price \u2192 status=archived; consider an explicit Archive vs Draft transition",
+        "[ ] Reconciliation/drift + Stripe propagation: archived \u2192 Stripe active=false; active \u2192 Stripe active=true; draft \u2192 do NOT create in Stripe (or create inactive)",
+        "",
+        "CHECKOUT + PUBLIC CATALOG (purchasability gate):",
+        "[ ] Public GetProducts/GetPrices: non-admins see only status=active; admins can filter by status",
+        "[ ] Checkout/new-subscription path: reject purchase of non-active (draft or archived) prices with a clear error",
+        "[ ] Renewal/rebill path: confirm it still bills archived prices (load-by-id, no status filter) \u2014 add a regression test",
+        "",
+        "TESTS:",
+        "[ ] Renewal of a subscription on an archived price still bills (grandfather regression test)",
+        "[ ] New purchase of an archived price is rejected",
+        "[ ] Draft price is hidden from public catalog and not purchasable",
+        "[ ] Create-as-archived in one step works (migration use case)",
+        "[ ] status round-trips through facade create/get/list",
+        "",
+        "DOCS:",
+        "[ ] README admin catalog section: document the status lifecycle + grandfather guarantee",
+        "",
+        "EXIT CRITERIA:",
+        "[ ] `is_active` is gone from product/price model + catalog code (other tables unaffected)",
+        "[ ] Archived price bills existing subs, rejects new purchases, hidden from public catalog",
+        "[ ] go build ./... + go test ./... green; DDL handed to user"
       ],
       "completed": false
     }

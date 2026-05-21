@@ -40,7 +40,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 			"premium": nil,
 			"extra":   nil,
 		},
-		IsActive:  true,
+		Status:    models.CatalogStatusActive,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
 	}).Exec(ctx)
@@ -50,7 +50,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 		ID:               priceID,
 		ProductID:        productID,
 		DisplayName:      "Test Monthly",
-		IsActive:         true,
+		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
 		BillingCycleDays: &billingDays,

@@ -928,7 +928,7 @@ func productFromModel(p *catalog.PublicProductResponse) Product {
 		CreditsSpec:      creditsSpecFromModel(p.CreditsSpec),
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
-		Active:           p.IsActive,
+		Active:           p.IsPurchasable(),
 		Created:          api.ToUnix(p.CreatedAt),
 		Updated:          api.ToUnix(p.UpdatedAt),
 		Prices:           prices,
@@ -973,7 +973,7 @@ func priceFromModel(p *models.Price) Price {
 		Type:       priceType,
 		Recurring:  recurring,
 		ProductID:  api.FormatProductID(p.ProductID),
-		Active:     p.IsActive,
+		Active:     p.IsPurchasable(),
 		Created:    api.ToUnix(p.CreatedAt),
 	}
 }
@@ -1032,7 +1032,7 @@ func subscriptionDetailFromModel(resp *subscriptions.UserSubscriptionResponse) *
 			ID:          api.FormatProductID(resp.Product.ID),
 			Name:        resp.Product.DisplayName,
 			Description: resp.Product.Description,
-			Active:      resp.Product.IsActive,
+			Active:      resp.Product.IsPurchasable(),
 			Created:     api.ToUnix(resp.Product.CreatedAt),
 			Updated:     api.ToUnix(resp.Product.UpdatedAt),
 		}

@@ -127,8 +127,16 @@ func (s *Service) providerAdapters() map[string]providerAdapter {
 	return map[string]providerAdapter{
 		"stripe": &stripeAdapter{svc: s},
 		"ccbill": &ccbillAdapter{},
-		"mobius": &mobiusAdapter{},
+		"mobius": &mobiusAdapter{svc: s},
 	}
+}
+
+// internalStripeLookupKey is the deterministic Stripe lookup_key OpenRails
+// assigns to every price it auto-creates. It is derived solely from the
+// OpenRails price UUID so it is stable, collision-free, and reconstructable
+// without the caller supplying anything. Callers no longer pass a lookup_key.
+func internalStripeLookupKey(priceID uuid.UUID) string {
+	return "openrails_" + priceID.String()
 }
 
 // resolveProviders walks the declared `providers` + `provider_links` from a
@@ -194,10 +202,6 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			if ids == nil {
 				ids = map[string]string{}
 			}
-			// Stamp the lookup_key if the caller provided one (stripe convention).
-			if name == "stripe" && strings.TrimSpace(req.LookupKey) != "" {
-				ids[providerLookupKey] = strings.TrimSpace(req.LookupKey)
-			}
 			processors[name] = ids
 			states[name] = ProviderState{
 				Status:     ProviderStatusLinked,
@@ -216,7 +220,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			UnitAmount:       req.UnitAmount,
 			Currency:         req.Currency,
 			BillingCycleDays: req.BillingCycleDays,
-			LookupKey:        strings.TrimSpace(req.LookupKey),
+			LookupKey:        internalStripeLookupKey(priceID),
 		})
 		switch {
 		case errors.Is(createErr, errPendingManualLink):

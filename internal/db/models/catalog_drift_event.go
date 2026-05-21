@@ -54,32 +54,37 @@ const (
 )
 
 // CatalogDriftEvent is an alert-only record produced by the catalog
-// reconciliation loop (issue #209). The loop never mutates Stripe or the
+// reconciliation loop (issue #209). The loop never mutates Stripe, NMI, or the
 // catalog rows; it only records divergence here. An event is "open" while
-// ResolvedAt IS NULL. Rows dedupe on (kind, stripe_resource_id,
-// openrails_resource_id, field) so reruns are idempotent.
+// ResolvedAt IS NULL. Rows dedupe on (provider, kind, openrails_resource_type,
+// openrails_resource_id, external_resource_id, field) so reruns are idempotent.
+//
+// The external_resource_id column generalizes across providers: it holds the
+// Stripe object id for the Stripe pass and the NMI plan_id for the NMI pass.
 type CatalogDriftEvent struct {
 	bun.BaseModel `bun:"table:billing.catalog_drift_events,alias:cde"`
 
-	ID   uuid.UUID        `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
-	Kind CatalogDriftKind `bun:"kind,notnull" json:"kind"`
+	ID uuid.UUID `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
+	// Provider is "stripe" or "nmi"; it disambiguates the shared field_drift kind.
+	Provider CatalogDriftProvider `bun:"provider,notnull" json:"provider"`
+	Kind     CatalogDriftKind     `bun:"kind,notnull" json:"kind"`
 
 	// OpenRailsResourceType is "product" or "price". Always set.
 	OpenRailsResourceType CatalogDriftResourceType `bun:"openrails_resource_type,notnull" json:"openrails_resource_type"`
 	// OpenRailsResourceID is the UUID of the OpenRails row (empty for pure
 	// orphans that have no OpenRails counterpart).
 	OpenRailsResourceID string `bun:"openrails_resource_id,nullzero" json:"openrails_resource_id,omitempty"`
-	// StripeResourceID is the Stripe object id (empty for missing_in_stripe when
-	// the stored id is what is missing — in that case it carries the id we
-	// failed to find, so it is set for all kinds in practice).
-	StripeResourceID string `bun:"stripe_resource_id,nullzero" json:"stripe_resource_id,omitempty"`
+	// ExternalResourceID is the upstream object id: a Stripe product/price id for
+	// the Stripe pass, or an NMI plan_id for the NMI pass. For missing_in_*, it
+	// carries the id we failed to find, so it is set for all kinds in practice.
+	ExternalResourceID string `bun:"external_resource_id,nullzero" json:"external_resource_id,omitempty"`
 
 	// Field is the diverged field name for field_drift; empty for orphan/missing.
 	Field string `bun:"field,nullzero" json:"field,omitempty"`
-	// OpenRailsValue / StripeValue carry the stringified diverging values for
+	// OpenRailsValue / ExternalValue carry the stringified diverging values for
 	// field_drift; empty otherwise.
 	OpenRailsValue string `bun:"openrails_value,nullzero" json:"openrails_value,omitempty"`
-	StripeValue    string `bun:"stripe_value,nullzero" json:"stripe_value,omitempty"`
+	ExternalValue  string `bun:"external_value,nullzero" json:"external_value,omitempty"`
 
 	DetectedAt time.Time  `bun:"detected_at,notnull,default:current_timestamp" json:"detected_at"`
 	ResolvedAt *time.Time `bun:"resolved_at,nullzero" json:"resolved_at,omitempty"`

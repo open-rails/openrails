@@ -78,7 +78,7 @@ func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, 
 	if err != nil {
 		return nil, fmt.Errorf("price not found: %w", err)
 	}
-	if !price.IsActive {
+	if !price.IsPurchasable() {
 		return &EligibilityResult{Status: EligibilityBlocked, Reason: "price is not available for purchase"}, nil
 	}
 
@@ -86,7 +86,7 @@ func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, 
 	if err != nil {
 		return nil, fmt.Errorf("product not found: %w", err)
 	}
-	if !product.IsActive {
+	if !product.IsPurchasable() {
 		return &EligibilityResult{Status: EligibilityBlocked, Reason: "product is not available for purchase"}, nil
 	}
 

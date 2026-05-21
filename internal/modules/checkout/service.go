@@ -181,7 +181,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	if err != nil {
 		return nil, fmt.Errorf("price not found: %w", err)
 	}
-	if !price.IsActive {
+	if !price.IsPurchasable() {
 		return nil, errors.New("price is not available for purchase")
 	}
 
@@ -190,7 +190,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	if err != nil {
 		return nil, fmt.Errorf("product not found: %w", err)
 	}
-	if !product.IsActive {
+	if !product.IsPurchasable() {
 		return nil, errors.New("product is not available for purchase")
 	}
 
@@ -1588,7 +1588,7 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "price not found"}
 	}
-	if !newPrice.IsActive {
+	if !newPrice.IsPurchasable() {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "price is not available"}
 	}
 
@@ -1596,7 +1596,7 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "product not found"}
 	}
-	if !newProduct.IsActive {
+	if !newProduct.IsPurchasable() {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "product is not available"}
 	}
 

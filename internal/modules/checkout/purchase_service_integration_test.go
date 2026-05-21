@@ -51,7 +51,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 		EntitlementsSpec: map[string]*int{
 			"premium_duplicate_purchase": &durationDays,
 		},
-		IsActive:  true,
+		Status:    models.CatalogStatusActive,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -59,7 +59,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 		ID:          priceID,
 		ProductID:   productID,
 		DisplayName: "One-time Test Price",
-		IsActive:    true,
+		Status:      models.CatalogStatusActive,
 		Amount:      1000,
 		Currency:    "USD",
 		CreatedAt:   now,
@@ -146,4 +146,119 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	require.Equal(t, "premium_duplicate_purchase", ents[0].Entitlement)
 	require.NotNil(t, ents[0].EndAt)
 	require.Equal(t, firstEnd, ents[0].EndAt.UTC())
+}
+
+// TestArchivedPriceStillBillsExistingSubscription is the load-bearing
+// grandfather regression for issue #210. An archived price MUST keep billing
+// existing subscribers indefinitely (renewal/rebill loads by ID and bills the
+// stored amount, status-agnostic), while NEW purchases of the same price are
+// rejected.
+func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
+	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
+	if dsn == "" {
+		t.Skip("set OPENRAILS_TEST_DB_URL to run integration tests")
+	}
+
+	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	bunDB := bun.NewDB(sqlDB, pgdialect.New())
+	models.RegisterModels(bunDB)
+
+	ctx := context.Background()
+	require.NoError(t, bunDB.PingContext(ctx))
+
+	dbi, err := db.NewWithBun(bunDB)
+	require.NoError(t, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	userID := uuid.New().String()
+	productID := uuid.New()
+	priceID := uuid.New()
+	durationDays := 30
+
+	product := &models.Product{
+		ID:          productID,
+		Slug:        "test_grandfather_" + uuid.New().String(),
+		DisplayName: "Grandfather Test",
+		Description: "Test",
+		EntitlementsSpec: map[string]*int{
+			"premium_grandfather": &durationDays,
+		},
+		Status:    models.CatalogStatusActive,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	price := &models.Price{
+		ID:          priceID,
+		ProductID:   productID,
+		DisplayName: "Recurring Grandfather Price",
+		Status:      models.CatalogStatusActive,
+		Amount:      1500,
+		Currency:    "USD",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	_, err = bunDB.NewInsert().Model(product).Exec(ctx)
+	require.NoError(t, err)
+	_, err = bunDB.NewInsert().Model(price).Exec(ctx)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+	})
+
+	fakeClock := clockwork.NewFakeClockAt(now)
+	priceSvc := catalog.NewPriceService(dbi)
+	productSvc := catalog.NewProductService(dbi)
+	purchaseSvc := NewCheckoutPurchaseService(
+		priceSvc,
+		productSvc,
+		payments.NewPaymentService(dbi, fakeClock),
+		entitlements.NewEntitlementService(dbi, fakeClock),
+		nil,
+		fakeClock,
+	)
+
+	// Initial purchase while the price is active (establishes the subscriber).
+	_, err = purchaseSvc.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
+		UserID:        userID,
+		PriceID:       priceID,
+		Processor:     string(models.ProcessorStripe),
+		TransactionID: "grandfather_initial_" + uuid.New().String(),
+		Amount:        price.Amount,
+		Currency:      price.Currency,
+	})
+	require.NoError(t, err)
+
+	// Archive the price (operator retires the plan).
+	require.NoError(t, priceSvc.Deactivate(ctx, priceID))
+
+	archived, err := priceSvc.GetByID(ctx, priceID)
+	require.NoError(t, err)
+	require.Equal(t, models.CatalogStatusArchived, archived.Status, "Deactivate must archive, not draft")
+	require.False(t, archived.IsPurchasable(), "archived price must not be purchasable")
+	require.True(t, archived.IsBillable(), "archived price must remain billable")
+	require.Equal(t, int64(1500), archived.Amount, "renewal must still see the stored amount")
+
+	// Renewal/rebill path: load-by-id is status-agnostic and bills the stored
+	// amount. This MUST still succeed for the grandfathered subscriber.
+	renewal, err := purchaseSvc.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
+		UserID:        userID,
+		PriceID:       priceID,
+		Processor:     string(models.ProcessorStripe),
+		TransactionID: "grandfather_renewal_" + uuid.New().String(),
+		Amount:        archived.Amount,
+		Currency:      archived.Currency,
+	})
+	require.NoError(t, err, "archived price must keep billing existing subscriptions")
+	require.NotEqual(t, uuid.Nil, renewal.PaymentID)
+
+	// New-purchase gate: a brand-new customer cannot buy the archived price.
+	elig, err := purchaseSvc.CheckPurchaseEligibility(ctx, uuid.New().String(), priceID)
+	require.NoError(t, err)
+	require.Equal(t, EligibilityBlocked, elig.Status, "new purchase of archived price must be blocked")
 }
