@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -578,7 +579,7 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	// Build subscription ID
-	subscriptionID := uuid.New()
+	subscriptionID := uuidutil.NewV7()
 	var paymentMethodID *uuid.UUID
 	if createdPaymentMethod != nil {
 		paymentMethodID = &createdPaymentMethod.ID
@@ -591,7 +592,7 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	attempt, err := s.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
-		ID:            uuid.New(),
+		ID:            uuidutil.NewV7(),
 		UserID:        user.ID,
 		PriceID:       price.ID,
 		Processor:     models.Processor(provider),
@@ -684,7 +685,7 @@ func (s *CheckoutService) recoverNMISubscriptionAttempt(ctx context.Context, req
 	if transactionID == "" {
 		transactionID = attempt.TransactionID
 	}
-	subscriptionID := uuid.New()
+	subscriptionID := uuidutil.NewV7()
 	if rawID := metadataString(attempt.Metadata, "local_subscription_id"); rawID != "" {
 		if parsedID, err := uuid.Parse(rawID); err == nil {
 			subscriptionID = parsedID
@@ -1275,7 +1276,7 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	// Step 1: Create the successor subscription at NMI before charging/cancelling.
-	newSubscriptionID := uuid.New()
+	newSubscriptionID := uuidutil.NewV7()
 
 	params := nmi.RecurringPaymentData{
 		CardUserData: nmi.CardUserData{

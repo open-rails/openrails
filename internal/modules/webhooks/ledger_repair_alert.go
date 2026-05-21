@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 type ledgerRepairAlert struct {
@@ -61,7 +62,7 @@ func recordLedgerRepairAlert(ctx context.Context, notificationService *subscript
 		now = time.Now()
 	}
 	notification := &models.NotificationQueue{
-		ID:        uuid.New(),
+		ID:        uuidutil.NewV7(),
 		UserID:    "system",
 		EventType: models.NotificationSystemAlert,
 		Data:      data,

@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -234,7 +235,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		purchasedAt = req.PurchasedAt.UTC()
 	}
 
-	paymentID := uuid.New()
+	paymentID := uuidutil.NewV7()
 	payment := &models.Payment{
 		ID:                       paymentID,
 		UserID:                   req.UserID,

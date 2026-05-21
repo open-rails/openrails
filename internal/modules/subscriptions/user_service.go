@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
@@ -442,7 +443,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 
 	// Add notification
 	notification := &models.NotificationQueue{
-		ID:        uuid.New(),
+		ID:        uuidutil.NewV7(),
 		UserID:    userID,
 		EventType: models.NotificationPremiumEnded,
 		Data:      map[string]any{"reason": string(PremiumEndReasonUserCancel)},

@@ -13,6 +13,7 @@ import (
 	entitlementmod "github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 )
@@ -250,7 +251,7 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 
 	now := time.Now().UTC()
 	payment := &models.Payment{
-		ID:            uuid.New(),
+		ID:            uuidutil.NewV7(),
 		UserID:        req.UserID,
 		Amount:        req.Amount,
 		ListAmount:    req.Amount,
@@ -381,7 +382,7 @@ func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string,
 
 	// Create admin grant record for audit
 	adminGrant := &models.AdminGrant{
-		ID:        uuid.New(),
+		ID:        uuidutil.NewV7(),
 		UserID:    req.UserID,
 		GrantedBy: adminUserID,
 		Reason:    req.Reason,

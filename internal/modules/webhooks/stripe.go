@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -1035,7 +1036,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 		}
 	} else {
 		recovery := &models.Payment{
-			ID:                uuid.New(),
+			ID:                uuidutil.NewV7(),
 			UserID:            original.UserID,
 			PriceID:           original.PriceID,
 			SubscriptionID:    original.SubscriptionID,

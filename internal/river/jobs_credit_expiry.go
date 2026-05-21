@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
@@ -112,7 +113,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			}
 			if errorsIsNoRows(err) {
 				bal = &models.UserCreditBalance{
-					ID:           uuid.New(),
+					ID:           uuidutil.NewV7(),
 					UserID:       k.UserID,
 					CreditTypeID: k.CreditTypeID,
 					Balance:      0,
@@ -141,7 +142,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			}
 
 			trx := &models.CreditTransaction{
-				ID:              uuid.New(),
+				ID:              uuidutil.NewV7(),
 				UserID:          k.UserID,
 				CreditTypeID:    k.CreditTypeID,
 				Amount:          -amount,

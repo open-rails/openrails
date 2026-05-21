@@ -27,6 +27,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -267,7 +268,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		ttl = redirectCheckoutSessionTTL
 	}
 	session := &models.CheckoutSession{
-		ID:              uuid.New(),
+		ID:              uuidutil.NewV7(),
 		UserID:          user.ID,
 		PriceID:         price.ID,
 		Mode:            mode,

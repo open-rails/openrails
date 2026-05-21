@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
@@ -337,7 +338,7 @@ func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscripti
 			Scan(ctx)
 		if errors.Is(err, sql.ErrNoRows) {
 			attempt = &models.ManualRebillAttempt{
-				ID:             uuid.New(),
+				ID:             uuidutil.NewV7(),
 				SubscriptionID: subscriptionID,
 				PeriodEnd:      periodEnd.UTC(),
 				Processor:      processor,

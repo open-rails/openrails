@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
@@ -118,7 +119,7 @@ func (s *SubscriptionService) CancelUserSubscription(ctx context.Context, userID
 
 	// Add notification
 	notification := &models.NotificationQueue{
-		ID:        uuid.New(),
+		ID:        uuidutil.NewV7(),
 		UserID:    userID,
 		EventType: models.NotificationPremiumEnded,
 		Data: map[string]any{

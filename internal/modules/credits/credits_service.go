@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/uptrace/bun"
 )
 
@@ -257,7 +258,7 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 	}
 
 	trx := &models.CreditTransaction{
-		ID:              uuid.New(),
+		ID:              uuidutil.NewV7(),
 		UserID:          params.UserID,
 		CreditTypeID:    ct.ID,
 		Amount:          params.Amount,
@@ -275,7 +276,7 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 		return nil, err
 	}
 	block := &models.CreditBlock{
-		ID:                  uuid.New(),
+		ID:                  uuidutil.NewV7(),
 		UserID:              params.UserID,
 		CreditTypeID:        ct.ID,
 		OriginalAmount:      params.Amount,
@@ -391,7 +392,7 @@ func (s *CreditsService) Hold(ctx context.Context, userID string, creditType str
 	exp := expiresAt.UTC()
 	auth := amount
 	hold := &models.CreditTransaction{
-		ID:              uuid.New(),
+		ID:              uuidutil.NewV7(),
 		UserID:          userID,
 		CreditTypeID:    ct.ID,
 		Amount:          0,
@@ -598,7 +599,7 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, userID stri
 
 	now := s.now()
 	bal = &models.UserCreditBalance{
-		ID:           uuid.New(),
+		ID:           uuidutil.NewV7(),
 		UserID:       userID,
 		CreditTypeID: creditTypeID,
 		Balance:      0,
@@ -649,7 +650,7 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 	}
 
 	trx := &models.CreditTransaction{
-		ID:              uuid.New(),
+		ID:              uuidutil.NewV7(),
 		UserID:          params.UserID,
 		CreditTypeID:    creditTypeID,
 		Amount:          -params.Amount,

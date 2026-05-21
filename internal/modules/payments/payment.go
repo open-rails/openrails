@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
@@ -115,7 +116,7 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 	}
 
 	refund := &models.Payment{
-		ID:             uuid.New(),
+		ID:             uuidutil.NewV7(),
 		UserID:         orig.UserID,
 		PriceID:        orig.PriceID,
 		SubscriptionID: orig.SubscriptionID,
@@ -153,7 +154,7 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 
 	now := s.now()
 	refund := &models.Payment{
-		ID:             uuid.New(),
+		ID:             uuidutil.NewV7(),
 		UserID:         orig.UserID,
 		PriceID:        orig.PriceID,
 		SubscriptionID: orig.SubscriptionID,
@@ -203,7 +204,7 @@ func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *mo
 	}
 	now := s.now()
 	if payment.ID == uuid.Nil {
-		payment.ID = uuid.New()
+		payment.ID = uuidutil.NewV7()
 	}
 	if payment.Status == "" {
 		payment.Status = PaymentStatusPendingValue

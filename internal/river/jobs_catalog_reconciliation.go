@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // KindCatalogReconciliationPull is the River kind for the alert-only catalog
@@ -503,7 +504,7 @@ func persistCatalogDriftJob(ctx context.Context, database *db.DB, desired []mode
 		}
 		row := desired[i]
 		if row.ID == uuid.Nil {
-			row.ID = uuid.New()
+			row.ID = uuidutil.NewV7()
 		}
 		if _, err := idb.NewInsert().Model(&row).Exec(ctx); err != nil {
 			return inserted, 0, fmt.Errorf("insert drift event: %w", err)

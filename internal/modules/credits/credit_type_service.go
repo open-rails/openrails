@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 var creditTypeNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
@@ -34,7 +35,7 @@ func (s *CreditTypeService) Create(ctx context.Context, ct *models.CreditType) e
 	ct.Unit = strings.TrimSpace(ct.Unit)
 
 	if ct.ID == uuid.Nil {
-		ct.ID = uuid.New()
+		ct.ID = uuidutil.NewV7()
 	}
 	if ct.Name == "" || !creditTypeNameRE.MatchString(ct.Name) {
 		return fmt.Errorf("invalid credit type name")

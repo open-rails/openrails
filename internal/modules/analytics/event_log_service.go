@@ -19,6 +19,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/spool"
 	log "github.com/sirupsen/logrus"
 )
@@ -237,7 +238,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				continue
 			}
 			if d.EventID == uuid.Nil {
-				d.EventID = uuid.New()
+				d.EventID = uuidutil.NewV7()
 			}
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
@@ -252,7 +253,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				continue
 			}
 			if d.EventID == uuid.Nil {
-				d.EventID = uuid.New()
+				d.EventID = uuidutil.NewV7()
 			}
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
@@ -270,7 +271,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				continue
 			}
 			if d.EventID == uuid.Nil {
-				d.EventID = uuid.New()
+				d.EventID = uuidutil.NewV7()
 			}
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
@@ -306,7 +307,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				continue
 			}
 			if d.EventID == uuid.Nil {
-				d.EventID = uuid.New()
+				d.EventID = uuidutil.NewV7()
 			}
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
@@ -321,7 +322,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 				continue
 			}
 			if d.EventID == uuid.Nil {
-				d.EventID = uuid.New()
+				d.EventID = uuidutil.NewV7()
 			}
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
@@ -548,7 +549,7 @@ func (s *EventLogService) LogSubscriptionEvent(ctx context.Context, data Subscri
 		return nil
 	}
 	if data.EventID == uuid.Nil {
-		data.EventID = uuid.New()
+		data.EventID = uuidutil.NewV7()
 	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
@@ -589,7 +590,7 @@ func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEvent
 		return nil
 	}
 	if data.EventID == uuid.Nil {
-		data.EventID = uuid.New()
+		data.EventID = uuidutil.NewV7()
 	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
@@ -634,7 +635,7 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 		return nil
 	}
 	if data.EventID == uuid.Nil {
-		data.EventID = uuid.New()
+		data.EventID = uuidutil.NewV7()
 	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
@@ -696,7 +697,7 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 		return nil
 	}
 	if data.EventID == uuid.Nil {
-		data.EventID = uuid.New()
+		data.EventID = uuidutil.NewV7()
 	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
@@ -762,7 +763,7 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 		return nil
 	}
 	if data.EventID == uuid.Nil {
-		data.EventID = uuid.New()
+		data.EventID = uuidutil.NewV7()
 	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()

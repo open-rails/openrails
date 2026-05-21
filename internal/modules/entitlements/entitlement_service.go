@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/uptrace/bun"
 )
 
@@ -251,7 +252,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		}
 
 		created = &models.Entitlement{
-			ID:          uuid.New(),
+			ID:          uuidutil.NewV7(),
 			UserID:      p.UserID,
 			Entitlement: p.Entitlement,
 			StartAt:     start,

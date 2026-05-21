@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
@@ -258,7 +259,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 
 	// Add notification
 	notification := &models.NotificationQueue{
-		ID:        uuid.New(),
+		ID:        uuidutil.NewV7(),
 		UserID:    subscription.UserID,
 		EventType: models.NotificationPremiumEnded,
 		Data:      map[string]any{"reason": string(PremiumEndReasonAdmin)},
@@ -333,7 +334,7 @@ func (s *AdminSubscriptionService) ExtendSubscriptionByDuration(ctx context.Cont
 
 // CreateProduct creates a new product (admin)
 func (s *AdminSubscriptionService) CreateProduct(ctx context.Context, product *models.Product) error {
-	product.ID = uuid.New()
+	product.ID = uuidutil.NewV7()
 	return s.ProductService.Create(ctx, product)
 }
 
@@ -379,7 +380,7 @@ func (s *AdminSubscriptionService) UpdateProduct(ctx context.Context, productID 
 
 // CreatePrice creates a new price (admin)
 func (s *AdminSubscriptionService) CreatePrice(ctx context.Context, price *models.Price) error {
-	price.ID = uuid.New()
+	price.ID = uuidutil.NewV7()
 	return s.PriceService.Create(ctx, price)
 }
 
@@ -406,7 +407,7 @@ func (s *AdminSubscriptionService) GetAllNotifications(ctx context.Context, quer
 // SendManualNotification sends a manual notification (admin)
 func (s *AdminSubscriptionService) SendManualNotification(ctx context.Context, userID string, eventType models.NotificationEventType, message string) error {
 	notification := &models.NotificationQueue{
-		ID:        uuid.New(),
+		ID:        uuidutil.NewV7(),
 		UserID:    userID,
 		EventType: eventType,
 		Data: map[string]any{

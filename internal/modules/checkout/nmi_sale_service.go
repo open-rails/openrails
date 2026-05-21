@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -129,7 +130,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 	}
 
 	attempt, err := s.PurchaseService.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
-		ID:            uuid.New(),
+		ID:            uuidutil.NewV7(),
 		UserID:        user.ID,
 		PriceID:       price.ID,
 		Processor:     models.Processor(provider),

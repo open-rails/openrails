@@ -8,11 +8,11 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -165,7 +165,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 	}
 
 	pm := &models.PaymentMethod{
-		ID:                   uuid.New(),
+		ID:                   uuidutil.NewV7(),
 		UserID:               userID,
 		Processor:            models.Processor(processor),
 		VaultID:              nmiResponse.CustomerVaultID,

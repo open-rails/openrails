@@ -13,7 +13,7 @@
 ---
 
 #### Stack
-- Postgres: `postgres:17-bookworm` (DB `billing_db`, user `admin` / `admin_password`)
+- Postgres: `postgres:18-bookworm` (DB `openrails_db`, user `admin` / `admin_password`)
 - Garnet (Redis-compatible): `ghcr.io/microsoft/garnet` on `6379`
 - ClickHouse: `clickhouse/clickhouse-server` (DB `analytics`, user `analytics_user`, pass `analytics_password`)
 - Billing service: this server exposing public API on `:2053` and a private/internal port `:8060` (exposed to the compose network only).
@@ -29,7 +29,9 @@
 - Note: ClickHouse migrations are tracked/locked via Postgres (`public.migrations` + advisory locks).
 - Billing service connects using built-in defaults that match the compose network/service names.
 
-- Postgres: `postgres://admin:admin_password@postgres:5432/billing_db?sslmode=disable`
+- Postgres: `postgres://admin:admin_password@postgres:5432/openrails_db?sslmode=disable`
+
+> **Postgres 18:** Local and test databases use Postgres 18 so migrations can use native `uuidv7()`. Existing local Postgres 17 Docker volumes must be recreated for disposable dev data, or upgraded with `pg_upgrade` if the data must be preserved.
 - Redis (Garnet): `garnet:6379`, DB `0`
 - ClickHouse: `http://clickhouse:8123` with `analytics_user/analytics_password` on DB `analytics`
 

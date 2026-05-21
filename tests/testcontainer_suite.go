@@ -127,7 +127,7 @@ func (suite *TestContainerSuite) startPostgresContainer() {
 	suite.t.Helper()
 
 	container, err := postgres.Run(suite.ctx,
-		"postgres:15-alpine",
+		"postgres:18-alpine",
 		postgres.WithDatabase("test_db"),
 		postgres.WithUsername("test_user"),
 		postgres.WithPassword("test_password"),

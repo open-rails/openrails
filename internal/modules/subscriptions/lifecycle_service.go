@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 )
@@ -328,7 +329,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		subscription = existingPendingSub
 	} else {
 		subscription = &models.Subscription{
-			ID:                       uuid.New(),
+			ID:                       uuidutil.NewV7(),
 			UserID:                   params.UserID,
 			ProductID:                price.ProductID,
 			PriceID:                  price.ID,
@@ -439,7 +440,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	notification := &models.NotificationQueue{
-		ID:        uuid.New(),
+		ID:        uuidutil.NewV7(),
 		UserID:    subscription.UserID,
 		EventType: models.NotificationPremiumStarted,
 	}
@@ -462,7 +463,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		}
 
 		payment := &models.Payment{
-			ID:                       uuid.New(),
+			ID:                       uuidutil.NewV7(),
 			UserID:                   subscription.UserID,
 			PriceID:                  price.ID,
 			SubscriptionID:           &subscription.ID,
@@ -636,7 +637,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		if params.TransactionID != "" {
 			now := s.now().UTC()
 			payment := &models.Payment{
-				ID:                       uuid.New(),
+				ID:                       uuidutil.NewV7(),
 				UserID:                   subscription.UserID,
 				PriceID:                  price.ID,
 				SubscriptionID:           &subscription.ID,
@@ -823,7 +824,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		}
 
 		notification := &models.NotificationQueue{
-			ID:        uuid.New(),
+			ID:        uuidutil.NewV7(),
 			UserID:    subscription.UserID,
 			EventType: eventType,
 			Data:      notifData,
@@ -1119,7 +1120,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		}
 
 		notification := &models.NotificationQueue{
-			ID:        uuid.New(),
+			ID:        uuidutil.NewV7(),
 			UserID:    subscription.UserID,
 			EventType: models.NotificationPremiumEnded,
 			Data:      map[string]any{"reason": string(reason)},
@@ -1246,7 +1247,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		}
 
 		notification := &models.NotificationQueue{
-			ID:        uuid.New(),
+			ID:        uuidutil.NewV7(),
 			UserID:    subscription.UserID,
 			EventType: models.NotificationPremiumEnded,
 			Data:      map[string]any{"reason": string(PremiumEndReasonExpired)},
@@ -1495,7 +1496,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		}
 
 		notification := &models.NotificationQueue{
-			ID:        uuid.New(),
+			ID:        uuidutil.NewV7(),
 			UserID:    subscription.UserID,
 			EventType: eventType,
 			Data:      data,

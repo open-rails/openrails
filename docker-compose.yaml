@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-bookworm
+    image: postgres:18-bookworm
     restart: unless-stopped
     environment:
       POSTGRES_DB: openrails_db

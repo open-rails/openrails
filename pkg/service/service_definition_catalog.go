@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 type CreditGrantCadence string
@@ -149,7 +150,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 		return nil, fmt.Errorf("invalid status %q", status)
 	}
 	p := &models.Product{
-		ID:               uuid.New(),
+		ID:               uuidutil.NewV7(),
 		Slug:             req.Slug,
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
@@ -407,7 +408,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		return nil, fmt.Errorf("invalid status %q", status)
 	}
 
-	priceID := uuid.New()
+	priceID := uuidutil.NewV7()
 
 	// Draft prices are not created in any external provider — they have no
 	// subscribers and are not purchasable, so there is nothing to mint remotely.

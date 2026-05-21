@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // Catalog reconciliation loop (issue #209).
@@ -731,7 +732,7 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 		}
 		row := desired[i]
 		if row.ID == uuid.Nil {
-			row.ID = uuid.New()
+			row.ID = uuidutil.NewV7()
 		}
 		if _, err := idb.NewInsert().Model(&row).Exec(ctx); err != nil {
 			return inserted, 0, fmt.Errorf("insert drift event: %w", err)

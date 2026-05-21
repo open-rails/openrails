@@ -29,7 +29,7 @@ func TestPostgresContainer(t *testing.T) {
 
 	t.Run("Start PostgreSQL Container", func(t *testing.T) {
 		container, err := postgres.Run(ctx,
-			"postgres:15-alpine",
+			"postgres:18-alpine",
 			postgres.WithDatabase("test_db"),
 			postgres.WithUsername("test_user"),
 			postgres.WithPassword("test_password"),
