@@ -374,6 +374,34 @@ type RedisConfig struct {
 type AuthConfig struct {
 	Issuers          []string `koanf:"issuers"`           // List of expected token issuers (e.g., ["https://issuer.example.com"])
 	ExpectedAudience string   `koanf:"expected_audience"` // Accept token only if it contains this audience (e.g., "openrails-app")
+
+	// OperatorOrgSlug, when set, switches admin auth (all /admin/* routes) from
+	// the legacy global "admin" role check to an AuthKit-org-claim check:
+	// the caller must have UserContext.Org == OperatorOrgSlug AND hold one of
+	// OperatorOrgAdminRoles within that org. When empty (default), the legacy
+	// global "admin" role check from profiles.user_roles is used.
+	//
+	// Use this for multi-org AuthKit deployments where a single org owns the
+	// billing operator role. For single-org AuthKit deployments and self-hosted
+	// instances with one customer, leave this unset.
+	OperatorOrgSlug string `koanf:"operator_org_slug,omitempty"`
+
+	// OperatorOrgAdminRoles is the list of OrgRoles considered admin-equivalent
+	// when OperatorOrgSlug is set. Defaults to ["admin", "owner"].
+	OperatorOrgAdminRoles []string `koanf:"operator_org_admin_roles,omitempty"`
+}
+
+// OperatorOrgEnabled reports whether OperatorOrgSlug is set (multi-org admin mode).
+func (c *AuthConfig) OperatorOrgEnabled() bool {
+	return c != nil && strings.TrimSpace(c.OperatorOrgSlug) != ""
+}
+
+// EffectiveOperatorOrgAdminRoles returns OperatorOrgAdminRoles or the default set.
+func (c *AuthConfig) EffectiveOperatorOrgAdminRoles() []string {
+	if c == nil || len(c.OperatorOrgAdminRoles) == 0 {
+		return []string{"admin", "owner"}
+	}
+	return c.OperatorOrgAdminRoles
 }
 
 type SolanaConfig struct {

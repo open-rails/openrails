@@ -37,6 +37,15 @@ type UserContext struct {
 
 	// Entitlements is a list of entitlements/permissions the user has (e.g., "premium", "pro")
 	Entitlements []string
+
+	// Org is the slug of the user's active organization context (optional).
+	// Populated by host apps integrating with multi-org auth systems like AuthKit.
+	// Empty when the host app does not use orgs, or when no org is active for the request.
+	Org string
+
+	// OrgRoles is the list of roles the user holds within Org (e.g., ["admin", "billing_admin"]).
+	// Only meaningful when Org is non-empty.
+	OrgRoles []string
 }
 
 // HasRole checks if the user has a specific role (case-insensitive).
@@ -54,6 +63,22 @@ func (uc UserContext) HasEntitlement(ent string) bool {
 	for _, e := range uc.Entitlements {
 		if strings.EqualFold(e, ent) {
 			return true
+		}
+	}
+	return false
+}
+
+// HasAnyOrgRole returns true if the user holds any of the listed roles within Org (case-insensitive).
+// Always returns false when Org is empty or want is empty.
+func (uc UserContext) HasAnyOrgRole(want ...string) bool {
+	if uc.Org == "" || len(want) == 0 {
+		return false
+	}
+	for _, r := range uc.OrgRoles {
+		for _, w := range want {
+			if strings.EqualFold(r, w) {
+				return true
+			}
 		}
 	}
 	return false

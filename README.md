@@ -369,7 +369,7 @@ Error types: `invalid_request_error`, `authentication_error`, `authorization_err
 }
 ```
 
-> **Note:** Prices are mostly immutable. Each price belongs to exactly one product. Financial fields (`unit_amount`, `currency`, `billing_cycle_days`) cannot be changed after creation to preserve historical payment accuracy. To change pricing, create a new price and deactivate the old one. Only `display_name`, `processors`, and `is_active` can be updated.
+> **Note:** Prices are mostly immutable. Each price belongs to exactly one product. Financial fields (`unit_amount`, `currency`, `billing_cycle_days`) cannot be changed after creation to preserve historical payment accuracy. To change pricing, create a new price and deactivate the old one. Only `display_name`, `provider_links` (per-provider link maps), and `is_active` can be updated.
 
 ---
 
@@ -550,12 +550,29 @@ usage.
 
 ### Admin Endpoints
 
-Admin endpoints are under `/v1/admin/*` and require:
+Admin endpoints are under `/v1/admin/*` and require a valid JWT plus an
+admin-equivalent identity. The check is performed by `policy.OperatorAdminRequired`,
+which has two modes selected by the `auth.operator_org_slug` config:
 
-- a valid JWT
-- the user to have the `admin` role in AuthKit (`profiles.user_roles`)
+- **Single-org mode** (default — `operator_org_slug` unset). The caller must
+  have the global `admin` role in `profiles.user_roles`. This is the legacy
+  behavior and applies to embedded deployments where AuthKit is single-org
+  (cozy.art), to self-hosted standalone deployments (doujins / hentai0), and to
+  any deployment whose AuthKit instance does not use organizations.
 
-Key endpoints:
+- **Multi-org mode** (`operator_org_slug` set, e.g. `"acme"`). The caller's
+  AuthKit JWT must carry `Claims.Org == <operator_org_slug>` AND one of
+  `auth.operator_org_admin_roles` in `Claims.OrgRoles` (defaults to
+  `["admin", "owner"]`). The OpenRails DB is not consulted in this mode —
+  revocation is delegated to short JWT TTL. Use this for tensorhub-style
+  deployments where OpenRails is embedded in an app whose AuthKit serves
+  multiple organizations and only one of them is the operator.
+
+Host apps populate `UserContext.Org` and `UserContext.OrgRoles` from the
+AuthKit JWT in their auth-bridge middleware before forwarding requests into
+OpenRails handlers. Empty `Org` is fine for legacy single-org mode.
+
+Subscription / payment / user admin endpoints:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -569,6 +586,246 @@ Key endpoints:
 | GET | `/v1/admin/users/:user_id/entitlements` | List active entitlement windows |
 | POST | `/v1/admin/users/:user_id/entitlements` | Grant entitlement (creates admin_grants source record) |
 | DELETE | `/v1/admin/users/:user_id/entitlements/:id` | Revoke entitlement |
+
+Admin catalog endpoints (issue #205 — symmetric with `pkg/service` embedded API):
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/v1/admin/catalog/products` | Create product (reconciles to Stripe by default) |
+| GET | `/v1/admin/catalog/products` | List products (filters: `active_only`, `tier_group`, `limit`, `offset`) |
+| GET | `/v1/admin/catalog/products/:id` | Get product by ID |
+| GET | `/v1/admin/catalog/products/by-slug/:slug` | Get product by slug |
+| PATCH | `/v1/admin/catalog/products/:id` | Update mutable product fields |
+| POST | `/v1/admin/catalog/products/:id/activate` | Activate product |
+| POST | `/v1/admin/catalog/products/:id/deactivate` | Deactivate product |
+| POST | `/v1/admin/catalog/prices` | Create price (reconciles to Stripe by default) |
+| GET | `/v1/admin/catalog/prices` | List prices (filters: `product_id`, `currency`, `type`, `active_only`, `limit`, `offset`) |
+| GET | `/v1/admin/catalog/prices/:id` | Get price |
+| PATCH | `/v1/admin/catalog/prices/:id` | Update mutable price fields (financials are immutable) |
+| POST | `/v1/admin/catalog/prices/:id/activate` | Activate price |
+| POST | `/v1/admin/catalog/prices/:id/deactivate` | Deactivate price |
+| POST | `/v1/admin/catalog/prices/:id/reconcile` | Reconcile drift between OpenRails and the price's providers (see below) |
+
+> **Reconciliation is a price-level operation.** Products are OpenRails-only
+> concepts; their Stripe-side mirror exists only because Stripe requires Prices
+> to attach to a Product, and is managed implicitly by price-level operations.
+> There is no `providers` field on a product, no `?verify=true` on product GETs,
+> and no `POST /admin/catalog/products/:id/reconcile` route.
+
+The admin catalog API is the canonical surface for mutating `billing.products`
+and `billing.prices`. Host apps must not write to those tables directly or
+reach into `catalog.ProductService` / `catalog.PriceService` — those become
+implementation details once this surface ships.
+
+**Declarative provider attachment (issue #208).** On `POST /admin/catalog/prices`,
+admins declare *intent* — which providers a price should exist in — and the
+system picks the right mechanism per provider:
+
+```json
+{
+  "product_id": "...",
+  "display_name": "Premium Monthly",
+  "unit_amount": 999,
+  "currency": "usd",
+  "billing_cycle_days": 30,
+  "providers": ["stripe", "ccbill", "mobius"],
+  "provider_links": {
+    "ccbill": {"form_name": "premium", "flex_id": "abc-123"}
+  },
+  "lookup_key": "app.premium.monthly.usd.999.month.1"
+}
+```
+
+Behavior matrix:
+
+| Provider | Pre-supplied link in `provider_links`? | No pre-supplied link |
+|----------|----------------------------------------|----------------------|
+| `stripe` | link + (optionally) verify the IDs exist | find-or-create (auto, idempotent) |
+| `ccbill` | link                                   | mark `pending_manual_link`, surface PendingAction, **do not fail** (CCBill is link-only forever — no upstream API to create FlexForms) |
+| `mobius` | link                                   | find-or-create the NMI Recurring Plan (auto, idempotent) when an NMI processor is configured; otherwise mark `pending_manual_link` and surface a PendingAction |
+
+Response carries a typed per-provider state plus an aggregated pending-action list:
+
+```json
+{
+  "id": "...",
+  "providers": {
+    "stripe": {"status": "linked", "ids": {"price_id": "price_xxx", "product_id": "prod_xxx"}, "lookup_key": "...", "sync_status": "unknown"},
+    "ccbill": {"status": "linked", "ids": {"form_name": "premium", "flex_id": "abc-123"}},
+    "mobius": {"status": "pending_manual_link", "message": "Create plan in NMI control center, then PATCH ..."}
+  },
+  "pending_manual_actions": [
+    {
+      "provider": "mobius",
+      "action": "create_recurring_plan",
+      "hint": "Create plan in the NMI control center, then PATCH /admin/catalog/prices/{id} with provider_links.mobius.plan_id",
+      "patch_required": {"provider_links": {"mobius": {"plan_id": "<plan id>"}}}
+    }
+  ]
+}
+```
+
+Provider status values: `linked`, `pending_manual_link`, `sync_disabled`, `error`.
+Sync status (per provider, populated only by `?verify=true` reads + reconcile):
+`unknown`, `in_sync`, `drifted`, `missing`, `never_synced`, `sync_disabled`.
+
+To resolve a `pending_manual_link`, PATCH the price with the missing provider link:
+
+```json
+PATCH /admin/catalog/prices/{id}
+{"provider_links": {"mobius": {"plan_id": "premium_monthly"}}}
+```
+
+No separate "resolve" endpoint is needed; the partial-PATCH merge on
+`provider_links` is the contract.
+
+**Stripe reconciliation model.** OpenRails is authoritative; Stripe is a
+downstream projection.
+
+- Create + update calls propagate to Stripe automatically. Pass
+  `skip_processor_sync: true` to skip the Stripe round-trip for one operation
+  (DB-only edit).
+- Stripe objects created by OpenRails carry metadata
+  (`openrails_product_id`, `openrails_price_id`) and Prices additionally carry
+  a deterministic `lookup_key`. Find-or-attach uses these on Create: if a
+  matching Stripe object exists (operator pre-created, or OpenRails recovered
+  from a lost-ID state), the existing object is attached rather than
+  duplicated.
+- `GET /admin/catalog/prices/:id?verify=true` performs a live retrieve against
+  every attached provider and populates `providers.<name>.sync_status` ∈
+  `{unknown, in_sync, drifted, missing, never_synced, sync_disabled}` plus a
+  per-field `drift[]` array. Without `verify`, reads are pure DB and
+  `sync_status` is `"unknown"`. CCBill has no read API and always reports
+  `sync_disabled`. NMI/Mobius surfaces live drift (plan_name, plan_amount) when
+  an NMI processor is configured, and `sync_disabled` when it is not. Product
+  GETs do **not** support `?verify=true` — products carry no provider state.
+- `POST /admin/catalog/prices/:id/reconcile` walks every attached provider,
+  does retrieve + diff + re-apply OpenRails values where the provider supports
+  a write surface (Stripe today). Supports `?dry_run=true` (return the diff
+  without mutating) and `?recreate=true` (for Stripe prices: when the stored
+  Stripe Price ID 404s, mint a new one under the same lookup_key + metadata and
+  update the OpenRails row). The response carries a per-provider `actions` map
+  and the post-reconcile `providers` map. There is no product-level reconcile
+  endpoint: updating a price (or reconciling it with `?recreate=true`)
+  implicitly manages the Stripe Product mirror.
+- **A background reconciliation loop surfaces drift, but never fixes it
+  automatically (issue #209).** In addition to lazy `?verify=true` detection, a
+  periodic job pulls the full Stripe catalog and records divergence (see
+  "Catalog reconciliation loop" below). It is strictly alert-only: it writes to
+  `billing.catalog_drift_events` and never mutates Stripe or the catalog rows.
+  Correction stays explicit (per-price reconcile), avoiding the silent-mutation
+  scar tissue that hits two-source-of-truth systems. Document for your team:
+  editing catalog directly in the Stripe Dashboard will surface as drift and be
+  reverted only on an explicit reconcile.
+
+##### Catalog reconciliation loop (issue #209)
+
+A background River job (`billing.catalog_reconciliation_pull`) periodically
+enumerates the entire Stripe catalog (Products + Prices via the List API) and
+diffs it against OpenRails. It records three kinds of divergence as **open**
+rows in `billing.catalog_drift_events`:
+
+| `kind`              | Meaning |
+|---------------------|---------|
+| `orphan_in_stripe`  | A Stripe object with no matching OpenRails row (missing/dangling `openrails_*_id` metadata marker). |
+| `missing_in_stripe` | An OpenRails row stores a Stripe object ID that was absent from the pulled Stripe catalog (deleted/archived in Stripe). |
+| `field_drift`       | An OpenRails row and its Stripe mirror disagree on a mutable field (`name`/`description`/`active` for products; `unit_amount`/`currency`/`active`/`nickname` for prices). |
+
+The loop is **alert-only** — it never mutates Stripe or the catalog rows. It is
+idempotent: rerunning produces no new rows for unchanged divergence (dedupe on
+`(kind, resource_type, openrails_resource_id, stripe_resource_id, field)`), and
+it auto-resolves (sets `resolved_at`) any open event whose divergence has
+disappeared. Each detected event is also emitted as a structured `WARN` log with
+`event=catalog_drift` and stable fields for downstream alerting; open counts per
+kind are available via the in-process `Service.CountOpenDriftByKind` for a
+`openrails_catalog_drift_open_count{kind}` metric.
+
+**Schedule / disabling.** Default interval is **1h**. Override with the
+`OPENRAILS_CATALOG_RECONCILIATION_INTERVAL` env var (a Go duration, e.g. `30m`,
+`2h`). Set it to `0` (or `0s`) to **disable** the loop entirely.
+
+**Admin surface:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/admin/catalog/drift` | List open drift events (filters: `kind`, `resource_type`, `limit`, `offset`). |
+| GET | `/v1/admin/catalog/stripe/orphans` | Operator-friendly alias for `?kind=orphan_in_stripe`. |
+| POST | `/v1/admin/catalog/drift/refresh` | Run the pull-and-diff pass synchronously and return the resulting open drift set. |
+| POST | `/v1/admin/catalog/drift/reconcile-all` | Alias for `drift/refresh` (spec-named on-demand trigger). |
+
+**Operator runbook — "there's drift in production, what do I do?"**
+
+1. `GET /v1/admin/catalog/drift` (or `POST /v1/admin/catalog/drift/refresh` first
+   for an immediate fresh scan). Inspect the `kind` and `field` of each event.
+2. For `field_drift` / `missing_in_stripe` on a price: resolve it with the
+   existing `POST /v1/admin/catalog/prices/:id/reconcile` (add `?recreate=true`
+   when the Stripe Price was deleted). OpenRails is authoritative, so reconcile
+   re-applies OpenRails values to Stripe. Resolving a price this way
+   **auto-closes** its matching open drift events.
+3. For `orphan_in_stripe`: decide whether the Stripe-only object should be
+   imported (attach it via `PATCH /admin/catalog/prices/:id` `provider_links`)
+   or deleted in the Stripe Dashboard. The loop will not touch it for you.
+4. Re-run `GET /v1/admin/catalog/drift` to confirm the event has cleared.
+
+**NMI / Mobius create-mode (issue #207).** NMI is a first-class create-capable
+provider alongside Stripe. Declaring `providers: ["mobius"]` on CreatePrice
+auto-creates the matching NMI Recurring Plan via the Direct Post API.
+
+- **Deterministic plan_id.** OpenRails creates the plan under
+  `openrails-<openrails_price_uuid>`. NMI plan_ids are operator-chosen and
+  stable, so the price UUID is the plan identity. Rerunning CreatePrice (or
+  recovering from a lost-ID state) does a find-or-attach against this id rather
+  than duplicating the plan.
+- **Field mapping.** `display_name` → `plan_name`; `unit_amount` (cents) →
+  `plan_amount` (NMI takes dollars, so OpenRails divides by 100);
+  `billing_cycle_days` → `day_frequency`. NMI plans bill forever
+  (`plan_payments = 0`).
+- **`billing_cycle_days` is required.** NMI recurring plans must have a
+  frequency, so create-mode rejects a price with a nil `billing_cycle_days`.
+- **Immutable fields.** Like Stripe Price financials, an NMI plan's frequency
+  and payment count are immutable post-create. Only `plan_name` and
+  `plan_amount` can change via `edit_plan`; OpenRails propagates `display_name`
+  on UpdatePrice and rejects financial changes (amount/frequency are immutable
+  in OpenRails too).
+- **Deactivation divergence from Stripe.** On DeactivatePrice OpenRails does
+  **not** call NMI `delete_recurring_plan`. NMI plan deletion does not stop
+  subscriptions already billing on the plan, so the plan must outlive the
+  OpenRails price. (Stripe's `Price active:false` is more lenient and is applied
+  there.) The `DeleteRecurringPlan` client method exists for explicit operator
+  cleanup paths only.
+- **Verify + reconcile.** `?verify=true` does a live `recurring_plans` lookup by
+  plan_id and reports `plan_name` / `plan_amount` drift; reconcile re-applies
+  the OpenRails `display_name` via `edit_plan`.
+- **No NMI processor configured?** Create-mode falls back to
+  `pending_manual_link` so an operator can create the plan in the NMI control
+  center and PATCH `provider_links.mobius.plan_id`.
+
+Embedded callers can invoke the same methods via the Go facade
+(`pkg/service.Service`):
+
+```go
+svc, _ := service.New(runtime)
+out, err := svc.CreateProduct(ctx, service.CreateProductRequest{...})
+out, err := svc.CreatePrice(ctx, service.CreatePriceRequest{
+    ProductID:        product.ID,
+    DisplayName:      "Premium Monthly",
+    UnitAmount:       999,
+    Currency:         "usd",
+    BillingCycleDays: ptrInt(30),
+    Providers:        []string{"stripe", "ccbill"},
+    ProviderLinks: map[string]map[string]string{
+        "ccbill": {"form_name": "premium", "flex_id": "abc-123"},
+    },
+    LookupKey: "app.premium.monthly.usd.999.month.1",
+})
+// out.Providers["stripe"].Status == "linked"   (auto-created)
+// out.Providers["ccbill"].Status == "linked"   (linked from supplied IDs)
+// out.PendingManualActions is empty (both providers resolved)
+out, err = svc.UpdatePrice(ctx, priceID, service.UpdatePriceRequest{
+    DisplayName: ptr("New display name"),
+    SkipProcessorSync: false, // default — propagate to every attached provider
+})
+```
 
 ---
 

@@ -70,7 +70,7 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	}
 
 	group.Use(opts.AuthProvider.Required())
-	group.Use(authpolicy.AdminRequired(rt.DB.GetDB()))
+	group.Use(authpolicy.OperatorAdminRequired(rt.Config, rt.DB.GetDB()))
 
 	group.GET("/subscriptions", wrap(httphandlers.GetAdminSubscriptions))
 	group.GET("/subscriptions/:id", wrap(httphandlers.GetAdminSubscription))
@@ -90,6 +90,36 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	group.GET("/users/:user_id/ccbill/metrics", wrap(httphandlers.GetAdminUserCCBillMetrics))
 	group.POST("/users/:user_id/entitlements", wrap(httphandlers.GrantAdminEntitlement))
 	group.DELETE("/users/:user_id/entitlements/:id", wrap(httphandlers.RevokeAdminEntitlement))
+
+	// Admin catalog API (issue #205). Mounted alongside subscriptions/payments/users.
+	// Symmetric with pkg/service facade; embedded hosts may call the facade directly.
+	adminCatalog := group.Group("/catalog")
+	adminProducts := adminCatalog.Group("/products")
+	adminProducts.POST("", wrap(httphandlers.AdminCreateProduct))
+	adminProducts.GET("", wrap(httphandlers.AdminListProducts))
+	adminProducts.GET("/:id", wrap(httphandlers.AdminGetProduct))
+	adminProducts.GET("/by-slug/:slug", wrap(httphandlers.AdminGetProductBySlug))
+	adminProducts.PATCH("/:id", wrap(httphandlers.AdminUpdateProduct))
+	adminProducts.POST("/:id/activate", wrap(httphandlers.AdminActivateProduct))
+	adminProducts.POST("/:id/deactivate", wrap(httphandlers.AdminDeactivateProduct))
+
+	adminPrices := adminCatalog.Group("/prices")
+	adminPrices.POST("", wrap(httphandlers.AdminCreatePrice))
+	adminPrices.GET("", wrap(httphandlers.AdminListPrices))
+	adminPrices.GET("/:id", wrap(httphandlers.AdminGetPrice))
+	adminPrices.PATCH("/:id", wrap(httphandlers.AdminUpdatePrice))
+	adminPrices.POST("/:id/activate", wrap(httphandlers.AdminActivatePrice))
+	adminPrices.POST("/:id/deactivate", wrap(httphandlers.AdminDeactivatePrice))
+	adminPrices.POST("/:id/reconcile", wrap(httphandlers.AdminReconcilePrice))
+
+	// Catalog reconciliation loop drift surface (issue #209). Alert-only:
+	// these endpoints never mutate Stripe or the catalog rows. Operators
+	// resolve drift via the per-price reconcile action above.
+	adminCatalog.GET("/drift", wrap(httphandlers.AdminListCatalogDrift))
+	adminCatalog.POST("/drift/refresh", wrap(httphandlers.AdminRefreshCatalogDrift))
+	// reconcile-all is the spec-named alias for an on-demand synchronous pull.
+	adminCatalog.POST("/drift/reconcile-all", wrap(httphandlers.AdminRefreshCatalogDrift))
+	adminCatalog.GET("/stripe/orphans", wrap(httphandlers.AdminListStripeOrphans))
 
 	group.GET("/metrics/summary", wrap(httphandlers.GetAdminMetricsSummary))
 	group.GET("/metrics/revenue", wrap(httphandlers.GetAdminMetricsRevenue))
@@ -131,12 +161,4 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, authMiddlewa
 	creditTypes.POST("/:name/deactivate", wrap(httphandlers.ServiceDeactivateCreditType))
 	creditTypes.POST("/:name/activate", wrap(httphandlers.ServiceActivateCreditType))
 
-	catalog := group.Group("/catalog")
-	products := catalog.Group("/products")
-	products.POST("", wrap(httphandlers.ServiceCreateProduct))
-	products.PATCH("/:id", wrap(httphandlers.ServiceUpdateProduct))
-
-	prices := catalog.Group("/prices")
-	prices.POST("", wrap(httphandlers.ServiceCreatePrice))
-	prices.PATCH("/:id", wrap(httphandlers.ServiceUpdatePrice))
 }

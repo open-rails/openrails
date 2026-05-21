@@ -1,1 +1,0 @@
-DROP INDEX IF EXISTS billing.idx_subscriptions_user_product_active_pending;

@@ -45,7 +45,7 @@ func GetProducts(r *httprequest.Request) {
 	includeInactive := false
 	if req.Active != nil && !*req.Active {
 		if uc, ok := authprovider.UserContextFromGin(r.GinCtx); ok {
-			if isAdmin, err := authpolicy.IsAdmin(r.Request.Context(), r.State.DB.GetDB(), uc.UserID); err == nil && isAdmin {
+			if isAdmin, err := authpolicy.IsOperatorAdmin(r.Request.Context(), r.State.Config, r.State.DB.GetDB(), uc); err == nil && isAdmin {
 				includeInactive = true
 			}
 		}
@@ -89,7 +89,7 @@ func GetPrices(r *httprequest.Request) {
 		filter.Active = req.Active
 	} else {
 		if uc, ok := authprovider.UserContextFromGin(r.GinCtx); ok {
-			if isAdmin, err := authpolicy.IsAdmin(r.Request.Context(), r.State.DB.GetDB(), uc.UserID); err == nil && isAdmin {
+			if isAdmin, err := authpolicy.IsOperatorAdmin(r.Request.Context(), r.State.Config, r.State.DB.GetDB(), uc); err == nil && isAdmin {
 				filter.Active = req.Active
 			} else {
 				active := true

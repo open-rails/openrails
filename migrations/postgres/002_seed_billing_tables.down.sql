@@ -1,3 +1,0 @@
--- No-op.
--- This migration previously removed application-specific seeded catalog rows.
--- OpenRails no longer seeds a default product catalog in production.

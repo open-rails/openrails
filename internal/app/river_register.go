@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/jonboulle/clockwork"
@@ -85,7 +87,34 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add webhook process worker: %w", err)
 	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.CatalogReconciliationPullWorker{
+		DB:     r.DB,
+		Config: r.Config,
+	}); err != nil {
+		return fmt.Errorf("add catalog reconciliation worker: %w", err)
+	}
 	return nil
+}
+
+// catalogReconciliationInterval returns the schedule for the alert-only Stripe
+// catalog reconciliation loop (issue #209). Configurable via the
+// OPENRAILS_CATALOG_RECONCILIATION_INTERVAL env var (Go duration, e.g. "30m",
+// "2h"). Defaults to 1h. A value of "0" (or "0s") disables the loop entirely;
+// the returned ok=false signals the caller to skip scheduling it.
+func catalogReconciliationInterval() (interval time.Duration, ok bool) {
+	raw := strings.TrimSpace(os.Getenv("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL"))
+	if raw == "" {
+		return time.Hour, true
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		// Unparseable -> fall back to the safe default rather than disabling.
+		return time.Hour, true
+	}
+	if d <= 0 {
+		return 0, false // interval=0 disables the loop
+	}
+	return d, true
 }
 
 func (r *Runtime) validateBillingWorkerRuntime() error {
@@ -195,6 +224,23 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
+
+	// Catalog reconciliation loop (issue #209): pull the Stripe catalog and
+	// diff it against the OpenRails DB, recording drift + orphan events.
+	// Alert-only — never mutates Stripe or the catalog rows. Interval is
+	// configurable via OPENRAILS_CATALOG_RECONCILIATION_INTERVAL (0 disables).
+	if interval, ok := catalogReconciliationInterval(); ok {
+		jobs = append(jobs, river.NewPeriodicJob(
+			river.PeriodicInterval(interval),
+			func() (river.JobArgs, *river.InsertOpts) {
+				return riverjobs.CatalogReconciliationPullArgs{}, &river.InsertOpts{
+					Queue:      riverjobs.QueueBilling,
+					UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: interval},
+				}
+			},
+			&river.PeriodicJobOpts{RunOnStart: false},
+		))
+	}
 
 	return jobs, nil
 }

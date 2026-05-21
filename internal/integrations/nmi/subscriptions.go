@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"net/url"
@@ -349,6 +350,201 @@ func (c *NMIClient) QueryRecurringSubscriptions(params RecurringQueryParams) (st
 	}
 
 	return c.sendQueryRequest(values)
+}
+
+// AddRecurringPlan creates a new NMI Recurring Plan via the Direct Post API
+// (recurring=add_plan). NMI plan amounts are denominated in dollars, while
+// OpenRails stores money in integer cents, so planAmountCents is converted to a
+// dollar string here. dayFrequency is the billing interval in days (NMI's
+// day_frequency). planPayments is the total number of payments (0 = bill
+// forever). Frequency and payments are immutable once a plan is created.
+func (c *NMIClient) AddRecurringPlan(planID, planName string, planAmountCents int64, dayFrequency, planPayments int) error {
+	if err := c.checkConfiguration(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(planID) == "" {
+		return errors.New("planID is required")
+	}
+	if strings.TrimSpace(planName) == "" {
+		return errors.New("planName is required")
+	}
+	if dayFrequency <= 0 {
+		return errors.New("dayFrequency must be greater than zero")
+	}
+
+	values := url.Values{
+		"recurring":     {"add_plan"},
+		"security_key":  {c.SecurityKey},
+		"plan_id":       {planID},
+		"plan_name":     {planName},
+		"plan_amount":   {centsToDollarString(planAmountCents)},
+		"day_frequency": {strconv.Itoa(dayFrequency)},
+		"plan_payments": {strconv.Itoa(planPayments)},
+	}
+
+	response, err := c.sendDirectRequest(values)
+	if err != nil {
+		return err
+	}
+
+	output, err := parseDirectResponse(response)
+	if err != nil {
+		return err
+	}
+	if !isDirectResponseApproved(output) {
+		return fmt.Errorf("failed to add recurring plan: %s", responseText(output, response))
+	}
+
+	return nil
+}
+
+// EditRecurringPlan updates the mutable fields of an existing NMI Recurring Plan
+// (recurring=edit_plan). NMI only permits the plan name and amount to change;
+// frequency and payment count are immutable once a plan exists. planAmountCents
+// is converted from cents to a dollar string for NMI.
+func (c *NMIClient) EditRecurringPlan(planID, planName string, planAmountCents int64) error {
+	if err := c.checkConfiguration(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(planID) == "" {
+		return errors.New("planID is required")
+	}
+
+	values := url.Values{
+		"recurring":    {"edit_plan"},
+		"security_key": {c.SecurityKey},
+		"plan_id":      {planID},
+		"plan_amount":  {centsToDollarString(planAmountCents)},
+	}
+	if name := strings.TrimSpace(planName); name != "" {
+		values.Set("plan_name", name)
+	}
+
+	response, err := c.sendDirectRequest(values)
+	if err != nil {
+		return err
+	}
+
+	output, err := parseDirectResponse(response)
+	if err != nil {
+		return err
+	}
+	if !isDirectResponseApproved(output) {
+		return fmt.Errorf("failed to edit recurring plan: %s", responseText(output, response))
+	}
+
+	return nil
+}
+
+// DeleteRecurringPlan soft-deletes an NMI Recurring Plan (recurring=delete_plan).
+// NOTE: deleting a plan in NMI does not stop existing subscriptions billing on
+// it, so OpenRails deliberately does not call this on price deactivation; it is
+// retained for explicit cleanup paths only.
+func (c *NMIClient) DeleteRecurringPlan(planID string) error {
+	if err := c.checkConfiguration(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(planID) == "" {
+		return errors.New("planID is required")
+	}
+
+	values := url.Values{
+		"recurring":    {"delete_plan"},
+		"security_key": {c.SecurityKey},
+		"plan_id":      {planID},
+	}
+
+	response, err := c.sendDirectRequest(values)
+	if err != nil {
+		return err
+	}
+
+	output, err := parseDirectResponse(response)
+	if err != nil {
+		return err
+	}
+	if !isDirectResponseApproved(output) {
+		return fmt.Errorf("failed to delete recurring plan: %s", responseText(output, response))
+	}
+
+	return nil
+}
+
+// recurringPlanQueryResponse mirrors the XML returned by the NMI Query API for
+// the recurring_plans report type. Only the fields OpenRails needs are mapped.
+type recurringPlanQueryResponse struct {
+	XMLName xml.Name             `xml:"nm_response"`
+	Plans   []recurringPlanQuery `xml:"plan"`
+}
+
+type recurringPlanQuery struct {
+	PlanID     string `xml:"plan_id"`
+	PlanName   string `xml:"plan_name"`
+	PlanAmount string `xml:"plan_amount"`
+}
+
+// GetRecurringPlanByID performs a strongly-consistent lookup of a single
+// recurring plan by its operator-chosen plan_id. It queries the NMI Query API
+// (recurring_plans report) filtered by plan_id and parses the XML response.
+// Returns found=false when no plan matches. amountCents is the plan amount
+// converted from NMI dollars back into integer cents to match OpenRails storage.
+func (c *NMIClient) GetRecurringPlanByID(planID string) (found bool, name string, amountCents int64, err error) {
+	if err := c.checkConfiguration(); err != nil {
+		return false, "", 0, err
+	}
+	if strings.TrimSpace(planID) == "" {
+		return false, "", 0, errors.New("planID is required")
+	}
+
+	values := url.Values{
+		"Servicert_type": {"recurring_plans"},
+		"security_key":   {c.SecurityKey},
+		"plan_id":        {planID},
+	}
+
+	response, err := c.sendQueryRequest(values)
+	if err != nil {
+		return false, "", 0, err
+	}
+
+	var parsed recurringPlanQueryResponse
+	if err := xml.Unmarshal([]byte(response), &parsed); err != nil {
+		return false, "", 0, fmt.Errorf("failed to parse recurring plan query response: %w", err)
+	}
+
+	for _, p := range parsed.Plans {
+		if strings.TrimSpace(p.PlanID) == strings.TrimSpace(planID) {
+			cents, convErr := dollarStringToCents(p.PlanAmount)
+			if convErr != nil {
+				return true, p.PlanName, 0, fmt.Errorf("failed to parse plan amount %q: %w", p.PlanAmount, convErr)
+			}
+			return true, p.PlanName, cents, nil
+		}
+	}
+	return false, "", 0, nil
+}
+
+// centsToDollarString converts integer cents into a fixed two-decimal dollar
+// string as required by NMI's plan_amount parameter.
+func centsToDollarString(cents int64) string {
+	return strconv.FormatFloat(float64(cents)/100.0, 'f', 2, 64)
+}
+
+// dollarStringToCents converts an NMI dollar amount string (e.g. "9.99") back
+// into integer cents, rounding to the nearest cent.
+func dollarStringToCents(dollars string) (int64, error) {
+	trimmed := strings.TrimSpace(dollars)
+	if trimmed == "" {
+		return 0, nil
+	}
+	f, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil {
+		return 0, err
+	}
+	if f < 0 {
+		return -int64(-f*100 + 0.5), nil
+	}
+	return int64(f*100 + 0.5), nil
 }
 
 func (c *NMIClient) SearchTransactions(filter QueryFilter) (string, error) {

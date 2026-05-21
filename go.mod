@@ -145,7 +145,7 @@ require (
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/riverqueue/river/riverdriver v0.26.0 // indirect
 	github.com/riverqueue/river/rivershared v0.26.0 // indirect
-	github.com/riverqueue/river/rivertype v0.26.0 // indirect
+	github.com/riverqueue/river/rivertype v0.26.0
 	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/sendgrid/rest v2.6.9+incompatible // indirect
 	github.com/shirou/gopsutil/v4 v4.25.5 // indirect

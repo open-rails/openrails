@@ -1,0 +1,292 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+)
+
+// stripeAdapter implements providerAdapter for the Stripe catalog provider.
+// It supports Attach (with optional remote verification), AutoCreate
+// (find-or-create via metadata search and lookup_key), Verify, and Update.
+type stripeAdapter struct {
+	svc *Service
+}
+
+func (a *stripeAdapter) Name() string { return "stripe" }
+
+func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) PendingAction {
+	// Stripe always supports AutoCreate; this should never fire under normal
+	// configuration. The dispatcher only invokes PendingActionTemplate when
+	// AutoCreate returns errPendingManualLink — for stripe that's an edge case
+	// (no config). We still surface a helpful hint.
+	return PendingAction{
+		Provider: "stripe",
+		Action:   "configure_stripe",
+		Hint:     "Stripe is not configured; set stripe.secret_key in config and retry, or PATCH /admin/catalog/prices/{id} with provider_links.stripe.price_id",
+	}
+}
+
+// Attach validates supplied Stripe link ids. When the feature flag
+// VerifyProcessorMappings is on, the price_id is round-tripped against Stripe.
+func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string) (map[string]string, error) {
+	link = normalizeLinkMap(link)
+	priceID := strings.TrimSpace(link[models.ProcessorKeyStripePriceID])
+	if priceID == "" {
+		return nil, fmt.Errorf("stripe link requires provider_links.stripe.price_id")
+	}
+	out := map[string]string{
+		models.ProcessorKeyStripePriceID: priceID,
+	}
+	if prodID := strings.TrimSpace(link[models.ProcessorKeyStripeProductID]); prodID != "" {
+		out[models.ProcessorKeyStripeProductID] = prodID
+	}
+	if a.svc != nil && a.svc.rt != nil && a.svc.rt.Config != nil &&
+		a.svc.rt.Config.FeatureFlags != nil && a.svc.rt.Config.FeatureFlags.VerifyProcessorMappings {
+		stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config}
+		if err := stripeSvc.VerifyPriceExists(ctx, priceID); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// AutoCreate implements the find-or-create flow for Stripe. The discovery
+// chain (in order):
+//
+//  1. If a Stripe Product already exists for this OpenRails product (via
+//     metadata search on openrails_product_id), reuse it.
+//  2. Otherwise create a new Stripe Product carrying the openrails_product_id
+//     metadata + an idempotency key derived from the OpenRails product ID.
+//  3. With the Product in hand, find-or-create the Stripe Price under the
+//     deterministic lookup_key. If a price with the same lookup_key already
+//     exists, attach to it (transfer_lookup_key=true keeps the contract).
+//     Otherwise mint a new one carrying openrails_price_id + the lookup_key.
+//
+// Returns the canonical ids to persist on processors["stripe"].
+func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
+		// Same error string used by stripe_catalog.go so callers can detect
+		// the "not configured" case via substring (Verify, etc).
+		return nil, errPendingManualLink
+	}
+	stripeProc := a.svc.rt.Config.GetStripeProcessor()
+	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
+		return nil, errPendingManualLink
+	}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config}
+
+	// Step 1: discover an existing Stripe Product for this OpenRails product.
+	stripeProductID := ""
+	if existing, err := stripeSvc.SearchProductsByMetadata(ctx, catalog.StripeMetadataOpenRailsProductID, in.ProductID.String()); err == nil {
+		for _, p := range existing {
+			if strings.TrimSpace(p.ID) != "" {
+				stripeProductID = p.ID
+				break
+			}
+		}
+	}
+	// Step 2: create the Stripe Product if discovery did not find one.
+	if stripeProductID == "" {
+		name := in.DisplayName
+		desc := ""
+		if in.Product != nil {
+			if strings.TrimSpace(in.Product.DisplayName) != "" {
+				name = in.Product.DisplayName
+			}
+			desc = in.Product.Description
+		}
+		id, err := stripeSvc.CreateProduct(ctx, catalog.CreateProductParams{
+			Name:           name,
+			Description:    desc,
+			IdempotencyKey: "openrails-product-" + in.ProductID.String(),
+			Metadata: map[string]string{
+				catalog.StripeMetadataOpenRailsProductID: in.ProductID.String(),
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		stripeProductID = id
+	}
+
+	// Step 3: find-or-create the Stripe Price under lookup_key.
+	stripePriceID := ""
+	if lookup := strings.TrimSpace(in.LookupKey); lookup != "" {
+		if existing, err := stripeSvc.ListPricesByLookupKey(ctx, lookup); err == nil {
+			for _, p := range existing {
+				if strings.TrimSpace(p.ID) != "" {
+					stripePriceID = p.ID
+					break
+				}
+			}
+		}
+	}
+	if stripePriceID == "" {
+		id, err := stripeSvc.CreatePrice(ctx, catalog.CreatePriceParams{
+			StripeProductID:  stripeProductID,
+			UnitAmount:       in.UnitAmount,
+			Currency:         in.Currency,
+			BillingCycleDays: in.BillingCycleDays,
+			LookupKey:        in.LookupKey,
+			IdempotencyKey:   "openrails-price-" + in.PriceID.String(),
+			Metadata: map[string]string{
+				catalog.StripeMetadataOpenRailsPriceID:   in.PriceID.String(),
+				catalog.StripeMetadataOpenRailsProductID: in.ProductID.String(),
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		stripePriceID = id
+	}
+
+	ids := map[string]string{
+		models.ProcessorKeyStripePriceID:   stripePriceID,
+		models.ProcessorKeyStripeProductID: stripeProductID,
+	}
+	if lookup := strings.TrimSpace(in.LookupKey); lookup != "" {
+		ids[providerLookupKey] = lookup
+	}
+	return ids, nil
+}
+
+// Verify performs a live retrieve of the Stripe Price (and its Product) and
+// computes per-field drift vs. the OpenRails snapshot.
+func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) ([]DriftField, bool, error) {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
+		return nil, false, fmt.Errorf("stripe is not configured")
+	}
+	stripeProc := a.svc.rt.Config.GetStripeProcessor()
+	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
+		return nil, false, fmt.Errorf("stripe is not configured")
+	}
+	priceID := strings.TrimSpace(ids[models.ProcessorKeyStripePriceID])
+	if priceID == "" {
+		return nil, false, fmt.Errorf("stripe price_id missing on local processors map")
+	}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config}
+	remote, err := stripeSvc.RetrievePrice(ctx, priceID)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return nil, true, nil
+		}
+		return nil, false, err
+	}
+	drift := []DriftField{}
+	if local != nil {
+		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(remote.Nickname) {
+			drift = append(drift, DriftField{
+				Field:          "display_name",
+				OpenRailsValue: local.DisplayName,
+				RemoteValue:    remote.Nickname,
+			})
+		}
+		if local.IsActive != remote.Active {
+			drift = append(drift, DriftField{
+				Field:          "is_active",
+				OpenRailsValue: strconv.FormatBool(local.IsActive),
+				RemoteValue:    strconv.FormatBool(remote.Active),
+			})
+		}
+		if local.UnitAmount != remote.UnitAmount {
+			drift = append(drift, DriftField{
+				Field:          "unit_amount",
+				OpenRailsValue: strconv.FormatInt(local.UnitAmount, 10),
+				RemoteValue:    strconv.FormatInt(remote.UnitAmount, 10),
+			})
+		}
+		if !strings.EqualFold(local.Currency, remote.Currency) {
+			drift = append(drift, DriftField{
+				Field:          "currency",
+				OpenRailsValue: local.Currency,
+				RemoteValue:    remote.Currency,
+			})
+		}
+	}
+	return drift, false, nil
+}
+
+// verifyStripeProduct is a product-side helper retained for internal use only.
+// It is NOT exposed through the public catalog API (per issue #208: products
+// have no user-facing provider linkage). It exists so that internal lookups
+// (UpdateProduct's best-effort Stripe propagation) can decide whether to push
+// changes. Returns drift, missing, configured, error.
+func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID string, local *models.Product) ([]DriftField, bool, bool, error) {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
+		return nil, false, false, nil
+	}
+	stripeProc := a.svc.rt.Config.GetStripeProcessor()
+	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
+		return nil, false, false, nil
+	}
+	stripeProductID = strings.TrimSpace(stripeProductID)
+	if stripeProductID == "" {
+		return nil, false, true, fmt.Errorf("stripe_product_id required")
+	}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config}
+	remote, err := stripeSvc.RetrieveProduct(ctx, stripeProductID)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return nil, true, true, nil
+		}
+		return nil, false, true, err
+	}
+	drift := []DriftField{}
+	if local != nil {
+		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(remote.Name) {
+			drift = append(drift, DriftField{
+				Field:          "display_name",
+				OpenRailsValue: local.DisplayName,
+				RemoteValue:    remote.Name,
+			})
+		}
+		if strings.TrimSpace(local.Description) != strings.TrimSpace(remote.Description) {
+			drift = append(drift, DriftField{
+				Field:          "description",
+				OpenRailsValue: local.Description,
+				RemoteValue:    remote.Description,
+			})
+		}
+		if local.IsActive != remote.Active {
+			drift = append(drift, DriftField{
+				Field:          "is_active",
+				OpenRailsValue: strconv.FormatBool(local.IsActive),
+				RemoteValue:    strconv.FormatBool(remote.Active),
+			})
+		}
+	}
+	return drift, false, true, nil
+}
+
+// Update propagates mutable fields (display name, active) to the Stripe Price.
+func (a *stripeAdapter) Update(ctx context.Context, ids map[string]string, mutable mutableUpdate) error {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
+		return nil
+	}
+	stripeProc := a.svc.rt.Config.GetStripeProcessor()
+	if stripeProc == nil || strings.TrimSpace(stripeProc.SecretKey) == "" {
+		return nil
+	}
+	priceID := strings.TrimSpace(ids[models.ProcessorKeyStripePriceID])
+	if priceID == "" {
+		return nil
+	}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config}
+	params := catalog.UpdatePriceParams{}
+	if mutable.DisplayName != nil {
+		nickname := strings.TrimSpace(*mutable.DisplayName)
+		params.Nickname = &nickname
+	}
+	if mutable.IsActive != nil {
+		active := *mutable.IsActive
+		params.Active = &active
+	}
+	return stripeSvc.UpdatePrice(ctx, priceID, params)
+}
