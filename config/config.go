@@ -248,7 +248,13 @@ type ProcessorConfig struct {
 	SecretKey  string `koanf:"secret_key"`
 	SuccessURL string `koanf:"success_url"`
 	CancelURL  string `koanf:"cancel_url"`
-	// WebhookSecret is shared with NMI (same field name)
+	// WebhookSecret is shared with NMI (same field name); for Stripe it is the
+	// signing secret of the classic / "snapshot" event destination.
+	// WebhookSecretThin is the signing secret of a Stripe "thin" Event
+	// Destination pointed at the same webhook URL. When set, incoming Stripe
+	// webhooks are verified against either secret, and thin payloads are
+	// hydrated into the classic event shape before processing.
+	WebhookSecretThin string `koanf:"webhook_secret_thin"`
 
 	// --- Solana fields (type: solana) ---
 	RPCEndpoint     string                 `koanf:"rpc_endpoint"`

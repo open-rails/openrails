@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
@@ -95,11 +98,18 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
 		return false
 	}
-	secret := ""
+	var secrets []string
+	stripeSecretKey := ""
 	if stripeProc := r.State.Config.GetStripeProcessor(); stripeProc != nil {
-		secret = stripeProc.WebhookSecret
+		stripeSecretKey = strings.TrimSpace(stripeProc.SecretKey)
+		if s := strings.TrimSpace(stripeProc.WebhookSecret); s != "" {
+			secrets = append(secrets, s)
+		}
+		if s := strings.TrimSpace(stripeProc.WebhookSecretThin); s != "" {
+			secrets = append(secrets, s)
+		}
 	}
-	prepared, err := webhookutil.PrepareStripe(body, secret, r.Request.Header.Get("Stripe-Signature"), 5*time.Minute)
+	prepared, err := prepareStripeMultiSecret(body, secrets, r.Request.Header.Get("Stripe-Signature"), 5*time.Minute)
 	if err != nil {
 		switch {
 		case errors.Is(err, webhookutil.ErrWebhookSignatureRequired):
@@ -115,13 +125,135 @@ func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
 		}
 		return false
 	}
-	args := prepared.QueueArgs(clientIP)
-	if err := enqueueWebhookJob(r, args); err != nil {
-		log.WithError(err).Error("failed to enqueue Stripe webhook")
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to enqueue webhook")
+	// Stripe "thin" event destinations deliver a minimal payload without the
+	// object. Hydrate it into the classic {data:{object}} shape so the River
+	// processor only ever sees snapshot-style events.
+	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), stripeSecretKey, prepared.Body); herr != nil {
+		log.WithError(herr).Error("failed to hydrate thin stripe event")
+		r.ErrorJSON(http.StatusBadGateway, "Failed to hydrate thin event")
+		return false
+	} else if hydrated != nil {
+		prepared.Body = hydrated
+	}
+	// Process synchronously in-request: Stripe webhooks drive subscription and
+	// entitlement state, and we want that reflected immediately rather than after
+	// a River worker picks the job up. Stripe retries on a non-2xx, so a transient
+	// failure here is safe to surface as 500; a non-retryable (poison) event is
+	// acked so Stripe stops retrying.
+	if r.State.WebhookDispatcher == nil {
+		log.Error("webhook dispatcher unavailable")
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
+		return false
+	}
+	signatureVerified := true
+	msg := &webhooks.WebhookMessage{
+		Processor:      subscriptions.ProcessorStripe,
+		EventID:        prepared.EventID,
+		EventType:      prepared.EventType,
+		Payload:        prepared.Body,
+		IPAddress:      clientIP,
+		Signature:      prepared.Signature,
+		SignatureValid: &signatureVerified,
+		ReceivedAt:     time.Now(),
+	}
+	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
+		fields := log.Fields{"event_id": prepared.EventID, "event_type": prepared.EventType}
+		if webhooks.IsWebhookErrorNonRetryable(err) {
+			log.WithError(err).WithFields(fields).Warn("stripe webhook non-retryable error; acking to stop retries")
+			return true
+		}
+		log.WithError(err).WithFields(fields).Error("stripe webhook processing failed")
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
 		return false
 	}
 	return true
+}
+
+// prepareStripeMultiSecret verifies the Stripe signature against each configured
+// secret, accepting the first that validates. Snapshot and thin Event
+// Destinations sign the same payload with their own secret, so a single endpoint
+// must try both. Non-signature errors (missing header, invalid payload)
+// short-circuit since they are not secret-specific.
+func prepareStripeMultiSecret(body []byte, secrets []string, header string, tolerance time.Duration) (webhookutil.Prepared, error) {
+	if len(secrets) == 0 {
+		return webhookutil.PrepareStripe(body, "", header, tolerance)
+	}
+	var lastErr error
+	for _, secret := range secrets {
+		prepared, err := webhookutil.PrepareStripe(body, secret, header, tolerance)
+		if err == nil {
+			return prepared, nil
+		}
+		lastErr = err
+		if !errors.Is(err, webhookutil.ErrWebhookSignatureInvalid) {
+			return webhookutil.Prepared{}, err
+		}
+	}
+	return webhookutil.Prepared{}, lastErr
+}
+
+// hydrateThinStripeEvent converts a Stripe "thin" event payload (minimal, with a
+// related_object reference but no embedded object) into the classic
+// {id,type,data:{object}} shape by fetching the referenced resource. Returns
+// (nil, nil) when the payload is already a snapshot event (object present) or is
+// not a hydratable thin event, so the caller passes the body through unchanged.
+func hydrateThinStripeEvent(ctx context.Context, stripeSecretKey string, body []byte) ([]byte, error) {
+	var envelope struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+		Data *struct {
+			Object json.RawMessage `json:"object"`
+		} `json:"data"`
+		RelatedObject *struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+			URL  string `json:"url"`
+		} `json:"related_object"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, nil // let downstream parsing surface the malformed payload
+	}
+	if envelope.Data != nil && len(envelope.Data.Object) > 0 {
+		return nil, nil // snapshot event: object already present
+	}
+	if envelope.RelatedObject == nil || strings.TrimSpace(envelope.RelatedObject.URL) == "" {
+		return nil, nil // not a hydratable thin event
+	}
+	if strings.TrimSpace(stripeSecretKey) == "" {
+		return nil, fmt.Errorf("stripe secret key not configured for thin event hydration")
+	}
+
+	url := strings.TrimSpace(envelope.RelatedObject.URL)
+	if !strings.HasPrefix(url, "http") {
+		url = "https://api.stripe.com" + url
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+stripeSecretKey)
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	object, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("fetch related object failed (%d)", resp.StatusCode)
+	}
+
+	synthesized := struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+		Data struct {
+			Object json.RawMessage `json:"object"`
+		} `json:"data"`
+	}{ID: envelope.ID, Type: envelope.Type}
+	synthesized.Data.Object = object
+	return json.Marshal(synthesized)
 }
 
 func enqueueWebhookJob(r *httprequest.Request, args riverjobs.WebhookProcessArgs) error {
