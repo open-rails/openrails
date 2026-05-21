@@ -398,52 +398,75 @@ func (s *CheckoutSessionService) resolveMode(mode string, processor string, pric
 	return models.CheckoutSessionMode(trimmedMode), nil
 }
 
+// validatePayment dispatches checkout-input validation to the per-processor
+// validator that owns that processor's required-input contract. Keeping each
+// processor's rules in its own method (rather than a shared switch body) is what
+// keeps the validation contract from drifting out of sync with what the
+// processor's executor actually consumes — the drift that previously made Stripe
+// demand billing fields its hosted-checkout path never reads.
 func (s *CheckoutSessionService) validatePayment(ctx context.Context, processor string, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
-	// Route to processor-specific validation based on config type detection
-	// This allows adding new NMI providers via config without code changes
 	switch {
 	case processors.IsNMIBacked(processor):
-		hasToken := strings.TrimSpace(payment.PaymentToken) != ""
-		hasMethod := strings.TrimSpace(payment.PaymentMethodID) != ""
-		if hasToken == hasMethod {
-			return fmt.Errorf("%w: provide either payment_token or payment_method_id", ErrCheckoutSessionValidation)
-		}
-		if hasMethod {
-			pmID, err := api.ParsePaymentMethodID(payment.PaymentMethodID)
-			if err != nil {
-				return fmt.Errorf("%w: invalid payment_method_id", ErrCheckoutSessionValidation)
-			}
-			if s.paymentMethodService == nil {
-				return fmt.Errorf("%w: payment method service unavailable", ErrCheckoutSessionValidation)
-			}
-			if err := s.paymentMethodService.ValidateOwnership(ctx, pmID, user.ID); err != nil {
-				return fmt.Errorf("%w: payment method not authorized", ErrCheckoutSessionValidation)
-			}
-		}
+		return s.validateNMIInput(ctx, payment, user)
 	case processor == "stripe":
-		hasToken := strings.TrimSpace(payment.PaymentToken) != ""
-		hasMethod := strings.TrimSpace(payment.PaymentMethodID) != ""
-		if hasToken && hasMethod {
-			return fmt.Errorf("%w: provide either payment_token or payment_method_id", ErrCheckoutSessionValidation)
-		}
-		if hasMethod {
-			return fmt.Errorf("%w: saved payment methods are not supported for stripe checkout", ErrCheckoutSessionValidation)
-		}
-		if err := requireBillingFields(payment); err != nil {
-			return err
-		}
+		return s.validateStripeInput(payment)
 	case processor == "solana":
-		if strings.TrimSpace(payment.TokenSymbol) == "" {
-			return fmt.Errorf("%w: token_symbol is required", ErrCheckoutSessionValidation)
-		}
+		return s.validateSolanaInput(payment)
 	case processor == "ccbill":
-		if err := requireBillingFields(payment); err != nil {
-			return err
-		}
+		return s.validateCCBillInput(payment)
 	default:
 		return fmt.Errorf("%w: unsupported processor", ErrCheckoutSessionValidation)
 	}
+}
+
+// validateNMIInput requires exactly one of payment_token or payment_method_id;
+// a saved method must belong to the caller. The NMI executor charges with the
+// token or vaulted method, so both inputs are genuinely consumed downstream.
+func (s *CheckoutSessionService) validateNMIInput(ctx context.Context, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
+	hasToken := strings.TrimSpace(payment.PaymentToken) != ""
+	hasMethod := strings.TrimSpace(payment.PaymentMethodID) != ""
+	if hasToken == hasMethod {
+		return fmt.Errorf("%w: provide either payment_token or payment_method_id", ErrCheckoutSessionValidation)
+	}
+	if hasMethod {
+		pmID, err := api.ParsePaymentMethodID(payment.PaymentMethodID)
+		if err != nil {
+			return fmt.Errorf("%w: invalid payment_method_id", ErrCheckoutSessionValidation)
+		}
+		if s.paymentMethodService == nil {
+			return fmt.Errorf("%w: payment method service unavailable", ErrCheckoutSessionValidation)
+		}
+		if err := s.paymentMethodService.ValidateOwnership(ctx, pmID, user.ID); err != nil {
+			return fmt.Errorf("%w: payment method not authorized", ErrCheckoutSessionValidation)
+		}
+	}
 	return nil
+}
+
+// validateStripeInput validates inputs for Stripe hosted Checkout. Stripe's
+// hosted page collects the customer's email and billing address itself, and
+// createStripeCheckoutSession sends none of those fields, so they are NOT
+// required here. Saved payment methods are not supported in the redirect flow.
+func (s *CheckoutSessionService) validateStripeInput(payment *CheckoutSessionPaymentRequest) error {
+	if strings.TrimSpace(payment.PaymentMethodID) != "" {
+		return fmt.Errorf("%w: saved payment methods are not supported for stripe checkout", ErrCheckoutSessionValidation)
+	}
+	return nil
+}
+
+// validateSolanaInput requires a token symbol so the executor can resolve which
+// SPL mint to charge.
+func (s *CheckoutSessionService) validateSolanaInput(payment *CheckoutSessionPaymentRequest) error {
+	if strings.TrimSpace(payment.TokenSymbol) == "" {
+		return fmt.Errorf("%w: token_symbol is required", ErrCheckoutSessionValidation)
+	}
+	return nil
+}
+
+// validateCCBillInput requires billing fields: CCBill's FlexForm flow submits
+// them with the charge, so they are genuinely consumed.
+func (s *CheckoutSessionService) validateCCBillInput(payment *CheckoutSessionPaymentRequest) error {
+	return requireBillingFields(payment)
 }
 
 func (s *CheckoutSessionService) initializeSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {

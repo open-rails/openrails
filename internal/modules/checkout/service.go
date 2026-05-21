@@ -941,6 +941,7 @@ func (s *CheckoutService) processStripeSubscription(
 		SuccessURL:        successURL,
 		CancelURL:         cancelURL,
 		UserID:            user.ID,
+		CustomerEmail:     userEmail(user),
 		InternalPriceID:   price.ID.String(),
 		TrialEnd:          trialEnd,
 		CheckoutSessionID: req.CheckoutSessionID,
@@ -988,6 +989,7 @@ func (s *CheckoutService) processStripePayment(
 		SuccessURL:        successURL,
 		CancelURL:         cancelURL,
 		UserID:            user.ID,
+		CustomerEmail:     userEmail(user),
 		InternalPriceID:   price.ID.String(),
 		CheckoutSessionID: req.CheckoutSessionID,
 	})
@@ -1000,6 +1002,16 @@ func (s *CheckoutService) processStripePayment(
 		Message:     "Redirect to Stripe checkout",
 		RedirectURL: urlStr,
 	}, nil
+}
+
+// userEmail returns the caller's email when present, so Stripe Checkout can
+// prefill it on the hosted page and route the receipt. Empty when unknown —
+// Stripe collects it on the page in that case.
+func userEmail(user *UserIdentity) string {
+	if user == nil || user.Email == nil {
+		return ""
+	}
+	return strings.TrimSpace(*user.Email)
 }
 
 func getStripePriceID(price *models.Price) (string, error) {
@@ -1023,6 +1035,7 @@ type stripeCheckoutParams struct {
 	SuccessURL        string
 	CancelURL         string
 	UserID            string
+	CustomerEmail     string
 	InternalPriceID   string
 	TrialEnd          int64
 	CheckoutSessionID string
@@ -1038,6 +1051,9 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	values.Set("success_url", params.SuccessURL)
 	values.Set("cancel_url", params.CancelURL)
 	values.Set("client_reference_id", params.UserID)
+	if email := strings.TrimSpace(params.CustomerEmail); email != "" {
+		values.Set("customer_email", email)
+	}
 	values.Set("line_items[0][price]", params.PriceID)
 	values.Set("line_items[0][quantity]", "1")
 	values.Set("metadata[user_id]", params.UserID)
