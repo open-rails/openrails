@@ -444,13 +444,7 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 			// (amount/currency) drifted, we cannot UPDATE the remote price — mint a
 			// new one (CreatePrice transfers the lookup_key off the old price) and
 			// archive the old. Mutable-only drift (active) is propagated normally.
-			immutableDrift := false
-			for _, df := range state.Drift {
-				if df.Field == "unit_amount" || df.Field == "currency" {
-					immutableDrift = true
-					break
-				}
-			}
+			immutableDrift := hasImmutablePriceDrift(state.Drift)
 			if name == "stripe" && immutableDrift {
 				if !opts.Recreate {
 					actions[name] = "drifted_no_recreate"
@@ -522,6 +516,21 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 		}
 	}
 	return &ReconcileResult{Providers: finalStates, Actions: actions}, nil
+}
+
+// hasImmutablePriceDrift reports whether any of the drifted fields are immutable
+// price terms (unit_amount / currency). Stripe and NMI prices cannot be edited
+// on these fields in place, so a true result forces the re-mint path (create a
+// new price + transfer_lookup_key + archive the old) rather than a plain Update.
+// Pure predicate so the reconcile decision is unit-testable without a live
+// Stripe account or the DB harness.
+func hasImmutablePriceDrift(drift []DriftField) bool {
+	for _, df := range drift {
+		if df.Field == "unit_amount" || df.Field == "currency" {
+			return true
+		}
+	}
+	return false
 }
 
 // remintStripePrice mints a fresh Stripe Price for the OpenRails price under its

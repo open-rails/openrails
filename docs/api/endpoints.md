@@ -371,6 +371,52 @@ Auto-create support:
 ### PATCH /v1/catalog/prices/{id}
 Update price display name, processors mapping, or active status.
 
+### Provider registration & content-addressed dedup
+
+When the catalog is synced, OpenRails find-or-creates the matching provider
+objects. Matching is **content-addressed** — it keys off the catalog slugs, not
+the OpenRails row UUIDs — so re-syncing or wiping the DB and re-syncing always
+re-attaches to the existing provider objects rather than duplicating them.
+
+- **Price identity** is `(product_slug, price_slug)`.
+- **Stripe content keys** derived from those slugs:
+  - Price `lookup_key` = `openrails.<product_slug>.<price_slug>`.
+  - Price metadata `openrails_price_key` = `<product_slug>.<price_slug>`.
+  - Product metadata `openrails_product_key` = `<product_slug>`.
+- These keys depend only on the slugs, so a DB-wipe-and-resync that regenerates
+  UUIDs reattaches to the same Stripe objects. Re-sync is idempotent: re-attach,
+  never duplicate. Reconciliation reverse-matches Stripe objects to OpenRails
+  rows the same way (by content key, falling back from `openrails_price_key`
+  metadata to the `openrails.` lookup_key prefix).
+
+**Provider coverage:**
+
+| Provider | Registration |
+|----------|--------------|
+| Stripe | **Auto-creates** products and prices on sync (and stamps the content keys above). |
+| Mobius / NMI | **Link-only** — the operator must supply the existing NMI/mobius `plan_id` in the catalog. Not auto-created. |
+| CCBill | **Link-only** — the operator must supply the CCBill `form_name` + `flex_id` (FlexForm) in the catalog. Not auto-created. |
+
+A link-only provider with no operator-supplied ids is recorded as
+`pending_manual_link` (the price is still created in OpenRails) and the response
+carries a `pending_manual_actions` entry telling the operator which link ids to
+PATCH in.
+
+**Amount / billing-cycle changes (re-mint):** Stripe and NMI prices are
+immutable on financial terms — `unit_amount`, `currency`, and the billing cycle
+cannot be edited in place. When such a field changes on a slug-stable price,
+reconcile **re-mints**: it creates a new Stripe price (which sets
+`transfer_lookup_key`, atomically moving the content `lookup_key` off the old
+price onto the new one) and archives the old price. Mutable-only drift (active
+flag) is propagated with a plain update. Re-mint requires `recreate=true` on the
+reconcile call; otherwise the price reports `drifted_no_recreate` / a missing
+remote reports `missing_no_recreate`.
+
+**Mode (test vs. live):** registration runs in whatever mode `test_mode`
+selects. Stripe test and live are entirely separate namespaces (separate objects
+and lookup_keys), so a price registered in test mode is never matched against a
+live object and vice versa.
+
 ## Admin API (`/v1/admin`, JWT + `admin` role)
 
 ### GET /v1/admin/subscriptions

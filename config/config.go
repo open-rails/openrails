@@ -618,16 +618,18 @@ func validateStripeKeyForTestMode(cfg *Config) {
 		return // No key configured, nothing to validate
 	}
 
-	isLiveKey := strings.HasPrefix(secretKey, "sk_live_")
-	isTestKey := strings.HasPrefix(secretKey, "sk_test_")
+	// Both standard secret keys (sk_*) and restricted keys (rk_*) carry the
+	// live/test mode in their prefix, so classify either form.
+	isLiveKey := strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
+	isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
 
 	if cfg.IsTestMode() && isLiveKey {
 		log.Warn("⚠️  Stripe live key provided but test_mode is enabled - disabling Stripe")
-		log.Warn("   Use sk_test_* key when test_mode=true, or set test_mode=false for production")
+		log.Warn("   Use a test-mode key (sk_test_/rk_test_) when test_mode=true, or set test_mode=false for production")
 		stripeProc.SecretKey = ""
 	} else if !cfg.IsTestMode() && isTestKey {
 		log.Warn("⚠️  Stripe test key provided but test_mode is disabled (production) - disabling Stripe")
-		log.Warn("   Use sk_live_* key when test_mode=false, or set test_mode=true for testing")
+		log.Warn("   Use a live-mode key (sk_live_/rk_live_) when test_mode=false, or set test_mode=true for testing")
 		stripeProc.SecretKey = ""
 	}
 }

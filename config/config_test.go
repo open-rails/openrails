@@ -328,6 +328,73 @@ func TestStripeKeyModeCompatibility(t *testing.T) {
 	})
 }
 
+// stripeModeTestConfig builds a minimal Config with a single Stripe processor
+// carrying the given secret key and the given test_mode setting.
+func stripeModeTestConfig(secretKey string, testMode bool) *Config {
+	tm := testMode
+	return &Config{
+		TestMode: &tm,
+		Processors: map[string]*ProcessorConfig{
+			"stripe": {
+				Type:      string(ProcessorTypeStripe),
+				SecretKey: secretKey,
+			},
+		},
+	}
+}
+
+func TestValidateStripeKeyForTestMode(t *testing.T) {
+	// Standard secret keys (sk_*)
+	t.Run("sk_live_ + test_mode=true disables Stripe", func(t *testing.T) {
+		cfg := stripeModeTestConfig("sk_live_abc123", true)
+		validateStripeKeyForTestMode(cfg)
+		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "live key in test mode should be disabled")
+	})
+
+	t.Run("sk_test_ + test_mode=true allowed", func(t *testing.T) {
+		cfg := stripeModeTestConfig("sk_test_abc123", true)
+		validateStripeKeyForTestMode(cfg)
+		assert.Equal(t, "sk_test_abc123", cfg.Processors["stripe"].SecretKey, "test key in test mode should be kept")
+	})
+
+	t.Run("sk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
+		cfg := stripeModeTestConfig("sk_test_abc123", false)
+		validateStripeKeyForTestMode(cfg)
+		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "test key in live mode should be disabled")
+	})
+
+	t.Run("sk_live_ + test_mode=false allowed", func(t *testing.T) {
+		cfg := stripeModeTestConfig("sk_live_abc123", false)
+		validateStripeKeyForTestMode(cfg)
+		assert.Equal(t, "sk_live_abc123", cfg.Processors["stripe"].SecretKey, "live key in live mode should be kept")
+	})
+
+	// Restricted keys (rk_*) — these must be classified the same as sk_* keys.
+	t.Run("rk_live_ + test_mode=true disables Stripe", func(t *testing.T) {
+		cfg := stripeModeTestConfig("rk_live_abc123", true)
+		validateStripeKeyForTestMode(cfg)
+		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "restricted live key in test mode should be disabled")
+	})
+
+	t.Run("rk_test_ + test_mode=true allowed", func(t *testing.T) {
+		cfg := stripeModeTestConfig("rk_test_abc123", true)
+		validateStripeKeyForTestMode(cfg)
+		assert.Equal(t, "rk_test_abc123", cfg.Processors["stripe"].SecretKey, "restricted test key in test mode should be kept")
+	})
+
+	t.Run("rk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
+		cfg := stripeModeTestConfig("rk_test_abc123", false)
+		validateStripeKeyForTestMode(cfg)
+		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "restricted test key in live mode should be disabled")
+	})
+
+	t.Run("rk_live_ + test_mode=false allowed", func(t *testing.T) {
+		cfg := stripeModeTestConfig("rk_live_abc123", false)
+		validateStripeKeyForTestMode(cfg)
+		assert.Equal(t, "rk_live_abc123", cfg.Processors["stripe"].SecretKey, "restricted live key in live mode should be kept")
+	})
+}
+
 // =============================================================================
 // Feature Flags Tests
 // =============================================================================
