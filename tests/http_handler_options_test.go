@@ -34,7 +34,7 @@ func TestHTTPHandlerOptions_WebhooksOnly(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, w.Code)
 	}
 
-	// Embedded handler should not accept stripped-prefix legacy paths.
+	// Embedded handler should not accept stripped-prefix paths.
 	{
 		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/stripe", nil)
 		w := httptest.NewRecorder()

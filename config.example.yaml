@@ -277,23 +277,35 @@ sendgrid:
 rate_limits:
   subscribe:
     requests_per_minute: 10  # Very restrictive for payment endpoints
-    burst: 3                 # Max burst size (optional)
 
   checkout:
     requests_per_minute: 5   # Heavy rate limiting for checkout
-    burst: 2
 
   webhook:
     requests_per_minute: 100 # Higher for processor webhooks
-    burst: 20
 
   payment:
     requests_per_minute: 20  # Payment method operations
-    burst: 5
 
   default:
     requests_per_minute: 60  # Default for other endpoints
-    burst: 10
+
+# Captcha is enabled after an IP exceeds an extreme rate-limit threshold.
+# The frontend should retry the same request with X-Captcha-Token.
+captcha:
+  enabled: false
+  provider: turnstile # turnstile | recaptcha | hcaptcha
+  site_key: ""
+  secret_key: ""
+  verify_url: "" # optional override
+  challenge_ttl: 15m
+  solved_ttl: 30m
+  extreme_multiplier: 3
+  min_score: 0.5 # used only when provider returns a score
+  challenge_buckets:
+    - checkout
+    - payment-methods
+    - subscriptions
 
 # =============================================================================
 # FEATURE FLAGS (Safety Controls)

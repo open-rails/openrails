@@ -130,7 +130,7 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	e.Use(middleware.SecurityHeaders())
 	e.Use(middleware.CORS(s.cfg.CorsOrigins))
 	e.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
-	e.Use(middleware.RateLimit(s.cfg.RateLimits, s.rdb))
+	e.Use(middleware.RateLimit(s.cfg.RateLimits, s.cfg.Captcha, s.rdb))
 	return e
 }
 

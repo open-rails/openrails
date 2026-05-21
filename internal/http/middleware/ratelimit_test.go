@@ -1,9 +1,16 @@
 package middleware
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,4 +40,117 @@ func TestClassifyBucketMatchesRegisteredRoutes(t *testing.T) {
 			require.Equal(t, tt.want, classifyBucket(tt.path, tt.method))
 		})
 	}
+}
+
+func TestRateLimitEscalatesToCaptchaAfterExtremeHits(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	verifier := &stubCaptchaVerifier{validToken: "valid-token"}
+	cfg := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
+	captchaCfg := &config.CaptchaConfig{
+		Enabled:           true,
+		Provider:          config.CaptchaProviderTurnstile,
+		SiteKey:           "site-key",
+		SecretKey:         "secret-key",
+		ExtremeMultiplier: 3,
+		ChallengeTTL:      "15m",
+		SolvedTTL:         "30m",
+		ChallengeBuckets:  []string{"checkout"},
+	}
+
+	r := gin.New()
+	r.Use(rateLimitWithDependencies(&cfg, captchaCfg, nil, NewRateLimitStore(), captcha.NewChallengeStore(nil), verifier))
+	r.POST("/v1/checkout", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+
+	require.Equal(t, http.StatusOK, performCaptchaTestRequest(r, "").Code)
+	require.Equal(t, http.StatusTooManyRequests, performCaptchaTestRequest(r, "").Code)
+
+	challenged := performCaptchaTestRequest(r, "")
+	require.Equal(t, http.StatusForbidden, challenged.Code)
+	require.Contains(t, challenged.Body.String(), "captcha_required")
+	require.Equal(t, "true", challenged.Header().Get("X-Captcha-Required"))
+
+	invalid := performCaptchaTestRequest(r, "bad-token")
+	require.Equal(t, http.StatusForbidden, invalid.Code)
+	require.Contains(t, invalid.Body.String(), "captcha_invalid")
+
+	solved := performCaptchaTestRequest(r, "valid-token")
+	require.Equal(t, http.StatusOK, solved.Code)
+	require.Equal(t, 2, verifier.calls)
+}
+
+func TestRateLimitDoesNotCaptchaWebhookBucket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := config.RateLimitsConfig{"webhook": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
+	captchaCfg := &config.CaptchaConfig{
+		Enabled:           true,
+		Provider:          config.CaptchaProviderTurnstile,
+		SiteKey:           "site-key",
+		SecretKey:         "secret-key",
+		ExtremeMultiplier: 2,
+		ChallengeBuckets:  []string{"webhook"},
+	}
+
+	r := gin.New()
+	r.Use(rateLimitWithDependencies(&cfg, captchaCfg, nil, NewRateLimitStore(), captcha.NewChallengeStore(nil), &stubCaptchaVerifier{validToken: "valid-token"}))
+	r.POST("/v1/webhooks/stripe", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+
+	require.Equal(t, http.StatusOK, performCaptchaWebhookTestRequest(r).Code)
+	for i := 0; i < 3; i++ {
+		w := performCaptchaWebhookTestRequest(r)
+		require.Equal(t, http.StatusTooManyRequests, w.Code)
+		require.NotContains(t, w.Body.String(), "captcha_required")
+	}
+}
+
+func TestRateLimitStorePrunesExpiredCounters(t *testing.T) {
+	t.Parallel()
+
+	store := NewRateLimitStore()
+	store.counters["expired"] = &inMemoryCounter{count: 1, reset: time.Now().Add(-time.Minute)}
+
+	result := store.Allow("203.0.113.30", "checkout", &config.RateLimit{RequestsPerMinute: 10})
+	require.True(t, result.allowed)
+	require.NotContains(t, store.counters, "expired")
+}
+
+func TestRateLimitStoreBoundsCounters(t *testing.T) {
+	t.Parallel()
+
+	store := NewRateLimitStore()
+	for i := 0; i < maxInMemoryRateLimitCounters; i++ {
+		store.counters[fmt.Sprintf("checkout:203.0.113.%d", i)] = &inMemoryCounter{count: 1, reset: time.Now().Add(time.Hour)}
+	}
+
+	result := store.Allow("203.0.113.31", "checkout", &config.RateLimit{RequestsPerMinute: 10})
+	require.True(t, result.allowed)
+	require.LessOrEqual(t, len(store.counters), maxInMemoryRateLimitCounters)
+}
+
+type stubCaptchaVerifier struct {
+	validToken string
+	calls      int
+}
+
+func (s *stubCaptchaVerifier) Verify(ctx context.Context, req captcha.VerifyRequest) (*captcha.VerifyResult, error) {
+	s.calls++
+	return &captcha.VerifyResult{Success: req.Token == s.validToken}, nil
+}
+
+func performCaptchaTestRequest(r http.Handler, token string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/v1/checkout", nil)
+	req.RemoteAddr = "203.0.113.10:1234"
+	if token != "" {
+		req.Header.Set(captcha.TokenHeader, token)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func performCaptchaWebhookTestRequest(r http.Handler) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/stripe", nil)
+	req.RemoteAddr = "203.0.113.20:1234"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
 }

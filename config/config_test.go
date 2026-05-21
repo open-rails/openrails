@@ -105,6 +105,86 @@ func TestLoad_MobiusProcessorRequiresExplicitType(t *testing.T) {
 	assert.ErrorContains(t, err, "processor 'mobius' must declare a type")
 }
 
+func TestValidateCaptchaRequiresKeysWhenEnabled(t *testing.T) {
+	cfg := GetDefaultBillingConfig()
+	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
+	cfg.Captcha.Enabled = true
+	cfg.Captcha.Provider = CaptchaProviderTurnstile
+	cfg.Captcha.SiteKey = ""
+	cfg.Captcha.SecretKey = "secret-key"
+
+	err := Validate(cfg)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "site_key is required")
+
+	cfg.Captcha.SiteKey = "site-key"
+	err = Validate(cfg)
+	assert.NoError(t, err)
+}
+
+func TestValidateCaptchaRejectsInvalidSettings(t *testing.T) {
+	tests := []struct {
+		name      string
+		mutate    func(*CaptchaConfig)
+		wantError string
+	}{
+		{
+			name:      "invalid verify url",
+			mutate:    func(c *CaptchaConfig) { c.VerifyURL = "://bad" },
+			wantError: "invalid verify_url",
+		},
+		{
+			name:      "unsupported verify url scheme",
+			mutate:    func(c *CaptchaConfig) { c.VerifyURL = "ftp://captcha.example/siteverify" },
+			wantError: "verify_url must use http or https",
+		},
+		{
+			name:      "invalid challenge ttl",
+			mutate:    func(c *CaptchaConfig) { c.ChallengeTTL = "soon" },
+			wantError: "invalid challenge_ttl",
+		},
+		{
+			name:      "negative solved ttl",
+			mutate:    func(c *CaptchaConfig) { c.SolvedTTL = "-1m" },
+			wantError: "solved_ttl must be positive",
+		},
+		{
+			name:      "invalid score",
+			mutate:    func(c *CaptchaConfig) { c.MinScore = 1.5 },
+			wantError: "min_score must be between 0 and 1",
+		},
+		{
+			name:      "empty buckets",
+			mutate:    func(c *CaptchaConfig) { c.ChallengeBuckets = []string{" ", ""} },
+			wantError: "challenge_buckets must include at least one non-empty bucket",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := GetDefaultBillingConfig()
+			cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
+			cfg.Captcha.Enabled = true
+			cfg.Captcha.Provider = CaptchaProviderTurnstile
+			cfg.Captcha.SiteKey = "site-key"
+			cfg.Captcha.SecretKey = "secret-key"
+			tt.mutate(cfg.Captcha)
+
+			err := Validate(cfg)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, tt.wantError)
+		})
+	}
+}
+
+func TestCaptchaConfigDefaults(t *testing.T) {
+	cfg := &CaptchaConfig{}
+	assert.Equal(t, CaptchaProviderTurnstile, cfg.EffectiveProvider())
+	assert.Equal(t, "https://challenges.cloudflare.com/turnstile/v0/siteverify", cfg.EffectiveVerifyURL())
+	assert.Equal(t, 3, cfg.EffectiveExtremeMultiplier())
+	assert.Equal(t, "checkout", cfg.EffectiveChallengeBuckets()[0])
+}
+
 func TestLoad_EnvTrimming(t *testing.T) {
 	t.Setenv("DB_HOST", "  example.com  ")
 	t.Setenv("DB_USERNAME", "  user  ")

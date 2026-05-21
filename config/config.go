@@ -125,6 +125,7 @@ type Config struct {
 	Pyth         *PythConfig       `koanf:"pyth,omitempty"`
 	CorsOrigins  []string          `koanf:"cors_origins,omitempty"`
 	RateLimits   *RateLimitsConfig `koanf:"rate_limits,omitempty"`
+	Captcha      *CaptchaConfig    `koanf:"captcha,omitempty"`
 	FeatureFlags *FeatureFlags     `koanf:"feature_flags,omitempty"`
 }
 
@@ -545,9 +546,98 @@ type LoggerConfig struct {
 type RateLimit struct {
 	// RequestsPerMinute is the maximum number of requests allowed per minute.
 	RequestsPerMinute int `koanf:"requests_per_minute"`
-	// Burst is the maximum burst size (optional, defaults to RequestsPerMinute).
-	// Reserved for future use with token bucket algorithms.
-	Burst int `koanf:"burst"`
+}
+
+const (
+	CaptchaProviderTurnstile = "turnstile"
+	CaptchaProviderRecaptcha = "recaptcha"
+	CaptchaProviderHCaptcha  = "hcaptcha"
+)
+
+// CaptchaConfig controls captcha challenges enabled after extreme rate-limit hits.
+type CaptchaConfig struct {
+	Enabled           bool     `koanf:"enabled"`
+	Provider          string   `koanf:"provider"`
+	SiteKey           string   `koanf:"site_key"`
+	SecretKey         string   `koanf:"secret_key"`
+	VerifyURL         string   `koanf:"verify_url"`
+	MinScore          float64  `koanf:"min_score"`
+	ChallengeTTL      string   `koanf:"challenge_ttl"`
+	SolvedTTL         string   `koanf:"solved_ttl"`
+	ExtremeMultiplier int      `koanf:"extreme_multiplier"`
+	ChallengeBuckets  []string `koanf:"challenge_buckets"`
+}
+
+func (c *CaptchaConfig) EffectiveProvider() string {
+	if c == nil || strings.TrimSpace(c.Provider) == "" {
+		return CaptchaProviderTurnstile
+	}
+	return strings.ToLower(strings.TrimSpace(c.Provider))
+}
+
+func (c *CaptchaConfig) EffectiveVerifyURL() string {
+	if c == nil || strings.TrimSpace(c.VerifyURL) == "" {
+		switch c.EffectiveProvider() {
+		case CaptchaProviderRecaptcha:
+			return "https://www.google.com/recaptcha/api/siteverify"
+		case CaptchaProviderHCaptcha:
+			return "https://hcaptcha.com/siteverify"
+		default:
+			return "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+		}
+	}
+	return strings.TrimSpace(c.VerifyURL)
+}
+
+func (c *CaptchaConfig) EffectiveChallengeTTL() time.Duration {
+	return parseDurationDefault(c.durationValue(func(c *CaptchaConfig) string { return c.ChallengeTTL }), 15*time.Minute)
+}
+
+func (c *CaptchaConfig) EffectiveSolvedTTL() time.Duration {
+	return parseDurationDefault(c.durationValue(func(c *CaptchaConfig) string { return c.SolvedTTL }), 30*time.Minute)
+}
+
+func (c *CaptchaConfig) EffectiveExtremeMultiplier() int {
+	if c == nil || c.ExtremeMultiplier <= 0 {
+		return 3
+	}
+	return c.ExtremeMultiplier
+}
+
+func (c *CaptchaConfig) EffectiveMinScore() float64 {
+	if c == nil || c.MinScore <= 0 {
+		return 0.5
+	}
+	return c.MinScore
+}
+
+func (c *CaptchaConfig) EffectiveChallengeBuckets() []string {
+	if c == nil || len(c.ChallengeBuckets) == 0 {
+		return []string{"checkout", "payment-methods", "subscriptions"}
+	}
+	out := make([]string, 0, len(c.ChallengeBuckets))
+	for _, bucket := range c.ChallengeBuckets {
+		bucket = strings.ToLower(strings.TrimSpace(bucket))
+		if bucket != "" {
+			out = append(out, bucket)
+		}
+	}
+	return out
+}
+
+func (c *CaptchaConfig) durationValue(get func(*CaptchaConfig) string) string {
+	if c == nil {
+		return ""
+	}
+	return get(c)
+}
+
+func parseDurationDefault(raw string, fallback time.Duration) time.Duration {
+	d, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
 }
 
 // Validate validates the billing configuration
@@ -601,12 +691,76 @@ func Validate(cfg *Config) error {
 	// Validate Stripe key prefix matches test_mode
 	// This runs after processor validation to check the key we'll actually use
 	validateStripeKeyForTestMode(cfg)
+	if err := validateCaptcha(cfg.Captcha); err != nil {
+		return fmt.Errorf("captcha config validation failed: %w", err)
+	}
 
 	// Always validate database configuration
 	if err := validateDatabase(cfg.DB); err != nil {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
 
+	return nil
+}
+
+func validateCaptcha(cfg *CaptchaConfig) error {
+	if cfg == nil || !cfg.Enabled {
+		return nil
+	}
+
+	switch cfg.EffectiveProvider() {
+	case CaptchaProviderTurnstile, CaptchaProviderRecaptcha, CaptchaProviderHCaptcha:
+	default:
+		return fmt.Errorf("unsupported provider %q", cfg.Provider)
+	}
+
+	if strings.TrimSpace(cfg.SiteKey) == "" {
+		return fmt.Errorf("site_key is required when captcha is enabled")
+	}
+	if strings.TrimSpace(cfg.SecretKey) == "" {
+		return fmt.Errorf("secret_key is required when captcha is enabled")
+	}
+	if rawURL := strings.TrimSpace(cfg.VerifyURL); rawURL != "" {
+		parsed, err := url.Parse(rawURL)
+		if err != nil {
+			return fmt.Errorf("invalid verify_url: %w", err)
+		}
+		if parsed.Scheme != "https" && parsed.Scheme != "http" {
+			return fmt.Errorf("verify_url must use http or https")
+		}
+		if parsed.Host == "" {
+			return fmt.Errorf("verify_url must include a host")
+		}
+	}
+	if err := validateOptionalDuration("challenge_ttl", cfg.ChallengeTTL); err != nil {
+		return err
+	}
+	if err := validateOptionalDuration("solved_ttl", cfg.SolvedTTL); err != nil {
+		return err
+	}
+	if cfg.MinScore < 0 || cfg.MinScore > 1 {
+		return fmt.Errorf("min_score must be between 0 and 1")
+	}
+	if cfg.ExtremeMultiplier < 0 {
+		return fmt.Errorf("extreme_multiplier cannot be negative")
+	}
+	if len(cfg.ChallengeBuckets) > 0 && len(cfg.EffectiveChallengeBuckets()) == 0 {
+		return fmt.Errorf("challenge_buckets must include at least one non-empty bucket")
+	}
+	return nil
+}
+
+func validateOptionalDuration(name, raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("invalid %s: %w", name, err)
+	}
+	if d <= 0 {
+		return fmt.Errorf("%s must be positive", name)
+	}
 	return nil
 }
 
@@ -993,24 +1147,28 @@ func GetDefaultBillingConfig() *Config {
 		RateLimits: &RateLimitsConfig{
 			"subscribe": &RateLimit{
 				RequestsPerMinute: 10, // Very restrictive for payment endpoints
-				Burst:             3,
 			},
 			"checkout": &RateLimit{
 				RequestsPerMinute: 5, // Heavy rate limiting for checkout - prevents abuse
-				Burst:             2,
 			},
 			"webhook": &RateLimit{
 				RequestsPerMinute: 100, // Higher for webhooks
-				Burst:             20,
 			},
 			"payment": &RateLimit{
 				RequestsPerMinute: 20,
-				Burst:             5,
 			},
 			"default": &RateLimit{
 				RequestsPerMinute: 60,
-				Burst:             10,
 			},
+		},
+		Captcha: &CaptchaConfig{
+			Enabled:           false,
+			Provider:          CaptchaProviderTurnstile,
+			ChallengeTTL:      "15m",
+			SolvedTTL:         "30m",
+			ExtremeMultiplier: 3,
+			MinScore:          0.5,
+			ChallengeBuckets:  []string{"checkout", "payment-methods", "subscriptions"},
 		},
 		FeatureFlags: &FeatureFlags{
 			DunningMode:                  DunningModeOn,

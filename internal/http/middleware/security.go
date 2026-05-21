@@ -62,6 +62,7 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 		"X-Real-IP",
 		"X-Idempotency-Key",
 		"X-E2E-Run-ID",
+		"X-Captcha-Token",
 		"Accept-Language",
 	)
 
@@ -77,6 +78,7 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 		"X-Request-ID",
 		"X-RateLimit-Remaining",
 		"X-RateLimit-Reset",
+		"X-Captcha-Required",
 	}
 
 	corsConfig.AllowCredentials = true
