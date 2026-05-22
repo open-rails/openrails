@@ -61,3 +61,28 @@ func (s *ProcessorCustomerService) GetCustomerID(ctx context.Context, userID, pr
 	}
 	return customerID, nil
 }
+
+// GetUserIDByCustomerID reverses GetCustomerID: it resolves the platform user from a
+// processor customer id. Used by webhook handlers (e.g. subscription invoices) whose
+// payloads carry the customer id but not the user_id metadata.
+func (s *ProcessorCustomerService) GetUserIDByCustomerID(ctx context.Context, processor, customerID string) (string, error) {
+	if s == nil || s.DB == nil {
+		return "", fmt.Errorf("processor customer service not initialized")
+	}
+	processor = strings.TrimSpace(processor)
+	customerID = strings.TrimSpace(customerID)
+	if processor == "" || customerID == "" {
+		return "", fmt.Errorf("invalid processor customer args")
+	}
+	var userID string
+	err := s.DB.GetDB().NewSelect().Model((*models.ProcessorCustomer)(nil)).
+		Column("user_id").
+		Where("customer_id = ? AND processor = ?", customerID, processor).
+		Order("updated_at DESC").
+		Limit(1).
+		Scan(ctx, &userID)
+	if err != nil {
+		return "", err
+	}
+	return userID, nil
+}

@@ -192,6 +192,26 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	metadata := stripeInvoiceEffectiveMetadata(inv)
 	userID := normalize.FirstNonEmpty(metadata["user_id"], metadata["userId"], metadata["uid"])
 	if userID == "" {
+		// Stripe subscription invoices do not carry user_id in invoice metadata (it lives
+		// on the checkout session / subscription). Resolve it from the existing subscription
+		// first (renewals), then from the processor customer mapping that
+		// checkout.session.completed records (first invoice). If neither is available yet
+		// (e.g. invoice.paid arrived before checkout.session.completed), return an error so
+		// Stripe retries once the mapping exists.
+		if procSubID := strings.TrimSpace(inv.Subscription); procSubID != "" {
+			if sub, lookupErr := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), procSubID); lookupErr == nil && sub != nil {
+				userID = strings.TrimSpace(sub.UserID)
+			}
+		}
+		if userID == "" && s.ProcessorCustomerService != nil {
+			if customerID := strings.TrimSpace(inv.Customer); customerID != "" {
+				if uid, lookupErr := s.ProcessorCustomerService.GetUserIDByCustomerID(ctx, string(models.ProcessorStripe), customerID); lookupErr == nil {
+					userID = strings.TrimSpace(uid)
+				}
+			}
+		}
+	}
+	if userID == "" {
 		return fmt.Errorf("stripe invoice missing user_id metadata")
 	}
 	if s.ProcessorCustomerService != nil {
