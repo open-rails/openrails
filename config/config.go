@@ -563,7 +563,6 @@ type CaptchaConfig struct {
 	VerifyURL         string   `koanf:"verify_url"`
 	MinScore          float64  `koanf:"min_score"`
 	ChallengeTTL      string   `koanf:"challenge_ttl"`
-	SolvedTTL         string   `koanf:"solved_ttl"`
 	ExtremeMultiplier int      `koanf:"extreme_multiplier"`
 	ChallengeBuckets  []string `koanf:"challenge_buckets"`
 }
@@ -591,10 +590,6 @@ func (c *CaptchaConfig) EffectiveVerifyURL() string {
 
 func (c *CaptchaConfig) EffectiveChallengeTTL() time.Duration {
 	return parseDurationDefault(c.durationValue(func(c *CaptchaConfig) string { return c.ChallengeTTL }), 15*time.Minute)
-}
-
-func (c *CaptchaConfig) EffectiveSolvedTTL() time.Duration {
-	return parseDurationDefault(c.durationValue(func(c *CaptchaConfig) string { return c.SolvedTTL }), 30*time.Minute)
 }
 
 func (c *CaptchaConfig) EffectiveExtremeMultiplier() int {
@@ -725,17 +720,14 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 		if err != nil {
 			return fmt.Errorf("invalid verify_url: %w", err)
 		}
-		if parsed.Scheme != "https" && parsed.Scheme != "http" {
-			return fmt.Errorf("verify_url must use http or https")
+		if parsed.Scheme != "https" {
+			return fmt.Errorf("verify_url must use https")
 		}
 		if parsed.Host == "" {
 			return fmt.Errorf("verify_url must include a host")
 		}
 	}
 	if err := validateOptionalDuration("challenge_ttl", cfg.ChallengeTTL); err != nil {
-		return err
-	}
-	if err := validateOptionalDuration("solved_ttl", cfg.SolvedTTL); err != nil {
 		return err
 	}
 	if cfg.MinScore < 0 || cfg.MinScore > 1 {
@@ -1165,7 +1157,6 @@ func GetDefaultBillingConfig() *Config {
 			Enabled:           false,
 			Provider:          CaptchaProviderTurnstile,
 			ChallengeTTL:      "15m",
-			SolvedTTL:         "30m",
 			ExtremeMultiplier: 3,
 			MinScore:          0.5,
 			ChallengeBuckets:  []string{"checkout", "payment-methods", "subscriptions"},

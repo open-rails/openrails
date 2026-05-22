@@ -2,15 +2,47 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
 func (s *Server) registerUserRoutesAt(e *gin.Engine, apiPrefix string) {
 	api := e.Group(apiPrefix)
+	api.GET("/captcha/status", s.captchaStatusHandler)
 	httproutes.RegisterUserRoutes(api, s.runtime, httproutes.Options{AuthProvider: s.authProvider})
+}
+
+func (s *Server) captchaStatusHandler(c *gin.Context) {
+	var cfg *config.CaptchaConfig
+	if s != nil && s.cfg != nil {
+		cfg = s.cfg.Captcha
+	}
+	resp := gin.H{
+		"enabled":      cfg != nil && cfg.Enabled,
+		"required":     false,
+		"token_header": captcha.TokenHeader,
+	}
+	if cfg == nil || !cfg.Enabled || s.captchaStore == nil {
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+
+	clientIP := middleware.ClientIP(c)
+	required, err := s.captchaStore.IsChallenged(c.Request.Context(), clientIP)
+	if err != nil {
+		required = false
+	}
+
+	resp["required"] = required
+	resp["provider"] = cfg.EffectiveProvider()
+	resp["site_key"] = strings.TrimSpace(cfg.SiteKey)
+	c.JSON(http.StatusOK, resp)
 }
 
 func (s *Server) registerUserRoutes(e *gin.Engine) {

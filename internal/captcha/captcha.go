@@ -55,7 +55,6 @@ type ChallengeStore struct {
 	rdb        *redis.Client
 	mu         sync.Mutex
 	challenged map[string]time.Time
-	solved     map[string]time.Time
 }
 
 // NewVerifier returns a provider-neutral captcha verifier when captcha is enabled.
@@ -135,33 +134,22 @@ func NewChallengeStore(rdb *redis.Client) *ChallengeStore {
 	return &ChallengeStore{
 		rdb:        rdb,
 		challenged: make(map[string]time.Time),
-		solved:     make(map[string]time.Time),
 	}
 }
 
-// IsChallenged reports whether bucket/ip currently requires captcha solving.
-func (s *ChallengeStore) IsChallenged(ctx context.Context, bucket, ip string) (bool, error) {
-	return s.exists(ctx, s.challengeRedisKey(bucket, ip), s.memoryKey(bucket, ip), s.challenged)
+// IsChallenged reports whether ip currently requires captcha solving.
+func (s *ChallengeStore) IsChallenged(ctx context.Context, ip string) (bool, error) {
+	return s.exists(ctx, s.challengeRedisKey(ip), s.memoryKey(ip), s.challenged)
 }
 
-// MarkChallenged records that bucket/ip must solve captcha.
-func (s *ChallengeStore) MarkChallenged(ctx context.Context, bucket, ip string, ttl time.Duration) error {
-	return s.set(ctx, s.challengeRedisKey(bucket, ip), s.memoryKey(bucket, ip), s.challenged, ttl)
+// MarkChallenged records that ip must solve captcha.
+func (s *ChallengeStore) MarkChallenged(ctx context.Context, ip string, ttl time.Duration) error {
+	return s.set(ctx, s.challengeRedisKey(ip), s.memoryKey(ip), s.challenged, ttl)
 }
 
-// ClearChallenged removes the captcha challenge marker for bucket/ip.
-func (s *ChallengeStore) ClearChallenged(ctx context.Context, bucket, ip string) error {
-	return s.del(ctx, s.challengeRedisKey(bucket, ip), s.memoryKey(bucket, ip), s.challenged)
-}
-
-// IsSolved reports whether bucket/ip has recently solved captcha.
-func (s *ChallengeStore) IsSolved(ctx context.Context, bucket, ip string) (bool, error) {
-	return s.exists(ctx, s.solvedRedisKey(bucket, ip), s.memoryKey(bucket, ip), s.solved)
-}
-
-// MarkSolved records that bucket/ip has solved captcha.
-func (s *ChallengeStore) MarkSolved(ctx context.Context, bucket, ip string, ttl time.Duration) error {
-	return s.set(ctx, s.solvedRedisKey(bucket, ip), s.memoryKey(bucket, ip), s.solved, ttl)
+// ClearChallenged removes the captcha challenge marker for ip.
+func (s *ChallengeStore) ClearChallenged(ctx context.Context, ip string) error {
+	return s.del(ctx, s.challengeRedisKey(ip), s.memoryKey(ip), s.challenged)
 }
 
 func (s *ChallengeStore) exists(ctx context.Context, redisKey, memoryKey string, memory map[string]time.Time) (bool, error) {
@@ -201,9 +189,7 @@ func (s *ChallengeStore) set(ctx context.Context, redisKey, memoryKey string, me
 		ttl = 15 * time.Minute
 	}
 	if s.rdb != nil {
-		if err := s.rdb.Set(ctx, redisKey, "1", ttl).Err(); err == nil {
-			return nil
-		} else {
+		if err := s.rdb.Set(ctx, redisKey, "1", ttl).Err(); err != nil {
 			log.WithError(err).Warn("captcha redis set failed; using in-memory store")
 		}
 	}
@@ -230,16 +216,12 @@ func (s *ChallengeStore) del(ctx context.Context, redisKey, memoryKey string, me
 	return nil
 }
 
-func (s *ChallengeStore) challengeRedisKey(bucket, ip string) string {
-	return "captcha:challenge:" + bucket + ":" + ip
+func (s *ChallengeStore) challengeRedisKey(ip string) string {
+	return "captcha:challenge:" + ip
 }
 
-func (s *ChallengeStore) solvedRedisKey(bucket, ip string) string {
-	return "captcha:solved:" + bucket + ":" + ip
-}
-
-func (s *ChallengeStore) memoryKey(bucket, ip string) string {
-	return bucket + ":" + ip
+func (s *ChallengeStore) memoryKey(ip string) string {
+	return ip
 }
 
 func (s *ChallengeStore) pruneLocked(memory map[string]time.Time, now time.Time) {

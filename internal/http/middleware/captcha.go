@@ -34,16 +34,14 @@ func verifyCaptchaChallenge(c *gin.Context, cfg *config.CaptchaConfig, verifier 
 		writeCaptchaInvalid(c, "captcha invalid")
 		return false
 	}
-	if err := challengeStore.MarkSolved(c.Request.Context(), bucket, clientIP, cfg.EffectiveSolvedTTL()); err != nil {
-		log.WithError(err).WithField("bucket", bucket).Warn("failed to mark captcha solved")
-	}
-	if err := challengeStore.ClearChallenged(c.Request.Context(), bucket, clientIP); err != nil {
+	if err := challengeStore.ClearChallenged(c.Request.Context(), clientIP); err != nil {
 		log.WithError(err).WithField("bucket", bucket).Warn("failed to clear captcha challenge")
 	}
-	if err := resetRedisRateLimit(c.Request.Context(), rdb, clientIP, bucket); err != nil {
+	resetBuckets := cfg.EffectiveChallengeBuckets()
+	if err := resetRedisRateLimitBuckets(c.Request.Context(), rdb, clientIP, resetBuckets); err != nil {
 		log.WithError(err).WithField("bucket", bucket).Warn("failed to reset redis rate limit after captcha")
 	}
-	rateStore.Reset(clientIP, bucket)
+	rateStore.ResetBuckets(clientIP, resetBuckets)
 	return true
 }
 

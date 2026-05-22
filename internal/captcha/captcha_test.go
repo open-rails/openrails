@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"testing"
 	"time"
@@ -16,16 +17,26 @@ import (
 func TestVerifierPostsSiteVerifyForm(t *testing.T) {
 	t.Parallel()
 
+	type observedRequest struct {
+		method      string
+		contentType string
+		form        url.Values
+		err         error
+	}
+	observed := make(chan observedRequest, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodPost, r.Method)
-		require.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
-		require.NoError(t, r.ParseForm())
-		require.Equal(t, "secret-key", r.Form.Get("secret"))
-		require.Equal(t, "response-token", r.Form.Get("response"))
-		require.Equal(t, "203.0.113.5", r.Form.Get("remoteip"))
+		obs := observedRequest{method: r.Method, contentType: r.Header.Get("Content-Type")}
+		if err := r.ParseForm(); err != nil {
+			obs.err = err
+		} else {
+			obs.form = cloneValues(r.Form)
+		}
+		observed <- obs
 
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"success": true}))
+		if err := json.NewEncoder(w).Encode(map[string]any{"success": true}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 	}))
 	defer server.Close()
 
@@ -39,6 +50,22 @@ func TestVerifierPostsSiteVerifyForm(t *testing.T) {
 	result, err := verifier.Verify(context.Background(), VerifyRequest{Token: "response-token", RemoteIP: "203.0.113.5", Bucket: "checkout"})
 	require.NoError(t, err)
 	require.True(t, result.Success)
+
+	obs := <-observed
+	require.NoError(t, obs.err)
+	require.Equal(t, http.MethodPost, obs.method)
+	require.Equal(t, "application/x-www-form-urlencoded", obs.contentType)
+	require.Equal(t, "secret-key", obs.form.Get("secret"))
+	require.Equal(t, "response-token", obs.form.Get("response"))
+	require.Equal(t, "203.0.113.5", obs.form.Get("remoteip"))
+}
+
+func cloneValues(values url.Values) url.Values {
+	cloned := make(url.Values, len(values))
+	for key, vals := range values {
+		cloned[key] = append([]string(nil), vals...)
+	}
+	return cloned
 }
 
 func TestVerifierRejectsLowScore(t *testing.T) {
@@ -46,7 +73,9 @@ func TestVerifierRejectsLowScore(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"success": true, "score": 0.4}))
+		if err := json.NewEncoder(w).Encode(map[string]any{"success": true, "score": 0.4}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 	}))
 	defer server.Close()
 
@@ -70,7 +99,7 @@ func TestChallengeStorePrunesExpiredMemoryEntries(t *testing.T) {
 	store := NewChallengeStore(nil)
 	store.challenged["expired"] = time.Now().Add(-time.Minute)
 
-	require.NoError(t, store.MarkChallenged(context.Background(), "checkout", "203.0.113.10", time.Minute))
+	require.NoError(t, store.MarkChallenged(context.Background(), "203.0.113.10", time.Minute))
 	require.NotContains(t, store.challenged, "expired")
 	require.Len(t, store.challenged, 1)
 }
@@ -83,6 +112,6 @@ func TestChallengeStoreBoundsMemoryEntries(t *testing.T) {
 		store.challenged[strconv.Itoa(i)] = time.Now().Add(time.Hour)
 	}
 
-	require.NoError(t, store.MarkChallenged(context.Background(), "checkout", "203.0.113.10", time.Minute))
+	require.NoError(t, store.MarkChallenged(context.Background(), "203.0.113.10", time.Minute))
 	require.LessOrEqual(t, len(store.challenged), maxMemoryEntries)
 }

@@ -53,7 +53,6 @@ func TestRateLimitEscalatesToCaptchaAfterExtremeHits(t *testing.T) {
 		SecretKey:         "secret-key",
 		ExtremeMultiplier: 3,
 		ChallengeTTL:      "15m",
-		SolvedTTL:         "30m",
 		ChallengeBuckets:  []string{"checkout"},
 	}
 
@@ -81,6 +80,8 @@ func TestRateLimitEscalatesToCaptchaAfterExtremeHits(t *testing.T) {
 func TestRateLimitDoesNotCaptchaWebhookBucket(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := config.RateLimitsConfig{"webhook": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
+	challengeStore := captcha.NewChallengeStore(nil)
+	require.NoError(t, challengeStore.MarkChallenged(context.Background(), "203.0.113.20", time.Minute))
 	captchaCfg := &config.CaptchaConfig{
 		Enabled:           true,
 		Provider:          config.CaptchaProviderTurnstile,
@@ -91,7 +92,7 @@ func TestRateLimitDoesNotCaptchaWebhookBucket(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.Use(rateLimitWithDependencies(&cfg, captchaCfg, nil, NewRateLimitStore(), captcha.NewChallengeStore(nil), &stubCaptchaVerifier{validToken: "valid-token"}))
+	r.Use(rateLimitWithDependencies(&cfg, captchaCfg, nil, NewRateLimitStore(), challengeStore, &stubCaptchaVerifier{validToken: "valid-token"}))
 	r.POST("/v1/webhooks/stripe", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
 
 	require.Equal(t, http.StatusOK, performCaptchaWebhookTestRequest(r).Code)
@@ -100,6 +101,43 @@ func TestRateLimitDoesNotCaptchaWebhookBucket(t *testing.T) {
 		require.Equal(t, http.StatusTooManyRequests, w.Code)
 		require.NotContains(t, w.Body.String(), "captcha_required")
 	}
+}
+
+func TestRateLimitCaptchaChallengeIsGlobalAcrossProtectedBuckets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	verifier := &stubCaptchaVerifier{validToken: "valid-token"}
+	cfg := config.RateLimitsConfig{
+		"checkout": {RequestsPerMinute: 1},
+		"payment":  {RequestsPerMinute: 1},
+		"default":  {RequestsPerMinute: 60},
+	}
+	captchaCfg := &config.CaptchaConfig{
+		Enabled:           true,
+		Provider:          config.CaptchaProviderTurnstile,
+		SiteKey:           "site-key",
+		SecretKey:         "secret-key",
+		ExtremeMultiplier: 3,
+		ChallengeTTL:      "15m",
+		ChallengeBuckets:  []string{"checkout", "payment-methods"},
+	}
+
+	r := gin.New()
+	r.Use(rateLimitWithDependencies(&cfg, captchaCfg, nil, NewRateLimitStore(), captcha.NewChallengeStore(nil), verifier))
+	r.POST("/v1/checkout", func(c *gin.Context) { c.String(http.StatusOK, "checkout") })
+	r.POST("/v1/me/payment-methods", func(c *gin.Context) { c.String(http.StatusOK, "payment") })
+
+	require.Equal(t, http.StatusOK, performCaptchaTestRequest(r, "", "/v1/checkout").Code)
+	require.Equal(t, http.StatusTooManyRequests, performCaptchaTestRequest(r, "", "/v1/checkout").Code)
+	require.Equal(t, http.StatusForbidden, performCaptchaTestRequest(r, "", "/v1/checkout").Code)
+
+	challengedPayment := performCaptchaTestRequest(r, "", "/v1/me/payment-methods")
+	require.Equal(t, http.StatusForbidden, challengedPayment.Code)
+	require.Contains(t, challengedPayment.Body.String(), "captcha_required")
+
+	solvedPayment := performCaptchaTestRequest(r, "valid-token", "/v1/me/payment-methods")
+	require.Equal(t, http.StatusOK, solvedPayment.Code)
+
+	require.Equal(t, http.StatusOK, performCaptchaTestRequest(r, "", "/v1/checkout").Code)
 }
 
 func TestRateLimitStorePrunesExpiredCounters(t *testing.T) {
@@ -126,6 +164,24 @@ func TestRateLimitStoreBoundsCounters(t *testing.T) {
 	require.LessOrEqual(t, len(store.counters), maxInMemoryRateLimitCounters)
 }
 
+func TestRateLimitStoreDoesNotEvictWhenReusingExistingCounter(t *testing.T) {
+	t.Parallel()
+
+	store := NewRateLimitStore()
+	ip := "203.0.113.32"
+	key := "checkout:" + ip
+	store.counters[key] = &inMemoryCounter{count: 1, reset: time.Now().Add(time.Hour)}
+	for i := 1; len(store.counters) < maxInMemoryRateLimitCounters; i++ {
+		store.counters[fmt.Sprintf("checkout:198.51.100.%d", i)] = &inMemoryCounter{count: 1, reset: time.Now().Add(time.Hour)}
+	}
+
+	result := store.Allow(ip, "checkout", &config.RateLimit{RequestsPerMinute: 10})
+	require.True(t, result.allowed)
+	require.Len(t, store.counters, maxInMemoryRateLimitCounters)
+	require.Contains(t, store.counters, key)
+	require.Equal(t, 2, store.counters[key].count)
+}
+
 type stubCaptchaVerifier struct {
 	validToken string
 	calls      int
@@ -136,8 +192,12 @@ func (s *stubCaptchaVerifier) Verify(ctx context.Context, req captcha.VerifyRequ
 	return &captcha.VerifyResult{Success: req.Token == s.validToken}, nil
 }
 
-func performCaptchaTestRequest(r http.Handler, token string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/v1/checkout", nil)
+func performCaptchaTestRequest(r http.Handler, token string, paths ...string) *httptest.ResponseRecorder {
+	path := "/v1/checkout"
+	if len(paths) > 0 {
+		path = paths[0]
+	}
+	req := httptest.NewRequest(http.MethodPost, path, nil)
 	req.RemoteAddr = "203.0.113.10:1234"
 	if token != "" {
 		req.Header.Set(captcha.TokenHeader, token)

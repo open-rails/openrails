@@ -208,9 +208,9 @@ func SecurityHeaders() gin.HandlerFunc {
 	}
 }
 
-// getClientIP extracts the socket peer IP. Do not trust forwarded headers unless
+// ClientIP extracts the socket peer IP. Do not trust forwarded headers unless
 // a trusted proxy middleware has already normalized RemoteAddr.
-func getClientIP(c *gin.Context) string {
+func ClientIP(c *gin.Context) string {
 	if c == nil || c.Request == nil {
 		return ""
 	}
@@ -218,4 +218,8 @@ func getClientIP(c *gin.Context) string {
 		return host
 	}
 	return c.Request.RemoteAddr
+}
+
+func getClientIP(c *gin.Context) string {
+	return ClientIP(c)
 }

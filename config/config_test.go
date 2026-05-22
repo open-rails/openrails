@@ -136,17 +136,17 @@ func TestValidateCaptchaRejectsInvalidSettings(t *testing.T) {
 		{
 			name:      "unsupported verify url scheme",
 			mutate:    func(c *CaptchaConfig) { c.VerifyURL = "ftp://captcha.example/siteverify" },
-			wantError: "verify_url must use http or https",
+			wantError: "verify_url must use https",
+		},
+		{
+			name:      "insecure verify url",
+			mutate:    func(c *CaptchaConfig) { c.VerifyURL = "http://captcha.example/siteverify" },
+			wantError: "verify_url must use https",
 		},
 		{
 			name:      "invalid challenge ttl",
 			mutate:    func(c *CaptchaConfig) { c.ChallengeTTL = "soon" },
 			wantError: "invalid challenge_ttl",
-		},
-		{
-			name:      "negative solved ttl",
-			mutate:    func(c *CaptchaConfig) { c.SolvedTTL = "-1m" },
-			wantError: "solved_ttl must be positive",
 		},
 		{
 			name:      "invalid score",

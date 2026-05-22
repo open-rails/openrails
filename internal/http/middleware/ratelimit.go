@@ -46,12 +46,18 @@ func NewRateLimitStore() *RateLimitStore {
 
 // RateLimit enforces per-bucket limits using Redis when available and falling back to an in-memory window.
 func RateLimit(rateLimiterConfig *config.RateLimitsConfig, captchaConfig *config.CaptchaConfig, rdb *redis.Client) gin.HandlerFunc {
+	return RateLimitWithChallengeStore(rateLimiterConfig, captchaConfig, rdb, captcha.NewChallengeStore(rdb))
+}
+
+func RateLimitWithChallengeStore(rateLimiterConfig *config.RateLimitsConfig, captchaConfig *config.CaptchaConfig, rdb *redis.Client, challengeStore *captcha.ChallengeStore) gin.HandlerFunc {
 	if rateLimiterConfig == nil {
 		return func(c *gin.Context) { c.Next() }
 	}
 
+	if challengeStore == nil {
+		challengeStore = captcha.NewChallengeStore(rdb)
+	}
 	store := NewRateLimitStore()
-	challengeStore := captcha.NewChallengeStore(rdb)
 	verifier := captcha.NewVerifier(captchaConfig, nil)
 	return rateLimitWithDependencies(rateLimiterConfig, captchaConfig, rdb, store, challengeStore, verifier)
 }
@@ -67,15 +73,11 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 		clientIP := getClientIP(c)
 		captchaEnabled := captcha.ShouldApply(captchaConfig, bucket)
 		if captchaEnabled && challengeStore != nil {
-			solved, err := challengeStore.IsSolved(c.Request.Context(), bucket, clientIP)
-			if err != nil {
-				log.WithError(err).WithField("bucket", bucket).Warn("captcha solved lookup failed")
-			}
-			challenged, err := challengeStore.IsChallenged(c.Request.Context(), bucket, clientIP)
+			challenged, err := challengeStore.IsChallenged(c.Request.Context(), clientIP)
 			if err != nil {
 				log.WithError(err).WithField("bucket", bucket).Warn("captcha challenge lookup failed")
 			}
-			if challenged && !solved {
+			if challenged {
 				if !verifyCaptchaChallenge(c, captchaConfig, verifier, challengeStore, store, rdb, bucket, clientIP) {
 					return
 				}
@@ -104,7 +106,7 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 
 		if !result.allowed {
 			if captchaEnabled && challengeStore != nil && result.count >= captcha.ExtremeThreshold(limit, captchaConfig) {
-				if err := challengeStore.MarkChallenged(c.Request.Context(), bucket, clientIP, captchaConfig.EffectiveChallengeTTL()); err != nil {
+				if err := challengeStore.MarkChallenged(c.Request.Context(), clientIP, captchaConfig.EffectiveChallengeTTL()); err != nil {
 					log.WithError(err).WithField("bucket", bucket).Warn("failed to mark captcha challenge")
 				}
 				writeCaptchaRequired(c, captchaConfig, bucket)
@@ -147,9 +149,9 @@ func (s *RateLimitStore) Allow(ip, bucket string, limit *config.RateLimit) rateL
 
 	key := fmt.Sprintf("%s:%s", bucket, ip)
 	now := time.Now()
-	s.pruneLocked(now)
 	counter, ok := s.counters[key]
 	if !ok || now.After(counter.reset) {
+		s.pruneLocked(now)
 		counter = &inMemoryCounter{count: 0, reset: now.Add(time.Minute)}
 		s.counters[key] = counter
 	}
@@ -203,6 +205,21 @@ func (s *RateLimitStore) Reset(ip, bucket string) {
 	delete(s.counters, fmt.Sprintf("%s:%s", bucket, ip))
 }
 
+func (s *RateLimitStore) ResetBuckets(ip string, buckets []string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, bucket := range buckets {
+		bucket = strings.ToLower(strings.TrimSpace(bucket))
+		if bucket == "" {
+			continue
+		}
+		delete(s.counters, fmt.Sprintf("%s:%s", bucket, ip))
+	}
+}
+
 // redisAllow implements a per-IP, per-bucket fixed-window counter in Redis (1-minute window).
 func redisAllow(ctx context.Context, rdb *redis.Client, ip, bucket string, limit *config.RateLimit) (rateLimitResult, error) {
 	if limit == nil {
@@ -230,11 +247,23 @@ func redisAllow(ctx context.Context, rdb *redis.Client, ip, bucket string, limit
 	return rateLimitResult{allowed: allowed, remaining: remaining, reset: reset, count: int(cnt)}, nil
 }
 
-func resetRedisRateLimit(ctx context.Context, rdb *redis.Client, ip, bucket string) error {
+func resetRedisRateLimitBuckets(ctx context.Context, rdb *redis.Client, ip string, buckets []string) error {
 	if rdb == nil {
 		return nil
 	}
-	return rdb.Del(ctx, rateLimitRedisKey(bucket, ip, currentRateLimitWindow())).Err()
+	keys := make([]string, 0, len(buckets))
+	window := currentRateLimitWindow()
+	for _, bucket := range buckets {
+		bucket = strings.ToLower(strings.TrimSpace(bucket))
+		if bucket == "" {
+			continue
+		}
+		keys = append(keys, rateLimitRedisKey(bucket, ip, window))
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return rdb.Del(ctx, keys...).Err()
 }
 
 func currentRateLimitWindow() int64 {

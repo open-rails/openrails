@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/authprovider"
@@ -31,6 +32,7 @@ type Server struct {
 	runtime      *app.Runtime
 	rdb          *redis.Client
 	authProvider authprovider.Provider
+	captchaStore *captcha.ChallengeStore
 
 	// publicHandler is the default "full surface" HTTP handler.
 	// It includes health + debug (dev only) + user + admin + webhook routes.
@@ -100,6 +102,7 @@ func New(deps Dependencies) (*Server, error) {
 		runtime:      deps.Runtime,
 		rdb:          deps.Redis,
 		authProvider: deps.AuthProvider,
+		captchaStore: captcha.NewChallengeStore(deps.Redis),
 	}
 
 	s.setupPrivateHandler()
@@ -130,7 +133,7 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	e.Use(middleware.SecurityHeaders())
 	e.Use(middleware.CORS(s.cfg.CorsOrigins))
 	e.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
-	e.Use(middleware.RateLimit(s.cfg.RateLimits, s.cfg.Captcha, s.rdb))
+	e.Use(middleware.RateLimitWithChallengeStore(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore))
 	return e
 }
 
