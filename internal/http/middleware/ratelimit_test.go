@@ -25,6 +25,8 @@ func TestClassifyBucketMatchesRegisteredRoutes(t *testing.T) {
 	}{
 		{name: "webhook", path: "/v1/webhooks/stripe", method: http.MethodPost, want: "webhook"},
 		{name: "embedded webhook", path: "/billing/v1/webhooks/mobius", method: http.MethodPost, want: "webhook"},
+		{name: "captcha status", path: "/v1/captcha/status", method: http.MethodGet, want: "captcha"},
+		{name: "embedded captcha client", path: "/billing/v1/captcha/client.js", method: http.MethodGet, want: "captcha"},
 		{name: "checkout create", path: "/v1/checkout", method: http.MethodPost, want: "checkout"},
 		{name: "checkout confirm", path: "/v1/checkout/checkout_123/confirm", method: http.MethodPost, want: "checkout"},
 		{name: "payment method create", path: "/v1/me/payment-methods", method: http.MethodPost, want: "payment-methods"},
@@ -138,6 +140,54 @@ func TestRateLimitCaptchaChallengeIsGlobalAcrossProtectedBuckets(t *testing.T) {
 	require.Equal(t, http.StatusOK, solvedPayment.Code)
 
 	require.Equal(t, http.StatusOK, performCaptchaTestRequest(r, "", "/v1/checkout").Code)
+}
+
+func TestRateLimitCaptchaChallengeAppliesToDefaultAPIBucket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	challengeStore := captcha.NewChallengeStore(nil)
+	require.NoError(t, challengeStore.MarkChallenged(context.Background(), "203.0.113.10", time.Minute))
+	cfg := config.RateLimitsConfig{"default": {RequestsPerMinute: 60}}
+	captchaCfg := &config.CaptchaConfig{
+		Enabled:          true,
+		Provider:         config.CaptchaProviderTurnstile,
+		SiteKey:          "site-key",
+		SecretKey:        "secret-key",
+		ChallengeBuckets: []string{"checkout"},
+	}
+
+	r := gin.New()
+	r.Use(rateLimitWithDependencies(&cfg, captchaCfg, nil, NewRateLimitStore(), challengeStore, &stubCaptchaVerifier{validToken: "valid-token"}))
+	r.POST("/v1/stripe/portal", func(c *gin.Context) { c.String(http.StatusOK, "portal") })
+
+	challenged := performCaptchaTestRequest(r, "", "/v1/stripe/portal")
+	require.Equal(t, http.StatusForbidden, challenged.Code)
+	require.Contains(t, challenged.Body.String(), "captcha_required")
+}
+
+func TestRateLimitDoesNotLimitCaptchaStatusOrClientScript(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := config.RateLimitsConfig{"default": {RequestsPerMinute: 1}}
+	captchaCfg := &config.CaptchaConfig{Enabled: true, Provider: config.CaptchaProviderTurnstile, SiteKey: "site-key", SecretKey: "secret-key"}
+
+	r := gin.New()
+	r.Use(rateLimitWithDependencies(&cfg, captchaCfg, nil, NewRateLimitStore(), captcha.NewChallengeStore(nil), &stubCaptchaVerifier{validToken: "valid-token"}))
+	r.GET("/v1/captcha/status", func(c *gin.Context) { c.String(http.StatusOK, "status") })
+	r.GET("/v1/captcha/client.js", func(c *gin.Context) { c.String(http.StatusOK, "client") })
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/v1/captcha/status", nil)
+		req.RemoteAddr = "203.0.113.10:1234"
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/v1/captcha/client.js", nil)
+		req.RemoteAddr = "203.0.113.10:1234"
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
 }
 
 func TestRateLimitStorePrunesExpiredCounters(t *testing.T) {

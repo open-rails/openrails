@@ -1,13 +1,16 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
+	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
@@ -15,6 +18,7 @@ import (
 func (s *Server) registerUserRoutesAt(e *gin.Engine, apiPrefix string) {
 	api := e.Group(apiPrefix)
 	api.GET("/captcha/status", s.captchaStatusHandler)
+	api.GET("/captcha/client.js", s.captchaClientScriptHandler)
 	httproutes.RegisterUserRoutes(api, s.runtime, httproutes.Options{AuthProvider: s.authProvider})
 }
 
@@ -24,9 +28,13 @@ func (s *Server) captchaStatusHandler(c *gin.Context) {
 		cfg = s.cfg.Captcha
 	}
 	resp := gin.H{
-		"enabled":      cfg != nil && cfg.Enabled,
-		"required":     false,
-		"token_header": captcha.TokenHeader,
+		"enabled":           cfg != nil && cfg.Enabled,
+		"required":          false,
+		"token_header":      captcha.TokenHeader,
+		"client_script_url": captchaClientScriptURL(c),
+	}
+	if cfg != nil {
+		resp["provider"] = cfg.EffectiveProvider()
 	}
 	if cfg == nil || !cfg.Enabled || s.captchaStore == nil {
 		c.JSON(http.StatusOK, resp)
@@ -40,9 +48,57 @@ func (s *Server) captchaStatusHandler(c *gin.Context) {
 	}
 
 	resp["required"] = required
-	resp["provider"] = cfg.EffectiveProvider()
-	resp["site_key"] = strings.TrimSpace(cfg.SiteKey)
 	c.JSON(http.StatusOK, resp)
+}
+
+func (s *Server) captchaClientScriptHandler(c *gin.Context) {
+	var cfg *config.CaptchaConfig
+	if s != nil && s.cfg != nil {
+		cfg = s.cfg.Captcha
+	}
+	script := buildCaptchaClientScript(cfg)
+	c.Header("Cache-Control", "no-store")
+	c.Data(http.StatusOK, "application/javascript; charset=utf-8", []byte(script))
+}
+
+func captchaClientScriptURL(c *gin.Context) string {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return "/v1/captcha/client.js"
+	}
+	path := c.Request.URL.Path
+	if strings.HasSuffix(path, "/status") {
+		return strings.TrimSuffix(path, "/status") + "/client.js"
+	}
+	return "/v1/captcha/client.js"
+}
+
+func buildCaptchaClientScript(cfg *config.CaptchaConfig) string {
+	enabled := cfg != nil && cfg.Enabled
+	provider := ""
+	siteKey := ""
+	scriptURL := ""
+	if cfg != nil {
+		provider = cfg.EffectiveProvider()
+	}
+	if enabled {
+		siteKey = strings.TrimSpace(cfg.SiteKey)
+		scriptURL = cfg.EffectiveScriptURL()
+	}
+
+	return strings.NewReplacer(
+		"__OPENRAILS_CAPTCHA_ENABLED__", strconv.FormatBool(enabled),
+		"__OPENRAILS_CAPTCHA_PROVIDER__", jsonLiteral(provider),
+		"__OPENRAILS_CAPTCHA_SITE_KEY__", jsonLiteral(siteKey),
+		"__OPENRAILS_CAPTCHA_SCRIPT_URL__", jsonLiteral(scriptURL),
+	).Replace(captchaembed.ClientScriptTemplate)
+}
+
+func jsonLiteral(value string) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "\"\""
+	}
+	return string(raw)
 }
 
 func (s *Server) registerUserRoutes(e *gin.Engine) {

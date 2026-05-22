@@ -71,8 +71,9 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 		}
 
 		clientIP := getClientIP(c)
-		captchaEnabled := captcha.ShouldApply(captchaConfig, bucket)
-		if captchaEnabled && challengeStore != nil {
+		captchaTriggerEnabled := captcha.ShouldApply(captchaConfig, bucket)
+		captchaEnforced := captchaShouldEnforce(captchaConfig, c.Request, bucket)
+		if captchaEnforced && challengeStore != nil {
 			challenged, err := challengeStore.IsChallenged(c.Request.Context(), clientIP)
 			if err != nil {
 				log.WithError(err).WithField("bucket", bucket).Warn("captcha challenge lookup failed")
@@ -105,7 +106,7 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 		}
 
 		if !result.allowed {
-			if captchaEnabled && challengeStore != nil && result.count >= captcha.ExtremeThreshold(limit, captchaConfig) {
+			if captchaTriggerEnabled && challengeStore != nil && result.count >= captcha.ExtremeThreshold(limit, captchaConfig) {
 				if err := challengeStore.MarkChallenged(c.Request.Context(), clientIP, captchaConfig.EffectiveChallengeTTL()); err != nil {
 					log.WithError(err).WithField("bucket", bucket).Warn("failed to mark captcha challenge")
 				}
@@ -279,6 +280,9 @@ func resolveRateLimitPolicy(cfg *config.RateLimitsConfig, req *http.Request) (*c
 		return nil, ""
 	}
 	bucket := classifyBucket(strings.ToLower(req.URL.Path), req.Method)
+	if bucket == "captcha" {
+		return nil, bucket
+	}
 	var limit *config.RateLimit
 	switch bucket {
 	case "webhook":
@@ -313,6 +317,8 @@ func classifyBucket(path, method string) string {
 
 	method = strings.ToUpper(method)
 	switch {
+	case path == "/v1/captcha/status" || path == "/v1/captcha/client.js":
+		return "captcha"
 	case strings.HasPrefix(path, "/v1/webhooks"):
 		return "webhook"
 	case strings.HasPrefix(path, "/v1/me/payment-methods"):
@@ -324,6 +330,20 @@ func classifyBucket(path, method string) string {
 	default:
 		return "default"
 	}
+}
+
+func captchaShouldEnforce(cfg *config.CaptchaConfig, req *http.Request, bucket string) bool {
+	if cfg == nil || !cfg.Enabled || req == nil || bucket == "" || bucket == "webhook" || bucket == "captcha" {
+		return false
+	}
+	path := strings.ToLower(req.URL.Path)
+	if strings.HasPrefix(path, "/billing") {
+		path = strings.TrimPrefix(path, "/billing")
+		if path == "" {
+			path = "/"
+		}
+	}
+	return strings.HasPrefix(path, "/v1/")
 }
 
 func effectiveLimit(limit *config.RateLimit) int {

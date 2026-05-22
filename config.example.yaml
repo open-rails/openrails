@@ -298,6 +298,7 @@ captcha:
   site_key: ""
   secret_key: ""
   verify_url: "" # optional override
+  script_url: "" # optional override
   challenge_ttl: 15m
   extreme_multiplier: 3
   min_score: 0.5 # used only when provider returns a score

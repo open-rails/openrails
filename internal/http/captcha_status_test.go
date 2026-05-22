@@ -41,9 +41,10 @@ func TestCaptchaStatusReportsGlobalChallenge(t *testing.T) {
 		"enabled": true,
 		"required": true,
 		"provider": "turnstile",
-		"site_key": "site-key",
-		"token_header": "X-Captcha-Token"
+		"token_header": "X-Captcha-Token",
+		"client_script_url": "/v1/captcha/client.js"
 	}`, w.Body.String())
+	require.NotContains(t, w.Body.String(), "site-key")
 	require.NotContains(t, w.Body.String(), "secret-key")
 }
 
@@ -58,7 +59,7 @@ func TestCaptchaStatusDisabled(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	require.JSONEq(t, `{"enabled": false, "required": false, "token_header": "X-Captcha-Token"}`, w.Body.String())
+	require.JSONEq(t, `{"enabled": false, "required": false, "provider": "turnstile", "token_header": "X-Captcha-Token", "client_script_url": "/v1/captcha/client.js"}`, w.Body.String())
 }
 
 func TestCaptchaStatusEmbeddedRoute(t *testing.T) {
@@ -83,6 +84,48 @@ func TestCaptchaStatusEmbeddedRoute(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `"enabled":true`)
+	require.Contains(t, w.Body.String(), `"client_script_url":"/billing/v1/captcha/client.js"`)
+}
+
+func TestCaptchaClientScriptIncludesProviderLoader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	s := &Server{cfg: &config.Config{Captcha: &config.CaptchaConfig{
+		Enabled:   true,
+		Provider:  config.CaptchaProviderHCaptcha,
+		SiteKey:   "site-key",
+		SecretKey: "secret-key",
+	}}}
+
+	r := gin.New()
+	r.GET("/v1/captcha/client.js", s.captchaClientScriptHandler)
+	req := httptest.NewRequest(http.MethodGet, "/v1/captcha/client.js", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "application/javascript; charset=utf-8", w.Header().Get("Content-Type"))
+	require.Contains(t, w.Body.String(), "window.OpenRailsCaptcha")
+	require.Contains(t, w.Body.String(), `provider: "hcaptcha"`)
+	require.Contains(t, w.Body.String(), "https://js.hcaptcha.com/1/api.js?render=explicit")
+	require.Contains(t, w.Body.String(), "site-key")
+	require.NotContains(t, w.Body.String(), "secret-key")
+}
+
+func TestCaptchaClientScriptDisabledNoop(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	s := &Server{cfg: &config.Config{Captcha: &config.CaptchaConfig{Enabled: false}}}
+
+	r := gin.New()
+	r.GET("/v1/captcha/client.js", s.captchaClientScriptHandler)
+	req := httptest.NewRequest(http.MethodGet, "/v1/captcha/client.js", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), "window.OpenRailsCaptcha")
+	require.Contains(t, w.Body.String(), "enabled: false")
+	require.NotContains(t, w.Body.String(), "site-key")
+	require.NotContains(t, w.Body.String(), "secret-key")
 }
 
 type passthroughAuthProvider struct{}

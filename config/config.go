@@ -561,6 +561,7 @@ type CaptchaConfig struct {
 	SiteKey           string   `koanf:"site_key"`
 	SecretKey         string   `koanf:"secret_key"`
 	VerifyURL         string   `koanf:"verify_url"`
+	ScriptURL         string   `koanf:"script_url"`
 	MinScore          float64  `koanf:"min_score"`
 	ChallengeTTL      string   `koanf:"challenge_ttl"`
 	ExtremeMultiplier int      `koanf:"extreme_multiplier"`
@@ -586,6 +587,20 @@ func (c *CaptchaConfig) EffectiveVerifyURL() string {
 		}
 	}
 	return strings.TrimSpace(c.VerifyURL)
+}
+
+func (c *CaptchaConfig) EffectiveScriptURL() string {
+	if c == nil || strings.TrimSpace(c.ScriptURL) == "" {
+		switch c.EffectiveProvider() {
+		case CaptchaProviderRecaptcha:
+			return "https://www.google.com/recaptcha/api.js?render=explicit"
+		case CaptchaProviderHCaptcha:
+			return "https://js.hcaptcha.com/1/api.js?render=explicit"
+		default:
+			return "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+		}
+	}
+	return strings.TrimSpace(c.ScriptURL)
 }
 
 func (c *CaptchaConfig) EffectiveChallengeTTL() time.Duration {
@@ -716,15 +731,13 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 		return fmt.Errorf("secret_key is required when captcha is enabled")
 	}
 	if rawURL := strings.TrimSpace(cfg.VerifyURL); rawURL != "" {
-		parsed, err := url.Parse(rawURL)
-		if err != nil {
-			return fmt.Errorf("invalid verify_url: %w", err)
+		if err := validateHTTPSURL("verify_url", rawURL); err != nil {
+			return err
 		}
-		if parsed.Scheme != "https" {
-			return fmt.Errorf("verify_url must use https")
-		}
-		if parsed.Host == "" {
-			return fmt.Errorf("verify_url must include a host")
+	}
+	if rawURL := strings.TrimSpace(cfg.ScriptURL); rawURL != "" {
+		if err := validateHTTPSURL("script_url", rawURL); err != nil {
+			return err
 		}
 	}
 	if err := validateOptionalDuration("challenge_ttl", cfg.ChallengeTTL); err != nil {
@@ -738,6 +751,20 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 	}
 	if len(cfg.ChallengeBuckets) > 0 && len(cfg.EffectiveChallengeBuckets()) == 0 {
 		return fmt.Errorf("challenge_buckets must include at least one non-empty bucket")
+	}
+	return nil
+}
+
+func validateHTTPSURL(name, rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid %s: %w", name, err)
+	}
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("%s must use https", name)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("%s must include a host", name)
 	}
 	return nil
 }

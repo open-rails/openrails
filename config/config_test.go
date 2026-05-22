@@ -149,6 +149,11 @@ func TestValidateCaptchaRejectsInvalidSettings(t *testing.T) {
 			wantError: "invalid challenge_ttl",
 		},
 		{
+			name:      "insecure script url",
+			mutate:    func(c *CaptchaConfig) { c.ScriptURL = "http://captcha.example/api.js" },
+			wantError: "script_url must use https",
+		},
+		{
 			name:      "invalid score",
 			mutate:    func(c *CaptchaConfig) { c.MinScore = 1.5 },
 			wantError: "min_score must be between 0 and 1",
@@ -181,6 +186,7 @@ func TestCaptchaConfigDefaults(t *testing.T) {
 	cfg := &CaptchaConfig{}
 	assert.Equal(t, CaptchaProviderTurnstile, cfg.EffectiveProvider())
 	assert.Equal(t, "https://challenges.cloudflare.com/turnstile/v0/siteverify", cfg.EffectiveVerifyURL())
+	assert.Equal(t, "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", cfg.EffectiveScriptURL())
 	assert.Equal(t, 3, cfg.EffectiveExtremeMultiplier())
 	assert.Equal(t, "checkout", cfg.EffectiveChallengeBuckets()[0])
 }
