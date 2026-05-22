@@ -217,8 +217,13 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 			}
 
 			if existingProduct.ID == product.ID {
-				// Same product - this is a duplicate, not an upgrade/downgrade
-				// Fall through to normal coverage check below
+				// Same product - the user already has this exact plan. Recurring
+				// tier subscriptions must not be bought twice; block it rather
+				// than create a second parallel subscription in the tier group.
+				return &CheckoutResponse{
+					Status:  "blocked",
+					Message: "You already have an active subscription to this plan",
+				}, nil
 			} else if existingProduct.TierRank < product.TierRank {
 				// Upgrade detected - direct to change-tier endpoint
 				return &CheckoutResponse{
