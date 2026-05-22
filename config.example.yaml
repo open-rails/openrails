@@ -106,7 +106,7 @@ db:
   # Option 2: Atomic parameters (preferred for Kubernetes/Vault)
   host: "localhost"
   port: "5432"
-  database: "openrails_db"
+  database: "doujins_db"
   username: "admin"
   # password: set via DB_PASSWORD env var
   sslmode: "disable"

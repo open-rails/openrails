@@ -107,7 +107,7 @@ func TestLoad_MobiusProcessorRequiresExplicitType(t *testing.T) {
 
 func TestValidateCaptchaRequiresKeysWhenEnabled(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
-	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
+	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/doujins_db?sslmode=disable"
 	cfg.Captcha.Enabled = true
 	cfg.Captcha.Provider = CaptchaProviderTurnstile
 	cfg.Captcha.SiteKey = ""
@@ -168,7 +168,7 @@ func TestValidateCaptchaRejectsInvalidSettings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := GetDefaultBillingConfig()
-			cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
+			cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/doujins_db?sslmode=disable"
 			cfg.Captcha.Enabled = true
 			cfg.Captcha.Provider = CaptchaProviderTurnstile
 			cfg.Captcha.SiteKey = "site-key"

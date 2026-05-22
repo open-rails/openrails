@@ -3,7 +3,7 @@ services:
     image: postgres:18-bookworm
     restart: unless-stopped
     environment:
-      POSTGRES_DB: openrails_db
+      POSTGRES_DB: doujins_db
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin_password
     ports:
@@ -36,7 +36,7 @@ services:
       - local-openrails
     healthcheck:
       # Verify bootstrap completed by checking the billing schema exists (schema name is kept for now).
-      test: ["CMD-SHELL", "pg_isready -U admin -d openrails_db -h localhost && psql -U admin -d openrails_db -tAc \"SELECT 1 FROM pg_namespace WHERE nspname='billing'\" | grep -q 1"]
+      test: ["CMD-SHELL", "pg_isready -U admin -d doujins_db -h localhost && psql -U admin -d doujins_db -tAc \"SELECT 1 FROM pg_namespace WHERE nspname='billing'\" | grep -q 1"]
       interval: 5s
       timeout: 5s
       start_period: 90s
@@ -172,7 +172,7 @@ services:
       # Database connection via host-exposed ports (same as local dev)
       DB_HOST: "host.docker.internal"
       DB_PORT: "5432"
-      DB_DATABASE: "openrails_db"
+      DB_DATABASE: "doujins_db"
       DB_USERNAME: "admin"
       DB_PASSWORD: "${DB_PASSWORD:-admin_password}"
       DB_SSLMODE: "disable"
@@ -232,7 +232,7 @@ services:
       # Database connection (admin superuser)
       DB_HOST: "postgres"
       DB_PORT: "5432"
-      DB_DATABASE: "openrails_db"
+      DB_DATABASE: "doujins_db"
       DB_USERNAME: "admin"
       DB_PASSWORD: "${DB_PASSWORD:-admin_password}"
       DB_SSLMODE: "disable"

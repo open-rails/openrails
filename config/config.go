@@ -1095,7 +1095,7 @@ func assembleDBURL(cfg *Config) {
 	if cfg.DB.Password == "admin_password" {
 		warnings = append(warnings, "DB password")
 	}
-	if cfg.DB.Database == "openrails_db" {
+	if cfg.DB.Database == "doujins_db" {
 		warnings = append(warnings, "DB database name")
 	}
 
@@ -1131,7 +1131,7 @@ func GetDefaultBillingConfig() *Config {
 		DB: &DBConfig{
 			Host:     "localhost",
 			Port:     "5432",
-			Database: "openrails_db",
+			Database: "doujins_db",
 			Username: "admin",
 			Password: "admin_password",
 			SSLMode:  "disable",

@@ -30,6 +30,6 @@ COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.yaml}"
 
 echo "Seeding local OpenRails DB with E2E product/price..."
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
-  psql -U admin -d openrails_db \
+  psql -U admin -d doujins_db \
   -v "mobius_plan_id=${E2E_MOBIUS_PLAN_ID}" \
   -f /dev/stdin <"$ROOT_DIR/scripts/seed_e2e_mobius.sql"
