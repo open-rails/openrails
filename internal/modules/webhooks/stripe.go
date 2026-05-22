@@ -70,6 +70,22 @@ type stripeInvoiceLineItem struct {
 	Price struct {
 		ID string `json:"id"`
 	} `json:"price"`
+	// The 2026-04-22.preview API moved the price reference off the line item's
+	// `price` object into `pricing.price_details.price` (a bare id string).
+	Pricing struct {
+		PriceDetails struct {
+			Price string `json:"price"`
+		} `json:"price_details"`
+	} `json:"pricing"`
+}
+
+// priceID returns the Stripe price id for the line item, tolerating both the
+// legacy `price.id` shape and the preview `pricing.price_details.price` shape.
+func (li stripeInvoiceLineItem) priceID() string {
+	if id := strings.TrimSpace(li.Price.ID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(li.Pricing.PriceDetails.Price)
 }
 
 type stripeInvoice struct {
@@ -88,6 +104,13 @@ type stripeInvoice struct {
 	SubscriptionDetails struct {
 		Metadata map[string]string `json:"metadata"`
 	} `json:"subscription_details"`
+	// The 2026-04-22.preview API moved subscription details (including the
+	// metadata we propagate via subscription_data.metadata) under `parent`.
+	Parent struct {
+		SubscriptionDetails struct {
+			Metadata map[string]string `json:"metadata"`
+		} `json:"subscription_details"`
+	} `json:"parent"`
 }
 
 type stripeCheckoutSession struct {
@@ -1161,18 +1184,23 @@ func (s *StripeWebhookService) resolvePriceFromMetadata(ctx context.Context, met
 			return priceID, nil, nil
 		}
 	}
-	if len(lines) > 0 && lines[0].Price.ID != "" {
-		price, err := s.PriceService.GetByStripePriceID(ctx, lines[0].Price.ID)
-		if err != nil {
-			return uuid.Nil, nil, fmt.Errorf("stripe price not mapped")
+	if len(lines) > 0 {
+		if stripePriceID := lines[0].priceID(); stripePriceID != "" {
+			price, err := s.PriceService.GetByStripePriceID(ctx, stripePriceID)
+			if err != nil {
+				return uuid.Nil, nil, fmt.Errorf("stripe price not mapped")
+			}
+			return price.ID, price, nil
 		}
-		return price.ID, price, nil
 	}
 	return uuid.Nil, nil, fmt.Errorf("unable to resolve price")
 }
 
 func stripeInvoiceEffectiveMetadata(inv stripeInvoice) map[string]string {
 	metadata := map[string]string{}
+	for key, value := range inv.Parent.SubscriptionDetails.Metadata {
+		metadata[key] = value
+	}
 	for key, value := range inv.SubscriptionDetails.Metadata {
 		metadata[key] = value
 	}
