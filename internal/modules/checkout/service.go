@@ -63,8 +63,15 @@ type CheckoutService struct {
 	VaultService         *vault.VaultService
 	IdempotencyService   checkoutIdempotencyStore
 	NMIClients           map[string]*nmi.NMIClient
-	clock                clockwork.Clock
-	Config               *config.Config
+	// ProcessorCustomerService maps app users to processor customer ids so we
+	// reuse a single Stripe customer per user (issue #212) and can record the
+	// mapping at checkout time instead of relying solely on webhooks.
+	ProcessorCustomerService *payments.ProcessorCustomerService
+	// StripeService is used to resolve/create the Stripe customer and to run the
+	// webhook-independent duplicate guard (issue #213).
+	StripeService *subscriptions.StripeService
+	clock         clockwork.Clock
+	Config        *config.Config
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -97,24 +104,27 @@ func NewCheckoutService(
 	vaultService *vault.VaultService,
 	idempotencyService checkoutIdempotencyStore,
 	nmiClients map[string]*nmi.NMIClient,
+	processorCustomerService *payments.ProcessorCustomerService,
 	cfg *config.Config,
 	clocks ...clockwork.Clock,
 ) *CheckoutService {
 	clock := firstClock(clocks...)
 	service := &CheckoutService{
-		SubscriptionService:  subscriptionService,
-		ProductService:       productService,
-		PriceService:         priceService,
-		PaymentService:       paymentService,
-		EntitlementService:   entitlementService,
-		PurchaseService:      NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
-		VaultResolver:        NewCheckoutVaultService(paymentMethodService, vaultService),
-		PaymentMethodService: paymentMethodService,
-		VaultService:         vaultService,
-		IdempotencyService:   idempotencyService,
-		NMIClients:           nmiClients,
-		clock:                clock,
-		Config:               cfg,
+		SubscriptionService:      subscriptionService,
+		ProductService:           productService,
+		PriceService:             priceService,
+		PaymentService:           paymentService,
+		EntitlementService:       entitlementService,
+		PurchaseService:          NewCheckoutPurchaseService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
+		VaultResolver:            NewCheckoutVaultService(paymentMethodService, vaultService),
+		PaymentMethodService:     paymentMethodService,
+		VaultService:             vaultService,
+		IdempotencyService:       idempotencyService,
+		NMIClients:               nmiClients,
+		ProcessorCustomerService: processorCustomerService,
+		StripeService:            &subscriptions.StripeService{Config: cfg},
+		clock:                    clock,
+		Config:                   cfg,
 	}
 	service.NMISaleService = NewCheckoutNMISaleService(
 		service.PurchaseService,
@@ -241,6 +251,24 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 				return &CheckoutResponse{
 					Status:  "blocked",
 					Message: fmt.Sprintf("You already have an equivalent product (%s) in this tier", existingProduct.DisplayName),
+				}, nil
+			}
+		}
+
+		// Webhook-independent guard (issue #213): the local check above only sees
+		// what webhooks have written. If a webhook was missed, the local DB can be
+		// empty and the guard would let a second parallel subscription through.
+		// For Stripe, additionally ask Stripe directly whether this customer
+		// already holds an active/trialing subscription in the same tier group.
+		if processor == "stripe" {
+			blocked, err := s.stripeTierGroupConflict(ctx, user, *product.TierGroup)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check stripe tier group: %w", err)
+			}
+			if blocked {
+				return &CheckoutResponse{
+					Status:  "blocked",
+					Message: "You already have an active subscription in this tier",
 				}, nil
 			}
 		}
@@ -940,6 +968,14 @@ func (s *CheckoutService) processStripeSubscription(
 		return nil, errors.New("stripe success/cancel URLs not available")
 	}
 
+	// Resolve a single, durable Stripe customer for this user (issue #212) so we
+	// stop minting a fresh customer on every checkout. The mapping is recorded
+	// here, at checkout time, not only via webhook.
+	customerID, err := s.resolveStripeCustomer(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
 	trialEnd := int64(0)
 	if coverage != nil && coverage.HasCoverage && coverage.EndDate != nil && coverage.EndDate.After(s.now().Add(5*time.Minute)) {
 		trialEnd = coverage.EndDate.Unix()
@@ -950,6 +986,7 @@ func (s *CheckoutService) processStripeSubscription(
 		SuccessURL:        successURL,
 		CancelURL:         cancelURL,
 		UserID:            user.ID,
+		CustomerID:        customerID,
 		CustomerEmail:     userEmail(user),
 		InternalPriceID:   price.ID.String(),
 		TrialEnd:          trialEnd,
@@ -1013,6 +1050,197 @@ func (s *CheckoutService) processStripePayment(
 	}, nil
 }
 
+// processorCustomerStore is the slice of ProcessorCustomerService used for
+// Stripe customer resolution. Defined as an interface so the resolution logic
+// is unit-testable without a database.
+type processorCustomerStore interface {
+	GetCustomerID(ctx context.Context, userID, processor string) (string, error)
+	Upsert(ctx context.Context, userID, processor, customerID string) error
+}
+
+// stripeCustomerClient is the slice of StripeService used for customer
+// resolution and the duplicate guard.
+type stripeCustomerClient interface {
+	CreateCustomer(ctx context.Context, email, appUserID string) (string, error)
+	FindCustomerIDByAppUserID(ctx context.Context, appUserID string) (string, error)
+	ListActiveSubscriptionsForCustomer(ctx context.Context, customerID string) ([]subscriptions.StripeSubscriptionSummary, error)
+}
+
+// stripePriceResolver maps a Stripe price id back to the local product's tier
+// group. Backed by PriceService + ProductService at runtime.
+type stripePriceResolver interface {
+	GetByStripePriceID(ctx context.Context, stripePriceID string) (*models.Price, error)
+}
+
+type productResolver interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error)
+}
+
+func (s *CheckoutService) customerStore() processorCustomerStore {
+	if s.ProcessorCustomerService == nil {
+		return nil
+	}
+	return s.ProcessorCustomerService
+}
+
+func (s *CheckoutService) stripeClient() stripeCustomerClient {
+	if s.StripeService == nil {
+		return nil
+	}
+	return s.StripeService
+}
+
+// resolveStripeCustomer returns the durable Stripe customer id for a user. See
+// resolveStripeCustomerWith for the resolution order; this is the production
+// wiring.
+func (s *CheckoutService) resolveStripeCustomer(ctx context.Context, user *UserIdentity) (string, error) {
+	return resolveStripeCustomerWith(ctx, s.customerStore(), s.stripeClient(), user)
+}
+
+// resolveStripeCustomerWith returns the durable Stripe customer id for a user,
+// resolving in priority order (issue #212):
+//
+//  1. local mapping (ProcessorCustomerService.GetCustomerID)
+//  2. Stripe Customer Search on metadata[app_user_id]
+//  3. create a fresh, idempotent Stripe customer
+//
+// Whenever a customer is resolved (or created), the local mapping is upserted so
+// the link survives even if the corresponding webhook is missed. It returns ""
+// (and no error) only when the dependencies are unavailable, in which case the
+// caller falls back to the legacy customer_email behavior.
+func resolveStripeCustomerWith(ctx context.Context, store processorCustomerStore, client stripeCustomerClient, user *UserIdentity) (string, error) {
+	if user == nil || strings.TrimSpace(user.ID) == "" {
+		return "", nil
+	}
+	if store == nil || client == nil {
+		// Without these wired we cannot manage a durable customer; fall back to
+		// the email-only path rather than failing the checkout.
+		return "", nil
+	}
+
+	// 1. Local mapping.
+	customerID, err := store.GetCustomerID(ctx, user.ID, "stripe")
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("lookup stripe customer mapping: %w", err)
+	}
+	customerID = strings.TrimSpace(customerID)
+
+	// 2. Stripe Customer Search by metadata.
+	if customerID == "" {
+		found, err := client.FindCustomerIDByAppUserID(ctx, user.ID)
+		if err != nil {
+			return "", fmt.Errorf("search stripe customer: %w", err)
+		}
+		customerID = strings.TrimSpace(found)
+	}
+
+	// 3. Create a new (idempotent) customer.
+	if customerID == "" {
+		created, err := client.CreateCustomer(ctx, userEmail(user), user.ID)
+		if err != nil {
+			return "", fmt.Errorf("create stripe customer: %w", err)
+		}
+		customerID = strings.TrimSpace(created)
+	}
+
+	if customerID == "" {
+		return "", nil
+	}
+
+	// Record the mapping at checkout time, not only via webhook.
+	if err := store.Upsert(ctx, user.ID, "stripe", customerID); err != nil {
+		return "", fmt.Errorf("record stripe customer mapping: %w", err)
+	}
+	return customerID, nil
+}
+
+// stripeTierGroupConflict is the production wiring for the webhook-independent
+// duplicate guard (issue #213).
+func (s *CheckoutService) stripeTierGroupConflict(ctx context.Context, user *UserIdentity, tierGroup string) (bool, error) {
+	var prices stripePriceResolver
+	if s.PriceService != nil {
+		prices = s.PriceService
+	}
+	var products productResolver
+	if s.ProductService != nil {
+		products = s.ProductService
+	}
+	return stripeTierGroupConflictWith(ctx, s.customerStore(), s.stripeClient(), prices, products, user, tierGroup)
+}
+
+// stripeTierGroupConflictWith reports whether the user already has an active or
+// trialing Stripe subscription whose price maps to the requested tier group
+// (issue #213). It consults Stripe directly so a missed webhook (which would
+// leave the local DB empty) cannot allow a second parallel subscription. It
+// never creates a customer: if no customer is mapped/found, there is by
+// definition no Stripe-side subscription to conflict with.
+func stripeTierGroupConflictWith(ctx context.Context, store processorCustomerStore, client stripeCustomerClient, prices stripePriceResolver, products productResolver, user *UserIdentity, tierGroup string) (bool, error) {
+	tierGroup = strings.TrimSpace(tierGroup)
+	if tierGroup == "" {
+		return false, nil
+	}
+	if user == nil || strings.TrimSpace(user.ID) == "" {
+		return false, nil
+	}
+	if store == nil || client == nil || prices == nil || products == nil {
+		return false, nil
+	}
+
+	// Find the customer without creating one: local mapping, then Stripe search.
+	customerID, err := store.GetCustomerID(ctx, user.ID, "stripe")
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("lookup stripe customer mapping: %w", err)
+	}
+	customerID = strings.TrimSpace(customerID)
+	if customerID == "" {
+		found, err := client.FindCustomerIDByAppUserID(ctx, user.ID)
+		if err != nil {
+			return false, fmt.Errorf("search stripe customer: %w", err)
+		}
+		customerID = strings.TrimSpace(found)
+	}
+	if customerID == "" {
+		return false, nil
+	}
+
+	subs, err := client.ListActiveSubscriptionsForCustomer(ctx, customerID)
+	if err != nil {
+		return false, fmt.Errorf("list stripe subscriptions: %w", err)
+	}
+	for _, sub := range subs {
+		stripePriceID := strings.TrimSpace(sub.PriceID)
+		if stripePriceID == "" {
+			continue
+		}
+		price, err := prices.GetByStripePriceID(ctx, stripePriceID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				// Unknown price (e.g. legacy/manual sub) — cannot map to a tier
+				// group, so skip rather than block.
+				continue
+			}
+			return false, fmt.Errorf("map stripe price %s: %w", stripePriceID, err)
+		}
+		if price == nil {
+			continue
+		}
+		product, err := products.GetByID(ctx, price.ProductID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return false, fmt.Errorf("load product for stripe price %s: %w", stripePriceID, err)
+		}
+		if product == nil || product.TierGroup == nil {
+			continue
+		}
+		if strings.TrimSpace(*product.TierGroup) == tierGroup {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // userEmail returns the caller's email when present, so Stripe Checkout can
 // prefill it on the hosted page and route the receipt. Empty when unknown —
 // Stripe collects it on the page in that case.
@@ -1044,6 +1272,7 @@ type stripeCheckoutParams struct {
 	SuccessURL        string
 	CancelURL         string
 	UserID            string
+	CustomerID        string // resolved Stripe customer (cus_...); takes precedence over CustomerEmail
 	CustomerEmail     string
 	InternalPriceID   string
 	TrialEnd          int64
@@ -1060,7 +1289,12 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	values.Set("success_url", params.SuccessURL)
 	values.Set("cancel_url", params.CancelURL)
 	values.Set("client_reference_id", params.UserID)
-	if email := strings.TrimSpace(params.CustomerEmail); email != "" {
+	// Stripe Checkout: `customer` and `customer_email` are mutually exclusive.
+	// Prefer the resolved customer so one app user maps to exactly one Stripe
+	// customer (issue #212); fall back to customer_email only when unresolved.
+	if customerID := strings.TrimSpace(params.CustomerID); customerID != "" {
+		values.Set("customer", customerID)
+	} else if email := strings.TrimSpace(params.CustomerEmail); email != "" {
 		values.Set("customer_email", email)
 	}
 	values.Set("line_items[0][price]", params.PriceID)

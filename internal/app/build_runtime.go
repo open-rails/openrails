@@ -617,6 +617,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		vaultService,
 		idempotency.NewPaymentsIdempotencyAdapter(idempotencyService),
 		nmiClients,
+		processorCustomerService,
 		cfg,
 		clock,
 	)

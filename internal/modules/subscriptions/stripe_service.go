@@ -53,6 +53,217 @@ func ParseStripeAPIError(body []byte) string {
 
 type StripeService struct {
 	Config *config.Config
+
+	// baseURL overrides the Stripe API root. Empty means the production Stripe
+	// API (https://api.stripe.com). Tests set this to an httptest server.
+	baseURL string
+}
+
+// stripeBaseURL returns the Stripe API root, honoring the test override.
+func (s *StripeService) stripeBaseURL() string {
+	if s != nil && strings.TrimSpace(s.baseURL) != "" {
+		return strings.TrimRight(strings.TrimSpace(s.baseURL), "/")
+	}
+	return "https://api.stripe.com"
+}
+
+// CreateCustomer creates a Stripe Customer for the given app user, tagging it
+// with metadata[app_user_id] so it can be re-discovered later. The request is
+// idempotent on the app user id, so retries (or two parallel checkouts) cannot
+// mint duplicate customers.
+func (s *StripeService) CreateCustomer(ctx context.Context, email, appUserID string) (string, error) {
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
+	if err != nil {
+		return "", err
+	}
+	appUserID = strings.TrimSpace(appUserID)
+	if appUserID == "" {
+		return "", errors.New("app_user_id is required")
+	}
+	values := url.Values{}
+	if email = strings.TrimSpace(email); email != "" {
+		values.Set("email", email)
+	}
+	values.Set("metadata[app_user_id]", appUserID)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.stripeBaseURL()+"/v1/customers", strings.NewReader(values.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Idempotency on the app user id prevents duplicate customers across retries
+	// and concurrent checkouts.
+	req.Header.Set("Idempotency-Key", "customer_create_"+appUserID)
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("stripe customer create failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read stripe customer create response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		msg := ParseStripeAPIError(body)
+		if msg == "" {
+			msg = fmt.Sprintf("stripe customer create failed (%d)", resp.StatusCode)
+		}
+		return "", errors.New(msg)
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", fmt.Errorf("stripe customer create parse failed: %w", err)
+	}
+	if strings.TrimSpace(out.ID) == "" {
+		return "", errors.New("stripe customer create returned empty id")
+	}
+	return out.ID, nil
+}
+
+// FindCustomerIDByAppUserID looks up an existing Stripe Customer by the
+// metadata[app_user_id] tag using Stripe Customer Search. It returns "" when no
+// match exists (not an error) so callers can fall back to creating one.
+func (s *StripeService) FindCustomerIDByAppUserID(ctx context.Context, appUserID string) (string, error) {
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
+	if err != nil {
+		return "", err
+	}
+	appUserID = strings.TrimSpace(appUserID)
+	if appUserID == "" {
+		return "", errors.New("app_user_id is required")
+	}
+	query := url.Values{}
+	query.Set("query", fmt.Sprintf("metadata['app_user_id']:'%s'", appUserID))
+	query.Set("limit", "1")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.stripeBaseURL()+"/v1/customers/search?"+query.Encode(), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("stripe customer search failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read stripe customer search response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		msg := ParseStripeAPIError(body)
+		if msg == "" {
+			msg = fmt.Sprintf("stripe customer search failed (%d)", resp.StatusCode)
+		}
+		return "", errors.New(msg)
+	}
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", fmt.Errorf("stripe customer search parse failed: %w", err)
+	}
+	if len(out.Data) == 0 {
+		return "", nil
+	}
+	return strings.TrimSpace(out.Data[0].ID), nil
+}
+
+// StripeSubscriptionSummary is a minimal view of a Stripe subscription used by
+// the webhook-independent duplicate guard.
+type StripeSubscriptionSummary struct {
+	ID        string
+	Status    string
+	PriceID   string
+	LookupKey string
+}
+
+// ListActiveSubscriptionsForCustomer returns the customer's active and trialing
+// Stripe subscriptions. It queries both statuses because a subscription in a
+// trial still represents a committed plan for tier-group purposes.
+func (s *StripeService) ListActiveSubscriptionsForCustomer(ctx context.Context, customerID string) ([]StripeSubscriptionSummary, error) {
+	_, secretKey, err := RequireStripeSecretKey(s.Config)
+	if err != nil {
+		return nil, err
+	}
+	customerID = strings.TrimSpace(customerID)
+	if customerID == "" {
+		return nil, errors.New("customer_id is required")
+	}
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	var summaries []StripeSubscriptionSummary
+	for _, status := range []string{"active", "trialing"} {
+		query := url.Values{}
+		query.Set("customer", customerID)
+		query.Set("status", status)
+		query.Set("limit", "100")
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.stripeBaseURL()+"/v1/subscriptions?"+query.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+secretKey)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("stripe subscription list failed: %w", err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read stripe subscription list response: %w", err)
+		}
+		if resp.StatusCode >= 400 {
+			msg := ParseStripeAPIError(body)
+			if msg == "" {
+				msg = fmt.Sprintf("stripe subscription list failed (%d)", resp.StatusCode)
+			}
+			return nil, errors.New(msg)
+		}
+		var out struct {
+			Data []struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+				Items  struct {
+					Data []struct {
+						Price struct {
+							ID        string `json:"id"`
+							LookupKey string `json:"lookup_key"`
+						} `json:"price"`
+					} `json:"data"`
+				} `json:"items"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, fmt.Errorf("stripe subscription list parse failed: %w", err)
+		}
+		for _, sub := range out.Data {
+			summary := StripeSubscriptionSummary{ID: sub.ID, Status: sub.Status}
+			if len(sub.Items.Data) > 0 {
+				summary.PriceID = strings.TrimSpace(sub.Items.Data[0].Price.ID)
+				summary.LookupKey = strings.TrimSpace(sub.Items.Data[0].Price.LookupKey)
+			}
+			summaries = append(summaries, summary)
+		}
+	}
+	return summaries, nil
+}
+
+// SetBaseURLForTest overrides the Stripe API root. Test-only.
+func (s *StripeService) SetBaseURLForTest(baseURL string) {
+	if s != nil {
+		s.baseURL = baseURL
+	}
 }
 
 func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionID string) (string, error) {
