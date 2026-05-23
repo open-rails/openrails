@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 type ProcessorCustomerService struct {
@@ -29,7 +30,13 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 		return fmt.Errorf("invalid processor customer args")
 	}
 	now := time.Now().UTC()
+	// id is a NOT NULL uuid pk; bun sends the struct's zero value rather than
+	// falling back to the column's uuidv7() default, so generate it explicitly.
+	// Without this every insert ships id=000…0 and the second distinct
+	// (user_id, processor) row collides on the pk (the ON CONFLICT below only
+	// covers (user_id, processor)).
 	_, err := s.DB.GetDB().NewInsert().Model(&models.ProcessorCustomer{
+		ID:         uuidutil.NewV7(),
 		UserID:     userID,
 		Processor:  processor,
 		CustomerID: customerID,
