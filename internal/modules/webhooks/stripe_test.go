@@ -249,3 +249,39 @@ func TestApplyStripeSubscriptionStatus_CancelledClearsRetrySchedule(t *testing.T
 		t.Fatalf("expected retry schedule fields to be cleared")
 	}
 }
+
+func TestApplyStripeScheduledCancellationKeepsFuturePeriodActive(t *testing.T) {
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	futureEnd := now.Add(48 * time.Hour)
+	sub := &models.Subscription{Status: models.StatusActive, CurrentPeriodEndsAt: &futureEnd}
+
+	applyStripeScheduledCancellation(sub, "active", now.Add(-time.Hour).Unix(), now)
+
+	if sub.Status != models.StatusActive {
+		t.Fatalf("expected paid-through scheduled cancellation to remain active, got %s", sub.Status)
+	}
+	if sub.CancelType == nil || *sub.CancelType != models.CancelTypeUser {
+		t.Fatalf("expected user cancel type, got %v", sub.CancelType)
+	}
+	if sub.CancelledAt == nil || !sub.CancelledAt.Equal(now.Add(-time.Hour)) {
+		t.Fatalf("expected canceled_at from stripe, got %v", sub.CancelledAt)
+	}
+	if sub.EndedAt == nil || !sub.EndedAt.Equal(futureEnd) {
+		t.Fatalf("expected ended_at at period end, got %v", sub.EndedAt)
+	}
+}
+
+func TestApplyStripeScheduledCancellationCancelsEndedPeriod(t *testing.T) {
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	pastEnd := now.Add(-time.Hour)
+	sub := &models.Subscription{Status: models.StatusActive, CurrentPeriodEndsAt: &pastEnd}
+
+	applyStripeScheduledCancellation(sub, "active", 0, now)
+
+	if sub.Status != models.StatusCancelled {
+		t.Fatalf("expected ended scheduled cancellation to be cancelled, got %s", sub.Status)
+	}
+	if sub.EndedAt == nil || !sub.EndedAt.Equal(now) {
+		t.Fatalf("expected ended_at now, got %v", sub.EndedAt)
+	}
+}

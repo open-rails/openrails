@@ -720,28 +720,7 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 	}
 
 	if data.CancelAtPeriodEnd {
-		// Stripe reports the subscription as scheduled to cancel at period end.
-		// Its `status` is still "active" until the period actually ends, so
-		// applyStripeSubscriptionStatus would (wrongly) flip a just-cancelled
-		// local record back to active — undoing the user's cancellation. Reflect
-		// the scheduled cancellation locally instead.
-		sub.Status = models.StatusCancelled
-		sub.ClearRetrySchedule()
-		now := s.now().UTC()
-		if sub.CancelledAt == nil {
-			ts := now
-			if data.CanceledAt > 0 {
-				ts = time.Unix(data.CanceledAt, 0).UTC()
-			}
-			sub.CancelledAt = &ts
-		}
-		if sub.EndedAt == nil {
-			endAt := now
-			if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now) {
-				endAt = *sub.CurrentPeriodEndsAt
-			}
-			sub.EndedAt = &endAt
-		}
+		applyStripeScheduledCancellation(sub, data.Status, data.CanceledAt, s.now().UTC())
 	} else {
 		// Not scheduled to cancel. If Stripe now reports it active/trialing while
 		// the local record is still cancelled, this is a resume — clear the prior
@@ -761,6 +740,41 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 		return err
 	}
 	return nil
+}
+
+func applyStripeScheduledCancellation(sub *models.Subscription, rawStatus string, canceledAt int64, now time.Time) {
+	if sub == nil {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	incoming := strings.ToLower(strings.TrimSpace(rawStatus))
+	periodEndsInFuture := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now)
+	if periodEndsInFuture && incoming != "canceled" && incoming != "incomplete_expired" {
+		// Keep paid-through scheduled cancellations as lifecycle owners so
+		// duplicate-checkout guards and the tier-group unique index still apply.
+		applyStripeSubscriptionStatus(sub, rawStatus, now)
+	} else {
+		sub.Status = models.StatusCancelled
+		sub.ClearRetrySchedule()
+	}
+	cancelType := models.CancelTypeUser
+	if sub.CancelType == nil {
+		sub.CancelType = &cancelType
+	}
+	if sub.CancelledAt == nil {
+		ts := now
+		if canceledAt > 0 {
+			ts = time.Unix(canceledAt, 0).UTC()
+		}
+		sub.CancelledAt = &ts
+	}
+	endAt := now
+	if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now) {
+		endAt = *sub.CurrentPeriodEndsAt
+	}
+	sub.EndedAt = &endAt
 }
 
 func (s *StripeWebhookService) reconcileStripeSubscriptionEntitlements(ctx context.Context, sub *models.Subscription, oldEntitlementsSpec map[string]*int, oldProduct, newProduct *models.Product) error {

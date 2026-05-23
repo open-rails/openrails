@@ -15,6 +15,7 @@ type CreateMembershipParams struct {
 	Processor               models.Processor
 	ProcessorSubscriptionID *string
 	UserEmail               *string
+	CurrentPeriodStartsAt   *time.Time
 	CurrentPeriodEndsAt     *time.Time
 	TransactionID           string
 	Amount                  int64

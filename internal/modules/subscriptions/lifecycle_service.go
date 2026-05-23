@@ -268,6 +268,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	now := s.now()
 	periodStartsAt := now
+	if params.CurrentPeriodStartsAt != nil && !params.CurrentPeriodStartsAt.IsZero() {
+		periodStartsAt = params.CurrentPeriodStartsAt.UTC()
+	}
 	var periodEndsAt time.Time
 	if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
 		periodEndsAt = params.CurrentPeriodEndsAt.UTC()

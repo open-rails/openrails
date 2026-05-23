@@ -19,11 +19,14 @@ import (
 // returned by the Stripe REST API, carrying only the fields the reconcile
 // command needs to map it back to a local membership.
 type StripeRemoteSubscription struct {
-	ID            string
-	Status        string
-	CustomerID    string
-	StripePriceID string
-	Metadata      map[string]string
+	ID                 string
+	Status             string
+	CustomerID         string
+	StripePriceID      string
+	CurrentPeriodStart time.Time
+	CurrentPeriodEnd   time.Time
+	CancelAtPeriodEnd  bool
+	Metadata           map[string]string
 }
 
 // StripeSubscriptionLister pages through remote Stripe subscriptions. It is an
@@ -56,11 +59,14 @@ type stripeSubscriptionListResponse struct {
 }
 
 type stripeSubscriptionEnvelope struct {
-	ID       string            `json:"id"`
-	Status   string            `json:"status"`
-	Customer string            `json:"customer"`
-	Metadata map[string]string `json:"metadata"`
-	Items    struct {
+	ID                 string            `json:"id"`
+	Status             string            `json:"status"`
+	Customer           string            `json:"customer"`
+	Metadata           map[string]string `json:"metadata"`
+	CancelAtPeriodEnd  bool              `json:"cancel_at_period_end"`
+	CurrentPeriodStart int64             `json:"current_period_start"`
+	CurrentPeriodEnd   int64             `json:"current_period_end"`
+	Items              struct {
 		Data []struct {
 			Price struct {
 				ID string `json:"id"`
@@ -88,6 +94,13 @@ func parseStripeSubscriptionList(body []byte) ([]StripeRemoteSubscription, bool,
 		if len(env.Items.Data) > 0 {
 			sub.StripePriceID = strings.TrimSpace(env.Items.Data[0].Price.ID)
 		}
+		if env.CurrentPeriodStart > 0 {
+			sub.CurrentPeriodStart = time.Unix(env.CurrentPeriodStart, 0).UTC()
+		}
+		if env.CurrentPeriodEnd > 0 {
+			sub.CurrentPeriodEnd = time.Unix(env.CurrentPeriodEnd, 0).UTC()
+		}
+		sub.CancelAtPeriodEnd = env.CancelAtPeriodEnd
 		out = append(out, sub)
 	}
 	return out, resp.HasMore, nil
@@ -177,7 +190,7 @@ func (l *HTTPStripeSubscriptionLister) ListSubscriptions(ctx context.Context, pa
 // should be treated as an active membership for reconciliation purposes.
 func StripeSubscriptionStatusActive(status string) bool {
 	switch strings.TrimSpace(strings.ToLower(status)) {
-	case "active", "trialing", "past_due":
+	case "active", "trialing":
 		return true
 	default:
 		return false

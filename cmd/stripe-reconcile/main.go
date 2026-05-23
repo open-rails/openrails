@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -206,6 +207,10 @@ func reconcileStripe(ctx context.Context, application *app.App, lister subscript
 			continue
 		}
 		remoteActiveCount++
+		if remote.CancelAtPeriodEnd {
+			skipped = append(skipped, fmt.Sprintf("%s (cancel_at_period_end backfill unsupported)", remote.ID))
+			continue
+		}
 
 		m, reason := mapRemoteSubscription(ctx, priceService, remote)
 		if reason != "" {
@@ -299,6 +304,8 @@ func reconcileStripe(ctx context.Context, application *app.App, lister subscript
 			PriceID:                 m.PriceID,
 			Processor:               models.ProcessorStripe,
 			ProcessorSubscriptionID: &subID,
+			CurrentPeriodStartsAt:   zeroTimeNil(m.Remote.CurrentPeriodStart),
+			CurrentPeriodEndsAt:     zeroTimeNil(m.Remote.CurrentPeriodEnd),
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to create membership for %s: %v\n", id, err)
@@ -310,4 +317,11 @@ func reconcileStripe(ctx context.Context, application *app.App, lister subscript
 	fmt.Printf("created %d local membership(s)\n", created)
 
 	return nil
+}
+
+func zeroTimeNil(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
