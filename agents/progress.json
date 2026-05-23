@@ -1391,6 +1391,47 @@
         "[x] Verify end-to-end: bump starter $12 -> $13 in YAML, run apply, confirm a new $13 Stripe price (active) + old $12 archived (still billing existing subs), content keys correct, change log shows the diff"
       ],
       "completed": true
+    },
+    {
+      "id": 212,
+      "name": "Stripe customer identity: reuse one customer per user (find-or-create, record at checkout, stamp user_id metadata)",
+      "description": "Today checkout passes `customer_email` to Stripe Checkout and never `customer=cus_...`, so Stripe AUTO-MINTS a brand-new Customer on every checkout (observed: one app user with the same email ended up with multiple `cus_...`). Stripe customer ids are server-generated and cannot be set, so the goal is NOT a deterministic id but a deterministic 1:1 mapping: exactly one Stripe customer per OpenRails user, reused on every checkout. The link must live on our side (processor_customers user_id<->customer_id) AND be discoverable from Stripe (customer metadata) so it survives a lost local mapping. Note: the mapping is currently written only by the checkout.session.completed webhook, so a missed webhook means no mapping and the next checkout mints yet another customer.",
+      "tasks": [
+        "[ ] At checkout, resolve the Stripe customer BEFORE creating the session: processor_customers.GetCustomerID(user_id) -> if present, pass `customer=<cus_id>` to Checkout (do not pass customer_email so Stripe cannot auto-mint a new one)",
+        "[ ] If no local mapping, fall back to Stripe Customer Search by metadata: GET /v1/customers/search?query=metadata['app_user_id']:'<user_id>' and reuse the match if found",
+        "[ ] If neither exists, create the customer ONCE (POST /v1/customers) with an Idempotency-Key, stamp metadata[app_user_id]=<user_id> (and optionally email), then check out against it",
+        "[ ] Record processor_customers (user_id<->customer_id) at customer-resolution time, not only from the webhook, so reuse no longer depends on webhook delivery",
+        "[ ] Backfill metadata[app_user_id] onto existing Stripe customers that lack it (covered by the reconcile command issue)",
+        "[ ] Tests: same user + repeated checkouts reuse one customer; lost local mapping recovers via Customer Search; new user creates exactly one customer; idempotent under retry"
+      ],
+      "completed": false
+    },
+    {
+      "id": 213,
+      "name": "Prevent redundant/duplicate subscriptions per user, independent of webhook delivery",
+      "description": "The same-tier-group duplicate guard (checkout/service.go) checks only the LOCAL subscriptions table, which is populated by webhooks. When a webhook is missed, the local DB shows no subscription, so the guard does not fire and a second parallel Stripe subscription is created (observed: 3 active `initiate` subs across 3 customers). Enforcement must not depend on webhook delivery. Add a checkout-time check against Stripe itself plus a hard DB invariant of at most one active/pending subscription per (user, tier_group).",
+      "tasks": [
+        "[ ] At checkout, after resolving the customer, query Stripe for that customer's active/trialing subscriptions; block (409) if one already exists in the same tier_group regardless of local DB state",
+        "[ ] Funnel any tier change through change-tier (already enforced cross-tier and, since v0.9.16, same-tier) -- keep that, but make it webhook-independent via the Stripe check above",
+        "[ ] Add a Postgres partial unique index: UNIQUE (user_id, tier_group) WHERE status IN ('active','pending') as a hard invariant (decide collision/upsert behavior on webhook insert)",
+        "[ ] Decide reconciliation behavior when duplicates already exist (pick the canonical sub, cancel the rest) -- coordinate with the reconcile command issue",
+        "[ ] Tests: missed-webhook scenario cannot create a second sub; concurrent double-submit is rejected; DB invariant holds under webhook insert races"
+      ],
+      "completed": false
+    },
+    {
+      "id": 214,
+      "name": "Stripe subscription reconcile/backfill command (parity with NMI/CCBill subscription-sync)",
+      "description": "cmd/subscription-sync reconciles local subscriptions against processor reports for NMI/Mobius and CCBill only -- there is NO Stripe path. So there is no way to backfill a fresh DB from Stripe, or to detect/repair drift from missed webhooks (e.g. a paid Stripe subscription that never got recorded locally, or local subs Stripe no longer has). Add a Stripe reconcile that pulls subscriptions/customers from Stripe and reconciles them into OpenRails, keyed on customer metadata[app_user_id] + subscription metadata[user_id]/internal_price_id.",
+      "tasks": [
+        "[ ] Implement a Stripe report fetch (list subscriptions + customers via the Stripe API, paginated) analogous to fetchCCBillSubscriptions/fetchRemoteSubscriptions",
+        "[ ] Resolve each Stripe subscription to an OpenRails user via customer metadata[app_user_id] (fallback: subscription metadata[user_id]) and to a price via metadata[internal_price_id] / lookup_key",
+        "[ ] Diff remote vs local: create missing local subscriptions (remote-only), flag/cancel stale local subs (local-only), report mismatches; support --apply and dry-run like the existing reconciler",
+        "[ ] Reuse the webhook handler's CreateMembership/RegisterPurchase path so backfilled subs grant entitlements identically to the live webhook flow",
+        "[ ] Make it safe to run on a fresh DB (bootstrap) and as a periodic drift check; refuse destructive apply when the remote report is empty (mirror the NMI guard)",
+        "[ ] Tests: fresh-DB backfill creates correct subs/entitlements; missed-webhook sub is recovered; duplicate Stripe subs for one user are reconciled to a single canonical local sub"
+      ],
+      "completed": false
     }
   ]
 }
