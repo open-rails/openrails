@@ -51,6 +51,41 @@ func TestStripeInvoiceEffectiveMetadataUsesSubscriptionDetailsFallback(t *testin
 	}
 }
 
+// Regression for the 2026-04-22.preview invoice shape: subscription metadata
+// lives under parent.subscription_details and the line-item price under
+// pricing.price_details.price (legacy subscription_details / price.id absent).
+func TestStripeInvoicePreviewShapeParsing(t *testing.T) {
+	payload := []byte(`{
+      "id": "in_test",
+      "subscription": "sub_test",
+      "customer": "cus_test",
+      "amount_paid": 1200,
+      "currency": "usd",
+      "metadata": {},
+      "lines": {"data": [{"pricing": {"price_details": {"price": "price_stripe_initiate"}}}]},
+      "parent": {"subscription_details": {"metadata": {
+        "user_id": "019e51df-17aa-7de4-a4e9-4f2e7c33ea29",
+        "internal_price_id": "4ecb4c2b-b057-49c0-a691-10639c0969db"
+      }}}
+    }`)
+
+	var inv stripeInvoice
+	if err := json.Unmarshal(payload, &inv); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	md := stripeInvoiceEffectiveMetadata(inv)
+	if md["user_id"] != "019e51df-17aa-7de4-a4e9-4f2e7c33ea29" {
+		t.Fatalf("user_id not resolved from parent.subscription_details.metadata: %q", md["user_id"])
+	}
+	if md["internal_price_id"] != "4ecb4c2b-b057-49c0-a691-10639c0969db" {
+		t.Fatalf("internal_price_id not resolved: %q", md["internal_price_id"])
+	}
+	if got := inv.Lines.Data[0].priceID(); got != "price_stripe_initiate" {
+		t.Fatalf("priceID() from pricing.price_details.price = %q, want price_stripe_initiate", got)
+	}
+}
+
 func TestValidateStripeInvoicePrice(t *testing.T) {
 	price := &models.Price{Amount: 2399, Currency: "USD"}
 	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 2399, Currency: "usd"}, price); err != nil {
