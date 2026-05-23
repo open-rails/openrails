@@ -650,6 +650,8 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 	var data struct {
 		ID                 string `json:"id"`
 		Status             string `json:"status"`
+		CancelAtPeriodEnd  bool   `json:"cancel_at_period_end"`
+		CanceledAt         int64  `json:"canceled_at"`
 		CurrentPeriodStart int64  `json:"current_period_start"`
 		CurrentPeriodEnd   int64  `json:"current_period_end"`
 		Items              struct {
@@ -717,7 +719,40 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 		sub.CurrentPeriodEndsAt = &ts
 	}
 
-	applyStripeSubscriptionStatus(sub, data.Status, s.now().UTC())
+	if data.CancelAtPeriodEnd {
+		// Stripe reports the subscription as scheduled to cancel at period end.
+		// Its `status` is still "active" until the period actually ends, so
+		// applyStripeSubscriptionStatus would (wrongly) flip a just-cancelled
+		// local record back to active — undoing the user's cancellation. Reflect
+		// the scheduled cancellation locally instead.
+		sub.Status = models.StatusCancelled
+		sub.ClearRetrySchedule()
+		now := s.now().UTC()
+		if sub.CancelledAt == nil {
+			ts := now
+			if data.CanceledAt > 0 {
+				ts = time.Unix(data.CanceledAt, 0).UTC()
+			}
+			sub.CancelledAt = &ts
+		}
+		if sub.EndedAt == nil {
+			endAt := now
+			if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now) {
+				endAt = *sub.CurrentPeriodEndsAt
+			}
+			sub.EndedAt = &endAt
+		}
+	} else {
+		// Not scheduled to cancel. If Stripe now reports it active/trialing while
+		// the local record is still cancelled, this is a resume — clear the prior
+		// scheduled-cancellation marks before applying the status.
+		incoming := strings.ToLower(strings.TrimSpace(data.Status))
+		if sub.Status == models.StatusCancelled && (incoming == "active" || incoming == "trialing") {
+			sub.CancelledAt = nil
+			sub.EndedAt = nil
+		}
+		applyStripeSubscriptionStatus(sub, data.Status, s.now().UTC())
+	}
 
 	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
 		return fmt.Errorf("update subscription from stripe: %w", err)
