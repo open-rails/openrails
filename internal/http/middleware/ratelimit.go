@@ -17,9 +17,15 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
 const maxInMemoryRateLimitCounters = 10_000
+
+const (
+	rateLimitScopeIP   = "ip"
+	rateLimitScopeUser = "user"
+)
 
 // RateLimitStore holds in-memory counters as a fallback when Redis is unavailable.
 type RateLimitStore struct {
@@ -37,6 +43,17 @@ type rateLimitResult struct {
 	remaining int
 	reset     time.Duration
 	count     int
+}
+
+type rateLimitSubject struct {
+	Scope string
+	Value string
+	Key   string
+}
+
+type subjectRateLimitResult struct {
+	subject rateLimitSubject
+	result  rateLimitResult
 }
 
 // NewRateLimitStore creates a new in-memory fallback store.
@@ -70,60 +87,92 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 			return
 		}
 
-		clientIP := getClientIP(c)
+		subjects := rateLimitSubjects(c)
+		clientIP := ""
+		userID := ""
+		for _, subject := range subjects {
+			switch subject.Scope {
+			case rateLimitScopeIP:
+				clientIP = subject.Value
+			case rateLimitScopeUser:
+				userID = subject.Value
+			}
+		}
 		captchaTriggerEnabled := captcha.ShouldApply(captchaConfig, bucket)
 		captchaEnforced := captchaShouldEnforce(captchaConfig, c.Request, bucket)
 		if captchaEnforced && challengeStore != nil {
-			challenged, err := challengeStore.IsChallenged(c.Request.Context(), clientIP)
-			if err != nil {
-				log.WithError(err).WithField("bucket", bucket).Warn("captcha challenge lookup failed")
+			challenged := false
+			for _, subject := range subjects {
+				subjectChallenged, err := challengeStore.IsChallenged(c.Request.Context(), subject.Key)
+				if err != nil {
+					log.WithError(err).WithFields(log.Fields{"bucket": bucket, "subject": subject.Key}).Warn("captcha challenge lookup failed")
+				}
+				if subjectChallenged {
+					challenged = true
+				}
 			}
 			if challenged {
-				if !verifyCaptchaChallenge(c, captchaConfig, verifier, challengeStore, store, rdb, bucket, clientIP) {
+				if !verifyCaptchaChallenge(c, captchaConfig, verifier, challengeStore, store, rdb, bucket, clientIP, subjectKeys(subjects)) {
 					return
 				}
 			}
 		}
 
-		var result rateLimitResult
-		var err error
-		if rdb != nil {
-			result, err = redisAllow(c.Request.Context(), rdb, clientIP, bucket, limit)
-			if err != nil {
-				log.WithError(err).Warn("Rate limit redis error; falling back to in-memory limiter")
+		results := make([]subjectRateLimitResult, 0, len(subjects))
+		for _, subject := range subjects {
+			var result rateLimitResult
+			var err error
+			if rdb != nil {
+				result, err = redisAllow(c.Request.Context(), rdb, subject.Key, bucket, limit)
+				if err != nil {
+					log.WithError(err).WithField("subject", subject.Key).Warn("Rate limit redis error; falling back to in-memory limiter")
+				}
 			}
-		}
 
-		if rdb == nil || err != nil {
-			result = store.Allow(clientIP, bucket, limit)
+			if rdb == nil || err != nil {
+				result = store.Allow(subject.Key, bucket, limit)
+			}
+			results = append(results, subjectRateLimitResult{subject: subject, result: result})
 		}
+		combined := combineRateLimitResults(results)
 
 		limitCap := effectiveLimit(limit)
 		c.Header("X-RateLimit-Limit", strconv.Itoa(limitCap))
-		c.Header("X-RateLimit-Remaining", strconv.Itoa(result.remaining))
-		if result.reset > 0 {
-			c.Header("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(result.reset).Unix(), 10))
+		c.Header("X-RateLimit-Remaining", strconv.Itoa(combined.result.remaining))
+		if combined.result.reset > 0 {
+			c.Header("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(combined.result.reset).Unix(), 10))
 		}
 
-		if !result.allowed {
-			if captchaTriggerEnabled && challengeStore != nil && result.count >= captcha.ExtremeThreshold(limit, captchaConfig) {
-				if err := challengeStore.MarkChallenged(c.Request.Context(), clientIP, captchaConfig.EffectiveChallengeTTL()); err != nil {
-					log.WithError(err).WithField("bucket", bucket).Warn("failed to mark captcha challenge")
+		if !combined.result.allowed {
+			if captchaTriggerEnabled && challengeStore != nil {
+				extremeThreshold := captcha.ExtremeThreshold(limit, captchaConfig)
+				markedChallenge := false
+				for _, item := range results {
+					if !item.result.allowed && item.result.count >= extremeThreshold {
+						if err := challengeStore.MarkChallenged(c.Request.Context(), item.subject.Key, captchaConfig.EffectiveChallengeTTL()); err != nil {
+							log.WithError(err).WithFields(log.Fields{"bucket": bucket, "subject": item.subject.Key}).Warn("failed to mark captcha challenge")
+						}
+						markedChallenge = true
+					}
 				}
-				writeCaptchaRequired(c, captchaConfig, bucket)
-				return
+				if markedChallenge {
+					writeCaptchaRequired(c, captchaConfig, bucket)
+					return
+				}
 			}
 
-			retryAfter := int(math.Ceil(result.reset.Seconds()))
+			retryAfter := int(math.Ceil(combined.result.reset.Seconds()))
 			if retryAfter <= 0 {
 				retryAfter = 60
 			}
 			c.Header("Retry-After", strconv.Itoa(retryAfter))
 			log.WithFields(log.Fields{
-				"client_ip": clientIP,
-				"path":      c.Request.URL.Path,
-				"method":    c.Request.Method,
-				"bucket":    bucket,
+				"limited_subject": combined.subject.Key,
+				"client_ip":       clientIP,
+				"user_id":         userID,
+				"path":            c.Request.URL.Path,
+				"method":          c.Request.Method,
+				"bucket":          bucket,
 			}).Warn("Rate limit exceeded")
 			response.TooManyRequests(c, "Rate limit exceeded")
 			c.Abort()
@@ -134,8 +183,66 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 	}
 }
 
-// Allow applies a simple fixed 60-second window per IP+bucket when Redis is unavailable.
-func (s *RateLimitStore) Allow(ip, bucket string, limit *config.RateLimit) rateLimitResult {
+// RateLimitSubjectKeys returns the current request's captcha/rate-limit subjects.
+func RateLimitSubjectKeys(c *gin.Context) []string {
+	return subjectKeys(rateLimitSubjects(c))
+}
+
+func rateLimitSubjects(c *gin.Context) []rateLimitSubject {
+	clientIP := strings.TrimSpace(getClientIP(c))
+	subjects := make([]rateLimitSubject, 0, 2)
+	if clientIP != "" {
+		subjects = append(subjects, rateLimitSubject{Scope: rateLimitScopeIP, Value: clientIP, Key: rateLimitScopeIP + ":" + clientIP})
+	}
+	if uc, ok := authprovider.UserContextFromGin(c); ok {
+		userID := strings.TrimSpace(uc.UserID)
+		if userID != "" {
+			subjects = append(subjects, rateLimitSubject{Scope: rateLimitScopeUser, Value: userID, Key: rateLimitScopeUser + ":" + userID})
+		}
+	}
+	return subjects
+}
+
+func subjectKeys(subjects []rateLimitSubject) []string {
+	keys := make([]string, 0, len(subjects))
+	for _, subject := range subjects {
+		if subject.Key != "" {
+			keys = append(keys, subject.Key)
+		}
+	}
+	return keys
+}
+
+func combineRateLimitResults(results []subjectRateLimitResult) subjectRateLimitResult {
+	if len(results) == 0 {
+		return subjectRateLimitResult{result: rateLimitResult{allowed: true}}
+	}
+	combined := results[0]
+	combined.result.allowed = true
+	blockedCount := -1
+	for _, item := range results {
+		if item.result.remaining < combined.result.remaining {
+			combined.result.remaining = item.result.remaining
+		}
+		if item.result.reset > combined.result.reset {
+			combined.result.reset = item.result.reset
+		}
+		if item.result.count > combined.result.count {
+			combined.result.count = item.result.count
+		}
+		if !item.result.allowed {
+			combined.result.allowed = false
+			if item.result.count >= blockedCount {
+				blockedCount = item.result.count
+				combined.subject = item.subject
+			}
+		}
+	}
+	return combined
+}
+
+// Allow applies a simple fixed 60-second window per subject+bucket when Redis is unavailable.
+func (s *RateLimitStore) Allow(subjectKey, bucket string, limit *config.RateLimit) rateLimitResult {
 	if limit == nil {
 		return rateLimitResult{allowed: true}
 	}
@@ -148,7 +255,7 @@ func (s *RateLimitStore) Allow(ip, bucket string, limit *config.RateLimit) rateL
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	key := fmt.Sprintf("%s:%s", bucket, ip)
+	key := rateLimitMemoryKey(bucket, subjectKey)
 	now := time.Now()
 	counter, ok := s.counters[key]
 	if !ok || now.After(counter.reset) {
@@ -197,32 +304,38 @@ func (s *RateLimitStore) pruneLocked(now time.Time) {
 	}
 }
 
-func (s *RateLimitStore) Reset(ip, bucket string) {
+func (s *RateLimitStore) Reset(subjectKey, bucket string) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.counters, fmt.Sprintf("%s:%s", bucket, ip))
+	delete(s.counters, rateLimitMemoryKey(bucket, subjectKey))
 }
 
-func (s *RateLimitStore) ResetBuckets(ip string, buckets []string) {
+func (s *RateLimitStore) ResetBuckets(subjectKeys []string, buckets []string) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, bucket := range buckets {
-		bucket = strings.ToLower(strings.TrimSpace(bucket))
-		if bucket == "" {
+	for _, subjectKey := range subjectKeys {
+		subjectKey = strings.TrimSpace(subjectKey)
+		if subjectKey == "" {
 			continue
 		}
-		delete(s.counters, fmt.Sprintf("%s:%s", bucket, ip))
+		for _, bucket := range buckets {
+			bucket = strings.ToLower(strings.TrimSpace(bucket))
+			if bucket == "" {
+				continue
+			}
+			delete(s.counters, rateLimitMemoryKey(bucket, subjectKey))
+		}
 	}
 }
 
-// redisAllow implements a per-IP, per-bucket fixed-window counter in Redis (1-minute window).
-func redisAllow(ctx context.Context, rdb *redis.Client, ip, bucket string, limit *config.RateLimit) (rateLimitResult, error) {
+// redisAllow implements a per-subject, per-bucket fixed-window counter in Redis (1-minute window).
+func redisAllow(ctx context.Context, rdb *redis.Client, subjectKey, bucket string, limit *config.RateLimit) (rateLimitResult, error) {
 	if limit == nil {
 		return rateLimitResult{allowed: true}, nil
 	}
@@ -231,7 +344,7 @@ func redisAllow(ctx context.Context, rdb *redis.Client, ip, bucket string, limit
 		return rateLimitResult{allowed: true}, nil
 	}
 	window := currentRateLimitWindow()
-	key := rateLimitRedisKey(bucket, ip, window)
+	key := rateLimitRedisKey(bucket, subjectKey, window)
 	cnt, err := rdb.Incr(ctx, key).Result()
 	if err != nil {
 		return rateLimitResult{}, err
@@ -248,18 +361,24 @@ func redisAllow(ctx context.Context, rdb *redis.Client, ip, bucket string, limit
 	return rateLimitResult{allowed: allowed, remaining: remaining, reset: reset, count: int(cnt)}, nil
 }
 
-func resetRedisRateLimitBuckets(ctx context.Context, rdb *redis.Client, ip string, buckets []string) error {
+func resetRedisRateLimitBuckets(ctx context.Context, rdb *redis.Client, subjectKeys []string, buckets []string) error {
 	if rdb == nil {
 		return nil
 	}
-	keys := make([]string, 0, len(buckets))
+	keys := make([]string, 0, len(buckets)*len(subjectKeys))
 	window := currentRateLimitWindow()
-	for _, bucket := range buckets {
-		bucket = strings.ToLower(strings.TrimSpace(bucket))
-		if bucket == "" {
+	for _, subjectKey := range subjectKeys {
+		subjectKey = strings.TrimSpace(subjectKey)
+		if subjectKey == "" {
 			continue
 		}
-		keys = append(keys, rateLimitRedisKey(bucket, ip, window))
+		for _, bucket := range buckets {
+			bucket = strings.ToLower(strings.TrimSpace(bucket))
+			if bucket == "" {
+				continue
+			}
+			keys = append(keys, rateLimitRedisKey(bucket, subjectKey, window))
+		}
 	}
 	if len(keys) == 0 {
 		return nil
@@ -271,8 +390,12 @@ func currentRateLimitWindow() int64 {
 	return time.Now().Unix() / 60
 }
 
-func rateLimitRedisKey(bucket, ip string, window int64) string {
-	return fmt.Sprintf("rl:%s:%s:%d", bucket, ip, window)
+func rateLimitRedisKey(bucket, subjectKey string, window int64) string {
+	return fmt.Sprintf("rl:%s:%s:%d", bucket, subjectKey, window)
+}
+
+func rateLimitMemoryKey(bucket, subjectKey string) string {
+	return fmt.Sprintf("%s:%s", bucket, subjectKey)
 }
 
 func resolveRateLimitPolicy(cfg *config.RateLimitsConfig, req *http.Request) (*config.RateLimit, string) {

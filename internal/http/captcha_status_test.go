@@ -11,13 +11,14 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCaptchaStatusReportsGlobalChallenge(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := captcha.NewChallengeStore(nil)
-	require.NoError(t, store.MarkChallenged(context.Background(), "203.0.113.50", time.Minute))
+	require.NoError(t, store.MarkChallenged(context.Background(), "ip:203.0.113.50", time.Minute))
 
 	s := &Server{
 		cfg: &config.Config{Captcha: &config.CaptchaConfig{
@@ -46,6 +47,38 @@ func TestCaptchaStatusReportsGlobalChallenge(t *testing.T) {
 	}`, w.Body.String())
 	require.NotContains(t, w.Body.String(), "site-key")
 	require.NotContains(t, w.Body.String(), "secret-key")
+}
+
+func TestCaptchaStatusReportsUserChallenge(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := captcha.NewChallengeStore(nil)
+	require.NoError(t, store.MarkChallenged(context.Background(), "user:user_1", time.Minute))
+
+	s := &Server{
+		cfg: &config.Config{Captcha: &config.CaptchaConfig{
+			Enabled:   true,
+			Provider:  config.CaptchaProviderTurnstile,
+			SiteKey:   "site-key",
+			SecretKey: "secret-key",
+		}},
+		captchaStore: store,
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		uc := authprovider.UserContext{UserID: "user_1"}
+		c.Set("billing.user_context", uc)
+		c.Request = c.Request.WithContext(authprovider.SetUserContext(c.Request.Context(), uc))
+		c.Next()
+	})
+	r.GET("/v1/captcha/status", s.captchaStatusHandler)
+	req := httptest.NewRequest(http.MethodGet, "/v1/captcha/status", nil)
+	req.RemoteAddr = "203.0.113.51:1234"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"required":true`)
 }
 
 func TestCaptchaStatusDisabled(t *testing.T) {

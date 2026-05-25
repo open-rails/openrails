@@ -41,10 +41,16 @@ func (s *Server) captchaStatusHandler(c *gin.Context) {
 		return
 	}
 
-	clientIP := middleware.ClientIP(c)
-	required, err := s.captchaStore.IsChallenged(c.Request.Context(), clientIP)
-	if err != nil {
-		required = false
+	required := false
+	for _, subjectKey := range middleware.RateLimitSubjectKeys(c) {
+		challenged, err := s.captchaStore.IsChallenged(c.Request.Context(), subjectKey)
+		if err != nil {
+			continue
+		}
+		if challenged {
+			required = true
+			break
+		}
 	}
 
 	resp["required"] = required

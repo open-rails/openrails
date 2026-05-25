@@ -133,6 +133,9 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	e.Use(middleware.SecurityHeaders())
 	e.Use(middleware.CORS(s.cfg.CorsOrigins))
 	e.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
+	if s.authProvider != nil {
+		e.Use(s.authProvider.Optional())
+	}
 	e.Use(middleware.RateLimitWithChallengeStore(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore))
 	return e
 }

@@ -50,7 +50,8 @@ type siteVerifyVerifier struct {
 	client *http.Client
 }
 
-// ChallengeStore tracks challenged and solved IP/bucket pairs with Redis and in-memory fallback.
+// ChallengeStore tracks challenged subjects with Redis and in-memory fallback.
+// Subjects are rate-limit identities such as "ip:203.0.113.1" or "user:abc".
 type ChallengeStore struct {
 	rdb        *redis.Client
 	mu         sync.Mutex
@@ -137,19 +138,19 @@ func NewChallengeStore(rdb *redis.Client) *ChallengeStore {
 	}
 }
 
-// IsChallenged reports whether ip currently requires captcha solving.
-func (s *ChallengeStore) IsChallenged(ctx context.Context, ip string) (bool, error) {
-	return s.exists(ctx, s.challengeRedisKey(ip), s.memoryKey(ip), s.challenged)
+// IsChallenged reports whether subject currently requires captcha solving.
+func (s *ChallengeStore) IsChallenged(ctx context.Context, subject string) (bool, error) {
+	return s.exists(ctx, s.challengeRedisKey(subject), s.memoryKey(subject), s.challenged)
 }
 
-// MarkChallenged records that ip must solve captcha.
-func (s *ChallengeStore) MarkChallenged(ctx context.Context, ip string, ttl time.Duration) error {
-	return s.set(ctx, s.challengeRedisKey(ip), s.memoryKey(ip), s.challenged, ttl)
+// MarkChallenged records that subject must solve captcha.
+func (s *ChallengeStore) MarkChallenged(ctx context.Context, subject string, ttl time.Duration) error {
+	return s.set(ctx, s.challengeRedisKey(subject), s.memoryKey(subject), s.challenged, ttl)
 }
 
-// ClearChallenged removes the captcha challenge marker for ip.
-func (s *ChallengeStore) ClearChallenged(ctx context.Context, ip string) error {
-	return s.del(ctx, s.challengeRedisKey(ip), s.memoryKey(ip), s.challenged)
+// ClearChallenged removes the captcha challenge marker for subject.
+func (s *ChallengeStore) ClearChallenged(ctx context.Context, subject string) error {
+	return s.del(ctx, s.challengeRedisKey(subject), s.memoryKey(subject), s.challenged)
 }
 
 func (s *ChallengeStore) exists(ctx context.Context, redisKey, memoryKey string, memory map[string]time.Time) (bool, error) {
@@ -216,12 +217,12 @@ func (s *ChallengeStore) del(ctx context.Context, redisKey, memoryKey string, me
 	return nil
 }
 
-func (s *ChallengeStore) challengeRedisKey(ip string) string {
-	return "captcha:challenge:" + ip
+func (s *ChallengeStore) challengeRedisKey(subject string) string {
+	return "captcha:challenge:" + subject
 }
 
-func (s *ChallengeStore) memoryKey(ip string) string {
-	return ip
+func (s *ChallengeStore) memoryKey(subject string) string {
+	return subject
 }
 
 func (s *ChallengeStore) pruneLocked(memory map[string]time.Time, now time.Time) {

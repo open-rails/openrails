@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 )
 
-func verifyCaptchaChallenge(c *gin.Context, cfg *config.CaptchaConfig, verifier captcha.Verifier, challengeStore *captcha.ChallengeStore, rateStore *RateLimitStore, rdb *redis.Client, bucket, clientIP string) bool {
+func verifyCaptchaChallenge(c *gin.Context, cfg *config.CaptchaConfig, verifier captcha.Verifier, challengeStore *captcha.ChallengeStore, rateStore *RateLimitStore, rdb *redis.Client, bucket, clientIP string, subjectKeys []string) bool {
 	token := strings.TrimSpace(c.GetHeader(captcha.TokenHeader))
 	if token == "" {
 		writeCaptchaRequired(c, cfg, bucket)
@@ -34,14 +34,16 @@ func verifyCaptchaChallenge(c *gin.Context, cfg *config.CaptchaConfig, verifier 
 		writeCaptchaInvalid(c, "captcha invalid")
 		return false
 	}
-	if err := challengeStore.ClearChallenged(c.Request.Context(), clientIP); err != nil {
-		log.WithError(err).WithField("bucket", bucket).Warn("failed to clear captcha challenge")
+	for _, subjectKey := range subjectKeys {
+		if err := challengeStore.ClearChallenged(c.Request.Context(), subjectKey); err != nil {
+			log.WithError(err).WithFields(log.Fields{"bucket": bucket, "subject": subjectKey}).Warn("failed to clear captcha challenge")
+		}
 	}
 	resetBuckets := cfg.EffectiveChallengeBuckets()
-	if err := resetRedisRateLimitBuckets(c.Request.Context(), rdb, clientIP, resetBuckets); err != nil {
+	if err := resetRedisRateLimitBuckets(c.Request.Context(), rdb, subjectKeys, resetBuckets); err != nil {
 		log.WithError(err).WithField("bucket", bucket).Warn("failed to reset redis rate limit after captcha")
 	}
-	rateStore.ResetBuckets(clientIP, resetBuckets)
+	rateStore.ResetBuckets(subjectKeys, resetBuckets)
 	return true
 }
 
