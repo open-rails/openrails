@@ -36,6 +36,25 @@ type Options struct {
 	PageSize int
 	// SkipPayments skips the charges/payments/cards pass (subscriptions only).
 	SkipPayments bool
+	// UserExists reports whether a user_id (resolved from Stripe metadata /
+	// customer mapping) exists in the host's identity system. When set, any
+	// remote subscription or charge that resolves to an unknown user is skipped
+	// (no membership/payment/card/customer rows are written) and reported -
+	// there is no point storing billing for a user we don't have. Injected so
+	// OpenRails stays decoupled from identity; the embedded host (cozy-art)
+	// always wires it, making the skip unconditional in the product. When nil
+	// (standalone with no identity source) the reconcile behaves as before.
+	UserExists func(ctx context.Context, userID string) (bool, error)
+}
+
+// userKnown reports whether userID exists in the host identity system. With no
+// checker wired it returns true (legacy behavior); the embedded host always
+// wires one, so unknown-user skipping is unconditional there.
+func (o Options) userKnown(ctx context.Context, userID string) (bool, error) {
+	if o.UserExists == nil {
+		return true, nil
+	}
+	return o.UserExists(ctx, userID)
 }
 
 // Report summarizes what the run observed and (when Apply) wrote. It is returned
@@ -45,6 +64,7 @@ type Report struct {
 	RemoteActiveSubscriptions  int
 	MappableSubscriptions      int
 	SkippedSubscriptions       []string
+	UnknownUserSubscriptions   []string
 	LocalActiveSubscriptions   int
 	RemoteOnlySubscriptions    []string
 	LocalOnlySubscriptions     []string
@@ -54,6 +74,7 @@ type Report struct {
 	RemoteChargesFetched int
 	ChargesMapped        int
 	ChargesSkipped       []string
+	UnknownUserCharges   []string
 	PaymentsCreated      int
 	PaymentCardsSnapshot int
 	CardsUpserted        int
@@ -214,6 +235,15 @@ func reconcileSubscriptions(
 			skipped = append(skipped, fmt.Sprintf("%s (%s)", remote.ID, reason))
 			continue
 		}
+		known, err := opts.userKnown(ctx, m.UserID)
+		if err != nil {
+			return fmt.Errorf("user existence check failed for %s: %w", remote.ID, err)
+		}
+		if !known {
+			report.UnknownUserSubscriptions = append(report.UnknownUserSubscriptions,
+				fmt.Sprintf("%s (user %s not found locally)", remote.ID, m.UserID))
+			continue
+		}
 		remoteIDs[remote.ID] = struct{}{}
 		mapped[remote.ID] = m
 	}
@@ -252,6 +282,16 @@ func reconcileSubscriptions(
 	} else {
 		fmt.Printf("skipped (unmappable) subscriptions (%d):\n", len(skipped))
 		for _, entry := range skipped {
+			fmt.Printf("  %s\n", entry)
+		}
+	}
+
+	// Loud: an active Stripe subscription bound to a user we have no local record
+	// of is a red flag (possibly billing a deleted account). We never create
+	// billing rows for unknown users.
+	if len(report.UnknownUserSubscriptions) > 0 {
+		fmt.Printf("!! SKIPPED - unknown user (%d subscription(s); no local account, billing NOT created):\n", len(report.UnknownUserSubscriptions))
+		for _, entry := range report.UnknownUserSubscriptions {
 			fmt.Printf("  %s\n", entry)
 		}
 	}
@@ -385,6 +425,15 @@ func reconcileCharges(
 			skipped = append(skipped, fmt.Sprintf("%s (no mapped user)", txnID))
 			continue
 		}
+		known, err := opts.userKnown(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("user existence check failed for charge %s: %w", txnID, err)
+		}
+		if !known {
+			report.UnknownUserCharges = append(report.UnknownUserCharges,
+				fmt.Sprintf("%s (user %s not found locally)", txnID, userID))
+			continue
+		}
 		mapped++
 
 		card := payments.NormalizeStripeCard(charge.Card)
@@ -436,6 +485,12 @@ func reconcileCharges(
 	report.CardsUpserted = cardsUpserted
 
 	fmt.Printf("remote charges fetched: %d (mapped=%d, skipped=%d)\n", len(charges), mapped, len(skipped))
+	if len(report.UnknownUserCharges) > 0 {
+		fmt.Printf("!! SKIPPED - unknown user (%d charge(s); no local account, payment/card NOT created):\n", len(report.UnknownUserCharges))
+		for _, entry := range report.UnknownUserCharges {
+			fmt.Printf("  %s\n", entry)
+		}
+	}
 	if !opts.Apply {
 		if mapped > 0 {
 			fmt.Printf("dry-run: would backfill payments/cards for %d charge(s); pass --apply to write\n", mapped)

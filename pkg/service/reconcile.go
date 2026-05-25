@@ -20,6 +20,12 @@ type StripeReconcileOptions struct {
 	PageSize int
 	// SkipPayments runs the subscription reconcile only (no charges/cards pass).
 	SkipPayments bool
+	// UserExists reports whether a resolved user_id exists in the host's identity
+	// system. When set, any remote subscription/charge resolving to an unknown
+	// user is skipped (no billing rows written) and reported. OpenRails owns no
+	// users table, so the host injects this; cozy-art always wires it, making the
+	// skip unconditional. Nil = no identity source (legacy behavior).
+	UserExists func(ctx context.Context, userID string) (bool, error)
 }
 
 // StripeReconcileReport summarizes what a Stripe backfill observed and wrote.
@@ -66,5 +72,6 @@ func (s *Service) ReconcileStripe(ctx context.Context, opts StripeReconcileOptio
 		MaxPages:     opts.MaxPages,
 		PageSize:     opts.PageSize,
 		SkipPayments: opts.SkipPayments,
+		UserExists:   opts.UserExists,
 	})
 }
