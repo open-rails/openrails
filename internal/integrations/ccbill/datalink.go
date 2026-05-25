@@ -7,13 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 type DataLinkClient struct {
@@ -28,11 +28,13 @@ type DataLinkClient struct {
 
 const defaultDataLinkBaseURL = "https://datalink.ccbill.com"
 
+const maxDataLinkResponseBytes = 25 << 20
+
 type CCBillRecord struct {
 	TransactionType string
 	ClientAccNum    string
 	Field2          string
-	SubscriptionID  int64
+	SubscriptionID  string
 	Date            string
 	Username        string
 	Email           string
@@ -105,7 +107,9 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 			if tries == maxRetries {
 				return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, err)
 			}
-			time.Sleep(time.Duration(tries) * time.Second) // Exponential backoff
+			if err := sleepWithContext(ctx, time.Duration(tries)*time.Second); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -133,13 +137,18 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 			return nil, fmt.Errorf("failed after %d retries, last status: %d", maxRetries, resp.StatusCode)
 		}
 		resp.Body.Close()
-		time.Sleep(time.Duration(tries) * time.Second) // Exponential backoff
+		if err := sleepWithContext(ctx, time.Duration(tries)*time.Second); err != nil {
+			return nil, err
+		}
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDataLinkResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)
+	}
+	if len(body) > maxDataLinkResponseBytes {
+		return nil, fmt.Errorf("ccbill datalink response exceeded %d bytes", maxDataLinkResponseBytes)
 	}
 
 	content := string(body)
@@ -219,9 +228,9 @@ func (c *DataLinkClient) ProcessCSVData(ctx context.Context, csvData string) ([]
 }
 
 func (c *DataLinkClient) parseRecord(record []string) (*CCBillRecord, error) {
-	subID, err := strconv.ParseInt(record[3], 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("parsing subscription ID '%s': %w", record[3], err)
+	subID := strings.TrimSpace(record[3])
+	if subID == "" {
+		return nil, fmt.Errorf("subscription ID is required")
 	}
 
 	return &CCBillRecord{
@@ -236,6 +245,43 @@ func (c *DataLinkClient) parseRecord(record []string) (*CCBillRecord, error) {
 		RebillDate:      record[8],
 		ExpiryDate:      record[9],
 	}, nil
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func IsDataLinkActiveStatus(status string) bool {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "1", "Y", "YES", "ACTIVE", "A":
+		return true
+	default:
+		return false
+	}
+}
+
+func DataLinkPaidThrough(record CCBillRecord, now time.Time) (time.Time, bool) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	for _, raw := range []string{record.ExpiryDate, record.RebillDate} {
+		parsed, err := timeutil.ParseFirstUTC(strings.TrimSpace(raw), "2006-01-02", "01/02/2006", time.RFC3339)
+		if err != nil {
+			continue
+		}
+		paidThrough := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, time.UTC)
+		if paidThrough.After(now.UTC()) {
+			return paidThrough, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func (c *DataLinkClient) ValidateConfig() error {

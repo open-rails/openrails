@@ -13,7 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-type ledgerRepairAlert struct {
+// LedgerRepairAlert describes a durable system alert for operator-led billing repair.
+type LedgerRepairAlert struct {
 	Provider          string
 	Operation         string
 	TransactionID     string
@@ -23,6 +24,13 @@ type ledgerRepairAlert struct {
 	Err               error
 	Metadata          map[string]any
 }
+
+// RecordLedgerRepairAlert stores a system notification visible through admin repair-alert endpoints.
+func RecordLedgerRepairAlert(ctx context.Context, notificationService *subscriptions.NotificationService, database *db.DB, now time.Time, alert LedgerRepairAlert) error {
+	return recordLedgerRepairAlert(ctx, notificationService, database, now, ledgerRepairAlert(alert))
+}
+
+type ledgerRepairAlert LedgerRepairAlert
 
 func recordLedgerRepairAlert(ctx context.Context, notificationService *subscriptions.NotificationService, database *db.DB, now time.Time, alert ledgerRepairAlert) error {
 	if notificationService == nil {

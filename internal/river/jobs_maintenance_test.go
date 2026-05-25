@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"testing"
+	"time"
 
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 )
@@ -21,7 +22,7 @@ func TestIsCCBillDataLinkActive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.status, func(t *testing.T) {
-			if got := isCCBillDataLinkActive(tt.status); got != tt.want {
+			if got := ccbill.IsDataLinkActiveStatus(tt.status); got != tt.want {
 				t.Fatalf("expected %v, got %v", tt.want, got)
 			}
 		})
@@ -29,7 +30,7 @@ func TestIsCCBillDataLinkActive(t *testing.T) {
 }
 
 func TestCCBillDataLinkPaidThrough(t *testing.T) {
-	paidThrough, ok := ccbillDataLinkPaidThrough(ccbill.CCBillRecord{ExpiryDate: "2099-06-03"})
+	paidThrough, ok := ccbill.DataLinkPaidThrough(ccbill.CCBillRecord{ExpiryDate: "2099-06-03"}, time.Now().UTC())
 	if !ok {
 		t.Fatal("expected future expiry date to parse")
 	}
@@ -37,7 +38,7 @@ func TestCCBillDataLinkPaidThrough(t *testing.T) {
 		t.Fatalf("expected end-of-day paid through, got %v", paidThrough)
 	}
 
-	_, ok = ccbillDataLinkPaidThrough(ccbill.CCBillRecord{ExpiryDate: "2000-01-01", RebillDate: ""})
+	_, ok = ccbill.DataLinkPaidThrough(ccbill.CCBillRecord{ExpiryDate: "2000-01-01", RebillDate: ""}, time.Now().UTC())
 	if ok {
 		t.Fatal("expected past date to be rejected")
 	}

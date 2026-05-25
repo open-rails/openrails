@@ -464,7 +464,9 @@ func createCCBillDataLinkClient(cfg *config.Config) *ccbill.DataLinkClient {
 		return nil
 	}
 
-	client := ccbill.NewDataLinkClient(ccbillProc.ToCCBillConfig())
+	ccbillConfig := ccbillProc.ToCCBillConfig()
+	ccbillConfig.TestMode = cfg.IsTestMode()
+	client := ccbill.NewDataLinkClient(ccbillConfig)
 	if err := client.ValidateConfig(); err != nil {
 		log.WithError(err).Warn("Invalid CCBill DataLink configuration; worker disabled")
 		return nil

@@ -39,7 +39,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{Config: r.Config}); err != nil {
 		return fmt.Errorf("add idempotency cleanup worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.CCBillReconcileWorker{DB: r.DB, DataLink: r.CCBillDataLink}); err != nil {
+	if err := river.AddWorkerSafely(workers, &riverjobs.CCBillReconcileWorker{DB: r.DB, DataLink: r.CCBillDataLink, NotificationService: r.NotificationService}); err != nil {
 		return fmt.Errorf("add ccbill reconcile worker: %w", err)
 	}
 	// Webhook processing is now synchronous-only - no background workers needed.

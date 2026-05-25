@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -197,10 +198,13 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 			return fmt.Errorf("fetch ccbill subscriptions failed: %w", err)
 		}
 		for _, record := range records {
-			if record.Status != "Y" {
+			if !ccbill.IsDataLinkActiveStatus(record.Status) {
 				continue
 			}
-			id := fmt.Sprintf("%d", record.SubscriptionID)
+			id := strings.TrimSpace(record.SubscriptionID)
+			if id == "" {
+				continue
+			}
 			remoteIDs[id] = struct{}{}
 			ccbillRecords[id] = record
 		}
@@ -255,8 +259,8 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 	}
 
 	if opts.apply && len(localOnly) > 0 {
-		if processorName != "ccbill" && remoteCount == 0 {
-			return fmt.Errorf("refusing to apply NMI reconciliation: remote report returned zero subscriptions while %d local active subscriptions exist", len(localOnly))
+		if err := refuseEmptyRemoteApply(processorName, remoteIDs, localOnly); err != nil {
+			return err
 		}
 
 		if application.Runtime.SubscriptionLifecycleService == nil {
@@ -311,6 +315,11 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 				fmt.Fprintf(os.Stderr, "skip %s: missing CCBill record\n", id)
 				continue
 			}
+			paidThrough, ok := ccbill.DataLinkPaidThrough(record, time.Now().UTC())
+			if !ok {
+				fmt.Fprintf(os.Stderr, "skip %s: missing future paid-through date in CCBill record\n", id)
+				continue
+			}
 
 			username := strings.TrimSpace(record.Username)
 			if username == "" {
@@ -339,29 +348,25 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 
 			if existingSub != nil {
 				if existingSub.Status != models.StatusActive {
-					renewPrice := price
 					if existingSub.PriceID != price.ID {
-						renewPrice, err = priceService.GetByID(ctx, existingSub.PriceID)
+						_, err = priceService.GetByID(ctx, existingSub.PriceID)
 						if err != nil {
 							fmt.Fprintf(os.Stderr, "skip %s: failed to load price for renewal: %v\n", id, err)
 							continue
 						}
-						if renewPrice == nil {
-							fmt.Fprintf(os.Stderr, "skip %s: missing price for renewal\n", id)
-							continue
-						}
 					}
 
-					err = application.Runtime.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
+					_, err = application.Runtime.SubscriptionLifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{
 						Processor:                 models.ProcessorCCBill,
 						ProcessorSubscriptionID:   id,
+						CurrentPeriodEndsAt:       &paidThrough,
 						AllowTerminalReactivation: opts.allowTerminalReactivation,
 					})
 					if err != nil {
-						fmt.Fprintf(os.Stderr, "failed to renew membership for %s: %v\n", id, err)
+						fmt.Fprintf(os.Stderr, "failed to reactivate membership for %s: %v\n", id, err)
 						continue
 					}
-					fmt.Printf("renewed membership for remote subscription %s\n", id)
+					fmt.Printf("reactivated membership for remote subscription %s\n", id)
 					continue
 				}
 
@@ -375,6 +380,7 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 				Processor:               models.ProcessorCCBill,
 				ProcessorSubscriptionID: &id,
 				UserEmail:               emailPtr,
+				CurrentPeriodEndsAt:     &paidThrough,
 			})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "failed to add membership for %s: %v\n", id, err)
@@ -385,6 +391,13 @@ func reconcileProcessor(ctx context.Context, application *app.App, cfg *config.C
 	}
 
 	return nil
+}
+
+func refuseEmptyRemoteApply(processorName string, remoteIDs map[string]struct{}, localOnly []string) error {
+	if len(remoteIDs) > 0 || len(localOnly) == 0 {
+		return nil
+	}
+	return fmt.Errorf("refusing to apply %s reconciliation: remote active set is empty while %d local active subscriptions exist", processorName, len(localOnly))
 }
 
 func normalizeProcessorList(processors []string, fallback string) []string {

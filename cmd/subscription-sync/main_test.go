@@ -27,3 +27,15 @@ func TestParseRecurringSubscriptionsAcceptsSuccessfulResponses(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"123"}, subs)
 }
+
+func TestRefuseEmptyRemoteApply(t *testing.T) {
+	err := refuseEmptyRemoteApply("ccbill", map[string]struct{}{}, []string{"0125217202000000017"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "remote active set is empty")
+
+	err = refuseEmptyRemoteApply("ccbill", map[string]struct{}{"0125217202000000017": {}}, []string{"other"})
+	require.NoError(t, err)
+
+	err = refuseEmptyRemoteApply("ccbill", map[string]struct{}{}, nil)
+	require.NoError(t, err)
+}

@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -85,8 +84,9 @@ func (CCBillReconcileArgs) Kind() string { return KindCCBillReconcile }
 
 type CCBillReconcileWorker struct {
 	river.WorkerDefaults[CCBillReconcileArgs]
-	DB       *db.DB
-	DataLink *ccbill.DataLinkClient
+	DB                  *db.DB
+	DataLink            *ccbill.DataLinkClient
+	NotificationService *subscriptions.NotificationService
 }
 
 func (CCBillReconcileWorker) Kind() string { return KindCCBillReconcile }
@@ -105,10 +105,10 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 	}
 	remoteActive := make(map[string]ccbill.CCBillRecord, len(records))
 	for _, record := range records {
-		if !isCCBillDataLinkActive(record.Status) {
+		if !ccbill.IsDataLinkActiveStatus(record.Status) {
 			continue
 		}
-		remoteActive[strconv.FormatInt(record.SubscriptionID, 10)] = record
+		remoteActive[strings.TrimSpace(record.SubscriptionID)] = record
 	}
 	priceService := catalog.NewPriceService(w.DB)
 	productService := catalog.NewProductService(w.DB)
@@ -131,6 +131,9 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 		localByProcessorID[processorSubID] = struct{}{}
 		if _, ok := remoteActive[processorSubID]; !ok {
 			missingRemote++
+			if err := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_remote", &sub.ID, sub.UserID, processorSubID, nil, nil); err != nil {
+				log.WithContext(ctx).WithError(err).Warn("CCBillReconcile: failed to persist missing-remote repair alert")
+			}
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id":           sub.ID,
 				"processor_subscription_id": processorSubID,
@@ -148,6 +151,9 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 		existing, err := subscriptionService.GetByProcessorSubscriptionID(ctx, "ccbill", processorSubID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
+				if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_local", nil, "", processorSubID, &record, nil); alertErr != nil {
+					log.WithContext(ctx).WithError(alertErr).Warn("CCBillReconcile: failed to persist missing-local repair alert")
+				}
 				log.WithContext(ctx).WithFields(log.Fields{
 					"processor_subscription_id": processorSubID,
 					"username":                  record.Username,
@@ -162,8 +168,11 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 		if existing.Status == "active" {
 			continue
 		}
-		paidThrough, ok := ccbillDataLinkPaidThrough(record)
+		paidThrough, ok := ccbill.DataLinkPaidThrough(record, time.Now().UTC())
 		if !ok {
+			if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_paid_through", &existing.ID, existing.UserID, processorSubID, &record, nil); alertErr != nil {
+				log.WithContext(ctx).WithError(alertErr).Warn("CCBillReconcile: failed to persist missing-paid-through repair alert")
+			}
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id":           existing.ID,
 				"processor_subscription_id": processorSubID,
@@ -178,6 +187,9 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 			CurrentPeriodEndsAt:     &paidThrough,
 		}); err != nil {
 			if subscriptions.IsTerminalTransitionBlocked(err) {
+				if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_terminal_reactivation_blocked", &existing.ID, existing.UserID, processorSubID, &record, err); alertErr != nil {
+					log.WithContext(ctx).WithError(alertErr).Warn("CCBillReconcile: failed to persist terminal-blocked repair alert")
+				}
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 					"subscription_id":           existing.ID,
 					"processor_subscription_id": processorSubID,
@@ -207,25 +219,21 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 	return nil
 }
 
-func isCCBillDataLinkActive(status string) bool {
-	switch strings.ToUpper(strings.TrimSpace(status)) {
-	case "1", "Y", "YES", "ACTIVE", "A":
-		return true
-	default:
-		return false
+func (w CCBillReconcileWorker) recordDataLinkRepairAlert(ctx context.Context, operation string, subscriptionID *uuid.UUID, userID, processorSubID string, record *ccbill.CCBillRecord, err error) error {
+	metadata := map[string]any{"processor_subscription_id": strings.TrimSpace(processorSubID)}
+	if record != nil {
+		metadata["datalink_status"] = record.Status
+		metadata["datalink_rebill_date"] = record.RebillDate
+		metadata["datalink_expiry_date"] = record.ExpiryDate
+		metadata["datalink_username"] = record.Username
+		metadata["datalink_email"] = record.Email
 	}
-}
-
-func ccbillDataLinkPaidThrough(record ccbill.CCBillRecord) (time.Time, bool) {
-	for _, raw := range []string{record.ExpiryDate, record.RebillDate} {
-		parsed, err := timeutil.ParseFirstUTC(strings.TrimSpace(raw), "2006-01-02", "01/02/2006", time.RFC3339)
-		if err != nil {
-			continue
-		}
-		paidThrough := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, time.UTC)
-		if paidThrough.After(time.Now().UTC()) {
-			return paidThrough, true
-		}
-	}
-	return time.Time{}, false
+	return webhooks.RecordLedgerRepairAlert(ctx, w.NotificationService, w.DB, time.Now().UTC(), webhooks.LedgerRepairAlert{
+		Provider:       "ccbill",
+		Operation:      operation,
+		SubscriptionID: subscriptionID,
+		UserID:         userID,
+		Err:            err,
+		Metadata:       metadata,
+	})
 }
