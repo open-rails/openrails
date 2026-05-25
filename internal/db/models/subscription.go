@@ -134,9 +134,13 @@ func (s *Subscription) ResetCurrentPeriods() error {
 		emptyTime := time.Time{}
 		s.CurrentPeriodStartsAt = &emptyTime
 		s.CurrentPeriodEndsAt = &emptyTime
-		nt := now.Add(-2 * time.Minute)
-		// Ensure endedAt is before cancelledAt to satisfy DB constraint
-		s.EndedAt = &nt
+		// The period has already expired, so the subscription ends now.
+		// The chk_ended_not_before_cancelled constraint requires
+		// ended_at >= cancelled_at; using the true wall-clock instant
+		// (rather than fudging it backwards) keeps that ordering correct
+		// by construction: Cancel() captures its cancelled_at timestamp
+		// before invoking this method, so cancelled_at <= ended_at always.
+		s.EndedAt = &now
 	}
 
 	return nil
@@ -150,6 +154,11 @@ func (s *Subscription) ClearRetrySchedule() {
 }
 
 func (s *Subscription) Cancel(reason string, cancelType *CancelType) error {
+	// Capture cancelled_at BEFORE ResetCurrentPeriods sets ended_at. Reset
+	// reads its own (>= now) wall-clock instant for ended_at, so this ordering
+	// guarantees cancelled_at <= ended_at, satisfying the
+	// chk_ended_not_before_cancelled constraint (ended_at >= cancelled_at)
+	// without any artificial time fudging.
 	now := time.Now()
 	if err := s.ResetCurrentPeriods(); err != nil {
 		return err
