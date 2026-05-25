@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -16,9 +17,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
+	"github.com/riverqueue/river"
 )
 
 // -------------------------------- Products --------------------------------
@@ -321,17 +324,85 @@ func (s *Service) CancelSubscription(ctx context.Context, userID string, req Can
 	}, nil
 }
 
-// ResumeSubscription resumes a cancelled subscription (if supported).
-// Note: Resume functionality is not currently supported by the underlying lifecycle service.
+// ResumeSubscription resumes a cancelled-but-still-resumable subscription.
+//
+// It runs the same path as the HTTP resume route: it locates the user's
+// resumable subscription, gates on the single shared Resumable predicate, then
+// enqueues the same ResumeSubscriptionArgs River job the HTTP handler enqueues —
+// so the library and HTTP entrypoints execute identically.
 func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*ResumeSubscriptionResult, error) {
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
+	}
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.RiverProducer == nil {
+		return nil, fmt.Errorf("job queue unavailable")
+	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	// Resume is not currently supported - subscriptions that are cancelled
-	// cannot be resumed. Users need to create a new subscription.
-	return nil, fmt.Errorf("resume subscription not supported: please create a new subscription")
+	now := s.now().UTC()
+
+	// Find the user's most recent resumable subscription. We look at the current
+	// subscription first (active/cancelled-in-window), then fall back to recent
+	// cancelled history.
+	resp, err := userSubscriptions.GetUserSubscription(ctx, userID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("resume subscription: %w", err)
+	}
+
+	var target *models.Subscription
+	if resp != nil && resp.Subscription != nil && subscriptions.Resumable(resp.Subscription, now) {
+		target = resp.Subscription
+	} else {
+		// Fall back to scanning the user's subscription history for a resumable one.
+		queryOpts := &query.QueryOptions[subscriptions.GetSubscriptionsFilters]{
+			Limit:   25,
+			Offset:  0,
+			Filters: subscriptions.GetSubscriptionsFilters{UserID: userID, Status: string(models.StatusCancelled)},
+		}
+		history, _, herr := userSubscriptions.GetUserSubscriptionHistory(ctx, userID, queryOpts)
+		if herr != nil {
+			return nil, fmt.Errorf("resume subscription: %w", herr)
+		}
+		for _, h := range history {
+			if h.Subscription != nil && subscriptions.Resumable(h.Subscription, now) {
+				target = h.Subscription
+				break
+			}
+		}
+	}
+
+	if target == nil {
+		return &ResumeSubscriptionResult{
+			Success: false,
+			Message: "no resumable subscription found",
+		}, nil
+	}
+
+	if _, err := rt.RiverProducer.Insert(ctx, riverjobs.ResumeSubscriptionArgs{
+		UserID:         userID,
+		SubscriptionID: target.ID,
+	}, &river.InsertOpts{
+		Queue: riverjobs.QueueBilling,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByQueue: true,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("resume subscription: enqueue: %w", err)
+	}
+
+	return &ResumeSubscriptionResult{
+		Success: true,
+		Message: "Subscription resume queued",
+	}, nil
 }
 
 // UpdateSubscriptionPaymentMethod updates the payment method for a subscription.
@@ -1020,6 +1091,16 @@ func subscriptionFromModel(resp *subscriptions.UserSubscriptionResponse) Subscri
 			ID: api.FormatPaymentMethodID(*sub.PaymentMethodID),
 		}
 	}
+
+	// Resumability surface — derived from the single shared predicate so the
+	// library DTO, the HTTP serialization, the resume handler, and the worker all
+	// agree (they call the same subscriptions.* helpers).
+	now := time.Now().UTC()
+	result.Resumable = subscriptions.Resumable(sub, now)
+	result.CancelScheduled = subscriptions.CancelScheduled(sub, now)
+	result.CancelMode = string(subscriptions.CancelModeFor(sub, now))
+	result.CancelPortalURL = subscriptions.CancelPortalURL(sub, now)
+
 	return result
 }
 

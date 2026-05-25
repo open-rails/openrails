@@ -194,6 +194,21 @@ type Subscription struct {
 	Updated                 int64 // Unix epoch seconds
 	Price                   *Price
 	PaymentMethod           *PaymentMethodSummary
+
+	// Resumability surface (issues 215/216). These are derived from the single
+	// shared predicate so library and HTTP consumers agree.
+	//
+	// Resumable: the cancellation can be undone right now (cancel mode is
+	// reversible && status==cancelled && current period end in the future).
+	// CancelScheduled: cancelled but the user retains paid access until the
+	// current period ends (status==cancelled && current period end in the future);
+	// the expiry date is CurrentPeriodEndsAt.
+	// CancelMode: "reversible" | "destructive" | "external_portal".
+	// CancelPortalURL: external consumer-portal URL (set only for CCBill).
+	Resumable       bool
+	CancelScheduled bool
+	CancelMode      string
+	CancelPortalURL *string
 }
 
 // SubscriptionDetail includes full subscription details for billing status.

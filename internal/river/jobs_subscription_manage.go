@@ -179,26 +179,47 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		}
 	}
 
-	if sub.Processor != models.ProcessorStripe {
-		return fmt.Errorf("resume unsupported for processor %s", sub.Processor)
+	// Gate on the single shared resumability predicate (matches the HTTP handler
+	// and the DTO). If the precondition no longer holds by the time the job runs
+	// (e.g. the paid period elapsed, or an NMI deferred delete already fired),
+	// the resume is a no-op rather than a hard failure.
+	if !subscriptions.Resumable(sub, now) {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"user_id":         userID,
+			"subscription_id": sub.ID,
+			"processor":       sub.Processor,
+			"status":          sub.Status,
+		}).Info("subscription not resumable; skipping resume")
+		return nil
 	}
+
 	log.WithContext(ctx).WithFields(log.Fields{
 		"user_id":         userID,
 		"subscription_id": sub.ID,
 		"processor":       sub.Processor,
 	}).Info("processing subscription resume")
-	stripeSvc := &subscriptions.StripeService{Config: w.Config}
-	if err := stripeSvc.ResumeSubscription(ctx, sub.ProcessorSubscriptionID); err != nil {
-		return err
+
+	if sub.Processor == models.ProcessorStripe {
+		stripeSvc := &subscriptions.StripeService{Config: w.Config}
+		if err := stripeSvc.ResumeSubscription(ctx, sub.ProcessorSubscriptionID); err != nil {
+			return err
+		}
+
+		sub.Status = models.StatusActive
+		sub.CancelledAt = nil
+		sub.CancelType = nil
+		sub.CancelFeedback = nil
+		sub.EndedAt = nil
+		if err := w.SubscriptionService.Update(ctx, sub); err != nil {
+			return err
+		}
+		return nil
 	}
 
-	sub.Status = models.StatusActive
-	sub.CancelledAt = nil
-	sub.CancelType = nil
-	sub.CancelFeedback = nil
-	sub.EndedAt = nil
-	if err := w.SubscriptionService.Update(ctx, sub); err != nil {
-		return err
-	}
+	// Other reversible processors (NMI in-window) are handled in issue 216.
+	log.WithContext(ctx).WithFields(log.Fields{
+		"subscription_id": sub.ID,
+		"processor":       sub.Processor,
+	}).Warn("resumable subscription with unsupported processor path")
 	return nil
 }

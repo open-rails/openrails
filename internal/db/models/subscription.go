@@ -69,6 +69,13 @@ type Subscription struct {
 	CancelType     *CancelType `bun:"cancel_type,nullzero" json:"cancel_type"`         // Who/what caused cancellation
 	CancelledAt    *time.Time  `bun:"cancelled_at,nullzero" json:"cancelled_at"`
 
+	// DeletionScheduledAt is set for NMI-backed cancellations that defer the
+	// processor-side delete_subscription until shortly before the paid period
+	// ends (issue 216). While non-nil, the cancellation is still reversible (the
+	// processor subscription is alive). The River finalizer clears it to nil
+	// after calling DeleteRecurringSubscription.
+	DeletionScheduledAt *time.Time `bun:"deletion_scheduled_at,nullzero" json:"deletion_scheduled_at,omitempty"`
+
 	// Relationships
 	Price         *Price         `bun:"rel:belongs-to,join:price_id=id" json:"price,omitempty"`
 	PaymentMethod *PaymentMethod `bun:"rel:belongs-to,join:payment_method_id=id" json:"payment_method,omitempty"`

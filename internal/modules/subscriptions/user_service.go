@@ -89,6 +89,10 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 		CancelFeedback        *string                   `json:"cancel_feedback,omitempty"`
 		CancelType            *models.CancelType        `json:"cancel_type,omitempty"`
 		CancelledAt           *time.Time                `json:"cancelled_at,omitempty"`
+		Resumable             bool                      `json:"resumable"`
+		CancelScheduled       bool                      `json:"cancel_scheduled"`
+		CancelMode            string                    `json:"cancel_mode,omitempty"`
+		CancelPortalURL       *string                   `json:"cancel_portal_url,omitempty"`
 		CreatedAt             time.Time                 `json:"created_at,omitempty"`
 		UpdatedAt             time.Time                 `json:"updated_at,omitempty"`
 		Price                 *api.PriceObject          `json:"price,omitempty"`
@@ -100,6 +104,10 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 	}
 
 	if r.Subscription != nil {
+		// Resumability surface — derived from the single shared predicate so the
+		// HTTP serialization stays in lockstep with the resume handler, the worker,
+		// and the library DTO.
+		now := time.Now().UTC()
 		out := userSubscriptionJSON{
 			ID:                    r.Subscription.ID,
 			UserID:                r.Subscription.UserID,
@@ -115,6 +123,10 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 			CancelFeedback:        r.Subscription.CancelFeedback,
 			CancelType:            r.Subscription.CancelType,
 			CancelledAt:           r.Subscription.CancelledAt,
+			Resumable:             Resumable(r.Subscription, now),
+			CancelScheduled:       CancelScheduled(r.Subscription, now),
+			CancelMode:            string(CancelModeFor(r.Subscription, now)),
+			CancelPortalURL:       CancelPortalURL(r.Subscription, now),
 			CreatedAt:             r.Subscription.CreatedAt,
 			UpdatedAt:             r.Subscription.UpdatedAt,
 			Access:                r.Access,
