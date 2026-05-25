@@ -260,6 +260,11 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	} else {
 		runtime.RiverProducer = producer
 		runtime.riverProducerPool = pool
+		// Wire the deferred NMI delete scheduler now that the producer exists
+		// (issue 216). Without it, NMI cancellations fall back to deleting inline.
+		if runtime.UserSubscriptionService != nil {
+			runtime.UserSubscriptionService.SetDeferredDeleteScheduler(newRiverDeferredDeleteScheduler(producer))
+		}
 	}
 
 	if cfg.ClickHouse != nil {

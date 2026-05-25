@@ -33,6 +33,44 @@ const (
 // use to manage (cancel) their subscription. Mirrors CCBillCancelError.SupportURL.
 const CCBillSupportPortalURL = "https://support.ccbill.com"
 
+// NMIDeleteSafetyMargin is how far ahead of the paid-period end we fire the
+// deferred NMI delete_subscription (issue 216).
+//
+// Timing assumption: NMI attempts the recurring auto-charge AT the period end
+// (current_period_ends_at). We must delete the recurring subscription on the NMI
+// side strictly BEFORE that charge fires, or the user gets billed after they
+// cancelled. A 48h margin gives River ample room to run the job (and retry on
+// transient failures) before NMI's rebill window opens, while still preserving
+// the user's full paid access right up to ~48h before expiry as an undo window.
+//
+// Corollary: if a cancel arrives when there is less than this margin left
+// (now >= current_period_ends_at - 48h), or the period end is unknown/past, we
+// must delete IMMEDIATELY — there is no safe room to defer.
+const NMIDeleteSafetyMargin = 48 * time.Hour
+
+// NMIDeferredDeleteAt returns (deleteAt, true) when an NMI-backed cancellation
+// should DEFER the processor-side delete to a scheduled time (a genuine future
+// undo window exists), or (zero, false) when it must delete IMMEDIATELY.
+//
+// Defer only when there is a real future window: the paid period end is known,
+// in the future, and far enough out that deleteAt = periodEnd - margin is still
+// in the future. Otherwise (window already open, or period unknown/past) the
+// caller must delete inline exactly as before.
+func NMIDeferredDeleteAt(sub *models.Subscription, now time.Time) (time.Time, bool) {
+	if sub == nil {
+		return time.Time{}, false
+	}
+	if !periodEndsInFuture(sub, now) {
+		return time.Time{}, false
+	}
+	deleteAt := sub.CurrentPeriodEndsAt.Add(-NMIDeleteSafetyMargin)
+	if !deleteAt.After(now) {
+		// The 48h pre-rebill window has already opened — too close to defer safely.
+		return time.Time{}, false
+	}
+	return deleteAt, true
+}
+
 // CancelModeFor returns the cancellation capability for a subscription.
 //
 // It takes the full subscription (not just the processor) because NMI is

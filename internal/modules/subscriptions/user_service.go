@@ -42,6 +42,25 @@ type UserSubscriptionService struct {
 	EntitlementService  *entitlements.EntitlementService
 	NMIClients          map[string]*nmi.NMIClient
 	clock               clockwork.Clock
+
+	// deferDelete enqueues a deferred NMI delete_subscription job (issue 216).
+	// When nil, NMI cancellations fall back to deleting inline immediately. It is
+	// injected post-construction (the River producer is built after services).
+	deferDelete DeferredDeleteScheduler
+}
+
+// DeferredDeleteScheduler schedules an NMI delete_subscription to run at a future
+// time. Implemented by the River producer wiring; kept as an interface here so
+// the subscriptions package does not depend on River/pgx.
+type DeferredDeleteScheduler interface {
+	ScheduleNMIDelete(ctx context.Context, userID string, subscriptionID uuid.UUID, runAt time.Time) error
+	CancelNMIDelete(ctx context.Context, userID string, subscriptionID uuid.UUID) error
+}
+
+// SetDeferredDeleteScheduler injects the deferred-delete scheduler. Wired in
+// build_runtime after the River producer exists.
+func (s *UserSubscriptionService) SetDeferredDeleteScheduler(d DeferredDeleteScheduler) {
+	s.deferDelete = d
 }
 
 // SetClock sets the clock for this service. Used for testing.
@@ -462,20 +481,34 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		return fmt.Errorf("unable to cancel subscription for processor %s", subscription.Processor)
 	}
 
-	// Cancel subscription with NMI
-	if s.NMIClients != nil {
-		// Use processor name to look up NMI client
-		provider := strings.ToLower(string(subscription.Processor))
+	now := s.now()
+	provider := strings.ToLower(string(subscription.Processor))
 
-		if client, ok := s.NMIClients[provider]; ok && subscription.ProcessorSubscriptionID != "" {
-			if err := client.DeleteRecurringSubscription(subscription.ProcessorSubscriptionID); err != nil {
-				return fmt.Errorf("failed to cancel subscription with processor '%s': %w", provider, err)
+	// Issue 216: when there is a genuine future undo window, DEFER the
+	// processor-side delete instead of doing it inline. We keep the NMI
+	// subscription alive (so a resume is a no-op processor-side) and schedule
+	// delete_subscription to fire at period_end - safety margin. If the window
+	// has already opened (now >= period_end - margin, common near rebill) or the
+	// period end is unknown/past, we delete IMMEDIATELY exactly as before.
+	deleteAt, defer_ := NMIDeferredDeleteAt(subscription, now)
+	if defer_ && s.deferDelete != nil {
+		if err := s.deferDelete.ScheduleNMIDelete(ctx, userID, subscription.ID, deleteAt); err != nil {
+			return fmt.Errorf("failed to schedule deferred subscription delete: %w", err)
+		}
+		subscription.DeletionScheduledAt = &deleteAt
+	} else {
+		// Immediate delete with NMI (no scheduled job).
+		if s.NMIClients != nil {
+			if client, ok := s.NMIClients[provider]; ok && subscription.ProcessorSubscriptionID != "" {
+				if err := client.DeleteRecurringSubscription(subscription.ProcessorSubscriptionID); err != nil {
+					return fmt.Errorf("failed to cancel subscription with processor '%s': %w", provider, err)
+				}
 			}
 		}
+		subscription.DeletionScheduledAt = nil
 	}
 
 	// Update subscription status in database
-	now := s.now()
 	cancelType := models.CancelTypeUser
 	subscription.Status = models.StatusCancelled
 	subscription.CancelledAt = &now

@@ -75,12 +75,22 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add cancel subscription worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.ResumeSubscriptionWorker{
-		DB:                  r.DB,
-		Config:              r.Config,
-		EntitlementService:  r.EntitlementService,
-		SubscriptionService: r.SubscriptionService,
+		DB:                           r.DB,
+		Config:                       r.Config,
+		EntitlementService:           r.EntitlementService,
+		SubscriptionService:          r.SubscriptionService,
+		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
+		NMIClients:                   r.NMIClients,
 	}); err != nil {
 		return fmt.Errorf("add resume subscription worker: %w", err)
+	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.NMIDeleteSubscriptionWorker{
+		DB:                  r.DB,
+		Config:              r.Config,
+		SubscriptionService: r.SubscriptionService,
+		NMIClients:          r.NMIClients,
+	}); err != nil {
+		return fmt.Errorf("add nmi delete subscription worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.WebhookProcessWorker{
 		Dispatcher: r.WebhookDispatcher,
