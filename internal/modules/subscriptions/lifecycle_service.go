@@ -277,7 +277,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	} else if price.BillingCycleDays != nil && *price.BillingCycleDays > 0 {
 		periodEndsAt = now.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
 	} else {
-		periodEndsAt = now.Add(30 * 24 * time.Hour)
+		periodEndsAt = now.Add(models.DefaultBillingCycle)
 	}
 	product, err := productService.GetByID(ctx, price.ProductID)
 	if err != nil {

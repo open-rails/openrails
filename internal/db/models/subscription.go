@@ -22,6 +22,11 @@ const (
 	StatusCancelled SubscriptionStatus = "cancelled" // Will never rebill again (user cancelled, max retries, admin cancelled, expired)
 )
 
+// DefaultBillingCycle is the fallback billing period applied when a Price has
+// no explicit BillingCycleDays. Kept at 30 days to match the historical
+// behaviour callers relied on before the constant was extracted.
+const DefaultBillingCycle = 30 * 24 * time.Hour
+
 // CancelType represents who/what caused the cancellation
 type CancelType string
 
@@ -87,18 +92,14 @@ func (s *Subscription) updateCurrentPeriods(billingCycle *time.Duration) {
 
 	if s.CurrentPeriodEndsAt != nil && !s.CurrentPeriodEndsAt.IsZero() {
 		periodStartsAt = *s.CurrentPeriodEndsAt
-		if billingCycle != nil {
-			periodEndsAt = periodStartsAt.Add(*billingCycle)
-		} else {
-			periodEndsAt = periodStartsAt.Add(30 * 24 * time.Hour)
-		}
 	} else {
 		periodStartsAt = time.Now()
-		if billingCycle != nil {
-			periodEndsAt = periodStartsAt.Add(*billingCycle)
-		} else {
-			periodEndsAt = periodStartsAt.Add(30 * 24 * time.Hour)
-		}
+	}
+
+	if billingCycle != nil {
+		periodEndsAt = periodStartsAt.Add(*billingCycle)
+	} else {
+		periodEndsAt = periodStartsAt.Add(DefaultBillingCycle)
 	}
 
 	s.CurrentPeriodStartsAt = &periodStartsAt
