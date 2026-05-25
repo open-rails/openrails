@@ -2707,6 +2707,28 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		}
 	}
 
+	if s.NotificationService != nil {
+		notification := &models.NotificationQueue{
+			ID:        uuidutil.NewV7(),
+			UserID:    subscription.UserID,
+			EventType: models.NotificationPaymentMethodFailed,
+			Data: map[string]any{
+				"processor":                 string(models.ProcessorCCBill),
+				"processor_subscription_id": ccBillSubID,
+				"transaction_id":            transactionID,
+				"failure_code":              data.FailureCode,
+				"failure_reason":            data.FailureReason,
+			},
+		}
+		if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"subscription_id":           subscription.ID,
+				"processor_subscription_id": ccBillSubID,
+				"transaction_id":            transactionID,
+			}).Error("failed to create and deliver CCBill renewal failure notification")
+		}
+	}
+
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscriptionID":          subscription.ID,
 		"userID":                  subscription.UserID,

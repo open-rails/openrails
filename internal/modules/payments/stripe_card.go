@@ -3,6 +3,7 @@ package payments
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -77,6 +78,86 @@ func SnapshotPaymentCard(ctx context.Context, database *db.DB, txnIDs []string, 
 		return fmt.Errorf("snapshot payment card: %w", err)
 	}
 	return nil
+}
+
+// LinkStripeInvoicePayment records Stripe's concrete payment identifiers on an
+// invoice-keyed payment row and copies an already-known card snapshot onto it.
+// Stripe preview invoice.paid events can arrive with only invoice.id; the later
+// invoice_payment.paid event links that invoice to the payment_intent/charge.
+func LinkStripeInvoicePayment(ctx context.Context, database *db.DB, invoiceID, chargeID, paymentIntentID string) error {
+	if database == nil {
+		return nil
+	}
+	invoiceID = strings.TrimSpace(invoiceID)
+	if invoiceID == "" {
+		return nil
+	}
+
+	metadata := map[string]any{"stripe_invoice_id": invoiceID}
+	if chargeID = strings.TrimSpace(chargeID); chargeID != "" {
+		metadata["stripe_charge_id"] = chargeID
+	}
+	if paymentIntentID = strings.TrimSpace(paymentIntentID); paymentIntentID != "" {
+		metadata["stripe_payment_intent_id"] = paymentIntentID
+	}
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("marshal stripe invoice payment metadata: %w", err)
+	}
+
+	if _, err := database.GetDB().NewUpdate().
+		Model((*models.Payment)(nil)).
+		Set("metadata = COALESCE(metadata, '{}'::jsonb) || ?::jsonb", string(encoded)).
+		Where("processor = ?", models.ProcessorStripe).
+		Where("transaction_id = ?", invoiceID).
+		Exec(ctx); err != nil {
+		return fmt.Errorf("link stripe invoice payment metadata: %w", err)
+	}
+
+	aliases := compactStrings(chargeID, paymentIntentID)
+	if len(aliases) == 0 {
+		return nil
+	}
+
+	var source models.Payment
+	err = database.GetDB().NewSelect().Model(&source).
+		Column("card_brand", "card_last4").
+		Where("processor = ?", models.ProcessorStripe).
+		Where("transaction_id IN (?)", bun.In(aliases)).
+		Where("card_last4 IS NOT NULL").
+		Limit(1).
+		Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load stripe alias card snapshot: %w", err)
+	}
+	if source.CardLast4 == nil || strings.TrimSpace(*source.CardLast4) == "" {
+		return nil
+	}
+	card := &StripeCard{Last4: strings.TrimSpace(*source.CardLast4)}
+	if source.CardBrand != nil {
+		card.Brand = strings.TrimSpace(*source.CardBrand)
+	}
+	return SnapshotPaymentCard(ctx, database, []string{invoiceID}, card)
+}
+
+func compactStrings(values ...string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 // StripeCardSubscriptionLinker is the slice of the subscription service the card

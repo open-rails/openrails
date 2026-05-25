@@ -47,3 +47,16 @@ func TestTitleCaseBrand(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactStrings(t *testing.T) {
+	got := compactStrings(" ch_1 ", "", "pi_1", "ch_1", " in_1 ")
+	want := []string{"ch_1", "pi_1", "in_1"}
+	if len(got) != len(want) {
+		t.Fatalf("compactStrings = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("compactStrings = %v, want %v", got, want)
+		}
+	}
+}

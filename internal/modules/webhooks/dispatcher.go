@@ -166,6 +166,7 @@ func (d *WebhookDispatcher) processStripe(ctx context.Context, event *WebhookMes
 		NotificationService:          d.NotificationService,
 		PurchaseRegistrar:            d.PurchaseRegistrar,
 		PaymentService:               d.PaymentService,
+		EventLogService:              d.EventLogService,
 		CreditsService:               d.CreditsService,
 		DeduplicationService:         d.DeduplicationService,
 		ProcessorCustomerService:     d.ProcessorCustomerService,

@@ -81,6 +81,8 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	group.POST("/payments/:id/refund", wrap(httphandlers.AdminRefundPayment))
 	group.GET("/users/:user_id/payments", wrap(httphandlers.GetAdminUserPayments))
 	group.POST("/users/:user_id/payments/off-channel", wrap(httphandlers.AdminCreateOffChannelPayment))
+	group.GET("/repair-alerts", wrap(httphandlers.GetAdminRepairAlerts))
+	group.GET("/manual-rebill-attempts", wrap(httphandlers.GetAdminManualRebillAttempts))
 
 	group.GET("/users/:user_id", wrap(httphandlers.GetAdminUserBillingProfile))
 	group.GET("/users/:user_id/entitlements", wrap(httphandlers.GetAdminUserEntitlements))

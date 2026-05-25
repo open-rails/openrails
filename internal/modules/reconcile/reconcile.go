@@ -455,13 +455,17 @@ func reconcileCharges(
 		}
 
 		if card != nil {
-			// Snapshot card onto the payment row(s) (charge id + payment_intent).
-			snapTxns := make([]string, 0, 2)
+			// Snapshot card onto the payment row(s). Preview invoice.paid rows can be
+			// keyed by invoice id, so include it alongside charge/payment_intent.
+			snapTxns := make([]string, 0, 3)
 			if id := strings.TrimSpace(charge.ID); id != "" {
 				snapTxns = append(snapTxns, id)
 			}
 			if pi := strings.TrimSpace(charge.PaymentIntent); pi != "" {
 				snapTxns = append(snapTxns, pi)
+			}
+			if invoiceID := strings.TrimSpace(charge.Invoice); invoiceID != "" {
+				snapTxns = append(snapTxns, invoiceID)
 			}
 			if err := payments.SnapshotPaymentCard(ctx, rt.DB, snapTxns, card); err != nil {
 				fmt.Printf("failed to snapshot card for %s: %v\n", txnID, err)
@@ -541,8 +545,9 @@ func ensureChargePayment(
 	txnID string,
 	card *payments.StripeCard,
 ) (bool, error) {
-	// Skip if a payment already exists for this charge id or payment_intent.
-	for _, candidate := range []string{strings.TrimSpace(charge.ID), strings.TrimSpace(charge.PaymentIntent)} {
+	// Skip if a payment already exists for this charge id, payment_intent, or
+	// invoice id. Preview invoice.paid can create the row before charge backfill.
+	for _, candidate := range []string{strings.TrimSpace(charge.ID), strings.TrimSpace(charge.PaymentIntent), strings.TrimSpace(charge.Invoice)} {
 		if candidate == "" {
 			continue
 		}

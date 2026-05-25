@@ -143,6 +143,41 @@ func TestStripeInvoiceProcessorSubscriptionID(t *testing.T) {
 	}
 }
 
+func TestStripeChargeSnapshotTransactionIDsIncludesInvoice(t *testing.T) {
+	ids := stripeChargeSnapshotTransactionIDs(stripeCharge{ID: " ch_1 ", PaymentIntent: " pi_1 ", Invoice: " in_1 "})
+	want := []string{"ch_1", "pi_1", "in_1"}
+	if len(ids) != len(want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("ids = %v, want %v", ids, want)
+		}
+	}
+}
+
+func TestStripeInvoicePaymentPaidPreviewShape(t *testing.T) {
+	var invoicePayment stripeInvoicePayment
+	if err := json.Unmarshal([]byte(`{
+        "id": "inpay_1",
+        "invoice": "in_1",
+        "payment": {"type": "payment_intent", "payment_intent": "pi_1"}
+    }`), &invoicePayment); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if invoicePayment.Invoice != "in_1" {
+		t.Fatalf("invoice = %q, want in_1", invoicePayment.Invoice)
+	}
+	if invoicePayment.Payment.PaymentIntent != "pi_1" {
+		t.Fatalf("payment_intent = %q, want pi_1", invoicePayment.Payment.PaymentIntent)
+	}
+
+	svc := &StripeWebhookService{}
+	if err := svc.handleInvoicePaymentPaid(context.Background(), []byte(`{"invoice":"in_1","payment":{"payment_intent":"pi_1"}}`)); err != nil {
+		t.Fatalf("expected nil-db handler to be a no-op, got %v", err)
+	}
+}
+
 func TestValidateStripeInvoicePrice(t *testing.T) {
 	price := &models.Price{Amount: 2399, Currency: "USD"}
 	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 2399, Currency: "usd"}, price); err != nil {

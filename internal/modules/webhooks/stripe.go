@@ -13,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -37,6 +38,7 @@ type StripeWebhookService struct {
 	NotificationService          *subscriptions.NotificationService
 	PurchaseRegistrar            stripePurchaseRegistrar
 	PaymentService               *payments.PaymentService
+	EventLogService              *analytics.EventLogService
 	CreditsService               *credits.CreditsService
 	DeduplicationService         *DeduplicationService
 	ProcessorCustomerService     *payments.ProcessorCustomerService
@@ -169,6 +171,16 @@ type stripeCharge struct {
 	} `json:"refunds"`
 }
 
+type stripeInvoicePayment struct {
+	ID      string `json:"id"`
+	Invoice string `json:"invoice"`
+	Payment struct {
+		Type          string `json:"type"`
+		Charge        string `json:"charge"`
+		PaymentIntent string `json:"payment_intent"`
+	} `json:"payment"`
+}
+
 // stripePaymentMethod is the payment_method.attached payload; card details live
 // directly under `card`.
 type stripePaymentMethod struct {
@@ -213,6 +225,8 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 		return s.handleInvoicePaid(ctx, obj)
 	case "invoice.payment_failed":
 		return s.handleInvoicePaymentFailed(ctx, obj)
+	case "invoice_payment.paid":
+		return s.handleInvoicePaymentPaid(ctx, obj)
 	case "checkout.session.completed":
 		return s.handleCheckoutSessionCompleted(ctx, obj)
 	case "checkout.session.async_payment_succeeded":
@@ -254,20 +268,40 @@ func (s *StripeWebhookService) handleChargeSucceeded(ctx context.Context, obj js
 		return nil
 	}
 
-	// Per-payment snapshot: match by charge id or payment_intent.
-	txnIDs := make([]string, 0, 2)
-	if id := strings.TrimSpace(charge.ID); id != "" {
-		txnIDs = append(txnIDs, id)
-	}
-	if pi := strings.TrimSpace(charge.PaymentIntent); pi != "" {
-		txnIDs = append(txnIDs, pi)
-	}
+	txnIDs := stripeChargeSnapshotTransactionIDs(charge)
 	if err := payments.SnapshotPaymentCard(ctx, s.DB, txnIDs, card); err != nil {
 		return err
 	}
 
 	// Current card for the active subscription.
 	return s.recordStripeCardForCustomer(ctx, charge.Customer, charge.PaymentMethod, charge.ID, card)
+}
+
+func stripeChargeSnapshotTransactionIDs(charge stripeCharge) []string {
+	// Per-payment snapshot: match by charge id, payment_intent, or invoice id.
+	// Preview invoice.paid events can create the payment row keyed by invoice.id.
+	txnIDs := make([]string, 0, 3)
+	if id := strings.TrimSpace(charge.ID); id != "" {
+		txnIDs = append(txnIDs, id)
+	}
+	if pi := strings.TrimSpace(charge.PaymentIntent); pi != "" {
+		txnIDs = append(txnIDs, pi)
+	}
+	if invoiceID := strings.TrimSpace(charge.Invoice); invoiceID != "" {
+		txnIDs = append(txnIDs, invoiceID)
+	}
+	return txnIDs
+}
+
+func (s *StripeWebhookService) handleInvoicePaymentPaid(ctx context.Context, obj json.RawMessage) error {
+	var invoicePayment stripeInvoicePayment
+	if err := json.Unmarshal(obj, &invoicePayment); err != nil {
+		return fmt.Errorf("parse stripe invoice_payment: %w", err)
+	}
+	if err := payments.LinkStripeInvoicePayment(ctx, s.DB, invoicePayment.Invoice, invoicePayment.Payment.Charge, invoicePayment.Payment.PaymentIntent); err != nil {
+		return err
+	}
+	return nil
 }
 
 // handlePaymentMethodAttached records a newly attached card as the customer's
@@ -1065,7 +1099,95 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 			return fmt.Errorf("record failed payment: %w", err)
 		}
 	}
+
+	if s.NotificationService != nil {
+		notification := &models.NotificationQueue{
+			ID:        uuidutil.NewV7(),
+			UserID:    sub.UserID,
+			EventType: models.NotificationPaymentMethodFailed,
+			Data: map[string]any{
+				"processor":                 string(models.ProcessorStripe),
+				"processor_subscription_id": processorSubID,
+				"stripe_invoice_id":         strings.TrimSpace(inv.ID),
+			},
+		}
+		if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"subscription_id":           sub.ID,
+				"processor_subscription_id": processorSubID,
+				"invoice_id":                inv.ID,
+			}).Error("failed to create and deliver stripe payment failure notification")
+		}
+	}
+
+	s.logStripePaymentFailure(ctx, sub, inv, processorSubID)
 	return nil
+}
+
+func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub *models.Subscription, inv stripeInvoice, processorSubID string) {
+	if s.EventLogService == nil || sub == nil {
+		return
+	}
+	reason := "stripe_invoice_payment_failed"
+	if err := s.EventLogService.LogLifecycleFailure(ctx, sub.ID, sub.UserID, models.ProcessorStripe, models.StatusPastDue, &reason, nil, s.now()); err != nil {
+		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+			"subscription_id":           sub.ID,
+			"processor_subscription_id": processorSubID,
+			"invoice_id":                inv.ID,
+		}).Error("failed to log stripe payment failure event")
+	}
+
+	metadata := map[string]interface{}{
+		"processor":                 string(models.ProcessorStripe),
+		"event_source":              "webhook",
+		"stripe_invoice_id":         strings.TrimSpace(inv.ID),
+		"processor_subscription_id": processorSubID,
+		"is_renewal":                true,
+	}
+	priceAmount := 0.0
+	priceCurrency := strings.ToLower(strings.TrimSpace(inv.Currency))
+	if priceCurrency == "" {
+		priceCurrency = "usd"
+	}
+	billingCycleDays := uint32(0)
+	var productID *uuid.UUID
+	priceID := sub.PriceID
+	if sub.Price != nil {
+		priceAmount = float64(sub.Price.Amount) / 100.0
+		if curr := strings.TrimSpace(sub.Price.Currency); curr != "" {
+			priceCurrency = curr
+		}
+		if sub.Price.BillingCycleDays != nil {
+			billingCycleDays = uint32(*sub.Price.BillingCycleDays)
+		}
+		productID = &sub.Price.ProductID
+	}
+	if txnID := strings.TrimPrefix(failedPaymentTransactionID(inv), "failed:"); strings.TrimSpace(txnID) != "" {
+		metadata["transaction_id"] = txnID
+	}
+	statusPastDue := string(models.StatusPastDue)
+	if err := s.EventLogService.LogSubscriptionEvent(ctx, analytics.SubscriptionEventData{
+		EventID:                 uuidutil.NewV7(),
+		SubscriptionID:          sub.ID,
+		UserID:                  sub.UserID,
+		EventType:               analytics.PaymentEventSubscriptionPastDue,
+		Status:                  statusPastDue,
+		PriceAmount:             priceAmount,
+		PriceCurrency:           priceCurrency,
+		BillingCycleDays:        billingCycleDays,
+		ProductID:               productID,
+		PriceID:                 &priceID,
+		Processor:               string(models.ProcessorStripe),
+		ProcessorSubscriptionID: &processorSubID,
+		Metadata:                analytics.CreateMetadataJSON(metadata),
+		Timestamp:               s.now().UTC(),
+	}); err != nil {
+		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+			"subscription_id":           sub.ID,
+			"processor_subscription_id": processorSubID,
+			"invoice_id":                inv.ID,
+		}).Error("failed to log stripe subscription past_due event")
+	}
 }
 
 func (s *StripeWebhookService) handleRefund(ctx context.Context, obj json.RawMessage) error {
