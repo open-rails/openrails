@@ -1432,6 +1432,50 @@
         "[ ] Tests: fresh-DB backfill creates correct subs/entitlements; missed-webhook sub is recovered; duplicate Stripe subs for one user are reconciled to a single canonical local sub"
       ],
       "completed": false
+    },
+    {
+      "id": 215,
+      "name": "Expose subscription resumability (Resumable / CancelScheduled / CancelMode) on the billing API from ONE shared predicate; stop the handler, worker, and SPA each re-deriving it",
+      "description": "Stripe resume ALREADY works end to end: POST /billing/v1/me/subscriptions/:id/resume (routes.go:48 -> handlers.ResumeSubscription, subscription_lifecycle.go:120) enqueues a River job whose ResumeSubscriptionWorker (jobs_subscription_manage.go:131) calls StripeService.ResumeSubscription (cancel_at_period_end=false) AND flips the local row to active. The defect is NOT that resume is unimplemented -- it is that the resumability PRECONDITION (processor==stripe && status=='cancelled' && current_period_ends_at>now) is duplicated in at least three places that can disagree: the HTTP handler (subscription_lifecycle.go:155,159), the River worker (jobs_subscription_manage.go:183), and the cozy-art SPA (billing.ts:310 + accountBillingLogic.ts:32,38). None of it is exposed on the public subscription DTO (pkg/service/types.go) or the /me/subscriptions HTTP payload, so the SPA reconstructs cancel_at_period_end and undoability itself and silently drifts -- e.g. it offered Resume on an ACTIVE sub, which the handler correctly 400'd with 'subscription is not cancelled'. The pkg/service facade Service.ResumeSubscription (service_user.go:326) is also a stub returning 'not supported', inconsistent with the working HTTP path. Fix: define ONE Resumable predicate, gate the handler+worker+facade on it, and expose it (plus CancelScheduled and CancelMode) on the API so 'button shows' iff 'route succeeds' by construction.",
+      "tasks": [
+        "[ ] Add a single Resumable(sub, now) predicate in one place (subscription model/service) = CancelMode(processor)==reversible && status=='cancelled' && current_period_ends_at>now. Its meaning is 'can this be resumed right now', NOT a processor-name check -- comes out Stripe-only today and flips false on its own after expiry",
+        "[ ] Add a CancelMode(processor) capability mapping (reversible | destructive | external_portal): stripe->reversible, mobius/NMI->destructive (until #216), ccbill->external_portal, solana->destructive; replaces the scattered processor==ProcessorStripe checks",
+        "[ ] Make the HTTP resume handler (subscription_lifecycle.go) and the River worker (jobs_subscription_manage.go) gate on the shared predicate instead of their own inline processor!=stripe + status!=cancelled checks",
+        "[ ] Expose on the public Subscription DTO (pkg/service/types.go) AND the /me/subscriptions HTTP serialization (user_subscriptions.go): Resumable bool, CancelScheduled bool, CancelMode string; reuse existing CurrentPeriodEndsAt as the expiry/'Cancels On' date (no new date field)",
+        "[ ] Implement the stubbed Service.ResumeSubscription facade (service_user.go:326) to run the same path as the HTTP route, so library and HTTP entrypoints agree",
+        "[ ] For ccbill (external_portal) expose the existing support-portal URL (CCBillCancelError) on the DTO so clients render the portal path, not a dead Resume button",
+        "[ ] Tests: stripe mid-period cancel -> CancelScheduled+Resumable true and POST /resume succeeds (Stripe cancel_at_period_end=false + local status=active); active sub -> Resumable false and /resume 400s identically; expired stripe -> Resumable false; NMI/ccbill -> Resumable false with correct CancelMode; assert DTO Resumable equals the handler/worker precondition so it cannot drift"
+      ],
+      "completed": false
+    },
+    {
+      "id": 216,
+      "name": "NMI cancellation undo window via deferred delete_subscription (48h before rebill); extend resume to NMI",
+      "description": "NMI cancel calls DeleteRecurringSubscription inline (user_service.go:459), destroying the NMI subscription_id immediately -> ZERO undo window, unlike Stripe which stays reversible for the whole remaining paid period. Defer it: on NMI cancel keep the NMI subscription alive, set local status=cancelled, and enqueue a River job to call delete_subscription ~48h before the next scheduled rebill (current_period_ends_at). Until that job fires the sub is resumable; resuming cancels the scheduled-delete job and re-arms via ReactivateMembership. Builds on #215's shared predicate: NMI's CancelMode becomes reversible ONLY during the window, so #215's Resumable field and resume handler cover NMI with no new branching. If the user cancels when the window has already opened (now >= current_period_ends_at - 48h, which happens often near rebill), do NOT schedule -- delete immediately with NMI, exactly as today. Scheduling only applies when there is a genuine future window. Hard requirement: the delete MUST land before NMI auto-charges in EVERY timing path -- a missed/late job must never allow an unwanted rebill.",
+      "tasks": [
+        "[ ] On NMI cancel, stop deleting inline; set status=cancelled, record deletion_scheduled_at = current_period_ends_at - 48h, keep ProcessorSubscriptionID alive",
+        "[ ] If cancel occurs within the 48h window (now >= current_period_ends_at - 48h) or period end is unknown/past, delete immediately with NMI (no scheduled job) and finalize cancellation -- preserve today's behavior; only defer when a real future window exists",
+        "[ ] Add an idempotent, retry-safe River job that at deletion_scheduled_at calls NMIClient.DeleteRecurringSubscription and finalizes the cancellation",
+        "[ ] Make CancelMode(NMI) resolve to reversible while (cancelled && delete not yet executed && period end in future) so #215's Resumable predicate automatically covers NMI",
+        "[ ] Extend the resume handler/worker (already gating on the shared predicate) to NMI: cancel the scheduled-delete job + restore status=active and entitlement window via ReactivateMembership; allowed only before the delete fires",
+        "[ ] Optionally expose ResumableUntil on the DTO (= deletion_scheduled_at for NMI, current_period_ends_at for Stripe) so the UI can show an 'undo by' date distinct from the access-expiry date",
+        "[ ] Safety: schedule margin > NMI rebill granularity and/or detect-and-refund; refuse to leave a sub in a state where NMI can auto-rebill after the user cancelled",
+        "[ ] Tests: cancel schedules delete 48h pre-rebill; resume before deadline re-arms and cancels the job; after deadline the sub is truly gone and not resumable; no rebill occurs after cancel under early / on-time / late / missed-job timing"
+      ],
+      "completed": false
+    },
+    {
+      "id": 217,
+      "name": "Stop fudging timestamps to satisfy the ended_at/cancelled_at constraint in ResetCurrentPeriods()",
+      "description": "ResetCurrentPeriods() subtracts 2 minutes from now with the comment 'Ensure endedAt is before cancelledAt to satisfy DB constraint' (internal/db/models/subscription.go:137). Subtracting wall-clock time to dodge a CHECK constraint means the write path and the constraint disagree; under clock skew or fast successive writes it can still violate. Make the ordering correct by construction instead of by subtraction.",
+      "tasks": [
+        "[ ] Identify the exact CHECK constraint and why Cancel() sets ended_at and cancelled_at to ~the same instant",
+        "[ ] Decide intended semantics: allow ended_at == cancelled_at (<=), or source ended_at from the true period end rather than now",
+        "[ ] Remove the -2min fudge; either relax the constraint to <= via migration, or set timestamps from their real sources so ordering holds naturally",
+        "[ ] Add a migration if the constraint changes",
+        "[ ] Tests: cancel at the same instant does not violate; immediate cancel after create holds; no dependence on wall-clock subtraction"
+      ],
+      "completed": false
     }
   ]
 }
