@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
 )
@@ -72,4 +73,25 @@ func TestCapCCBillRetryAt(t *testing.T) {
 	capped = capCCBillRetryAt(&distantRetry, &paidTermEnd)
 	require.NotNil(t, capped)
 	require.Equal(t, paidTermEnd.Add(subscriptions.DunningInterval), *capped)
+}
+
+func TestShouldIgnoreCCBillRenewalFailure(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 1, 23, 59, 59, 0, time.UTC)
+	cancelled := &models.Subscription{Status: models.StatusCancelled}
+	ignored, reason := shouldIgnoreCCBillRenewalFailure(cancelled, nil)
+	require.True(t, ignored)
+	require.Equal(t, "cancelled_subscription", reason)
+
+	active := &models.Subscription{Status: models.StatusActive, CurrentPeriodStartsAt: &now}
+	failureAt := now
+	ignored, reason = shouldIgnoreCCBillRenewalFailure(active, &failureAt)
+	require.True(t, ignored)
+	require.Equal(t, "stale_renewal_failure", reason)
+
+	futureFailure := now.Add(time.Hour)
+	ignored, reason = shouldIgnoreCCBillRenewalFailure(active, &futureFailure)
+	require.False(t, ignored)
+	require.Empty(t, reason)
 }

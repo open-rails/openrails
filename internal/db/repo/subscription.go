@@ -401,14 +401,14 @@ func (r *SubscriptionRepo) selectWithProduct(model any) *bun.SelectQuery {
 		Relation("PaymentMethod")
 }
 
-// GetActiveOrPendingByUserIDAndTierGroup finds an active or pending subscription for a user
+// GetActiveOrPendingByUserIDAndTierGroup finds a lifecycle-owning subscription for a user
 // where the product belongs to the specified tier group.
 // Returns the subscription with its Price and Product loaded.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
 	sub := new(models.Subscription)
 	err := r.selectWithProduct(sub).
 		Where("sub.user_id = ?", userID).
-		Where("sub.status IN (?, ?)", models.StatusActive, models.StatusPending).
+		Where("sub.status IN (?, ?, ?)", models.StatusActive, models.StatusPending, models.StatusPastDue).
 		// Join to products table to filter by tier_group
 		Join("JOIN billing.products AS prod ON prod.id = sub.product_id").
 		Where("prod.tier_group = ?", tierGroup).

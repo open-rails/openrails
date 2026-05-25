@@ -27,6 +27,7 @@ type CreateMembershipParams struct {
 type RenewMembershipParams struct {
 	Processor                 models.Processor
 	ProcessorSubscriptionID   string
+	CurrentPeriodStartsAt     *time.Time
 	CurrentPeriodEndsAt       *time.Time
 	TransactionID             string
 	Amount                    int64

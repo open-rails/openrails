@@ -380,6 +380,8 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 			PriceID:                 priceID,
 			Processor:               models.ProcessorStripe,
 			ProcessorSubscriptionID: &processorSubID,
+			CurrentPeriodStartsAt:   zeroTimePtr(stripeInvoicePeriodStart(inv)),
+			CurrentPeriodEndsAt:     zeroTimePtr(stripeInvoicePeriodEnd(inv)),
 			TransactionID:           paymentTransactionID,
 			Amount:                  inv.AmountPaid,
 			AmountProvided:          true,
@@ -394,6 +396,8 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		if err := s.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 			Processor:               models.ProcessorStripe,
 			ProcessorSubscriptionID: processorSubID,
+			CurrentPeriodStartsAt:   zeroTimePtr(stripeInvoicePeriodStart(inv)),
+			CurrentPeriodEndsAt:     zeroTimePtr(stripeInvoicePeriodEnd(inv)),
 			TransactionID:           paymentTransactionID,
 			Amount:                  inv.AmountPaid,
 			AmountProvided:          true,
@@ -532,6 +536,29 @@ func stripeInvoicePeriodEnd(inv stripeInvoice) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(end, 0).UTC()
+}
+
+func stripeInvoicePeriodStart(inv stripeInvoice) time.Time {
+	var start int64
+	for _, line := range inv.Lines.Data {
+		if line.Period.Start <= 0 {
+			continue
+		}
+		if start == 0 || line.Period.Start < start {
+			start = line.Period.Start
+		}
+	}
+	if start <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(start, 0).UTC()
+}
+
+func zeroTimePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context, obj json.RawMessage) error {
@@ -774,6 +801,16 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 	if err != nil {
 		return nil
 	}
+	incomingStatus := strings.ToLower(strings.TrimSpace(data.Status))
+	if _, terminal := subscriptions.TerminalCancelReason(sub); terminal && (incomingStatus == "active" || incomingStatus == "trialing") {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id":           sub.ID,
+			"processor_subscription_id": subID,
+			"incoming_status":           incomingStatus,
+		}).Warn("ignoring stripe active update for terminal local subscription")
+		return nil
+	}
+
 	oldEntitlementsSpec := models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot)
 	var oldProduct *models.Product
 	if s.ProductService != nil && sub.ProductID != uuid.Nil {
@@ -826,8 +863,7 @@ func (s *StripeWebhookService) handleSubscriptionUpdated(ctx context.Context, ob
 		// Not scheduled to cancel. If Stripe now reports it active/trialing while
 		// the local record is still cancelled, this is a resume — clear the prior
 		// scheduled-cancellation marks before applying the status.
-		incoming := strings.ToLower(strings.TrimSpace(data.Status))
-		if sub.Status == models.StatusCancelled && (incoming == "active" || incoming == "trialing") {
+		if sub.Status == models.StatusCancelled && (incomingStatus == "active" || incomingStatus == "trialing") {
 			sub.CancelledAt = nil
 			sub.EndedAt = nil
 		}
@@ -988,6 +1024,14 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 	}
 	sub, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), processorSubID)
 	if err != nil {
+		return nil
+	}
+	if sub.Status == models.StatusCancelled {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id":           sub.ID,
+			"processor_subscription_id": processorSubID,
+			"invoice_id":                inv.ID,
+		}).Warn("ignoring stripe payment failure for cancelled local subscription")
 		return nil
 	}
 	sub.Status = models.StatusPastDue

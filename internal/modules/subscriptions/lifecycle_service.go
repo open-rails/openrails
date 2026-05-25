@@ -672,7 +672,14 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		// Calculate new billing period
 		var periodStartsAt, periodEndsAt time.Time
-		if subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.IsZero() {
+		if params.CurrentPeriodStartsAt != nil && !params.CurrentPeriodStartsAt.IsZero() {
+			periodStartsAt = params.CurrentPeriodStartsAt.UTC()
+			if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
+				periodEndsAt = params.CurrentPeriodEndsAt.UTC()
+			} else {
+				periodEndsAt = periodStartsAt.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+			}
+		} else if subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.IsZero() {
 			periodStartsAt = *subscription.CurrentPeriodEndsAt
 			periodEndsAt = periodStartsAt.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
 		} else {

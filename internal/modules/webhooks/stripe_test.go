@@ -33,6 +33,28 @@ func TestStripeInvoicePeriodEnd(t *testing.T) {
 	}
 }
 
+func TestStripeInvoicePeriodStart(t *testing.T) {
+	raw := []byte(`{
+		"id":"in_1",
+		"subscription":"sub_1",
+		"lines":{"data":[
+			{"period":{"start":100,"end":200},"price":{"id":"price_1"}},
+			{"period":{"start":50,"end":150},"price":{"id":"price_2"}}
+		]}
+	}`)
+	var inv stripeInvoice
+	if err := json.Unmarshal(raw, &inv); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	start := stripeInvoicePeriodStart(inv)
+	if start.IsZero() {
+		t.Fatalf("expected non-zero period start")
+	}
+	if start.Unix() != 50 {
+		t.Fatalf("expected unix=50, got %d", start.Unix())
+	}
+}
+
 func TestStripeInvoiceEffectiveMetadataUsesSubscriptionDetailsFallback(t *testing.T) {
 	inv := stripeInvoice{
 		Metadata: map[string]string{"user_id": "invoice_user"},
@@ -162,6 +184,19 @@ func TestWebhookDispatcher_RejectsUnsignedStripeJob(t *testing.T) {
 	}
 	if !IsWebhookErrorNonRetryable(err) {
 		t.Fatalf("expected non-retryable error, got %v", err)
+	}
+}
+
+func TestWebhookDispatcher_UsesPreviouslyVerifiedStripePayload(t *testing.T) {
+	verified := true
+	d := &WebhookDispatcher{}
+	err := d.Process(context.Background(), &WebhookMessage{
+		Processor:      "stripe",
+		Payload:        []byte(`{"id":"evt_1","type":"unhandled.event","data":{"object":{}}}`),
+		SignatureValid: &verified,
+	})
+	if err != nil {
+		t.Fatalf("expected previously verified stripe payload to process without dispatcher re-verification: %v", err)
 	}
 }
 

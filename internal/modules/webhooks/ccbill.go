@@ -102,6 +102,19 @@ func capCCBillRetryAt(nextRetryAt, paidTermEnd *time.Time) *time.Time {
 	return &candidate
 }
 
+func shouldIgnoreCCBillRenewalFailure(sub *models.Subscription, failureRenewalAt *time.Time) (bool, string) {
+	if sub == nil {
+		return false, ""
+	}
+	if sub.Status == models.StatusCancelled {
+		return true, "cancelled_subscription"
+	}
+	if sub.Status == models.StatusActive && failureRenewalAt != nil && sub.CurrentPeriodStartsAt != nil && !failureRenewalAt.After(sub.CurrentPeriodStartsAt.UTC()) {
+		return true, "stale_renewal_failure"
+	}
+	return false, ""
+}
+
 func parseCCBillPositiveAmountCents(rawAmount, parseFieldName, invalidFieldName string) (int64, error) {
 	amountCents, err := moneyutil.ParseDecimalToCents(rawAmount)
 	if err != nil {
@@ -2322,6 +2335,22 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 				"processor_subscription_id": ccBillSubID,
 				"transaction_id":            transactionID,
 			}).Warn("Blocked terminal -> active transition for delayed CCBill RenewalSuccess")
+			if alertErr := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+				Provider:       string(models.ProcessorCCBill),
+				Operation:      "terminal_blocked_renewal_success",
+				TransactionID:  transactionID,
+				UserID:         prevSub.UserID,
+				SubscriptionID: &prevSub.ID,
+				Err:            err,
+				Metadata: map[string]any{
+					"processor_subscription_id": ccBillSubID,
+					"amount_cents":              billedAmountCents,
+					"currency":                  currencyValue,
+					"event_type":                string(s.Data.EventType),
+				},
+			}); alertErr != nil {
+				return fmt.Errorf("record terminal-blocked CCBill renewal success repair alert: %w", alertErr)
+			}
 			return nil
 		}
 		return fmt.Errorf("failed to renew membership: %w", err)
@@ -2474,6 +2503,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 	}
 
 	var subForLogs *models.Subscription
+	ignoredRenewalFailure := false
 
 	if err := s.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		txdb := db.NewWithTx(tx)
@@ -2486,6 +2516,28 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)
 		if err != nil {
 			return fmt.Errorf("subscription not found: %w", err)
+		}
+		failureRenewalAt, err := parseCCBillDateUsingTimestamp(data.RenewalDate)
+		if err != nil {
+			return fmt.Errorf("failed to parse renewalDate '%s': %w", data.RenewalDate, err)
+		}
+		if ignored, reason := shouldIgnoreCCBillRenewalFailure(sub, failureRenewalAt); ignored {
+			fields := log.Fields{
+				"subscription_id":           sub.ID,
+				"processor_subscription_id": ccBillSubID,
+				"transaction_id":            transactionID,
+				"reason":                    reason,
+			}
+			if failureRenewalAt != nil {
+				fields["failure_renewal_at"] = failureRenewalAt.UTC()
+			}
+			if sub.CurrentPeriodStartsAt != nil {
+				fields["current_period_start"] = sub.CurrentPeriodStartsAt.UTC()
+			}
+			log.WithContext(ctx).WithFields(fields).Warn("ignoring CCBill RenewalFailure")
+			subForLogs = sub
+			ignoredRenewalFailure = true
+			return nil
 		}
 
 		paidTermEnd := sub.CurrentPeriodEndsAt
@@ -2561,6 +2613,9 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		return nil
 	}); err != nil {
 		return err
+	}
+	if ignoredRenewalFailure {
+		return nil
 	}
 
 	// Reload subscription for logging (ensures relations are present if service loads them).
@@ -2696,13 +2751,14 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 
 	// Use SubscriptionLifecycleService to cancel membership
 	processor := models.ProcessorCCBill
+	revokeAccess := data.Source == "failedRB"
 	if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 		SubscriptionID:          &subscription.ID,
 		Processor:               &processor,
 		ProcessorSubscriptionID: &ccBillSubID,
 		CancelType:              cancelType,
 		CancelFeedback:          &data.Reason,
-		RevokeAccess:            false, // Keep access until paid term end
+		RevokeAccess:            revokeAccess,
 	}); err != nil {
 		return fmt.Errorf("failed to cancel membership: %w", err)
 	}

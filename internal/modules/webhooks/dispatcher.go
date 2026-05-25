@@ -154,18 +154,9 @@ func (d *WebhookDispatcher) processStripe(ctx context.Context, event *WebhookMes
 	if !webhookSignatureVerified(event) {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe webhook signature was not verified before processing"))
 	}
-	secret := ""
-	if d.Config != nil {
-		if stripeProc := d.Config.GetStripeProcessor(); stripeProc != nil {
-			secret = stripeProc.WebhookSecret
-		}
-	}
-	if strings.TrimSpace(secret) == "" {
-		return fmt.Errorf("stripe webhook secret not configured")
-	}
-	if err := verifyQueuedStripeSignature(secret, event.Signature, event.Payload, 0); err != nil {
-		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe queued webhook signature verification failed: %w", err))
-	}
+	// HTTP ingestion verifies the original Stripe payload before optional thin-event
+	// hydration. Re-verifying the hydrated body against Stripe's signature would
+	// incorrectly reject valid thin events because the signed bytes changed.
 	service := StripeWebhookService{
 		DB:                           d.DB,
 		PriceService:                 d.PriceService,

@@ -272,7 +272,12 @@ func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebil
 		return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
 	}
 	if isDirectResponseApproved(output) {
-		return &ManualRebillResponse{Success: true, TransactionID: output.Get("transactionid")}, nil
+		transactionID := strings.TrimSpace(output.Get("transactionid"))
+		if transactionID == "" {
+			err := errors.New("approved manual rebill missing transaction id")
+			return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
+		}
+		return &ManualRebillResponse{Success: true, TransactionID: transactionID}, nil
 	}
 
 	errorMessage := responseText(output, "Unknown error")
