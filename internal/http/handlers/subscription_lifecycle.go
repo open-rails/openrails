@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -15,8 +17,16 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
+// User-initiated cancellations must include a typed explanation. The bound
+// gin validator only honors `binding` tags, so the length rule is enforced
+// explicitly below (after trimming) rather than via struct tags.
+const (
+	minCancelFeedbackChars = 4
+	maxCancelFeedbackChars = 500
+)
+
 type cancelSubscriptionRequest struct {
-	Feedback string `json:"feedback" validate:"max=500"`
+	Feedback string `json:"feedback"`
 }
 
 func subscriptionLifecycleUniqueOpts() river.UniqueOpts {
@@ -36,6 +46,16 @@ func subscriptionLifecycleUniqueOpts() river.UniqueOpts {
 func CancelSubscription(r *httprequest.Request) {
 	req := new(cancelSubscriptionRequest)
 	if !r.BindJSON(req) {
+		return
+	}
+
+	feedback := strings.TrimSpace(req.Feedback)
+	switch n := utf8.RuneCountInString(feedback); {
+	case n < minCancelFeedbackChars:
+		r.ErrorJSON(http.StatusBadRequest, "Please tell us why you're cancelling (at least 4 characters).")
+		return
+	case n > maxCancelFeedbackChars:
+		r.ErrorJSON(http.StatusBadRequest, "Cancellation feedback must be 500 characters or fewer.")
 		return
 	}
 
@@ -84,7 +104,7 @@ func CancelSubscription(r *httprequest.Request) {
 	_, err = r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.CancelSubscriptionArgs{
 		UserID:         uc.UserID,
 		SubscriptionID: subscriptionID,
-		Feedback:       req.Feedback,
+		Feedback:       feedback,
 	}, &river.InsertOpts{
 		Queue:      riverjobs.QueueBilling,
 		UniqueOpts: subscriptionLifecycleUniqueOpts(),

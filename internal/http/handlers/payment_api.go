@@ -107,6 +107,28 @@ type userPaymentObject struct {
 	Captured       bool             `json:"captured,omitempty"`
 	Created        int64            `json:"created"`
 	Price          *api.PriceObject `json:"price,omitempty"`
+	Card           *paymentCardJSON `json:"card,omitempty"`
+}
+
+// paymentCardJSON is the card snapshot for a single payment (the card used for
+// that charge), served from the DB. No Stripe fetch.
+type paymentCardJSON struct {
+	Brand string `json:"brand,omitempty"`
+	Last4 string `json:"last4,omitempty"`
+}
+
+func paymentCardFromModel(p *models.Payment) *paymentCardJSON {
+	brand, last4 := "", ""
+	if p.CardBrand != nil {
+		brand = *p.CardBrand
+	}
+	if p.CardLast4 != nil {
+		last4 = *p.CardLast4
+	}
+	if brand == "" && last4 == "" {
+		return nil
+	}
+	return &paymentCardJSON{Brand: brand, Last4: last4}
 }
 
 func PaymentToUserAPI(p *models.Payment) userPaymentObject {
@@ -125,6 +147,7 @@ func PaymentToUserAPI(p *models.Payment) userPaymentObject {
 		Captured:       payment.Captured,
 		Created:        payment.Created,
 		Price:          payment.Price,
+		Card:           paymentCardFromModel(p),
 	}
 }
 

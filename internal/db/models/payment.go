@@ -31,6 +31,13 @@ type Payment struct {
 	Currency   string `bun:"currency,notnull,default:'usd'" json:"currency"`
 	Status     string `bun:"status,notnull,default:'completed',nullzero" json:"status"`
 
+	// Card snapshot of the payment method used for this charge, captured from
+	// Stripe charge.succeeded / payment_method.attached webhooks. Immutable per
+	// payment so history shows the card actually used even if the default later
+	// changes. Never fetched from Stripe at query time.
+	CardBrand *string `bun:"card_brand,nullzero" json:"card_brand,omitempty"`
+	CardLast4 *string `bun:"card_last4,nullzero" json:"card_last4,omitempty"`
+
 	DiscountCode     *string        `bun:"discount_code,nullzero" json:"discount_code,omitempty"`
 	DiscountReason   *string        `bun:"discount_reason,nullzero" json:"discount_reason,omitempty"`
 	DiscountMetadata map[string]any `bun:"discount_metadata,type:jsonb,nullzero" json:"discount_metadata,omitempty"`

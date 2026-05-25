@@ -139,12 +139,28 @@ type stripeRefund struct {
 type stripeCharge struct {
 	ID             string `json:"id"`
 	PaymentIntent  string `json:"payment_intent"`
+	Customer       string `json:"customer"`
+	Invoice        string `json:"invoice"`
+	PaymentMethod  string `json:"payment_method"`
 	Amount         int64  `json:"amount"`
 	AmountRefunded int64  `json:"amount_refunded"`
 	Currency       string `json:"currency"`
-	Refunds        struct {
+	// payment_method_details.card carries the brand/last4/exp for the card that
+	// was actually charged. This is the no-fetch source for the card snapshot.
+	PaymentMethodDetails struct {
+		Card payments.StripeCardDetails `json:"card"`
+	} `json:"payment_method_details"`
+	Refunds struct {
 		Data []stripeRefund `json:"data"`
 	} `json:"refunds"`
+}
+
+// stripePaymentMethod is the payment_method.attached payload; card details live
+// directly under `card`.
+type stripePaymentMethod struct {
+	ID       string                     `json:"id"`
+	Customer string                     `json:"customer"`
+	Card     payments.StripeCardDetails `json:"card"`
 }
 
 type stripeDispute struct {
@@ -197,6 +213,10 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 		return s.handleSubscriptionDeleted(ctx, obj)
 	case "refund.created", "refund.updated":
 		return s.handleRefund(ctx, obj)
+	case "charge.succeeded":
+		return s.handleChargeSucceeded(ctx, obj)
+	case "payment_method.attached":
+		return s.handlePaymentMethodAttached(ctx, obj)
 	case "charge.refunded":
 		return s.handleChargeRefunded(ctx, obj)
 	case "charge.dispute.created", "charge.dispute.closed":
@@ -205,6 +225,69 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 		log.WithField("event_type", eventType).Info("stripe webhook ignored (not handled)")
 		return nil
 	}
+}
+
+// handleChargeSucceeded snapshots the charged card onto the matching payment row
+// (per-payment history) and records it as the subscription's current card. The
+// charge payload embeds payment_method_details.card, so no Stripe fetch is needed.
+func (s *StripeWebhookService) handleChargeSucceeded(ctx context.Context, obj json.RawMessage) error {
+	var charge stripeCharge
+	if err := json.Unmarshal(obj, &charge); err != nil {
+		return fmt.Errorf("parse charge: %w", err)
+	}
+	card := payments.NormalizeStripeCard(charge.PaymentMethodDetails.Card)
+	if card == nil {
+		return nil
+	}
+
+	// Per-payment snapshot: match by charge id or payment_intent.
+	txnIDs := make([]string, 0, 2)
+	if id := strings.TrimSpace(charge.ID); id != "" {
+		txnIDs = append(txnIDs, id)
+	}
+	if pi := strings.TrimSpace(charge.PaymentIntent); pi != "" {
+		txnIDs = append(txnIDs, pi)
+	}
+	if err := payments.SnapshotPaymentCard(ctx, s.DB, txnIDs, card); err != nil {
+		return err
+	}
+
+	// Current card for the active subscription.
+	return s.recordStripeCardForCustomer(ctx, charge.Customer, charge.PaymentMethod, charge.ID, card)
+}
+
+// handlePaymentMethodAttached records a newly attached card as the customer's
+// current payment method (e.g. when the user updates their card in the portal).
+func (s *StripeWebhookService) handlePaymentMethodAttached(ctx context.Context, obj json.RawMessage) error {
+	var pm stripePaymentMethod
+	if err := json.Unmarshal(obj, &pm); err != nil {
+		return fmt.Errorf("parse payment_method: %w", err)
+	}
+	card := payments.NormalizeStripeCard(pm.Card)
+	if card == nil {
+		return nil
+	}
+	return s.recordStripeCardForCustomer(ctx, pm.Customer, pm.ID, pm.ID, card)
+}
+
+// recordStripeCardForCustomer upserts a billing.payment_methods row for the
+// customer's card and links it as the active subscription's payment method. It
+// delegates to payments.UpsertStripeCardForCustomer so the webhook path and the
+// reconcile backfill share one implementation.
+func (s *StripeWebhookService) recordStripeCardForCustomer(ctx context.Context, customerID, paymentMethodID, initialTxnID string, card *payments.StripeCard) error {
+	var linker payments.StripeCardSubscriptionLinker
+	if s.SubscriptionService != nil {
+		linker = s.SubscriptionService
+	}
+	return payments.UpsertStripeCardForCustomer(
+		ctx,
+		s.DB,
+		s.ProcessorCustomerService,
+		linker,
+		s.Clock,
+		customerID, paymentMethodID, initialTxnID,
+		card,
+	)
 }
 
 func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.RawMessage) error {

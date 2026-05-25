@@ -95,6 +95,7 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 		Product               *api.ProductObject        `json:"product,omitempty"`
 		ScheduledPrice        *api.PriceObject          `json:"scheduled_price,omitempty"`
 		ScheduledProduct      *api.ProductObject        `json:"scheduled_product,omitempty"`
+		Card                  *subscriptionCardJSON     `json:"card,omitempty"`
 		Access                *UserAccessGrant          `json:"access,omitempty"`
 	}
 
@@ -134,10 +135,45 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 			product := productToAPIObject(r.ScheduledProduct)
 			out.ScheduledProduct = &product
 		}
+		out.Card = subscriptionCardFromPaymentMethod(r.Subscription.PaymentMethod)
 		return json.Marshal(out)
 	}
 
 	return json.Marshal(userSubscriptionJSON{Access: r.Access})
+}
+
+// subscriptionCardJSON is the card on the subscription's current payment method,
+// served purely from the DB (the linked billing.payment_methods row). No Stripe
+// fetch.
+type subscriptionCardJSON struct {
+	Brand    string `json:"brand,omitempty"`
+	Last4    string `json:"last4,omitempty"`
+	ExpMonth *int   `json:"exp_month,omitempty"`
+	ExpYear  *int   `json:"exp_year,omitempty"`
+}
+
+func subscriptionCardFromPaymentMethod(pm *models.PaymentMethod) *subscriptionCardJSON {
+	if pm == nil {
+		return nil
+	}
+	brand, last4 := "", ""
+	if pm.CardType != nil {
+		brand = *pm.CardType
+	}
+	if pm.LastFour != nil {
+		last4 = *pm.LastFour
+	}
+	if brand == "" && last4 == "" {
+		return nil
+	}
+	card := &subscriptionCardJSON{Brand: brand, Last4: last4}
+	if pm.ExpiryDate != nil {
+		if month, year, ok := sharedformat.ParseExpiry(*pm.ExpiryDate); ok {
+			card.ExpMonth = &month
+			card.ExpYear = &year
+		}
+	}
+	return card
 }
 
 func priceToAPIObject(p *models.Price) api.PriceObject {
