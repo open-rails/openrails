@@ -96,6 +96,7 @@ type stripeInvoice struct {
 	PaymentIntent string            `json:"payment_intent"`
 	Charge        string            `json:"charge"`
 	AmountPaid    int64             `json:"amount_paid"`
+	AmountDue     int64             `json:"amount_due"`
 	Currency      string            `json:"currency"`
 	Metadata      map[string]string `json:"metadata"`
 	Lines         struct {
@@ -950,6 +951,15 @@ func applyStripeSubscriptionStatus(sub *models.Subscription, rawStatus string, n
 	}
 }
 
+// failedPaymentTransactionID builds the transaction id for a recorded failed
+// payment. The "failed:" prefix guarantees it never collides with the eventual
+// successful charge's row (which uses the bare charge/payment_intent id), while
+// staying stable for a given failed invoice so duplicate webhook deliveries
+// dedupe via the (processor, transaction_id) unique constraint.
+func failedPaymentTransactionID(inv stripeInvoice) string {
+	return "failed:" + normalize.FirstNonEmpty(inv.Charge, inv.PaymentIntent, inv.ID)
+}
+
 func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, obj json.RawMessage) error {
 	var inv stripeInvoice
 	if err := json.Unmarshal(obj, &inv); err != nil {
@@ -966,6 +976,33 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 	sub.Status = models.StatusPastDue
 	if err := s.SubscriptionService.Update(ctx, sub); err != nil {
 		return fmt.Errorf("update stripe subscription after payment failure: %w", err)
+	}
+
+	// Record the failed attempt so it shows in payment history. The transaction
+	// id is prefixed with "failed:" so it can never collide with the eventual
+	// successful charge's row, and so duplicate webhook deliveries of the same
+	// failure dedupe (CreateIfNotExists on processor+transaction_id). This is a
+	// plain insert: no entitlements/credits are granted for a failed payment.
+	if s.PaymentService != nil {
+		amount := inv.AmountDue
+		txnID := failedPaymentTransactionID(inv)
+		subID := sub.ID
+		failed := &models.Payment{
+			ID:             uuidutil.NewV7(),
+			UserID:         sub.UserID,
+			PriceID:        sub.PriceID,
+			SubscriptionID: &subID,
+			Processor:      models.ProcessorStripe,
+			TransactionID:  txnID,
+			Amount:         amount,
+			ListAmount:     amount,
+			Currency:       normalize.FirstNonEmpty(inv.Currency, "usd"),
+			Status:         "failed",
+			PurchasedAt:    s.now(),
+		}
+		if _, err := s.PaymentService.CreateIfNotExists(ctx, failed); err != nil {
+			return fmt.Errorf("record failed payment: %w", err)
+		}
 	}
 	return nil
 }
