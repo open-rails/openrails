@@ -549,9 +549,9 @@ type RateLimit struct {
 }
 
 const (
-	CaptchaProviderTurnstile = "turnstile"
-	CaptchaProviderRecaptcha = "recaptcha"
-	CaptchaProviderHCaptcha  = "hcaptcha"
+	CaptchaProviderTurnstile   = "turnstile"
+	CaptchaProviderRecaptchaV3 = "recaptcha-v3"
+	CaptchaProviderHCaptcha    = "hcaptcha"
 )
 
 // CaptchaConfig controls captcha challenges enabled after extreme rate-limit hits.
@@ -560,6 +560,7 @@ type CaptchaConfig struct {
 	Provider          string   `koanf:"provider"`
 	SiteKey           string   `koanf:"site_key"`
 	SecretKey         string   `koanf:"secret_key"`
+	Action            string   `koanf:"action"`
 	VerifyURL         string   `koanf:"verify_url"`
 	ScriptURL         string   `koanf:"script_url"`
 	MinScore          float64  `koanf:"min_score"`
@@ -578,7 +579,7 @@ func (c *CaptchaConfig) EffectiveProvider() string {
 func (c *CaptchaConfig) EffectiveVerifyURL() string {
 	if c == nil || strings.TrimSpace(c.VerifyURL) == "" {
 		switch c.EffectiveProvider() {
-		case CaptchaProviderRecaptcha:
+		case CaptchaProviderRecaptchaV3:
 			return "https://www.google.com/recaptcha/api/siteverify"
 		case CaptchaProviderHCaptcha:
 			return "https://hcaptcha.com/siteverify"
@@ -592,8 +593,12 @@ func (c *CaptchaConfig) EffectiveVerifyURL() string {
 func (c *CaptchaConfig) EffectiveScriptURL() string {
 	if c == nil || strings.TrimSpace(c.ScriptURL) == "" {
 		switch c.EffectiveProvider() {
-		case CaptchaProviderRecaptcha:
-			return "https://www.google.com/recaptcha/api.js?render=explicit"
+		case CaptchaProviderRecaptchaV3:
+			siteKey := strings.TrimSpace(c.SiteKey)
+			if siteKey == "" {
+				return "https://www.google.com/recaptcha/api.js?render="
+			}
+			return "https://www.google.com/recaptcha/api.js?render=" + url.QueryEscape(siteKey)
 		case CaptchaProviderHCaptcha:
 			return "https://js.hcaptcha.com/1/api.js?render=explicit"
 		default:
@@ -619,6 +624,13 @@ func (c *CaptchaConfig) EffectiveMinScore() float64 {
 		return 0.5
 	}
 	return c.MinScore
+}
+
+func (c *CaptchaConfig) EffectiveAction() string {
+	if c == nil || strings.TrimSpace(c.Action) == "" {
+		return "billing_challenge"
+	}
+	return strings.TrimSpace(c.Action)
 }
 
 func (c *CaptchaConfig) EffectiveChallengeBuckets() []string {
@@ -719,7 +731,7 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 	}
 
 	switch cfg.EffectiveProvider() {
-	case CaptchaProviderTurnstile, CaptchaProviderRecaptcha, CaptchaProviderHCaptcha:
+	case CaptchaProviderTurnstile, CaptchaProviderRecaptchaV3, CaptchaProviderHCaptcha:
 	default:
 		return fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
@@ -729,6 +741,9 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 	}
 	if strings.TrimSpace(cfg.SecretKey) == "" {
 		return fmt.Errorf("secret_key is required when captcha is enabled")
+	}
+	if cfg.EffectiveProvider() == CaptchaProviderRecaptchaV3 && strings.TrimSpace(cfg.EffectiveAction()) == "" {
+		return fmt.Errorf("action is required when recaptcha-v3 is enabled")
 	}
 	if rawURL := strings.TrimSpace(cfg.VerifyURL); rawURL != "" {
 		if err := validateHTTPSURL("verify_url", rawURL); err != nil {
@@ -1183,6 +1198,7 @@ func GetDefaultBillingConfig() *Config {
 		Captcha: &CaptchaConfig{
 			Enabled:           false,
 			Provider:          CaptchaProviderTurnstile,
+			Action:            "billing_challenge",
 			ChallengeTTL:      "15m",
 			ExtremeMultiplier: 3,
 			MinScore:          0.5,

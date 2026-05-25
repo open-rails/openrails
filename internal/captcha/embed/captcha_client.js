@@ -3,7 +3,8 @@
     enabled: __OPENRAILS_CAPTCHA_ENABLED__,
     provider: __OPENRAILS_CAPTCHA_PROVIDER__,
     siteKey: __OPENRAILS_CAPTCHA_SITE_KEY__,
-    scriptURL: __OPENRAILS_CAPTCHA_SCRIPT_URL__
+    scriptURL: __OPENRAILS_CAPTCHA_SCRIPT_URL__,
+    action: __OPENRAILS_CAPTCHA_ACTION__
   };
   var providerPromise = null;
   var widgetId = null;
@@ -12,7 +13,7 @@
     if (!cfg.enabled) return true;
     if (cfg.provider === "turnstile") return !!(window.turnstile && window.turnstile.render);
     if (cfg.provider === "hcaptcha") return !!(window.hcaptcha && window.hcaptcha.render);
-    if (cfg.provider === "recaptcha") return !!(window.grecaptcha && window.grecaptcha.render);
+    if (cfg.provider === "recaptcha-v3") return !!(window.grecaptcha && window.grecaptcha.execute);
     return false;
   }
 
@@ -63,19 +64,27 @@
       widgetId = window.hcaptcha.render(el, options);
       return;
     }
-    if (cfg.provider === 'recaptcha') {
-      if (!window.grecaptcha || !window.grecaptcha.render) return reject(new Error('recaptcha is unavailable'));
-      var doRender = function(){ widgetId = window.grecaptcha.render(el, options); };
-      if (window.grecaptcha.ready) window.grecaptcha.ready(doRender); else doRender();
-      return;
-    }
     reject(new Error('unsupported captcha provider'));
+  }
+
+  function executeRecaptchaV3(resolve, reject) {
+    if (!window.grecaptcha || !window.grecaptcha.execute) return reject(new Error('recaptcha-v3 is unavailable'));
+    var run = function() {
+      window.grecaptcha.execute(cfg.siteKey, { action: cfg.action }).then(function(token) {
+        resolve(token || '');
+      }).catch(reject);
+    };
+    if (window.grecaptcha.ready) window.grecaptcha.ready(run); else run();
   }
 
   function solve(container) {
     if (!cfg.enabled) return Promise.resolve('');
     return loadProvider().then(function() {
       return new Promise(function(resolve, reject) {
+        if (cfg.provider === 'recaptcha-v3') {
+          executeRecaptchaV3(resolve, reject);
+          return;
+        }
         var el;
         try { el = resolveElement(container); } catch (err) { reject(err); return; }
         renderProvider(el, resolve, reject);
@@ -87,7 +96,6 @@
     try {
       if (cfg.provider === 'turnstile' && window.turnstile && window.turnstile.reset) window.turnstile.reset(widgetId);
       if (cfg.provider === 'hcaptcha' && window.hcaptcha && window.hcaptcha.reset) window.hcaptcha.reset(widgetId);
-      if (cfg.provider === 'recaptcha' && window.grecaptcha && window.grecaptcha.reset) window.grecaptcha.reset(widgetId);
     } catch (_) {}
   }
 

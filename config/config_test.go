@@ -129,6 +129,11 @@ func TestValidateCaptchaRejectsInvalidSettings(t *testing.T) {
 		wantError string
 	}{
 		{
+			name:      "legacy recaptcha provider unsupported",
+			mutate:    func(c *CaptchaConfig) { c.Provider = "recaptcha" },
+			wantError: "unsupported provider",
+		},
+		{
 			name:      "invalid verify url",
 			mutate:    func(c *CaptchaConfig) { c.VerifyURL = "://bad" },
 			wantError: "invalid verify_url",
@@ -187,8 +192,15 @@ func TestCaptchaConfigDefaults(t *testing.T) {
 	assert.Equal(t, CaptchaProviderTurnstile, cfg.EffectiveProvider())
 	assert.Equal(t, "https://challenges.cloudflare.com/turnstile/v0/siteverify", cfg.EffectiveVerifyURL())
 	assert.Equal(t, "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", cfg.EffectiveScriptURL())
+	assert.Equal(t, "billing_challenge", cfg.EffectiveAction())
 	assert.Equal(t, 3, cfg.EffectiveExtremeMultiplier())
 	assert.Equal(t, "checkout", cfg.EffectiveChallengeBuckets()[0])
+}
+
+func TestCaptchaConfigRecaptchaV3Defaults(t *testing.T) {
+	cfg := &CaptchaConfig{Provider: CaptchaProviderRecaptchaV3, SiteKey: "site key"}
+	assert.Equal(t, "https://www.google.com/recaptcha/api/siteverify", cfg.EffectiveVerifyURL())
+	assert.Equal(t, "https://www.google.com/recaptcha/api.js?render=site+key", cfg.EffectiveScriptURL())
 }
 
 func TestLoad_EnvTrimming(t *testing.T) {

@@ -83,8 +83,10 @@ func buildCaptchaClientScript(cfg *config.CaptchaConfig) string {
 	provider := ""
 	siteKey := ""
 	scriptURL := ""
+	action := ""
 	if cfg != nil {
 		provider = cfg.EffectiveProvider()
+		action = cfg.EffectiveAction()
 	}
 	if enabled {
 		siteKey = strings.TrimSpace(cfg.SiteKey)
@@ -96,6 +98,7 @@ func buildCaptchaClientScript(cfg *config.CaptchaConfig) string {
 		"__OPENRAILS_CAPTCHA_PROVIDER__", jsonLiteral(provider),
 		"__OPENRAILS_CAPTCHA_SITE_KEY__", jsonLiteral(siteKey),
 		"__OPENRAILS_CAPTCHA_SCRIPT_URL__", jsonLiteral(scriptURL),
+		"__OPENRAILS_CAPTCHA_ACTION__", jsonLiteral(action),
 	).Replace(captchaembed.ClientScriptTemplate)
 }
 

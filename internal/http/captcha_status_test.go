@@ -144,6 +144,30 @@ func TestCaptchaClientScriptIncludesProviderLoader(t *testing.T) {
 	require.NotContains(t, w.Body.String(), "secret-key")
 }
 
+func TestCaptchaClientScriptIncludesRecaptchaV3Execute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	s := &Server{cfg: &config.Config{Captcha: &config.CaptchaConfig{
+		Enabled:   true,
+		Provider:  config.CaptchaProviderRecaptchaV3,
+		SiteKey:   "site-key",
+		SecretKey: "secret-key",
+		Action:    "billing_challenge",
+	}}}
+
+	r := gin.New()
+	r.GET("/v1/captcha/client.js", s.captchaClientScriptHandler)
+	req := httptest.NewRequest(http.MethodGet, "/v1/captcha/client.js", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `provider: "recaptcha-v3"`)
+	require.Contains(t, w.Body.String(), "https://www.google.com/recaptcha/api.js?render=site-key")
+	require.Contains(t, w.Body.String(), `action: "billing_challenge"`)
+	require.Contains(t, w.Body.String(), "window.grecaptcha.execute(cfg.siteKey, { action: cfg.action })")
+	require.NotContains(t, w.Body.String(), "secret-key")
+}
+
 func TestCaptchaClientScriptDisabledNoop(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	s := &Server{cfg: &config.Config{Captcha: &config.CaptchaConfig{Enabled: false}}}

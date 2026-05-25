@@ -81,7 +81,7 @@ func TestVerifierRejectsLowScore(t *testing.T) {
 
 	verifier := NewVerifier(&config.CaptchaConfig{
 		Enabled:   true,
-		Provider:  config.CaptchaProviderRecaptcha,
+		Provider:  config.CaptchaProviderRecaptchaV3,
 		SecretKey: "secret-key",
 		VerifyURL: server.URL,
 		MinScore:  0.5,
@@ -91,6 +91,59 @@ func TestVerifierRejectsLowScore(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, result.Success)
 	require.Contains(t, result.ErrorCodes, "low-score")
+}
+
+func TestVerifierValidatesRecaptchaV3Action(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		action     string
+		wantResult bool
+		wantCode   string
+	}{
+		{
+			name:       "matching action accepted",
+			action:     "billing_challenge",
+			wantResult: true,
+		},
+		{
+			name:       "mismatched action rejected",
+			action:     "login",
+			wantResult: false,
+			wantCode:   "action-mismatch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(map[string]any{"success": true, "score": 0.9, "action": tt.action}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			}))
+			defer server.Close()
+
+			verifier := NewVerifier(&config.CaptchaConfig{
+				Enabled:   true,
+				Provider:  config.CaptchaProviderRecaptchaV3,
+				SecretKey: "secret-key",
+				VerifyURL: server.URL,
+				Action:    "billing_challenge",
+				MinScore:  0.5,
+			}, server.Client())
+
+			result, err := verifier.Verify(context.Background(), VerifyRequest{Token: "response-token"})
+			require.NoError(t, err)
+			require.Equal(t, tt.wantResult, result.Success)
+			if tt.wantCode != "" {
+				require.Contains(t, result.ErrorCodes, tt.wantCode)
+			}
+		})
+	}
 }
 
 func TestChallengeStorePrunesExpiredMemoryEntries(t *testing.T) {

@@ -126,6 +126,10 @@ func (v *siteVerifyVerifier) Verify(ctx context.Context, req VerifyRequest) (*Ve
 		result.Success = false
 		result.ErrorCodes = append(result.ErrorCodes, "low-score")
 	}
+	if result.Success && v.cfg.EffectiveProvider() == config.CaptchaProviderRecaptchaV3 && strings.TrimSpace(payload.Action) != v.cfg.EffectiveAction() {
+		result.Success = false
+		result.ErrorCodes = append(result.ErrorCodes, "action-mismatch")
+	}
 
 	return result, nil
 }
