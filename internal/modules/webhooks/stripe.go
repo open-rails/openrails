@@ -106,12 +106,25 @@ type stripeInvoice struct {
 		Metadata map[string]string `json:"metadata"`
 	} `json:"subscription_details"`
 	// The 2026-04-22.preview API moved subscription details (including the
-	// metadata we propagate via subscription_data.metadata) under `parent`.
+	// metadata we propagate via subscription_data.metadata, and the subscription
+	// id itself) under `parent`. The top-level `subscription`, `charge`, and
+	// `payment_intent` fields are no longer present on preview invoice events.
 	Parent struct {
 		SubscriptionDetails struct {
-			Metadata map[string]string `json:"metadata"`
+			Subscription string            `json:"subscription"`
+			Metadata     map[string]string `json:"metadata"`
 		} `json:"subscription_details"`
 	} `json:"parent"`
+}
+
+// processorSubscriptionID returns the Stripe subscription id, reading the
+// top-level field (classic/snapshot shape) and falling back to
+// parent.subscription_details.subscription (2026-04-22.preview shape).
+func (inv stripeInvoice) processorSubscriptionID() string {
+	if id := strings.TrimSpace(inv.Subscription); id != "" {
+		return id
+	}
+	return strings.TrimSpace(inv.Parent.SubscriptionDetails.Subscription)
 }
 
 type stripeCheckoutSession struct {
@@ -305,7 +318,7 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 		// checkout.session.completed records (first invoice). If neither is available yet
 		// (e.g. invoice.paid arrived before checkout.session.completed), return an error so
 		// Stripe retries once the mapping exists.
-		if procSubID := strings.TrimSpace(inv.Subscription); procSubID != "" {
+		if procSubID := inv.processorSubscriptionID(); procSubID != "" {
 			if sub, lookupErr := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorStripe), procSubID); lookupErr == nil && sub != nil {
 				userID = strings.TrimSpace(sub.UserID)
 			}
@@ -342,14 +355,18 @@ func (s *StripeWebhookService) handleInvoicePaid(ctx context.Context, obj json.R
 	}
 	paymentTransactionID := normalize.FirstNonEmpty(inv.Charge, inv.PaymentIntent)
 	if paymentTransactionID == "" {
-		if inv.AmountPaid != 0 || strings.TrimSpace(inv.ID) == "" {
-			return fmt.Errorf("stripe invoice missing refundable transaction id (charge/payment_intent)")
-		}
+		// The 2026-04-22.preview invoice.paid payload omits charge/payment_intent
+		// (those arrive on charge.succeeded / invoice_payment.paid). Fall back to
+		// the invoice id as the stable transaction id for the subscription
+		// invoice; the real charge id + card are captured by handleChargeSucceeded.
 		paymentTransactionID = strings.TrimSpace(inv.ID)
+		if paymentTransactionID == "" {
+			return fmt.Errorf("stripe invoice missing transaction id (charge/payment_intent/invoice id)")
+		}
 	}
 	paymentMetadata := stripeInvoicePaymentMetadata(inv)
 
-	processorSubID := strings.TrimSpace(inv.Subscription)
+	processorSubID := inv.processorSubscriptionID()
 	if processorSubID == "" {
 		return fmt.Errorf("stripe invoice missing subscription id")
 	}
@@ -965,7 +982,7 @@ func (s *StripeWebhookService) handleInvoicePaymentFailed(ctx context.Context, o
 	if err := json.Unmarshal(obj, &inv); err != nil {
 		return fmt.Errorf("parse failed invoice: %w", err)
 	}
-	processorSubID := strings.TrimSpace(inv.Subscription)
+	processorSubID := inv.processorSubscriptionID()
 	if processorSubID == "" {
 		return nil
 	}

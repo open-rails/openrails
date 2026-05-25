@@ -57,16 +57,18 @@ func TestStripeInvoiceEffectiveMetadataUsesSubscriptionDetailsFallback(t *testin
 func TestStripeInvoicePreviewShapeParsing(t *testing.T) {
 	payload := []byte(`{
       "id": "in_test",
-      "subscription": "sub_test",
       "customer": "cus_test",
       "amount_paid": 1200,
       "currency": "usd",
       "metadata": {},
       "lines": {"data": [{"pricing": {"price_details": {"price": "price_stripe_initiate"}}}]},
-      "parent": {"subscription_details": {"metadata": {
-        "user_id": "019e51df-17aa-7de4-a4e9-4f2e7c33ea29",
-        "internal_price_id": "4ecb4c2b-b057-49c0-a691-10639c0969db"
-      }}}
+      "parent": {"subscription_details": {
+        "subscription": "sub_test",
+        "metadata": {
+          "user_id": "019e51df-17aa-7de4-a4e9-4f2e7c33ea29",
+          "internal_price_id": "4ecb4c2b-b057-49c0-a691-10639c0969db"
+        }
+      }}
     }`)
 
 	var inv stripeInvoice
@@ -83,6 +85,39 @@ func TestStripeInvoicePreviewShapeParsing(t *testing.T) {
 	}
 	if got := inv.Lines.Data[0].priceID(); got != "price_stripe_initiate" {
 		t.Fatalf("priceID() from pricing.price_details.price = %q, want price_stripe_initiate", got)
+	}
+	// On the preview shape there is no top-level subscription; it lives under
+	// parent.subscription_details.subscription. handleInvoicePaid bails ("missing
+	// subscription id") without this fallback — the root cause of purchases
+	// sticking on Free.
+	if got := inv.processorSubscriptionID(); got != "sub_test" {
+		t.Fatalf("processorSubscriptionID() from parent = %q, want sub_test", got)
+	}
+}
+
+func TestStripeInvoiceProcessorSubscriptionID(t *testing.T) {
+	// Classic/snapshot shape: top-level subscription is used.
+	classic := stripeInvoice{Subscription: "sub_classic"}
+	if got := classic.processorSubscriptionID(); got != "sub_classic" {
+		t.Fatalf("classic: got %q, want sub_classic", got)
+	}
+
+	// 2026-04-22.preview shape: subscription only under parent.subscription_details.
+	var preview stripeInvoice
+	if err := json.Unmarshal([]byte(`{
+      "parent": {"subscription_details": {"subscription": "sub_preview"}}
+    }`), &preview); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := preview.processorSubscriptionID(); got != "sub_preview" {
+		t.Fatalf("preview: got %q, want sub_preview", got)
+	}
+
+	// Top-level wins when both are present.
+	both := stripeInvoice{Subscription: "sub_top"}
+	both.Parent.SubscriptionDetails.Subscription = "sub_parent"
+	if got := both.processorSubscriptionID(); got != "sub_top" {
+		t.Fatalf("both: got %q, want sub_top (top-level wins)", got)
 	}
 }
 
