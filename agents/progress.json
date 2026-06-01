@@ -1476,6 +1476,78 @@
         "[ ] Tests: cancel at the same instant does not violate; immediate cancel after create holds; no dependence on wall-clock subtraction"
       ],
       "completed": false
+    },
+    {
+      "id": 218,
+      "name": "Consider preventing embedded hosts from mounting private service HTTP routes",
+      "description": "Open question: should OpenRails prevent embedded hosts from exposing the private/service HTTP route surface altogether? In embedded mode there is normally no OpenRails-owned host/port/private_port, and hosts should call the Go service API directly instead of mounting `ServiceHandler()` / `PrivateHandler()`. Today those handlers still exist and could be mounted by an embedded host, which risks recreating a private HTTP surface outside the intended service-to-service boundary. The separate standalone migration from `private_port` + `X-API-KEY` to mTLS is tracked in issue 220.",
+      "tasks": [
+        "[ ] Integrate AuthKit organizational access tokens (OATs) on public routes as an alternative to user JWTs for organization/API callers",
+        "[ ] Define public-route auth semantics when a request presents a user JWT, an OAT, or both; OATs are used in place of user JWTs, not over mTLS",
+        "[ ] Compare OpenRails entitlements against Stripe's newer entitlement system and decide whether our model, API shape, and AuthKit claim integration should change",
+        "[ ] Decide whether `ServiceHandler()` / `PrivateHandler()` should remain mountable in embedded mode, be deprecated harder, or be removed from the embedded public API",
+        "[ ] Inventory current embedded/private HTTP callers and tests before changing the API",
+        "[ ] Preserve direct Go service/facade access for embedded hosts; the concern is private HTTP route mounting, not embedded billing functionality",
+        "[ ] Coordinate with issue 220 so embedded route exposure policy and standalone mTLS migration do not preserve two competing private-service surfaces",
+        "[ ] Update docs/comments so embedded mode ownership is unambiguous: no OpenRails-owned host/port/private_port, and no embedded mounting of private HTTP routes if that is the chosen direction",
+        "[ ] Add tests proving embedded hosts cannot accidentally mount the private route surface, if that is the chosen direction"
+      ],
+      "completed": false
+    },
+    {
+      "id": 219,
+      "name": "Require prepared or parameterized SQL; migrate from Bun to sqlc",
+      "description": "Adopt a hard rule that OpenRails database access must use prepared statements or parameterized statements, never direct SQL built from interpolated values. Run a direct benchmark comparison between current Bun-written queries and equivalent sqlc + pgx queries for performance, allocations, generated SQL quality, query plans, and ergonomics. Plan direction: switch all OpenRails queries from Bun to sqlc, using the benchmark to guide rollout order, catch regressions, and validate the expected performance/control gains.",
+      "tasks": [
+        "[ ] Define the SQL safety rule precisely: placeholders/parameter binding are required for all runtime values; string concatenation/interpolation is allowed only for vetted static SQL fragments such as fixed identifiers or generated migrations",
+        "[ ] Audit all Bun query builder, NewRaw, Exec, Query, QueryRow, and fmt.Sprintf SQL construction sites for interpolated runtime values",
+        "[ ] Add focused tests or static checks that fail on unsafe raw SQL patterns where practical",
+        "[ ] Add a benchmark suite comparing representative Bun queries against equivalent sqlc + pgx queries for latency, allocations, generated SQL quality, query plans, and operational debuggability",
+        "[ ] Benchmark active entitlement reads: IsEntitled, ListActiveEntitlements, and ListActiveRecords against billing.entitlements with realistic active, expired, revoked, deleted, finite, and indefinite rows",
+        "[ ] Benchmark credit balance and credit transaction lifecycle flows: GetBalance, Deposit, Hold, CaptureHold, ReleaseHold, Withdraw, and FIFO credit_blocks depletion with 1/10/100 spendable blocks",
+        "[ ] Benchmark credit transaction history and idempotency lookups: paginated transactions by user+credit_type and source/source_id lookup for metering/request idempotency",
+        "[ ] Benchmark checkout session lifecycle queries: price/product lookup, checkout session insert, GetByID, status/state update, and latest open session by user+price+processor",
+        "[ ] Benchmark subscription lifecycle guard queries: active-or-pending by user+product and active-or-pending by user+tier_group with product relation loading",
+        "[ ] Benchmark webhook resolution queries: subscription lookup by processor_subscription_id, subscription metadata lookup, price lookup by processor JSONB fields, payment lookup by processor+transaction_id, and payment insert-if-not-exists",
+        "[ ] Benchmark processor customer mapping queries: upsert customer id, lookup customer id by user+processor, and reverse lookup user id by processor+customer_id",
+        "[ ] Benchmark public catalog reads and account/admin pagination as second-wave cases: active prices with product relation, filtered price listing, user subscriptions, user payments, and subscriber/payment admin listings",
+        "[ ] Seed benchmark datasets at realistic sizes and skews: large entitlements, payments, subscriptions, credit_transactions, credit_blocks, and user_credit_balances tables with both hot users and normal users",
+        "[ ] Capture EXPLAIN ANALYZE, query text, DB round trips, Go allocations, p50/p95 latency, and transaction contention behavior for each Bun and sqlc implementation",
+        "[ ] Use the benchmark to choose rollout order and identify hot repositories/queries that should move first",
+        "[ ] Introduce sqlc configuration, query directories, generated package layout, and CI checks (`sqlc generate`, `sqlc vet`, and any schema verification we adopt)",
+        "[ ] Design the sqlc repository layer: generated query package ownership, transaction handling, pagination helpers, nullable/type overrides, and scan/mapping conventions",
+        "[ ] Migrate one representative repository from Bun to sqlc as a spike and compare readability, safety, performance, and test ergonomics",
+        "[ ] Migrate all remaining Bun-backed repositories and runtime queries to sqlc + pgx",
+        "[ ] Remove Bun from runtime dependencies once no production query path depends on it",
+        "[ ] Document the approved SQL patterns for new code and code review"
+      ],
+      "completed": false
+    },
+    {
+      "id": 220,
+      "name": "Replace private port plus API key service API with mTLS",
+      "description": "Move OpenRails standalone service-to-service HTTP away from the current `private_port` + `X-API-KEY` trust boundary and toward mTLS-authenticated service communication. The target design should remove `private_port` as a separate security primitive, stop relying on shared API keys for private routes, and use workload certificates for caller identity. Kubernetes deployments should use HashiCorp Vault PKI as the CA backend, cert-manager Vault Issuer/ClusterIssuer for certificate issuance and renewal, and a 7-day workload certificate rotation policy. Local Docker Compose/dev behavior should also use HashiCorp Vault PKI through a dev Vault profile/service rather than OpenRails generating or managing ad-hoc root CA/self-signed certificate material. AuthKit OATs are intentionally out of scope for this transport boundary: OATs are for public routes as an alternative to user JWTs, not for mTLS.",
+      "tasks": [
+        "[ ] Inventory all current private API routes, handlers, tests, and callers, including host apps that call `openrails:8060` with `X-API-KEY`",
+        "[ ] Define the mTLS service identity model: allowed client services, DNS/SPIFFE-style SANs, trust bundles, server cert validation, client cert validation, and authorization decisions derived from certificate identity",
+        "[ ] Decide whether service routes remain on a temporary separate listener during migration or move onto the normal listener behind mTLS-gated route groups; target outcome is no `private_port` security boundary",
+        "[ ] Add explicit OpenRails configuration for mTLS server cert, server key, client CA/trust bundle, required client certificate mode, and transition flags without silent fallback to API-key auth",
+        "[ ] Replace `X-API-KEY` private-route middleware with mTLS-authenticated service middleware for the service route surface",
+        "[ ] Define the Kubernetes certificate lifecycle using HashiCorp Vault PKI engine as the certificate authority backend",
+        "[ ] Use cert-manager with a Vault Issuer/ClusterIssuer so Kubernetes `Certificate` resources request Vault PKI certs, write TLS Secrets, and renew before expiry",
+        "[ ] Add Docker Compose support for local mTLS using a HashiCorp Vault dev PKI profile/service that issues OpenRails server and caller workload certificates; do not use OpenRails-owned root CA or self-signed certificate generation",
+        "[ ] Rotate workload/leaf mTLS certificates once every 7 days, with automated renewal and overlap so service-to-service traffic does not require downtime",
+        "[ ] Start with Secret-mounted mTLS files plus pod restart/reloader on Secret update; later add OpenRails in-process TLS file reload if rotation without pod restarts is worth it",
+        "[ ] Define local development and Docker Compose behavior using HashiCorp Vault PKI, not ad-hoc root CA/self-signed cert generation; add a Vault dev PKI compose profile/service if needed, explicit insecure-dev mode only as an opt-in escape hatch, and no accidental production fallback",
+        "[ ] Migrate existing standalone callers from `http://openrails:8060` plus `X-API-KEY` to HTTPS mTLS clients",
+        "[ ] Coordinate with Doujins and Hentai0 usage: remove or replace `BILLING_ADMIN_URL`/`BILLING_API_KEY` entitlement fallback paths where they are redundant, and keep embedded AuthKit/direct-SQL paths separate from service HTTP",
+        "[ ] Remove `api_key`, `OPENRAILS_API_KEY`, `private_port`, and `PRIVATE_PORT` runtime dependency once no production caller depends on the legacy private listener",
+        "[ ] Remove the redundant unauthenticated `/health` route from the private/internal listener; use the normal public health/readiness endpoints as the canonical operational surface",
+        "[ ] If a temporary internal listener exists during migration, have the normal readiness endpoint report whether that listener is configured/bound/ready when that signal is useful",
+        "[ ] Add tests rejecting missing client certs, untrusted CAs, wrong SANs, and expired certs; add positive tests for valid service certificates and any temporary dual-stack migration behavior",
+        "[ ] Update deployment docs, runbooks, examples, and comments so host/port/private_port/api_key/mTLS/OAT ownership is unambiguous in standalone vs embedded mode"
+      ],
+      "completed": false
     }
   ]
 }
