@@ -1,0 +1,244 @@
+{
+  "issues": [
+    {
+      "id": "SEC-1",
+      "name": "ccbill-ip-list-configurable",
+      "priority": "high",
+      "description": "Move CCBill IP allowlist from hard-coded source into config (env vars / CI/CD pipeline). Currently lives in internal/shared/iputil/ccbill.go as static CIDR constants. Must be updatable without a code deploy when CCBill adds or rotates IP ranges.",
+      "files": ["internal/shared/iputil/ccbill.go"],
+      "tasks": [
+        "[ ] Move CIDR list from hard-coded Go constants to config.yaml / env var (e.g. ccbill.allowed_cidrs)",
+        "[ ] Parse CIDRs at boot, fail-fast on invalid entries",
+        "[ ] Add config reload or at minimum document the restart-to-update requirement",
+        "[ ] Update IsValidCCBillIP to read from the runtime config instead of package-level constants",
+        "[ ] Add integration test that verifies the config-driven allowlist rejects unknown IPs"
+      ]
+    },
+    {
+      "id": "SEC-2",
+      "name": "security-scanning-ci-cd",
+      "priority": "medium",
+      "description": "Add security scanning tools to the GitHub CI/CD pipeline. Run on PR open and/or commit. Tools: gosec (SAST), golangci-lint (quality/style), govulncheck (dependency vulns). Consider Trivy, Semgrep, or Snyk for additional SAST and SCA coverage.",
+      "files": [".github/workflows/"],
+      "tasks": [
+        "[ ] Add gosec step to CI pipeline (Go SAST - source code security scanning)",
+        "[ ] Add golangci-lint step (code quality, linting, style enforcement)",
+        "[ ] Add govulncheck step (dependency vulnerability scanning against Go vuln DB)",
+        "[ ] Consider adding Snyk or Trivy as an additional SCA scanner in pipeline",
+        "[ ] Configure pipeline to run on PR open and push to main",
+        "[ ] Set appropriate severity thresholds (fail on HIGH+, warn on MEDIUM)"
+      ]
+    },
+    {
+      "id": "SEC-3",
+      "name": "webhook-body-size-limit",
+      "priority": "high",
+      "description": "Webhook routes currently opt out of body-size limit entirely (internal/http/middleware/security.go). An attacker who can reach the webhook port can send multi-gigabyte payloads and exhaust memory. Apply per-processor caps using http.MaxBytesReader.",
+      "files": [
+        "internal/http/middleware/security.go",
+        "internal/http/handlers/webhook.go"
+      ],
+      "tasks": [
+        "[ ] Remove the blanket body-limit exemption for /v1/webhooks/*",
+        "[ ] Apply per-processor limits via http.MaxBytesReader on r.Request.Body:",
+        "    - CCBill: 2 KiB (form-encoded key-value pairs, always small)",
+        "    - Stripe: 5 KiB (thin events; hydrated objects are fetched server-side)",
+        "    - NMI: 5 KiB (JSON webhook payloads)",
+        "[ ] Return 413 Payload Too Large if limit exceeded before any further processing",
+        "[ ] Add test that sends oversized body and asserts 413"
+      ]
+    },
+    {
+      "id": "SEC-4",
+      "name": "rate-limiting-enhancements",
+      "priority": "medium",
+      "description": "Implement more granular rate limiting within the OpenRails service: by IP, by authenticated user ID, and by payload size. Current rate limiter only uses raw IP and collapses behind a proxy.",
+      "files": [
+        "internal/http/middleware/ratelimit.go"
+      ],
+      "tasks": [
+        "[ ] Add per-authenticated-user rate limiting (keyed on JWT user_id) for mutation endpoints",
+        "[ ] Add per-IP rate limiting that works correctly behind a proxy (requires SEC-6 trusted proxies fix)",
+        "[ ] Add payload-size-based throttling: reject early if Content-Length exceeds route threshold",
+        "[ ] Consider /24 aggregation for the IP-based limiter to handle NAT/cloud scenarios",
+        "[ ] Document the rate-limit tiers per endpoint category (webhooks, checkout, admin, credits)"
+      ]
+    },
+    {
+      "id": "SEC-5",
+      "name": "hard-stop-empty-expected-audience",
+      "priority": "high",
+      "description": "When expected_audience config is empty, the JWT verifier accepts tokens with any audience claim. Make this a hard deployment failure — refuse to boot if expected_audience is not set in non-test/non-dev environments.",
+      "files": [
+        "internal/auth/verifier.go",
+        "config/config.go"
+      ],
+      "tasks": [
+        "[ ] In config validation (boot time): if env != development/test AND expected_audience is empty, log.Fatal with clear error message",
+        "[ ] Same pattern for other critical empty fields: api_key, trusted_proxies (non-dev)",
+        "[ ] Add unit test that verifies boot fails when expected_audience is empty in production mode"
+      ]
+    },
+    {
+      "id": "SEC-6",
+      "name": "constant-time-api-key-compare",
+      "priority": "high",
+      "description": "Fix the timing leak in X-API-KEY comparison. The early return on length mismatch leaks the secret's length. One-line fix: crypto/subtle.ConstantTimeCompare. Better: hash both sides with SHA-256 first so lengths are always equal.",
+      "files": ["internal/http/middleware/apikey.go"],
+      "tasks": [
+        "[ ] Replace the custom constantTimeCompare with:",
+        "    func constantTimeCompare(a, b string) bool {",
+        "        aHash := sha256.Sum256([]byte(a))",
+        "        bHash := sha256.Sum256([]byte(b))",
+        "        return subtle.ConstantTimeCompare(aHash[:], bHash[:]) == 1",
+        "    }",
+        "[ ] Import crypto/sha256 and crypto/subtle",
+        "[ ] Add unit test confirming equal timing for different-length inputs"
+      ]
+    },
+    {
+      "id": "SEC-7",
+      "name": "proration-rounding-fix",
+      "priority": "medium",
+      "description": "CalculateProration truncates to whole days, causing $0 proration near period end. Should compute in hours/seconds and round UP to the nearest day (1h left = 1 day of charge). Prevents free upgrades near period boundary.",
+      "files": ["internal/modules/checkout/service.go"],
+      "tasks": [
+        "[ ] Change CalculateProration to compute remaining time in seconds/hours instead of truncated days",
+        "[ ] Round UP: any partial day remaining counts as 1 full day of proration charge",
+        "[ ] Minimum proration: if daysRemaining rounds to 0 but time > 0, charge 1 day",
+        "[ ] Update the proration test to verify edge case: upgrade with 1 hour left charges for 1 day",
+        "[ ] Document the rounding policy in a code comment"
+      ]
+    },
+    {
+      "id": "SEC-8",
+      "name": "dunning-hard-decline-stop",
+      "priority": "medium",
+      "description": "FailMembership / dunning retries should only apply on NMI and must check the decline error code. Hard declines (account closed, stolen card, do_not_honor) must stop retries immediately. Only soft declines (insufficient_funds, try_again_later) should retry.",
+      "files": [
+        "internal/modules/subscriptions/dunning.go",
+        "internal/river/jobs_dunning.go"
+      ],
+      "tasks": [
+        "[ ] Parse the NMI decline response code from the rebill attempt result",
+        "[ ] Categorize decline codes into hard-decline vs soft-decline:",
+        "    - Hard (stop immediately): account_closed, stolen_card, do_not_honor, card_expired, pickup_card",
+        "    - Soft (allow retry): insufficient_funds, try_again_later, processing_error",
+        "[ ] On hard decline: immediately transition subscription to cancelled/failed, do NOT schedule another retry",
+        "[ ] On soft decline: continue existing retry logic (72h interval, max 5 attempts)",
+        "[ ] Log the decline reason code for operational visibility",
+        "[ ] Emit alert/metric when hard decline terminates a subscription"
+      ]
+    },
+    {
+      "id": "SEC-9",
+      "name": "operator-admin-db-check",
+      "priority": "medium",
+      "description": "IsOperatorAdmin currently trusts JWT org_roles claims without a DB cross-check. A revoked admin retains authority until their JWT expires. Add a DB verification on write endpoints to prevent stale-JWT privilege abuse.",
+      "files": ["internal/auth/policy/admin.go"],
+      "tasks": [
+        "[ ] For write endpoints (refunds, entitlement grants, off-channel payments, catalog mutations):",
+        "    - After JWT claim check passes, query the DB to confirm the user still holds the admin role",
+        "[ ] Cache the DB result for a short TTL (e.g., 30s) to avoid per-request DB hit on read endpoints",
+        "[ ] If DB says revoked but JWT says admin: reject with 403 and log a security event",
+        "[ ] Keep the claims-only fast path for read-only admin endpoints (GET /admin/*)"
+      ]
+    },
+    {
+      "id": "SEC-10",
+      "name": "nmi-tier-upgrade-atomicity",
+      "priority": "high",
+      "description": "The NMI tier upgrade flow (processUpgrade) charges the card at step 2, cancels old sub at step 3, then does DB writes at steps 4-5. If step 4 or 5 fails, the user is charged, old sub is cancelled at NMI, new sub is active at NMI billing every period — but the local DB has no record. Must add proper rollback/compensation for post-charge failures.",
+      "files": ["internal/modules/checkout/service.go"],
+      "tasks": [
+        "[ ] Before any processor calls, persist a pending_upgrade record (idempotency-protected) with all step state",
+        "[ ] After each step succeeds, update the pending record with step completion status",
+        "[ ] If DB write at step 4/5 fails:",
+        "    - Attempt to refund the proration charge at NMI",
+        "    - Attempt to cancel the new NMI subscription",
+        "    - Attempt to reactivate the old NMI subscription (or at minimum flag for manual intervention)",
+        "[ ] Add a recovery worker that periodically scans for stuck pending_upgrade records and resumes/compensates",
+        "[ ] Add idempotency key to the NMI proration sale call to prevent double-charging on retry",
+        "[ ] Add integration test that simulates DB failure after charge and verifies compensation fires"
+      ]
+    },
+    {
+      "id": "SEC-11",
+      "name": "eliminate-newraw-pattern",
+      "priority": "low",
+      "description": "Replace db.NewRaw(...) usage with proper parameterized queries or direct Bun query builder methods. The NewRaw-then-reserialize pattern in the audit package drops parameter bindings and is a future SQL injection risk if anyone adds placeholders.",
+      "files": [
+        "internal/audit/checks_subscription_state.go",
+        "internal/audit/checks_payment_method.go",
+        "internal/audit/checks_temporal.go"
+      ],
+      "tasks": [
+        "[ ] In checks_subscription_state.go: replace db.NewRaw(q.String()).Scan(...) with q.Scan(ctx, &results) directly",
+        "[ ] Audit all files in internal/audit/ for the same pattern and fix",
+        "[ ] Add a golangci-lint custom rule or code review policy that flags fmt.Sprintf inside NewRaw arguments",
+        "[ ] Consider using Bun's typed query builder instead of NewRaw for all audit queries"
+      ]
+    },
+    {
+      "id": "SEC-12",
+      "name": "mtls-service-to-service",
+      "priority": "medium",
+      "description": "Replace the shared X-API-KEY bearer-secret model for service-to-service auth with mTLS using Vault PKI certs. This eliminates the single-secret-equals-full-access problem and enables per-service identity without key rotation downtime.",
+      "files": [
+        "internal/http/middleware/apikey.go",
+        "internal/http/routes/routes.go",
+        "cmd/billing/main.go"
+      ],
+      "tasks": [
+        "[ ] Set up HashiCorp Vault PKI secret engine for issuing short-lived client certs",
+        "[ ] Configure the billing service TLS listener to require and verify client certificates",
+        "[ ] Map client cert CN/SAN to a service identity with defined scopes (credits:read, credits:write, etc.)",
+        "[ ] Update RegisterServiceRoutes to check the resolved service identity's scopes instead of a shared key",
+        "[ ] Keep the API key middleware as a fallback/migration path (deprecated, logged when used)",
+        "[ ] Document the cert rotation lifecycle and Vault PKI configuration",
+        "[ ] Add integration test with test certs verifying mutual auth handshake"
+      ]
+    },
+    {
+      "id": "SEC-13",
+      "name": "credit-deposit-overflow-guard",
+      "priority": "low",
+      "description": "In credits_service.go depositTx(), the line `newBal := bal.Balance + params.Amount` has no int64 overflow check. A MaxInt64 deposit on a user with balance > 0 wraps the balance negative, permanently bricking their credit account. NOTE: This is entirely dependent on already having the shared API key — and if an attacker has the key they can already withdraw any user's balance directly, making this strictly worse for them. Not a real exploit, just a good preventative coding hygiene step.",
+      "files": ["internal/modules/credits/credits_service.go"],
+      "tasks": [
+        "[ ] Add overflow guard before the addition at line ~253:",
+        "    if params.Amount > math.MaxInt64-bal.Balance {",
+        "        return nil, fmt.Errorf(\"deposit would overflow balance\")",
+        "    }",
+        "[ ] Import math if not already imported",
+        "[ ] Add unit test: deposit MaxInt64 on a user with balance=1, assert error returned",
+        "[ ] Consider adding a configurable max single-deposit cap as a secondary safeguard"
+      ]
+    },
+    {
+      "id": "SEC-14",
+      "name": "upgrade-pgx-dependency",
+      "priority": "high",
+      "description": "Upgrade github.com/jackc/pgx/v5 from v5.7.6 to v5.9.2+. Fixes 4 genuine CVEs: 2x HIGH (pgproto3 malicious server crash) and 2x LOW (client-side SQL sanitization injection). While exploitation requires a malicious/compromised Postgres server, the fix is a version bump with no breaking changes.",
+      "files": ["go.mod"],
+      "tasks": [
+        "[ ] Run: go get github.com/jackc/pgx/v5@v5.9.2",
+        "[ ] Run: go mod tidy",
+        "[ ] Run full test suite to verify no regressions",
+        "[ ] Verify go.sum updated with new hashes"
+      ]
+    },
+    {
+      "id": "SEC-15",
+      "name": "upgrade-x-net-dependency",
+      "priority": "low",
+      "description": "Upgrade golang.org/x/net from v0.47.0 to v0.55.0+. Fixes 5 MEDIUM CVEs (XSS in html tokenizer + HTTP/2 client infinite loop). All are unreachable in this codebase (no HTML rendering, HTTP/2 client loop requires compromised payment processor), but removes Snyk noise and is good hygiene.",
+      "files": ["go.mod"],
+      "tasks": [
+        "[ ] Run: go get golang.org/x/net@v0.55.0",
+        "[ ] Run: go mod tidy",
+        "[ ] Run full test suite to verify no regressions"
+      ]
+    }
+  ]
+}
