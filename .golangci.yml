@@ -1,0 +1,28 @@
+# golangci-lint configuration for OpenRails.
+# Introduced alongside CI security scanning (SEC-2). The linter step is advisory
+# in CI for now; this config keeps the enabled set focused on high-signal checks.
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck      # unchecked errors
+    - govet         # suspicious constructs
+    - ineffassign   # ineffectual assignments
+    - staticcheck   # static analysis / bug detection
+    - unused        # unused code
+    - gosimple      # simplifications
+    - bodyclose     # unclosed HTTP response bodies (resource leak / DoS surface)
+    - noctx         # HTTP requests without context
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    # Test files frequently ignore errors on cleanup/teardown.
+    - path: _test\.go
+      linters:
+        - errcheck
+        - noctx

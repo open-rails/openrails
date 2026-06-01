@@ -4,6 +4,9 @@ package credits_test
 
 import (
 	"context"
+	"database/sql"
+	"math"
+	"os"
 	"testing"
 	"time"
 
@@ -16,6 +19,67 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCreditsDepositOverflowGuard(t *testing.T) {
+	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
+	if dsn == "" {
+		t.Skip("set OPENRAILS_TEST_DB_URL to run integration tests")
+	}
+
+	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	bunDB := bun.NewDB(sqlDB, pgdialect.New())
+	models.RegisterModels(bunDB)
+
+	ctx := context.Background()
+	require.NoError(t, bunDB.PingContext(ctx))
+
+	dbi, err := db.NewWithBun(bunDB)
+	require.NoError(t, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	creditTypeName := "test_credits_overflow_" + uuid.NewString()
+	creditTypeID := uuid.New()
+	userID := uuid.NewString()
+
+	_, err = bunDB.NewInsert().Model(&models.CreditType{
+		ID:            creditTypeID,
+		Name:          creditTypeName,
+		DisplayName:   "Test Credits Overflow",
+		Unit:          "units",
+		DecimalPlaces: 0,
+		IsActive:      true,
+		CreatedAt:     now,
+	}).Exec(ctx)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", creditTypeID).Exec(ctx)
+	})
+
+	creditsSvc := credits.NewCreditsService(dbi)
+
+	// Seed a positive balance, then attempt a MaxInt64 deposit which would wrap
+	// the balance negative without the overflow guard.
+	_, err = creditsSvc.Deposit(ctx, credits.CreditDepositParams{
+		UserID: userID, CreditType: creditTypeName, Amount: 1, Source: "seed",
+	})
+	require.NoError(t, err)
+
+	_, err = creditsSvc.Deposit(ctx, credits.CreditDepositParams{
+		UserID: userID, CreditType: creditTypeName, Amount: math.MaxInt64, Source: "overflow",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "overflow")
+
+	// Balance must be unchanged (still 1) after the rejected deposit.
+	bal, err := creditsSvc.GetBalance(ctx, userID, creditTypeName)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), bal.Balance)
+}
 
 func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)

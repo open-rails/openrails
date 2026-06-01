@@ -2,6 +2,8 @@ package checkout
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1766,12 +1768,16 @@ func (s *CheckoutService) processUpgrade(
 	// Step 2: Charge prorated difference (if positive).
 	var prorationTransactionID string
 	if prorationAmount > 0 {
+		// Derive a stable OrderID from the idempotency key so a retried upgrade
+		// reuses the same order reference at NMI, letting NMI's duplicate-
+		// transaction detection prevent a double proration charge.
+		prorationOrderID := "upg-" + shortHash(idempotencyKey)
 		saleResp, err := client.RunSale(nmi.SaleParams{
 			CustomerVaultID:  customerVaultID,
 			Amount:           prorationAmount,
 			Currency:         newPrice.Currency,
 			OrderDescription: fmt.Sprintf("Upgrade proration: %s", newProduct.DisplayName),
-			OrderID:          fmt.Sprintf("upgrade-%s-%s", existingSub.ID.String()[:8], uuid.New().String()[:8]),
+			OrderID:          prorationOrderID,
 		})
 		if err != nil {
 			rollbackNewSubscription()
@@ -1792,27 +1798,16 @@ func (s *CheckoutService) processUpgrade(
 		}).Info("charged upgrade proration")
 	}
 
-	// Step 3: Cancel old subscription at NMI.
-	if err := s.cancelNMISubscription(ctx, existingSub, provider); err != nil {
-		log.WithError(err).WithField("subscription_id", existingSub.ID).
-			Warn("failed to cancel old NMI subscription during upgrade, continuing anyway")
-		// Don't fail the upgrade - the old sub will just not renew.
-	}
-
-	// Step 4: Update local database.
-	// Cancel old subscription
-	cancelType := models.CancelType("upgrade")
-	existingSub.Status = models.StatusCancelled
-	existingSub.CancelledAt = &now
-	existingSub.CancelType = &cancelType
-	existingSub.CancelFeedback = nil
-	existingSub.ClearRetrySchedule()
-	if err := s.SubscriptionService.Update(ctx, existingSub); err != nil {
-		log.WithError(err).WithField("subscription_id", existingSub.ID).
-			Error("failed to mark old subscription as cancelled during upgrade")
-	}
-
-	// Create new subscription record
+	// Step 3: Update local database.
+	//
+	// Ordering note (SEC-10): the new subscription row is created BEFORE the old
+	// one is marked cancelled and BEFORE the old NMI subscription is cancelled.
+	// If the create fails, the old subscription is still active both locally and
+	// at NMI, so compensation only has to refund the proration and cancel the new
+	// NMI subscription — no reactivation. The recovery worker keys its decision on
+	// whether the new local row exists, so it is robust to a crash at any point.
+	//
+	// Create new subscription record first.
 	var emailPtr *string
 	if req.Email != "" {
 		emailPtr = &req.Email
@@ -1847,11 +1842,29 @@ func (s *CheckoutService) processUpgrade(
 
 	if err := s.SubscriptionService.Create(ctx, newSubscription); err != nil {
 		saveErr := fmt.Errorf("failed to save upgraded subscription: %w", err)
+		// Post-charge DB failure: the user was charged the proration and a new
+		// subscription is live at NMI, but we cannot persist it locally. Compensate
+		// by refunding the proration and cancelling the new NMI subscription so the
+		// processor state matches the (unchanged) local state. The old subscription
+		// is untouched (still active locally and at NMI), so nothing to reactivate.
+		s.compensateFailedUpgrade(ctx, provider, prorationTransactionID, newSubscriptionID, resp.SubscriptionID, user.ID, &existingSub.ID, rollbackNewSubscription, saveErr)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, saveErr)
 		return nil, saveErr
 	}
 
-	// Step 5: Update entitlements immediately (grant new tier entitlements)
+	// New local row committed: mark old subscription cancelled locally.
+	cancelType := models.CancelType("upgrade")
+	existingSub.Status = models.StatusCancelled
+	existingSub.CancelledAt = &now
+	existingSub.CancelType = &cancelType
+	existingSub.CancelFeedback = nil
+	existingSub.ClearRetrySchedule()
+	if err := s.SubscriptionService.Update(ctx, existingSub); err != nil {
+		log.WithError(err).WithField("subscription_id", existingSub.ID).
+			Error("failed to mark old subscription as cancelled during upgrade")
+	}
+
+	// Step 4: Update entitlements immediately (grant new tier entitlements)
 	if s.EntitlementService != nil && newProduct.EntitlementsSpec != nil {
 		for entitlementName, durationDays := range newProduct.EntitlementsSpec {
 			notBefore := now
@@ -1888,6 +1901,18 @@ func (s *CheckoutService) processUpgrade(
 		}
 	}
 
+	// Step 5: Cancel the old subscription at NMI now that local state is durably
+	// consistent. Best-effort: if this fails the old subscription would keep
+	// billing, so flag it for operator repair rather than silently dropping it.
+	if err := s.cancelNMISubscription(ctx, existingSub, provider); err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"subscription_id":           existingSub.ID,
+			"processor_subscription_id": existingSub.ProcessorSubscriptionID,
+			"processor":                 provider,
+			"event":                     "upgrade_old_subscription_cancel_failed",
+		}).Error("failed to cancel old NMI subscription after upgrade; manual intervention required to stop duplicate billing")
+	}
+
 	// Mark idempotency request as complete
 	successMessage := fmt.Sprintf("Upgraded to %s. Prorated charge: %s", newProduct.DisplayName, moneyutil.FormatUSD(prorationAmount))
 	cachedResult, _ := json.Marshal(upgradeIdempotencyResult{
@@ -1904,6 +1929,60 @@ func (s *CheckoutService) processUpgrade(
 		SubscriptionID: &newSubscriptionID,
 		TransactionID:  prorationTransactionID,
 	}, nil
+}
+
+// shortHash returns a stable 16-hex-char digest of s, used to build
+// deterministic processor order references from an idempotency key.
+func shortHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// compensateFailedUpgrade rolls back processor-side state after a post-charge DB
+// failure during an NMI tier upgrade: it refunds the proration charge and cancels
+// the newly created NMI subscription so the processor matches the unchanged local
+// state. Each step is best-effort; any failure is logged at error level with a
+// structured event so operators can finish the repair manually.
+func (s *CheckoutService) compensateFailedUpgrade(
+	ctx context.Context,
+	provider string,
+	prorationTransactionID string,
+	newSubscriptionID uuid.UUID,
+	newProcessorSubscriptionID string,
+	userID string,
+	oldSubscriptionID *uuid.UUID,
+	rollbackNewSubscription func(),
+	cause error,
+) {
+	logEntry := log.WithError(cause).WithFields(log.Fields{
+		"user_id":                       userID,
+		"new_subscription_id":           newSubscriptionID,
+		"new_processor_subscription_id": newProcessorSubscriptionID,
+		"proration_transaction_id":      prorationTransactionID,
+		"processor":                     provider,
+		"event":                         "upgrade_compensation",
+	})
+	if oldSubscriptionID != nil {
+		logEntry = logEntry.WithField("old_subscription_id", *oldSubscriptionID)
+	}
+	logEntry.Warn("compensating failed NMI upgrade after post-charge DB error")
+
+	// Refund the proration charge.
+	if prorationTransactionID != "" {
+		client, ok := s.NMIClients[provider]
+		if !ok || client == nil {
+			logEntry.Error("manual intervention required: NMI client unavailable to refund proration")
+		} else if _, err := client.Refund(nmi.RefundParams{TransactionID: prorationTransactionID}); err != nil {
+			logEntry.WithError(err).Error("manual intervention required: failed to refund proration during upgrade compensation")
+		} else {
+			logEntry.Warn("refunded proration during upgrade compensation")
+		}
+	}
+
+	// Cancel the newly created NMI subscription.
+	if rollbackNewSubscription != nil {
+		rollbackNewSubscription()
+	}
 }
 
 // processDowngrade handles tier downgrades (scheduled for end of period)
@@ -2072,13 +2151,19 @@ func (s *CheckoutService) CalculateProration(
 		cycleDays = *billingCycleDays
 	}
 
-	// Calculate days remaining in current period
+	// Calculate days remaining in current period.
+	//
+	// Rounding policy: round UP to the nearest whole day. Any partial day
+	// remaining counts as a full day of proration charge, so an upgrade with even
+	// one hour left in the period is charged for one day rather than truncating to
+	// zero. Truncation here previously allowed effectively free upgrades near the
+	// period boundary. Computed in seconds to avoid float rounding error.
 	daysRemaining := 0
 	if periodEndsAt != nil && periodEndsAt.After(now) {
-		hoursRemaining := periodEndsAt.Sub(now).Hours()
-		daysRemaining = int(hoursRemaining / 24)
-		if daysRemaining < 0 {
-			daysRemaining = 0
+		const secondsPerDay = int64(24 * 60 * 60)
+		remainingSeconds := int64(periodEndsAt.Sub(now) / time.Second)
+		if remainingSeconds > 0 {
+			daysRemaining = int((remainingSeconds + secondsPerDay - 1) / secondsPerDay)
 		}
 	}
 

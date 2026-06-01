@@ -292,6 +292,16 @@ processors:
     # datalink_username: set via PROCESSORS_CCBILL_DATALINK_USERNAME env var
     # datalink_password: set via PROCESSORS_CCBILL_DATALINK_PASSWORD env var
 
+    # Webhook source IP allowlist (CIDR notation). Overrides the documented
+    # built-in default ranges so they can be rotated without a code deploy when
+    # CCBill adds/changes IPs. Parsed at boot; invalid entries fail startup.
+    # Changes require a service restart to take effect.
+    # allowed_cidrs:
+    #   - "64.38.212.0/24"
+    #   - "64.38.215.0/24"
+    #   - "64.38.240.0/24"
+    #   - "64.38.241.0/24"
+
   # ---------------------------------------------------------------------------
   # Stripe (reserved name - type implied)
   # ---------------------------------------------------------------------------

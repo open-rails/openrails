@@ -1,0 +1,114 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+jobs:
+  # gosec: Go SAST - source code security scanning. Fails the build on HIGH+
+  # findings; MEDIUM findings are surfaced as a non-blocking warning step.
+  gosec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Configure private module access
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "GH_TOKEN secret is required for private module access" >&2
+            exit 1
+          fi
+          go env -w GOPRIVATE=github.com/doujins-org/*
+          go env -w GONOSUMDB=github.com/doujins-org/*
+          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          go mod download
+          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - name: Run gosec (fail on HIGH+)
+        run: gosec -severity high -confidence medium -exclude-dir=.agents ./...
+      - name: Run gosec (warn on MEDIUM)
+        continue-on-error: true
+        run: gosec -severity medium -confidence medium -exclude-dir=.agents ./...
+
+  # golangci-lint: code quality, linting, and style enforcement.
+  golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Configure private module access
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "GH_TOKEN secret is required for private module access" >&2
+            exit 1
+          fi
+          go env -w GOPRIVATE=github.com/doujins-org/*
+          go env -w GONOSUMDB=github.com/doujins-org/*
+          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          go mod download
+          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      # Advisory for now: this codebase has not previously run golangci-lint, so
+      # the step reports findings without blocking merges. Flip continue-on-error
+      # to false once the existing backlog is cleared.
+      - name: Run golangci-lint
+        continue-on-error: true
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+  # govulncheck: dependency vulnerability scanning against the Go vuln DB.
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Configure private module access
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "GH_TOKEN secret is required for private module access" >&2
+            exit 1
+          fi
+          go env -w GOPRIVATE=github.com/doujins-org/*
+          go env -w GONOSUMDB=github.com/doujins-org/*
+          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          go mod download
+          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  # Trivy: additional SCA + filesystem vulnerability/secret scanning. Fails on
+  # HIGH/CRITICAL findings.
+  trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+          scanners: vuln,secret,misconfig

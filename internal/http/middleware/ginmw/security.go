@@ -19,28 +19,17 @@ import (
 const DefaultMaxBodyBytes = middleware.DefaultMaxBodyBytes
 
 // BodyLimit caps request bodies before handlers bind JSON or read forms.
+//
+// Webhook routes are no longer exempted: they get this global cap as a backstop
+// against memory-exhaustion payloads. Webhook handlers additionally apply much
+// tighter per-processor caps (see internal/http/handlers/webhook.go).
 func BodyLimit(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if isWebhookPath(c.Request.URL.Path) {
-			c.Next()
-			return
-		}
 		if maxBytes > 0 && c.Request != nil && c.Request.Body != nil {
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 		}
 		c.Next()
 	}
-}
-
-func isWebhookPath(path string) bool {
-	path = strings.ToLower(path)
-	if strings.HasPrefix(path, "/billing") {
-		path = strings.TrimPrefix(path, "/billing")
-		if path == "" {
-			path = "/"
-		}
-	}
-	return strings.HasPrefix(path, "/v1/webhooks")
 }
 
 func isDebugNMITokenizationPath(path string) bool {

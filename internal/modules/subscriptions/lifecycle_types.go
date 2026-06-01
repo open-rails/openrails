@@ -106,6 +106,11 @@ type FailMembershipParams struct {
 	// was attempted. Used when the dunning window has expired: a months-stale
 	// rebill must be downgraded, never retried.
 	Terminal bool
+	// HardDecline, when true, forces immediate cancellation with no further retry
+	// scheduling regardless of dunning mode. Set by dunning when the processor
+	// returns a permanent decline (stolen card, do-not-honor, account closed,
+	// expired card, pickup card). See ClassifyNMIDecline.
+	HardDecline bool
 }
 
 func NormalizeCancelType(cancelType *models.CancelType) string {

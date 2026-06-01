@@ -409,6 +409,26 @@ func performCaptchaTestRequest(r http.Handler, token string, paths ...string) *h
 	return w
 }
 
+func TestRateLimitRejectsOversizedContentLength(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := NewRateLimitStore()
+	cfg := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 10}}
+
+	r := gin.New()
+	r.Use(rateLimitWithDependencies(&cfg, nil, nil, store, captcha.NewChallengeStore(nil), nil))
+	r.POST("/v1/checkout", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/checkout", nil)
+	req.RemoteAddr = "203.0.113.60:1234"
+	req.ContentLength = bucketMaxContentLength["checkout"] + 1
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	// Rejected before any rate-limit counting.
+	require.Empty(t, store.counters)
+}
+
 func performRateLimitTestRequest(r http.Handler, path, ip, userID string) *httptest.ResponseRecorder {
 	return performRateLimitTestRequestWithToken(r, path, ip, userID, "")
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -446,6 +447,11 @@ type ProcessorConfig struct {
 	SubscriptionTypeId string `koanf:"subscription_type_id"`
 	DataLinkUsername   string `koanf:"datalink_username"`
 	DataLinkPassword   string `koanf:"datalink_password"`
+	// AllowedCIDRs is the CCBill webhook source allowlist (CIDR notation). When
+	// empty, the documented default ranges are used. Supplying it via config/env
+	// lets the ranges be rotated without a code deploy. Parsed at boot (fail-fast
+	// on invalid entries) — see iputil.Configure.
+	AllowedCIDRs []string `koanf:"allowed_cidrs"`
 
 	// --- Stripe fields (type: stripe) ---
 	SecretKey  string `koanf:"secret_key"`
@@ -540,7 +546,8 @@ func (p *ProcessorConfig) ToCCBillConfig() *CCBillConfig {
 		SubscriptionTypeId: p.SubscriptionTypeId,
 		DataLinkUsername:   p.DataLinkUsername,
 		DataLinkPassword:   p.DataLinkPassword,
-		TestMode:           false, // Will be set by caller based on test_env
+		AllowedCIDRs:       p.AllowedCIDRs,
+		TestMode:           false, // Will be set by caller based on global test_mode
 	}
 }
 
@@ -584,6 +591,10 @@ type CCBillConfig struct {
 
 	DataLinkUsername string `koanf:"datalink_username"`
 	DataLinkPassword string `koanf:"datalink_password"`
+
+	// AllowedCIDRs is the CCBill webhook source allowlist (CIDR notation).
+	// Empty means use iputil.DefaultCCBillIPRanges.
+	AllowedCIDRs []string `koanf:"allowed_cidrs"`
 }
 
 type RedisConfig struct {
@@ -1900,6 +1911,16 @@ func Load(configPath string) (*Config, error) {
 	// Validate the loaded configuration
 	if err := Validate(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	// Configure the CCBill webhook IP allowlist from config (fail-fast on invalid
+	// CIDRs). Empty list falls back to the documented default ranges.
+	var ccbillCIDRs []string
+	if ccbillProc := cfg.GetCCBillProcessor(); ccbillProc != nil {
+		ccbillCIDRs = ccbillProc.AllowedCIDRs
+	}
+	if err := iputil.Configure(ccbillCIDRs); err != nil {
+		return nil, fmt.Errorf("config validation failed: ccbill allowed_cidrs: %w", err)
 	}
 
 	return cfg, nil

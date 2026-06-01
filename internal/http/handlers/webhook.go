@@ -29,6 +29,43 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// Per-processor webhook body caps. The primary memory-exhaustion fix is the
+// global 1 MiB BodyLimit now applying to webhook routes (the blanket exemption
+// was removed); these per-processor caps are tighter defense-in-depth. They are
+// sized with headroom above real payloads to avoid 413-ing legitimate webhooks:
+//   - CCBill background posts are form-encoded but carry many customer/transaction
+//     fields, so 16 KiB rather than a couple KiB.
+//   - Stripe "snapshot" events embed the full object (subscriptions, invoices with
+//     line items) and can be tens of KiB, so 256 KiB.
+//   - NMI JSON transaction webhooks are modest; 64 KiB is ample.
+const (
+	maxCCBillWebhookBytes int64 = 16 << 10  // 16 KiB
+	maxStripeWebhookBytes int64 = 256 << 10 // 256 KiB
+	maxNMIWebhookBytes    int64 = 64 << 10  // 64 KiB
+)
+
+// readLimitedWebhookBody reads the request body capped at maxBytes via
+// http.MaxBytesReader. If the body exceeds the cap it writes a 413 response and
+// returns ok=false so the caller stops before any further processing.
+func readLimitedWebhookBody(r *httprequest.Request, maxBytes int64) ([]byte, bool) {
+	if r.Request == nil || r.Request.Body == nil {
+		return []byte{}, true
+	}
+	r.Request.Body = http.MaxBytesReader(nil, r.Request.Body, maxBytes)
+	body, err := readRequestBody(r.Request.Body)
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			log.WithField("max_bytes", maxBytes).Warn("webhook payload exceeded size limit")
+			r.ErrorJSON(http.StatusRequestEntityTooLarge, "Webhook payload too large")
+			return nil, false
+		}
+		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
+		return nil, false
+	}
+	return body, true
+}
+
 func Webhook(r *httprequest.Request) {
 	provider := webhookutil.CanonicalProvider(r.Param("provider"))
 	clientIP := r.GetRemoteIP()
@@ -77,9 +114,8 @@ func Webhook(r *httprequest.Request) {
 }
 
 func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {
-	body, err := readRequestBody(r.Request.Body)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
+	body, ok := readLimitedWebhookBody(r, maxCCBillWebhookBytes)
+	if !ok {
 		return false
 	}
 	prepared, err := webhookutil.PrepareCCBill(body, r.Query("eventType"))
@@ -106,9 +142,8 @@ func enqueueCCBillWebhook(r *httprequest.Request, clientIP string) bool {
 }
 
 func enqueueStripeWebhook(r *httprequest.Request, clientIP string) bool {
-	body, err := readRequestBody(r.Request.Body)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
+	body, ok := readLimitedWebhookBody(r, maxStripeWebhookBytes)
+	if !ok {
 		return false
 	}
 	var secrets []string
@@ -449,9 +484,8 @@ func enqueueWebhookJob(r *httprequest.Request, args riverjobs.WebhookProcessArgs
 }
 
 func enqueueNMIWebhook(r *httprequest.Request, provider string, clientIP string) bool {
-	body, err := readRequestBody(r.Request.Body)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to read request body")
+	body, ok := readLimitedWebhookBody(r, maxNMIWebhookBytes)
+	if !ok {
 		return false
 	}
 	providerKey := webhookutil.CanonicalProvider(provider)
