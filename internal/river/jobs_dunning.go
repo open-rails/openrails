@@ -294,7 +294,11 @@ func (w *DunningWorker) processSubscription(
 			responseCode = rebillResp.ResponseCode
 		}
 		hardDecline := subscriptions.ClassifyNMIDecline(responseCode) == subscriptions.DeclineHard
-		failureCode := fmt.Sprintf("%d", responseCode)
+		var failureCode *string
+		if responseCode != 0 {
+			code := fmt.Sprintf("%d", responseCode)
+			failureCode = &code
+		}
 
 		declineLog := logEntry.WithFields(log.Fields{
 			"response_code": responseCode,
@@ -314,7 +318,7 @@ func (w *DunningWorker) processSubscription(
 			Processor:      processor,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
-			FailureCode:    &failureCode,
+			FailureCode:    failureCode,
 			HardDecline:    hardDecline,
 		}); err != nil {
 			logEntry.WithError(err).Warn("apply failure policy after declined rebill")

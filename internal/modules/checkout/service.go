@@ -1804,8 +1804,7 @@ func (s *CheckoutService) processUpgrade(
 	// one is marked cancelled and BEFORE the old NMI subscription is cancelled.
 	// If the create fails, the old subscription is still active both locally and
 	// at NMI, so compensation only has to refund the proration and cancel the new
-	// NMI subscription — no reactivation. The recovery worker keys its decision on
-	// whether the new local row exists, so it is robust to a crash at any point.
+	// NMI subscription — no reactivation.
 	//
 	// Create new subscription record first.
 	var emailPtr *string

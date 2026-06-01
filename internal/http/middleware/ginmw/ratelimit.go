@@ -100,20 +100,22 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 			return
 		}
 
-		// Payload-size throttling: shed oversized requests early (before counting
-		// or reading the body) based on the declared Content-Length for the route.
-		if max, ok := bucketMaxContentLength[bucket]; ok && c.Request != nil && c.Request.ContentLength > max {
-			safePath := strings.ReplaceAll(c.Request.URL.Path, "\n", "")
-			safePath = strings.ReplaceAll(safePath, "\r", "")
-			log.WithFields(log.Fields{
-				"bucket":         bucket,
-				"content_length": c.Request.ContentLength,
-				"max":            max,
-				"path":           safePath,
-			}).Warn("Request rejected: Content-Length exceeds route threshold")
-			c.Header("Retry-After", "60")
-			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request payload too large"})
-			return
+		// Payload-size throttling: enforce per-bucket caps for both declared and
+		// streaming/chunked payloads.
+		if max, ok := bucketMaxContentLength[bucket]; ok && c.Request != nil {
+			if c.Request.Body != nil {
+				c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, max)
+			}
+			if c.Request.ContentLength > max {
+				log.WithFields(log.Fields{
+					"bucket":         bucket,
+					"content_length": c.Request.ContentLength,
+					"max":            max,
+				}).Warn("Request rejected: Content-Length exceeds route threshold")
+				c.Header("Retry-After", "60")
+				c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request payload too large"})
+				return
+			}
 		}
 
 		subjects := rateLimitSubjects(c)
