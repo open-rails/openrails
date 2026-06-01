@@ -201,6 +201,22 @@
     },
     {
       "id": "SEC-13",
+      "name": "credit-deposit-overflow-guard",
+      "priority": "low",
+      "description": "In credits_service.go depositTx(), the line `newBal := bal.Balance + params.Amount` has no int64 overflow check. A MaxInt64 deposit on a user with balance > 0 wraps the balance negative, permanently bricking their credit account. NOTE: This is entirely dependent on already having the shared API key — and if an attacker has the key they can already withdraw any user's balance directly, making this strictly worse for them. Not a real exploit, just a good preventative coding hygiene step.",
+      "files": ["internal/modules/credits/credits_service.go"],
+      "tasks": [
+        "[ ] Add overflow guard before the addition at line ~253:",
+        "    if params.Amount > math.MaxInt64-bal.Balance {",
+        "        return nil, fmt.Errorf(\"deposit would overflow balance\")",
+        "    }",
+        "[ ] Import math if not already imported",
+        "[ ] Add unit test: deposit MaxInt64 on a user with balance=1, assert error returned",
+        "[ ] Consider adding a configurable max single-deposit cap as a secondary safeguard"
+      ]
+    },
+    {
+      "id": "SEC-14",
       "name": "upgrade-pgx-dependency",
       "priority": "high",
       "description": "Upgrade github.com/jackc/pgx/v5 from v5.7.6 to v5.9.2+. Fixes 4 genuine CVEs: 2x HIGH (pgproto3 malicious server crash) and 2x LOW (client-side SQL sanitization injection). While exploitation requires a malicious/compromised Postgres server, the fix is a version bump with no breaking changes.",
@@ -213,7 +229,7 @@
       ]
     },
     {
-      "id": "SEC-14",
+      "id": "SEC-15",
       "name": "upgrade-x-net-dependency",
       "priority": "low",
       "description": "Upgrade golang.org/x/net from v0.47.0 to v0.55.0+. Fixes 5 MEDIUM CVEs (XSS in html tokenizer + HTTP/2 client infinite loop). All are unreachable in this codebase (no HTML rendering, HTTP/2 client loop requires compromised payment processor), but removes Snyk noise and is good hygiene.",
