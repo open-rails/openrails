@@ -262,14 +262,20 @@ type CreditDepositParams struct {
 	// nil, the owner is the actor (UserID)'s own account/personal-org UUID for the
 	// self-hosted / single-tenant personal case; it is never a synthesized
 	// stand-in, and a non-UUID UserID with no explicit owner is rejected.
-	OwnerID     *identity.OwnerOrgID
-	UserID      string
-	CreditType  string
-	Amount      int64
-	Source      string
-	SourceID    *uuid.UUID
-	ExpiresAt   *time.Time
-	Description *string
+	OwnerID    *identity.OwnerOrgID
+	UserID     string
+	CreditType string
+	Amount     int64
+	Source     string
+	SourceID   *uuid.UUID
+	ExpiresAt  *time.Time
+	// ApplyAccountExpiryDefault, when true and ExpiresAt is nil, sets the deposit's
+	// expiry to now + the owner's credit_account_settings.default_credit_expiry_days
+	// (issue #240). Purchase/top-up paths set this so bought credits expire (default
+	// 365d); permanent grants (subscriptions, admin) leave it false. No-op when no
+	// settings default is configured.
+	ApplyAccountExpiryDefault bool
+	Description               *string
 }
 
 func (s *CreditsService) Deposit(ctx context.Context, params CreditDepositParams) (*models.CreditTransaction, error) {
@@ -285,6 +291,18 @@ func (s *CreditsService) Deposit(ctx context.Context, params CreditDepositParams
 	}
 	if !ct.IsActive {
 		return nil, ErrCreditTypeInactive
+	}
+
+	// Apply the per-account default expiry (issue #240) when requested and the
+	// caller did not set an explicit expiry.
+	if params.ExpiresAt == nil && params.ApplyAccountExpiryDefault {
+		if owner, oerr := resolveOwner(params.OwnerID, params.UserID); oerr == nil {
+			if settings, serr := s.GetAccountSettings(ctx, owner, params.CreditType); serr == nil &&
+				settings.DefaultCreditExpiryDays != nil && *settings.DefaultCreditExpiryDays > 0 {
+				exp := s.now().AddDate(0, 0, *settings.DefaultCreditExpiryDays)
+				params.ExpiresAt = &exp
+			}
+		}
 	}
 
 	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
