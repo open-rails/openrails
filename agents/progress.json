@@ -1382,7 +1382,7 @@
         "[x] Persist plan_pda, plan_id, mint, mint_symbol, amount_base_units, period_hours, created_at into Price.Processors[\"solana\"] [PlanHandle.ToProcessorConfig]",
         "[x] update_plan: status (sunset), end_ts, pullers, metadata_uri (NOT core terms)",
         "[ ] delete_plan after expiry; reclaim rent",
-        "[ ] Admin endpoint/CLI path + authz; document that editing core terms = sunset + new plan + re-enroll",
+        "[x] Admin endpoint/CLI path + authz; document that editing core terms = sunset + new plan + re-enroll [DONE: POST /admin/solana/recurring/plans -> AdminPublishSolanaPlan, admin-gated; optionally attaches the plan handle to a price's Solana config]",
         "[ ] Tests: allowlist enforcement, immutability guard, idempotent re-publish"
       ],
       "completed": false
@@ -1395,7 +1395,7 @@
         "[x] Migration: billing.solana_subscriptions (tenant_id, FK subscriptions.id, subscriber_wallet, authority_pda, subscription_pda UNIQUE, plan_pda, mint, last_pulled_period_start, last_signature, plan_created_at_fingerprint, next_pull_at, timestamps); index (tenant_id, next_pull_at) + subscription_pda",
         "[ ] Checkout returns subscribe instructions / SDK params for a Solana-recurring price",
         "[ ] Pending-enroll record (reuse Redis pending-payment pattern) to detect the subscribe tx",
-        "[ ] Poller confirms subscribe tx; upsert billing.solana_subscriptions; create local subscription (pending)",
+        "[x] Poller confirms subscribe tx; upsert billing.solana_subscriptions; create local subscription (pending) [DONE as a synchronous confirm endpoint instead of a poller: POST /solana/recurring/enroll -> ConfirmSolanaEnrollment verifies the on-chain subscription PDA, charges the first cycle, CreateMembership, upserts the row. Reads canonical immutable plan terms server-side from the price (never client-supplied)]",
         "[x] First pull immediately -> CreateMembership(processor=solana, processor_subscription_id=subscription_pda, transaction_id=signature) [on-chain subscribe+transfer validated on devnet]",
         "[ ] Idempotency: dedupe on subscription_pda + first-pull signature",
         "[ ] Tests: enroll happy path, duplicate subscribe, abandoned enroll cleanup"
@@ -1444,7 +1444,7 @@
       "tasks": [
         "[ ] Low-SOL alert on the merchant cranking wallet (warn when below ~N pulls of runway). NO auto-top-up, NO relayer.",
         "[ ] A pull that fails for insufficient SOL is OPERATIONAL -> retry next run + alert; never subscriber dunning (distinct from insufficient-USDC).",
-        "[ ] Reconciliation: on-chain transfer_subscription events <-> billing.payments (extend existing reconcile workers).",
+        "[x] Reconciliation: on-chain transfer_subscription events <-> billing.payments (extend existing reconcile workers). [DONE: SolanaReconcileWorker (6h) cross-checks each active sub's last_signature against billing.payments; a confirmed pull with no payment row raises a billing_ledger_repair_required operator alert via RecordLedgerRepairAlert (same surface as Stripe/NMI). Operator-led repair; never mutates the ledger]",
         "[ ] Tenant key-rotation runbook (rotating the Solana key = new merchant address = re-publish plans + re-enroll).",
         "[ ] Admin/analytics: active Solana subs, MRR (USDC/USD1), failed pulls, recovered vs churned."
       ],
