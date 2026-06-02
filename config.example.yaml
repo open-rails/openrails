@@ -403,3 +403,22 @@ feature_flags:
   #   4. All accumulated expirations will process at once
   #
   disable_entitlement_expiration: false
+
+# =============================================================================
+# Credits - global defaults for the purchased-credit system (issue #240)
+# =============================================================================
+# These are GLOBAL fallbacks. Per-credit-type values
+# (credit_types.default_credit_expiry_days, credit_types.low_balance_threshold)
+# take precedence when set. (#237's per-owner account settings may later take
+# precedence over both.)
+credits:
+  # Default expiry (in days) stamped on a purchased-credit deposit when neither
+  # the caller nor the credit type specifies an explicit expiry. Default: 365.
+  # Set to 0 (or a negative value) to disable the global fallback so such
+  # deposits stay non-expiring (pre-#240 behavior).
+  default_expiry_days: 365
+
+  # How long (in hours) the low-balance alert job waits before re-alerting an
+  # owner whose available balance is still below the credit type's
+  # low_balance_threshold. Default: 24. Non-positive values fall back to 24h.
+  low_balance_alert_cooldown_hours: 24

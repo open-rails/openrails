@@ -27,6 +27,13 @@ const (
 	// System notifications (1 type)
 	NotificationSystemAlert NotificationEventType = "system_alert" // (7) Arbitrary system notifications
 
+	// Credits notifications
+	// NotificationLowBalance fires when an owner's available credit balance drops
+	// below the credit type's configured low_balance_threshold (issue #240,
+	// completing the deferred #116 alert). Data carries owner_id, tenant_id,
+	// credit_type, available, and threshold.
+	NotificationLowBalance NotificationEventType = "low_balance" // Credit balance below threshold
+
 	// Translation notifications
 	NotificationTranslationCompleted              NotificationEventType = "translation_completed"                // Voted translation completed (rate-limited)
 	NotificationTranslationCompletedPendingDigest NotificationEventType = "translation_completed_pending_digest" // queued for weekly digest

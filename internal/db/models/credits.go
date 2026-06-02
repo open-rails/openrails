@@ -16,7 +16,17 @@ type CreditType struct {
 	Unit          string    `bun:"unit,notnull" json:"unit"`
 	DecimalPlaces int       `bun:"decimal_places,notnull" json:"decimal_places"`
 	IsActive      bool      `bun:"is_active,notnull" json:"is_active"`
-	CreatedAt     time.Time `bun:"created_at,notnull" json:"created_at"`
+	// DefaultCreditExpiryDays is the default expiry (in days) applied to deposits
+	// of this credit type when the caller passes no explicit ExpiresAt (issue
+	// #240). NULL = no per-type default (the service may then fall back to the
+	// global config default). #237's per-owner account settings may later override
+	// this per owner.
+	DefaultCreditExpiryDays *int `bun:"default_credit_expiry_days,nullzero" json:"default_credit_expiry_days,omitempty"`
+	// LowBalanceThreshold is the low-balance alert threshold for this credit type
+	// (issue #240). When an owner's AVAILABLE balance drops below this, the
+	// low-balance alert job emits a notification. NULL = alerting disabled.
+	LowBalanceThreshold *int64    `bun:"low_balance_threshold,nullzero" json:"low_balance_threshold,omitempty"`
+	CreatedAt           time.Time `bun:"created_at,notnull" json:"created_at"`
 }
 
 type UserCreditBalance struct {
@@ -35,8 +45,15 @@ type UserCreditBalance struct {
 	CreditTypeID uuid.UUID `bun:"credit_type_id,notnull" json:"credit_type_id"`
 	Balance      int64     `bun:"balance,notnull" json:"balance"`
 	HeldBalance  int64     `bun:"held_balance,notnull" json:"held_balance"`
-	CreatedAt    time.Time `bun:"created_at,notnull" json:"created_at"`
-	UpdatedAt    time.Time `bun:"updated_at,notnull" json:"updated_at"`
+	// LastLowBalanceAlertAt records when the low-balance alert job last emitted an
+	// alert for this owner+credit_type (issue #240). NULL = never alerted. The job
+	// re-alerts only when this is NULL or older than the configured cooldown, then
+	// updates it — preventing duplicate alerts for a persistently-low owner. The
+	// alert state is the per-owner cooldown anchor regardless of where the
+	// threshold itself ends up living (#237 may later own per-owner thresholds).
+	LastLowBalanceAlertAt *time.Time `bun:"last_low_balance_alert_at,nullzero" json:"last_low_balance_alert_at,omitempty"`
+	CreatedAt             time.Time  `bun:"created_at,notnull" json:"created_at"`
+	UpdatedAt             time.Time  `bun:"updated_at,notnull" json:"updated_at"`
 }
 
 type CreditTransaction struct {

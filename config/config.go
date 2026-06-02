@@ -136,6 +136,50 @@ type Config struct {
 	Captcha      *CaptchaConfig               `koanf:"captcha,omitempty"`
 	FeatureFlags *FeatureFlags                `koanf:"feature_flags,omitempty"`
 	Encryption   *EncryptionConfig            `koanf:"encryption,omitempty"`
+	Credits      *CreditsConfig               `koanf:"credits,omitempty"`
+}
+
+// CreditsConfig holds global defaults for the credits system (issue #240).
+//
+// These are GLOBAL fallbacks. Per-credit-type values
+// (credit_types.default_credit_expiry_days, credit_types.low_balance_threshold)
+// take precedence when set; #237's per-owner account settings may later take
+// precedence over both.
+type CreditsConfig struct {
+	// DefaultExpiryDays is the global fallback expiry (in days) applied to a
+	// purchased-credit deposit when neither the caller nor the credit type
+	// specifies an expiry (issue #240). Defaults to 365. A value <= 0 disables
+	// the global fallback (deposits with no explicit/per-type expiry stay
+	// non-expiring), preserving pre-#240 behavior for operators who want it.
+	DefaultExpiryDays int `koanf:"default_expiry_days,omitempty"`
+
+	// LowBalanceAlertCooldownHours is how long (in hours) the low-balance alert
+	// job waits before re-alerting an owner whose available balance is still
+	// below threshold (issue #240). Defaults to 24h. A value <= 0 falls back to
+	// the 24h default rather than disabling the cooldown (which would spam).
+	LowBalanceAlertCooldownHours int `koanf:"low_balance_alert_cooldown_hours,omitempty"`
+}
+
+// DefaultCreditExpiryDays returns the global fallback default expiry in days
+// (issue #240), defaulting to 365 when unset. A configured value <= 0 is
+// returned as-is so callers can treat it as "disabled".
+func (cfg *Config) DefaultCreditExpiryDays() int {
+	if cfg == nil || cfg.Credits == nil {
+		return 365
+	}
+	if cfg.Credits.DefaultExpiryDays == 0 {
+		return 365
+	}
+	return cfg.Credits.DefaultExpiryDays
+}
+
+// LowBalanceAlertCooldown returns the cooldown between repeat low-balance alerts
+// for the same owner (issue #240), defaulting to 24h when unset or non-positive.
+func (cfg *Config) LowBalanceAlertCooldown() time.Duration {
+	if cfg == nil || cfg.Credits == nil || cfg.Credits.LowBalanceAlertCooldownHours <= 0 {
+		return 24 * time.Hour
+	}
+	return time.Duration(cfg.Credits.LowBalanceAlertCooldownHours) * time.Hour
 }
 
 // EncryptionConfig configures per-tenant encryption-at-rest (issue #227). The

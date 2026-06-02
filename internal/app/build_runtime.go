@@ -523,6 +523,12 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	purchaseService := payments.NewPaymentService(database, clock)
 	entitlementService := entitlements.NewEntitlementService(database, clock)
 	creditsService := credits.NewCreditsService(database, clock)
+	// Wire the global default purchased-credit expiry (issue #240). Per-credit-type
+	// default_credit_expiry_days takes precedence; this is the fallback (365d unless
+	// overridden in config; <=0 disables the global fallback).
+	if cfg != nil {
+		creditsService.SetDefaultExpiryDays(cfg.DefaultCreditExpiryDays())
+	}
 	creditTypeService := credits.NewCreditTypeService(database)
 	processorCustomerService := payments.NewProcessorCustomerService(database)
 	profileRepo := repo.NewProfileRepo(database)

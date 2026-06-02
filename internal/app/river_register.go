@@ -65,6 +65,17 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add hold expiry worker: %w", err)
 	}
+	// Low-balance alert worker (issue #240, completing the deferred #116 alert).
+	// Sink defaults to notification-only here; #239/#241 will inject a composed
+	// credits.MultiLowBalanceSink to also drive auto-top-up / arrears.
+	if err := river.AddWorkerSafely(workers, &riverjobs.LowBalanceAlertWorker{
+		DB:                  r.DB,
+		Config:              r.Config,
+		Clock:               clock,
+		NotificationService: r.NotificationService,
+	}); err != nil {
+		return fmt.Errorf("add low balance alert worker: %w", err)
+	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CancelSubscriptionWorker{
 		DB:                           r.DB,
 		Config:                       r.Config,
@@ -231,6 +242,22 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.HoldExpiryArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 15 minutes: scan for owners whose available credit balance has dropped
+	// below the credit type's low_balance_threshold and emit the low-balance alert
+	// signal (issue #240). The job's own cooldown (config.LowBalanceAlertCooldown,
+	// default 24h) prevents duplicate alerts; the short interval just keeps
+	// detection latency low.
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(15*time.Minute),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.LowBalanceAlertArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

@@ -25,10 +25,48 @@ var (
 type CreditsService struct {
 	db    *db.DB
 	clock clockwork.Clock
+	// defaultExpiryDays is the GLOBAL fallback expiry (in days) applied to a
+	// deposit when neither the caller nor the credit type specifies an expiry
+	// (issue #240). 0 means "no global fallback" (such deposits stay
+	// non-expiring), preserving pre-#240 behavior. The runtime wires this from
+	// config.Config.DefaultCreditExpiryDays(); it defaults to 365 there.
+	defaultExpiryDays int
 }
 
 func NewCreditsService(database *db.DB, clocks ...clockwork.Clock) *CreditsService {
 	return &CreditsService{db: database, clock: firstClock(clocks...)}
+}
+
+// SetDefaultExpiryDays sets the global fallback default expiry (in days) applied
+// to deposits that specify no explicit expiry and whose credit type carries no
+// per-type default (issue #240). 0 disables the global fallback. Per-credit-type
+// default_credit_expiry_days takes precedence over this value.
+func (s *CreditsService) SetDefaultExpiryDays(days int) {
+	if days < 0 {
+		days = 0
+	}
+	s.defaultExpiryDays = days
+}
+
+// resolveDepositExpiry picks the effective ExpiresAt for a deposit (issue #240).
+// Precedence: explicit caller ExpiresAt > per-credit-type default > global config
+// default. Returns nil (non-expiring) only when none of the three apply. #237's
+// per-owner account settings may later slot in ahead of the per-type default.
+func (s *CreditsService) resolveDepositExpiry(now time.Time, ct *models.CreditType, explicit *time.Time) *time.Time {
+	if explicit != nil {
+		return explicit
+	}
+	days := 0
+	if ct != nil && ct.DefaultCreditExpiryDays != nil && *ct.DefaultCreditExpiryDays > 0 {
+		days = *ct.DefaultCreditExpiryDays
+	} else if s.defaultExpiryDays > 0 {
+		days = s.defaultExpiryDays
+	}
+	if days <= 0 {
+		return nil
+	}
+	exp := now.Add(time.Duration(days) * 24 * time.Hour).UTC()
+	return &exp
 }
 
 func (s *CreditsService) SetClock(c clockwork.Clock) {
@@ -314,6 +352,9 @@ func (s *CreditsService) getCreditTypeByNameTx(ctx context.Context, tx bun.Tx, n
 
 func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.CreditType, params CreditDepositParams) (*models.CreditTransaction, error) {
 	now := s.now()
+	// Apply the default purchased-credit expiry when the caller passed none
+	// (issue #240): per-type default first, then the global config fallback.
+	expiresAt := s.resolveDepositExpiry(now, ct, params.ExpiresAt)
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	owner, err := resolveOwner(params.OwnerID, params.UserID)
 	if err != nil {
@@ -371,7 +412,7 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 		Status:          "posted",
 		Source:          params.Source,
 		SourceID:        sourceIDText,
-		ExpiresAt:       params.ExpiresAt,
+		ExpiresAt:       expiresAt,
 		Description:     params.Description,
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -387,7 +428,7 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 		CreditTypeID:        ct.ID,
 		OriginalAmount:      params.Amount,
 		RemainingAmount:     params.Amount,
-		ExpiresAt:           params.ExpiresAt,
+		ExpiresAt:           expiresAt,
 		SourceTransactionID: &trx.ID,
 		CreatedAt:           now,
 	}
