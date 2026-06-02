@@ -32,4 +32,14 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")
+
+	// Browser-direct TENANT-ADMIN surface (issue #259): the SAME delegated-token
+	// middleware authenticates; per-route gates require `openrails:tenant:*`
+	// permissions and the handlers act on a `:user_id` WITHIN the token's pinned
+	// tenant. Mounted on the same public engine alongside /v1/self/*.
+	adminGroup := e.Group(StandaloneV1Prefix + httproutes.TenantAdminRoutePrefix)
+	httproutes.RegisterTenantAdminRoutes(adminGroup, s.runtime, middleware.DelegatedSelfRequired(s.controlPlane))
+
+	log.WithField("prefix", StandaloneV1Prefix+httproutes.TenantAdminRoutePrefix).
+		Info("delegated tenant-admin API routes registered on public handler")
 }

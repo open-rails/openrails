@@ -47,8 +47,8 @@ func newTestDelegatedVerifier(t *testing.T) (*authhttp.Verifier, jwtkit.Signer) 
 				return errors.New("delegated token carries no permissions")
 			}
 			for _, p := range permissions {
-				if !IsSelfPermission(p) {
-					return errors.New("permission not in self catalog: " + p)
+				if !IsDelegatedPermission(p) {
+					return errors.New("permission not in delegated catalog: " + p)
 				}
 			}
 			return nil

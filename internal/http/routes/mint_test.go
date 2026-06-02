@@ -58,7 +58,7 @@ func newMintRouter(t *testing.T, resolver middleware.OATResolver, minter Delegat
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	group := e.Group("/v1/service")
-	RegisterServiceRoutes(group, nil, middleware.OATRequired(resolver), minter)
+	RegisterServiceRoutes(group, nil, middleware.OATRequired(resolver), minter, nil)
 	return e
 }
 

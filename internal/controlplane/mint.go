@@ -75,6 +75,13 @@ type MintedDelegatedToken struct {
 // MintDelegatedAccessToken mints a short-lived, user-scoped delegated access
 // token for the browser-direct self-service surface (issue #222 browser tier).
 //
+// DEPRECATED (issue #259): this central mint path exists only for the dual-trust
+// migration window. The federated model has each tenant host SELF-SIGN its own
+// aud=openrails tokens (verified via the tenant's registered JWKS), removing the
+// frontend -> host -> OpenRails mint round-trip. New hosts should register an
+// issuer (POST /v1/service/tenant/issuers) and mint locally; this method + the
+// `openrails:self:mint` OAT permission are retired once all tenants self-sign.
+//
 // It signs with the control plane's OWN active signing key — the SAME key the
 // `/v1/self` delegated verifier trusts — stamping the canonical claims the
 // verifier requires (`typ=at+jwt`, `iss`, `aud`=control-plane audiences,

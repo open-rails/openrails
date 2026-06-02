@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	authcore "github.com/open-rails/authkit/core"
 	authhttp "github.com/open-rails/authkit/http"
 	jwtkit "github.com/open-rails/authkit/jwt"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
 )
@@ -44,7 +47,21 @@ type ControlPlane struct {
 	// access tokens. They are the control plane's accepted (expected) audiences, so
 	// every minted token is accepted by delegatedVerifier (and the /v1/self gate).
 	delegatedAudiences []string
+
+	// issuerMu guards delegatedIssuers (the live set of FEDERATED tenant issuers
+	// registered into delegatedVerifier, issue #259). It is held while reloading
+	// the registry so concurrent register/disable calls converge.
+	issuerMu sync.Mutex
+	// delegatedIssuers is the set of tenant issuer ids currently registered into
+	// the multi-issuer verifier (excludes the self-issuer). Tracked so a reload /
+	// kill-switch can RemoveIssuer the ones no longer enabled.
+	delegatedIssuers map[string]struct{}
 }
+
+// delegatedIssuerJWKSCacheTTL is how long the verifier treats a fetched tenant
+// JWKS as fresh before a scheduled refresh (issue #259, ~hourly cadence). The
+// verifier also refetches on-demand when a presented `kid` is unknown.
+const delegatedIssuerJWKSCacheTTL = time.Hour
 
 // New builds the OpenRails-owned AuthKit control plane from config and a pgx
 // pool. The pool must point at the database that holds AuthKit's `profiles.*`
@@ -141,7 +158,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
 	}
 
-	return &ControlPlane{
+	cp2 := &ControlPlane{
 		cfg:                cfg,
 		authSvc:            authSvc,
 		pool:               pool,
@@ -149,7 +166,19 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		signer:             keySource.ActiveSigner(),
 		issuer:             issuer,
 		delegatedAudiences: append([]string(nil), expected...),
-	}, nil
+		delegatedIssuers:   map[string]struct{}{},
+	}
+
+	// Load the FEDERATED tenant issuers (issue #259) into the multi-issuer
+	// verifier. A registry read failure (or an individual bad issuer) must NOT
+	// take down startup: the self-issuer is already registered (dual-trust
+	// migration window), and unreachable JWKS is handled lazily/fail-closed per
+	// token at verify time. So we log and continue.
+	if err := cp2.reloadDelegatedIssuers(ctx); err != nil {
+		log.WithError(err).Warn("controlplane: initial delegated issuer load failed; continuing with self-issuer only")
+	}
+
+	return cp2, nil
 }
 
 // Core returns the underlying AuthKit core service used for in-process

@@ -77,8 +77,10 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 				response.UnauthorizedWithMessage(c, "delegated_token_expired")
 			case errors.Is(err, authcore.ErrAccessTokenRevoked):
 				response.UnauthorizedWithMessage(c, "delegated_token_revoked")
-			case errors.Is(err, controlplane.ErrOATTenantUnresolved):
-				// Token's org maps to no active tenant (cross-tenant / unmapped).
+			case errors.Is(err, controlplane.ErrOATTenantUnresolved),
+				errors.Is(err, controlplane.ErrDelegatedIssuerUnknown):
+				// Token's org/issuer maps to no active tenant (cross-tenant /
+				// unmapped / unregistered or disabled federated issuer).
 				response.ForbiddenWithMessage(c, "delegated_tenant_unresolved")
 			case errors.Is(err, controlplane.ErrDelegatedNotConfigured):
 				response.InternalError(c, "delegated authentication not configured")

@@ -27,6 +27,16 @@ const ServiceRoutePrefix = "/service"
 // acting tenant is bound by the token's `tenant` claim — never the URL.
 const SelfRoutePrefix = "/self"
 
+// TenantAdminRoutePrefix is the path under the tenant-scoped public API where
+// browser-direct TENANT-ADMIN billing operations live (issue #259). A tenant's
+// host frontend mints a FEDERATED, TENANT-SIGNED delegated access token carrying
+// `openrails:tenant:*` permissions for one of its ADMIN users; the browser
+// presents it as a Bearer token directly against this surface to act on ANY user
+// WITHIN the token's tenant via the `:user_id` path param. The acting admin is
+// the token's `delegated_sub` (recorded for audit) and the acting tenant is
+// pinned from the token's validated issuer — never the URL.
+const TenantAdminRoutePrefix = "/tenant-admin"
+
 type Options struct {
 	AuthProvider authprovider.Provider
 
@@ -179,7 +189,7 @@ func RegisterWebhookRoutes(group *gin.RouterGroup, rt *app.Runtime) {
 // oatMW must authenticate the OAT (typically middleware.OATRequired); it pins the
 // resolved tenant + permissions onto the context that the per-route
 // RequireOATPermission gates and the handlers read.
-func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc, minter DelegatedMinter) {
+func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc, minter DelegatedMinter, issuerAdmin DelegatedIssuerAdmin) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
@@ -191,11 +201,28 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// user-scoped delegated access token (for its OWN tenant) to hand to a browser
 	// for the /v1/self/* surface. Mounted only when a minter is wired (control
 	// plane present); the OAT gate + per-route permission keep it server-to-server.
+	//
+	// DEPRECATED (issue #259): the federated/tenant-signed tier lets hosts mint
+	// their OWN aud=openrails tokens (signed with their key, verified via JWKS),
+	// removing this round-trip. Kept during the dual-trust migration window; it is
+	// retired once all tenants self-sign (see the issuer-management routes below).
 	if minter != nil {
 		group.POST("/delegated-tokens",
 			middleware.RequireOATPermission(controlplane.PermSelfMint),
 			mintDelegatedTokenHandler(minter),
 		)
+	}
+
+	// FEDERATED issuer management (issue #259). The OAT remains the ROOT
+	// tenant-management credential: a host backend authenticated by an OAT holding
+	// PermAdmin for its tenant registers/rotates/disables the issuer + JWKS URL it
+	// self-signs aud=openrails browser tokens with. The tenant is bound from the
+	// OAT (never the body), so a caller can only manage its OWN tenant's issuers.
+	if issuerAdmin != nil {
+		issuers := group.Group("/tenant/issuers")
+		issuers.POST("", middleware.RequireOATPermission(controlplane.PermAdmin), registerDelegatedIssuerHandler(issuerAdmin))
+		issuers.GET("", middleware.RequireOATPermission(controlplane.PermAdmin), listDelegatedIssuersHandler(issuerAdmin))
+		issuers.POST("/disable", middleware.RequireOATPermission(controlplane.PermAdmin), disableDelegatedIssuerHandler(issuerAdmin))
 	}
 
 	users := group.Group("/users/:user_id")
@@ -276,4 +303,61 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	checkout.POST("", checkoutCreate, wrap(httphandlers.CreateCheckoutSession))
 	checkout.GET("/:id", read, wrap(httphandlers.GetCheckoutSession))
 	checkout.POST("/:id/confirm", checkoutCreate, wrap(httphandlers.ConfirmCheckoutSession))
+}
+
+// RegisterTenantAdminRoutes mounts the browser-direct TENANT-ADMIN billing
+// surface on a tenant-scoped PUBLIC route group authenticated by a FEDERATED,
+// TENANT-SIGNED delegated access token carrying `openrails:tenant:*` permissions
+// (issue #259). Unlike the self-service surface (which has no `:user_id` and acts
+// only on the token's own subject), these routes act on ANY user WITHIN the
+// token's tenant via the `:user_id` path param.
+//
+// It REUSES the existing operator admin handlers unchanged. They are safe here
+// because:
+//   - the target user is the `:user_id` path param,
+//   - the acting admin is r.GetUser() == the token's `delegated_sub` (so audit
+//     fields like AdminGrant.GrantedBy record the acting admin),
+//   - the tenant is pinned onto the request context by delegatedMW from the
+//     token's validated issuer, so every tenant-owned query is scoped to that
+//     tenant (RLS-enforced, #227). A `:user_id` belonging to another tenant is
+//     therefore unreachable — fail closed, no cross-tenant access.
+//
+// delegatedMW must authenticate the delegated token (middleware.DelegatedSelfRequired);
+// it pins the resolved tenant + acting admin + tenant-permissions onto the
+// context that the per-route RequireDelegatedPermission gates and handlers read.
+func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
+	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
+		return wrapHandler(rt, fn)
+	}
+
+	group.Use(delegatedMW)
+
+	read := middleware.RequireDelegatedPermission(controlplane.PermTenantBillingRead)
+	entWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantEntitlementsWrite)
+	payWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantPaymentsWrite)
+	subWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantSubscriptionsWrite)
+
+	users := group.Group("/users/:user_id")
+
+	// Reads — the tenant-admin billing:read capability.
+	users.GET("", read, wrap(httphandlers.GetAdminUserBillingProfile))
+	users.GET("/payments", read, wrap(httphandlers.GetAdminUserPayments))
+	users.GET("/entitlements", read, wrap(httphandlers.GetAdminUserEntitlements))
+	users.GET("/nmi", read, wrap(httphandlers.GetAdminUserNMI))
+	users.GET("/nmi/metrics", read, wrap(httphandlers.GetAdminUserNMIMetrics))
+	users.GET("/ccbill", read, wrap(httphandlers.GetAdminUserCCBill))
+	users.GET("/ccbill/metrics", read, wrap(httphandlers.GetAdminUserCCBillMetrics))
+
+	// Entitlement grants/revokes — entitlements:write.
+	users.POST("/entitlements", entWrite, wrap(httphandlers.GrantAdminEntitlement))
+	users.DELETE("/entitlements/:id", entWrite, wrap(httphandlers.RevokeAdminEntitlement))
+
+	// Off-channel payment recording — payments:write.
+	users.POST("/payments/off-channel", payWrite, wrap(httphandlers.AdminCreateOffChannelPayment))
+
+	// Subscriptions: a tenant admin may cancel a subscription owned by a user in
+	// its tenant. Subscriptions are addressed by id; the handler operates within
+	// the pinned tenant, so a sub outside the tenant is unreachable (fail closed).
+	subs := group.Group("/subscriptions")
+	subs.POST("/:id/cancel", subWrite, wrap(httphandlers.AdminCancelSubscription))
 }

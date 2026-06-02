@@ -73,6 +73,11 @@ const (
 	PermSelfSubscriptionCancel = "openrails:self:subscriptions:cancel"
 	PermSelfPaymentMethods     = "openrails:self:payment-methods:manage"
 
+	// DEPRECATED (issue #259): PermSelfMint backs the central mint round-trip,
+	// superseded by federated tenant self-signing (POST /v1/service/tenant/issuers
+	// + local minting). Retained for the dual-trust migration window; removed once
+	// all tenants self-sign.
+	//
 	// PermSelfMint authorizes a server-to-server OAT caller (a tenant's host
 	// backend, e.g. doujins/hentai0) to MINT short-lived, user-scoped delegated
 	// access tokens for its OWN tenant, to hand to a browser for the
@@ -83,6 +88,27 @@ const (
 	// is always the CALLER's OAT tenant, so this permission can never mint
 	// cross-tenant.
 	PermSelfMint = "openrails:self:mint"
+
+	// Tenant-admin (browser-direct) permissions (issue #259). These gate the
+	// `/v1/tenant-admin/users/:user_id/*` surface reached with a FEDERATED,
+	// TENANT-SIGNED delegated access token whose `delegated_sub` is the ACTING
+	// ADMIN. Unlike `openrails:self:*` (which act on the holder's OWN billing),
+	// a `openrails:tenant:*` token acts on ANY user WITHIN the token's tenant via
+	// the `:user_id` path param (scoped to that tenant; cross-tenant targets are
+	// rejected). The minting TENANT decides who is an admin (it signs the token);
+	// OpenRails trusts the signature + this catalog.
+	//
+	// DECISION (owner): permissions are EXPLICIT, exact-match, NO wildcard. A full
+	// admin token lists ALL FIVE; a read-only/support admin lists only
+	// PermTenantBillingRead. There is deliberately NO `openrails:tenant:*` wildcard
+	// and NO coarse `openrails:tenant:admin` super-grant — so any future-added
+	// tenant perm does NOT auto-grant to existing admin tokens (the minting tenant
+	// must opt each admin in explicitly), matching how `openrails:self:*` works.
+	PermTenantBillingRead        = "openrails:tenant:billing:read"
+	PermTenantEntitlementsWrite  = "openrails:tenant:entitlements:write"
+	PermTenantCreditsWrite       = "openrails:tenant:credits:write"
+	PermTenantPaymentsWrite      = "openrails:tenant:payments:write"
+	PermTenantSubscriptionsWrite = "openrails:tenant:subscriptions:write"
 
 	// PermPlatformSuperadmin is the PLATFORM-level cross-tenant administrative
 	// capability (issue #226), DISTINCT from PermAdmin. PermAdmin is per-tenant
@@ -141,6 +167,46 @@ func SelfCatalogNames() []string {
 func IsSelfPermission(perm string) bool {
 	_, ok := selfCatalog[strings.TrimSpace(perm)]
 	return ok
+}
+
+// tenantCatalog is the set of tenant-admin permissions accepted on a FEDERATED
+// tenant-signed delegated access token for the `/v1/tenant-admin/*` surface
+// (issue #259). Exact-match, no wildcard. A token presenting any permission
+// outside selfCatalog ∪ tenantCatalog is rejected: browser tokens must never
+// carry operator/server-to-server grants.
+var tenantCatalog = map[string]struct{}{
+	PermTenantBillingRead:        {},
+	PermTenantEntitlementsWrite:  {},
+	PermTenantCreditsWrite:       {},
+	PermTenantPaymentsWrite:      {},
+	PermTenantSubscriptionsWrite: {},
+}
+
+// TenantCatalogNames returns the tenant-admin permission names in catalog order.
+func TenantCatalogNames() []string {
+	return []string{
+		PermTenantBillingRead,
+		PermTenantEntitlementsWrite,
+		PermTenantCreditsWrite,
+		PermTenantPaymentsWrite,
+		PermTenantSubscriptionsWrite,
+	}
+}
+
+// IsTenantPermission reports whether perm is a known tenant-admin permission.
+func IsTenantPermission(perm string) bool {
+	_, ok := tenantCatalog[strings.TrimSpace(perm)]
+	return ok
+}
+
+// IsDelegatedPermission reports whether perm is acceptable on ANY browser-direct
+// delegated access token — i.e. a self-service OR tenant-admin permission. This
+// is the SOLE allowlist the federated verifier enforces (issue #259): every
+// `permissions` entry must pass this, so service/operator grants
+// (`openrails:credits:*`, `openrails:catalog:write`, `openrails:admin`,
+// `openrails:platform:superadmin`, ...) are hard-rejected by exclusion.
+func IsDelegatedPermission(perm string) bool {
+	return IsSelfPermission(perm) || IsTenantPermission(perm)
 }
 
 // Catalog returns the OpenRails permission catalog as AuthKit PermissionDefs,
