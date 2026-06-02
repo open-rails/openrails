@@ -9,10 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 type serviceWithdrawRequest struct {
+	OwnerID    string     `json:"owner_id"`
+	OwnerOrgID string     `json:"owner_org_id"`
 	UserID     string     `json:"user_id" binding:"required"`
 	CreditType string     `json:"credit_type" binding:"required"`
 	Amount     int64      `json:"amount" binding:"required"`
@@ -21,6 +24,8 @@ type serviceWithdrawRequest struct {
 }
 
 type serviceDepositRequest struct {
+	OwnerID     string     `json:"owner_id"`
+	OwnerOrgID  string     `json:"owner_org_id"`
 	UserID      string     `json:"user_id" binding:"required"`
 	CreditType  string     `json:"credit_type" binding:"required"`
 	Amount      int64      `json:"amount" binding:"required"`
@@ -31,6 +36,8 @@ type serviceDepositRequest struct {
 }
 
 type serviceHoldRequest struct {
+	OwnerID    string `json:"owner_id"`
+	OwnerOrgID string `json:"owner_org_id"`
 	UserID     string `json:"user_id" binding:"required"`
 	CreditType string `json:"credit_type" binding:"required"`
 	Amount     int64  `json:"amount" binding:"required"`
@@ -41,6 +48,22 @@ type serviceHoldRequest struct {
 
 type serviceCaptureRequest struct {
 	Amount int64 `json:"amount" binding:"required"`
+}
+
+func parseServiceOwnerOrgID(ownerID, ownerOrgID string) (*billingidentity.OwnerOrgID, error) {
+	raw := strings.TrimSpace(ownerID)
+	if raw == "" {
+		raw = strings.TrimSpace(ownerOrgID)
+	}
+	if raw == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil || id == uuid.Nil {
+		return nil, errors.New("invalid owner_id")
+	}
+	owner := billingidentity.OwnerOrgID(id)
+	return &owner, nil
 }
 
 func ServiceDepositCredits(r *httprequest.Request) {
@@ -54,6 +77,12 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		return
 	}
 
+	ownerID, err := parseServiceOwnerOrgID(req.OwnerID, req.OwnerOrgID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
 		v := time.Unix(*req.ExpiresAt, 0).UTC()
@@ -61,6 +90,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	}
 
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
+		OwnerID:     ownerID,
 		UserID:      req.UserID,
 		CreditType:  req.CreditType,
 		Amount:      req.Amount,
@@ -90,7 +120,13 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
+	ownerID, err := parseServiceOwnerOrgID(req.OwnerID, req.OwnerOrgID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 	trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
+		OwnerID:    ownerID,
 		UserID:     req.UserID,
 		CreditType: req.CreditType,
 		Amount:     req.Amount,
@@ -122,7 +158,13 @@ func ServiceHoldCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
+	ownerID, err := parseServiceOwnerOrgID(req.OwnerID, req.OwnerOrgID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
+		OwnerID:    ownerID,
 		UserID:     req.UserID,
 		CreditType: req.CreditType,
 		Amount:     req.Amount,
@@ -200,15 +242,34 @@ func ServiceGetUserCredits(r *httprequest.Request) {
 	if creditType == "" {
 		creditType = "api_credits"
 	}
-	bal, err := r.State.CreditsService.GetBalance(r.Request.Context(), userID, creditType)
+	ownerID, err := parseServiceOwnerOrgID(r.Request.URL.Query().Get("owner_id"), r.Request.URL.Query().Get("owner_org_id"))
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	var balance int64
+	var heldBalance int64
+	if ownerID != nil {
+		bal, err := r.State.CreditsService.GetBalanceForOwner(r.Request.Context(), *ownerID, creditType)
+		if err == nil {
+			balance = bal.Balance
+			heldBalance = bal.HeldBalance
+		}
+	} else {
+		bal, err := r.State.CreditsService.GetBalance(r.Request.Context(), userID, creditType)
+		if err == nil {
+			balance = bal.Balance
+			heldBalance = bal.HeldBalance
+		}
+	}
 	if err != nil {
 		r.ErrorJSON(http.StatusNotFound, "credit type not found")
 		return
 	}
 	r.SuccessJSON(map[string]any{
 		"type":         creditType,
-		"balance":      bal.Balance,
-		"held_balance": bal.HeldBalance,
+		"balance":      balance,
+		"held_balance": heldBalance,
 	})
 }
 
