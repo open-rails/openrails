@@ -23,6 +23,8 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		"openrails:self:checkout:create",
 		"openrails:self:subscriptions:cancel",
 		"openrails:self:payment-methods:manage",
+		// Browser-tier delegated-token MINT capability (server-to-server, #222).
+		"openrails:self:mint",
 	}
 	got := map[string]bool{}
 	for _, p := range Catalog() {

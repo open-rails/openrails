@@ -104,7 +104,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		controlplane.PermCreditsWrite,
 		controlplane.PermEntitlementsRead,
 	}}
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, middleware.OATRequired(resolver))
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, middleware.OATRequired(resolver), nil)
 
 	withOAT := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer openrails_oat_testkeyid_testsecret")

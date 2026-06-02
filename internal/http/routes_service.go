@@ -24,7 +24,7 @@ func (s *Server) registerServiceRoutes(e *gin.Engine) {
 	}
 
 	group := e.Group(StandaloneV1Prefix + httproutes.ServiceRoutePrefix)
-	httproutes.RegisterServiceRoutes(group, s.runtime, middleware.OATRequired(s.controlPlane))
+	httproutes.RegisterServiceRoutes(group, s.runtime, middleware.OATRequired(s.controlPlane), s.controlPlane)
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.ServiceRoutePrefix).
 		Info("OAT-authenticated service API routes registered on public handler")

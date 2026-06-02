@@ -1,0 +1,182 @@
+package routes
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/http/middleware"
+)
+
+// These tests exercise the HTTP MINT route (POST /v1/service/delegated-tokens)
+// end to end through the real OAT gate + permission check (issue #222 browser
+// tier). They use a fake OAT resolver to pin the calling tenant + permissions and
+// a recording fake minter to assert the load-bearing security invariant: the
+// minted token's tenant is bound to the CALLING OAT, never the request body.
+
+// fakeOATResolver implements middleware.OATResolver for the mint route tests.
+type fakeOATResolver struct {
+	looksLikeOAT bool
+	resolved     *controlplane.ResolvedOAT
+	err          error
+}
+
+func (f fakeOATResolver) LooksLikeOAT(string) bool { return f.looksLikeOAT }
+func (f fakeOATResolver) ResolveOAT(context.Context, string) (*controlplane.ResolvedOAT, error) {
+	return f.resolved, f.err
+}
+
+// recordingMinter records the params it was called with and returns a fixed token.
+type recordingMinter struct {
+	gotParams controlplane.MintDelegatedParams
+	called    bool
+	retErr    error
+}
+
+func (m *recordingMinter) MintDelegatedAccessToken(_ context.Context, p controlplane.MintDelegatedParams) (*controlplane.MintedDelegatedToken, error) {
+	m.called = true
+	m.gotParams = p
+	if m.retErr != nil {
+		return nil, m.retErr
+	}
+	return &controlplane.MintedDelegatedToken{
+		Token:     "minted.jwt.token",
+		ExpiresAt: time.Unix(1_700_000_000, 0).UTC(),
+	}, nil
+}
+
+func newMintRouter(t *testing.T, resolver middleware.OATResolver, minter DelegatedMinter) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	group := e.Group("/v1/service")
+	RegisterServiceRoutes(group, nil, middleware.OATRequired(resolver), minter)
+	return e
+}
+
+func postMint(e *gin.Engine, withAuth bool, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/v1/service/delegated-tokens", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if withAuth {
+		req.Header.Set("Authorization", "Bearer openrails_oat_keyid_secret")
+	}
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+	return w
+}
+
+func operatorOAT(org string) *controlplane.ResolvedOAT {
+	return &controlplane.ResolvedOAT{
+		OrgSlug:     org,
+		TenantSlug:  org,
+		Permissions: []string{controlplane.PermSelfMint},
+	}
+}
+
+// Happy path: an OAT holding PermSelfMint mints a token; the response carries the
+// token + RFC3339 expiry, and the minter was called with the OAT's tenant.
+func TestMintRoute_SucceedsAndReturnsToken(t *testing.T) {
+	minter := &recordingMinter{}
+	resolver := fakeOATResolver{looksLikeOAT: true, resolved: operatorOAT("acme-org")}
+	e := newMintRouter(t, resolver, minter)
+
+	w := postMint(e, true, `{"delegated_sub":"user-42","permissions":["openrails:self:billing:read"],"ttl_seconds":120}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var resp struct {
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, "minted.jwt.token", resp.Token)
+	require.NotEmpty(t, resp.ExpiresAt)
+	_, err := time.Parse(time.RFC3339, resp.ExpiresAt)
+	require.NoError(t, err, "expires_at must be RFC3339")
+
+	require.True(t, minter.called)
+	require.Equal(t, "acme-org", minter.gotParams.Tenant)
+	require.Equal(t, "user-42", minter.gotParams.DelegatedSubject)
+	require.Equal(t, []string{"openrails:self:billing:read"}, minter.gotParams.Permissions)
+	require.Equal(t, 120*time.Second, minter.gotParams.TTL)
+}
+
+// (3) The minted token's tenant ALWAYS equals the OAT's tenant: a body-supplied
+// `tenant`/`org` is ignored. The handler never reads tenant from the body.
+func TestMintRoute_BodyCannotOverrideTenant(t *testing.T) {
+	minter := &recordingMinter{}
+	resolver := fakeOATResolver{looksLikeOAT: true, resolved: operatorOAT("caller-org")}
+	e := newMintRouter(t, resolver, minter)
+
+	// Attacker tries to smuggle a different tenant in the body.
+	w := postMint(e, true, `{"delegated_sub":"u1","permissions":["openrails:self:billing:read"],"tenant":"victim-org","org":"victim-org"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, "caller-org", minter.gotParams.Tenant, "tenant must come from the OAT, not the body")
+}
+
+// (5) Calling without a valid OAT is rejected: the OAT gate runs before the
+// handler, so no mint happens.
+func TestMintRoute_RejectedWithoutOAT(t *testing.T) {
+	minter := &recordingMinter{}
+	// Resolver reports the credential is not an OAT at all.
+	resolver := fakeOATResolver{looksLikeOAT: false}
+	e := newMintRouter(t, resolver, minter)
+
+	w := postMint(e, false, `{"delegated_sub":"u1","permissions":["openrails:self:billing:read"]}`)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.False(t, minter.called, "no token may be minted without a valid OAT")
+}
+
+// An OAT lacking PermSelfMint is forbidden: the per-route permission gate blocks
+// it before the handler.
+func TestMintRoute_RejectedWithoutMintPermission(t *testing.T) {
+	minter := &recordingMinter{}
+	oat := &controlplane.ResolvedOAT{
+		OrgSlug:     "acme-org",
+		Permissions: []string{controlplane.PermCreditsWrite}, // no self:mint
+	}
+	resolver := fakeOATResolver{looksLikeOAT: true, resolved: oat}
+	e := newMintRouter(t, resolver, minter)
+
+	w := postMint(e, true, `{"delegated_sub":"u1","permissions":["openrails:self:billing:read"]}`)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.False(t, minter.called)
+}
+
+// A forbidden (non-self) requested permission surfaces as 403 from the handler.
+func TestMintRoute_ForbiddenPermissionRejected(t *testing.T) {
+	minter := &recordingMinter{retErr: &controlplane.ErrMintForbiddenPermission{Permission: "openrails:credits:write"}}
+	resolver := fakeOATResolver{looksLikeOAT: true, resolved: operatorOAT("acme-org")}
+	e := newMintRouter(t, resolver, minter)
+
+	w := postMint(e, true, `{"delegated_sub":"u1","permissions":["openrails:credits:write"]}`)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.True(t, minter.called)
+}
+
+// A missing delegated_sub fails request binding (delegated_sub is required).
+func TestMintRoute_MissingSubjectRejected(t *testing.T) {
+	minter := &recordingMinter{}
+	resolver := fakeOATResolver{looksLikeOAT: true, resolved: operatorOAT("acme-org")}
+	e := newMintRouter(t, resolver, minter)
+
+	w := postMint(e, true, `{"permissions":["openrails:self:billing:read"]}`)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.False(t, minter.called)
+}
+
+// The mint route is not mounted when no minter is wired (verifier-only mode).
+func TestMintRoute_NotMountedWithoutMinter(t *testing.T) {
+	resolver := fakeOATResolver{looksLikeOAT: true, resolved: operatorOAT("acme-org")}
+	e := newMintRouter(t, resolver, nil)
+
+	w := postMint(e, true, `{"delegated_sub":"u1","permissions":["openrails:self:billing:read"]}`)
+	require.Equal(t, http.StatusNotFound, w.Code)
+}

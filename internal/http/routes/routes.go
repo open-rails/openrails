@@ -179,12 +179,24 @@ func RegisterWebhookRoutes(group *gin.RouterGroup, rt *app.Runtime) {
 // oatMW must authenticate the OAT (typically middleware.OATRequired); it pins the
 // resolved tenant + permissions onto the context that the per-route
 // RequireOATPermission gates and the handlers read.
-func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc) {
+func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc, minter DelegatedMinter) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 
 	group.Use(oatMW)
+
+	// Browser-tier delegated-token MINT (issue #222). A host backend authenticated
+	// by an OAT holding PermSelfMint asks OpenRails to mint a short-lived,
+	// user-scoped delegated access token (for its OWN tenant) to hand to a browser
+	// for the /v1/self/* surface. Mounted only when a minter is wired (control
+	// plane present); the OAT gate + per-route permission keep it server-to-server.
+	if minter != nil {
+		group.POST("/delegated-tokens",
+			middleware.RequireOATPermission(controlplane.PermSelfMint),
+			mintDelegatedTokenHandler(minter),
+		)
+	}
 
 	users := group.Group("/users/:user_id")
 	users.GET("/entitlements", middleware.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))

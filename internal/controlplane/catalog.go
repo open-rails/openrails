@@ -72,6 +72,17 @@ const (
 	PermSelfCheckoutCreate     = "openrails:self:checkout:create"
 	PermSelfSubscriptionCancel = "openrails:self:subscriptions:cancel"
 	PermSelfPaymentMethods     = "openrails:self:payment-methods:manage"
+
+	// PermSelfMint authorizes a server-to-server OAT caller (a tenant's host
+	// backend, e.g. doujins/hentai0) to MINT short-lived, user-scoped delegated
+	// access tokens for its OWN tenant, to hand to a browser for the
+	// `openrails:self:*` surface (issue #222 browser tier). It is an
+	// operator/server-to-server permission carried by OATs — NOT a browser
+	// self-permission — so it is deliberately NOT part of selfCatalog: a minted
+	// browser token can never itself carry the mint capability. The minting tenant
+	// is always the CALLER's OAT tenant, so this permission can never mint
+	// cross-tenant.
+	PermSelfMint = "openrails:self:mint"
 )
 
 // catalogEntries is the canonical ordered list of OpenRails permissions with
@@ -88,6 +99,7 @@ var catalogEntries = []Permission{
 	{Name: PermSelfCheckoutCreate, Description: "Self-service: create your own checkout sessions."},
 	{Name: PermSelfSubscriptionCancel, Description: "Self-service: cancel your own subscriptions."},
 	{Name: PermSelfPaymentMethods, Description: "Self-service: manage your own payment methods."},
+	{Name: PermSelfMint, Description: "Mint short-lived, user-scoped delegated access tokens for your own tenant (server-to-server, browser tier)."},
 }
 
 // selfCatalog is the set of self-service permissions accepted on delegated

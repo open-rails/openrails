@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	authcore "github.com/open-rails/authkit/core"
 	authhttp "github.com/open-rails/authkit/http"
+	jwtkit "github.com/open-rails/authkit/jwt"
 
 	"github.com/open-rails/openrails/config"
 )
@@ -30,6 +31,19 @@ type ControlPlane struct {
 	// issuer/audience/keys the control plane signs with, plus a self-service
 	// permission-catalog validator. See delegated.go.
 	delegatedVerifier *authhttp.Verifier
+
+	// signer is the control plane's ACTIVE signing key — the SAME key whose public
+	// half delegatedVerifier trusts (both are derived from one KeySource built in
+	// New). It is used to MINT delegated access tokens for the browser tier
+	// (MintDelegatedAccessToken). See mint.go.
+	signer jwtkit.Signer
+	// issuer is the control plane's token issuer (`iss`), stamped on minted tokens
+	// so they verify against delegatedVerifier.
+	issuer string
+	// delegatedAudiences are the audiences (`aud`) stamped on minted delegated
+	// access tokens. They are the control plane's accepted (expected) audiences, so
+	// every minted token is accepted by delegatedVerifier (and the /v1/self gate).
+	delegatedAudiences []string
 }
 
 // New builds the OpenRails-owned AuthKit control plane from config and a pgx
@@ -79,7 +93,19 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 
 	locked := cp.LockedDownEnabled()
 
+	// Build the signing KeySource ONCE and inject it into the core config, so the
+	// active signer the control plane MINTS with and the public keys the delegated
+	// verifier TRUSTS are guaranteed to be the same key. (When Keys is left nil,
+	// core.NewFromConfig auto-discovers internally and we'd have no handle on the
+	// active signer; in dev it could even generate a different key on a second
+	// call.) Discovery priority is unchanged: env -> /vault/auth -> dev-generated.
+	keySource, err := jwtkit.NewAutoKeySource()
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: discover signing keys: %w", err)
+	}
+
 	coreCfg := authcore.Config{
+		Keys:              keySource,
 		Issuer:            issuer,
 		BaseURL:           issuer,
 		IssuedAudiences:   issued,
@@ -116,10 +142,13 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 	}
 
 	return &ControlPlane{
-		cfg:               cfg,
-		authSvc:           authSvc,
-		pool:              pool,
-		delegatedVerifier: delegatedVerifier,
+		cfg:                cfg,
+		authSvc:            authSvc,
+		pool:               pool,
+		delegatedVerifier:  delegatedVerifier,
+		signer:             keySource.ActiveSigner(),
+		issuer:             issuer,
+		delegatedAudiences: append([]string(nil), expected...),
 	}, nil
 }
 
