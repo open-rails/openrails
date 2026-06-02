@@ -29,12 +29,20 @@ Buckets are classified by path + method in `classifyBucket`. Defaults
 
 | Bucket            | Config key   | Default rpm | Routes                                   |
 |-------------------|--------------|-------------|------------------------------------------|
-| `checkout`        | `checkout`   | 5           | `POST /v1/checkout*`                      |
-| `subscriptions`   | `subscribe`  | 10          | `POST/PUT/DELETE /v1/me/subscriptions*`   |
-| `payment-methods` | `payment`    | 20          | `/v1/me/payment-methods*`                 |
-| `webhook`         | `webhook`    | 100         | `/v1/webhooks/*`                          |
-| `default`         | `default`    | 60          | everything else under `/v1/*`             |
+| `checkout`        | `checkout`   | 10          | `POST /v1/checkout*`                      |
+| `subscriptions`   | `subscribe`  | 20          | `POST/PUT/DELETE /v1/me/subscriptions*`   |
+| `payment-methods` | `payment`    | 40          | `/v1/me/payment-methods*`                 |
+| `webhook`         | `webhook`    | 1200        | `/v1/webhooks/*`                          |
+| `default`         | `default`    | 300         | everything else under `/v1/*`             |
 | `captcha`         | —            | unlimited   | `/v1/captcha/status`, `/v1/captcha/client.js` |
+
+> **Webhooks are per-IP, and all webhooks from a processor share one source-IP
+> bucket** (fixed processor IPs). The high `webhook` default exists so rebill runs
+> and event bursts are never throttled into 429s (which would delay payment/
+> entitlement processing). Webhooks are independently protected by signature
+> verification, the IP allowlist, and per-processor body caps — the rate limit is
+> a DoS floor, not the primary control. Because it is per-IP, raising it does not
+> meaningfully help an attacker (each attacker IP is still capped on its own).
 
 ## Payload-size throttling
 

@@ -1632,19 +1632,24 @@ func GetDefaultBillingConfig() *Config {
 		},
 		RateLimits: &RateLimitsConfig{
 			"subscribe": &RateLimit{
-				RequestsPerMinute: 10, // Very restrictive for payment endpoints
+				RequestsPerMinute: 20, // Mutation endpoint; per-user limit is the real fraud control
 			},
 			"checkout": &RateLimit{
-				RequestsPerMinute: 5, // Heavy rate limiting for checkout - prevents abuse
+				RequestsPerMinute: 10, // Kept tight to deter card-testing/abuse
 			},
 			"webhook": &RateLimit{
-				RequestsPerMinute: 100, // Higher for webhooks
+				// Per source IP. All webhooks from a processor share one bucket
+				// (fixed processor IPs), so this must absorb rebill runs / event
+				// bursts without 429-ing legit payment events. Webhooks are already
+				// authenticated (signature + IP allowlist + body caps); this is a
+				// DoS floor, not the primary control.
+				RequestsPerMinute: 1200,
 			},
 			"payment": &RateLimit{
-				RequestsPerMinute: 20,
+				RequestsPerMinute: 40,
 			},
 			"default": &RateLimit{
-				RequestsPerMinute: 60,
+				RequestsPerMinute: 300, // SPA/NAT friendly (multiple users behind one IP)
 			},
 		},
 		Captcha: &CaptchaConfig{
