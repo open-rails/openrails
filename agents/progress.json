@@ -1368,7 +1368,7 @@
         "[x] In-process signer/secret cache with TTL; load once per worker run, not per row",
         "[ ] tx build/sign/submit helpers (versioned tx, recent blockhash, priority fee, confirmation) reusing RPCClient",
         "[ ] Seed the `default` tenant's solana secrets from existing global config GetSolanaProcessor() so single-tenant installs are unchanged",
-        "[ ] Optional managed track: Vault Transit RemoteSigner (Ed25519) so the key never leaves Vault — behind the same Signer interface (ties to #251)",
+        "[x] Optional managed track: Vault Transit RemoteSigner (Ed25519) so the key never leaves Vault — behind the same Signer interface (ties to #251)",
         "[ ] Devnet smoke test: sign + submit a no-op/self transfer using a tenant signer",
         "[x] Unit tests with mem secret store; never log private keys"
       ],
