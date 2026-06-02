@@ -169,6 +169,17 @@ func (c *ControlPlane) AuthService() *authhttp.Service {
 	return c.authSvc
 }
 
+// Pool returns the control plane's pgx pool (the pool holding the billing.*
+// control-plane schema). Used by the tenancy lifecycle/secret-store service
+// (issue #225), which owns the same OpenRails-owned control-plane state. nil when
+// the control plane is disabled.
+func (c *ControlPlane) Pool() *pgxpool.Pool {
+	if c == nil {
+		return nil
+	}
+	return c.pool
+}
+
 // LockedDown reports whether this control plane runs in the locked-down,
 // self-hosted posture.
 func (c *ControlPlane) LockedDown() bool {

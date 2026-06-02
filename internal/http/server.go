@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/cache"
 )
@@ -39,6 +40,13 @@ type Server struct {
 	authProvider authprovider.Provider
 	controlPlane *controlplane.ControlPlane
 	captchaStore *captcha.ChallengeStore
+
+	// tenancy is the tenant provisioning + lifecycle + per-tenant secret service
+	// (issue #225). Built only when the control plane is present (it owns the
+	// billing.* control-plane pool and the operator-org provisioner). nil in
+	// verifier-only mode: the tenant webhook + provisioning admin routes are then
+	// not mounted and the single default tenant continues via the global webhook.
+	tenancy *tenancy.Service
 
 	// publicHandler is the single "full surface" HTTP handler. It includes
 	// health + debug (dev only) + user + admin + webhook routes AND the
@@ -110,6 +118,23 @@ func New(deps Dependencies) (*Server, error) {
 		captchaStore: captcha.NewChallengeStore(deps.Redis),
 	}
 
+	// Build the tenant provisioning/lifecycle/secret service when the control
+	// plane is present (issue #225). It reuses the control plane's pgx pool (the
+	// OpenRails-owned billing.* control-plane DB) and operator-org provisioner. The
+	// DB-backed secret store is the self-hosted default and needs no live Vault; a
+	// managed deployment swaps in the Vault-backed store with the same addressing.
+	if deps.ControlPlane != nil && deps.ControlPlane.Pool() != nil {
+		secretStore, sserr := tenancy.NewDBSecretStore(deps.ControlPlane.Pool())
+		if sserr != nil {
+			return nil, fmt.Errorf("build tenant secret store: %w", sserr)
+		}
+		tsvc, terr := tenancy.NewService(deps.ControlPlane.Pool(), deps.ControlPlane, secretStore)
+		if terr != nil {
+			return nil, fmt.Errorf("build tenancy service: %w", terr)
+		}
+		s.tenancy = tsvc
+	}
+
 	// Single (standalone-friendly) HTTP surface.
 	// Standalone mode owns service-level health/debug routes.
 	s.publicHandler = s.newPublicEngine()
@@ -134,6 +159,16 @@ func New(deps Dependencies) (*Server, error) {
 	// the SAME public engine (issue #222 browser tier). No-op without a control
 	// plane (verifier-only mode has no delegated-token issuer).
 	s.registerSelfServiceRoutes(s.publicHandler)
+
+	// Tenant-scoped webhook routing (issue #225): /v1/t/:tenant/webhooks/:provider
+	// resolves the tenant from the path slug, then loads THAT tenant's signing
+	// secret and verifies the signature AFTER tenant resolution. No-op without the
+	// tenancy service (verifier-only mode).
+	s.registerTenantWebhookRoutes(s.publicHandler)
+
+	// Operator-gated tenant provisioning/lifecycle admin API (issue #225). No-op
+	// without the tenancy service.
+	s.registerTenantAdminRoutes(s.publicHandler)
 
 	log.Info("Billing service initialized successfully")
 	return s, nil
