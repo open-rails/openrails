@@ -29,11 +29,24 @@ import (
 )
 
 const (
-	devnetRPC = "https://api.devnet.solana.com"
 	// Hardcoded devnet mints (also in config/solana_tokens.go).
 	devnetUSDCMint  = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
 	devnetPYUSDMint = "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM"
 )
+
+// devnetEndpoint resolves the RPC URL: an explicit SOLANA_DEVNET_RPC wins, else a
+// Helius devnet URL built from HELIUS_API_KEY (per-KEY airdrop limit, bypasses the
+// public per-IP cap), else the rate-limited public endpoint. Populate via
+// .env.devnet: `set -a; source .env.devnet; set +a`.
+func devnetEndpoint() string {
+	if u := strings.TrimSpace(os.Getenv("SOLANA_DEVNET_RPC")); u != "" {
+		return u
+	}
+	if k := strings.TrimSpace(os.Getenv("HELIUS_API_KEY")); k != "" {
+		return "https://devnet.helius-rpc.com/?api-key=" + k
+	}
+	return "https://api.devnet.solana.com"
+}
 
 // staticSecret is a TenantSecretGetter that returns one fixed key, so the test
 // drives the REAL keypairSigner + BuildSignSubmit path (not a bespoke signer).
@@ -110,7 +123,7 @@ func airdrop(ctx context.Context, t *testing.T, cl *rpc.Client, addr solanago.Pu
 func submitCreatePlan(ctx context.Context, t *testing.T, merchant solanago.PrivateKey, mint, tokenProgram solanago.PublicKey) error {
 	t.Helper()
 	signer := NewKeypairSigner(staticSecret{base58: merchant.String()}, time.Minute)
-	rpcClient := NewRPCClientWithConfig(RPCClientConfig{Endpoint: devnetRPC, Network: "devnet"})
+	rpcClient := NewRPCClientWithConfig(RPCClientConfig{Endpoint: devnetEndpoint(), Network: "devnet"})
 
 	planID := uint64(time.Now().UnixNano())
 	planPDA, _, err := subscriptions.DerivePlanPDA(merchant.PublicKey(), planID)
@@ -150,7 +163,7 @@ func TestDevnetCreatePlanUSDC(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	faucet := rpc.New(devnetRPC)
+	faucet := rpc.New(devnetEndpoint())
 	merchant := fundedMerchant(ctx, t, faucet)
 
 	if err := submitCreatePlan(ctx, t, merchant, solanago.MustPublicKeyFromBase58(devnetUSDCMint), solanago.TokenProgramID); err != nil {
@@ -166,7 +179,7 @@ func TestDevnetCreatePlanPYUSDRejected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	faucet := rpc.New(devnetRPC)
+	faucet := rpc.New(devnetEndpoint())
 	merchant := fundedMerchant(ctx, t, faucet)
 
 	err := submitCreatePlan(ctx, t, merchant, solanago.MustPublicKeyFromBase58(devnetPYUSDMint), solanago.Token2022ProgramID)
