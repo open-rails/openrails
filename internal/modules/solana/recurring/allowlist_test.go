@@ -11,7 +11,6 @@ func TestIsRecurringStablecoinSymbol(t *testing.T) {
 		"USD1":  true,  // plain SPL, verified eligible
 		"PYUSD": false, // Token-2022 PermanentDelegate (devnet error 121)
 		"USDG":  false, // Token-2022 PermanentDelegate+TransferFee+...
-		"BUIDL": false, // Token-2022 PermanentDelegate+TransferHook (permissioned)
 		"SOL":   false, // volatile
 		"":      false,
 	}
@@ -46,7 +45,7 @@ func TestResolveRecurringMint(t *testing.T) {
 	}
 
 	// Off-allowlist tokens fail closed even though they're supported for one-off.
-	for _, sym := range []string{"PYUSD", "USDG", "BUIDL", "SOL"} {
+	for _, sym := range []string{"PYUSD", "USDG", "SOL"} {
 		if _, _, err := ResolveRecurringMint(sym, "mainnet"); err == nil {
 			t.Errorf("ResolveRecurringMint(%s) = nil error, want rejection", sym)
 		}

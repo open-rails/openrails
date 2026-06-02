@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -29,13 +30,19 @@ type SupportedTokensResponse struct {
 }
 
 type TokenInfo struct {
-	Symbol   string        `json:"symbol"`
-	Name     string        `json:"name"`
-	Mint     string        `json:"mint"`
-	Decimals int           `json:"decimals"`
-	Price    float64       `json:"price"`
-	Quote    *TokenQuote   `json:"quote,omitempty"`
-	Balance  *TokenBalance `json:"balance,omitempty"`
+	Symbol   string  `json:"symbol"`
+	Name     string  `json:"name"`
+	Mint     string  `json:"mint"`
+	Decimals int     `json:"decimals"`
+	Price    float64 `json:"price"`
+	// Preferred marks the default stablecoin the frontend should present first
+	// for Solana purchase options (USDC).
+	Preferred bool `json:"preferred"`
+	// RecurringEligible reports whether this token can back a recurring Solana
+	// subscription (USDC, USD1) vs one-off only.
+	RecurringEligible bool          `json:"recurring_eligible"`
+	Quote             *TokenQuote   `json:"quote,omitempty"`
+	Balance           *TokenBalance `json:"balance,omitempty"`
 }
 
 type TokenQuote struct {
@@ -142,11 +149,13 @@ func GetSupportedTokens(r *httprequest.Request) {
 		price := prices[symbol]
 
 		tokenInfo := TokenInfo{
-			Symbol:   symbol,
-			Name:     name,
-			Mint:     mint,
-			Decimals: t.Decimals,
-			Price:    price,
+			Symbol:            symbol,
+			Name:              name,
+			Mint:              mint,
+			Decimals:          t.Decimals,
+			Price:             price,
+			Preferred:         symbol == config.PreferredStablecoin,
+			RecurringEligible: recurring.IsRecurringStablecoinSymbol(symbol),
 		}
 
 		if priceAmount > 0 && price > 0 && quoteError == "" {

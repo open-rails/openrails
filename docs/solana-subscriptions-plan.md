@@ -52,18 +52,31 @@ also confirmed via `create_plan` on devnet:
 | **USD1** | SPL Token | none | ✅ eligible (World Liberty Financial USD; **mainnet-only** mint) |
 | **PYUSD** | Token-2022 | PermanentDelegate, TransferFee | ❌ (devnet error 121 `mintHasPermanentDelegate`) |
 | **USDG** | Token-2022 | PermanentDelegate, TransferFee, ConfidentialTransfer, TransferHook, MintCloseAuthority | ❌ |
-| **BUIDL** | Token-2022 | PermanentDelegate, TransferHook, MintCloseAuthority (permissioned security) | ❌ |
+
+(USD1 owner program confirmed `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA` =
+classic SPL Token, not Token-2022.) BUIDL was evaluated and **dropped** — it's a
+permissioned security (transferHook gates transfers to Securitize-whitelisted
+holders), too complex, not used at all.
 
 Mint extensions are immutable, so a rejected token can never become eligible.
 `RecurringStablecoins = {USDC, USD1}`. New stablecoins are added by re-running the
 mint-inspection check.
 
-**One-off vs. recurring for these stablecoins:** PYUSD, USDG, and BUIDL are
-supported for **one-off** purchases (added to the token registry) but are **not
-used for recurring** — they can't be rebilled, so we don't prefer them and never
-attach them to recurring prices. The recurring-ineligible feedless stablecoins
-(USD1/USDG/BUIDL) are priced at a flat $1.00 for one-off quoting (no Pyth feed
-needed); USDC/PYUSD keep their Pyth feeds.
+**Frontend default:** **USDC is the exclusive preferred stablecoin** presented in
+the UI for Solana purchase options. The supported-tokens API marks it
+(`config.PreferredStablecoin`, `TokenInfo.Preferred`) and flags each token's
+`RecurringEligible`.
+
+**One-off vs. recurring:** PYUSD and USDG are supported for **one-off** purchases
+(in the token registry) but **never used for recurring** — they can't be rebilled,
+so we don't prefer them or attach them to recurring prices.
+
+**Stablecoin pricing ($1 peg + depeg failsafe):** stablecoins are quoted at a flat
+**$1.00** — no live price check, no sub-penny noise. A rarely-used failsafe guards
+against a real depeg: for stablecoins with a price feed (USDC/PYUSD), if the feed
+shows divergence **> 1%** from $1, the live price is used so the charge compensates
+(e.g. USDC at $0.95 → ~5% more tokens). Feedless stablecoins (USD1/USDG) have no
+feed and always use the $1.00 peg. Tolerance: `stablecoinPegTolerance = 0.01`.
 
 ### One-off vs. recurring token asymmetry
 

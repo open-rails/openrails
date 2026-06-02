@@ -160,3 +160,24 @@ func TestGeneratePaymentRequiresCheckoutSession(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "checkout session id is required")
 }
+
+func TestStablecoinPegAndDepegFailsafe(t *testing.T) {
+	cfg := config.SolanaToken{Mint: "mint", Decimals: 6}
+	ctx := context.Background()
+
+	// USDC within 1% of peg -> use clean $1.00 (ignore sub-penny noise).
+	q, err := CalculateTokenQuote(ctx, "USDC", cfg, 1000, "usd", nil, fakeTokenPriceProvider{"USDC": 0.999})
+	require.NoError(t, err)
+	require.Equal(t, 1.0, q.TokenPriceUSD)
+
+	// USDC depegged >1% -> failsafe uses the live price (charge compensates).
+	q, err = CalculateTokenQuote(ctx, "USDC", cfg, 1000, "usd", nil, fakeTokenPriceProvider{"USDC": 0.95})
+	require.NoError(t, err)
+	require.Equal(t, 0.95, q.TokenPriceUSD)
+	require.Greater(t, q.Units, uint64(10_000_000)) // $10 / $0.95 > 10 tokens
+
+	// Feedless stablecoin (USD1) -> always $1.00, no provider consulted.
+	q, err = CalculateTokenQuote(ctx, "USD1", cfg, 1000, "usd", nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1.0, q.TokenPriceUSD)
+}

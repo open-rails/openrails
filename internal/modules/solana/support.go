@@ -9,7 +9,35 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/fx"
+	log "github.com/sirupsen/logrus"
 )
+
+// stablecoinPegTolerance is the band around $1.00 within which a stablecoin's peg
+// is used verbatim (no sub-penny noise). Outside it (a real depeg), the live
+// price is used as a failsafe — 1%, rarely triggered.
+const stablecoinPegTolerance = 0.01
+
+// stablecoinPriceUSD returns the USD price for a stablecoin: $1.00 by default, or
+// the live price when a feed shows the peg has diverged by more than
+// stablecoinPegTolerance (the failsafe — e.g. a $0.95 USDC yields a ~5% higher
+// token charge so the merchant still nets the USD amount). Feedless stablecoins,
+// a nil provider, or an unavailable/invalid feed all fall back to the $1.00 peg.
+func stablecoinPriceUSD(ctx context.Context, symbol string, priceProvider TokenPriceProvider) float64 {
+	if priceProvider == nil || config.IsFeedlessStablecoin(symbol) {
+		return 1.0
+	}
+	p, err := priceProvider.PriceUSD(ctx, symbol)
+	if err != nil || p <= 0 {
+		log.WithField("token", symbol).WithError(err).Warn("stablecoin price feed unavailable; using $1.00 peg")
+		return 1.0
+	}
+	if math.Abs(p-1.0) <= stablecoinPegTolerance {
+		return 1.0
+	}
+	log.WithFields(log.Fields{"token": symbol, "price_usd": p}).
+		Warn("stablecoin depeg beyond tolerance; using live price (failsafe)")
+	return p
+}
 
 func RequireSolanaProcessorConfig(cfg *config.Config) (*config.ProcessorConfig, error) {
 	if cfg == nil {
@@ -83,10 +111,14 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 	if strings.TrimSpace(tokenCfg.Mint) == "" {
 		return nil, fmt.Errorf("token %s missing mint configuration", tokenSymbol)
 	}
-	// Feedless stablecoins (USD1/USDG/BUIDL) are pegged to $1.00 and have no Pyth
-	// feed; price them directly. USDC/PYUSD keep their configured Pyth feeds.
-	tokenPriceUSD := 1.0
-	if !config.IsFeedlessStablecoin(tokenSymbol) {
+	// Stablecoins are treated as $1.00 (no sub-penny price noise). A divergence
+	// failsafe (rarely triggered) consults the price feed when one exists: if the
+	// stablecoin has depegged beyond the tolerance, the live price is used so the
+	// charge compensates. Non-stablecoins (SOL, ...) always require a live price.
+	var tokenPriceUSD float64
+	if config.IsStablecoin(tokenSymbol) {
+		tokenPriceUSD = stablecoinPriceUSD(ctx, tokenSymbol, priceProvider)
+	} else {
 		if priceProvider == nil {
 			return nil, fmt.Errorf("token price provider is not configured")
 		}
