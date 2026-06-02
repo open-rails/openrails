@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/crypto"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/platform"
@@ -138,6 +139,28 @@ func New(deps Dependencies) (*Server, error) {
 		secretStore, sserr := tenancy.NewDBSecretStore(deps.ControlPlane.Pool())
 		if sserr != nil {
 			return nil, fmt.Errorf("build tenant secret store: %w", sserr)
+		}
+
+		// Per-tenant encryption-at-rest (issue #227): when a master key is
+		// configured, wrap the secret store so per-tenant processor credentials and
+		// webhook signing secrets are envelope-encrypted with the tenant's DEK
+		// before they ever touch the DB. With no master key, the plain store is
+		// used unchanged (self-hosted-without-encryption / back-compat).
+		var masterKey string
+		if deps.Config != nil && deps.Config.Encryption != nil {
+			masterKey = deps.Config.Encryption.MasterKey
+		}
+		dekStore, dkerr := crypto.NewDBDEKStore(deps.ControlPlane.Pool())
+		if dkerr != nil {
+			return nil, fmt.Errorf("build tenant DEK store: %w", dkerr)
+		}
+		enc, encerr := crypto.NewEncryptor(masterKey, dekStore)
+		if encerr != nil {
+			return nil, fmt.Errorf("build tenant encryptor: %w", encerr)
+		}
+		secretStore, sserr = tenancy.NewEncryptedSecretStore(secretStore, enc)
+		if sserr != nil {
+			return nil, fmt.Errorf("wrap tenant secret store with encryption: %w", sserr)
 		}
 		tsvc, terr := tenancy.NewService(deps.ControlPlane.Pool(), deps.ControlPlane, secretStore)
 		if terr != nil {
