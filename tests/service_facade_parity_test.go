@@ -64,6 +64,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 
 	ucb := &models.UserCreditBalance{
 		ID:           uuid.New(),
+		OwnerID:      personalOwnerID(userID),
 		UserID:       userID,
 		CreditTypeID: ct.ID,
 		Balance:      10_000,
@@ -74,13 +75,16 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	_, err = suite.BunDB.NewInsert().Model(ucb).Exec(ctx)
 	require.NoError(t, err)
 
-	// Seed an entitlement.
+	// Seed an entitlement. source_id is NOT NULL (the originating
+	// subscription/payment/admin-grant id); use a synthetic admin source here.
+	entSourceID := uuid.New()
 	ent := &models.Entitlement{
 		ID:          uuid.New(),
 		UserID:      userID,
 		Entitlement: "premium-1",
 		StartAt:     time.Now().Add(-1 * time.Hour).UTC(),
 		EndAt:       nil,
+		SourceID:    &entSourceID,
 		SourceType:  models.EntitlementSourceAdmin,
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),

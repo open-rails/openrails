@@ -66,26 +66,51 @@ func TestMigration039_CreatesTenantsTableAndSeedsDefault(t *testing.T) {
 	}
 }
 
-func TestMigration039_IsAdditiveAndBackwardCompatible(t *testing.T) {
+func TestMigration039_EnforcesNotNullTenantID(t *testing.T) {
 	c := loadMigration039(t)
 
-	// Adds tenant_id as a NULLABLE column and backfills it — never NOT NULL yet.
-	if !strings.Contains(c, "ADD COLUMN IF NOT EXISTS tenant_id UUID") {
-		t.Error("migration 039 must add a nullable tenant_id UUID column")
+	// HARDCUT / GREENFIELD: tenant_id is created NOT NULL from the start (defaulted
+	// to the default tenant), with no backfill-of-existing-rows logic.
+	if !strings.Contains(c, "ADD COLUMN IF NOT EXISTS tenant_id UUID NOT NULL") {
+		t.Error("migration 039 must add a NOT NULL tenant_id UUID column")
 	}
-	if strings.Contains(c, "SET NOT NULL") {
-		t.Error("migration 039 must NOT enforce NOT NULL on tenant_id yet (additive rollout)")
+	// No backfill of pre-existing rows in a greenfield hardcut.
+	if strings.Contains(c, "WHERE tenant_id IS NULL") {
+		t.Error("migration 039 must NOT backfill existing rows (greenfield hardcut)")
 	}
-	// Must not drop or rewrite existing constraints/indexes in a breaking way.
-	if strings.Contains(strings.ToUpper(c), "DROP INDEX") {
-		t.Error("migration 039 (up) must not drop existing indexes")
+}
+
+func TestMigration039_ReplacesLegacyUniquesWithTenantScoped(t *testing.T) {
+	c := loadMigration039(t)
+
+	// The legacy non-tenant-scoped uniques must be DROPPED (replaced, not kept
+	// alongside).
+	for _, legacy := range []string{
+		"DROP INDEX IF EXISTS billing.uq_payment_methods_user_vault",
+		"DROP INDEX IF EXISTS billing.idx_subscriptions_user_product_lifecycle_owner",
+		"DROP INDEX IF EXISTS billing.uniq_entitlements_active",
+		"DROP CONSTRAINT IF EXISTS payments_processor_transaction_unique",
+		"DROP CONSTRAINT IF EXISTS entitlements_no_overlap",
+	} {
+		if !strings.Contains(c, legacy) {
+			t.Errorf("migration 039 must drop legacy unique: %q", legacy)
+		}
 	}
-	if strings.Contains(strings.ToUpper(c), "DROP CONSTRAINT") {
-		t.Error("migration 039 (up) must not drop existing constraints")
+	// And the tenant-scoped replacements must be created.
+	for _, repl := range []string{
+		"uq_payment_methods_tenant_user_vault",
+		"uq_subscriptions_tenant_user_product_lifecycle",
+		"uq_entitlements_tenant_active",
+		"uq_payments_tenant_processor_transaction",
+		"uq_processor_customers_tenant_user_processor",
+	} {
+		if !strings.Contains(c, repl) {
+			t.Errorf("migration 039 must create tenant-scoped unique: %q", repl)
+		}
 	}
-	// Backfills existing rows to the default tenant.
-	if !strings.Contains(c, "SET tenant_id = ") || !strings.Contains(c, "WHERE tenant_id IS NULL") {
-		t.Error("migration 039 must backfill existing rows to the default tenant")
+	// The tenant-scoped no-overlap exclusion must include tenant_id.
+	if !strings.Contains(c, "tenant_id   WITH =") {
+		t.Error("migration 039 must scope the entitlements no-overlap exclusion by tenant_id")
 	}
 }
 

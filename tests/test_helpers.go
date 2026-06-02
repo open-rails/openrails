@@ -19,6 +19,12 @@ import (
 	server "github.com/open-rails/openrails/internal/http"
 )
 
+// testOperatorOrgSlug is the operator org slug the integration suite configures
+// (config.Auth.OperatorOrgSlug). HARDCUT (#224): admin authority is the
+// operator-org permission model ONLY, so admin tokens must carry this org slug
+// in the `org` claim plus an admin-equivalent role in `org_roles`.
+const testOperatorOrgSlug = "operator"
+
 var (
 	// Test issuer for auth verification (shared across tests)
 	testIssuerOnce sync.Once
@@ -28,6 +34,26 @@ var (
 	sharedSuiteOnce sync.Once
 	sharedSuite     *TestContainerSuite
 )
+
+// personalOwnerID returns the owner org id for the self-hosted / single-tenant
+// personal case: the user's own account/personal-org UUID. HARDCUT (#221): this
+// matches credits.resolveOwner / identity.OwnerOrgIDFromString — the owner is the
+// caller-provided personal-org id, never a synthesized stand-in. Test user ids
+// are UUIDs, so the owner is simply the parsed subject.
+func personalOwnerID(userID string) uuid.UUID {
+	return uuid.MustParse(userID)
+}
+
+// operatorAdminClaims returns the extra JWT claims that make a token an operator
+// admin under the hardcut model: the operator org slug and an admin-equivalent
+// org role. authkit's verifier maps these to Claims.Org / Claims.OrgRoles, which
+// OpenRails copies into UserContext.Org / UserContext.OrgRoles.
+func operatorAdminClaims() map[string]any {
+	return map[string]any{
+		"org":       testOperatorOrgSlug,
+		"org_roles": []string{"admin"},
+	}
+}
 
 func init() {
 	gin.SetMode(gin.TestMode)
@@ -138,37 +164,19 @@ func setupTestSuiteWithAdminAuth(t *testing.T) (*TestContainerSuite, string, str
 	suite := getSharedTestSuite(t)
 	userID := uuid.New().String()
 	email := "admin-" + t.Name() + "@test.example.com"
-	token := getTestIssuer().CreateTokenWithRoles(userID, email, []string{"admin"})
-
-	// AdminRequired checks Postgres roles (profiles.user_roles), not JWT claims.
-	// Seed the minimal role assignment so admin endpoints can be exercised.
-	ctx := context.Background()
-	_, err := suite.BunDB.ExecContext(ctx, "CREATE EXTENSION IF NOT EXISTS pgcrypto")
-	require.NoError(t, err)
-	_, err = suite.BunDB.ExecContext(ctx,
-		"INSERT INTO profiles.users (id, email, email_verified, created_at, updated_at) VALUES (?::uuid, ?, true, NOW(), NOW()) ON CONFLICT (id) DO NOTHING",
-		userID, email,
-	)
-	require.NoError(t, err)
-	_, err = suite.BunDB.ExecContext(ctx,
-		"INSERT INTO profiles.roles (slug, name) VALUES ('admin', 'Admin') ON CONFLICT (slug) DO NOTHING",
-	)
-	require.NoError(t, err)
-	_, err = suite.BunDB.ExecContext(ctx,
-		"INSERT INTO profiles.user_roles (user_id, role_id) VALUES (?::uuid, profiles.role_id('admin')) ON CONFLICT (user_id, role_id) DO NOTHING",
-		userID,
-	)
-	require.NoError(t, err)
-
+	// HARDCUT (#224): admin authority is the operator-org model ONLY. The token
+	// carries the operator org slug + admin org role; no profiles.user_roles
+	// seeding is needed (and would be ignored — that legacy fallback is removed).
+	token := getTestIssuer().CreateTokenWithClaims(userID, email, operatorAdminClaims())
 	return suite, token, userID
 }
 
-// CreateAdminToken creates a JWT token with admin role for the given user ID.
-// Use this when you need an admin token for a specific user ID.
+// CreateAdminToken creates a JWT token with operator-org admin authority for the
+// given user ID. Use this when you need an admin token for a specific user ID.
 func CreateAdminToken(t *testing.T, userID string) string {
 	t.Helper()
 	email := "admin-" + userID[:8] + "@test.example.com"
-	return getTestIssuer().CreateTokenWithRoles(userID, email, []string{"admin"})
+	return getTestIssuer().CreateTokenWithClaims(userID, email, operatorAdminClaims())
 }
 
 // CreateUserToken creates a JWT token without admin role for the given user ID.

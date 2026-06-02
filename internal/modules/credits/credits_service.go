@@ -55,20 +55,32 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 	return clockwork.NewRealClock()
 }
 
+// ErrOwnerRequired is returned when a credit operation cannot resolve a real
+// owner org id. HARDCUT (#221): owner_id is supplied by the caller and is NOT
+// synthesized — there is no deterministic stand-in derivation. For the
+// self-hosted / single-tenant personal case the owner org IS the authenticated
+// user's own account/personal-org UUID, so a non-UUID actor with no explicit
+// owner is a programming error rather than something to paper over.
+var ErrOwnerRequired = errors.New("owner_id required")
+
 // resolveOwner resolves the OWNER ORG for a credit operation (issue #221, the
-// payer/billing owner). When the caller supplies an explicit owner org, it is
-// used verbatim. Otherwise the owner defaults to the ACTOR's deterministic
-// personal-org id (identity.PersonalOrgID), which is what keeps existing
-// single-user callers working unchanged after #221: a bare user_id continues to
-// own its own balance, now expressed as that user's personal org.
+// payer/billing owner). When the caller supplies an explicit owner org it is
+// used verbatim. Otherwise, for the self-hosted / single-tenant personal case,
+// the owner is the actor's own account/personal-org id parsed from its UUID
+// subject (identity.OwnerOrgIDFromString). It is NEVER a synthesized stand-in.
 //
-// The actorUserID is the existing free-form user_id (who caused usage). It is
-// retained for attribution and is NOT the financial owner.
-func resolveOwner(owner *identity.OwnerOrgID, actorUserID string) identity.OwnerOrgID {
+// The actorUserID is the existing free-form user_id (who caused usage); it is
+// retained for attribution and is NOT the financial owner. resolveOwner returns
+// ErrOwnerRequired when no owner can be resolved.
+func resolveOwner(owner *identity.OwnerOrgID, actorUserID string) (identity.OwnerOrgID, error) {
 	if owner != nil && !owner.IsZero() {
-		return *owner
+		return *owner, nil
 	}
-	return identity.PersonalOrgID(actorUserID)
+	resolved := identity.OwnerOrgIDFromString(actorUserID)
+	if resolved.IsZero() {
+		return identity.OwnerOrgID{}, ErrOwnerRequired
+	}
+	return resolved, nil
 }
 
 func (s *CreditsService) GetCreditTypeByName(ctx context.Context, name string) (*models.CreditType, error) {
@@ -92,10 +104,15 @@ func (s *CreditsService) GetBalance(ctx context.Context, userID string, creditTy
 		return nil, err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	// Reads are scoped by tenant + OWNER (issue #221). For a bare user_id we
-	// resolve the owner to that user's deterministic personal org — the same row
-	// the org-owned writers stamp — so single-user reads return unchanged.
-	ownerID := identity.PersonalOrgID(userID).UUID()
+	// Reads are scoped by tenant + OWNER (issue #221). For the self-hosted /
+	// single-tenant personal case the owner IS the user's own account/personal-org
+	// UUID — the same row the org-owned writers stamp — so single-user reads return
+	// the right balance. owner_id is never synthesized.
+	owner, err := resolveOwner(nil, userID)
+	if err != nil {
+		return nil, err
+	}
+	ownerID := owner.UUID()
 	bal := new(models.UserCreditBalance)
 	err = s.db.GetDB().NewSelect().
 		Model(bal).
@@ -162,7 +179,11 @@ func (s *CreditsService) GetTransactions(ctx context.Context, userID string, cre
 	if err != nil {
 		return nil, 0, err
 	}
-	ownerID := identity.PersonalOrgID(userID).UUID()
+	owner, err := resolveOwner(nil, userID)
+	if err != nil {
+		return nil, 0, err
+	}
+	ownerID := owner.UUID()
 	var items []models.CreditTransaction
 	q := s.db.GetDB().NewSelect().Model(&items).
 		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
@@ -217,7 +238,11 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, userID stri
 		return nil, err
 	}
 
-	ownerID := identity.PersonalOrgID(userID).UUID()
+	owner, err := resolveOwner(nil, userID)
+	if err != nil {
+		return nil, err
+	}
+	ownerID := owner.UUID()
 	trx := new(models.CreditTransaction)
 	if err := s.db.GetDB().NewSelect().
 		Model(trx).
@@ -234,8 +259,9 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, userID stri
 
 type CreditDepositParams struct {
 	// OwnerID is the OWNER ORG that owns the deposited balance (issue #221). When
-	// nil, it defaults to the actor (UserID)'s deterministic personal org, so
-	// existing single-user callers keep working unchanged.
+	// nil, the owner is the actor (UserID)'s own account/personal-org UUID for the
+	// self-hosted / single-tenant personal case; it is never a synthesized
+	// stand-in, and a non-UUID UserID with no explicit owner is rejected.
 	OwnerID     *identity.OwnerOrgID
 	UserID      string
 	CreditType  string
@@ -289,7 +315,10 @@ func (s *CreditsService) getCreditTypeByNameTx(ctx context.Context, tx bun.Tx, n
 func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.CreditType, params CreditDepositParams) (*models.CreditTransaction, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	owner := resolveOwner(params.OwnerID, params.UserID)
+	owner, err := resolveOwner(params.OwnerID, params.UserID)
+	if err != nil {
+		return nil, err
+	}
 	ownerID := owner.UUID()
 	bal, err := s.lockBalance(ctx, tx, owner, params.UserID, ct.ID)
 	if err != nil {
@@ -370,8 +399,9 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 }
 
 type CreditWithdrawParams struct {
-	// OwnerID is the OWNER ORG to withdraw from (issue #221). When nil, defaults
-	// to the actor (UserID)'s deterministic personal org.
+	// OwnerID is the OWNER ORG to withdraw from (issue #221). When nil, the owner
+	// is the actor (UserID)'s own account/personal-org UUID for the self-hosted /
+	// single-tenant personal case; it is never a synthesized stand-in.
 	OwnerID    *identity.OwnerOrgID
 	UserID     string
 	CreditType string
@@ -414,8 +444,9 @@ func (s *CreditsService) Withdraw(ctx context.Context, params CreditWithdrawPara
 
 // Hold reserves credits for prepay usage (issue #221: Reserve/Hold(owner) ->
 // CaptureHold(actual) -> ReleaseHold(failure/zero)). owner is the OWNER ORG the
-// reservation is charged against; when nil it defaults to the actor (userID)'s
-// deterministic personal org, preserving existing single-user behaviour.
+// reservation is charged against; when nil the owner is the actor (userID)'s own
+// account/personal-org UUID for the self-hosted / single-tenant personal case
+// (never a synthesized stand-in).
 func (s *CreditsService) Hold(ctx context.Context, owner *identity.OwnerOrgID, userID string, creditType string, amount int64, source, sourceID string, expiresAt time.Time) (*models.CreditTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
@@ -439,7 +470,10 @@ func (s *CreditsService) Hold(ctx context.Context, owner *identity.OwnerOrgID, u
 
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerOrg := resolveOwner(owner, userID)
+	ownerOrg, err := resolveOwner(owner, userID)
+	if err != nil {
+		return nil, err
+	}
 	ownerID := ownerOrg.UUID()
 
 	// Idempotency: treat (tenant, owner, credit_type, source, source_id) as a
@@ -685,12 +719,10 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 // within the resolved tenant (issue #223), creating it if absent. The balance
 // is keyed by (tenant, owner, credit_type); user_id is stamped for attribution.
 //
-// During the additive rollout the legacy (user_id, credit_type_id) UNIQUE is
-// still present, so the ON CONFLICT DO NOTHING targets that constraint to avoid
-// a duplicate-key error on concurrent first-touch. Because the owner is the
-// actor's deterministic personal org (1:1 with user_id) for single-user
-// callers, the owner row and the legacy user row are the same physical row, so
-// the legacy conflict target remains correct.
+// The balance row is unique per (tenant_id, owner_id, credit_type_id) — the
+// HARDCUT owner+tenant-scoped uniqueness (migration 040). ON CONFLICT DO NOTHING
+// targets that constraint to avoid a duplicate-key error on concurrent
+// first-touch, after which the row is re-selected FOR UPDATE.
 func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, owner identity.OwnerOrgID, userID string, creditTypeID uuid.UUID) (*models.UserCreditBalance, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	ownerID := owner.UUID()
@@ -719,7 +751,7 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, owner ident
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	if _, err := tx.NewInsert().Model(bal).On("CONFLICT (user_id, credit_type_id) DO NOTHING").Exec(ctx); err != nil {
+	if _, err := tx.NewInsert().Model(bal).On("CONFLICT (tenant_id, owner_id, credit_type_id) DO NOTHING").Exec(ctx); err != nil {
 		return nil, err
 	}
 	bal = new(models.UserCreditBalance)
@@ -736,7 +768,10 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, owner ident
 func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID uuid.UUID, params CreditWithdrawParams) (*models.CreditTransaction, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	owner := resolveOwner(params.OwnerID, params.UserID)
+	owner, err := resolveOwner(params.OwnerID, params.UserID)
+	if err != nil {
+		return nil, err
+	}
 	ownerID := owner.UUID()
 	sourceIDText := (*string)(nil)
 	if params.SourceID != nil {

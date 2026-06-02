@@ -26,48 +26,41 @@ func TestMigration040_Loads(t *testing.T) {
 	_ = loadMigration040(t)
 }
 
-func TestMigration040_IsAdditiveAndBackwardCompatible(t *testing.T) {
+func TestMigration040_EnforcesNotNullOwnerID(t *testing.T) {
 	c := loadMigration040(t)
 
-	// Adds owner_id as a NULLABLE column on the three credit tables.
-	if !strings.Contains(c, "ADD COLUMN IF NOT EXISTS owner_id UUID") {
-		t.Error("migration 040 must add a nullable owner_id UUID column")
+	// HARDCUT / GREENFIELD: owner_id is created NOT NULL from the start, supplied
+	// by the writer — no stand-in backfill, no later reconciliation.
+	if !strings.Contains(c, "ADD COLUMN IF NOT EXISTS owner_id UUID NOT NULL") {
+		t.Error("migration 040 must add a NOT NULL owner_id UUID column")
 	}
-	// Never enforces NOT NULL yet (additive rollout).
-	if strings.Contains(c, "SET NOT NULL") {
-		t.Error("migration 040 must NOT enforce NOT NULL on owner_id yet")
+	// No SHA-1 stand-in derivation / personal-org backfill in a hardcut.
+	if strings.Contains(c, "6f1c9b3e2a445d7c8e109a2b3c4d5e6f") {
+		t.Error("migration 040 must NOT carry the legacy personal-org namespace backfill")
 	}
-	// Must not drop or rewrite existing constraints/indexes in the up path.
-	if strings.Contains(strings.ToUpper(c), "DROP INDEX") {
-		t.Error("migration 040 (up) must not drop existing indexes")
+	if strings.Contains(c, "openrails:personal-org:") {
+		t.Error("migration 040 must NOT carry the legacy stand-in derivation prefix")
 	}
-	if strings.Contains(strings.ToUpper(c), "DROP CONSTRAINT") {
-		t.Error("migration 040 (up) must not drop existing constraints")
-	}
-	// Backfills NULL owner_id rows deterministically.
-	if !strings.Contains(c, "WHERE tbl.owner_id IS NULL") {
-		t.Error("migration 040 must backfill rows whose owner_id is NULL")
+	if strings.Contains(c, "owner_id IS NULL") {
+		t.Error("migration 040 must NOT backfill owner_id (greenfield hardcut)")
 	}
 }
 
-func TestMigration040_UsesDeterministicPersonalOrgDerivation(t *testing.T) {
+func TestMigration040_ReplacesLegacyUserScopedUniques(t *testing.T) {
 	c := loadMigration040(t)
-	// The derivation must use the documented namespace + prefix, matching
-	// pkg/identity.PersonalOrgID byte-for-byte.
-	if !strings.Contains(c, "6f1c9b3e2a445d7c8e109a2b3c4d5e6f") {
-		t.Error("migration 040 must use the fixed personal-org namespace")
-	}
-	if !strings.Contains(c, "openrails:personal-org:") {
-		t.Error("migration 040 must use the documented derivation prefix")
-	}
-	// UUIDv5 version (5) + variant (10xx) bit-forcing must be present.
-	if !strings.Contains(c, "| 80") || !strings.Contains(c, "| 128") {
-		t.Error("migration 040 must force UUIDv5 version+variant bits")
-	}
-}
 
-func TestMigration040_AddsOwnerScopedIdempotencyUniques(t *testing.T) {
-	c := loadMigration040(t)
+	// The legacy user-scoped uniques must be DROPPED (replaced, not kept).
+	for _, legacy := range []string{
+		"DROP INDEX IF EXISTS billing.uniq_credit_hold_idem",
+		"DROP INDEX IF EXISTS billing.uniq_credit_deposit_idem",
+		"DROP INDEX IF EXISTS billing.uniq_credit_withdrawal_idem",
+		"DROP CONSTRAINT IF EXISTS user_credit_balances_user_id_credit_type_id_key",
+	} {
+		if !strings.Contains(c, legacy) {
+			t.Errorf("migration 040 must drop legacy user-scoped unique: %q", legacy)
+		}
+	}
+	// And the owner+tenant-scoped replacements must be created.
 	for _, idx := range []string{
 		"uniq_credit_hold_idem_owner",
 		"uniq_credit_deposit_idem_owner",
@@ -75,7 +68,11 @@ func TestMigration040_AddsOwnerScopedIdempotencyUniques(t *testing.T) {
 		"uq_user_credit_balances_owner_type",
 	} {
 		if !strings.Contains(c, idx) {
-			t.Errorf("migration 040 must add owner-scoped unique %q alongside the existing user-scoped one", idx)
+			t.Errorf("migration 040 must create owner+tenant-scoped unique %q", idx)
 		}
+	}
+	// Owner+tenant-scoped uniques must key on (tenant_id, owner_id, credit_type_id, ...).
+	if !strings.Contains(c, "(tenant_id, owner_id, credit_type_id, source, source_id)") {
+		t.Error("migration 040 idempotency uniques must be scoped by (tenant_id, owner_id, credit_type_id, source, source_id)")
 	}
 }

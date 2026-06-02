@@ -223,6 +223,10 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 		Auth: &config.AuthConfig{
 			Issuers:          []string{jwksIssuer},
 			ExpectedAudience: "test-app",
+			// HARDCUT (#224): admin authority is the operator-org model ONLY. Admin
+			// callers must present the operator org slug + an admin-equivalent
+			// org role; there is no global-admin DB fallback.
+			OperatorOrgSlug: testOperatorOrgSlug,
 		},
 		// All payment processor configs use the unified Processors map
 		Processors: map[string]*config.ProcessorConfig{

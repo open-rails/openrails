@@ -21,9 +21,10 @@
 //  2. OwnerOrgID (the payer / billing owner — #221). The org that OWNS a credit
 //     balance, is billed for usage, and against which invoices and credit
 //     reservations are recorded. Every account is org-backed: an individual
-//     user's balance is owned by THAT user's personal AuthKit org
-//     (profiles.orgs.is_personal=true, owner_user_id=<user_id>), and team orgs
+//     user's balance is owned by THAT user's personal AuthKit org, and team orgs
 //     use the same owner primitive. Bills and balances belong to OwnerOrgIDs.
+//     The owner org id is supplied by the caller at write time — it is the real
+//     owner AuthKit org id, never a synthesized stand-in.
 //
 //  3. ActorUserID (who CAUSED the usage — #221). The user / OpenRails-issued
 //     OAT / delegated platform user / system that caused usage inside an owner
@@ -41,37 +42,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// personalOrgNamespace is the fixed UUID namespace used to DETERMINISTICALLY
-// derive a stand-in personal-org id from an actor user id during the additive
-// #221 rollout, BEFORE real AuthKit personal-org rows (profiles.orgs) are
-// guaranteed to exist.
-//
-// DERIVATION RULE (must match the SQL backfill in migration 040 byte-for-byte):
-//
-//	PersonalOrgID(userID) = UUIDv5(personalOrgNamespace, "openrails:personal-org:" + userID)
-//
-// UUIDv5 (RFC 4122, SHA-1, name-based) is used because it is:
-//   - deterministic: the same user id always maps to the same owner id, so the
-//     migration backfill and live writes agree without coordination;
-//   - collision-free across distinct user ids (SHA-1 name hashing);
-//   - reproducible in pure SQL (pgcrypto digest) so the migration can backfill
-//     existing rows without a round-trip to Go.
-//
-// This is a STAND-IN owner id, not the real AuthKit personal-org id (those are
-// random uuidv7 minted by AuthKit's ensurePersonalOrgForUser and are not yet
-// guaranteed to exist for legacy users). AuthKit-side provisioning must later
-// reconcile each stand-in owner id to the user's real personal-org id; see the
-// migration header and the #221 status notes for the coordination plan. Until
-// then, balances are correctly org-scoped to a stable, per-user owner id.
-var personalOrgNamespace = uuid.MustParse("6f1c9b3e-2a44-5d7c-8e10-9a2b3c4d5e6f")
-
-// personalOrgPrefix namespaces the derivation input so the same user id can
-// never collide with any other UUIDv5 derivation in the codebase.
-const personalOrgPrefix = "openrails:personal-org:"
-
 // OwnerOrgID is the org that OWNS a credit balance / is billed (#221). It is a
 // distinct type from any actor or operator identity precisely so the compiler
-// rejects passing the wrong one.
+// rejects passing the wrong one. The value is the real owner AuthKit org id,
+// supplied by the caller at write time — there is no synthesized placeholder.
 type OwnerOrgID uuid.UUID
 
 // ActorUserID is the user / OAT / delegated principal that CAUSED usage (#221).
@@ -95,27 +69,19 @@ func (a ActorUserID) String() string { return string(a) }
 // IsZero reports whether the actor id is empty.
 func (a ActorUserID) IsZero() bool { return strings.TrimSpace(string(a)) == "" }
 
-// PersonalOrgID deterministically derives the stand-in personal-org OwnerOrgID
-// for an actor user id, per the DERIVATION RULE documented on
-// personalOrgNamespace. It is the default billing owner for single-user callers
-// that do not pass an explicit owner org, which is what keeps existing
-// user-scoped callers working unchanged after #221.
-//
-// The input is the raw actor user id (trimmed). An empty input yields the zero
-// OwnerOrgID, which callers must treat as "no owner resolved".
-func PersonalOrgID(actorUserID string) OwnerOrgID {
-	actorUserID = strings.TrimSpace(actorUserID)
-	if actorUserID == "" {
+// OwnerOrgIDFromString parses s as the canonical owner AuthKit org id. It is the
+// caller-side resolution used by self-hosted / single-tenant callers whose owner
+// org id is the user's own personal-org / account UUID: the caller passes the
+// authenticated subject and gets back the OwnerOrgID. An empty or non-UUID input
+// yields the zero OwnerOrgID (which callers must treat as "no owner resolved").
+func OwnerOrgIDFromString(s string) OwnerOrgID {
+	s = strings.TrimSpace(s)
+	if s == "" {
 		return OwnerOrgID(uuid.Nil)
 	}
-	return OwnerOrgID(uuid.NewSHA1(personalOrgNamespace, []byte(personalOrgPrefix+actorUserID)))
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return OwnerOrgID(uuid.Nil)
+	}
+	return OwnerOrgID(id)
 }
-
-// PersonalOrgNamespace returns the fixed namespace UUID used by the derivation.
-// Exposed so tests (and the SQL backfill cross-check) can assert byte-for-byte
-// agreement between the Go and SQL derivations.
-func PersonalOrgNamespace() uuid.UUID { return personalOrgNamespace }
-
-// PersonalOrgPrefix returns the derivation input prefix, for the same
-// cross-check reasons as PersonalOrgNamespace.
-func PersonalOrgPrefix() string { return personalOrgPrefix }

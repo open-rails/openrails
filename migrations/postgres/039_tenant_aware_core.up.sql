@@ -5,25 +5,22 @@
 -- tenants, while self-hosted single-tenant installs run the SAME code paths
 -- with one DEFAULT tenant namespace.
 --
--- This migration is intentionally ADDITIVE and BACKWARD-COMPATIBLE:
+-- HARDCUT / GREENFIELD: this branch replaces the pre-refactor single-tenant
+-- schema wholesale. There are NO pre-existing rows to preserve, so tenant_id is
+-- created NOT NULL from the start, the legacy non-tenant-scoped uniqueness
+-- constraints are REPLACED (dropped + re-created tenant-scoped), and no
+-- backfill-of-existing-rows logic is needed.
+--
+-- This migration:
 --   * Creates billing.tenants (the tenant / billing-namespace directory).
---   * Seeds exactly one default tenant row (slug = 'default').
---   * Adds a NULLABLE tenant_id column to every tenant-owned table.
---   * Backfills every existing row to the default tenant.
---   * Adds NEW tenant-scoped indexes alongside existing ones.
---
--- It does NOT (deferred to follow-up migrations once all queries are scoped):
---   * Enforce NOT NULL on tenant_id.
---   * Drop or rewrite any existing unique constraint / index.
---   * Add cross-table foreign keys to billing.tenants (kept loose so the
---     backfill + future per-tenant work can proceed incrementally).
---
--- CROSS-REPO COUPLING NOTE: doujins and hentai0 read billing.entitlements via
--- DIRECT SQL from their own processes. Adding a nullable column and extra
--- indexes is fully backward compatible with `SELECT ... FROM billing.entitlements
--- WHERE user_id = ...` style reads, so those direct readers keep working
--- unchanged. Do NOT make tenant_id NOT NULL or change entitlements' existing
--- unique/overlap constraints until those readers are coordinated.
+--   * Seeds exactly one default tenant row (slug = 'default'). That default
+--     tenant IS the self-hosted single-tenant namespace — it is NOT legacy.
+--   * Adds a NOT NULL tenant_id column (defaulted to the 'default' tenant so
+--     single-tenant writers that do not stamp a tenant land in the default
+--     namespace) to every tenant-owned table.
+--   * Replaces the legacy non-tenant-scoped unique constraints / indexes with
+--     tenant-scoped ones (drops the old, adds the new — never both).
+--   * Adds tenant-scoped lookup indexes for the hottest paths.
 -- =============================================================================
 
 SET lock_timeout      = '10s';
@@ -76,6 +73,9 @@ COMMENT ON COLUMN billing.tenants.authkit_org_id IS
 -- Seed the single DEFAULT tenant. Deterministic UUID so application code,
 -- tests, and other services can rely on a well-known default tenant id.
 --   default tenant id = 00000000-0000-0000-0000-000000000001
+--
+-- This default-tenant row IS the self-hosted single-tenant mode. It is the
+-- legitimate single-tenant namespace, not a legacy compatibility shim.
 -- -----------------------------------------------------------------------------
 
 INSERT INTO billing.tenants (id, slug, name, status)
@@ -83,9 +83,11 @@ VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default Tenant', 'ac
 ON CONFLICT (slug) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- Add a NULLABLE tenant_id to every tenant-owned table and backfill it to the
--- default tenant. Each block is idempotent (ADD COLUMN IF NOT EXISTS + guarded
--- backfill) so the migration is safe to reason about and re-read.
+-- Add a NOT NULL tenant_id to every tenant-owned table. Greenfield: no existing
+-- rows, so the column is created NOT NULL directly. It DEFAULTs to the 'default'
+-- tenant so single-tenant writers that do not explicitly stamp a tenant land in
+-- the default namespace (legitimate single-tenant mode), while multi-tenant
+-- writers stamp the real tenant.
 --
 -- Tenant-owned tables (per issue #223):
 --   products, prices, catalog_drift_events, payment_methods, subscriptions,
@@ -127,15 +129,7 @@ BEGIN
             WHERE table_schema = 'billing' AND table_name = t
         ) THEN
             EXECUTE format(
-                'ALTER TABLE billing.%I ADD COLUMN IF NOT EXISTS tenant_id UUID',
-                t
-            );
-            EXECUTE format(
-                'UPDATE billing.%I SET tenant_id = %L WHERE tenant_id IS NULL',
-                t, default_tenant
-            );
-            EXECUTE format(
-                'ALTER TABLE billing.%I ALTER COLUMN tenant_id SET DEFAULT %L',
+                'ALTER TABLE billing.%I ADD COLUMN IF NOT EXISTS tenant_id UUID NOT NULL DEFAULT %L',
                 t, default_tenant
             );
             EXECUTE format(
@@ -143,7 +137,7 @@ BEGIN
                 t, t
             );
             EXECUTE format(
-                $cmt$COMMENT ON COLUMN billing.%I.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). Nullable + defaulted to the ''default'' tenant during the additive rollout; will become NOT NULL once all queries are tenant-scoped.'$cmt$,
+                $cmt$COMMENT ON COLUMN billing.%I.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.'$cmt$,
                 t
             );
         END IF;
@@ -151,14 +145,62 @@ BEGIN
 END $$;
 
 -- -----------------------------------------------------------------------------
--- NEW tenant-scoped indexes for the hottest lookup paths. These sit ALONGSIDE
--- the existing user-scoped indexes/uniques (which are intentionally left in
--- place for backward compatibility, including direct-SQL readers). They give
--- the tenant-aware query layer efficient, tenant-prefixed access.
---
--- We do NOT add tenant-scoped UNIQUE replacements for the existing uniques yet,
--- because that requires retiring the old global uniques in lockstep with all
--- writers being tenant-aware. That is deferred to a follow-up migration.
+-- Replace the legacy non-tenant-scoped unique constraints / indexes with
+-- tenant-scoped ones. HARDCUT: we DROP the old global uniques and CREATE the
+-- tenant-scoped replacements — the two never coexist.
+-- -----------------------------------------------------------------------------
+
+-- payment_methods: (user_id, vault_id) and (processor, vault_id) -> tenant-scoped.
+DROP INDEX IF EXISTS billing.uq_payment_methods_user_vault;
+DROP INDEX IF EXISTS billing.idx_payment_methods_processor_vault_id;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_methods_tenant_user_vault
+    ON billing.payment_methods (tenant_id, user_id, vault_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_methods_tenant_processor_vault
+    ON billing.payment_methods (tenant_id, processor, vault_id);
+
+-- subscriptions: one lifecycle owner per (user, product) and processor-sub-id
+-- uniqueness -> tenant-scoped.
+DROP INDEX IF EXISTS billing.idx_subscriptions_user_product_lifecycle_owner;
+DROP INDEX IF EXISTS billing.uniq_subscriptions_processor_subscription_id_nonempty;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_subscriptions_tenant_user_product_lifecycle
+    ON billing.subscriptions (tenant_id, user_id, product_id)
+    WHERE status IN ('active', 'pending', 'past_due');
+CREATE UNIQUE INDEX IF NOT EXISTS uq_subscriptions_tenant_processor_subscription_id
+    ON billing.subscriptions (tenant_id, processor, processor_subscription_id)
+    WHERE processor_subscription_id <> '';
+
+-- entitlements: at-most-one open-ended live entitlement per (user, entitlement)
+-- and the no-overlap exclusion -> tenant-scoped.
+DROP INDEX IF EXISTS billing.uniq_entitlements_active;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_entitlements_tenant_active
+    ON billing.entitlements (tenant_id, user_id, entitlement)
+    WHERE revoked_at IS NULL AND end_at IS NULL;
+
+ALTER TABLE billing.entitlements DROP CONSTRAINT IF EXISTS entitlements_no_overlap;
+ALTER TABLE billing.entitlements ADD CONSTRAINT entitlements_no_overlap
+    EXCLUDE USING gist (
+        tenant_id   WITH =,
+        user_id     WITH =,
+        entitlement WITH =,
+        period      WITH &&
+    )
+    WHERE (revoked_at IS NULL AND deleted_at IS NULL);
+
+-- payments: (processor, transaction_id) uniqueness -> tenant-scoped.
+ALTER TABLE billing.payments DROP CONSTRAINT IF EXISTS payments_processor_transaction_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_tenant_processor_transaction
+    ON billing.payments (tenant_id, processor, transaction_id);
+
+-- processor_customers: (user_id, processor) and (processor, customer_id) -> tenant-scoped.
+ALTER TABLE billing.processor_customers DROP CONSTRAINT IF EXISTS processor_customers_user_id_processor_key;
+ALTER TABLE billing.processor_customers DROP CONSTRAINT IF EXISTS processor_customers_processor_customer_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_processor_customers_tenant_user_processor
+    ON billing.processor_customers (tenant_id, user_id, processor);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_processor_customers_tenant_processor_customer
+    ON billing.processor_customers (tenant_id, processor, customer_id);
+
+-- -----------------------------------------------------------------------------
+-- Tenant-scoped lookup indexes for the hottest read paths.
 -- -----------------------------------------------------------------------------
 
 -- Entitlements: tenant + user + entitlement live-window lookups.

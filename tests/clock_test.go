@@ -231,6 +231,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	blockExpiry := mockClock.Now().Add(time.Hour)
 	block := &models.CreditBlock{
 		ID:              uuid.New(),
+		OwnerID:         personalOwnerID(creditUserID),
 		UserID:          creditUserID,
 		CreditTypeID:    creditType.ID,
 		OriginalAmount:  75,

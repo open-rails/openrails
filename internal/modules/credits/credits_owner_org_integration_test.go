@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -72,19 +71,18 @@ func startOwnerOrgPostgres(t *testing.T) (*bun.DB, context.Context) {
 	return bunDB, ctx
 }
 
-// TestMigration040_BackfillPreservesBalancesExactly is the MANDATORY balance-
-// preservation test for issue #221: it seeds legacy user-owned balances WITHOUT
-// owner_id, runs the deterministic backfill exactly as migration 040 does, and
-// proves SUM(balance) per (user -> owner) is identical before and after — no
-// credits created or destroyed, and every user maps to exactly one owner.
-func TestMigration040_BackfillPreservesBalancesExactly(t *testing.T) {
+// TestSchema_EnforcesNotNullTenantAndOwner proves the HARDCUT schema (migrations
+// 039 + 040, applied fresh / greenfield) enforces NOT NULL on tenant_id and
+// owner_id for the credit tables: an insert that omits either is rejected by the
+// database, so there is no path to a tenant-less or owner-less credit row.
+func TestSchema_EnforcesNotNullTenantAndOwner(t *testing.T) {
 	bunDB, ctx := startOwnerOrgPostgres(t)
 
 	creditTypeID := uuid.New()
 	_, err := bunDB.NewInsert().Model(&models.CreditType{
 		ID:            creditTypeID,
-		Name:          "owner_backfill_" + uuid.NewString(),
-		DisplayName:   "Owner Backfill",
+		Name:          "notnull_" + uuid.NewString(),
+		DisplayName:   "NotNull",
 		Unit:          "units",
 		DecimalPlaces: 0,
 		IsActive:      true,
@@ -92,92 +90,76 @@ func TestMigration040_BackfillPreservesBalancesExactly(t *testing.T) {
 	}).Exec(ctx)
 	require.NoError(t, err)
 
-	// Seed legacy balances with owner_id NULL (as if written before 040), by
-	// nulling owner_id after insert. Distinct users + amounts.
-	users := map[string]int64{
-		uuid.NewString(): 1000,
-		uuid.NewString(): 2500,
-		uuid.NewString(): 0,
-		uuid.NewString(): 777,
-	}
-	var wantTotal int64
-	for userID, bal := range users {
-		wantTotal += bal
-		_, err := bunDB.NewInsert().Model(&models.UserCreditBalance{
-			ID:           uuid.New(),
-			UserID:       userID,
-			CreditTypeID: creditTypeID,
-			Balance:      bal,
-			HeldBalance:  0,
-			CreatedAt:    time.Now().UTC(),
-			UpdatedAt:    time.Now().UTC(),
-		}).Exec(ctx)
-		require.NoError(t, err)
-	}
-	// Force owner_id NULL to simulate pre-040 rows.
-	_, err = bunDB.NewUpdate().Model((*models.UserCreditBalance)(nil)).
-		Set("owner_id = NULL").
-		Where("credit_type_id = ?", creditTypeID).
-		Exec(ctx)
+	owner := uuid.New()
+
+	// owner_id has no default: an insert that leaves it unset must be rejected.
+	_, err = bunDB.ExecContext(ctx,
+		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, balance, held_balance)
+		 VALUES (?, ?, ?, 0, 0)`,
+		uuid.New(), uuid.NewString(), creditTypeID)
+	require.Error(t, err, "insert with NULL owner_id must violate NOT NULL")
+
+	// tenant_id is NOT NULL but defaulted; an explicit NULL must still be rejected.
+	_, err = bunDB.ExecContext(ctx,
+		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, owner_id, tenant_id, balance, held_balance)
+		 VALUES (?, ?, ?, ?, NULL, 0, 0)`,
+		uuid.New(), uuid.NewString(), creditTypeID, owner)
+	require.Error(t, err, "insert with explicit NULL tenant_id must violate NOT NULL")
+
+	// A fully-specified owner+tenant row inserts cleanly.
+	_, err = bunDB.ExecContext(ctx,
+		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, owner_id, balance, held_balance)
+		 VALUES (?, ?, ?, ?, 0, 0)`,
+		uuid.New(), uuid.NewString(), creditTypeID, owner)
+	require.NoError(t, err, "owner+tenant-defaulted insert must succeed")
+}
+
+// TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness proves the HARDCUT
+// owner+tenant-scoped uniqueness on user_credit_balances: two rows with the same
+// (tenant, owner, credit_type) collide, while the SAME owner across DISTINCT
+// tenants does NOT collide (tenant is part of the key).
+func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
+	bunDB, ctx := startOwnerOrgPostgres(t)
+
+	creditTypeID := uuid.New()
+	_, err := bunDB.NewInsert().Model(&models.CreditType{
+		ID:            creditTypeID,
+		Name:          "uniq_" + uuid.NewString(),
+		DisplayName:   "Uniq",
+		Unit:          "units",
+		DecimalPlaces: 0,
+		IsActive:      true,
+		CreatedAt:     time.Now().UTC(),
+	}).Exec(ctx)
 	require.NoError(t, err)
 
-	// BEFORE: sum of all balances for this credit type.
-	var beforeTotal int64
-	require.NoError(t, bunDB.NewSelect().Model((*models.UserCreditBalance)(nil)).
-		ColumnExpr("COALESCE(SUM(balance),0)").
-		Where("credit_type_id = ?", creditTypeID).
-		Scan(ctx, &beforeTotal))
-	require.Equal(t, wantTotal, beforeTotal)
+	owner := uuid.New()
 
-	// Re-run the EXACT backfill expression migration 040 uses. (Idempotent:
-	// only touches owner_id IS NULL rows.)
-	backfill := `
-		UPDATE billing.user_credit_balances AS tbl SET owner_id = (
-			WITH h AS (
-				SELECT substring(
-					public.digest(decode('6f1c9b3e2a445d7c8e109a2b3c4d5e6f','hex')::bytea
-						|| convert_to('openrails:personal-org:' || tbl.user_id, 'UTF8'), 'sha1')
-					FROM 1 FOR 16
-				) AS b
-			)
-			SELECT encode(
-				set_byte(set_byte(h.b, 6, (get_byte(h.b,6) & 15) | 80), 8, (get_byte(h.b,8) & 63) | 128),
-				'hex'
-			)::uuid FROM h
-		)
-		WHERE tbl.owner_id IS NULL`
-	_, err = bunDB.ExecContext(ctx, backfill)
+	// First row in the default tenant.
+	_, err = bunDB.ExecContext(ctx,
+		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, owner_id, balance, held_balance)
+		 VALUES (?, ?, ?, ?, 0, 0)`,
+		uuid.New(), uuid.NewString(), creditTypeID, owner)
 	require.NoError(t, err)
 
-	// AFTER: every row now has owner_id; total unchanged.
-	var afterTotal int64
-	require.NoError(t, bunDB.NewSelect().Model((*models.UserCreditBalance)(nil)).
-		ColumnExpr("COALESCE(SUM(balance),0)").
-		Where("credit_type_id = ?", creditTypeID).
-		Scan(ctx, &afterTotal))
-	require.Equal(t, beforeTotal, afterTotal, "backfill must not create or destroy credits")
+	// Duplicate (tenant, owner, credit_type) -> unique violation.
+	_, err = bunDB.ExecContext(ctx,
+		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, owner_id, balance, held_balance)
+		 VALUES (?, ?, ?, ?, 0, 0)`,
+		uuid.New(), uuid.NewString(), creditTypeID, owner)
+	require.Error(t, err, "duplicate (tenant, owner, credit_type) must violate uniqueness")
 
-	var nullOwners int
-	require.NoError(t, bunDB.NewSelect().Model((*models.UserCreditBalance)(nil)).
-		ColumnExpr("COUNT(*)").
-		Where("credit_type_id = ? AND owner_id IS NULL", creditTypeID).
-		Scan(ctx, &nullOwners))
-	require.Zero(t, nullOwners, "every legacy balance must be assigned an owner")
-
-	// Per-user invariant: SQL-derived owner_id must equal the Go derivation, and
-	// each user's balance is preserved 1:1 under its owner.
-	for userID, bal := range users {
-		var gotOwner string
-		var gotBalI int64
-		require.NoError(t, bunDB.NewSelect().
-			Model((*models.UserCreditBalance)(nil)).
-			ColumnExpr("owner_id::text AS owner, balance").
-			Where("credit_type_id = ? AND user_id = ?", creditTypeID, userID).
-			Scan(ctx, &gotOwner, &gotBalI))
-		require.Equal(t, identity.PersonalOrgID(userID).String(), gotOwner,
-			"SQL backfill owner_id must match Go identity.PersonalOrgID for %s", userID)
-		require.Equal(t, bal, gotBalI, "per-user balance must be preserved exactly")
-	}
+	// Same owner + credit_type in a DIFFERENT tenant -> allowed.
+	otherTenant := uuid.New()
+	_, err = bunDB.ExecContext(ctx,
+		`INSERT INTO billing.tenants (id, slug, name, status) VALUES (?, ?, 'Other', 'active')`,
+		otherTenant, "other_"+uuid.NewString())
+	require.NoError(t, err)
+	_, err = bunDB.ExecContext(ctx,
+		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, owner_id, tenant_id, balance, held_balance)
+		 VALUES (?, ?, ?, ?, ?, 0, 0)`,
+		uuid.New(), uuid.NewString(), creditTypeID, owner, otherTenant)
+	require.NoError(t, err, "same owner in a different tenant must NOT collide")
 }
 
 // seedSpendable deposits `amount` credits for a user via the service, creating a
