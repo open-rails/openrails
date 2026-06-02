@@ -104,6 +104,31 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
 	}
+	// Credit money-in + reconciliation workers (#239/#240/#241/#243). The
+	// auto-top-up and arrears workers carry no Charger and the low-balance worker
+	// no Alerter yet, so they log-and-skip until the processor/notification wiring
+	// lands; the reconcile worker runs fully (alert-only).
+	if err := river.AddWorkerSafely(workers, &riverjobs.LowBalanceAlertWorker{
+		Credits: r.CreditsService,
+	}); err != nil {
+		return fmt.Errorf("add low-balance alert worker: %w", err)
+	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.AutoTopupWorker{
+		Credits: r.CreditsService,
+	}); err != nil {
+		return fmt.Errorf("add auto-topup worker: %w", err)
+	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.ArrearsChargeWorker{
+		Credits: r.CreditsService,
+	}); err != nil {
+		return fmt.Errorf("add arrears charge worker: %w", err)
+	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.CreditReconcileWorker{
+		Credits: r.CreditsService,
+		Clock:   clock,
+	}); err != nil {
+		return fmt.Errorf("add credit reconcile worker: %w", err)
+	}
 	return nil
 }
 
@@ -252,6 +277,52 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			&river.PeriodicJobOpts{RunOnStart: false},
 		))
 	}
+
+	// Every hour: low-balance alerts (#240) + arrears collection (#241).
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(time.Hour),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.LowBalanceAlertArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(time.Hour),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.ArrearsChargeArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 15 minutes: prepaid auto-top-up (#239).
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(15*time.Minute),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.AutoTopupArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 30 minutes: credit ledger reconciliation (#243, alert-only).
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(30*time.Minute),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.CreditReconcileArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 30 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
 
 	return jobs, nil
 }
