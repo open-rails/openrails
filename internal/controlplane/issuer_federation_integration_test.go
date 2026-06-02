@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +72,26 @@ var (
 func newFedTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
+
+	// Escape hatch for environments where the testcontainers dynamic-port/ryuk
+	// path is flaky (e.g. a busy Docker host): point at an existing Postgres via
+	// OPENRAILS_TEST_DB_DSN and skip spinning a container.
+	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")); dsn != "" {
+		pool, err := pgxpool.New(ctx, dsn)
+		require.NoError(t, err)
+		t.Cleanup(pool.Close)
+		_, err = pool.Exec(ctx, fedSchemaDDL)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `
+			INSERT INTO billing.tenants (id, slug, name, authkit_org_slug) VALUES
+			  ($1, 'tenant-a', 'Tenant A', 'org-a'),
+			  ($2, 'tenant-b', 'Tenant B', 'org-b')
+			ON CONFLICT (id) DO NOTHING
+		`, fedTenantA.String(), fedTenantB.String())
+		require.NoError(t, err)
+		return pool
+	}
+
 	container, err := postgres.Run(ctx,
 		"postgres:18-alpine",
 		postgres.WithDatabase("openrails"),

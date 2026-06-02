@@ -5,6 +5,9 @@ package db
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +38,24 @@ func mustID(s string) tenant.ID {
 		panic(err)
 	}
 	return id
+}
+
+// newDBRetry opens a *db.DB, retrying transient connect failures. Busy/CI Docker
+// hosts intermittently drop bridge packets (i/o timeout) on connect; the test
+// logic is unaffected, so a few retries keep the suite from flaking.
+func newDBRetry(t *testing.T, dsn string) *DB {
+	t.Helper()
+	var lastErr error
+	for i := 0; i < 8; i++ {
+		d, err := NewDB(&config.DBConfig{URL: dsn})
+		if err == nil {
+			return d
+		}
+		lastErr = err
+		time.Sleep(2 * time.Second)
+	}
+	require.NoError(t, lastErr)
+	return nil
 }
 
 // rlsProbe is the tenant-owned probe table, mirroring a real billing.* table.
@@ -72,6 +93,19 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON billing.rls_probe TO openrails_app;
 func startRLSContainer(t *testing.T) (superDSN string, appDSN string) {
 	t.Helper()
 	ctx := context.Background()
+
+	// Escape hatch for flaky-testcontainers hosts: OPENRAILS_TEST_DB_DSN is the
+	// SUPER/admin DSN; the openrails_app DSN is derived by swapping the userinfo
+	// (the setup DDL creates that role with password 'app_pw').
+	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")); dsn != "" {
+		u, err := url.Parse(dsn)
+		require.NoError(t, err)
+		superDSN = dsn
+		u.User = url.UserPassword("openrails_app", "app_pw")
+		appDSN = u.String()
+		return superDSN, appDSN
+	}
+
 	container, err := postgres.Run(ctx,
 		"postgres:18-alpine",
 		postgres.WithDatabase("openrails"),
@@ -100,10 +134,9 @@ func TestRLSEnforcement_Under_OpenRailsAppRole(t *testing.T) {
 
 	// As the superuser: create schema/table/policy/role and seed both tenants
 	// (the superuser bypasses RLS, so it can write any tenant's rows).
-	super, err := NewDB(&config.DBConfig{URL: superDSN})
-	require.NoError(t, err)
+	super := newDBRetry(t, superDSN)
 	defer super.Close()
-	_, err = super.GetDB().ExecContext(ctx, rlsSetupDDL)
+	_, err := super.GetDB().ExecContext(ctx, rlsSetupDDL)
 	require.NoError(t, err)
 	seed := []rlsProbe{
 		{ID: "00000000-0000-0000-0000-00000000000a", TenantID: rlsTenantA.String(), Val: "a-row"},
@@ -120,8 +153,7 @@ func TestRLSEnforcement_Under_OpenRailsAppRole(t *testing.T) {
 	require.Error(t, super.EnforceRLSPosture(ctx, true))
 
 	// As openrails_app: RLS ENFORCES.
-	app, err := NewDB(&config.DBConfig{URL: appDSN})
-	require.NoError(t, err)
+	app := newDBRetry(t, appDSN)
 	defer app.Close()
 	appPosture, err := app.CheckRLSPosture(ctx)
 	require.NoError(t, err)
