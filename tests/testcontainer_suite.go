@@ -250,6 +250,15 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 				QueryURL:      "https://secure.networkmerchants.com/api/query.php",
 			},
 		},
+		// Pyth price-feed config is required whenever a Solana processor is
+		// configured (config.validateSolanaProcessor). Use the package defaults
+		// so the integration suite can bootstrap.
+		Pyth: &config.PythConfig{
+			HermesURL:        config.DefaultPythHermesURL,
+			MaxPriceAge:      config.DefaultPythMaxPriceAge,
+			MaxConfidenceBPS: config.DefaultPythMaxConfidenceBPS,
+			PriceFeeds:       config.DefaultPythPriceFeeds(),
+		},
 	}
 	if suite.port != 0 {
 		suite.Config.Port = config.FlexiblePort(suite.port)
