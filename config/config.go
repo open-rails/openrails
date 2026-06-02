@@ -168,6 +168,15 @@ type DBConfig struct {
 	Username string `koanf:"username"`
 	Password string `koanf:"password"`
 	SSLMode  string `koanf:"sslmode"`
+
+	// RequireRLS makes startup FAIL if the connected role does not enforce Row
+	// Level Security (i.e. it is a superuser or a BYPASSRLS role). Set this in
+	// managed multi-tenant deployments, where the app MUST connect as the
+	// unprivileged openrails_app role (migration 050) so the per-tenant RLS
+	// policies actually constrain queries (issue #227). Left false for self-hosted
+	// single-tenant deployments, where RLS is a backstop and running as a
+	// privileged role is acceptable.
+	RequireRLS bool `koanf:"require_rls"`
 }
 
 // GetConnectionString returns the database connection string.
