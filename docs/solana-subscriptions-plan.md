@@ -53,11 +53,17 @@ also confirmed via `create_plan` on devnet:
 | **PYUSD** | Token-2022 | PermanentDelegate, TransferFee | ❌ (devnet error 121 `mintHasPermanentDelegate`) |
 | **USDG** | Token-2022 | PermanentDelegate, TransferFee, ConfidentialTransfer, TransferHook, MintCloseAuthority | ❌ |
 | **BUIDL** | Token-2022 | PermanentDelegate, TransferHook, MintCloseAuthority (permissioned security) | ❌ |
-| **USDT** | — | excluded by policy (freeze/counterparty risk) | ❌ |
 
 Mint extensions are immutable, so a rejected token can never become eligible.
 `RecurringStablecoins = {USDC, USD1}`. New stablecoins are added by re-running the
 mint-inspection check.
+
+**One-off vs. recurring for these stablecoins:** PYUSD, USDG, and BUIDL are
+supported for **one-off** purchases (added to the token registry) but are **not
+used for recurring** — they can't be rebilled, so we don't prefer them and never
+attach them to recurring prices. The recurring-ineligible feedless stablecoins
+(USD1/USDG/BUIDL) are priced at a flat $1.00 for one-off quoting (no Pyth feed
+needed); USDC/PYUSD keep their Pyth feeds.
 
 ### One-off vs. recurring token asymmetry
 

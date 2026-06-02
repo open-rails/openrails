@@ -83,15 +83,21 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 	if strings.TrimSpace(tokenCfg.Mint) == "" {
 		return nil, fmt.Errorf("token %s missing mint configuration", tokenSymbol)
 	}
-	if priceProvider == nil {
-		return nil, fmt.Errorf("token price provider is not configured")
-	}
-	tokenPriceUSD, err := priceProvider.PriceUSD(ctx, tokenSymbol)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch token price: %w", err)
-	}
-	if tokenPriceUSD <= 0 {
-		return nil, fmt.Errorf("token price unavailable for %s", tokenSymbol)
+	// Feedless stablecoins (USD1/USDG/BUIDL) are pegged to $1.00 and have no Pyth
+	// feed; price them directly. USDC/PYUSD keep their configured Pyth feeds.
+	tokenPriceUSD := 1.0
+	if !config.IsFeedlessStablecoin(tokenSymbol) {
+		if priceProvider == nil {
+			return nil, fmt.Errorf("token price provider is not configured")
+		}
+		p, err := priceProvider.PriceUSD(ctx, tokenSymbol)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch token price: %w", err)
+		}
+		if p <= 0 {
+			return nil, fmt.Errorf("token price unavailable for %s", tokenSymbol)
+		}
+		tokenPriceUSD = p
 	}
 
 	scale := math.Pow10(tokenCfg.Decimals)

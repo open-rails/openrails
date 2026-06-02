@@ -12,7 +12,6 @@ func TestIsRecurringStablecoinSymbol(t *testing.T) {
 		"PYUSD": false, // Token-2022 PermanentDelegate (devnet error 121)
 		"USDG":  false, // Token-2022 PermanentDelegate+TransferFee+...
 		"BUIDL": false, // Token-2022 PermanentDelegate+TransferHook (permissioned)
-		"USDT":  false, // permanently excluded
 		"SOL":   false, // volatile
 		"":      false,
 	}
@@ -46,18 +45,18 @@ func TestResolveRecurringMint(t *testing.T) {
 		t.Error("ResolveRecurringMint(USD1, devnet) should fail — USD1 has no devnet mint")
 	}
 
-	// Off-allowlist tokens fail closed even though they're otherwise supported.
-	for _, sym := range []string{"PYUSD", "USDG", "BUIDL", "USDT", "SOL", "NOPE"} {
+	// Off-allowlist tokens fail closed even though they're supported for one-off.
+	for _, sym := range []string{"PYUSD", "USDG", "BUIDL", "SOL"} {
 		if _, _, err := ResolveRecurringMint(sym, "mainnet"); err == nil {
 			t.Errorf("ResolveRecurringMint(%s) = nil error, want rejection", sym)
 		}
 	}
 
 	// The eligibility error is typed.
-	_, _, err := ResolveRecurringMint("USDT", "mainnet")
+	_, _, err := ResolveRecurringMint("PYUSD", "mainnet")
 	var typed ErrTokenNotRecurringEligible
 	if !errors.As(err, &typed) {
-		t.Errorf("expected ErrTokenNotRecurringEligible for USDT, got %T", err)
+		t.Errorf("expected ErrTokenNotRecurringEligible for PYUSD, got %T", err)
 	}
 }
 
@@ -72,7 +71,7 @@ func TestValidateRecurringMint(t *testing.T) {
 	if err := ValidateRecurringMint("USDC", "SomeOtherMint1111111111111111111111111111111", "mainnet"); err == nil {
 		t.Error("mismatched mint should fail")
 	}
-	if err := ValidateRecurringMint("USDT", goodMint, "mainnet"); err == nil {
+	if err := ValidateRecurringMint("PYUSD", goodMint, "mainnet"); err == nil {
 		t.Error("off-allowlist symbol should fail regardless of mint")
 	}
 }

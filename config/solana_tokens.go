@@ -47,7 +47,35 @@ func DefaultSupportedTokens() map[string]SolanaToken {
 			Mint:     "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB",
 			Decimals: 6,
 		},
+		// USDG (Global Dollar, Paxos) and BUIDL (BlackRock/Securitize) are
+		// Token-2022 mints with extensions the Subscriptions program rejects, so
+		// they are supported for ONE-OFF purchases only (NOT recurring). Mainnet only.
+		"USDG": {
+			Name:     "Global Dollar",
+			Mint:     "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
+			Decimals: 6,
+		},
+		"BUIDL": {
+			Name:     "BlackRock USD Institutional Digital Liquidity Fund",
+			Mint:     "GyWgeqpy5GueU2YbkE8xqUeVEokCMMCEeUrfbtMw6phr",
+			Decimals: 6,
+		},
 	}
+}
+
+// feedlessStablecoins are USD-pegged tokens priced at $1.00 for one-off quoting
+// without a market price feed (they have no Pyth feed). USDC/PYUSD are NOT here —
+// they keep their existing Pyth feeds.
+var feedlessStablecoins = map[string]bool{
+	"USD1":  true,
+	"USDG":  true,
+	"BUIDL": true,
+}
+
+// IsFeedlessStablecoin reports whether symbol is a USD-pegged token quoted at
+// $1.00 without a price feed.
+func IsFeedlessStablecoin(symbol string) bool {
+	return feedlessStablecoins[strings.ToUpper(strings.TrimSpace(symbol))]
 }
 
 func DefaultDevnetTokens() map[string]SolanaToken {

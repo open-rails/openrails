@@ -29,7 +29,6 @@ import (
 //   - PYUSD — Token-2022 w/ PermanentDelegate+TransferFee → REJECTED (devnet error 121 mintHasPermanentDelegate).
 //   - USDG  — Token-2022 w/ PermanentDelegate+TransferFee+ConfidentialTransfer+TransferHook → rejected.
 //   - BUIDL — Token-2022 w/ PermanentDelegate+TransferHook (permissioned security) → rejected.
-//   - USDT  — excluded by policy (regulatory/counterparty-freeze risk).
 //   - SOL / volatile — excluded: on-chain plan amounts are immutable, so only a
 //     stablecoin keeps a fixed base-unit amount ≈ a fixed USD amount across cycles.
 //
@@ -57,7 +56,7 @@ func (e ErrTokenNotRecurringEligible) Error() string {
 
 // ResolveRecurringMint validates that symbol is recurring-eligible and returns
 // its mint + decimals for the given network (mainnet/devnet). It fails closed:
-// an unknown token, an off-allowlist token (USDT/SOL/PYUSD-for-now), or a token
+// an unknown token, an off-allowlist token (PYUSD/USDG/BUIDL/SOL), or a token
 // without a configured mint for the network all return an error, so a caller can
 // never publish a plan against an ineligible or misconfigured mint.
 func ResolveRecurringMint(symbol, network string) (mint string, decimals int, err error) {
