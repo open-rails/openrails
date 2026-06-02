@@ -181,8 +181,10 @@ billing.NewHTTPHandler(embedded.HTTPHandlerOptions{
 	IncludeWebhooks: true,
 })
 
-// Internal service-to-service API. Embedded hosts usually call Service() instead.
-billing.PrivateHandler() http.Handler
+// Server-to-server operations: embedded hosts call the in-process Service()
+// facade (below) after authorizing the action themselves. There is no separate
+// private/mTLS HTTP surface — standalone machine callers use OpenRails-issued
+// OATs against the public /v1/service/* routes (issue #222).
 ```
 
 ## In-Process Service API

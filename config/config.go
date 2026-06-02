@@ -69,10 +69,9 @@ type StoreConfig struct {
 }
 
 type Config struct {
-	Env         string            `koanf:"env,omitempty"`
-	Port        FlexiblePort      `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
-	Host        string            `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
-	ServiceMTLS ServiceMTLSConfig `koanf:"service_mtls,omitempty"`
+	Env  string       `koanf:"env,omitempty"`
+	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
+	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
 	// Cloudflared contains Cloudflare Tunnel settings used for local/dev tooling.
 	// Billing does not run cloudflared, but we keep these keys in config so that
@@ -126,44 +125,6 @@ type Config struct {
 	RateLimits   *RateLimitsConfig `koanf:"rate_limits,omitempty"`
 	Captcha      *CaptchaConfig    `koanf:"captcha,omitempty"`
 	FeatureFlags *FeatureFlags     `koanf:"feature_flags,omitempty"`
-}
-
-// ServiceMTLSConfig controls the standalone service-to-service mTLS listener.
-type ServiceMTLSConfig struct {
-	Enabled           bool                               `koanf:"enabled,omitempty"`
-	Port              FlexiblePort                       `koanf:"port,omitempty"`
-	CertFile          string                             `koanf:"cert_file,omitempty"`
-	KeyFile           string                             `koanf:"key_file,omitempty"`
-	ClientCAFile      string                             `koanf:"client_ca_file,omitempty"`
-	AllowedClientSANs []string                           `koanf:"allowed_client_sans,omitempty"`
-	Clients           map[string]ServiceMTLSClientConfig `koanf:"clients,omitempty"`
-}
-
-// ServiceMTLSClientConfig maps a certificate identity to service route scopes.
-type ServiceMTLSClientConfig struct {
-	Scopes []string `koanf:"scopes,omitempty"`
-}
-
-// ClientScopes returns the configured service identities and their route scopes.
-func (c ServiceMTLSConfig) ClientScopes() map[string][]string {
-	out := make(map[string][]string, len(c.Clients)+len(c.AllowedClientSANs))
-	for identity, client := range c.Clients {
-		identity = strings.TrimSpace(identity)
-		if identity == "" {
-			continue
-		}
-		out[identity] = nonEmptyStrings(client.Scopes)
-	}
-	for _, identity := range c.AllowedClientSANs {
-		identity = strings.TrimSpace(identity)
-		if identity == "" {
-			continue
-		}
-		if _, exists := out[identity]; !exists {
-			out[identity] = []string{"*"}
-		}
-	}
-	return out
 }
 
 // DBConfig holds database configuration.
@@ -802,10 +763,6 @@ func Validate(cfg *Config) error {
 			return fmt.Errorf("cors_origins must be configured outside development")
 		}
 	}
-	if err := validateServiceMTLSConfig(cfg); err != nil {
-		return err
-	}
-
 	// Validate Processors map
 	if len(cfg.Processors) > 0 {
 		if err := validateProcessors(cfg, isDev); err != nil {
@@ -1239,49 +1196,12 @@ func validateDatabase(cfg *DBConfig) error {
 	return nil
 }
 
-func validateServiceMTLSConfig(cfg *Config) error {
-	if cfg == nil || !cfg.ServiceMTLS.Enabled {
-		return nil
-	}
-	if cfg.ServiceMTLS.Port <= 0 {
-		return fmt.Errorf("service_mtls.port must be configured when service_mtls.enabled=true")
-	}
-	if cfg.ServiceMTLS.Port == cfg.Port {
-		return fmt.Errorf("service_mtls.port must be different from public port")
-	}
-	if strings.TrimSpace(cfg.ServiceMTLS.CertFile) == "" || strings.TrimSpace(cfg.ServiceMTLS.KeyFile) == "" {
-		return fmt.Errorf("service_mtls.cert_file and service_mtls.key_file are required when service_mtls.enabled=true")
-	}
-	if strings.TrimSpace(cfg.ServiceMTLS.ClientCAFile) == "" {
-		return fmt.Errorf("service_mtls.client_ca_file is required when service_mtls.enabled=true")
-	}
-	if len(cfg.ServiceMTLS.ClientScopes()) == 0 {
-		return fmt.Errorf("service_mtls.clients or service_mtls.allowed_client_sans must include at least one identity when service_mtls.enabled=true")
-	}
-	return nil
-}
-
-func nonEmptyStrings(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
-}
-
 // GetDefaultBillingConfig returns a billing configuration with sensible defaults
 func GetDefaultBillingConfig() *Config {
 	return &Config{
 		Env:  "development",
 		Host: "0.0.0.0",
 		Port: 2053,
-		ServiceMTLS: ServiceMTLSConfig{
-			Enabled: false,
-			Port:    2054,
-		},
 		DB: &DBConfig{
 			Host:     "localhost",
 			Port:     "5432",
@@ -1474,13 +1394,6 @@ func Load(configPath string) (*Config, error) {
 			return "auth.expected_audience"
 		}
 
-		if s == "service_mtls_port" {
-			return "service_mtls.port"
-		}
-		if strings.HasPrefix(s, "service_mtls_") {
-			return "service_mtls." + strings.TrimPrefix(s, "service_mtls_")
-		}
-
 		// Special case: CORS_ORIGINS -> cors_origins (top-level, not cors.origins)
 		if s == "cors_origins" {
 			return "cors_origins"
@@ -1537,7 +1450,7 @@ func Load(configPath string) (*Config, error) {
 			}
 			return mapped, out
 		}
-		if mapped == "auth.issuers" || mapped == "service_mtls.allowed_client_sans" {
+		if mapped == "auth.issuers" {
 			parts := strings.Split(v, ",")
 			out := make([]string, 0, len(parts))
 			for _, p := range parts {

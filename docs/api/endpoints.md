@@ -38,7 +38,7 @@ List endpoints use a Stripe-like envelope:
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
 | User routes (`/v1/checkout`, `/v1/me/*`) | `Authorization: Bearer <JWT>` issued by AuthKit |
 | Admin routes (`/v1/admin/*`) | Same JWT header, user must have the `admin` role |
-| Service API (`SERVICE_MTLS_PORT`, default 2054) | Verified mTLS client certificate with an allowed service identity |
+| Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <OpenRails-issued OAT>`; each route requires an `openrails:*` permission (see Service API section) |
 | Webhooks (`/v1/webhooks/:provider`) | Provider-specific verification (see notes) |
 
 ## Health & Service Banner
@@ -240,45 +240,60 @@ Lists credit transactions for the credit type (including hold lifecycle rows). Q
 ### POST /v1/me/portal
 Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
 
-## Service API (mTLS Port 2054)
+## Service API (`/v1/service/*`, OAT-authenticated)
 
-All endpoints require a verified mTLS client certificate and run on the dedicated service listener.
-The certificate identity must be configured under `service_mtls.clients` with the needed scopes:
-`entitlements:read`, `credits:read`, `credits:write`, `credit_types:read`, and/or `credit_types:write`.
+Server-to-server endpoints. They live on the SAME public port as everything else
+(issue #222) — there is no private port, mTLS listener, or API key. Machine callers
+present an OpenRails-issued tenant OAT:
 
-### GET /v1/users/{user_id}/entitlements
+```
+Authorization: Bearer <openrails_oat_...>
+```
+
+The OAT is resolved through the OpenRails-owned AuthKit control plane: its owning
+org determines the acting tenant, and its granted permissions gate each route. The
+canonical permission vocabulary is colon-form `openrails:<resource>:<action>`:
+
+| Route | Required permission |
+|-------|---------------------|
+| `GET /v1/service/users/{user_id}/entitlements` | `openrails:entitlements:read` |
+| `GET /v1/service/users/{user_id}/credits`, `GET /v1/service/credits/users/{user_id}`, `GET /v1/service/credits/transactions/lookup`, `GET /v1/service/credit-types` | `openrails:credits:read` |
+| `POST /v1/service/credits/{deposit,withdraw,hold}`, `.../hold(s)/{id}/{capture,release}` | `openrails:credits:write` |
+| `POST/PATCH /v1/service/credit-types*` (definition writes) | `openrails:catalog:write` |
+
+`openrails:admin` satisfies any of the above. Embedded hosts skip HTTP entirely and
+call the in-process `pkg/service` facade after authorizing the action themselves.
+
+### GET /v1/service/users/{user_id}/entitlements
 Returns active entitlements for the user at the current time. Optional query param `at` (RFC3339) to query
 entitlements at a specific time. Response: array of entitlement records.
 
-### GET /v1/users/{user_id}/credits
-Deprecated path (was documented incorrectly). Use `GET /v1/credits/users/{user_id}`.
-
-### GET /v1/credits/users/{user_id}
+### GET /v1/service/credits/users/{user_id}
 Returns credit balance summary for a user. Optional query param `type` (defaults to `api_credits`, which must exist in `billing.credit_types`).
 Response: `{ type, balance, held_balance }`.
 
-### POST /v1/credits/deposit
+### POST /v1/service/credits/deposit
 Deposit/grant credits. Body: `{ user_id, credit_type, amount, source, source_id?, expires_at?, description? }` where `expires_at` is epoch seconds.
 Returns a `CreditTransaction`. If `source_id` is provided, deposits are idempotent per `(user_id, credit_type, source, source_id)`.
 
-### POST /v1/credits/withdraw
+### POST /v1/service/credits/withdraw
 Withdraw credits. Body: `{ user_id, credit_type, amount, source, source_id? }`.
 Returns a `CreditTransaction`. On insufficient credits, returns 402 with `insufficient_credits`.
 
-### POST /v1/credits/hold
+### POST /v1/service/credits/hold
 Reserve credits for long-running jobs. Body: `{ user_id, credit_type, amount, source, source_id, expires_at }` (epoch seconds).
 Returns a `CreditTransaction` with `transaction_type='hold'` and `status='active'`. The returned `id` is the durable identifier you later use to capture or release the hold. On insufficient credits, returns 402.
 
 Idempotency:
 - Hold creation is idempotent per `(user_id, credit_type, source, source_id)`; retries return the existing hold transaction.
 
-### POST /v1/credits/holds/{id}/capture
+### POST /v1/service/credits/holds/{id}/capture
 Capture a hold: `{ amount }` (amount <= hold). Updates the same `CreditTransaction` row to `status='captured'`, setting `captured_amount` and `amount` (negative).
 
-### POST /v1/credits/holds/{id}/release
+### POST /v1/service/credits/holds/{id}/release
 Release a hold without spending credits. Response `{ ok: true }`.
 
-### GET /v1/credits/transactions/lookup
+### GET /v1/service/credits/transactions/lookup
 Lookup a single credit transaction by its idempotency key.
 
 Query params:
@@ -294,19 +309,19 @@ Returns a `CreditTransaction` or 404.
 
 These endpoints let the host define credit types in `billing.credit_types` (OpenRails does not seed credit types in production).
 
-### GET /v1/credit-types?active_only=true
+### GET /v1/service/credit-types?active_only=true
 List credit types.
 
-### POST /v1/credit-types
+### POST /v1/service/credit-types
 Create a credit type. Body: `{ name, display_name, unit, decimal_places }`.
 
-### PATCH /v1/credit-types/{name}
+### PATCH /v1/service/credit-types/{name}
 Update mutable fields. Body: `{ display_name?, is_active? }`. `name`, `unit`, and `decimal_places` are treated as immutable.
 
-### POST /v1/credit-types/{name}/deactivate
+### POST /v1/service/credit-types/{name}/deactivate
 Marks the credit type inactive.
 
-### POST /v1/credit-types/{name}/activate
+### POST /v1/service/credit-types/{name}/activate
 Marks the credit type active.
 
 ### Catalog (definition surface)

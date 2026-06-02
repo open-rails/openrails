@@ -37,7 +37,7 @@ func (c *ControlPlane) HasOperatorPermission(ctx context.Context, orgSlug, userI
 	return c.Core().HasPermission(ctx, slug, userID, strings.TrimSpace(perm))
 }
 
-// IsOperatorAdmin reports whether the user holds the broad openrails.admin
+// IsOperatorAdmin reports whether the user holds the broad openrails:admin
 // permission in the operator org via live AuthKit state.
 func (c *ControlPlane) IsOperatorAdmin(ctx context.Context, orgSlug, userID string) (bool, error) {
 	return c.HasOperatorPermission(ctx, orgSlug, userID, PermAdmin)

@@ -8,7 +8,7 @@
 //     full DefaultAPI surface),
 //   - runs with public user registration and public org management disabled,
 //   - bootstraps the default tenant's operator org, OpenRails roles, the
-//     `openrails.*` permission catalog, and an initial operator OAT through
+//     `openrails:*` permission catalog, and an initial operator OAT through
 //     in-process AuthKit CORE calls (CreateOrg / DefineRole / AssignRole /
 //     MintOrgAccessToken) — never raw SQL or a private HTTP route.
 //
@@ -22,35 +22,40 @@ import authcore "github.com/open-rails/authkit/core"
 
 // Permission is an OpenRails permission string in the OpenRails permission
 // catalog. AuthKit treats permission strings as opaque; OpenRails owns their
-// meaning. The `openrails.` prefix is kept in every deployment mode so leak
+// meaning. The `openrails:` prefix is kept in every deployment mode so leak
 // scanners and audits can identify OpenRails-issued grants.
 //
-// NOTE on form: issue #224 specifies the dot-form names below
-// (e.g. openrails.credits.read). Issue #222 later proposes a colon-form
-// resource:action vocabulary (e.g. openrails:credits:hold). The dot-form here is
-// the #224 control-plane catalog; reconciling the two forms is tracked as an
-// open question for #222 and intentionally NOT decided here.
+// CANONICAL FORM (reconciled for issue #222): OpenRails permissions use the
+// COLON-form `openrails:<resource>:<action>` vocabulary (e.g.
+// `openrails:credits:hold`). Issue #224 originally seeded a dot-form catalog
+// (e.g. openrails.credits.read); #222's STEP 3 requires picking ONE canonical
+// form and applying it everywhere. We adopt the colon-form that #222's permission
+// catalog task spells out, and this #224 control-plane catalog is updated to
+// match. There is exactly one permission vocabulary in OpenRails.
 type Permission = authcore.PermissionDef
 
-// The OpenRails permission catalog (issue #224). These are the permission
-// strings seeded into AuthKit and granted to the operator role.
+// The OpenRails permission catalog. These are the permission strings seeded into
+// AuthKit and granted to the operator role. Colon-form `openrails:resource:action`
+// is the single canonical vocabulary (issue #222).
 const (
 	// PermAdmin is the broad OpenRails operator/admin capability.
-	PermAdmin = "openrails.admin"
+	PermAdmin = "openrails:admin"
 
-	// Credit operations (server-to-server / operator).
-	PermCreditsRead  = "openrails.credits.read"
-	PermCreditsWrite = "openrails.credits.write"
+	// Credit operations (server-to-server / operator). reserve/hold, capture,
+	// release, withdraw, deposit, and balance/transaction reads are gated by
+	// these two coarse capabilities (write covers all mutating credit ops).
+	PermCreditsRead  = "openrails:credits:read"
+	PermCreditsWrite = "openrails:credits:write"
 
 	// Entitlement reads (enrichment, server-to-server).
-	PermEntitlementsRead = "openrails.entitlements.read"
+	PermEntitlementsRead = "openrails:entitlements:read"
 
 	// Catalog (products/prices) writes.
-	PermCatalogWrite = "openrails.catalog.write"
+	PermCatalogWrite = "openrails:catalog:write"
 
 	// Destructive billing operations.
-	PermPaymentsRefund      = "openrails.payments.refund"
-	PermSubscriptionsCancel = "openrails.subscriptions.cancel"
+	PermPaymentsRefund      = "openrails:payments:refund"
+	PermSubscriptionsCancel = "openrails:subscriptions:cancel"
 )
 
 // catalogEntries is the canonical ordered list of OpenRails permissions with

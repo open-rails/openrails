@@ -90,20 +90,6 @@ func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 	})
 }
 
-// ServiceHandler returns the internal service-to-service HTTP API.
-// Embedded hosts should typically NOT mount this; use `Embedded.Service()` instead.
-func (e *Embedded) ServiceHandler() http.Handler {
-	if e == nil || e.server == nil {
-		return nil
-	}
-	return e.server.ServiceHandler()
-}
-
-// PrivateHandler returns the internal service-to-service HTTP API.
-func (e *Embedded) PrivateHandler() http.Handler {
-	return e.ServiceHandler()
-}
-
 // Service returns the in-process billing API for embedded hosts.
 func (e *Embedded) Service() (*service.Service, error) {
 	if e == nil || e.app == nil {

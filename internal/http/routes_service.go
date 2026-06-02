@@ -8,22 +8,24 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
-// registerServiceRoutes sets up routes on the mTLS service API.
-// These endpoints are authenticated by verified client certificates and are
-// intended for service-to-service communication only.
-func (s *Server) registerServiceRoutes() {
-	if !s.cfg.ServiceMTLS.Enabled {
-		log.Info("Service mTLS listener disabled; service API routes will not be mounted")
+// registerServiceRoutes mounts the server-to-server billing surface on the PUBLIC
+// API engine under /v1/service/*, authenticated by OpenRails-issued tenant OATs
+// (issue #222). This REPLACES the retired private/mTLS listener entirely: there is
+// no separate trust surface or port — machine callers present an OAT as a Bearer
+// token on the one public tenant API.
+//
+// Mounted only when the OpenRails-owned AuthKit control plane is configured (it is
+// what resolves and authorizes OATs). In verifier-only mode there is no OAT issuer
+// and the service surface is not mounted.
+func (s *Server) registerServiceRoutes(e *gin.Engine) {
+	if s.controlPlane == nil {
+		log.Info("control plane disabled; OAT service API routes will not be mounted")
 		return
 	}
 
-	// No /internal or /service prefix needed: the dedicated mTLS listener is the boundary.
-	v1 := s.privateHandler.Group(StandaloneV1Prefix)
-	httproutes.RegisterServiceRoutes(v1, s.runtime, middleware.ServiceMTLSRequired(s.cfg.ServiceMTLS.ClientScopes()))
+	group := e.Group(StandaloneV1Prefix + httproutes.ServiceRoutePrefix)
+	httproutes.RegisterServiceRoutes(group, s.runtime, middleware.OATRequired(s.controlPlane))
 
-	log.Info("Service API routes registered on mTLS handler")
-}
-
-func (s *Server) serviceHealth(c *gin.Context) {
-	c.JSON(200, gin.H{"status": "ok", "api": "service"})
+	log.WithField("prefix", StandaloneV1Prefix+httproutes.ServiceRoutePrefix).
+		Info("OAT-authenticated service API routes registered on public handler")
 }

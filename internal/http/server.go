@@ -40,13 +40,11 @@ type Server struct {
 	controlPlane *controlplane.ControlPlane
 	captchaStore *captcha.ChallengeStore
 
-	// publicHandler is the default "full surface" HTTP handler.
-	// It includes health + debug (dev only) + user + admin + webhook routes.
+	// publicHandler is the single "full surface" HTTP handler. It includes
+	// health + debug (dev only) + user + admin + webhook routes AND the
+	// OAT-authenticated server-to-server service routes (issue #222). There is no
+	// separate private/service trust surface or port.
 	publicHandler *gin.Engine
-
-	// privateHandler is the service-to-service API. In standalone mode it is
-	// served only by the dedicated mTLS listener.
-	privateHandler *gin.Engine
 }
 
 func New(deps Dependencies) (*Server, error) {
@@ -112,9 +110,7 @@ func New(deps Dependencies) (*Server, error) {
 		captchaStore: captcha.NewChallengeStore(deps.Redis),
 	}
 
-	s.setupPrivateHandler()
-
-	// Default (standalone-friendly) HTTP surface.
+	// Single (standalone-friendly) HTTP surface.
 	// Standalone mode owns service-level health/debug routes.
 	s.publicHandler = s.newPublicEngine()
 	s.registerStandaloneMetaRoutes(s.publicHandler)
@@ -129,8 +125,10 @@ func New(deps Dependencies) (*Server, error) {
 	// /auth — never AuthKit DefaultAPI. No-op in verifier-only mode.
 	s.registerControlPlaneAuthRoutes(s.publicHandler)
 
-	// Private/service API surface.
-	s.registerServiceRoutes()
+	// Server-to-server service API: OAT-authenticated, on the SAME public engine
+	// (issue #222). No private port, no mTLS listener. No-op without a control
+	// plane (verifier-only mode has no OAT issuer).
+	s.registerServiceRoutes(s.publicHandler)
 
 	log.Info("Billing service initialized successfully")
 	return s, nil
@@ -153,14 +151,6 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	}
 	e.Use(middleware.RateLimitWithChallengeStore(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore))
 	return e
-}
-
-func (s *Server) setupPrivateHandler() {
-	s.privateHandler = gin.New()
-	s.privateHandler.Use(gin.Recovery())
-	s.privateHandler.Use(gin.Logger())
-	s.privateHandler.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
-	// No CORS needed for internal service-to-service calls.
 }
 
 func (s *Server) newHTTPHandlerEngine(opts HTTPHandlerOptions) *gin.Engine {
@@ -194,16 +184,12 @@ func (s *Server) wrap(fn func(r *httprequest.Request)) func(c *gin.Context) {
 	}
 }
 
-// Handler returns the full public HTTP surface (health + debug (dev only) + user + admin + webhooks).
-// It is designed to be mounted at a path prefix via http.StripPrefix.
+// Handler returns the full public HTTP surface: health + debug (dev only) + user
+// + admin + webhooks + OAT-authenticated server-to-server service routes
+// (issue #222). There is no separate private/service handler — embedded hosts use
+// the in-process pkg/service facade (Embedded.Service()) or this same public
+// surface. It is designed to be mounted at a path prefix via http.StripPrefix.
 func (s *Server) Handler() http.Handler { return s.publicHandler }
-
-// ServiceHandler returns the internal service-to-service HTTP API.
-// Standalone callers must serve this handler through the mTLS listener.
-func (s *Server) ServiceHandler() http.Handler { return s.privateHandler }
-
-// PrivateHandler returns the internal service-to-service HTTP API.
-func (s *Server) PrivateHandler() http.Handler { return s.privateHandler }
 
 // Close currently does not own underlying resources; callers should close the App.
 func (s *Server) Close(_ context.Context) error {

@@ -12,12 +12,19 @@ import (
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
+// ServiceRoutePrefix is the path under the tenant-scoped public API where
+// OAT-authenticated server-to-server billing operations live (issue #222). It
+// REPLACES the retired private/mTLS service listener: machine callers present an
+// OpenRails-issued tenant OAT as a Bearer token against this public surface. The
+// acting tenant is bound by the OAT's owning org, not the URL.
+const ServiceRoutePrefix = "/service"
+
 type Options struct {
 	AuthProvider authprovider.Provider
 
 	// OperatorPermissionChecker, when set, makes the operator org the LIVE
 	// authority for admin routes (#224): after the operator-org gate, admin
-	// routes additionally require the openrails.admin permission evaluated live
+	// routes additionally require the openrails:admin permission evaluated live
 	// against the operator org. nil in verifier-only mode (legacy gate only).
 	OperatorPermissionChecker authpolicy.OperatorPermissionChecker
 }
@@ -80,7 +87,7 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	group.Use(opts.AuthProvider.Required())
 	group.Use(authpolicy.OperatorAdminRequired(rt.Config, rt.DB.GetDB()))
 	// #224: when the OpenRails-owned AuthKit control plane is present, the
-	// operator org is the LIVE authority — require the openrails.admin permission
+	// operator org is the LIVE authority — require the openrails:admin permission
 	// evaluated against the operator org at request time. This is the forward
 	// path away from the global-admin fallback.
 	if opts.OperatorPermissionChecker != nil {
@@ -154,33 +161,46 @@ func RegisterWebhookRoutes(group *gin.RouterGroup, rt *app.Runtime) {
 	group.POST(":provider", wrapHandler(rt, httphandlers.Webhook))
 }
 
-func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, authMiddleware gin.HandlerFunc) {
+// RegisterServiceRoutes mounts the server-to-server billing surface on a
+// tenant-scoped PUBLIC route group authenticated by OpenRails-issued tenant OATs
+// (issue #222). This replaces the retired private/mTLS listener and its
+// certificate-scope model: every operation is gated by an OAT permission from the
+// canonical colon-form OpenRails permission catalog, and the acting tenant is the
+// OAT's owning tenant (pinned by OATRequired before any tenant-owned DB access).
+//
+// oatMW must authenticate the OAT (typically middleware.OATRequired); it pins the
+// resolved tenant + permissions onto the context that the per-route
+// RequireOATPermission gates and the handlers read.
+func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 
-	group.Use(authMiddleware)
+	group.Use(oatMW)
 
 	users := group.Group("/users/:user_id")
-	users.GET("/entitlements", middleware.RequireServiceScope(middleware.ServiceScopeEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
-	users.GET("/credits", middleware.RequireServiceScope(middleware.ServiceScopeCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
+	users.GET("/entitlements", middleware.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
+	users.GET("/credits", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
 
 	credits := group.Group("/credits")
-	credits.POST("/deposit", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceDepositCredits))
-	credits.POST("/withdraw", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceWithdrawCredits))
-	credits.POST("/hold", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceHoldCredits))
-	credits.POST("/holds/:id/capture", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
-	credits.POST("/holds/:id/release", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
-	credits.POST("/hold/:id/capture", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
-	credits.POST("/hold/:id/release", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
-	credits.GET("/transactions/lookup", middleware.RequireServiceScope(middleware.ServiceScopeCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
-	credits.GET("/users/:user_id", middleware.RequireServiceScope(middleware.ServiceScopeCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
+	credits.POST("/deposit", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceDepositCredits))
+	credits.POST("/withdraw", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceWithdrawCredits))
+	credits.POST("/hold", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceHoldCredits))
+	credits.POST("/holds/:id/capture", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
+	credits.POST("/holds/:id/release", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
+	credits.POST("/hold/:id/capture", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
+	credits.POST("/hold/:id/release", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
+	credits.GET("/transactions/lookup", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
+	credits.GET("/users/:user_id", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
 
+	// Credit-type definition writes are catalog-definition operations: gate them
+	// behind the explicit catalog-write permission (issue #222 — catalog/definition
+	// writes available to OATs only under an explicit permission). Reads use the
+	// coarse credits:read capability.
 	creditTypes := group.Group("/credit-types")
-	creditTypes.POST("", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceCreateCreditType))
-	creditTypes.GET("", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesRead), wrap(httphandlers.ServiceListCreditTypes))
-	creditTypes.PATCH("/:name", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceUpdateCreditType))
-	creditTypes.POST("/:name/deactivate", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceDeactivateCreditType))
-	creditTypes.POST("/:name/activate", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceActivateCreditType))
-
+	creditTypes.POST("", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceCreateCreditType))
+	creditTypes.GET("", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceListCreditTypes))
+	creditTypes.PATCH("/:name", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceUpdateCreditType))
+	creditTypes.POST("/:name/deactivate", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceDeactivateCreditType))
+	creditTypes.POST("/:name/activate", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceActivateCreditType))
 }

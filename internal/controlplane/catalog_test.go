@@ -11,13 +11,13 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 	// Issue #224 fixed permission catalog. If this list changes, the seeding and
 	// the operator-role grant must be reviewed together.
 	want := []string{
-		"openrails.admin",
-		"openrails.credits.read",
-		"openrails.credits.write",
-		"openrails.entitlements.read",
-		"openrails.catalog.write",
-		"openrails.payments.refund",
-		"openrails.subscriptions.cancel",
+		"openrails:admin",
+		"openrails:credits:read",
+		"openrails:credits:write",
+		"openrails:entitlements:read",
+		"openrails:catalog:write",
+		"openrails:payments:refund",
+		"openrails:subscriptions:cancel",
 	}
 	got := map[string]bool{}
 	for _, p := range Catalog() {

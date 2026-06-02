@@ -82,8 +82,9 @@ USER billing
 ENV GIN_MODE=release \
     TZ=UTC
 
-# Expose ports (2053 public; 2054 service mTLS)
-EXPOSE 2053 2054
+# Expose the single public port. Server-to-server calls use OpenRails-issued
+# OATs on this same port — there is no separate private/mTLS service port (#222).
+EXPOSE 2053
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

@@ -45,7 +45,7 @@ type BootstrapOptions struct {
 
 // Bootstrap idempotently ensures the OpenRails control-plane state for the
 // DEFAULT tenant (#223): the operator AuthKit org exists, the OpenRails operator
-// role is defined and granted the full `openrails.*` permission catalog, the
+// role is defined and granted the full `openrails:*` permission catalog, the
 // default tenant directory row records the operator org, and (optionally) an
 // initial operator OAT is minted when the org has none.
 //
