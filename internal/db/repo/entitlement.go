@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/uptrace/bun"
 )
 
@@ -25,6 +26,9 @@ func (r *EntitlementRepo) SetEndAtTx(ctx context.Context, tx bun.Tx, id uuid.UUI
 func (r *EntitlementRepo) IsEntitled(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
 	q := r.db.GetDB().NewSelect().
 		Model((*models.Entitlement)(nil)).
+		// Tenant scoping (issue #223): defaults to the default tenant when the
+		// request has not resolved one, so single-tenant runs unchanged.
+		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("ent.user_id = ?", userID).
 		Where("ent.entitlement = ?", entitlement).
 		Where("ent.start_at <= ?", at).
@@ -38,6 +42,7 @@ func (r *EntitlementRepo) IsEntitled(ctx context.Context, userID, entitlement st
 func (r *EntitlementRepo) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
 	q := r.db.GetDB().NewSelect().
 		Model((*models.Entitlement)(nil)).
+		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("ent.user_id = ?", userID).
 		Where("ent.entitlement = ?", entitlement).
 		Where("ent.revoked_at IS NULL AND ent.end_at IS NULL").
@@ -50,6 +55,7 @@ func (r *EntitlementRepo) GetLatestActive(ctx context.Context, userID, entitleme
 	var ent models.Entitlement
 	err := r.db.GetDB().NewSelect().
 		Model(&ent).
+		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("ent.user_id = ? AND ent.entitlement = ?", userID, entitlement).
 		Where("ent.revoked_at IS NULL").
 		Where("ent.deleted_at IS NULL").
@@ -66,6 +72,7 @@ func (r *EntitlementRepo) GetLatestFiniteActive(ctx context.Context, userID, ent
 	var ent models.Entitlement
 	err := r.db.GetDB().NewSelect().
 		Model(&ent).
+		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("ent.user_id = ? AND ent.entitlement = ?", userID, entitlement).
 		Where("ent.revoked_at IS NULL").
 		Where("ent.deleted_at IS NULL").
@@ -85,6 +92,13 @@ func (r *EntitlementRepo) Insert(ctx context.Context, entitlement *models.Entitl
 	// Validate that end_at > start_at if end_at is provided (non-indefinite entitlement)
 	if entitlement.EndAt != nil && !entitlement.EndAt.After(entitlement.StartAt) {
 		return fmt.Errorf("invalid entitlement: end_at (%v) must be after start_at (%v)", entitlement.EndAt, entitlement.StartAt)
+	}
+
+	// Stamp the resolved tenant (issue #223) when the caller did not set one,
+	// so new rows are tenant-scoped consistently with reads. Defaults to the
+	// default tenant for single-tenant / self-hosted runs.
+	if (entitlement.TenantID == uuid.UUID{}) {
+		entitlement.TenantID = tenant.FromContextOrDefault(ctx).UUID()
 	}
 
 	res, err := r.db.GetDB().NewInsert().Model(entitlement).Exec(ctx)

@@ -133,6 +133,9 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	e.Use(middleware.SecurityHeaders())
 	e.Use(middleware.CORS(s.cfg.CorsOrigins))
 	e.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
+	// Resolve the tenant / billing namespace before authorization and before any
+	// tenant-owned DB access (issue #223). Defaults to the single default tenant.
+	e.Use(middleware.ResolveTenant())
 	if s.authProvider != nil {
 		e.Use(s.authProvider.Optional())
 	}

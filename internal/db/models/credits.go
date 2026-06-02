@@ -22,7 +22,9 @@ type CreditType struct {
 type UserCreditBalance struct {
 	bun.BaseModel `bun:"table:billing.user_credit_balances,alias:ucb"`
 
-	ID           uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	// TenantID scopes this row to a tenant / billing namespace (issue #223).
+	TenantID     uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	UserID       string    `bun:"user_id,notnull" json:"user_id"`
 	CreditTypeID uuid.UUID `bun:"credit_type_id,notnull" json:"credit_type_id"`
 	Balance      int64     `bun:"balance,notnull" json:"balance"`
@@ -34,7 +36,9 @@ type UserCreditBalance struct {
 type CreditTransaction struct {
 	bun.BaseModel `bun:"table:billing.credit_transactions,alias:ctran"`
 
-	ID              uuid.UUID  `bun:"id,pk,type:uuid" json:"id"`
+	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	// TenantID scopes this row to a tenant / billing namespace (issue #223).
+	TenantID        uuid.UUID  `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	UserID          string     `bun:"user_id,notnull" json:"user_id"`
 	CreditTypeID    uuid.UUID  `bun:"credit_type_id,notnull" json:"credit_type_id"`
 	Amount          int64      `bun:"amount,notnull" json:"amount"`
@@ -54,7 +58,9 @@ type CreditTransaction struct {
 type CreditBlock struct {
 	bun.BaseModel `bun:"table:billing.credit_blocks,alias:cb"`
 
-	ID                  uuid.UUID  `bun:"id,pk,type:uuid" json:"id"`
+	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	// TenantID scopes this row to a tenant / billing namespace (issue #223).
+	TenantID            uuid.UUID  `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	UserID              string     `bun:"user_id,notnull" json:"user_id"`
 	CreditTypeID        uuid.UUID  `bun:"credit_type_id,notnull" json:"credit_type_id"`
 	OriginalAmount      int64      `bun:"original_amount,notnull" json:"original_amount"`

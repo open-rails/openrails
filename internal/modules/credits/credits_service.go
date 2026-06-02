@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/uptrace/bun"
 )
 
@@ -73,9 +74,11 @@ func (s *CreditsService) GetBalance(ctx context.Context, userID string, creditTy
 	if err != nil {
 		return nil, err
 	}
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	bal := new(models.UserCreditBalance)
 	err = s.db.GetDB().NewSelect().
 		Model(bal).
+		Where("tenant_id = ?", tenantID).
 		Where("user_id = ? AND credit_type_id = ?", userID, ct.ID).
 		Limit(1).
 		Scan(ctx)
@@ -84,6 +87,7 @@ func (s *CreditsService) GetBalance(ctx context.Context, userID string, creditTy
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return &models.UserCreditBalance{
+			TenantID:     tenantID,
 			UserID:       userID,
 			CreditTypeID: ct.ID,
 			Balance:      0,
@@ -103,6 +107,7 @@ func (s *CreditsService) GetTransactions(ctx context.Context, userID string, cre
 	}
 	var items []models.CreditTransaction
 	q := s.db.GetDB().NewSelect().Model(&items).
+		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("user_id = ? AND credit_type_id = ?", userID, ct.ID)
 	total, err := q.Count(ctx)
 	if err != nil {
@@ -157,6 +162,7 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, userID stri
 	trx := new(models.CreditTransaction)
 	if err := s.db.GetDB().NewSelect().
 		Model(trx).
+		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("user_id = ? AND credit_type_id = ?", userID, ct.ID).
 		Where("transaction_type = ?", transactionType).
 		Where("source = ? AND source_id = ?", source, sourceID).
@@ -585,8 +591,14 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 }
 
 func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, userID string, creditTypeID uuid.UUID) (*models.UserCreditBalance, error) {
+	// Tenant scoping (issue #223). The existing (user_id, credit_type_id) unique
+	// constraint is intentionally left in place during the additive rollout, so
+	// the ON CONFLICT target is unchanged; we additionally scope reads by tenant
+	// and stamp the tenant on newly created balance rows.
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	bal := new(models.UserCreditBalance)
 	err := tx.NewSelect().Model(bal).
+		Where("tenant_id = ?", tenantID).
 		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
 		For("UPDATE").
 		Scan(ctx)
@@ -600,6 +612,7 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, userID stri
 	now := s.now()
 	bal = &models.UserCreditBalance{
 		ID:           uuidutil.NewV7(),
+		TenantID:     tenantID,
 		UserID:       userID,
 		CreditTypeID: creditTypeID,
 		Balance:      0,
@@ -612,6 +625,7 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, userID stri
 	}
 	bal = new(models.UserCreditBalance)
 	if err := tx.NewSelect().Model(bal).
+		Where("tenant_id = ?", tenantID).
 		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
 		For("UPDATE").
 		Scan(ctx); err != nil {
