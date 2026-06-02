@@ -471,25 +471,39 @@ CREATE TABLE IF NOT EXISTS billing.credit_types (
 );
 
 -- -----------------------------------------------------------------------------
--- billing.credit_transactions — append-only ledger (with hold lifecycle)
+-- billing.credit_transactions — single ROOT lifecycle record (issue #203)
+--
+-- Unifies the former `credit_holds` (authorization state machine) and the former
+-- append-only ledger into ONE record that carries its own lifecycle over time:
+--
+--   transaction_type = 'deposit'    : terminal credit grant   (status='posted')
+--   transaction_type = 'withdrawal' : terminal immediate spend (status='posted')
+--   transaction_type = 'hold'       : authorization that evolves through
+--                                       'active' -> 'captured' | 'released' | 'expired'
+--
+-- A hold reserves authorized_amount in user_credit_balances.held_balance while
+-- 'active'. Capture transitions it to 'captured', records the real
+-- captured_amount, posts amount = -captured_amount, and releases the rest of the
+-- reservation. Release/expire transition it to 'released'/'expired' and restore
+-- the full reservation. The row's stable id is the per-request audit anchor.
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.credit_transactions (
     id                 UUID         PRIMARY KEY DEFAULT uuidv7(),
-    user_id            TEXT         NOT NULL,
+    user_id            TEXT         NOT NULL,                                    -- ACTOR attribution (who caused usage)
     credit_type_id     UUID         NOT NULL REFERENCES billing.credit_types(id),
-    amount             BIGINT       NOT NULL,                                    -- + deposit, - withdrawal
-    balance_after      BIGINT,                                                   -- nullable for non-posting (holds)
-    transaction_type   TEXT         NOT NULL,                                    -- deposit|withdrawal|expiry|refund|admin_adjust|hold|hold_capture
-    source             TEXT         NOT NULL,                                    -- purchase|promo|usage|admin|expiry_job|refund|hold
+    amount             BIGINT       NOT NULL,                                    -- posted delta: + deposit, - withdrawal/capture, 0 while held
+    balance_after      BIGINT,                                                   -- nullable until the row posts a delta
+    transaction_type   TEXT         NOT NULL,                                    -- deposit | withdrawal | hold
+    source             TEXT         NOT NULL,                                    -- purchase|promo|usage|admin|expiry_job|refund|api_call
     source_id          TEXT,                                                     -- idempotency key / request id (not necessarily a UUID)
-    expires_at         TIMESTAMPTZ,
+    expires_at         TIMESTAMPTZ,                                             -- hold expiry deadline (when transaction_type='hold')
     description        TEXT,
 
-    -- Hold lifecycle fields
-    status             TEXT         NOT NULL DEFAULT 'posted',                   -- posted|active|captured|released|expired
-    authorized_amount  BIGINT,
-    captured_amount    BIGINT,
+    -- Lifecycle fields (meaningful for transaction_type='hold')
+    status             TEXT         NOT NULL DEFAULT 'posted',                   -- posted (deposit/withdrawal) | active | captured | released | expired
+    authorized_amount  BIGINT,                                                  -- amount reserved by the hold
+    captured_amount    BIGINT,                                                  -- amount actually spent on capture (<= authorized_amount)
 
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp,
     updated_at         TIMESTAMPTZ  NOT NULL DEFAULT current_timestamp
@@ -497,7 +511,8 @@ CREATE TABLE IF NOT EXISTS billing.credit_transactions (
 
 CREATE INDEX IF NOT EXISTS idx_credit_transactions_user_created
     ON billing.credit_transactions(user_id, credit_type_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_credit_holds_active_expires
+-- Drives the hold-expiry worker: still-active holds ordered by deadline.
+CREATE INDEX IF NOT EXISTS idx_credit_transactions_active_holds_expires
     ON billing.credit_transactions(expires_at)
     WHERE transaction_type = 'hold' AND status = 'active';
 
@@ -514,7 +529,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_credit_withdrawal_idem
 
 -- -----------------------------------------------------------------------------
 -- billing.credit_blocks — immutable blocks of credits for FIFO consumption
---   (formerly billing.credit_expiry_batches, renamed in migration 022)
+--   (each deposit creates one block; spends decrement remaining_amount oldest-
+--    expiry-first; source_transaction_id points back to the depositing lifecycle row)
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS billing.credit_blocks (

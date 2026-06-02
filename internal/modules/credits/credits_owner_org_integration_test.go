@@ -14,7 +14,9 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/credits"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -256,4 +258,121 @@ func TestReserveRelease_RestoresFullBalance(t *testing.T) {
 	require.Equal(t, initial, bal.Balance, "release must not consume credits")
 	require.Equal(t, int64(0), bal.HeldBalance, "release must clear the hold")
 	require.Equal(t, initial, bal.Balance-bal.HeldBalance, "full available balance restored")
+}
+
+func newCreditType(t *testing.T, ctx context.Context, bunDB *bun.DB, prefix string) string {
+	t.Helper()
+	name := prefix + "_" + uuid.NewString()
+	_, err := bunDB.NewInsert().Model(&models.CreditType{
+		ID: uuid.New(), Name: name, DisplayName: prefix, Unit: "u",
+		DecimalPlaces: 0, IsActive: true, CreatedAt: time.Now().UTC(),
+	}).Exec(ctx)
+	require.NoError(t, err)
+	return name
+}
+
+// TestHoldExpireWorker_ReleasesOwnerHeldBalance proves the unified-record expiry
+// path: an 'active' hold past its expires_at is transitioned to 'expired' by the
+// worker and its reservation is released back to the OWNER's balance row. This is
+// the regression guard for the worker keying held_balance by (tenant, owner,
+// credit_type) — not by actor user_id, which is not part of the balance identity.
+func TestHoldExpireWorker_ReleasesOwnerHeldBalance(t *testing.T) {
+	bunDB, ctx := startOwnerOrgPostgres(t)
+	dbi, err := db.NewWithBun(bunDB)
+	require.NoError(t, err)
+	svc := credits.NewCreditsService(dbi, clockwork.NewRealClock())
+
+	ctName := newCreditType(t, ctx, bunDB, "hold_expire")
+	userID := uuid.NewString()
+	const initial = int64(1000)
+	seedSpendable(t, ctx, svc, ctName, userID, initial)
+
+	// Hold that is already expired (deadline in the past).
+	hold, err := svc.Hold(ctx, nil, userID, ctName, 250, "api", "req-exp-1", time.Now().Add(-time.Minute).UTC())
+	require.NoError(t, err)
+
+	held, err := svc.GetBalance(ctx, userID, ctName)
+	require.NoError(t, err)
+	require.Equal(t, int64(250), held.HeldBalance, "hold reserves held_balance")
+
+	w := &riverjobs.HoldExpiryWorker{DB: dbi, Clock: clockwork.NewRealClock()}
+	require.NoError(t, w.Work(ctx, &river.Job[riverjobs.HoldExpiryArgs]{Args: riverjobs.HoldExpiryArgs{}}))
+
+	row := new(models.CreditTransaction)
+	require.NoError(t, bunDB.NewSelect().Model(row).Where("id = ?", hold.ID).Scan(ctx))
+	require.Equal(t, "expired", row.Status, "worker transitions the lifecycle record to expired")
+
+	bal, err := svc.GetBalance(ctx, userID, ctName)
+	require.NoError(t, err)
+	require.Equal(t, initial, bal.Balance, "expiry consumes no credits")
+	require.Equal(t, int64(0), bal.HeldBalance, "expiry releases the reservation to the owner balance")
+}
+
+// TestDepositWithdraw_TerminalTransactionsAndFIFO proves deposits/withdrawals are
+// terminal lifecycle rows (status='posted') and that withdrawals consume credit
+// blocks oldest-expiry-first (FIFO).
+func TestDepositWithdraw_TerminalTransactionsAndFIFO(t *testing.T) {
+	bunDB, ctx := startOwnerOrgPostgres(t)
+	dbi, err := db.NewWithBun(bunDB)
+	require.NoError(t, err)
+	svc := credits.NewCreditsService(dbi, clockwork.NewRealClock())
+
+	ctName := newCreditType(t, ctx, bunDB, "fifo")
+	userID := uuid.NewString()
+
+	earlyExpiry := time.Now().Add(time.Hour).UTC()
+	lateExpiry := time.Now().Add(48 * time.Hour).UTC()
+
+	// Block A: 100 credits expiring soon. Block B: 100 expiring later.
+	srcA, srcB := uuid.New(), uuid.New()
+	depA, err := svc.Deposit(ctx, credits.CreditDepositParams{
+		UserID: userID, CreditType: ctName, Amount: 100, Source: "purchase",
+		SourceID: &srcA, ExpiresAt: &earlyExpiry,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "deposit", depA.TransactionType)
+	require.Equal(t, "posted", depA.Status)
+	require.Equal(t, int64(100), depA.Amount)
+	require.NotNil(t, depA.BalanceAfter)
+	require.Equal(t, int64(100), *depA.BalanceAfter)
+
+	_, err = svc.Deposit(ctx, credits.CreditDepositParams{
+		UserID: userID, CreditType: ctName, Amount: 100, Source: "purchase",
+		SourceID: &srcB, ExpiresAt: &lateExpiry,
+	})
+	require.NoError(t, err)
+
+	// Withdraw 150: must drain block A (100, earliest expiry) then 50 from block B.
+	srcW := uuid.New()
+	wTrx, err := svc.Withdraw(ctx, credits.CreditWithdrawParams{
+		UserID: userID, CreditType: ctName, Amount: 150, Source: "usage", SourceID: &srcW,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "withdrawal", wTrx.TransactionType)
+	require.Equal(t, "posted", wTrx.Status)
+	require.Equal(t, int64(-150), wTrx.Amount)
+
+	bal, err := svc.GetBalance(ctx, userID, ctName)
+	require.NoError(t, err)
+	require.Equal(t, int64(50), bal.Balance, "200 deposited - 150 withdrawn")
+
+	var blocks []models.CreditBlock
+	require.NoError(t, bunDB.NewSelect().Model(&blocks).
+		Where("user_id = ?", userID).
+		OrderExpr("expires_at ASC").
+		Scan(ctx))
+	require.Len(t, blocks, 2)
+	require.Equal(t, int64(0), blocks[0].RemainingAmount, "earliest-expiry block drained first (FIFO)")
+	require.Equal(t, int64(50), blocks[1].RemainingAmount, "later block holds the remainder")
+
+	// Idempotent withdrawal: same SourceID returns the same row, no double-spend.
+	wTrx2, err := svc.Withdraw(ctx, credits.CreditWithdrawParams{
+		UserID: userID, CreditType: ctName, Amount: 150, Source: "usage", SourceID: &srcW,
+	})
+	require.NoError(t, err)
+	require.Equal(t, wTrx.ID, wTrx2.ID, "withdrawal idempotency by (owner, type, source, source_id)")
+
+	bal, err = svc.GetBalance(ctx, userID, ctName)
+	require.NoError(t, err)
+	require.Equal(t, int64(50), bal.Balance, "retry must not double-spend")
 }
