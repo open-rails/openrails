@@ -1438,14 +1438,14 @@
     },
     {
       "id": 258,
-      "name": "solana-fee-wallet-monitoring-and-reconciliation",
-      "description": "Operational hardening for per-tenant Solana billing: gas monitoring, on-chain<->DB reconciliation, runbooks.\n\n## Context\n\nPer-tenant fee wallets pay SOL gas; one running dry must not affect other tenants. The program emits events for indexers; extend the existing reconcile workers to cross-check on-chain transfer_subscription events against recorded payments. Document tenant credential/key-rotation lifecycle (rotating a Solana key = new merchant address = re-publish plans + re-enroll).\n\n## Metadata\n\n- Category: ops/hardening\n- Depends on: #256\n- Plan: docs/solana-subscriptions-plan.md (§8, §9)\n\n## Two-wallet model\n\nPer tenant: a HOT cranking/puller wallet (Vault Transit key, signs every transfer_subscription, pays SOL gas, never holds funds) and a COLD receiving wallet (pubkey only, the plan's whitelisted destination, receives USDC, never signs). destinations=[cold_wallet] means a compromised hot key cannot redirect funds — only trigger authorized pulls into the cold treasury, capped per period. Monitor the HOT wallet's SOL (each pull ~5000 lamports + priority fee; N due subs = N txns/cycle).",
+      "name": "solana-gas-float-and-reconciliation",
+      "description": "Operational hardening for Solana recurring. NOTE: there is NO fee-payer delegation / gasless relayer (too complex, explicitly out of scope). Gas is paid by whoever submits the tx: one-off + enroll are submitted by the USER (user pays); only the recurring transfer_subscription pull is submitted by OpenRails, so the merchant cranking wallet pays its own (tiny, ~5000 lamports) gas. This issue just keeps that wallet funded enough and reconciles on-chain pulls against the ledger.",
       "tasks": [
-        "[ ] Per-tenant fee-wallet SOL balance monitor + alerts/auto-top-up below threshold",
-        "[ ] Reconciliation: on-chain transfer_subscription events <-> billing.payments (extend existing reconcile workers)",
-        "[ ] Distinguish operational (Vault/RPC/SOL) failures from subscriber dunning in dashboards/metrics",
-        "[ ] Tenant credential + key-rotation runbook (rotation forces plan re-publish + re-enroll)",
-        "[ ] Admin/analytics surface: active Solana subs, MRR (USDC), failed pulls, recovered vs churned"
+        "[ ] Low-SOL alert on the merchant cranking wallet (warn when below ~N pulls of runway). NO auto-top-up, NO relayer.",
+        "[ ] A pull that fails for insufficient SOL is OPERATIONAL -> retry next run + alert; never subscriber dunning (distinct from insufficient-USDC).",
+        "[ ] Reconciliation: on-chain transfer_subscription events <-> billing.payments (extend existing reconcile workers).",
+        "[ ] Tenant key-rotation runbook (rotating the Solana key = new merchant address = re-publish plans + re-enroll).",
+        "[ ] Admin/analytics: active Solana subs, MRR (USDC/USD1), failed pulls, recovered vs churned."
       ],
       "completed": false
     },
