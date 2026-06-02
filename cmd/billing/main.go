@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/audit"
+	"github.com/open-rails/openrails/internal/controlplane"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
@@ -153,6 +154,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}()
+
+	// Bootstrap the OpenRails-owned AuthKit control plane (#224) when enabled.
+	// Idempotent + a no-op in verifier-only mode. Runs after migrations have been
+	// applied (migrations are a separate `billing migrate` step) and at startup.
+	if res, err := embeddedApp.RunControlPlaneBootstrap(context.Background(), controlplane.BootstrapOptions{MintInitialOAT: true}); err != nil {
+		cleanupOnError = true
+		return fmt.Errorf("control plane bootstrap: %w", err)
+	} else if res != nil && res.OATMinted {
+		log.WithField("oat_key_id", res.OATKeyID).
+			Warn("control plane: initial operator OAT minted; capture the secret from logs now (shown once)")
+	}
 
 	cleanupOnError = false
 

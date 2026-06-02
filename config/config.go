@@ -433,6 +433,73 @@ type AuthConfig struct {
 	// OperatorOrgAdminRoles is the list of OrgRoles considered admin-equivalent
 	// when OperatorOrgSlug is set. Defaults to ["admin", "owner"].
 	OperatorOrgAdminRoles []string `koanf:"operator_org_admin_roles,omitempty"`
+
+	// ControlPlane configures OpenRails' OpenRails-owned AuthKit control plane
+	// (issue #224). When nil/disabled, OpenRails behaves as a pure JWT verifier
+	// (current default). When enabled, OpenRails builds an in-process AuthKit
+	// core/service, can selectively mount AuthKit route groups, and bootstraps
+	// the default tenant's operator org + roles + permission catalog + initial
+	// operator OAT.
+	ControlPlane *ControlPlaneConfig `koanf:"control_plane,omitempty"`
+}
+
+// ControlPlaneConfig configures the OpenRails-owned AuthKit control plane
+// (issue #224). It is OPTIONAL and OFF by default: a deployment that only
+// verifies externally-issued JWTs does not set this. A self-hosted, locked-down
+// deployment enables it to own user/org/role/OAT operations in-process.
+type ControlPlaneConfig struct {
+	// Enabled turns on the in-process AuthKit control plane. When false (the
+	// default), OpenRails does not construct an AuthKit core/service and does not
+	// run control-plane bootstrap.
+	Enabled bool `koanf:"enabled,omitempty"`
+
+	// Issuer is the AuthKit token issuer this OpenRails control plane signs as
+	// (e.g. "https://billing.mysite.com"). Required when Enabled.
+	Issuer string `koanf:"issuer,omitempty"`
+
+	// IssuedAudiences are the audiences placed on tokens this control plane
+	// issues. ExpectedAudiences are the audiences it accepts. Both default to
+	// the verifier's ExpectedAudience when left empty.
+	IssuedAudiences   []string `koanf:"issued_audiences,omitempty"`
+	ExpectedAudiences []string `koanf:"expected_audiences,omitempty"`
+
+	// OrgMode is the AuthKit org mode ("single" or "multi"). Operator-org
+	// bootstrap and the org-management HTTP routes require "multi". Defaults to
+	// "multi" when Enabled so the operator org and its OATs exist.
+	OrgMode string `koanf:"org_mode,omitempty"`
+
+	// TokenPrefix is the brand prefix for minted OATs (e.g. "openrails" ->
+	// `openrails_oat_<key_id>_<secret>`). Empty -> bare `oat_`.
+	TokenPrefix string `koanf:"token_prefix,omitempty"`
+
+	// LockedDown selects the self-hosted, locked-down posture: public user
+	// registration and public org management are disabled, and only the
+	// intentional AuthKit route groups are mounted (never DefaultAPI). Defaults
+	// to true when Enabled — hosted-SaaS mode must explicitly opt out.
+	LockedDown *bool `koanf:"locked_down,omitempty"`
+
+	// OperatorOATName is the human-readable name of the initial operator OAT
+	// minted at bootstrap. Defaults to "openrails-bootstrap-operator".
+	OperatorOATName string `koanf:"operator_oat_name,omitempty"`
+}
+
+// ControlPlaneEnabled reports whether the OpenRails-owned AuthKit control plane
+// is enabled for this deployment.
+func (c *AuthConfig) ControlPlaneEnabled() bool {
+	return c != nil && c.ControlPlane != nil && c.ControlPlane.Enabled
+}
+
+// LockedDownEnabled reports whether the control plane runs in the self-hosted,
+// locked-down posture (public registration + org management disabled, selective
+// route mounting). Defaults to true when the control plane is enabled.
+func (cp *ControlPlaneConfig) LockedDownEnabled() bool {
+	if cp == nil {
+		return false
+	}
+	if cp.LockedDown == nil {
+		return true
+	}
+	return *cp.LockedDown
 }
 
 // OperatorOrgEnabled reports whether OperatorOrgSlug is set (multi-org admin mode).

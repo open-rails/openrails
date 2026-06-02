@@ -13,6 +13,56 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// OperatorPermissionChecker is the live AuthKit effective-permission check the
+// control plane provides (#224). It evaluates whether a user holds a permission
+// in the operator org at request time (not from stale JWT claims). The
+// controlplane.ControlPlane satisfies this interface.
+type OperatorPermissionChecker interface {
+	HasOperatorPermission(ctx context.Context, orgSlug, userID, perm string) (bool, error)
+}
+
+// OperatorPermissionRequired gates a route on a LIVE OpenRails permission held
+// in the operator org (#224 admin authority). It is the forward replacement for
+// the global-admin fallback: admin authority comes from the operator org +
+// permission catalog, evaluated live, rather than from a global `admin` role or
+// trusting JWT role claims.
+//
+// The caller must be authenticated (else 401). The checker resolves the operator
+// org from config when orgSlug is empty. On denial it returns 403
+// "operator_permission_required". When checker is nil this middleware is a
+// configuration error and fails closed with 500.
+func OperatorPermissionRequired(checker OperatorPermissionChecker, perm string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		uc, ok := authprovider.UserContextFromGin(c)
+		if !ok || uc.UserID == "" {
+			response.UnauthorizedWithMessage(c, "authentication required")
+			c.Abort()
+			return
+		}
+		if checker == nil {
+			log.Error("operator permission middleware misconfigured: nil checker")
+			response.InternalError(c, "authorization unavailable")
+			c.Abort()
+			return
+		}
+		allowed, err := checker.HasOperatorPermission(c.Request.Context(), uc.Org, uc.UserID, perm)
+		if err != nil {
+			log.WithError(err).Error("failed to evaluate operator permission")
+			response.InternalError(c, "failed to check permission")
+			c.Abort()
+			return
+		}
+		if !allowed {
+			log.WithFields(log.Fields{"user_id": uc.UserID, "permission": perm}).
+				Warn("operator permission denied")
+			response.ForbiddenWithMessage(c, "operator_permission_required")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 func IsAdmin(ctx context.Context, db bun.IDB, userID string) (bool, error) {
 	uid, err := uuid.Parse(userID)
 	if err != nil {

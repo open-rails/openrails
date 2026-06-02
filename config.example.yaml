@@ -147,6 +147,31 @@ auth:
   # Expected audience - the expected "aud" claim in incoming JWTs
   expected_audience: "openrails-app"
 
+  # operator_org_slug, when set, makes the named AuthKit org the admin authority
+  # for /admin/* routes (instead of a global "admin" role). See #221.
+  # operator_org_slug: "operator"
+
+  # ---------------------------------------------------------------------------
+  # OpenRails-owned AuthKit control plane (#224). OPTIONAL and OFF by default.
+  # When omitted/disabled, OpenRails is a pure JWT verifier (current behavior).
+  # When enabled, OpenRails builds an in-process AuthKit control plane:
+  #   * selectively mounts only intentional AuthKit route groups under /auth
+  #     (NEVER AuthKit DefaultAPI in locked-down mode),
+  #   * disables public user registration + public org management (self-hosted),
+  #   * bootstraps the default tenant's operator org + openrails.* permission
+  #     catalog + operator role + an initial operator OAT at startup.
+  # The control plane needs a database holding AuthKit's profiles.* schema.
+  # ---------------------------------------------------------------------------
+  # control_plane:
+  #   enabled: true
+  #   issuer: "https://billing.mysite.com"   # AuthKit token issuer this CP signs as
+  #   org_mode: "multi"                       # required for operator-org + OATs
+  #   token_prefix: "openrails"               # OAT brand prefix -> openrails_oat_...
+  #   locked_down: true                       # self-hosted posture (default true)
+  #   # issued_audiences: ["openrails-app"]   # defaults to expected_audience
+  #   # expected_audiences: ["openrails-app"]
+  #   # operator_oat_name: "openrails-bootstrap-operator"
+
 # =============================================================================
 # PYTH PRICE FEEDS
 # =============================================================================

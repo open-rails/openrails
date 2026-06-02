@@ -5,6 +5,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/internal/controlplane"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -13,6 +14,12 @@ import (
 
 type Options struct {
 	AuthProvider authprovider.Provider
+
+	// OperatorPermissionChecker, when set, makes the operator org the LIVE
+	// authority for admin routes (#224): after the operator-org gate, admin
+	// routes additionally require the openrails.admin permission evaluated live
+	// against the operator org. nil in verifier-only mode (legacy gate only).
+	OperatorPermissionChecker authpolicy.OperatorPermissionChecker
 }
 
 func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFunc {
@@ -72,6 +79,13 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 
 	group.Use(opts.AuthProvider.Required())
 	group.Use(authpolicy.OperatorAdminRequired(rt.Config, rt.DB.GetDB()))
+	// #224: when the OpenRails-owned AuthKit control plane is present, the
+	// operator org is the LIVE authority — require the openrails.admin permission
+	// evaluated against the operator org at request time. This is the forward
+	// path away from the global-admin fallback.
+	if opts.OperatorPermissionChecker != nil {
+		group.Use(authpolicy.OperatorPermissionRequired(opts.OperatorPermissionChecker, controlplane.PermAdmin))
+	}
 
 	group.GET("/subscriptions", wrap(httphandlers.GetAdminSubscriptions))
 	group.GET("/subscriptions/:id", wrap(httphandlers.GetAdminSubscription))

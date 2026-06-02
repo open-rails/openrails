@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/authprovider"
@@ -24,6 +25,10 @@ type Dependencies struct {
 	Runtime      *app.Runtime
 	Redis        *redis.Client
 	AuthProvider authprovider.Provider
+	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224).
+	// nil in verifier-only mode. When present, the server selectively mounts the
+	// intentional AuthKit route groups (never DefaultAPI in locked-down mode).
+	ControlPlane *controlplane.ControlPlane
 }
 
 type Server struct {
@@ -32,6 +37,7 @@ type Server struct {
 	runtime      *app.Runtime
 	rdb          *redis.Client
 	authProvider authprovider.Provider
+	controlPlane *controlplane.ControlPlane
 	captchaStore *captcha.ChallengeStore
 
 	// publicHandler is the default "full surface" HTTP handler.
@@ -102,6 +108,7 @@ func New(deps Dependencies) (*Server, error) {
 		runtime:      deps.Runtime,
 		rdb:          deps.Redis,
 		authProvider: deps.AuthProvider,
+		controlPlane: deps.ControlPlane,
 		captchaStore: captcha.NewChallengeStore(deps.Redis),
 	}
 
@@ -116,6 +123,11 @@ func New(deps Dependencies) (*Server, error) {
 	s.registerUserRoutes(s.publicHandler)
 	s.registerAdminRoutesOn(s.publicHandler)
 	s.registerWebhookRoutes(s.publicHandler)
+
+	// Selective AuthKit route mounting (#224). In locked-down mode this mounts
+	// ONLY the intentional AuthKit route groups (login/session/user) under
+	// /auth — never AuthKit DefaultAPI. No-op in verifier-only mode.
+	s.registerControlPlaneAuthRoutes(s.publicHandler)
 
 	// Private/service API surface.
 	s.registerServiceRoutes()

@@ -190,3 +190,11 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mellium.im/sasl v0.3.2 // indirect
 )
+
+// TODO(#224): DEV-ONLY temporary shim. This replace points authkit at the local
+// checkout (branch feat/47-route-mounting-registration-switches, post-v0.11.5)
+// so OpenRails builds against the new OAT control-plane / org-RBAC / registration
+// switch APIs (#43/#44/#46/#47) before they are released. REMOVE before release:
+// bump the require above to a real tagged authkit version (>= v0.12.0 once the
+// #47 branch is tagged) and delete this replace directive.
+replace github.com/open-rails/authkit => /home/fidika/authkit
