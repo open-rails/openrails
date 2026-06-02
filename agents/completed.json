@@ -2084,7 +2084,7 @@
       "completed_at": "2026-01-18"
     },
     {
-      "id": 134,
+      "id": 229,
       "name": "Remove is_active from payment methods",
       "category": "feature",
       "description": "Simplify payment methods to just CRUD operations (create, update, delete). Remove the concept of 'active' vs 'inactive' payment methods entirely.\n\n## Current State\n\nPayment methods have an `is_active` boolean field used to soft-disable cards without deleting them. This adds complexity:\n- Activate/Deactivate repo methods\n- PUT /v1/me/payment-methods/:id/activate endpoint\n- Filtering by is_active=true in queries\n- Validation that payment method is active before use\n- Audit checks for inactive methods\n\n## Goal\n\nPayment methods should simply exist or not exist:\n- Create: POST /v1/me/payment-methods (Stripe/NMI only)\n- Update: PUT /v1/me/payment-methods/:id\n- Delete: DELETE /v1/me/payment-methods/:id\n\nNo activate/deactivate concept.\n\n## Files to Update\n\n- internal/db/models/payment_method.go - Remove IsActive field\n- internal/db/repo/payment_method.go - Remove Deactivate/Activate methods, remove is_active filters\n- internal/services/payment_method.go - Remove Activate/Deactivate service methods, remove IsActive validation\n- internal/handlers/payment_methods.go - Remove ActivatePaymentMethod handler\n- internal/handlers/update_subscription_payment_method.go - Remove IsActive validation\n- internal/server/routes_public.go - Remove PUT /payment-methods/:id/activate route\n- internal/audit/checks_payment_method.go - Remove/update checks that reference is_active\n- Migration to drop is_active column\n- Update pkg/service API (issue #100) to not include ActivatePaymentMethod",
@@ -2223,7 +2223,7 @@
       ]
     },
     {
-      "id": 139,
+      "id": 231,
       "name": "ergonomic-rate-limit-config",
       "category": "config-ergonomics",
       "description": "Rate limit window config should use human-readable durations, not nanoseconds",
