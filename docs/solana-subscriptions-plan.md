@@ -173,7 +173,10 @@ one `HeliusAPIKey`). Per-tenant billing requires generalizing that:
 - **Merchant/admin-initiated:** stop pulling + `CancelMembership`. Optionally call `update_plan` to sunset the plan for new subscribers. We cannot force-cancel a user's on-chain authorization, but not pulling is sufficient.
 
 ### 7.5 Failure / dunning
-- **Insufficient USDC balance** → `transfer_subscription` fails → `FailMembership` → existing dunning state machine (past_due, retries per `DunningMode`, eventual expire). The pull worker becomes the Solana analog of `DunningWorker`.
+- **Insufficient USDC balance** → `transfer_subscription` fails → `FailMembership` → **the same dunning state machine as NMI** (`lifecycle_service.go`: `past_due`, retry every `DunningInterval`=3d up to `MaxDunningFailures`=5 → D+3/6/9/12/15, then cancel; gated by `DunningMode`). The pull worker is the Solana analog of `DunningWorker`. **No new dunning logic — Solana is just another processor on the existing path.**
+  - **Never partial-pull (decided):** the worker always requests the **full** plan amount; it never pulls `min(balance, cap)`. Combined with Solana tx atomicity, an underfunded pull **reverts entirely — zero USDC moves** (we pay only the failed-tx SOL fee). "Take nothing, not $5" is therefore a property of the chain, not a policy to enforce.
+  - **On-chain period cap (Solana-only nuance):** the program enforces `amount_pulled_in_period ≤ plan_amount` and **resets the allowance each period**. So (a) dunning retries must land **within the on-chain period window** — fine, since 5×3d=15d fits inside a 30d monthly period and we cancel at D+15 before the period rolls; and (b) a **fully-missed period cannot be clawed back later** (can't exceed the cap next period — unlike NMI arrears). #257 must keep `NextRetryAt` inside the period and treat exhausted dunning as cancel (already the existing behavior).
+  - **Dunning grace (decided): Solana gets the SAME paid-through grace as NMI.** The grace-entitlement-append at `lifecycle_service.go:1375` is currently gated on `processors.IsNMIBackedProcessor`. Generalize that gate to a predicate like `processorDrivesDunning(processor)` (true for NMI-backed **and** Solana — both are processors where *OpenRails* controls retry timing, unlike Stripe where the processor does). So during a Solana subscriber's retry window the user keeps access via grace entitlement windows, exactly like NMI; access is revoked only on dunning exhaustion → cancel.
 - **Delegation revoked** (user revoked the SA approval) → terminal; `CancelMembership`.
 - **`PlanTermsMismatch` (ghost plan)** → terminal for that subscription; notify user to re-enroll.
 - **Period already pulled** → on-chain `amount_pulled_in_period` guard makes double-pull a no-op; treat as idempotent success.
@@ -254,3 +257,29 @@ plugs into the same pipe; we do not invent a parallel one.**
 4. ✅ **RESOLVED — secret storage** — reuse the existing `tenancy.TenantSecretStore` (#225/#227): DB+envelope self-hosted, Vault KV managed; key `solana/private_key`. *Remaining sub-choice:* KV-fetch-then-sign vs. **Vault Transit** remote-sign (recommended for the money-moving key). See §8.
 5. **Per-tenant fee-wallet funding model** — tenant funds their own SOL, or platform fronts gas and bills it back?
 ```
+
+## 12. Testing strategy — real devnet integration tests (decided)
+
+On-chain behavior is verified with **live devnet integration tests, not mocks**.
+Each test generates a keypair, funds it, and submits **real transactions** against
+the deployed program on devnet — so we test what actually works, including the
+DEVNET-VERIFY items (PDA derivation, account orderings, `__event_authority` seed,
+Token-2022 mint rejection) that no unit test can confirm.
+
+- **Build-tagged + opt-in:** files carry `//go:build devnet` and run only via
+  `go test -tags devnet -run Devnet ./internal/integrations/solana/...`. They are
+  slow and need network, so they never run in the default unit suite.
+- **Funded payer:** set `SOLANA_DEVNET_PAYER_KEY` to a base58 devnet key funded
+  once at https://faucet.solana.com (the public RPC `requestAirdrop` is IP-rate-
+  limited, so a persistent funded payer is the reliable path). Tests fall back to
+  RPC airdrop and **skip** (not fail) when the faucet is dry.
+- **Per-flow coverage (built as each flow lands):** `create_plan` (USDC accepted /
+  PYUSD rejected → #252), `init_subscription_authority` + `subscribe`,
+  `transfer_subscription` (the pull, incl. insufficient-USDC revert), and
+  `cancel`/`resume`. Each asserts the real on-chain outcome.
+- **Fast structural unit tests remain** for pure logic (PDA determinism, arg byte
+  layout, allowlist, signer crypto) — they are not mocks of on-chain behavior, just
+  cheap guards; the devnet tests are the source of truth for program interaction.
+
+The first integration test (`create_plan`) is committed; it ran live against
+devnet and is currently faucet-blocked pending a funded payer key.
