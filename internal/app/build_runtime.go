@@ -32,6 +32,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/productaccess"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
@@ -235,6 +236,8 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		PaymentMethodService:     serviceInstances.PaymentMethodService,
 		PaymentService:           serviceInstances.PurchaseService,
 		EntitlementService:       serviceInstances.EntitlementService,
+		FeatureService:           serviceInstances.FeatureService,
+		ProductAccessService:     serviceInstances.ProductAccessService,
 		VaultService:             serviceInstances.VaultService,
 		SolanaPayService:         serviceInstances.SolanaPayService,
 		SolanaPayPoller:          serviceInstances.SolanaPayPoller,
@@ -499,6 +502,8 @@ type servicesInstances struct {
 	PaymentMethodService     *vault.PaymentMethodService
 	PurchaseService          *payments.PaymentService
 	EntitlementService       *entitlements.EntitlementService
+	FeatureService           *entitlements.FeatureService
+	ProductAccessService     *productaccess.Service
 	VaultService             *vault.VaultService
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller
@@ -531,6 +536,8 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	paymentMethodService := vault.NewPaymentMethodService(database)
 	purchaseService := payments.NewPaymentService(database, clock)
 	entitlementService := entitlements.NewEntitlementService(database, clock)
+	featureService := entitlements.NewFeatureService(database, clock)
+	productAccessService := productaccess.NewService(database, clock)
 	creditsService := credits.NewCreditsService(database, clock)
 	creditTypeService := credits.NewCreditTypeService(database)
 	processorCustomerService := payments.NewProcessorCustomerService(database)
@@ -645,6 +652,11 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		clock,
 	)
 	webhookDispatcher.PurchaseRegistrar = checkoutService
+	// Wire durable product-access grants (issue #250) into the one-time purchase
+	// flow. Additive to feature entitlements; nil-safe.
+	if checkoutService.PurchaseService != nil {
+		checkoutService.PurchaseService.SetProductAccessService(productAccessService)
+	}
 	subscriptionLifecycleService.EventLogService = nil // reset until ClickHouse init
 
 	checkoutSessionService := checkout.NewCheckoutSessionService(
@@ -684,6 +696,8 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		PaymentMethodService:         paymentMethodService,
 		PurchaseService:              purchaseService,
 		EntitlementService:           entitlementService,
+		FeatureService:               featureService,
+		ProductAccessService:         productAccessService,
 		VaultService:                 vaultService,
 		SolanaPayService:             solanaPayService,
 		SolanaPayPoller:              solanaPayPoller,

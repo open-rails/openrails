@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -29,7 +30,20 @@ type CheckoutPurchaseService struct {
 	PaymentService      *payments.PaymentService
 	EntitlementService  *entitlements.EntitlementService
 	SubscriptionService checkoutSubscriptionAccess
-	clock               clockwork.Clock
+	// ProductAccessService records durable product ownership/access grants
+	// (issue #250) alongside feature entitlements on a successful one-time
+	// purchase. Optional: when nil, purchases still grant entitlements (grants
+	// are an additive, separate model). Wired post-construction via
+	// SetProductAccessService so existing constructor call sites are unchanged.
+	ProductAccessService productAccessGranter
+	clock                clockwork.Clock
+}
+
+// productAccessGranter is the subset of the product-access service the purchase
+// flow needs. An interface keeps the checkout module decoupled from the
+// productaccess module's concrete type (and avoids an import cycle risk).
+type productAccessGranter interface {
+	GrantProductAccess(ctx context.Context, params productaccess.GrantParams) (*models.ProductAccessGrant, bool, error)
 }
 
 func NewCheckoutPurchaseService(
@@ -59,6 +73,13 @@ func (s *CheckoutPurchaseService) now() time.Time {
 
 func (s *CheckoutPurchaseService) SetClock(c clockwork.Clock) {
 	s.clock = firstClock(c)
+}
+
+// SetProductAccessService wires the durable product-access grant service (issue
+// #250). Wired post-construction so existing NewCheckoutPurchaseService call
+// sites stay unchanged.
+func (s *CheckoutPurchaseService) SetProductAccessService(g productAccessGranter) {
+	s.ProductAccessService = g
 }
 
 func (s *CheckoutPurchaseService) Clock() clockwork.Clock {
@@ -299,6 +320,11 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 			return nil, fmt.Errorf("failed to repair entitlements for existing payment: %w", err)
 		}
 
+		// Idempotently (re)record the durable product access grant for one-time
+		// purchases (issue #250) so a replayed webhook/poll repairs a missing
+		// grant the same way it repairs entitlements.
+		s.grantProductAccess(ctx, req.UserID, product.ID, existingPayment.ID, existingPayment.SubscriptionID != nil, price.BillingCycleDays)
+
 		grantedEntitlements := make([]string, 0, len(entitlementsSpec))
 		for entName := range entitlementsSpec {
 			grantedEntitlements = append(grantedEntitlements, entName)
@@ -326,6 +352,11 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		}
 	}
 
+	// Durable product ownership/access grant (issue #250) for one-time product
+	// purchases — additive to the feature entitlements granted above. Keyed on the
+	// payment id so it is idempotent; skipped for subscription purchases.
+	s.grantProductAccess(ctx, req.UserID, product.ID, paymentID, req.SubscriptionID != nil, price.BillingCycleDays)
+
 	var delayedStart *time.Time
 	if coverage.HasCoverage && coverage.EndDate != nil {
 		delayedStart = coverage.EndDate
@@ -338,6 +369,37 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	}).Info("registered purchase")
 
 	return &payments.RegisterPurchaseResponse{PaymentID: paymentID, Entitlements: grantedEntitlements, DelayedStart: delayedStart, Eligibility: string(eligibility.Status)}, nil
+}
+
+// grantProductAccess records a durable product ownership/access grant (issue
+// #250) for a successful ONE-TIME product purchase, in ADDITION to (and distinct
+// from) feature entitlements. It is idempotent: the grant is keyed on the payment
+// id, so re-processing the same purchase is a no-op. Skipped for subscription
+// purchases (price.BillingCycleDays != nil or req.SubscriptionID set) — those are
+// access-by-subscription, not durable ownership. A nil ProductAccessService makes
+// this a no-op so existing call sites/tests are unaffected.
+func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID string, productID, paymentID uuid.UUID, isSubscription bool, billingCycleDays *int) {
+	if s.ProductAccessService == nil {
+		return
+	}
+	if isSubscription || billingCycleDays != nil {
+		return
+	}
+	pid := paymentID
+	if _, _, err := s.ProductAccessService.GrantProductAccess(ctx, productaccess.GrantParams{
+		UserID:     userID,
+		ProductID:  productID,
+		SourceType: models.ProductAccessSourcePurchase,
+		SourceID:   paymentID.String(),
+		PaymentID:  &pid,
+	}); err != nil {
+		// Non-fatal: the payment + entitlements already succeeded. Log and
+		// continue so a grant write failure never blocks fulfilment; refunds
+		// revoke by payment id regardless.
+		log.WithError(err).WithFields(log.Fields{
+			"user_id": userID, "product_id": productID, "payment_id": paymentID,
+		}).Error("failed to record product access grant after purchase")
+	}
 }
 
 func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, entitlementsSpec map[string]*int, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, walletPurchase bool, billingCycleDays *int, skipExistingSource bool) error {

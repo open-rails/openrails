@@ -29,6 +29,8 @@ var ModelRegistry = []any{
 	(*PaymentMethod)(nil),
 	(*NotificationQueue)(nil),
 	(*Entitlement)(nil),
+	(*EntitlementFeature)(nil),
+	(*ProductEntitlementFeature)(nil),
 	(*AdminGrant)(nil),
 	(*CreditType)(nil),
 	(*UserCreditBalance)(nil),
@@ -38,6 +40,7 @@ var ModelRegistry = []any{
 	(*CreditSpendLimit)(nil),
 	(*ProcessorCustomer)(nil),
 	(*SolanaSubscription)(nil),
+	(*ProductAccessGrant)(nil),
 }
 
 func RegisterModels(db *bun.DB) {

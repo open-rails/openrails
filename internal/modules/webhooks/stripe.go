@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -1281,6 +1282,12 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.EntitlementRevokeRefund); err != nil {
 			return fmt.Errorf("revoke one-off entitlements after stripe refund: %w", err)
 		}
+		// Revoke the durable product access grant tied to this payment (issue #250),
+		// consistent with the entitlement reversal above.
+		paSvc := productaccess.NewService(s.DB, s.Clock)
+		if _, err := paSvc.RevokeProductAccessByPayment(ctx, original.ID, models.ProductAccessRevokeRefund); err != nil {
+			return fmt.Errorf("revoke product access after stripe refund: %w", err)
+		}
 	}
 	return nil
 }
@@ -1351,6 +1358,12 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
 		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.EntitlementRevokeChargeback); err != nil {
 			return fmt.Errorf("revoke one-off entitlements after stripe dispute: %w", err)
+		}
+		// Revoke the durable product access grant tied to this payment (issue #250),
+		// consistent with the entitlement reversal above.
+		paSvc := productaccess.NewService(s.DB, s.Clock)
+		if _, err := paSvc.RevokeProductAccessByPayment(ctx, original.ID, models.ProductAccessRevokeChargeback); err != nil {
+			return fmt.Errorf("revoke product access after stripe dispute: %w", err)
 		}
 	}
 	if ledgerErr != nil {

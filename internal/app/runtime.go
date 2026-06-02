@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/productaccess"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -64,6 +65,8 @@ type Runtime struct {
 
 	EventLogService          *analytics.EventLogService
 	EntitlementService       *entitlements.EntitlementService
+	FeatureService           *entitlements.FeatureService
+	ProductAccessService     *productaccess.Service
 	CreditsService           *credits.CreditsService
 	CreditTypeService        *credits.CreditTypeService
 	ProcessorCustomerService *payments.ProcessorCustomerService
