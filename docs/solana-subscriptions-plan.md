@@ -39,6 +39,26 @@ These were decided up front and constrain everything below:
 > treat USDC as the guaranteed path and PYUSD as a verify-then-add.
 | **Billing engine** | **New OpenRails pull worker + merchant hot wallet** | OpenRails holds a funded Solana keypair, signs `transfer_subscription` each cycle from a scheduled River worker, and pays SOL gas. This is the big new capability — today the backend is read-only. |
 
+### Stablecoin recurring-eligibility (verified by on-chain mint inspection)
+
+Eligibility is a function of the mint's token-program + extension set (the program
+rejects ConfidentialTransfer / NonTransferable / PermanentDelegate / TransferHook /
+TransferFee / MintCloseAuthority / Pausable). Checked live on mainnet, with USDC
+also confirmed via `create_plan` on devnet:
+
+| Stablecoin | Mint program | Blocking extensions | Recurring |
+|---|---|---|---|
+| **USDC** | SPL Token | none | ✅ eligible (devnet `create_plan` accepted) |
+| **USD1** | SPL Token | none | ✅ eligible (World Liberty Financial USD; **mainnet-only** mint) |
+| **PYUSD** | Token-2022 | PermanentDelegate, TransferFee | ❌ (devnet error 121 `mintHasPermanentDelegate`) |
+| **USDG** | Token-2022 | PermanentDelegate, TransferFee, ConfidentialTransfer, TransferHook, MintCloseAuthority | ❌ |
+| **BUIDL** | Token-2022 | PermanentDelegate, TransferHook, MintCloseAuthority (permissioned security) | ❌ |
+| **USDT** | — | excluded by policy (freeze/counterparty risk) | ❌ |
+
+Mint extensions are immutable, so a rejected token can never become eligible.
+`RecurringStablecoins = {USDC, USD1}`. New stablecoins are added by re-running the
+mint-inspection check.
+
 ### One-off vs. recurring token asymmetry
 
 These are deliberately different and must be enforced separately:

@@ -39,6 +39,14 @@ func DefaultSupportedTokens() map[string]SolanaToken {
 			Mint:     "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
 			Decimals: 6,
 		},
+		// USD1 (World Liberty Financial USD) — plain SPL Token mint, no
+		// extensions, so it is recurring-eligible (verified by mint inspection,
+		// like USDC). Mainnet only; no devnet mint exists.
+		"USD1": {
+			Name:     "World Liberty Financial USD",
+			Mint:     "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB",
+			Decimals: 6,
+		},
 	}
 }
 

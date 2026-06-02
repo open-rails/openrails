@@ -8,7 +8,10 @@ import (
 func TestIsRecurringStablecoinSymbol(t *testing.T) {
 	cases := map[string]bool{
 		"USDC": true, "usdc": true, " USDC ": true,
-		"PYUSD": false, // gated pending #252
+		"USD1":  true,  // plain SPL, verified eligible
+		"PYUSD": false, // Token-2022 PermanentDelegate (devnet error 121)
+		"USDG":  false, // Token-2022 PermanentDelegate+TransferFee+...
+		"BUIDL": false, // Token-2022 PermanentDelegate+TransferHook (permissioned)
 		"USDT":  false, // permanently excluded
 		"SOL":   false, // volatile
 		"":      false,
@@ -35,8 +38,16 @@ func TestResolveRecurringMint(t *testing.T) {
 		}
 	}
 
+	// USD1 resolves on mainnet (where its mint exists) but not devnet (mainnet-only).
+	if mint, dec, err := ResolveRecurringMint("USD1", "mainnet"); err != nil || mint == "" || dec != 6 {
+		t.Errorf("ResolveRecurringMint(USD1, mainnet) = (%q,%d,%v), want a 6-decimal mint", mint, dec, err)
+	}
+	if _, _, err := ResolveRecurringMint("USD1", "devnet"); err == nil {
+		t.Error("ResolveRecurringMint(USD1, devnet) should fail — USD1 has no devnet mint")
+	}
+
 	// Off-allowlist tokens fail closed even though they're otherwise supported.
-	for _, sym := range []string{"PYUSD", "USDT", "SOL", "NOPE"} {
+	for _, sym := range []string{"PYUSD", "USDG", "BUIDL", "USDT", "SOL", "NOPE"} {
 		if _, _, err := ResolveRecurringMint(sym, "mainnet"); err == nil {
 			t.Errorf("ResolveRecurringMint(%s) = nil error, want rejection", sym)
 		}

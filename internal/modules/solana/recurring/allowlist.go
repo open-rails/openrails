@@ -18,17 +18,25 @@ import (
 // RecurringStablecoins is the launch allowlist of token SYMBOLS eligible to back
 // a recurring Solana subscription.
 //
-// USDC only at launch. PYUSD is intentionally excluded pending the #252 devnet
-// spike: its Token-2022 mint has PermanentDelegate + TransferFee extensions
-// initialized, both on the Subscriptions program's reject list, so create_plan
-// almost certainly rejects it (and mint extensions are immutable). USDT is
-// excluded permanently for regulatory/counterparty-freeze risk. Volatile tokens
-// (SOL, etc.) are excluded because on-chain plan amounts are immutable — only a
-// stablecoin keeps a fixed base-unit amount ≈ a fixed USD amount across cycles.
+// Eligibility is determined by the mint's token-program + extension set (the
+// Subscriptions program rejects mints carrying ConfidentialTransfer,
+// NonTransferable, PermanentDelegate, TransferHook, TransferFee,
+// MintCloseAuthority, or Pausable). Verified per token by on-chain mint
+// inspection (and create_plan on devnet for USDC):
 //
+//   - USDC  — plain SPL Token, no extensions → eligible (create_plan ACCEPTED on devnet).
+//   - USD1  — plain SPL Token, no extensions → eligible (World Liberty Financial USD; mainnet only).
+//   - PYUSD — Token-2022 w/ PermanentDelegate+TransferFee → REJECTED (devnet error 121 mintHasPermanentDelegate).
+//   - USDG  — Token-2022 w/ PermanentDelegate+TransferFee+ConfidentialTransfer+TransferHook → rejected.
+//   - BUIDL — Token-2022 w/ PermanentDelegate+TransferHook (permissioned security) → rejected.
+//   - USDT  — excluded by policy (regulatory/counterparty-freeze risk).
+//   - SOL / volatile — excluded: on-chain plan amounts are immutable, so only a
+//     stablecoin keeps a fixed base-unit amount ≈ a fixed USD amount across cycles.
+//
+// Mint extensions are immutable, so a rejected token can never become eligible.
 // One-off purchases are unaffected — they accept the full DefaultSupportedTokens
 // set and FX-quote at purchase time.
-var RecurringStablecoins = []string{"USDC"}
+var RecurringStablecoins = []string{"USDC", "USD1"}
 
 // IsRecurringStablecoinSymbol reports whether symbol is on the recurring allowlist.
 func IsRecurringStablecoinSymbol(symbol string) bool {
