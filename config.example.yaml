@@ -78,6 +78,21 @@ cors_origins:
   - "http://localhost:3000"
   - "https://your-frontend-domain.com"
 
+# Per-tenant browser-direct allowed origins (issue #222 browser tier).
+# Keyed by tenant slug. Each tenant lists the exact browser origins on its own
+# domain that may call OpenRails directly (e.g. the /v1/self/* self-service
+# surface with a delegated access token). These are added to the CORS allow-list
+# ALONGSIDE cors_origins (additive union, exact-match only — never a wildcard).
+# A browser preflight from any listed origin succeeds; unlisted origins are denied.
+# tenant_cors:
+#   doujins:
+#     allowed_origins:
+#       - "https://app.doujins.com"
+#       - "https://doujins.com"
+#   hentai0:
+#     allowed_origins:
+#       - "https://hentai0.com"
+
 # =============================================================================
 # STORE/MERCHANT BRANDING
 # =============================================================================

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -122,6 +123,15 @@ type Config struct {
 	SendGrid     *SendGridConfig   `koanf:"sendgrid,omitempty"`
 	Pyth         *PythConfig       `koanf:"pyth,omitempty"`
 	CorsOrigins  []string          `koanf:"cors_origins,omitempty"`
+	// TenantCORS configures per-tenant browser-direct allowed origins (issue #222
+	// browser tier). It is keyed by tenant slug; each entry lists the exact
+	// origins a browser on that tenant's domain may use to call OpenRails
+	// directly (e.g. the /v1/self/* self-service surface with a delegated access
+	// token). These origins are added to the allow-list ALONGSIDE CorsOrigins —
+	// they are an additive union, never a wildcard. Preflight succeeds for any
+	// listed origin and is denied for any origin that is not listed in either
+	// CorsOrigins or some tenant's allowed origins.
+	TenantCORS   map[string]*TenantCORSConfig `koanf:"tenant_cors,omitempty"`
 	RateLimits   *RateLimitsConfig `koanf:"rate_limits,omitempty"`
 	Captcha      *CaptchaConfig    `koanf:"captcha,omitempty"`
 	FeatureFlags *FeatureFlags     `koanf:"feature_flags,omitempty"`
@@ -376,6 +386,58 @@ type RedisConfig struct {
 
 // AuthConfig holds JWT verification configuration for billing service.
 // Billing is a JWT verifier (not issuer) - it validates tokens issued by your IdP.
+// TenantCORSConfig holds the browser-direct CORS policy for a single tenant
+// (issue #222 browser tier).
+type TenantCORSConfig struct {
+	// AllowedOrigins is the exact set of browser origins (scheme+host+port) on
+	// this tenant's domain that may call OpenRails directly. Exact-match only; no
+	// wildcards. Example: ["https://app.doujins.com", "https://doujins.com"].
+	AllowedOrigins []string `koanf:"allowed_origins,omitempty"`
+}
+
+// AllowedCORSOrigins returns the de-duplicated union of the global CorsOrigins
+// and every tenant's per-tenant allowed origins (issue #222 browser tier). This
+// is the explicit allow-list handed to the CORS middleware so browsers on a
+// configured tenant domain can call OpenRails directly without weakening CORS to
+// a wildcard. Order is stable (global origins first, then tenant origins in
+// tenant-slug order) so the allow-list is deterministic.
+func (c *Config) AllowedCORSOrigins() []string {
+	if c == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(o string) {
+		o = strings.TrimSpace(o)
+		if o == "" {
+			return
+		}
+		if _, ok := seen[o]; ok {
+			return
+		}
+		seen[o] = struct{}{}
+		out = append(out, o)
+	}
+	for _, o := range c.CorsOrigins {
+		add(o)
+	}
+	slugs := make([]string, 0, len(c.TenantCORS))
+	for slug := range c.TenantCORS {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	for _, slug := range slugs {
+		tc := c.TenantCORS[slug]
+		if tc == nil {
+			continue
+		}
+		for _, o := range tc.AllowedOrigins {
+			add(o)
+		}
+	}
+	return out
+}
+
 type AuthConfig struct {
 	Issuers          []string `koanf:"issuers"`           // List of expected token issuers (e.g., ["https://issuer.example.com"])
 	ExpectedAudience string   `koanf:"expected_audience"` // Accept token only if it contains this audience (e.g., "openrails-app")

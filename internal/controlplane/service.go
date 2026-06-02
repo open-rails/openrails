@@ -24,6 +24,12 @@ type ControlPlane struct {
 	cfg     *config.Config
 	authSvc *authhttp.Service
 	pool    *pgxpool.Pool
+
+	// delegatedVerifier validates browser-direct delegated access tokens for the
+	// self-service surface (issue #222 browser tier). It is built from the same
+	// issuer/audience/keys the control plane signs with, plus a self-service
+	// permission-catalog validator. See delegated.go.
+	delegatedVerifier *authhttp.Verifier
 }
 
 // New builds the OpenRails-owned AuthKit control plane from config and a pgx
@@ -101,7 +107,20 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 	}
 	authSvc = authSvc.WithPostgres(pool)
 
-	return &ControlPlane{cfg: cfg, authSvc: authSvc, pool: pool}, nil
+	// Build the browser-direct delegated-access-token verifier (#222 browser
+	// tier). It accepts ONLY this control plane's own delegated tokens with the
+	// canonical `openrails` audience and `openrails:self:*` permissions.
+	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), expected, orgMode, strings.TrimSpace(cp.TokenPrefix))
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
+	}
+
+	return &ControlPlane{
+		cfg:               cfg,
+		authSvc:           authSvc,
+		pool:              pool,
+		delegatedVerifier: delegatedVerifier,
+	}, nil
 }
 
 // Core returns the underlying AuthKit core service used for in-process

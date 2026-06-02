@@ -552,3 +552,39 @@ func TestGetDefaultBillingConfig_FeatureFlags(t *testing.T) {
 		assert.False(t, cfg.IsEntitlementExpirationDisabled())
 	})
 }
+
+func TestAllowedCORSOrigins_UnionsGlobalAndTenantOrigins(t *testing.T) {
+	cfg := &Config{
+		CorsOrigins: []string{"https://app.example.com", "https://app.example.com"}, // dup
+		TenantCORS: map[string]*TenantCORSConfig{
+			"doujins": {AllowedOrigins: []string{"https://app.doujins.com", "https://doujins.com"}},
+			"hentai0": {AllowedOrigins: []string{"https://hentai0.com", "https://app.example.com"}}, // dup w/ global
+			"empty":   nil,
+		},
+	}
+
+	got := cfg.AllowedCORSOrigins()
+
+	// Global origin first, de-duplicated; tenant origins follow in slug order.
+	assert.Equal(t, []string{
+		"https://app.example.com",
+		"https://app.doujins.com",
+		"https://doujins.com",
+		"https://hentai0.com",
+	}, got)
+}
+
+func TestAllowedCORSOrigins_NoWildcardWhenConfigured(t *testing.T) {
+	cfg := &Config{TenantCORS: map[string]*TenantCORSConfig{
+		"t": {AllowedOrigins: []string{"https://t.example.com"}},
+	}}
+	got := cfg.AllowedCORSOrigins()
+	assert.Equal(t, []string{"https://t.example.com"}, got)
+	assert.NotContains(t, got, "*")
+}
+
+func TestAllowedCORSOrigins_NilSafe(t *testing.T) {
+	var cfg *Config
+	assert.Nil(t, cfg.AllowedCORSOrigins())
+	assert.Empty(t, (&Config{}).AllowedCORSOrigins())
+}

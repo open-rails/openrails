@@ -130,6 +130,11 @@ func New(deps Dependencies) (*Server, error) {
 	// plane (verifier-only mode has no OAT issuer).
 	s.registerServiceRoutes(s.publicHandler)
 
+	// Browser-direct self-service API: delegated-access-token-authenticated, on
+	// the SAME public engine (issue #222 browser tier). No-op without a control
+	// plane (verifier-only mode has no delegated-token issuer).
+	s.registerSelfServiceRoutes(s.publicHandler)
+
 	log.Info("Billing service initialized successfully")
 	return s, nil
 }
@@ -141,7 +146,11 @@ func (s *Server) newPublicEngine() *gin.Engine {
 		SkipPaths: []string{"/health/live", "/health/ready", "/healthz", "/readyz", "/health"},
 	}))
 	e.Use(middleware.SecurityHeaders())
-	e.Use(middleware.CORS(s.cfg.CorsOrigins))
+	// Allow-list = global CorsOrigins UNION every tenant's browser-direct
+	// allowed origins (issue #222 browser tier). Preflight from a configured
+	// tenant origin succeeds; unlisted origins are denied (never a wildcard
+	// outside development).
+	e.Use(middleware.CORS(s.cfg.AllowedCORSOrigins()))
 	e.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
 	// Resolve the tenant / billing namespace before authorization and before any
 	// tenant-owned DB access (issue #223). Defaults to the single default tenant.

@@ -18,7 +18,11 @@
 // AuthKit operator org.
 package controlplane
 
-import authcore "github.com/open-rails/authkit/core"
+import (
+	"strings"
+
+	authcore "github.com/open-rails/authkit/core"
+)
 
 // Permission is an OpenRails permission string in the OpenRails permission
 // catalog. AuthKit treats permission strings as opaque; OpenRails owns their
@@ -56,6 +60,18 @@ const (
 	// Destructive billing operations.
 	PermPaymentsRefund      = "openrails:payments:refund"
 	PermSubscriptionsCancel = "openrails:subscriptions:cancel"
+
+	// Self-service (browser-direct) permissions. These gate the tenant-scoped
+	// self-service surface (`/v1/self/*`) reached with a DELEGATED ACCESS TOKEN
+	// minted by a tenant's host frontend (issue #222 foundation for the browser
+	// tier: doujins #253 / hentai0 #142 / cozy-art #46). Unlike the coarse
+	// server-to-server OAT permissions above, `openrails:self:*` authorizes a
+	// human end-user (the token's `delegated_sub`) to manage ONLY their own
+	// billing — never another user's and never operator/admin surfaces.
+	PermSelfBillingRead        = "openrails:self:billing:read"
+	PermSelfCheckoutCreate     = "openrails:self:checkout:create"
+	PermSelfSubscriptionCancel = "openrails:self:subscriptions:cancel"
+	PermSelfPaymentMethods     = "openrails:self:payment-methods:manage"
 )
 
 // catalogEntries is the canonical ordered list of OpenRails permissions with
@@ -68,6 +84,37 @@ var catalogEntries = []Permission{
 	{Name: PermCatalogWrite, Description: "Create and update products and prices."},
 	{Name: PermPaymentsRefund, Description: "Refund payments."},
 	{Name: PermSubscriptionsCancel, Description: "Cancel subscriptions on behalf of the operator."},
+	{Name: PermSelfBillingRead, Description: "Self-service: read your own balance, credits, transactions, subscriptions, and payment history."},
+	{Name: PermSelfCheckoutCreate, Description: "Self-service: create your own checkout sessions."},
+	{Name: PermSelfSubscriptionCancel, Description: "Self-service: cancel your own subscriptions."},
+	{Name: PermSelfPaymentMethods, Description: "Self-service: manage your own payment methods."},
+}
+
+// selfCatalog is the set of self-service permissions accepted on delegated
+// access tokens for the browser-direct `/v1/self/*` surface. A delegated token
+// presenting any permission OUTSIDE this set is rejected: browser tokens must
+// not carry operator/server-to-server grants.
+var selfCatalog = map[string]struct{}{
+	PermSelfBillingRead:        {},
+	PermSelfCheckoutCreate:     {},
+	PermSelfSubscriptionCancel: {},
+	PermSelfPaymentMethods:     {},
+}
+
+// SelfCatalogNames returns the self-service permission names in catalog order.
+func SelfCatalogNames() []string {
+	return []string{
+		PermSelfBillingRead,
+		PermSelfCheckoutCreate,
+		PermSelfSubscriptionCancel,
+		PermSelfPaymentMethods,
+	}
+}
+
+// IsSelfPermission reports whether perm is a known self-service permission.
+func IsSelfPermission(perm string) bool {
+	_, ok := selfCatalog[strings.TrimSpace(perm)]
+	return ok
 }
 
 // Catalog returns the OpenRails permission catalog as AuthKit PermissionDefs,

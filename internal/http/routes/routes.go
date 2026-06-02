@@ -19,6 +19,14 @@ import (
 // acting tenant is bound by the OAT's owning org, not the URL.
 const ServiceRoutePrefix = "/service"
 
+// SelfRoutePrefix is the path under the tenant-scoped public API where
+// browser-direct SELF-SERVICE billing operations live (issue #222 browser
+// tier). A tenant's host frontend mints a short-lived DELEGATED ACCESS TOKEN for
+// the logged-in end-user and the browser presents it as a Bearer token directly
+// against this surface. The acting user is the token's `delegated_sub` and the
+// acting tenant is bound by the token's `tenant` claim — never the URL.
+const SelfRoutePrefix = "/self"
+
 type Options struct {
 	AuthProvider authprovider.Provider
 
@@ -203,4 +211,57 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	creditTypes.PATCH("/:name", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceUpdateCreditType))
 	creditTypes.POST("/:name/deactivate", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceDeactivateCreditType))
 	creditTypes.POST("/:name/activate", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceActivateCreditType))
+}
+
+// RegisterSelfServiceRoutes mounts the browser-direct SELF-SERVICE billing
+// surface on a tenant-scoped PUBLIC route group authenticated by a browser's
+// DELEGATED ACCESS TOKEN (issue #222 browser-tier foundation). It reuses the
+// existing user-facing handlers — they all read the acting user via
+// r.GetUser(), which delegatedMW binds to the token's `delegated_sub` — so every
+// operation is automatically scoped to the authenticated end-user and their
+// tenant. There is no `:user_id` in any path: a browser token can only act on
+// its own subject.
+//
+// delegatedMW must authenticate the delegated token (typically
+// middleware.DelegatedSelfRequired); it pins the resolved tenant + acting user +
+// self-permissions onto the context that the per-route RequireDelegatedPermission
+// gates and the handlers read.
+func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
+	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
+		return wrapHandler(rt, fn)
+	}
+
+	group.Use(delegatedMW)
+
+	read := middleware.RequireDelegatedPermission(controlplane.PermSelfBillingRead)
+
+	// Account + balance/credits read.
+	group.GET("/status", read, wrap(httphandlers.GetMyBillingStatus))
+	group.GET("/credits", read, wrap(httphandlers.GetMyCredits))
+	group.GET("/credits/:type", read, wrap(httphandlers.GetMyCreditsType))
+	group.GET("/credits/:type/transactions", read, wrap(httphandlers.GetMyCreditTransactions))
+
+	// Payment / transaction history.
+	group.GET("/payments", read, wrap(httphandlers.GetUserPayments))
+
+	// Subscriptions: read for the whole group; cancel gated by the cancel scope.
+	subs := group.Group("/subscriptions")
+	subs.GET("", read, wrap(httphandlers.GetMySubscriptions))
+	subs.GET("/:id", read, wrap(httphandlers.GetSubscription))
+	subs.POST("/:id/cancel", middleware.RequireDelegatedPermission(controlplane.PermSelfSubscriptionCancel), wrap(httphandlers.CancelSubscription))
+
+	// Payment methods: list is a read; mutations require the manage scope.
+	pm := group.Group("/payment-methods")
+	pm.GET("", read, wrap(httphandlers.ListPaymentMethods))
+	manage := middleware.RequireDelegatedPermission(controlplane.PermSelfPaymentMethods)
+	pm.POST("", manage, wrap(httphandlers.CreatePaymentMethod))
+	pm.PUT("/:id", manage, wrap(httphandlers.UpdatePaymentMethod))
+	pm.DELETE("/:id", manage, wrap(httphandlers.DeletePaymentMethod))
+
+	// Checkout: create a session and read/confirm it (browser self-checkout).
+	checkoutCreate := middleware.RequireDelegatedPermission(controlplane.PermSelfCheckoutCreate)
+	checkout := group.Group("/checkout")
+	checkout.POST("", checkoutCreate, wrap(httphandlers.CreateCheckoutSession))
+	checkout.GET("/:id", read, wrap(httphandlers.GetCheckoutSession))
+	checkout.POST("/:id/confirm", checkoutCreate, wrap(httphandlers.ConfirmCheckoutSession))
 }

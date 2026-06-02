@@ -18,6 +18,11 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		"openrails:catalog:write",
 		"openrails:payments:refund",
 		"openrails:subscriptions:cancel",
+		// Self-service (browser-direct) permissions (#222 browser tier).
+		"openrails:self:billing:read",
+		"openrails:self:checkout:create",
+		"openrails:self:subscriptions:cancel",
+		"openrails:self:payment-methods:manage",
 	}
 	got := map[string]bool{}
 	for _, p := range Catalog() {

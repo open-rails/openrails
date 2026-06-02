@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     authkit_org_id   TEXT,
     authkit_org_slug TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    deleted_at       TIMESTAMPTZ
 );
 INSERT INTO billing.tenants (id, slug, name)
 VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default')
@@ -166,4 +167,44 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	eff2, err := cp.Core().EffectiveRolePermissions(ctx, "operator", OperatorRole)
 	require.NoError(t, err)
 	require.ElementsMatch(t, eff, eff2, fmt.Sprintf("permissions should be stable across reruns: %v vs %v", eff, eff2))
+}
+
+// TestDelegatedTenantResolution exercises the org->tenant mapping that
+// ResolveDelegated relies on for browser-direct delegated access tokens (issue
+// #222 browser tier): an active org maps to its tenant, while an unknown or
+// suspended org is rejected as cross-tenant/unmapped. ResolveDelegated and
+// ResolveOAT share this exact mapping (tenantForOrgSlug).
+func TestDelegatedTenantResolution(t *testing.T) {
+	ctx := context.Background()
+	pool := newBootstrapTestPool(t)
+	cp := newEnabledControlPlane(t, pool)
+
+	// A second, suspended tenant owned by a distinct org.
+	_, err := pool.Exec(ctx, `
+		INSERT INTO billing.tenants (id, slug, name, status, authkit_org_slug)
+		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'Acme', 'suspended', 'acme-org')
+		ON CONFLICT (id) DO NOTHING`)
+	require.NoError(t, err)
+	// Map the default tenant to an active org so the happy path resolves.
+	_, err = pool.Exec(ctx, `
+		UPDATE billing.tenants SET authkit_org_slug = 'default-org', status = 'active'
+		WHERE id = $1::uuid`, tenant.DefaultID.String())
+	require.NoError(t, err)
+
+	// Active org -> its tenant.
+	tid, slug, err := cp.tenantForOrgSlug(ctx, "default-org")
+	require.NoError(t, err)
+	require.Equal(t, tenant.DefaultID, tid)
+	require.Equal(t, "default", slug)
+
+	// Suspended tenant's org -> cross-tenant/unmapped rejection.
+	_, _, err = cp.tenantForOrgSlug(ctx, "acme-org")
+	require.ErrorIs(t, err, ErrOATTenantUnresolved)
+
+	// Unknown org -> rejection.
+	_, _, err = cp.tenantForOrgSlug(ctx, "nobody")
+	require.ErrorIs(t, err, ErrOATTenantUnresolved)
+
+	// The control plane built a delegated verifier (browser-tier prerequisite).
+	require.NotNil(t, cp.DelegatedVerifier())
 }
