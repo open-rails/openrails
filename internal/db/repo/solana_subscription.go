@@ -126,6 +126,27 @@ func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) 
 	return rows, nil
 }
 
+// ListActiveWithSignature returns active subscriptions that have recorded at
+// least one confirmed pull (last_signature set) — the rows the reconciliation
+// worker cross-checks against billing.payments (#258). `limit` caps the batch
+// (0 = no limit).
+func (r *SolanaSubscriptionRepo) ListActiveWithSignature(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
+	var rows []*models.SolanaSubscription
+	q := r.db.Q(ctx).NewSelect().
+		Model(&rows).
+		Where("status = ?", models.SolanaSubscriptionActive).
+		Where("last_signature IS NOT NULL").
+		Where("last_signature <> ''").
+		Order("updated_at ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Scan(ctx); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // SetStatus transitions the on-chain record's lifecycle (cancelled/expired).
 func (r *SolanaSubscriptionRepo) SetStatus(ctx context.Context, id uuid.UUID, status string) error {
 	_, err := r.db.Q(ctx).NewUpdate().

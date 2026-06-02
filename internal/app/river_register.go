@@ -153,6 +153,15 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add solana gas alert worker: %w", err)
 	}
+	// Solana ledger reconciliation (#258): cross-checks confirmed on-chain pulls
+	// against billing.payments and raises operator repair alerts on drift.
+	if err := river.AddWorkerSafely(workers, &riverjobs.SolanaReconcileWorker{
+		DB:                  r.DB,
+		NotificationService: r.NotificationService,
+		Clock:               clock,
+	}); err != nil {
+		return fmt.Errorf("add solana reconcile worker: %w", err)
+	}
 	return nil
 }
 
@@ -279,6 +288,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		river.PeriodicInterval(6*time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.SolanaGasAlertArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 6 hours: reconcile confirmed Solana pulls against the ledger (#258).
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(6*time.Hour),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.SolanaReconcileArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
 			}
