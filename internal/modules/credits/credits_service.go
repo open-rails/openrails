@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/uptrace/bun"
 )
@@ -54,6 +55,22 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 	return clockwork.NewRealClock()
 }
 
+// resolveOwner resolves the OWNER ORG for a credit operation (issue #221, the
+// payer/billing owner). When the caller supplies an explicit owner org, it is
+// used verbatim. Otherwise the owner defaults to the ACTOR's deterministic
+// personal-org id (identity.PersonalOrgID), which is what keeps existing
+// single-user callers working unchanged after #221: a bare user_id continues to
+// own its own balance, now expressed as that user's personal org.
+//
+// The actorUserID is the existing free-form user_id (who caused usage). It is
+// retained for attribution and is NOT the financial owner.
+func resolveOwner(owner *identity.OwnerOrgID, actorUserID string) identity.OwnerOrgID {
+	if owner != nil && !owner.IsZero() {
+		return *owner
+	}
+	return identity.PersonalOrgID(actorUserID)
+}
+
 func (s *CreditsService) GetCreditTypeByName(ctx context.Context, name string) (*models.CreditType, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
@@ -75,11 +92,15 @@ func (s *CreditsService) GetBalance(ctx context.Context, userID string, creditTy
 		return nil, err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	// Reads are scoped by tenant + OWNER (issue #221). For a bare user_id we
+	// resolve the owner to that user's deterministic personal org — the same row
+	// the org-owned writers stamp — so single-user reads return unchanged.
+	ownerID := identity.PersonalOrgID(userID).UUID()
 	bal := new(models.UserCreditBalance)
 	err = s.db.GetDB().NewSelect().
 		Model(bal).
 		Where("tenant_id = ?", tenantID).
-		Where("user_id = ? AND credit_type_id = ?", userID, ct.ID).
+		Where("owner_id = ? AND credit_type_id = ?", ownerID, ct.ID).
 		Limit(1).
 		Scan(ctx)
 	if err == nil {
@@ -88,7 +109,43 @@ func (s *CreditsService) GetBalance(ctx context.Context, userID string, creditTy
 	if errors.Is(err, sql.ErrNoRows) {
 		return &models.UserCreditBalance{
 			TenantID:     tenantID,
+			OwnerID:      ownerID,
 			UserID:       userID,
+			CreditTypeID: ct.ID,
+			Balance:      0,
+			HeldBalance:  0,
+		}, nil
+	}
+	return nil, err
+}
+
+// GetBalanceForOwner reads a balance scoped explicitly by OWNER ORG (issue
+// #221), for callers that own balances at a team org rather than a personal
+// org. The actor user id is not required for an owner-scoped read.
+func (s *CreditsService) GetBalanceForOwner(ctx context.Context, owner identity.OwnerOrgID, creditType string) (*models.UserCreditBalance, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("credits service not initialized")
+	}
+	ct, err := s.GetCreditTypeByName(ctx, creditType)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	ownerID := owner.UUID()
+	bal := new(models.UserCreditBalance)
+	err = s.db.GetDB().NewSelect().
+		Model(bal).
+		Where("tenant_id = ?", tenantID).
+		Where("owner_id = ? AND credit_type_id = ?", ownerID, ct.ID).
+		Limit(1).
+		Scan(ctx)
+	if err == nil {
+		return bal, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return &models.UserCreditBalance{
+			TenantID:     tenantID,
+			OwnerID:      ownerID,
 			CreditTypeID: ct.ID,
 			Balance:      0,
 			HeldBalance:  0,
@@ -105,10 +162,11 @@ func (s *CreditsService) GetTransactions(ctx context.Context, userID string, cre
 	if err != nil {
 		return nil, 0, err
 	}
+	ownerID := identity.PersonalOrgID(userID).UUID()
 	var items []models.CreditTransaction
 	q := s.db.GetDB().NewSelect().Model(&items).
 		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("user_id = ? AND credit_type_id = ?", userID, ct.ID)
+		Where("owner_id = ? AND credit_type_id = ?", ownerID, ct.ID)
 	total, err := q.Count(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -159,11 +217,12 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, userID stri
 		return nil, err
 	}
 
+	ownerID := identity.PersonalOrgID(userID).UUID()
 	trx := new(models.CreditTransaction)
 	if err := s.db.GetDB().NewSelect().
 		Model(trx).
 		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("user_id = ? AND credit_type_id = ?", userID, ct.ID).
+		Where("owner_id = ? AND credit_type_id = ?", ownerID, ct.ID).
 		Where("transaction_type = ?", transactionType).
 		Where("source = ? AND source_id = ?", source, sourceID).
 		Limit(1).
@@ -174,6 +233,10 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, userID stri
 }
 
 type CreditDepositParams struct {
+	// OwnerID is the OWNER ORG that owns the deposited balance (issue #221). When
+	// nil, it defaults to the actor (UserID)'s deterministic personal org, so
+	// existing single-user callers keep working unchanged.
+	OwnerID     *identity.OwnerOrgID
 	UserID      string
 	CreditType  string
 	Amount      int64
@@ -225,14 +288,17 @@ func (s *CreditsService) getCreditTypeByNameTx(ctx context.Context, tx bun.Tx, n
 
 func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.CreditType, params CreditDepositParams) (*models.CreditTransaction, error) {
 	now := s.now()
-	bal, err := s.lockBalance(ctx, tx, params.UserID, ct.ID)
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	owner := resolveOwner(params.OwnerID, params.UserID)
+	ownerID := owner.UUID()
+	bal, err := s.lockBalance(ctx, tx, owner, params.UserID, ct.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Idempotency: if caller provides SourceID, treat (user_id, credit_type_id, source, source_id)
-	// as an idempotency key for deposits. This is safe because we lock the user_credit_balances row
-	// for UPDATE, serializing deposits per user+credit_type.
+	// Idempotency: if caller provides SourceID, treat (tenant, owner, credit_type,
+	// source, source_id) as an idempotency key for deposits. This is safe because
+	// we lock the balance row for UPDATE, serializing deposits per owner+credit_type.
 	sourceIDText := (*string)(nil)
 	if params.SourceID != nil {
 		v := params.SourceID.String()
@@ -240,7 +306,8 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 		existing := new(models.CreditTransaction)
 		err := tx.NewSelect().
 			Model(existing).
-			Where("user_id = ? AND credit_type_id = ?", params.UserID, ct.ID).
+			Where("tenant_id = ? AND owner_id = ?", tenantID, ownerID).
+			Where("credit_type_id = ?", ct.ID).
 			Where("transaction_type = 'deposit'").
 			Where("source = ? AND source_id = ?", params.Source, v).
 			Limit(1).
@@ -258,13 +325,15 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 	if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 		Set("balance = ?", newBal).
 		Set("updated_at = ?", now).
-		Where("user_id = ? AND credit_type_id = ?", params.UserID, ct.ID).
+		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 		Exec(ctx); err != nil {
 		return nil, err
 	}
 
 	trx := &models.CreditTransaction{
 		ID:              uuidutil.NewV7(),
+		TenantID:        tenantID,
+		OwnerID:         ownerID,
 		UserID:          params.UserID,
 		CreditTypeID:    ct.ID,
 		Amount:          params.Amount,
@@ -283,6 +352,8 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 	}
 	block := &models.CreditBlock{
 		ID:                  uuidutil.NewV7(),
+		TenantID:            tenantID,
+		OwnerID:             ownerID,
 		UserID:              params.UserID,
 		CreditTypeID:        ct.ID,
 		OriginalAmount:      params.Amount,
@@ -299,6 +370,9 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 }
 
 type CreditWithdrawParams struct {
+	// OwnerID is the OWNER ORG to withdraw from (issue #221). When nil, defaults
+	// to the actor (UserID)'s deterministic personal org.
+	OwnerID    *identity.OwnerOrgID
 	UserID     string
 	CreditType string
 	Amount     int64
@@ -338,7 +412,11 @@ func (s *CreditsService) Withdraw(ctx context.Context, params CreditWithdrawPara
 	return trx, nil
 }
 
-func (s *CreditsService) Hold(ctx context.Context, userID string, creditType string, amount int64, source, sourceID string, expiresAt time.Time) (*models.CreditTransaction, error) {
+// Hold reserves credits for prepay usage (issue #221: Reserve/Hold(owner) ->
+// CaptureHold(actual) -> ReleaseHold(failure/zero)). owner is the OWNER ORG the
+// reservation is charged against; when nil it defaults to the actor (userID)'s
+// deterministic personal org, preserving existing single-user behaviour.
+func (s *CreditsService) Hold(ctx context.Context, owner *identity.OwnerOrgID, userID string, creditType string, amount int64, source, sourceID string, expiresAt time.Time) (*models.CreditTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
@@ -360,14 +438,19 @@ func (s *CreditsService) Hold(ctx context.Context, userID string, creditType str
 	defer func() { _ = tx.Rollback() }()
 
 	now := s.now()
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	ownerOrg := resolveOwner(owner, userID)
+	ownerID := ownerOrg.UUID()
 
-	// Idempotency: treat (user_id, credit_type_id, source, source_id) as a unique key for holds.
-	// This prevents duplicate held_balance reservations on caller retries.
+	// Idempotency: treat (tenant, owner, credit_type, source, source_id) as a
+	// unique key for holds. This prevents duplicate held_balance reservations on
+	// caller retries.
 	existing := new(models.CreditTransaction)
 	err = tx.NewSelect().
 		Model(existing).
 		Where("transaction_type = 'hold'").
-		Where("user_id = ? AND credit_type_id = ?", userID, ct.ID).
+		Where("tenant_id = ? AND owner_id = ?", tenantID, ownerID).
+		Where("credit_type_id = ?", ct.ID).
 		Where("source = ? AND source_id = ?", source, sourceID).
 		Limit(1).
 		Scan(ctx)
@@ -378,7 +461,7 @@ func (s *CreditsService) Hold(ctx context.Context, userID string, creditType str
 		return nil, err
 	}
 
-	bal, err := s.lockBalance(ctx, tx, userID, ct.ID)
+	bal, err := s.lockBalance(ctx, tx, ownerOrg, userID, ct.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +473,7 @@ func (s *CreditsService) Hold(ctx context.Context, userID string, creditType str
 	if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 		Set("held_balance = ?", bal.HeldBalance+amount).
 		Set("updated_at = ?", now).
-		Where("user_id = ? AND credit_type_id = ?", userID, ct.ID).
+		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 		Exec(ctx); err != nil {
 		return nil, err
 	}
@@ -399,6 +482,8 @@ func (s *CreditsService) Hold(ctx context.Context, userID string, creditType str
 	auth := amount
 	hold := &models.CreditTransaction{
 		ID:              uuidutil.NewV7(),
+		TenantID:        tenantID,
+		OwnerID:         ownerID,
 		UserID:          userID,
 		CreditTypeID:    ct.ID,
 		Amount:          0,
@@ -453,20 +538,22 @@ func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actu
 		return nil, fmt.Errorf("invalid capture amount")
 	}
 
-	bal, err := s.lockBalance(ctx, tx, hold.UserID, hold.CreditTypeID)
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	holdOwner := identity.OwnerOrgID(hold.OwnerID)
+	bal, err := s.lockBalance(ctx, tx, holdOwner, hold.UserID, hold.CreditTypeID)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 		Set("held_balance = ?", bal.HeldBalance-authorized).
 		Set("updated_at = ?", now).
-		Where("user_id = ? AND credit_type_id = ?", hold.UserID, hold.CreditTypeID).
+		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, hold.OwnerID, hold.CreditTypeID).
 		Exec(ctx); err != nil {
 		return nil, err
 	}
 
 	// Apply the actual withdrawal and update the existing hold transaction row to reflect capture.
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, tx, hold.UserID, hold.CreditTypeID, actualAmount)
+	newBal, err := s.withdrawBalanceAndBlocks(ctx, tx, holdOwner, hold.UserID, hold.CreditTypeID, actualAmount)
 	if err != nil {
 		return nil, err
 	}
@@ -514,14 +601,16 @@ func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) erro
 	authorized := *hold.Authorized
 
 	now := s.now()
-	bal, err := s.lockBalance(ctx, tx, hold.UserID, hold.CreditTypeID)
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	holdOwner := identity.OwnerOrgID(hold.OwnerID)
+	bal, err := s.lockBalance(ctx, tx, holdOwner, hold.UserID, hold.CreditTypeID)
 	if err != nil {
 		return err
 	}
 	if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 		Set("held_balance = ?", bal.HeldBalance-authorized).
 		Set("updated_at = ?", now).
-		Where("user_id = ? AND credit_type_id = ?", hold.UserID, hold.CreditTypeID).
+		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, hold.OwnerID, hold.CreditTypeID).
 		Exec(ctx); err != nil {
 		return err
 	}
@@ -538,9 +627,11 @@ func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) erro
 	return tx.Commit()
 }
 
-func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx, userID string, creditTypeID uuid.UUID, amount int64) (int64, error) {
+func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx, owner identity.OwnerOrgID, userID string, creditTypeID uuid.UUID, amount int64) (int64, error) {
 	now := s.now()
-	bal, err := s.lockBalance(ctx, tx, userID, creditTypeID)
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	ownerID := owner.UUID()
+	bal, err := s.lockBalance(ctx, tx, owner, userID, creditTypeID)
 	if err != nil {
 		return 0, err
 	}
@@ -552,7 +643,7 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 	remaining := amount
 	var blocks []models.CreditBlock
 	if err := tx.NewSelect().Model(&blocks).
-		Where("user_id = ? AND credit_type_id = ? AND remaining_amount > 0 AND (expires_at IS NULL OR expires_at > ?)", userID, creditTypeID, now).
+		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ? AND remaining_amount > 0 AND (expires_at IS NULL OR expires_at > ?)", tenantID, ownerID, creditTypeID, now).
 		OrderExpr("expires_at ASC NULLS LAST, created_at ASC").
 		For("UPDATE").
 		Scan(ctx); err != nil {
@@ -583,23 +674,30 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 	if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 		Set("balance = ?", newBal).
 		Set("updated_at = ?", now).
-		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
+		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
 		Exec(ctx); err != nil {
 		return 0, err
 	}
 	return newBal, nil
 }
 
-func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, userID string, creditTypeID uuid.UUID) (*models.UserCreditBalance, error) {
-	// Tenant scoping (issue #223). The existing (user_id, credit_type_id) unique
-	// constraint is intentionally left in place during the additive rollout, so
-	// the ON CONFLICT target is unchanged; we additionally scope reads by tenant
-	// and stamp the tenant on newly created balance rows.
+// lockBalance selects-for-update the balance row for an OWNER ORG (issue #221)
+// within the resolved tenant (issue #223), creating it if absent. The balance
+// is keyed by (tenant, owner, credit_type); user_id is stamped for attribution.
+//
+// During the additive rollout the legacy (user_id, credit_type_id) UNIQUE is
+// still present, so the ON CONFLICT DO NOTHING targets that constraint to avoid
+// a duplicate-key error on concurrent first-touch. Because the owner is the
+// actor's deterministic personal org (1:1 with user_id) for single-user
+// callers, the owner row and the legacy user row are the same physical row, so
+// the legacy conflict target remains correct.
+func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, owner identity.OwnerOrgID, userID string, creditTypeID uuid.UUID) (*models.UserCreditBalance, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	ownerID := owner.UUID()
 	bal := new(models.UserCreditBalance)
 	err := tx.NewSelect().Model(bal).
 		Where("tenant_id = ?", tenantID).
-		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
+		Where("owner_id = ? AND credit_type_id = ?", ownerID, creditTypeID).
 		For("UPDATE").
 		Scan(ctx)
 	if err == nil {
@@ -613,6 +711,7 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, userID stri
 	bal = &models.UserCreditBalance{
 		ID:           uuidutil.NewV7(),
 		TenantID:     tenantID,
+		OwnerID:      ownerID,
 		UserID:       userID,
 		CreditTypeID: creditTypeID,
 		Balance:      0,
@@ -626,7 +725,7 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, userID stri
 	bal = new(models.UserCreditBalance)
 	if err := tx.NewSelect().Model(bal).
 		Where("tenant_id = ?", tenantID).
-		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
+		Where("owner_id = ? AND credit_type_id = ?", ownerID, creditTypeID).
 		For("UPDATE").
 		Scan(ctx); err != nil {
 		return nil, err
@@ -636,9 +735,12 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, userID stri
 
 func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID uuid.UUID, params CreditWithdrawParams) (*models.CreditTransaction, error) {
 	now := s.now()
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	owner := resolveOwner(params.OwnerID, params.UserID)
+	ownerID := owner.UUID()
 	sourceIDText := (*string)(nil)
 	if params.SourceID != nil {
-		if _, err := s.lockBalance(ctx, tx, params.UserID, creditTypeID); err != nil {
+		if _, err := s.lockBalance(ctx, tx, owner, params.UserID, creditTypeID); err != nil {
 			return nil, err
 		}
 		v := params.SourceID.String()
@@ -646,7 +748,8 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 		existing := new(models.CreditTransaction)
 		err := tx.NewSelect().
 			Model(existing).
-			Where("user_id = ? AND credit_type_id = ?", params.UserID, creditTypeID).
+			Where("tenant_id = ? AND owner_id = ?", tenantID, ownerID).
+			Where("credit_type_id = ?", creditTypeID).
 			Where("transaction_type = 'withdrawal'").
 			Where("source = ? AND source_id = ?", params.Source, v).
 			Limit(1).
@@ -658,13 +761,15 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 			return nil, err
 		}
 	}
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, tx, params.UserID, creditTypeID, params.Amount)
+	newBal, err := s.withdrawBalanceAndBlocks(ctx, tx, owner, params.UserID, creditTypeID, params.Amount)
 	if err != nil {
 		return nil, err
 	}
 
 	trx := &models.CreditTransaction{
 		ID:              uuidutil.NewV7(),
+		TenantID:        tenantID,
+		OwnerID:         ownerID,
 		UserID:          params.UserID,
 		CreditTypeID:    creditTypeID,
 		Amount:          -params.Amount,

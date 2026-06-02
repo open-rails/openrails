@@ -63,6 +63,17 @@ func OperatorPermissionRequired(checker OperatorPermissionChecker, perm string) 
 	}
 }
 
+// IsAdmin is the LEGACY global-admin fallback (issue #221): it checks the live
+// `admin` role in profiles.user_roles, which treats any AuthKit global admin as
+// an OpenRails billing admin. #221 removes this fallback in favour of the
+// operator-org permission authority (#224).
+//
+// The removal is GATED behind the control-plane-enabled path so deployments that
+// run WITHOUT the control plane (single-org embedded: doujins / hentai0 / cozy
+// .art) keep working on this fallback during the cutover. When the control plane
+// IS enabled, this fallback must NOT be the authority — callers use
+// OperatorPermissionRequired against the operator org instead, and the single-
+// org admin middleware fails closed (see OperatorAdminRequired).
 func IsAdmin(ctx context.Context, db bun.IDB, userID string) (bool, error) {
 	uid, err := uuid.Parse(userID)
 	if err != nil {
@@ -100,6 +111,12 @@ func IsOperatorAdmin(ctx context.Context, cfg *config.Config, db bun.IDB, uc aut
 		return uc.HasAnyOrgRole(adminRoles...), nil
 	}
 	if uc.UserID == "" {
+		return false, nil
+	}
+	// #221: when the control plane is enabled, the global-admin fallback is
+	// retired — admin authority must come from the operator org permission layer
+	// (OperatorPermissionRequired), so this DB role check fails closed here.
+	if cfg != nil && cfg.Auth.ControlPlaneEnabled() {
 		return false, nil
 	}
 	return IsAdmin(ctx, db, uc.UserID)
@@ -166,7 +183,21 @@ func OperatorAdminRequired(cfg *config.Config, db bun.IDB) gin.HandlerFunc {
 			return
 		}
 
-		// Single-org mode: live DB role check.
+		// #221: when the control plane is enabled (single-org config but with the
+		// OpenRails-owned AuthKit control plane present), the global-admin fallback
+		// is retired. Admin authority is the operator-org permission layer applied
+		// at the route (OperatorPermissionRequired); this middleware no longer
+		// consults profiles.user_roles and fails closed so a global admin without
+		// the operator-org permission is denied.
+		if cfg != nil && cfg.Auth.ControlPlaneEnabled() {
+			log.WithField("user_id", uc.UserID).
+				Warn("admin access denied: global-admin fallback retired under control plane (#221); use operator-org permission")
+			response.ForbiddenWithMessage(c, "admin_required")
+			c.Abort()
+			return
+		}
+
+		// Single-org mode (no control plane): live DB role check.
 		isAdmin, err := IsAdmin(c.Request.Context(), db, uc.UserID)
 		if err != nil {
 			log.WithError(err).Error("failed to check admin role")

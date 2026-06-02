@@ -140,6 +140,56 @@ func TestOperatorAdminRequired_OperatorOrgMode(t *testing.T) {
 	}
 }
 
+// TestOperatorAdminRequired_ControlPlaneRetiresGlobalFallback proves the #221
+// cutover: when the control plane is enabled (single-org config, no operator
+// org slug), the global-admin fallback is retired — OperatorAdminRequired fails
+// closed with admin_required WITHOUT consulting profiles.user_roles (db == nil
+// here, so any DB consultation would panic). Authority is expected to come from
+// the operator-org permission layer (OperatorPermissionRequired) at the route.
+func TestOperatorAdminRequired_ControlPlaneRetiresGlobalFallback(t *testing.T) {
+	cfg := &config.Config{
+		Auth: &config.AuthConfig{
+			ControlPlane: &config.ControlPlaneConfig{Enabled: true},
+		},
+	}
+
+	rr := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rr)
+	c.Set("billing.user_context", authprovider.UserContext{UserID: "global-admin-user"})
+	c.Request = httptest.NewRequest(http.MethodGet, "/admin/test", nil)
+
+	// db is nil: if the middleware fell through to IsAdmin it would panic.
+	OperatorAdminRequired(cfg, nil)(c)
+
+	if !c.IsAborted() {
+		t.Fatal("expected control-plane cutover to abort (fail closed), but it passed through")
+	}
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status: got %d want 403", rr.Code)
+	}
+	if !contains(rr.Body.String(), "admin_required") {
+		t.Errorf("body %q does not contain admin_required", rr.Body.String())
+	}
+}
+
+// TestIsOperatorAdmin_ControlPlaneDeniesGlobalAdmin proves the helper variant of
+// the cutover: with the control plane enabled, IsOperatorAdmin returns false
+// without consulting the DB (nil db would otherwise panic).
+func TestIsOperatorAdmin_ControlPlaneDeniesGlobalAdmin(t *testing.T) {
+	cfg := &config.Config{
+		Auth: &config.AuthConfig{
+			ControlPlane: &config.ControlPlaneConfig{Enabled: true},
+		},
+	}
+	got, err := IsOperatorAdmin(context.Background(), cfg, nil, authprovider.UserContext{UserID: "u1"})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got {
+		t.Error("control plane enabled: global-admin fallback must be denied")
+	}
+}
+
 // TestIsOperatorAdmin_MultiOrg covers the helper that admin handlers like
 // catalog.go use to gate inactive-product visibility for read paths. It only
 // covers the multi-org branch — the single-org branch consults the live DB.
