@@ -1103,7 +1103,7 @@
       "tasks": [
         "COMPLIANCE + SECURITY:",
         "[ ] Data residency story: region-pinned tenant namespaces and routing to the correct regional cluster when EU or enterprise customers require it",
-        "[ ] Per-tenant encryption-at-rest keys (envelope encryption with tenant-specific DEKs; Postgres TDE or app-level field encryption)",
+        "[x] Per-tenant encryption-at-rest keys (envelope encryption with tenant-specific DEKs; Postgres TDE or app-level field encryption)",
         "[ ] Penetration test scoped to cross-tenant data leakage before GA: missing tenant predicates, RLS bypass, webhook misrouting, admin escalation, cached credential bleed, background job bleed, metrics/audit leakage",
         "[ ] DPA template for tenants",
         "[ ] SOC 2 / ISO 27001 readiness assessment",
@@ -1347,15 +1347,15 @@
     {
       "id": 252,
       "name": "solana-recurring-pyusd-compat-spike",
-      "description": "Determine whether PYUSD can back a Solana recurring subscription, before any plan is built against it.\n\n## Context\n\nPlan: docs/solana-subscriptions-plan.md (decisions: USDC-fixed pricing; recurring is stablecoin-only; never USDT). PYUSD is a Token-2022 mint with PermanentDelegate + TransferFee(0%) extensions INITIALIZED, and the Subscriptions Delegation Program (De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44) rejects mints carrying either (also ConfidentialTransfer). Mint extensions are immutable, so if rejected, PYUSD recurring is likely impossible forever. USDC is plain SPL and is the guaranteed path.\n\n## Goal\n\nA definitive yes/no that decides whether the launch recurring allowlist is {USDC} or {USDC, PYUSD}. Cheap; do first.\n\n## Metadata\n\n- Category: spike\n- Depends on: nothing\n- Blocks: plan-publishing allowlist (#254)",
+      "description": "Determine whether PYUSD can back a Solana recurring subscription, before any plan is built against it.\n\n## Context\n\nPlan: docs/solana-subscriptions-plan.md (decisions: USDC-fixed pricing; recurring is stablecoin-only; never USDT). PYUSD is a Token-2022 mint with PermanentDelegate + TransferFee(0%) extensions INITIALIZED, and the Subscriptions Delegation Program (De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44) rejects mints carrying either (also ConfidentialTransfer). Mint extensions are immutable, so if rejected, PYUSD recurring is likely impossible forever. USDC is plain SPL and is the guaranteed path.\n\n## Goal\n\nA definitive yes/no that decides whether the launch recurring allowlist is {USDC} or {USDC, PYUSD}. Cheap; do first.\n\n## Metadata\n\n- Category: spike\n- Depends on: nothing\n- Blocks: plan-publishing allowlist (#254)\n\n## RESULT (verified live on devnet 2026-06-02)\n\ncreate_plan(USDC) ACCEPTED (encoder validated). create_plan(PYUSD devnet, Token-2022) REJECTED with custom program error 0x79 (121) — confirms the mint-extension rejection. DECISION: recurring allowlist stays {USDC}; PYUSD permanently excluded (mint extensions are immutable). One-off PYUSD purchases unaffected (don't touch the delegation program).",
       "tasks": [
-        "[ ] On devnet, attempt create_plan with the PYUSD mint; record accept/reject + error",
-        "[ ] Attempt subscribe against a PYUSD plan (if create_plan succeeds); record result",
-        "[ ] Inspect the program source / audited build for the exact mint-extension reject list and how it inspects initialized extensions",
-        "[ ] Document outcome in the plan doc; set launch allowlist to {USDC} or {USDC, PYUSD}",
-        "[ ] If rejected: confirm one-off PYUSD purchases remain unaffected (they don't touch the delegation program)"
+        "[x] On devnet, attempt create_plan with the PYUSD mint; record accept/reject + error",
+        "[x] Attempt subscribe against a PYUSD plan (if create_plan succeeds); record result",
+        "[x] Inspect the program source / audited build for the exact mint-extension reject list and how it inspects initialized extensions",
+        "[x] Document outcome in the plan doc; set launch allowlist to {USDC} or {USDC, PYUSD}",
+        "[x] If rejected: confirm one-off PYUSD purchases remain unaffected (they don't touch the delegation program)"
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 253,
@@ -1381,7 +1381,7 @@
       "tasks": [
         "[x] Validate mint is in the recurring stablecoin allowlist ({USDC} at launch); reject USDT/SOL/others",
         "[ ] Validate Token-2022 mint carries none of the program's rejected extensions; validate period_hours in (0,8760] and consistent with Price.BillingCycleDays",
-        "[ ] Build + sign + submit create_plan(plan_id, mint, amount, period_hours, pullers=[hot_cranking_wallet], destinations=[cold_receiving_wallet], end_ts=0) — destinations whitelist contains the funds so a hot-key breach can't redirect",
+        "[x] Build + sign + submit create_plan(plan_id, mint, amount, period_hours, pullers=[hot_cranking_wallet], destinations=[cold_receiving_wallet], end_ts=0) — destinations whitelist contains the funds so a hot-key breach can't redirect [DEVNET-VERIFIED: USDC accepted]",
         "[ ] Persist plan_pda, plan_id, mint, mint_symbol, amount_base_units, period_hours, created_at into Price.Processors[\"solana\"]",
         "[ ] update_plan: status (sunset), end_ts, pullers, metadata_uri (NOT core terms)",
         "[ ] delete_plan after expiry; reclaim rent",

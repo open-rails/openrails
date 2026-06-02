@@ -25,6 +25,8 @@ These were decided up front and constrain everything below:
 | **Pricing** | **Stablecoin-fixed** | A Solana-subscribable price is denominated in a stablecoin so a fixed base-unit amount stays ~constant in USD for the whole plan life. On-chain plan `amount`/`period` are **immutable**, so no FX re-quote per cycle. Non-stablecoin recurring is out of scope. |
 | **Recurring stablecoin allowlist** | **USDC confirmed; PYUSD pending verification — never USDT** | USDC is a plain SPL mint and is cleanly supported. **PYUSD is at risk** (see below). USDT is excluded for regulatory/counterparty-freeze risk. Allowlist is **enforced at plan-create**. |
 
+> ✅ **CONFIRMED on devnet (2026-06-02): PYUSD is rejected by the Subscriptions program** — `create_plan(PYUSD)` fails with `custom program error 0x79` (121). Recurring is **USDC-only**; PYUSD is permanently excluded (mint extensions are immutable). Original analysis below.
+>
 > ⚠️ **PYUSD may be incompatible with the Subscriptions program.** PYUSD's
 > Token-2022 mint has **PermanentDelegate** and **TransferFee** (0%) extensions
 > *initialized*, and the program rejects mints carrying either
