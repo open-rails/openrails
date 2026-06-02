@@ -143,3 +143,6 @@ docker-compose.dev.yml
 docker-compose.test.yml
 
 .codegraph/
+
+# agent git worktrees (never track)
+.claude/worktrees/
