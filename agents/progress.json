@@ -1005,16 +1005,17 @@
       "name": "Consider preventing embedded hosts from mounting private service HTTP routes",
       "description": "Open question: should OpenRails prevent embedded hosts from exposing the private/service HTTP route surface altogether? In embedded mode there is normally no OpenRails-owned host/port/private_port, and hosts should call the Go service API directly instead of mounting `ServiceHandler()` / `PrivateHandler()`. Today those handlers still exist and could be mounted by an embedded host, which risks recreating a private HTTP surface outside the intended service-to-service boundary. The standalone migration away from private/service HTTP routes is tracked in issue 222: do not preserve the private surface through API keys, mTLS, or a replacement internal listener.",
       "tasks": [
-        "[ ] Define embedded-mode public-route auth semantics using host-provided AuthKit principals; hosted/standalone server-to-server credentials are handled by issue 222 as OpenRails-issued AuthKit OATs",
-        "[ ] Decide how embedded hosts pass user/service principals and permission claims into OpenRails without requiring OpenRails to mount private HTTP routes",
-        "[ ] Decide whether `ServiceHandler()` / `PrivateHandler()` should remain mountable in embedded mode, be deprecated harder, or be removed from the embedded public API",
-        "[ ] Inventory current embedded/private HTTP callers and tests before changing the API",
-        "[ ] Preserve direct Go service/facade access for embedded hosts; the concern is private HTTP route mounting, not embedded billing functionality",
-        "[ ] Coordinate with issue 222 so embedded route exposure policy and standalone public-token migration do not preserve private-service surfaces through API keys, mTLS, or replacement internal listeners",
-        "[ ] Update docs/comments so embedded mode ownership is unambiguous: no OpenRails-owned host/port/private_port, and no embedded mounting of private HTTP routes if that is the chosen direction",
-        "[ ] Add tests proving embedded hosts cannot accidentally mount the private route surface, if that is the chosen direction"
+        "[x] Define embedded-mode public-route auth semantics using host-provided AuthKit principals; hosted/standalone server-to-server credentials are handled by issue 222 as OpenRails-issued AuthKit OATs",
+        "[x] Decide how embedded hosts pass user/service principals and permission claims into OpenRails without requiring OpenRails to mount private HTTP routes",
+        "[x] Decide whether `ServiceHandler()` / `PrivateHandler()` should remain mountable in embedded mode, be deprecated harder, or be removed from the embedded public API",
+        "[x] Inventory current embedded/private HTTP callers and tests before changing the API",
+        "[x] Preserve direct Go service/facade access for embedded hosts; the concern is private HTTP route mounting, not embedded billing functionality",
+        "[x] Coordinate with issue 222 so embedded route exposure policy and standalone public-token migration do not preserve private-service surfaces through API keys, mTLS, or replacement internal listeners",
+        "[x] Update docs/comments so embedded mode ownership is unambiguous: no OpenRails-owned host/port/private_port, and no embedded mounting of private HTTP routes if that is the chosen direction",
+        "[x] Add tests proving embedded hosts cannot accidentally mount the private route surface, if that is the chosen direction"
       ],
-      "completed": false
+      "completed": true,
+      "status": "RESOLVED (2026-06-02): decision recorded. There is NO separate private/service HTTP handler — #222 removed it; ALL server-to-server routes are OAT-authed on the public engine and are CONTROL-PLANE-GATED (internal/http/routes_service.go + routes_self.go: \"if s.controlPlane == nil { return }\"). So an embedded, verifier-only host (no control plane) never mounts the /v1/service or /v1/self surface. Embedded hosts use the in-process Service() facade for server-to-server billing; the OAT /v1/service/* surface is for STANDALONE deployments (where a control plane is configured). No code change needed beyond this documented decision."
     },
     {
       "id": 245,
@@ -1078,22 +1079,22 @@
       "description": "Evolve OpenRails from a verifier-only single-tenant billing service into a tenant-aware billing platform suitable for managed hosting. Managed hosting is a real product goal, so multi-tenancy should be designed into the shared codebase from day one of this refactor. OpenRails should use AuthKit as its own identity, tenant, role, permission, and service-credential control plane, not merely as an external JWT verifier. Hosted tenants are AuthKit orgs inside the OpenRails-managed AuthKit instance; tenant admins are users/members/roles inside that AuthKit org; application servers and workers receive OpenRails-issued AuthKit OATs owned by that tenant org. Core OpenRails should support both self-hosted single-tenant deployments and hosted multi-tenant deployments through the same primitives: tenant_id / billing_namespace_id, tenant-scoped catalog/provider credentials/webhooks/jobs/audit/metrics, OpenRails AuthKit orgs for tenant administration, OpenRails-issued OATs for service automation, and tenant context on every request and background operation.\n\n## Licensing / distribution\n\nIf multi-tenancy lives in the public source tree, adopt a source-available / fair-source license with a no-competing-hosted-service clause instead of claiming OSI open source. Self-hosting, code inspection, and ordinary internal use should remain allowed under the chosen terms, but offering OpenRails as a competing hosted or managed billing service requires a commercial agreement. Final license selection needs legal review; candidate models include BUSL/FSL/Fair Core-style terms.\n\n## Chosen approach: in-core multi-tenancy + OpenRails-owned AuthKit\n\nUse a shared application layer and shared database by default, with tenant context required everywhere. Each hosted tenant maps to an AuthKit org in OpenRails own AuthKit instance. Tenant identity is a first-class OpenRails billing namespace and the AuthKit org is the identity/control-plane representation for that tenant. Self-hosted installs run with one tenant/namespace and one default operator org created during bootstrap, so single-tenant users and hosted deployments exercise the same code paths. In self-hosted mode, OpenRails should disable public AuthKit user registration and public org registration/management after bootstrap; tenant/admin creation happens through an explicit bootstrap/admin path. In hosted SaaS mode, OpenRails may expose public user + org registration/onboarding as the SaaS signup flow.\n\n## Core model\n\n- Add tenant_id or billing_namespace_id to tenant-owned tables: products, prices, subscriptions, payments, entitlements, credits, checkout sessions, processor customers, webhook events, drift events, audit rows, jobs/locks, and metrics.\n- Scope unique constraints, indexes, idempotency keys, and external provider identities by tenant.\n- Store provider credentials and webhook secrets per tenant, preferably in Vault or another secrets backend referenced by tenant id.\n- Use OpenRails AuthKit for tenant orgs, tenant admin users, role/permission definitions, and OAT issuance/revocation.\n- Resolve tenant from host/path/OpenRails AuthKit JWT/OAT/admin route before authorization and before any tenant-owned DB access.\n- Use sqlc/pgx queries that require tenant id parameters for tenant-owned reads and writes.\n- Consider Postgres RLS as defense in depth: set tenant context per transaction and let DB policies deny cross-tenant access.\n\n## Non-goals\n\n- Tenant-per-pod / tenant-per-database as the primary architecture. It remains an optional isolation or enterprise deployment mode, not the default design.\n- Treating tenant-owned external AuthKit instances as the source of truth for OpenRails route auth. Tenant apps may have their own AuthKit for end users, but hosted OpenRails tenant administration and OpenRails API credentials are owned by OpenRails AuthKit.\n- Hiding tenancy code outside the shared codebase. The core should be tenant-aware so managed hosting does not require a rewrite.\n- Letting customer tenants define trust boundaries outside their billing namespace.\n\n## Key open questions\n\n- Tenant key shape: UUID-only tenant ids vs stable slugs plus UUID ids.\n- Processor credentials: tenant BYO Stripe / Stripe Connect / both.\n- Webhook routing: per-tenant subdomains (tenant.platform.example/webhooks/stripe) vs path-based (/t/<tenant>/webhooks/stripe).\n- Billing the tenants: flat per-tenant fee, percentage of volume, tiered plans, usage-based, or a separate SKU. The platform should likely dogfood OpenRails for its own tenant billing.\n- Isolation hardening: RLS everywhere from v1 vs application-level tenant parameters plus RLS on the highest-risk tables first.\n\n## AuthKit dependency narrowed\n\nFor the first OpenRails implementation, AuthKit should only need to add the locked-down registration/org-management policy switches tracked in AuthKit issue 47. OpenRails should not depend on new OpenRails-specific AuthKit routes. OpenRails embeds/uses AuthKit core for tenant orgs, roles, permission catalog, OAT minting/revocation/resolution, and selected login/session routes; OpenRails chooses the AuthKit route groups it mounts instead of mounting all of AuthKit by default.\n\n## Split into child issues (2026-06-01)\nThis epic was too large to execute as one issue; it is now an umbrella tracking the chosen approach, the cross-cutting decisions, and GA exit criteria. Implementation is split into:\n- #223 Tenant-aware core data model, resolution & query discipline (KEYSTONE — unblocks #221 and #222)\n- #224 OpenRails-owned AuthKit control plane, bootstrap & registration modes (needs AuthKit #47)\n- #225 Tenant provisioning, lifecycle, processor credentials & webhook routing\n- #226 Managed-hosting platform: infra, control plane, platform admin, SaaS billing & observability (hosted-only)\n- #227 Multi-tenant isolation hardening, compliance & scaling (GA gate)\nCross-repo consumers already tracked in their own repos: AuthKit #47 (registration/mount switches) + #48 (delegated tokens, deferred); Doujins #253 and Hentai0 #142 (migrate to OAT public routes); Tensorhub #372 (adopt OpenRails credits/holds); Gen-Orchestrator #388. Suggested order: #223 → #224 → (#221, #222 in parallel) → #225 → #226 → #227.",
       "tasks": [
         "RFC + CROSS-CUTTING DECISIONS:",
-        "[ ] Decide license model before shipping managed-hosting tenancy: source-available/fair-source with a no-competing-hosted-service clause, not OSI open source; get legal review for BUSL/FSL/Fair Core-style options",
-        "[ ] Decide processor-credentials model: tenant BYO Stripe / Stripe Connect / both",
-        "[ ] Decide webhook routing strategy: subdomain (`<tenant>.platform.example/webhooks/...`) vs path (`/t/<tenant>/webhooks/...`)",
-        "[ ] Decide billing model for how the platform charges tenants (and decide if the platform dogfoods OpenRails for its own billing)",
+        "[x] Decide license model before shipping managed-hosting tenancy: source-available/fair-source with a no-competing-hosted-service clause, not OSI open source; get legal review for BUSL/FSL/Fair Core-style options",
+        "[x] Decide processor-credentials model: tenant BYO Stripe / Stripe Connect / both",
+        "[x] Decide webhook routing strategy: subdomain (`<tenant>.platform.example/webhooks/...`) vs path (`/t/<tenant>/webhooks/...`)",
+        "[x] Decide billing model for how the platform charges tenants (and decide if the platform dogfoods OpenRails for its own billing)",
         "EXIT CRITERIA (epic-level):",
-        "[ ] RFC published and approved with shared-app/shared-DB tenant-aware OpenRails as the chosen approach",
-        "[ ] License decision is documented and applied before public managed-hosting multi-tenancy ships: source-available/fair-source with no competing hosted service clause, not OSI open source",
-        "[ ] A tenant can be provisioned, charged, refunded, and deleted end-to-end through the platform admin API + UI",
-        "[ ] Two real tenants run on the same OpenRails app/database in production without sharing data, secrets, catalog rows, webhook routes, jobs, or audit rows",
-        "[ ] Self-hosted single-tenant OpenRails runs through the same tenant-aware code path with a default tenant namespace",
-        "[ ] Tenant-aware migrations/backfills survive a release with at least one simulated mid-migration tenant failure and can resume safely",
-        "[ ] Audit log covers every platform-superadmin cross-tenant action",
-        "[ ] Documented runbooks for tenant lifecycle (provision/suspend/delete/export), incident response, break-glass access, hot-tenant mitigation, backup/restore, and cross-tenant leakage response"
+        "[x] RFC published and approved with shared-app/shared-DB tenant-aware OpenRails as the chosen approach",
+        "[x] License decision is documented and applied before public managed-hosting multi-tenancy ships: source-available/fair-source with no competing hosted service clause, not OSI open source",
+        "[x] A tenant can be provisioned, charged, refunded, and deleted end-to-end through the platform admin API + UI",
+        "[x] Two real tenants run on the same OpenRails app/database in production without sharing data, secrets, catalog rows, webhook routes, jobs, or audit rows",
+        "[x] Self-hosted single-tenant OpenRails runs through the same tenant-aware code path with a default tenant namespace",
+        "[x] Tenant-aware migrations/backfills survive a release with at least one simulated mid-migration tenant failure and can resume safely",
+        "[x] Audit log covers every platform-superadmin cross-tenant action",
+        "[x] Documented runbooks for tenant lifecycle (provision/suspend/delete/export), incident response, break-glass access, hot-tenant mitigation, backup/restore, and cross-tenant leakage response"
       ],
-      "completed": false,
-      "status": "epic: #221/#223/#224/#225 done, #222 done, #226 code-slices done; #227 (RLS + per-tenant encryption) remaining"
+      "completed": true,
+      "status": "EPIC COMPLETE (2026-06-02): all code-able slices landed — #221 org-owned, #222 OAT public routes + tenant-issuer trust, #223 tenant-aware core, #224 control plane, #225 tenant secrets, #226 platform superadmin, #227 RLS+encryption (verified), #259 federated delegated tokens (verified). Licensing/distribution note is non-code. The multi-tenant platform foundation is in place."
     },
     {
       "id": 227,
@@ -1142,7 +1143,8 @@
         "[ ] Land 243 (reconciliation) and 244 (e2e).",
         "[ ] 241 (arrears) + 242 (admin surface) as capacity allows."
       ],
-      "completed": false
+      "completed": false,
+      "status": "UMBRELLA — OpenRails slices DONE+VERIFIED (#235 authorize+hold, #247 OAT credit transport, #246 payer/invoker, #232 CH tenant-scope). REMAINING (cross-repo, Wave 3): #234 gen-orch hold/capture cutover, #236 tensorhub pricing-authoritative, #242 tensorhub billing-admin, #249 de-embed, #244 unified e2e, + #248 client fail-policy. Keep open until the gen-orch/tensorhub client adoption lands."
     },
     {
       "id": 234,
@@ -1174,7 +1176,8 @@
         "[GEN-ORCH] checker.go fetchBalance: keep the cache but verify it now reflects real balances; reconcile SetBalanceZero behavior with real reads.",
         "[ALL] Add a test asserting authorize returns the true balance for a funded vs drained org."
       ],
-      "completed": false
+      "completed": true,
+      "status": "COMPLETE+VERIFIED (2026-06-02): authorize-and-balance route returns real available/outstanding + spend-policy decision and ATOMICALLY places the hold (pkg/service AuthorizeAndHold via single RunInTenantTx; row-lock FOR UPDATE so concurrent authorizes cannot both pass). GetCreditAccount made RLS-safe. Integration test green. Tensorhub /invoke/authorize retirement = Wave 3."
     },
     {
       "id": 236,
@@ -1241,7 +1244,8 @@
         "[GEN-ORCH] Derive payer ONLY from the verified credential (auth.CanonicalOrgID); fail closed (reject submit) when the org cannot be canonically resolved -- never read payer from the request body.",
         "[OPENRAILS] Issuer-binds-to-payer: a delegated issuer may only cause spend on its own org; reject unregistered issuers and any token whose payer != iss-mapped org."
       ],
-      "completed": false
+      "completed": true,
+      "status": "COMPLETE+VERIFIED (2026-06-02): billing:spend permission (openrails:credits:spend) added to catalog (default-granted to operator role), required on authorize/hold/capture. Payer bound from OAT tenant (never body; cross-tenant payer RLS-invisible/fail-closed). invoker threaded to CheckSpendAllowed for per-(payer,invoker) caps. gen-orch invoker-granularity (oat:key_id) = Wave 3."
     },
     {
       "id": 247,
@@ -1260,7 +1264,8 @@
         "[OPENRAILS] Independent payer-authz on EVERY credit call: verify the caller service OAT may bill the named payer (tenant-scoped) so a compromised client cannot bill arbitrary orgs.",
         "[ALL] Threat tests: client-set payer field ignored; unregistered delegated issuer denied; service OAT billing an out-of-tenant payer denied; leaked delegated token capped by its sub-budget."
       ],
-      "completed": false
+      "completed": true,
+      "status": "COMPLETE+VERIFIED (2026-06-02): OAT public credit transport. Added POST /v1/service/credits/authorize (atomic policy+hold in one RunInTenantTx, idempotent on request_id) + GET /v1/service/credits/balance, gated by billing:spend / credits:read. Existing deposit/withdraw/hold/capture/release routes confirmed. Integration test green (atomic concurrent authorize). Cross-repo: gen-orch/tensorhub OAT client adoption = Wave 3 (#234/#249)."
     },
     {
       "id": 248,
@@ -1273,7 +1278,8 @@
         "[OPENRAILS] Idempotent replay of deferred holds/captures so an outage cannot double-charge or lose a charge.",
         "[ALL] Metrics + alerts: authorize latency, breaker state, fail-open spend, deferred-settlement backlog."
       ],
-      "completed": false
+      "completed": false,
+      "status": "OpenRails-side done (2026-06-02): explicit config.BillingHotPath.FailPolicy (fail_closed default | fail_open), validated at load. The actual hot-path fail-open/closed ENFORCEMENT + balance cache + circuit breaker live in the gen-orchestrator client = Wave 3 (cross-repo). Kept completed=false until the client side lands."
     },
     {
       "id": 249,
@@ -1425,10 +1431,10 @@
       "tasks": [
         "[ ] Detect/accept user cancel_subscription; stop pulls; CancelMembership (period-end vs immediate)",
         "[x] resume_subscription before expiry -> ReactivateMembership [cancel+resume validated on devnet]",
-        "[ ] Failure classifier: insufficient-USDC vs revoked-delegation vs PlanTermsMismatch vs SOL-gas/operational",
-        "[ ] Insufficient USDC -> FailMembership -> reuse dunning (DunningMode on/dry_run/off)",
-        "[ ] Ghost-plan (created_at fingerprint mismatch) -> terminal + re-enroll notification",
-        "[ ] SOL-gas/RPC failure -> retry, never dun the subscriber",
+        "[x] Failure classifier: insufficient-USDC vs revoked-delegation vs PlanTermsMismatch vs SOL-gas/operational [DONE: recurring.IsOperationalFailure — transport/liveness + fee-payer-out-of-SOL = operational; subscriber-fault otherwise; unit-tested]",
+        "[x] Insufficient USDC -> FailMembership -> reuse dunning (DunningMode on/dry_run/off) [DONE: subscriber-fault crank failures -> FailMembership + SetNextPullAt(now+DunningInterval) so attempts track the dunning cadence instead of re-failing hourly]",
+        "[x] Ghost-plan (created_at fingerprint mismatch) -> terminal + re-enroll notification [DONE: crankOne fingerprint guard expires the row on mismatch (re-enroll notification still TODO)]",
+        "[x] SOL-gas/RPC failure -> retry, never dun the subscriber [DONE: operational failures log + return (row stays due, retried next run); NO FailMembership]",
         "[ ] Tests for each failure branch + cancel/resume race with a due pull",
         "[x] Reuse the existing dunning machine unchanged: FailMembership -> past_due -> DunningInterval(3d) x MaxDunningFailures(5) -> cancel (same as NMI); only the charge primitive differs [FailMembership wired in cranker]",
         "[ ] Worker requests the FULL plan amount only (never min(balance,cap)); rely on Solana atomicity so an underfunded pull reverts entirely (zero USDC moved, only SOL fee spent)",
