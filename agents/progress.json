@@ -1319,7 +1319,7 @@
       "tasks": [
         "VAULT KV ADAPTER:",
         "[x] Implement a live VaultKV (ReadSecret/WriteSecret/DeleteSecret/ListSecrets) over hashicorp/vault/api against KV-v2",
-        "[ ] Add config to select vaultSecretStore (mount, address) and inject the client in server.go wiring (currently only NewDBSecretStore -> optional NewEncryptedSecretStore)",
+        "[x] Add config to select vaultSecretStore (mount, address) and inject the client in server.go wiring (currently only NewDBSecretStore -> optional NewEncryptedSecretStore) [config.vault + server.go selection]",
         "[ ] Confirm vaultSecretStore addressing secret/openrails/tenants/<tenant-id>/<name> and that it still fails closed when misconfigured",
         "VAULT AUTH:",
         "[x] App-level auth: AppRole (role_id/secret_id) and/or Kubernetes auth (service-account JWT)",
@@ -1329,7 +1329,7 @@
         "[ ] Distinguish Vault-unreachable (retry) from secret-absent (terminal) in callers (esp. pull worker / webhook verify)",
         "TRANSIT (OPTIONAL, RECOMMENDED FOR SIGNING KEYS):",
         "[x] RemoteSigner over Vault Transit (Ed25519) for solana/private_key so the key never leaves Vault",
-        "[ ] Decide per-deployment: KV-fetch-then-sign vs Transit remote-sign (behind the solana Signer interface)",
+        "[x] Decide per-deployment: KV-fetch-then-sign vs Transit remote-sign (behind the solana Signer interface) [config flag]",
         "MIGRATION + OPS:",
         "[ ] Path/runbook to move existing default-tenant + DB-stored secrets into Vault for managed installs",
         "[ ] Per-tenant secret rotation flow (KV-v2 versions); document that rotating a Solana key forces plan re-publish + re-enroll",
