@@ -104,6 +104,20 @@ func (r *SolanaSubscriptionRepo) AdvanceAfterPull(ctx context.Context, id uuid.U
 	return err
 }
 
+// SetNextPullAt reschedules the next pull without recording a payment — used on
+// a failed crank to align the next attempt with the dunning retry cadence (so
+// the hourly worker doesn't re-attempt + re-fail every hour, collapsing the
+// multi-day dunning window).
+func (r *SolanaSubscriptionRepo) SetNextPullAt(ctx context.Context, id uuid.UUID, nextPullAt time.Time) error {
+	_, err := r.db.Q(ctx).NewUpdate().
+		Model((*models.SolanaSubscription)(nil)).
+		Set("next_pull_at = ?", nextPullAt.UTC()).
+		Set("updated_at = ?", time.Now().UTC()).
+		Where("id = ?", id).
+		Exec(ctx)
+	return err
+}
+
 // MerchantWallet is a distinct (tenant, cranker wallet) pair with active subs.
 type MerchantWallet struct {
 	TenantID        uuid.UUID `bun:"tenant_id"`

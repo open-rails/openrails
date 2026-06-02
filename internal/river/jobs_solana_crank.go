@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/riverqueue/river"
@@ -122,14 +123,30 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo *dbrepo.SolanaSub
 
 	sig, crankErr := w.Cranker.Crank(ctx, tenantID, row, amountBaseUnits)
 	if crankErr != nil {
-		// Charge failed (insufficient USDC, revoked delegation, etc.) -> dunning.
+		// Operational failure (RPC/network, or the cranker wallet out of SOL gas):
+		// retry on the next run, NEVER dun the subscriber (#257). A SOL-gas outage
+		// hits a tenant's whole book at once, so dunning on it would wrongly
+		// past-due every subscriber. Leave next_pull_at unchanged so it stays due.
+		if recurring.IsOperationalFailure(crankErr) {
+			log.WithContext(ctx).WithError(crankErr).WithField("subscription_pda", row.SubscriptionPDA).
+				Warn("Solana cranker: operational pull failure; will retry next run (no dunning)")
+			return crankErr
+		}
+		// Subscriber fault (insufficient USDC, revoked delegation, etc.) -> dunning.
+		// Advance next_pull_at by the dunning interval so the next attempt aligns
+		// with the dunning cadence instead of re-failing every hourly run (which
+		// would collapse the multi-day dunning window to a few hours).
 		reason := crankErr.Error()
 		subID := row.SubscriptionID
-		return w.Lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
+		if err := w.Lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      models.ProcessorSolana,
 			SubscriptionID: &subID,
 			FailureReason:  &reason,
-		})
+		}); err != nil {
+			return fmt.Errorf("solana crank: fail membership: %w", err)
+		}
+		nextRetry := w.now().Add(subscriptions.DunningInterval)
+		return repo.SetNextPullAt(ctx, row.ID, nextRetry)
 	}
 
 	now := w.now()
