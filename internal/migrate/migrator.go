@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	authkitpostgres "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -40,13 +41,30 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 
 	schema := "billing" // Hardcoded schema
 
-	// ---------- 0. River Migrations (billing schema) ----------
+	// ---------- 0. Bootstrap schema/extensions ----------
+	if err := ensurePostgresBootstrap(ctx, sqlDB); err != nil {
+		return fmt.Errorf("postgres bootstrap failed: %w", err)
+	}
+
+	// ---------- 1. AuthKit Migrations (profiles schema) ----------
+	log.Info("Running AuthKit migrations (profiles schema)...")
+	authMigrations, err := migratekit.LoadFromFS(authkitpostgres.FS)
+	if err != nil {
+		return fmt.Errorf("authkit: load migrations: %w", err)
+	}
+	authMigrator := migratekit.NewPostgres(sqlDB, "authkit")
+	if err := authMigrator.ApplyMigrations(ctx, authMigrations); err != nil {
+		return fmt.Errorf("authkit: apply migrations: %w", err)
+	}
+	log.Info("✓ AuthKit migrations completed successfully")
+
+	// ---------- 2. River Migrations (billing schema) ----------
 	log.Info("Running River migrations (billing schema)...")
 	if err := runRiverMigrations(ctx, cfg, schema); err != nil {
 		return fmt.Errorf("river migrations failed: %w", err)
 	}
 
-	// ---------- 1. Billing Migrations (billing schema) ----------
+	// ---------- 3. Billing Migrations (billing schema) ----------
 	log.Info("Running Billing migrations (billing schema)...")
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	if err != nil {
@@ -60,6 +78,25 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	}
 	log.Info("✓ Billing migrations completed successfully")
 	return nil
+}
+
+func ensurePostgresBootstrap(ctx context.Context, db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("missing sql db")
+	}
+	_, err := db.ExecContext(ctx, `
+		CREATE SCHEMA IF NOT EXISTS billing;
+		CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+		CREATE TABLE IF NOT EXISTS public.migrations (
+			id BIGSERIAL PRIMARY KEY,
+			app TEXT NOT NULL,
+			database TEXT NOT NULL,
+			name TEXT NOT NULL,
+			migrated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE(app, database, name)
+		);
+	`)
+	return err
 }
 
 // RunClickHouse applies ClickHouse migrations

@@ -120,9 +120,16 @@ func main() {
 		Short: "Seed a minimal dev billing catalog for local migrations",
 		RunE:  seedDevCatalog,
 	}
+	mintOperatorOATCmd := &cobra.Command{
+		Use:   "mint-operator-oat",
+		Short: "Mint an OpenRails operator OAT and print the one-time token",
+		RunE:  mintOperatorOAT,
+	}
+	mintOperatorOATCmd.Flags().String("name", "openrails-operator-manual", "OAT display name")
+	mintOperatorOATCmd.Flags().String("org", "", "Operator org slug (defaults to config/operator)")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd)
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, mintOperatorOATCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		log.WithError(err).Fatal("Failed to execute command")
@@ -161,7 +168,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 		cleanupOnError = true
 		return fmt.Errorf("control plane bootstrap: %w", err)
 	} else if res != nil && res.OATMinted {
-		log.WithField("oat_key_id", res.OATKeyID).
+		log.WithFields(log.Fields{
+			"oat_key_id": res.OATKeyID,
+			"oat_secret": res.OATSecret,
+		}).
 			Warn("control plane: initial operator OAT minted; capture the secret from logs now (shown once)")
 	}
 
