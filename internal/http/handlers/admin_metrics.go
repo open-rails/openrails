@@ -12,6 +12,23 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
+// Admin metrics handlers (issue #232).
+//
+// These endpoints are the PER-TENANT admin dashboard surface. Every handler
+// passes r.Request.Context() into AdminMetricsService, which resolves the
+// tenant id from that context (tenant.FromContextOrDefault) and pins every
+// ClickHouse query to WHERE tenant_id = ?. A tenant operator therefore can only
+// ever read their OWN metrics; there is no cross-tenant read on this path.
+//
+// Platform-wide (cross-tenant) metrics are a SEPARATE, explicit control-plane
+// concern gated on controlplane.PermPlatformSuperadmin and served by
+// AdminMetricsService's *CrossTenant methods. They are intentionally NOT wired
+// here. TODO(#232): add a dedicated platform-superadmin metrics surface that
+// calls the *CrossTenant methods once that control-plane surface exists.
+//
+// ClickHouse is OPTIONAL and DERIVED: Postgres is the system of record. A
+// ClickHouse outage degrades these dashboards but never blocks billing.
+
 func GetAdminMetricsSummary(r *httprequest.Request) {
 	rng, err := parseMetricsRange(r, 30)
 	if err != nil {

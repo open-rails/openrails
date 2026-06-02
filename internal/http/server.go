@@ -16,6 +16,8 @@ import (
 	"github.com/open-rails/openrails/internal/crypto"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
@@ -137,45 +139,73 @@ func New(deps Dependencies) (*Server, error) {
 	// DB-backed secret store is the self-hosted default and needs no live Vault; a
 	// managed deployment swaps in the Vault-backed store with the same addressing.
 	if deps.ControlPlane != nil && deps.ControlPlane.Pool() != nil {
-		secretStore, sserr := tenancy.NewDBSecretStore(deps.ControlPlane.Pool())
-		if sserr != nil {
-			return nil, fmt.Errorf("build tenant secret store: %w", sserr)
+		var secretStore tenancy.TenantSecretStore
+		var solanaTransit solanaint.TransitClient
+
+		if deps.Config != nil && deps.Config.Vault != nil && deps.Config.Vault.Enabled {
+			// Managed: Vault KV-v2 backend (#251), same (tenant, name) addressing.
+			// Vault encrypts at rest, so no envelope wrapper. Optional Transit signer
+			// keeps the per-tenant Solana key non-extractable.
+			vc := deps.Config.Vault
+			kvMount := vc.KVMount
+			if kvMount == "" {
+				kvMount = "secret"
+			}
+			vclient, verr := vault.Login(context.Background(), vault.Config{
+				Address: vc.Address, AuthMethod: vc.AuthMethod, RoleID: vc.RoleID,
+				SecretID: vc.SecretID, K8sRole: vc.K8sRole, KVMount: kvMount, TransitMount: vc.TransitMount,
+			})
+			if verr != nil {
+				return nil, fmt.Errorf("vault login: %w", verr)
+			}
+			secretStore = tenancy.NewVaultSecretStore(kvMount, vault.NewKVv2Adapter(vclient, kvMount))
+			if vc.UseTransitForSolana {
+				tMount := vc.TransitMount
+				if tMount == "" {
+					tMount = "transit"
+				}
+				solanaTransit = vault.NewTransitAdapter(vclient, tMount)
+			}
+		} else {
+			// Self-hosted default: DB-backed store + per-tenant envelope encryption
+			// (issue #227). With no master key, the plain store is used unchanged.
+			dbStore, sserr := tenancy.NewDBSecretStore(deps.ControlPlane.Pool())
+			if sserr != nil {
+				return nil, fmt.Errorf("build tenant secret store: %w", sserr)
+			}
+			var masterKey string
+			if deps.Config != nil && deps.Config.Encryption != nil {
+				masterKey = deps.Config.Encryption.MasterKey
+			}
+			dekStore, dkerr := crypto.NewDBDEKStore(deps.ControlPlane.Pool())
+			if dkerr != nil {
+				return nil, fmt.Errorf("build tenant DEK store: %w", dkerr)
+			}
+			enc, encerr := crypto.NewEncryptor(masterKey, dekStore)
+			if encerr != nil {
+				return nil, fmt.Errorf("build tenant encryptor: %w", encerr)
+			}
+			secretStore, sserr = tenancy.NewEncryptedSecretStore(dbStore, enc)
+			if sserr != nil {
+				return nil, fmt.Errorf("wrap tenant secret store with encryption: %w", sserr)
+			}
 		}
 
-		// Per-tenant encryption-at-rest (issue #227): when a master key is
-		// configured, wrap the secret store so per-tenant processor credentials and
-		// webhook signing secrets are envelope-encrypted with the tenant's DEK
-		// before they ever touch the DB. With no master key, the plain store is
-		// used unchanged (self-hosted-without-encryption / back-compat).
-		var masterKey string
-		if deps.Config != nil && deps.Config.Encryption != nil {
-			masterKey = deps.Config.Encryption.MasterKey
-		}
-		dekStore, dkerr := crypto.NewDBDEKStore(deps.ControlPlane.Pool())
-		if dkerr != nil {
-			return nil, fmt.Errorf("build tenant DEK store: %w", dkerr)
-		}
-		enc, encerr := crypto.NewEncryptor(masterKey, dekStore)
-		if encerr != nil {
-			return nil, fmt.Errorf("build tenant encryptor: %w", encerr)
-		}
-		secretStore, sserr = tenancy.NewEncryptedSecretStore(secretStore, enc)
-		if sserr != nil {
-			return nil, fmt.Errorf("wrap tenant secret store with encryption: %w", sserr)
-		}
 		tsvc, terr := tenancy.NewService(deps.ControlPlane.Pool(), deps.ControlPlane, secretStore)
 		if terr != nil {
 			return nil, fmt.Errorf("build tenancy service: %w", terr)
 		}
 		s.tenancy = tsvc
 
-		// Recurring Solana cranker (#256): now that the per-tenant secret store
-		// exists, build the cranker over it + the Solana RPC and inject it into the
-		// runtime BEFORE workers start (InitRiver). Until this runs the cranker
-		// worker log-and-skips. The per-tenant solana/private_key resolves through
-		// the same store (DB+envelope here, or Vault when wired).
+		// Recurring Solana cranker (#256): inject the per-tenant cranker BEFORE
+		// workers start (InitRiver). Transit signer when configured (key never
+		// leaves Vault), else a keypair signer over the secret store.
 		if deps.Runtime != nil && deps.Runtime.SolanaRPC != nil {
-			deps.Runtime.SetSolanaCranker(recurring.NewCrankServiceFromStore(secretStore, deps.Runtime.SolanaRPC, 0))
+			if solanaTransit != nil {
+				deps.Runtime.SetSolanaCranker(recurring.NewCrankServiceFromTransit(solanaTransit, deps.Runtime.SolanaRPC, 0))
+			} else {
+				deps.Runtime.SetSolanaCranker(recurring.NewCrankServiceFromStore(secretStore, deps.Runtime.SolanaRPC, 0))
+			}
 		}
 
 		// Platform superadmin layer (issue #226): cross-tenant audit, break-glass,

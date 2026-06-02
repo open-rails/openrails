@@ -136,6 +136,7 @@ type Config struct {
 	Captcha      *CaptchaConfig               `koanf:"captcha,omitempty"`
 	FeatureFlags *FeatureFlags                `koanf:"feature_flags,omitempty"`
 	Encryption   *EncryptionConfig            `koanf:"encryption,omitempty"`
+	Vault        *VaultConfig                 `koanf:"vault,omitempty"`
 }
 
 // EncryptionConfig configures per-tenant encryption-at-rest (issue #227). The
@@ -152,6 +153,27 @@ type EncryptionConfig struct {
 	// MasterKey is the base64-encoded 32-byte AES-256 master key that wraps
 	// per-tenant DEKs. Empty disables at-rest encryption.
 	MasterKey string `koanf:"master_key,omitempty"`
+}
+
+// VaultConfig selects a HashiCorp Vault backend for per-tenant secrets (issue
+// #251). When Enabled, the tenant secret store resolves to Vault KV-v2 (same
+// (tenant, name) addressing) instead of DB+envelope, and Solana signing can use
+// Vault Transit (the key never leaves Vault). Disabled by default; self-hosted
+// uses the DB+envelope store.
+type VaultConfig struct {
+	Enabled    bool   `koanf:"enabled,omitempty"`
+	Address    string `koanf:"address,omitempty"`     // VAULT_ADDR; empty uses the api default
+	AuthMethod string `koanf:"auth_method,omitempty"` // "approle" | "kubernetes"
+	RoleID     string `koanf:"role_id,omitempty"`
+	SecretID   string `koanf:"secret_id,omitempty"`
+	K8sRole    string `koanf:"k8s_role,omitempty"`
+	// KVMount is the KV-v2 mount for tenant secrets (default "secret").
+	KVMount string `koanf:"kv_mount,omitempty"`
+	// TransitMount is the Transit mount for tenant signing keys (default "transit").
+	TransitMount string `koanf:"transit_mount,omitempty"`
+	// UseTransitForSolana signs the per-tenant Solana key via Vault Transit
+	// (non-extractable) rather than fetching solana/private_key from KV.
+	UseTransitForSolana bool `koanf:"use_transit_for_solana,omitempty"`
 }
 
 // DBConfig holds database configuration.

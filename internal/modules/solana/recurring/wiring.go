@@ -44,3 +44,16 @@ func NewCrankServiceFromStore(store tenancy.TenantSecretStore, rpc *solanaint.RP
 func NewPlanServiceFromStore(store tenancy.TenantSecretStore, rpc *solanaint.RPCClient, network string, ttl time.Duration) *PlanService {
 	return NewPlanService(NewSignerSubmitterFromStore(store, rpc, ttl), network)
 }
+
+// NewSignerSubmitterFromTransit builds a Submitter whose signing key lives in
+// Vault Transit (non-extractable) — the key never enters this process.
+func NewSignerSubmitterFromTransit(transit solanaint.TransitClient, rpc *solanaint.RPCClient, ttl time.Duration) Submitter {
+	signer := solanaint.NewTransitSigner(transit, nil, ttl)
+	return NewSignerSubmitter(signer, rpc)
+}
+
+// NewCrankServiceFromTransit builds a CrankService whose per-tenant Solana key is
+// signed via Vault Transit.
+func NewCrankServiceFromTransit(transit solanaint.TransitClient, rpc *solanaint.RPCClient, ttl time.Duration) *CrankService {
+	return NewCrankService(NewSignerSubmitterFromTransit(transit, rpc, ttl))
+}
