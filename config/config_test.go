@@ -8,25 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLoad_ServiceMTLSFromEnv(t *testing.T) {
-	t.Run("loads service mTLS config", func(t *testing.T) {
-		t.Setenv("SERVICE_MTLS_ENABLED", "true")
-		t.Setenv("SERVICE_MTLS_PORT", "2054")
-		t.Setenv("SERVICE_MTLS_CERT_FILE", "/run/secrets/mtls/server.crt")
-		t.Setenv("SERVICE_MTLS_KEY_FILE", "/run/secrets/mtls/server.key")
-		t.Setenv("SERVICE_MTLS_CLIENT_CA_FILE", "/run/secrets/mtls/ca.crt")
-		t.Setenv("SERVICE_MTLS_ALLOWED_CLIENT_SANS", "authkit.internal,orchestrator.internal")
-
-		cfg, err := Load("nonexistent-config.yaml")
-		assert.NoError(t, err)
-		assert.True(t, cfg.ServiceMTLS.Enabled)
-		assert.Equal(t, FlexiblePort(2054), cfg.ServiceMTLS.Port)
-		assert.Equal(t, "/run/secrets/mtls/server.crt", cfg.ServiceMTLS.CertFile)
-		assert.Equal(t, "/run/secrets/mtls/server.key", cfg.ServiceMTLS.KeyFile)
-		assert.Equal(t, "/run/secrets/mtls/ca.crt", cfg.ServiceMTLS.ClientCAFile)
-		assert.Equal(t, []string{"authkit.internal", "orchestrator.internal"}, cfg.ServiceMTLS.AllowedClientSANs)
-	})
-
+func TestLoad_EnvMapping(t *testing.T) {
+	// Issue #222 removed the SERVICE_MTLS_* env surface entirely (no private/mTLS
+	// service listener). These cases assert the remaining env-mapping behaviour.
 	t.Run("loads nested keys via single underscore (db.url)", func(t *testing.T) {
 		t.Setenv("DB_URL", "postgres://u:p@localhost:5432/db?sslmode=disable")
 
@@ -361,12 +345,6 @@ func TestProductionTestModeValidation(t *testing.T) {
 		assembleDBURL(cfg)
 		assert.ErrorContains(t, Validate(cfg), "cors_origins must be configured outside development")
 	})
-
-	t.Run("service mTLS enabled requires certificate config", func(t *testing.T) {
-		cfg := GetDefaultBillingConfig()
-		cfg.ServiceMTLS.Enabled = true
-		assert.ErrorContains(t, Validate(cfg), "service_mtls.cert_file and service_mtls.key_file are required")
-	})
 }
 
 func TestStripeKeyModeCompatibility(t *testing.T) {
@@ -573,4 +551,40 @@ func TestGetDefaultBillingConfig_FeatureFlags(t *testing.T) {
 		assert.False(t, cfg.FeatureFlags.DisableEntitlementExpiration)
 		assert.False(t, cfg.IsEntitlementExpirationDisabled())
 	})
+}
+
+func TestAllowedCORSOrigins_UnionsGlobalAndTenantOrigins(t *testing.T) {
+	cfg := &Config{
+		CorsOrigins: []string{"https://app.example.com", "https://app.example.com"}, // dup
+		TenantCORS: map[string]*TenantCORSConfig{
+			"doujins": {AllowedOrigins: []string{"https://app.doujins.com", "https://doujins.com"}},
+			"hentai0": {AllowedOrigins: []string{"https://hentai0.com", "https://app.example.com"}}, // dup w/ global
+			"empty":   nil,
+		},
+	}
+
+	got := cfg.AllowedCORSOrigins()
+
+	// Global origin first, de-duplicated; tenant origins follow in slug order.
+	assert.Equal(t, []string{
+		"https://app.example.com",
+		"https://app.doujins.com",
+		"https://doujins.com",
+		"https://hentai0.com",
+	}, got)
+}
+
+func TestAllowedCORSOrigins_NoWildcardWhenConfigured(t *testing.T) {
+	cfg := &Config{TenantCORS: map[string]*TenantCORSConfig{
+		"t": {AllowedOrigins: []string{"https://t.example.com"}},
+	}}
+	got := cfg.AllowedCORSOrigins()
+	assert.Equal(t, []string{"https://t.example.com"}, got)
+	assert.NotContains(t, got, "*")
+}
+
+func TestAllowedCORSOrigins_NilSafe(t *testing.T) {
+	var cfg *Config
+	assert.Nil(t, cfg.AllowedCORSOrigins())
+	assert.Empty(t, (&Config{}).AllowedCORSOrigins())
 }

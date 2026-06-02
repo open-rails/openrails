@@ -57,7 +57,7 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 	res, err := r.db.GetDB().
 		NewInsert().
 		Model(payment).
-		On("CONFLICT (processor, transaction_id) DO NOTHING").
+		On("CONFLICT (tenant_id, processor, transaction_id) DO NOTHING").
 		Exec(ctx)
 	if err != nil {
 		return false, err

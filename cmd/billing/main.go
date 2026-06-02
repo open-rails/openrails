@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/audit"
-	server "github.com/open-rails/openrails/internal/http"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 )
@@ -154,6 +154,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	// Bootstrap the OpenRails-owned AuthKit control plane (#224) when enabled.
+	// Idempotent + a no-op in verifier-only mode. Runs after migrations have been
+	// applied (migrations are a separate `billing migrate` step) and at startup.
+	if res, err := embeddedApp.RunControlPlaneBootstrap(context.Background(), controlplane.BootstrapOptions{MintInitialOAT: true}); err != nil {
+		cleanupOnError = true
+		return fmt.Errorf("control plane bootstrap: %w", err)
+	} else if res != nil && res.OATMinted {
+		log.WithField("oat_key_id", res.OATKeyID).
+			Warn("control plane: initial operator OAT minted; capture the secret from logs now (shown once)")
+	}
+
 	cleanupOnError = false
 
 	sigChan := make(chan os.Signal, 1)
@@ -170,24 +181,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 		MaxHeaderBytes:    1 << 20,
 	}
 
-	// Service API server (mTLS auth for server-to-server calls).
-	var serviceSrv *http.Server
-	if cfg.ServiceMTLS.Enabled {
-		tlsCfg, err := server.NewServiceTLSConfig(cfg.ServiceMTLS)
-		if err != nil {
-			return fmt.Errorf("configure service mTLS listener: %w", err)
-		}
-		serviceSrv = &http.Server{
-			Handler:           embeddedApp.ServiceHandler(),
-			Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.ServiceMTLS.Port),
-			ReadHeaderTimeout: 5 * time.Second,
-			ReadTimeout:       15 * time.Second,
-			WriteTimeout:      30 * time.Second,
-			IdleTimeout:       60 * time.Second,
-			MaxHeaderBytes:    1 << 20,
-			TLSConfig:         tlsCfg,
-		}
-	}
+	// Issue #222: there is no separate private/service listener. Server-to-server
+	// callers authenticate with OpenRails-issued tenant OATs against the SAME
+	// public API surface (publicSrv); embedded hosts use the in-process facade.
 
 	// Start public server in a goroutine
 	go func() {
@@ -196,16 +192,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 			log.WithError(err).Fatal("Failed to start public server")
 		}
 	}()
-
-	// Start service mTLS server in a goroutine (if configured).
-	if serviceSrv != nil {
-		go func() {
-			log.Infof("Starting service mTLS billing server on %s", serviceSrv.Addr)
-			if err := serviceSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-				log.WithError(err).Fatal("Failed to start service mTLS server")
-			}
-		}()
-	}
 
 	var (
 		workerDone   chan struct{}
@@ -259,11 +245,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	if err := publicSrv.Shutdown(shutdownCtx); err != nil {
 		log.WithError(err).Error("Public server forced to shutdown")
-	}
-	if serviceSrv != nil {
-		if err := serviceSrv.Shutdown(shutdownCtx); err != nil {
-			log.WithError(err).Error("Service mTLS server forced to shutdown")
-		}
 	}
 
 	if err := embeddedApp.Close(shutdownCtx); err != nil {

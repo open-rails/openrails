@@ -13,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/auth"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -26,7 +27,14 @@ type App struct {
 	RedisClient  *redis.Client
 	AuthProvider authprovider.Provider
 
+	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224).
+	// nil when auth.control_plane is disabled (pure verifier mode).
+	ControlPlane *controlplane.ControlPlane
+
 	stopRedisMonitor context.CancelFunc
+	// controlPlanePool is an OpenRails-owned pgx pool backing the control plane,
+	// created only when the control plane is enabled and no pool was injected.
+	controlPlanePool *pgxpool.Pool
 }
 
 // BootstrapOptions controls optional overrides for embedded use.
@@ -127,14 +135,75 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 		}
 	}
 
-	return &App{
+	app := &App{
 		Config:           cfg,
 		Runtime:          runtime,
 		Cache:            appCache,
 		RedisClient:      runtime.RedisClient,
 		AuthProvider:     authProvider,
 		stopRedisMonitor: stop,
-	}, nil
+	}
+
+	// Build the OpenRails-owned AuthKit control plane (#224) when enabled. This
+	// is OFF by default; verifier-only deployments leave app.ControlPlane nil.
+	if cfg.Auth != nil && cfg.Auth.ControlPlaneEnabled() {
+		// The control plane needs a pgx pool over the database holding AuthKit's
+		// profiles.* schema. Reuse an injected pool when provided, else create one.
+		pool := func() *pgxpool.Pool {
+			if opts != nil {
+				return opts.PGXPool
+			}
+			return nil
+		}()
+		ownedPool := false
+		if pool == nil {
+			p, err := pgxpool.New(context.Background(), cfg.DB.GetConnectionString())
+			if err != nil {
+				return nil, fmt.Errorf("control plane: build pgx pool: %w", err)
+			}
+			pool = p
+			ownedPool = true
+		}
+		cp, err := controlplane.New(context.Background(), cfg, pool)
+		if err != nil {
+			if ownedPool {
+				pool.Close()
+			}
+			return nil, fmt.Errorf("build control plane: %w", err)
+		}
+		app.ControlPlane = cp
+		if ownedPool {
+			app.controlPlanePool = pool
+		}
+	}
+
+	return app, nil
+}
+
+// RunControlPlaneBootstrap idempotently bootstraps the OpenRails-owned AuthKit
+// control plane (#224): ensures the default tenant's operator org, OpenRails
+// operator role, the openrails.* permission catalog, and an initial operator
+// OAT. It is a no-op when the control plane is disabled.
+//
+// Call it AFTER migrations have run (so billing.tenants and profiles.* exist)
+// and at startup. Safe to re-run.
+func (a *App) RunControlPlaneBootstrap(ctx context.Context, opts controlplane.BootstrapOptions) (*controlplane.BootstrapResult, error) {
+	if a == nil || a.ControlPlane == nil {
+		return nil, nil
+	}
+	if !opts.MintInitialOAT {
+		opts.MintInitialOAT = true
+	}
+	res, err := a.ControlPlane.Bootstrap(ctx, opts)
+	if err != nil {
+		return res, err
+	}
+	// #226: also ensure the managed-hosting platform superadmin org + role when
+	// configured. No-op when no platform org is set (single-tenant / non-managed).
+	if _, perr := a.ControlPlane.BootstrapPlatform(ctx); perr != nil {
+		return res, fmt.Errorf("platform superadmin bootstrap: %w", perr)
+	}
+	return res, nil
 }
 
 // Close releases all resources owned by the application.
@@ -144,6 +213,10 @@ func (a *App) Close(ctx context.Context) error {
 	}
 	if a.stopRedisMonitor != nil {
 		a.stopRedisMonitor()
+	}
+	if a.controlPlanePool != nil {
+		a.controlPlanePool.Close()
+		a.controlPlanePool = nil
 	}
 	var errs []error
 	if a.Cache != nil {

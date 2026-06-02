@@ -68,6 +68,7 @@ func NewServer(cfg *config.Config, opts *Options) (*Result, error) {
 		Runtime:      application.Runtime,
 		Redis:        application.RedisClient,
 		AuthProvider: application.AuthProvider,
+		ControlPlane: application.ControlPlane,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create billing server: %w", err)

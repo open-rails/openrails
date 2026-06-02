@@ -223,6 +223,10 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 		Auth: &config.AuthConfig{
 			Issuers:          []string{jwksIssuer},
 			ExpectedAudience: "test-app",
+			// HARDCUT (#224): admin authority is the operator-org model ONLY. Admin
+			// callers must present the operator org slug + an admin-equivalent
+			// org role; there is no global-admin DB fallback.
+			OperatorOrgSlug: testOperatorOrgSlug,
 		},
 		// All payment processor configs use the unified Processors map
 		Processors: map[string]*config.ProcessorConfig{
@@ -249,6 +253,15 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 				DirectPostURL: "https://secure.networkmerchants.com/api/transact.php",
 				QueryURL:      "https://secure.networkmerchants.com/api/query.php",
 			},
+		},
+		// Pyth price-feed config is required whenever a Solana processor is
+		// configured (config.validateSolanaProcessor). Use the package defaults
+		// so the integration suite can bootstrap.
+		Pyth: &config.PythConfig{
+			HermesURL:        config.DefaultPythHermesURL,
+			MaxPriceAge:      config.DefaultPythMaxPriceAge,
+			MaxConfidenceBPS: config.DefaultPythMaxConfidenceBPS,
+			PriceFeeds:       config.DefaultPythPriceFeeds(),
 		},
 	}
 	if suite.port != 0 {

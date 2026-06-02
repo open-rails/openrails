@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // Service is the exported, in-process billing API.
@@ -45,6 +46,9 @@ var ErrInsufficientCredits = credits.ErrInsufficientCredits
 var ErrCreditTypeInactive = credits.ErrCreditTypeInactive
 
 type HoldCreditsRequest struct {
+	// OwnerID is the OWNER ORG charged for the reservation (issue #221). When
+	// nil, the owner defaults to UserID's deterministic personal org.
+	OwnerID    *identity.OwnerOrgID
 	UserID     string
 	CreditType string
 	Amount     int64
@@ -90,7 +94,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.creditsService().Hold(ctx, req.UserID, req.CreditType, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.creditsService().Hold(ctx, req.OwnerID, req.UserID, req.CreditType, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +148,9 @@ type CreditTransaction struct {
 }
 
 type WithdrawCreditsRequest struct {
+	// OwnerID is the OWNER ORG to withdraw from (issue #221). When nil, defaults
+	// to UserID's deterministic personal org.
+	OwnerID    *identity.OwnerOrgID
 	UserID     string
 	CreditType string
 	Amount     int64
@@ -171,6 +178,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.creditsService().Withdraw(ctx, credits.CreditWithdrawParams{
+		OwnerID:    req.OwnerID,
 		UserID:     req.UserID,
 		CreditType: req.CreditType,
 		Amount:     req.Amount,
@@ -200,6 +208,9 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 }
 
 type DepositCreditsRequest struct {
+	// OwnerID is the OWNER ORG that owns the deposited balance (issue #221). When
+	// nil, defaults to UserID's deterministic personal org.
+	OwnerID     *identity.OwnerOrgID
 	UserID      string
 	CreditType  string
 	Amount      int64
@@ -229,6 +240,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.creditsService().Deposit(ctx, credits.CreditDepositParams{
+		OwnerID:     req.OwnerID,
 		UserID:      req.UserID,
 		CreditType:  req.CreditType,
 		Amount:      req.Amount,

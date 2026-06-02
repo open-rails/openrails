@@ -16,7 +16,7 @@
 - Postgres: `postgres:18-bookworm` (DB `doujins_db`, user `admin` / `admin_password`)
 - Garnet (Redis-compatible): `ghcr.io/microsoft/garnet` on `6379`
 - ClickHouse: `clickhouse/clickhouse-server` (DB `analytics`, user `analytics_user`, pass `analytics_password`)
-- Billing service: this server exposing public API on `:2053`; optional service-to-service mTLS API on `:2054` is exposed only to the compose network.
+- Billing service: this server exposing one public API on `:2053`. Server-to-server calls authenticate with OpenRails-issued tenant OATs on that same port (`/v1/service/*`); there is no separate private/mTLS port.
 
 #### Quick Start
 - Start services: `task docker-up` (or `docker compose -f docker-compose.yaml up -d`)
@@ -135,9 +135,8 @@ task build
 task dev
 ```
 
-The standalone server exposes:
-- **Port 2053** (public): User APIs, admin APIs, webhooks
-- **Port 2054** (service mTLS): Internal service-to-service APIs (credits, entitlements), when `service_mtls.enabled=true`
+The standalone server exposes a single public port:
+- **Port 2053** (public): user APIs, admin APIs, webhooks, AND server-to-server service APIs (credits, entitlements) under `/v1/service/*`, authenticated with OpenRails-issued tenant OATs. There is no separate private/mTLS port (issue #222).
 
 This is the default mode for production deployments where billing runs as a separate microservice.
 
@@ -273,9 +272,9 @@ result, _ := svc.HandleWebhook(ctx, service.HandleWebhookRequest{
 | Aspect | Standalone | Embedded |
 |--------|-----------|----------|
 | Deployment | Separate container/binary | Single binary with host app |
-| HTTP routing | Fixed public routes on port 2053; optional service mTLS routes on 2054 | You choose which routes to mount |
+| HTTP routing | Fixed public routes on port 2053, including OAT-authenticated `/v1/service/*` server-to-server routes | You choose which routes to mount |
 | Health endpoints | Built-in `/health/*`, `/healthz`, `/readyz` | Host app provides its own |
-| Internal ops | mTLS HTTP calls to port 2054 | Direct Go API calls |
+| Internal ops | OAT-authenticated `/v1/service/*` calls on port 2053 | Direct Go API calls |
 | Workers | Built-in, always running | Call `billing.RunWorkers(ctx)` |
 | Config | Own config file/env vars | Passed via `embedded.Options` |
 | Auth | Own JWT verifier | Use host app's auth provider |
@@ -886,24 +885,19 @@ out, err = svc.UpdatePrice(ctx, priceID, service.UpdatePriceRequest{
 ---
 
 Networking
-- Public: port `2053` is published to the host.
-- Service mTLS: port `2054` is exposed only to the Docker network when enabled. The listener requires client certificates signed by the configured HashiCorp Vault PKI CA.
+- Public: port `2053` is published to the host. This is the only OpenRails port.
+- Server-to-server: machine callers authenticate with OpenRails-issued tenant OATs on the same `2053` surface under `/v1/service/*` (issue #222). There is no private/mTLS port, no API key, and no OpenRails-owned service listener. Any infrastructure TLS / service mesh is deployment-owned and is NOT part of OpenRails authorization.
 
-Local mTLS certificates
-- The Docker Compose `mtls` profile starts a local HashiCorp Vault dev server, enables the Vault PKI engine, and renders an OpenRails server cert plus service client certs into the shared `openrails_mtls` volume.
-- Render local certs with `docker compose -f docker-compose.yaml --profile mtls run --rm vault-mtls-render`.
-- Start OpenRails with `SERVICE_MTLS_ENABLED=true` after the certs are rendered. The default service listener is `https://openrails:2054`; sibling compose stacks can use `https://billing:2054` against the same server cert.
-- Per-caller certs are rendered under `/run/secrets/mtls/clients/<identity>/`, including `authkit.internal`, `orchestrator.internal`, `doujins.internal`, and `hentai0.internal`.
-- Server and client leaf certificate files are reloaded on new TLS handshakes so 7-day Vault renewals can roll forward without reintroducing API keys.
-- `SERVICE_MTLS_ALLOWED_CLIENT_SANS` is a local shorthand for full service access. For production, prefer `service_mtls.clients.<identity>.scopes`.
-- Deployment notes: [docs/mtls-vault-pki.md](docs/mtls-vault-pki.md).
+OpenRails-issued OATs (server-to-server auth)
+- OATs are opaque bearer credentials minted/resolved through the OpenRails-owned AuthKit control plane (`auth.control_plane.*`). An OAT carries an owning tenant org and a set of `openrails:*` permissions.
+- Present them as `Authorization: Bearer <openrails_oat_...>` against `/v1/service/*`. The OAT's owning org resolves the acting tenant; per-route permission gates (`openrails:credits:write`, `openrails:entitlements:read`, etc.) authorize the call. Expired, revoked, unknown, or cross-tenant OATs are rejected.
+- The service surface is only mounted when the control plane is configured; verifier-only deployments have no OAT issuer.
 
-Private “definition” surface (host-owned catalog + credits)
+Server-to-server “definition” surface (host-owned catalog + credits)
 - OpenRails does **not** seed products/prices/credit types in production. Hosts should define them via:
-  - Service mTLS API (port `2054`)
-    - Credit types: `GET /v1/credit-types`, `POST /v1/credit-types`, `PATCH /v1/credit-types/{name}`, `POST /v1/credit-types/{name}/activate|deactivate`
-    - Catalog: `POST /v1/catalog/products`, `PATCH /v1/catalog/products/{id}`, `POST /v1/catalog/prices`, `PATCH /v1/catalog/prices/{id}`
-    - Credits funding: `POST /v1/credits/deposit`
+  - OAT-authenticated service API (`/v1/service/*`, port `2053`)
+    - Credit types: `GET /v1/service/credit-types`, `POST /v1/service/credit-types`, `PATCH /v1/service/credit-types/{name}`, `POST /v1/service/credit-types/{name}/activate|deactivate` (writes require `openrails:catalog:write`)
+    - Credits funding: `POST /v1/service/credits/deposit` (requires `openrails:credits:write`)
   - Embedded Go API (in-process, no HTTP)
     - Credit types: `Service.ListCreditTypes`, `Service.CreateCreditType`, `Service.UpdateCreditType`, `Service.ActivateCreditType`, `Service.DeactivateCreditType`
     - Catalog: `Service.CreateProduct`, `Service.UpdateProduct`, `Service.CreatePrice`, `Service.UpdatePrice`

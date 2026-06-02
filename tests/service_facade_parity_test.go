@@ -5,22 +5,42 @@ package tests
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
-	server "github.com/open-rails/openrails/internal/http"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	billingservice "github.com/open-rails/openrails/pkg/service"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
+
+// stubOATResolver is a test OATResolver (issue #222) that accepts any non-empty
+// bearer token as a valid OAT for the default tenant with the given permissions,
+// so the parity test can exercise the OAT-authenticated public service routes
+// without standing up a full AuthKit control plane.
+type stubOATResolver struct {
+	permissions []string
+}
+
+func (s stubOATResolver) LooksLikeOAT(token string) bool { return token != "" }
+
+func (s stubOATResolver) ResolveOAT(_ context.Context, token string) (*controlplane.ResolvedOAT, error) {
+	return &controlplane.ResolvedOAT{
+		OrgSlug:     "operator",
+		TenantID:    tenant.DefaultID,
+		TenantSlug:  tenant.DefaultSlug,
+		Permissions: s.permissions,
+	}, nil
+}
 
 func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T) {
 	suite := setupTestSuite(t)
@@ -44,6 +64,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 
 	ucb := &models.UserCreditBalance{
 		ID:           uuid.New(),
+		OwnerID:      personalOwnerID(userID),
 		UserID:       userID,
 		CreditTypeID: ct.ID,
 		Balance:      10_000,
@@ -54,13 +75,16 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	_, err = suite.BunDB.NewInsert().Model(ucb).Exec(ctx)
 	require.NoError(t, err)
 
-	// Seed an entitlement.
+	// Seed an entitlement. source_id is NOT NULL (the originating
+	// subscription/payment/admin-grant id); use a synthetic admin source here.
+	entSourceID := uuid.New()
 	ent := &models.Entitlement{
 		ID:          uuid.New(),
 		UserID:      userID,
 		Entitlement: "premium-1",
 		StartAt:     time.Now().Add(-1 * time.Hour).UTC(),
 		EndAt:       nil,
+		SourceID:    &entSourceID,
 		SourceType:  models.EntitlementSourceAdmin,
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
@@ -72,25 +96,22 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
 
-	// Build a service HTTP handler using the same runtime and mTLS identity config.
-	cfg2 := *suite.Config
-	cfg2.ServiceMTLS.Enabled = true
-	cfg2.ServiceMTLS.AllowedClientSANs = []string{"authkit.internal"}
-	privateSrv, err := server.New(server.Dependencies{
-		Config:       (*config.Config)(&cfg2),
-		Cache:        suite.App.Cache,
-		Runtime:      suite.App.Runtime,
-		Redis:        suite.App.RedisClient,
-		AuthProvider: suite.App.AuthProvider,
-	})
-	require.NoError(t, err)
-	privateHandler := privateSrv.PrivateHandler()
-	withServiceCert := func(req *http.Request) {
-		req.TLS = &tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{{
-				DNSNames: []string{"authkit.internal"},
-			}},
-		}
+	// Build the OAT-authenticated PUBLIC service routes (issue #222) directly,
+	// with a stub OAT resolver granting the credit + entitlement permissions. This
+	// is the same surface registered on the public handler at /v1/service/*.
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.ResolveTenant())
+	group := router.Group("/v1/service")
+	resolver := stubOATResolver{permissions: []string{
+		controlplane.PermCreditsRead,
+		controlplane.PermCreditsWrite,
+		controlplane.PermEntitlementsRead,
+	}}
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, middleware.OATRequired(resolver), nil)
+
+	withOAT := func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer openrails_oat_testkeyid_testsecret")
 	}
 
 	// 1) Create hold via Service facade, release via service HTTP.
@@ -105,10 +126,10 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.NoError(t, err)
 	require.NotEqual(t, uuid.Nil, hold1.ID)
 
-	reqRelease := httptest.NewRequest(http.MethodPost, "/v1/credits/hold/"+hold1.ID.String()+"/release", nil)
-	withServiceCert(reqRelease)
+	reqRelease := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold/"+hold1.ID.String()+"/release", nil)
+	withOAT(reqRelease)
 	wRelease := httptest.NewRecorder()
-	privateHandler.ServeHTTP(wRelease, reqRelease)
+	router.ServeHTTP(wRelease, reqRelease)
 	require.Equal(t, http.StatusOK, wRelease.Code)
 
 	// 2) Create hold via service HTTP, capture via Service facade.
@@ -120,11 +141,11 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		"source_id":   "hold-2",
 		"expires_at":  time.Now().Add(10 * time.Minute).Unix(),
 	})
-	reqHold := httptest.NewRequest(http.MethodPost, "/v1/credits/hold", bytes.NewReader(bodyHold))
-	withServiceCert(reqHold)
+	reqHold := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold", bytes.NewReader(bodyHold))
+	withOAT(reqHold)
 	reqHold.Header.Set("Content-Type", "application/json")
 	wHold := httptest.NewRecorder()
-	privateHandler.ServeHTTP(wHold, reqHold)
+	router.ServeHTTP(wHold, reqHold)
 	require.Equal(t, http.StatusOK, wHold.Code)
 
 	var holdResp struct {
@@ -144,10 +165,10 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.NoError(t, err)
 	require.Contains(t, ents, "premium-1")
 
-	reqEnt := httptest.NewRequest(http.MethodGet, "/v1/users/"+userID+"/entitlements", nil)
-	withServiceCert(reqEnt)
+	reqEnt := httptest.NewRequest(http.MethodGet, "/v1/service/users/"+userID+"/entitlements", nil)
+	withOAT(reqEnt)
 	wEnt := httptest.NewRecorder()
-	privateHandler.ServeHTTP(wEnt, reqEnt)
+	router.ServeHTTP(wEnt, reqEnt)
 	require.Equal(t, http.StatusOK, wEnt.Code)
 	require.Contains(t, wEnt.Body.String(), "premium-1")
 }

@@ -31,6 +31,7 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureCanFailAfterExpiry(t *t
 	expiredAt := time.Now().Add(-1 * time.Hour).UTC()
 	batch := &models.CreditBlock{
 		ID:              uuid.New(),
+		OwnerID:         personalOwnerID(userID),
 		UserID:          userID,
 		CreditTypeID:    creditType.ID,
 		OriginalAmount:  100,

@@ -88,9 +88,9 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 
 	// 1) Hold idempotency.
 	expiresAt := now.Add(10 * time.Minute).UTC()
-	hold1, err := creditsSvc.Hold(ctx, userID, creditTypeName, 200, "api_call", "req_1", expiresAt)
+	hold1, err := creditsSvc.Hold(ctx, nil, userID, creditTypeName, 200, "api_call", "req_1", expiresAt)
 	require.NoError(t, err)
-	hold2, err := creditsSvc.Hold(ctx, userID, creditTypeName, 200, "api_call", "req_1", expiresAt)
+	hold2, err := creditsSvc.Hold(ctx, nil, userID, creditTypeName, 200, "api_call", "req_1", expiresAt)
 	require.NoError(t, err)
 	require.Equal(t, hold1.ID, hold2.ID)
 
@@ -112,7 +112,7 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	require.Equal(t, "released", holdAfterRelease.Status)
 
 	// 3) Hold -> partial capture.
-	hold3, err := creditsSvc.Hold(ctx, userID, creditTypeName, 300, "api_call", "req_2", now.Add(10*time.Minute).UTC())
+	hold3, err := creditsSvc.Hold(ctx, nil, userID, creditTypeName, 300, "api_call", "req_2", now.Add(10*time.Minute).UTC())
 	require.NoError(t, err)
 	trx, err := creditsSvc.CaptureHold(ctx, hold3.ID, 120)
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	require.Equal(t, int64(0), bal.HeldBalance)
 
 	// 4) Hold -> expire (via worker).
-	hold4, err := creditsSvc.Hold(ctx, userID, creditTypeName, 50, "api_call", "req_3", now.Add(-1*time.Minute).UTC())
+	hold4, err := creditsSvc.Hold(ctx, nil, userID, creditTypeName, 50, "api_call", "req_3", now.Add(-1*time.Minute).UTC())
 	require.NoError(t, err)
 	bal, err = creditsSvc.GetBalance(ctx, userID, creditTypeName)
 	require.NoError(t, err)

@@ -33,8 +33,8 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 	// id is a NOT NULL uuid pk; bun sends the struct's zero value rather than
 	// falling back to the column's uuidv7() default, so generate it explicitly.
 	// Without this every insert ships id=000…0 and the second distinct
-	// (user_id, processor) row collides on the pk (the ON CONFLICT below only
-	// covers (user_id, processor)).
+	// (tenant_id, user_id, processor) row collides on the pk (the ON CONFLICT below
+	// covers the tenant-scoped (tenant_id, user_id, processor) unique).
 	_, err := s.DB.GetDB().NewInsert().Model(&models.ProcessorCustomer{
 		ID:         uuidutil.NewV7(),
 		UserID:     userID,
@@ -42,7 +42,7 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 		CustomerID: customerID,
 		CreatedAt:  now,
 		UpdatedAt:  now,
-	}).On("CONFLICT (user_id, processor) DO UPDATE").
+	}).On("CONFLICT (tenant_id, user_id, processor) DO UPDATE").
 		Set("customer_id = EXCLUDED.customer_id").
 		Set("updated_at = EXCLUDED.updated_at").
 		Exec(ctx)

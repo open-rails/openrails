@@ -5,14 +5,36 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/internal/controlplane"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
+// ServiceRoutePrefix is the path under the tenant-scoped public API where
+// OAT-authenticated server-to-server billing operations live (issue #222). It
+// REPLACES the retired private/mTLS service listener: machine callers present an
+// OpenRails-issued tenant OAT as a Bearer token against this public surface. The
+// acting tenant is bound by the OAT's owning org, not the URL.
+const ServiceRoutePrefix = "/service"
+
+// SelfRoutePrefix is the path under the tenant-scoped public API where
+// browser-direct SELF-SERVICE billing operations live (issue #222 browser
+// tier). A tenant's host frontend mints a short-lived DELEGATED ACCESS TOKEN for
+// the logged-in end-user and the browser presents it as a Bearer token directly
+// against this surface. The acting user is the token's `delegated_sub` and the
+// acting tenant is bound by the token's `tenant` claim — never the URL.
+const SelfRoutePrefix = "/self"
+
 type Options struct {
 	AuthProvider authprovider.Provider
+
+	// OperatorPermissionChecker, when set, makes the operator org the LIVE
+	// authority for admin routes (#224): after the operator-org gate, admin
+	// routes additionally require the openrails:admin permission evaluated live
+	// against the operator org. nil in verifier-only mode (legacy gate only).
+	OperatorPermissionChecker authpolicy.OperatorPermissionChecker
 }
 
 func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFunc {
@@ -72,6 +94,13 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 
 	group.Use(opts.AuthProvider.Required())
 	group.Use(authpolicy.OperatorAdminRequired(rt.Config, rt.DB.GetDB()))
+	// #224: when the OpenRails-owned AuthKit control plane is present, the
+	// operator org is the LIVE authority — require the openrails:admin permission
+	// evaluated against the operator org at request time. This is the forward
+	// path away from the global-admin fallback.
+	if opts.OperatorPermissionChecker != nil {
+		group.Use(authpolicy.OperatorPermissionRequired(opts.OperatorPermissionChecker, controlplane.PermAdmin))
+	}
 
 	group.GET("/subscriptions", wrap(httphandlers.GetAdminSubscriptions))
 	group.GET("/subscriptions/:id", wrap(httphandlers.GetAdminSubscription))
@@ -140,33 +169,111 @@ func RegisterWebhookRoutes(group *gin.RouterGroup, rt *app.Runtime) {
 	group.POST(":provider", wrapHandler(rt, httphandlers.Webhook))
 }
 
-func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, authMiddleware gin.HandlerFunc) {
+// RegisterServiceRoutes mounts the server-to-server billing surface on a
+// tenant-scoped PUBLIC route group authenticated by OpenRails-issued tenant OATs
+// (issue #222). This replaces the retired private/mTLS listener and its
+// certificate-scope model: every operation is gated by an OAT permission from the
+// canonical colon-form OpenRails permission catalog, and the acting tenant is the
+// OAT's owning tenant (pinned by OATRequired before any tenant-owned DB access).
+//
+// oatMW must authenticate the OAT (typically middleware.OATRequired); it pins the
+// resolved tenant + permissions onto the context that the per-route
+// RequireOATPermission gates and the handlers read.
+func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc, minter DelegatedMinter) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 
-	group.Use(authMiddleware)
+	group.Use(oatMW)
+
+	// Browser-tier delegated-token MINT (issue #222). A host backend authenticated
+	// by an OAT holding PermSelfMint asks OpenRails to mint a short-lived,
+	// user-scoped delegated access token (for its OWN tenant) to hand to a browser
+	// for the /v1/self/* surface. Mounted only when a minter is wired (control
+	// plane present); the OAT gate + per-route permission keep it server-to-server.
+	if minter != nil {
+		group.POST("/delegated-tokens",
+			middleware.RequireOATPermission(controlplane.PermSelfMint),
+			mintDelegatedTokenHandler(minter),
+		)
+	}
 
 	users := group.Group("/users/:user_id")
-	users.GET("/entitlements", middleware.RequireServiceScope(middleware.ServiceScopeEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
-	users.GET("/credits", middleware.RequireServiceScope(middleware.ServiceScopeCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
+	users.GET("/entitlements", middleware.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
+	users.GET("/credits", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
 
 	credits := group.Group("/credits")
-	credits.POST("/deposit", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceDepositCredits))
-	credits.POST("/withdraw", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceWithdrawCredits))
-	credits.POST("/hold", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceHoldCredits))
-	credits.POST("/holds/:id/capture", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
-	credits.POST("/holds/:id/release", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
-	credits.POST("/hold/:id/capture", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
-	credits.POST("/hold/:id/release", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
-	credits.GET("/transactions/lookup", middleware.RequireServiceScope(middleware.ServiceScopeCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
-	credits.GET("/users/:user_id", middleware.RequireServiceScope(middleware.ServiceScopeCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
+	credits.POST("/deposit", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceDepositCredits))
+	credits.POST("/withdraw", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceWithdrawCredits))
+	credits.POST("/hold", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceHoldCredits))
+	credits.POST("/holds/:id/capture", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
+	credits.POST("/holds/:id/release", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
+	credits.POST("/hold/:id/capture", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
+	credits.POST("/hold/:id/release", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
+	credits.GET("/transactions/lookup", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
+	credits.GET("/users/:user_id", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
 
+	// Credit-type definition writes are catalog-definition operations: gate them
+	// behind the explicit catalog-write permission (issue #222 — catalog/definition
+	// writes available to OATs only under an explicit permission). Reads use the
+	// coarse credits:read capability.
 	creditTypes := group.Group("/credit-types")
-	creditTypes.POST("", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceCreateCreditType))
-	creditTypes.GET("", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesRead), wrap(httphandlers.ServiceListCreditTypes))
-	creditTypes.PATCH("/:name", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceUpdateCreditType))
-	creditTypes.POST("/:name/deactivate", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceDeactivateCreditType))
-	creditTypes.POST("/:name/activate", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceActivateCreditType))
+	creditTypes.POST("", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceCreateCreditType))
+	creditTypes.GET("", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceListCreditTypes))
+	creditTypes.PATCH("/:name", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceUpdateCreditType))
+	creditTypes.POST("/:name/deactivate", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceDeactivateCreditType))
+	creditTypes.POST("/:name/activate", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceActivateCreditType))
+}
 
+// RegisterSelfServiceRoutes mounts the browser-direct SELF-SERVICE billing
+// surface on a tenant-scoped PUBLIC route group authenticated by a browser's
+// DELEGATED ACCESS TOKEN (issue #222 browser-tier foundation). It reuses the
+// existing user-facing handlers — they all read the acting user via
+// r.GetUser(), which delegatedMW binds to the token's `delegated_sub` — so every
+// operation is automatically scoped to the authenticated end-user and their
+// tenant. There is no `:user_id` in any path: a browser token can only act on
+// its own subject.
+//
+// delegatedMW must authenticate the delegated token (typically
+// middleware.DelegatedSelfRequired); it pins the resolved tenant + acting user +
+// self-permissions onto the context that the per-route RequireDelegatedPermission
+// gates and the handlers read.
+func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
+	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
+		return wrapHandler(rt, fn)
+	}
+
+	group.Use(delegatedMW)
+
+	read := middleware.RequireDelegatedPermission(controlplane.PermSelfBillingRead)
+
+	// Account + balance/credits read.
+	group.GET("/status", read, wrap(httphandlers.GetMyBillingStatus))
+	group.GET("/credits", read, wrap(httphandlers.GetMyCredits))
+	group.GET("/credits/:type", read, wrap(httphandlers.GetMyCreditsType))
+	group.GET("/credits/:type/transactions", read, wrap(httphandlers.GetMyCreditTransactions))
+
+	// Payment / transaction history.
+	group.GET("/payments", read, wrap(httphandlers.GetUserPayments))
+
+	// Subscriptions: read for the whole group; cancel gated by the cancel scope.
+	subs := group.Group("/subscriptions")
+	subs.GET("", read, wrap(httphandlers.GetMySubscriptions))
+	subs.GET("/:id", read, wrap(httphandlers.GetSubscription))
+	subs.POST("/:id/cancel", middleware.RequireDelegatedPermission(controlplane.PermSelfSubscriptionCancel), wrap(httphandlers.CancelSubscription))
+
+	// Payment methods: list is a read; mutations require the manage scope.
+	pm := group.Group("/payment-methods")
+	pm.GET("", read, wrap(httphandlers.ListPaymentMethods))
+	manage := middleware.RequireDelegatedPermission(controlplane.PermSelfPaymentMethods)
+	pm.POST("", manage, wrap(httphandlers.CreatePaymentMethod))
+	pm.PUT("/:id", manage, wrap(httphandlers.UpdatePaymentMethod))
+	pm.DELETE("/:id", manage, wrap(httphandlers.DeletePaymentMethod))
+
+	// Checkout: create a session and read/confirm it (browser self-checkout).
+	checkoutCreate := middleware.RequireDelegatedPermission(controlplane.PermSelfCheckoutCreate)
+	checkout := group.Group("/checkout")
+	checkout.POST("", checkoutCreate, wrap(httphandlers.CreateCheckoutSession))
+	checkout.GET("/:id", read, wrap(httphandlers.GetCheckoutSession))
+	checkout.POST("/:id/confirm", checkoutCreate, wrap(httphandlers.ConfirmCheckoutSession))
 }

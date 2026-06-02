@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -69,10 +70,9 @@ type StoreConfig struct {
 }
 
 type Config struct {
-	Env         string            `koanf:"env,omitempty"`
-	Port        FlexiblePort      `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
-	Host        string            `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
-	ServiceMTLS ServiceMTLSConfig `koanf:"service_mtls,omitempty"`
+	Env  string       `koanf:"env,omitempty"`
+	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
+	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
 	// Cloudflared contains Cloudflare Tunnel settings used for local/dev tooling.
 	// Billing does not run cloudflared, but we keep these keys in config so that
@@ -115,55 +115,26 @@ type Config struct {
 	//       recipient_wallet: "..."
 	Processors map[string]*ProcessorConfig `koanf:"processors,omitempty"`
 
-	DB           *DBConfig         `koanf:"db,omitempty"`
-	Redis        *RedisConfig      `koanf:"redis,omitempty"`
-	Auth         *AuthConfig       `koanf:"auth,omitempty"`
-	ClickHouse   *ClickHouseConfig `koanf:"clickhouse,omitempty"`
-	Logger       *LoggerConfig     `koanf:"logger,omitempty"`
-	SendGrid     *SendGridConfig   `koanf:"sendgrid,omitempty"`
-	Pyth         *PythConfig       `koanf:"pyth,omitempty"`
-	CorsOrigins  []string          `koanf:"cors_origins,omitempty"`
-	RateLimits   *RateLimitsConfig `koanf:"rate_limits,omitempty"`
-	Captcha      *CaptchaConfig    `koanf:"captcha,omitempty"`
-	FeatureFlags *FeatureFlags     `koanf:"feature_flags,omitempty"`
-}
-
-// ServiceMTLSConfig controls the standalone service-to-service mTLS listener.
-type ServiceMTLSConfig struct {
-	Enabled           bool                               `koanf:"enabled,omitempty"`
-	Port              FlexiblePort                       `koanf:"port,omitempty"`
-	CertFile          string                             `koanf:"cert_file,omitempty"`
-	KeyFile           string                             `koanf:"key_file,omitempty"`
-	ClientCAFile      string                             `koanf:"client_ca_file,omitempty"`
-	AllowedClientSANs []string                           `koanf:"allowed_client_sans,omitempty"`
-	Clients           map[string]ServiceMTLSClientConfig `koanf:"clients,omitempty"`
-}
-
-// ServiceMTLSClientConfig maps a certificate identity to service route scopes.
-type ServiceMTLSClientConfig struct {
-	Scopes []string `koanf:"scopes,omitempty"`
-}
-
-// ClientScopes returns the configured service identities and their route scopes.
-func (c ServiceMTLSConfig) ClientScopes() map[string][]string {
-	out := make(map[string][]string, len(c.Clients)+len(c.AllowedClientSANs))
-	for identity, client := range c.Clients {
-		identity = strings.TrimSpace(identity)
-		if identity == "" {
-			continue
-		}
-		out[identity] = nonEmptyStrings(client.Scopes)
-	}
-	for _, identity := range c.AllowedClientSANs {
-		identity = strings.TrimSpace(identity)
-		if identity == "" {
-			continue
-		}
-		if _, exists := out[identity]; !exists {
-			out[identity] = []string{"*"}
-		}
-	}
-	return out
+	DB          *DBConfig         `koanf:"db,omitempty"`
+	Redis       *RedisConfig      `koanf:"redis,omitempty"`
+	Auth        *AuthConfig       `koanf:"auth,omitempty"`
+	ClickHouse  *ClickHouseConfig `koanf:"clickhouse,omitempty"`
+	Logger      *LoggerConfig     `koanf:"logger,omitempty"`
+	SendGrid    *SendGridConfig   `koanf:"sendgrid,omitempty"`
+	Pyth        *PythConfig       `koanf:"pyth,omitempty"`
+	CorsOrigins []string          `koanf:"cors_origins,omitempty"`
+	// TenantCORS configures per-tenant browser-direct allowed origins (issue #222
+	// browser tier). It is keyed by tenant slug; each entry lists the exact
+	// origins a browser on that tenant's domain may use to call OpenRails
+	// directly (e.g. the /v1/self/* self-service surface with a delegated access
+	// token). These origins are added to the allow-list ALONGSIDE CorsOrigins —
+	// they are an additive union, never a wildcard. Preflight succeeds for any
+	// listed origin and is denied for any origin that is not listed in either
+	// CorsOrigins or some tenant's allowed origins.
+	TenantCORS   map[string]*TenantCORSConfig `koanf:"tenant_cors,omitempty"`
+	RateLimits   *RateLimitsConfig            `koanf:"rate_limits,omitempty"`
+	Captcha      *CaptchaConfig               `koanf:"captcha,omitempty"`
+	FeatureFlags *FeatureFlags                `koanf:"feature_flags,omitempty"`
 }
 
 // DBConfig holds database configuration.
@@ -415,6 +386,58 @@ type RedisConfig struct {
 
 // AuthConfig holds JWT verification configuration for billing service.
 // Billing is a JWT verifier (not issuer) - it validates tokens issued by your IdP.
+// TenantCORSConfig holds the browser-direct CORS policy for a single tenant
+// (issue #222 browser tier).
+type TenantCORSConfig struct {
+	// AllowedOrigins is the exact set of browser origins (scheme+host+port) on
+	// this tenant's domain that may call OpenRails directly. Exact-match only; no
+	// wildcards. Example: ["https://app.doujins.com", "https://doujins.com"].
+	AllowedOrigins []string `koanf:"allowed_origins,omitempty"`
+}
+
+// AllowedCORSOrigins returns the de-duplicated union of the global CorsOrigins
+// and every tenant's per-tenant allowed origins (issue #222 browser tier). This
+// is the explicit allow-list handed to the CORS middleware so browsers on a
+// configured tenant domain can call OpenRails directly without weakening CORS to
+// a wildcard. Order is stable (global origins first, then tenant origins in
+// tenant-slug order) so the allow-list is deterministic.
+func (c *Config) AllowedCORSOrigins() []string {
+	if c == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(o string) {
+		o = strings.TrimSpace(o)
+		if o == "" {
+			return
+		}
+		if _, ok := seen[o]; ok {
+			return
+		}
+		seen[o] = struct{}{}
+		out = append(out, o)
+	}
+	for _, o := range c.CorsOrigins {
+		add(o)
+	}
+	slugs := make([]string, 0, len(c.TenantCORS))
+	for slug := range c.TenantCORS {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+	for _, slug := range slugs {
+		tc := c.TenantCORS[slug]
+		if tc == nil {
+			continue
+		}
+		for _, o := range tc.AllowedOrigins {
+			add(o)
+		}
+	}
+	return out
+}
+
 type AuthConfig struct {
 	Issuers          []string `koanf:"issuers"`           // List of expected token issuers (e.g., ["https://issuer.example.com"])
 	ExpectedAudience string   `koanf:"expected_audience"` // Accept token only if it contains this audience (e.g., "openrails-app")
@@ -433,6 +456,94 @@ type AuthConfig struct {
 	// OperatorOrgAdminRoles is the list of OrgRoles considered admin-equivalent
 	// when OperatorOrgSlug is set. Defaults to ["admin", "owner"].
 	OperatorOrgAdminRoles []string `koanf:"operator_org_admin_roles,omitempty"`
+
+	// ControlPlane configures OpenRails' OpenRails-owned AuthKit control plane
+	// (issue #224). When nil/disabled, OpenRails behaves as a pure JWT verifier
+	// (current default). When enabled, OpenRails builds an in-process AuthKit
+	// core/service, can selectively mount AuthKit route groups, and bootstraps
+	// the default tenant's operator org + roles + permission catalog + initial
+	// operator OAT.
+	ControlPlane *ControlPlaneConfig `koanf:"control_plane,omitempty"`
+}
+
+// ControlPlaneConfig configures the OpenRails-owned AuthKit control plane
+// (issue #224). It is OPTIONAL and OFF by default: a deployment that only
+// verifies externally-issued JWTs does not set this. A self-hosted, locked-down
+// deployment enables it to own user/org/role/OAT operations in-process.
+type ControlPlaneConfig struct {
+	// Enabled turns on the in-process AuthKit control plane. When false (the
+	// default), OpenRails does not construct an AuthKit core/service and does not
+	// run control-plane bootstrap.
+	Enabled bool `koanf:"enabled,omitempty"`
+
+	// Issuer is the AuthKit token issuer this OpenRails control plane signs as
+	// (e.g. "https://billing.mysite.com"). Required when Enabled.
+	Issuer string `koanf:"issuer,omitempty"`
+
+	// IssuedAudiences are the audiences placed on tokens this control plane
+	// issues. ExpectedAudiences are the audiences it accepts. Both default to
+	// the verifier's ExpectedAudience when left empty.
+	IssuedAudiences   []string `koanf:"issued_audiences,omitempty"`
+	ExpectedAudiences []string `koanf:"expected_audiences,omitempty"`
+
+	// OrgMode is the AuthKit org mode ("single" or "multi"). Operator-org
+	// bootstrap and the org-management HTTP routes require "multi". Defaults to
+	// "multi" when Enabled so the operator org and its OATs exist.
+	OrgMode string `koanf:"org_mode,omitempty"`
+
+	// TokenPrefix is the brand prefix for minted OATs (e.g. "openrails" ->
+	// `openrails_oat_<key_id>_<secret>`). Empty -> bare `oat_`.
+	TokenPrefix string `koanf:"token_prefix,omitempty"`
+
+	// LockedDown selects the self-hosted, locked-down posture: public user
+	// registration and public org management are disabled, and only the
+	// intentional AuthKit route groups are mounted (never DefaultAPI). Defaults
+	// to true when Enabled — hosted-SaaS mode must explicitly opt out.
+	LockedDown *bool `koanf:"locked_down,omitempty"`
+
+	// OperatorOATName is the human-readable name of the initial operator OAT
+	// minted at bootstrap. Defaults to "openrails-bootstrap-operator".
+	OperatorOATName string `koanf:"operator_oat_name,omitempty"`
+
+	// PlatformOrgSlug is the AuthKit org slug for the managed-hosting PLATFORM
+	// superadmin org (issue #226), DISTINCT from any tenant operator org. The
+	// platform org holds the openrails-platform-superadmin role with the
+	// openrails:platform:superadmin permission and gates the cross-tenant
+	// /v1/platform/* surface. When empty (the default), platform-superadmin
+	// bootstrap and the /v1/platform/* routes are NOT enabled — a single-tenant
+	// or non-managed deployment never grows a cross-tenant superadmin.
+	PlatformOrgSlug string `koanf:"platform_org_slug,omitempty"`
+
+	// PlatformAdminUserID, when set, is assigned the platform-superadmin role in
+	// the platform org at bootstrap (issue #226). Optional: the platform org can
+	// be seeded empty and admins added later.
+	PlatformAdminUserID string `koanf:"platform_admin_user_id,omitempty"`
+}
+
+// PlatformOrgEnabled reports whether a managed-hosting platform-superadmin org
+// is configured (issue #226). When false, the cross-tenant /v1/platform/*
+// surface is not mounted and no platform-superadmin is bootstrapped.
+func (cp *ControlPlaneConfig) PlatformOrgEnabled() bool {
+	return cp != nil && strings.TrimSpace(cp.PlatformOrgSlug) != ""
+}
+
+// ControlPlaneEnabled reports whether the OpenRails-owned AuthKit control plane
+// is enabled for this deployment.
+func (c *AuthConfig) ControlPlaneEnabled() bool {
+	return c != nil && c.ControlPlane != nil && c.ControlPlane.Enabled
+}
+
+// LockedDownEnabled reports whether the control plane runs in the self-hosted,
+// locked-down posture (public registration + org management disabled, selective
+// route mounting). Defaults to true when the control plane is enabled.
+func (cp *ControlPlaneConfig) LockedDownEnabled() bool {
+	if cp == nil {
+		return false
+	}
+	if cp.LockedDown == nil {
+		return true
+	}
+	return *cp.LockedDown
 }
 
 // OperatorOrgEnabled reports whether OperatorOrgSlug is set (multi-org admin mode).
@@ -735,10 +846,6 @@ func Validate(cfg *Config) error {
 			return fmt.Errorf("cors_origins must be configured outside development")
 		}
 	}
-	if err := validateServiceMTLSConfig(cfg); err != nil {
-		return err
-	}
-
 	// Validate Processors map
 	if len(cfg.Processors) > 0 {
 		if err := validateProcessors(cfg, isDev); err != nil {
@@ -1172,49 +1279,12 @@ func validateDatabase(cfg *DBConfig) error {
 	return nil
 }
 
-func validateServiceMTLSConfig(cfg *Config) error {
-	if cfg == nil || !cfg.ServiceMTLS.Enabled {
-		return nil
-	}
-	if cfg.ServiceMTLS.Port <= 0 {
-		return fmt.Errorf("service_mtls.port must be configured when service_mtls.enabled=true")
-	}
-	if cfg.ServiceMTLS.Port == cfg.Port {
-		return fmt.Errorf("service_mtls.port must be different from public port")
-	}
-	if strings.TrimSpace(cfg.ServiceMTLS.CertFile) == "" || strings.TrimSpace(cfg.ServiceMTLS.KeyFile) == "" {
-		return fmt.Errorf("service_mtls.cert_file and service_mtls.key_file are required when service_mtls.enabled=true")
-	}
-	if strings.TrimSpace(cfg.ServiceMTLS.ClientCAFile) == "" {
-		return fmt.Errorf("service_mtls.client_ca_file is required when service_mtls.enabled=true")
-	}
-	if len(cfg.ServiceMTLS.ClientScopes()) == 0 {
-		return fmt.Errorf("service_mtls.clients or service_mtls.allowed_client_sans must include at least one identity when service_mtls.enabled=true")
-	}
-	return nil
-}
-
-func nonEmptyStrings(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
-}
-
 // GetDefaultBillingConfig returns a billing configuration with sensible defaults
 func GetDefaultBillingConfig() *Config {
 	return &Config{
 		Env:  "development",
 		Host: "0.0.0.0",
 		Port: 2053,
-		ServiceMTLS: ServiceMTLSConfig{
-			Enabled: false,
-			Port:    2054,
-		},
 		DB: &DBConfig{
 			Host:     "localhost",
 			Port:     "5432",
@@ -1407,13 +1477,6 @@ func Load(configPath string) (*Config, error) {
 			return "auth.expected_audience"
 		}
 
-		if s == "service_mtls_port" {
-			return "service_mtls.port"
-		}
-		if strings.HasPrefix(s, "service_mtls_") {
-			return "service_mtls." + strings.TrimPrefix(s, "service_mtls_")
-		}
-
 		// Special case: CORS_ORIGINS -> cors_origins (top-level, not cors.origins)
 		if s == "cors_origins" {
 			return "cors_origins"
@@ -1470,7 +1533,7 @@ func Load(configPath string) (*Config, error) {
 			}
 			return mapped, out
 		}
-		if mapped == "auth.issuers" || mapped == "service_mtls.allowed_client_sans" {
+		if mapped == "auth.issuers" {
 			parts := strings.Split(v, ",")
 			out := make([]string, 0, len(parts))
 			for _, p := range parts {

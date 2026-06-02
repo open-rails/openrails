@@ -41,6 +41,7 @@ func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTy
 	now := suite.GetClock().Now()
 	bal := &models.UserCreditBalance{
 		ID:           uuid.New(),
+		OwnerID:      personalOwnerID(userID),
 		UserID:       userID,
 		CreditTypeID: creditTypeID,
 		Balance:      balance,
@@ -63,6 +64,7 @@ func (suite *TestContainerSuite) createTestCreditHold(userID string, creditTypeI
 	sid := uuid.New().String()
 	hold := &models.CreditTransaction{
 		ID:              uuid.New(),
+		OwnerID:         personalOwnerID(userID),
 		UserID:          userID,
 		CreditTypeID:    creditTypeID,
 		Amount:          0,

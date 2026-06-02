@@ -80,3 +80,42 @@ func TestSecurityHeadersSkipsCSPForNMITokenizationDebugPage(t *testing.T) {
 	require.Equal(t, http.StatusOK, apiW.Code)
 	require.NotEmpty(t, apiW.Header().Get("Content-Security-Policy"))
 }
+
+// CORS tenant-origin tests (issue #222 browser tier): a browser on a configured
+// (per-tenant) allowed origin can preflight + call OpenRails directly; an
+// unlisted origin is denied. The allow-list never weakens to "*" when origins
+// are configured.
+func TestCORS_AllowsConfiguredTenantOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(CORS([]string{"https://app.example.com", "https://app.doujins.com"}))
+	r.POST("/v1/self/status", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	// Preflight (OPTIONS) from an allowed tenant origin.
+	req := httptest.NewRequest(http.MethodOptions, "/v1/self/status", nil)
+	req.Header.Set("Origin", "https://app.doujins.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "authorization")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, "https://app.doujins.com", w.Header().Get("Access-Control-Allow-Origin"))
+	require.True(t, w.Code == http.StatusNoContent || w.Code == http.StatusOK, "preflight should succeed, got %d", w.Code)
+}
+
+func TestCORS_DeniesUnlistedOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(CORS([]string{"https://app.example.com", "https://app.doujins.com"}))
+	r.POST("/v1/self/status", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodOptions, "/v1/self/status", nil)
+	req.Header.Set("Origin", "https://evil.example.net")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// A disallowed origin must NOT be echoed back and must not get a wildcard.
+	require.NotEqual(t, "https://evil.example.net", w.Header().Get("Access-Control-Allow-Origin"))
+	require.NotEqual(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+}

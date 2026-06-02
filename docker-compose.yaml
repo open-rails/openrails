@@ -205,11 +205,10 @@ services:
       clickhouse:
         condition: service_healthy
     ports:
-      - "127.0.0.1:2053:2053"  # API (public endpoints + admin endpoints with JWT auth)
-    # Service mTLS is exposed to the compose network only. Enable it by providing
-    # Vault PKI-rendered certs and SERVICE_MTLS_ENABLED=true.
-    expose:
-      - "2054"  # Service API (mTLS, internal only)
+      # Single public API surface. Server-to-server callers authenticate with
+      # OpenRails-issued tenant OATs on this same port (issue #222) — there is no
+      # separate private/mTLS service port.
+      - "127.0.0.1:2053:2053"  # API (public + admin + OAT service routes)
     environment:
       # Service runtime mode
       ENV: "${ENV:-development}"
@@ -245,127 +244,9 @@ services:
       CLICKHOUSE_DB: "analytics"
       CLICKHOUSE_USER: "${CLICKHOUSE_USER:-analytics_user}"
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-analytics_password}"
-      # Service mTLS listener (cert files should be rendered from HashiCorp Vault PKI).
-      SERVICE_MTLS_ENABLED: "${SERVICE_MTLS_ENABLED:-false}"
-      SERVICE_MTLS_PORT: "${SERVICE_MTLS_PORT:-2054}"
-      SERVICE_MTLS_CERT_FILE: "${SERVICE_MTLS_CERT_FILE:-/run/secrets/mtls/server.crt}"
-      SERVICE_MTLS_KEY_FILE: "${SERVICE_MTLS_KEY_FILE:-/run/secrets/mtls/server.key}"
-      SERVICE_MTLS_CLIENT_CA_FILE: "${SERVICE_MTLS_CLIENT_CA_FILE:-/run/secrets/mtls/ca.crt}"
-      SERVICE_MTLS_ALLOWED_CLIENT_SANS: "${SERVICE_MTLS_ALLOWED_CLIENT_SANS:-authkit.internal}"
     command: ["server"]
     volumes:
       - openrails_spool:/var/lib/openrails/spool
-      - openrails_mtls:/run/secrets/mtls:ro
-    networks:
-      - local-openrails
-
-  vault:
-    profiles: ["mtls"]
-    image: hashicorp/vault:1.20
-    cap_add:
-      - IPC_LOCK
-    environment:
-      VAULT_DEV_ROOT_TOKEN_ID: "${VAULT_DEV_ROOT_TOKEN_ID:-devroot}"
-      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
-    command: ["server", "-dev"]
-    ports:
-      - "127.0.0.1:${VAULT_HOST_PORT:-18200}:8200"
-    networks:
-      - local-openrails
-    healthcheck:
-      test: ["CMD-SHELL", "VAULT_ADDR=http://127.0.0.1:8200 vault status >/dev/null 2>&1"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
-  vault-pki-init:
-    profiles: ["mtls"]
-    image: hashicorp/vault:1.20
-    depends_on:
-      vault:
-        condition: service_healthy
-    environment:
-      VAULT_ADDR: "http://vault:8200"
-      VAULT_TOKEN: "${VAULT_DEV_ROOT_TOKEN_ID:-devroot}"
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        vault secrets enable -path=pki pki 2>/dev/null || true
-        vault secrets tune -max-lease-ttl=8760h pki
-        if ! vault read pki/cert/ca >/dev/null 2>&1; then
-          vault write -field=certificate pki/root/generate/internal \
-            common_name="OpenRails local dev Vault PKI" \
-            ttl=8760h >/dev/null
-        fi
-        vault write pki/config/urls \
-          issuing_certificates="$${VAULT_ADDR}/v1/pki/ca" \
-          crl_distribution_points="$${VAULT_ADDR}/v1/pki/crl"
-        vault write pki/roles/openrails-server \
-          allowed_domains="openrails,billing,localhost" \
-          allow_bare_domains=true \
-          allow_subdomains=true \
-          allow_localhost=true \
-          server_flag=true \
-          client_flag=false \
-          ttl=168h \
-          max_ttl=168h
-        vault write pki/roles/openrails-client \
-          allowed_domains="authkit.internal,orchestrator.internal,doujins.internal,hentai0.internal,localhost" \
-          allow_bare_domains=true \
-          allow_subdomains=true \
-          allow_localhost=true \
-          server_flag=false \
-          client_flag=true \
-          ttl=168h \
-          max_ttl=168h
-    networks:
-      - local-openrails
-
-  vault-mtls-render:
-    profiles: ["mtls"]
-    image: hashicorp/vault:1.20
-    depends_on:
-      vault-pki-init:
-        condition: service_completed_successfully
-    environment:
-      VAULT_ADDR: "http://vault:8200"
-      VAULT_TOKEN: "${VAULT_DEV_ROOT_TOKEN_ID:-devroot}"
-      OPENRAILS_SERVICE_CLIENT_SAN: "${OPENRAILS_SERVICE_CLIENT_SAN:-authkit.internal}"
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        apk add --no-cache jq >/dev/null
-        mkdir -p /out
-        vault write -format=json pki/issue/openrails-server \
-          common_name=openrails \
-          alt_names=openrails,billing,localhost \
-          ttl=168h >/tmp/server.json
-        jq -r '.data.certificate' /tmp/server.json > /out/server.crt
-        jq -r '.data.private_key' /tmp/server.json > /out/server.key
-        jq -r '.data.issuing_ca' /tmp/server.json > /out/ca.crt
-
-        for san in authkit.internal orchestrator.internal doujins.internal hentai0.internal; do
-          mkdir -p "/out/clients/$${san}"
-          vault write -format=json pki/issue/openrails-client \
-            common_name="$${san}" \
-            alt_names="$${san}" \
-            ttl=168h >"/tmp/client-$${san}.json"
-          jq -r '.data.certificate' "/tmp/client-$${san}.json" > "/out/clients/$${san}/client.crt"
-          jq -r '.data.private_key' "/tmp/client-$${san}.json" > "/out/clients/$${san}/client.key"
-          cp /out/ca.crt "/out/clients/$${san}/ca.crt"
-          chmod 0444 "/out/clients/$${san}/ca.crt" "/out/clients/$${san}/client.crt" "/out/clients/$${san}/client.key"
-        done
-
-        vault write -format=json pki/issue/openrails-client \
-          common_name="$${OPENRAILS_SERVICE_CLIENT_SAN}" \
-          alt_names="$${OPENRAILS_SERVICE_CLIENT_SAN}" \
-          ttl=168h >/tmp/client.json
-        jq -r '.data.certificate' /tmp/client.json > /out/client.crt
-        jq -r '.data.private_key' /tmp/client.json > /out/client.key
-        chmod 0444 /out/ca.crt /out/server.crt /out/server.key /out/client.crt /out/client.key
-        echo "Rendered Vault PKI mTLS certs to /run/secrets/mtls volume"
-    volumes:
-      - openrails_mtls:/out
     networks:
       - local-openrails
 
@@ -411,8 +292,6 @@ volumes:
   clickhouse_logs:
   clickhouse_keeper_data:
   openrails_spool:
-  openrails_mtls:
-    name: openrails_mtls
   issuer_postgres_data:
   issuer_runtime_keys:
 
