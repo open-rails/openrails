@@ -1378,8 +1378,8 @@
         "[x] Validate mint is in the recurring stablecoin allowlist ({USDC} at launch); reject USDT/SOL/others",
         "[ ] Validate Token-2022 mint carries none of the program's rejected extensions; validate period_hours in (0,8760] and consistent with Price.BillingCycleDays",
         "[x] Build + sign + submit create_plan(plan_id, mint, amount, period_hours, pullers=[hot_cranking_wallet], destinations=[cold_receiving_wallet], end_ts=0) — destinations whitelist contains the funds so a hot-key breach can't redirect [DEVNET-VERIFIED: USDC accepted]",
-        "[ ] Persist plan_pda, plan_id, mint, mint_symbol, amount_base_units, period_hours, created_at into Price.Processors[\"solana\"]",
-        "[ ] update_plan: status (sunset), end_ts, pullers, metadata_uri (NOT core terms)",
+        "[x] Persist plan_pda, plan_id, mint, mint_symbol, amount_base_units, period_hours, created_at into Price.Processors[\"solana\"] [PlanHandle.ToProcessorConfig]",
+        "[x] update_plan: status (sunset), end_ts, pullers, metadata_uri (NOT core terms)",
         "[ ] delete_plan after expiry; reclaim rent",
         "[ ] Admin endpoint/CLI path + authz; document that editing core terms = sunset + new plan + re-enroll",
         "[ ] Tests: allowlist enforcement, immutability guard, idempotent re-publish"
@@ -1406,12 +1406,12 @@
       "name": "solana-recurring-pull-worker",
       "description": "Drive recurring pulls every billing cycle from a scheduled River worker (the Solana analog of DunningWorker).\n\n## Context\n\nModel on internal/river/jobs_dunning.go. Query billing.solana_subscriptions due rows (next_pull_at <= now) GROUPED BY tenant_id; load each tenant's signer once; sign + submit transfer_subscription(plan_pda, subscription_pda) from that tenant's hot wallet. On confirmed tx -> SubscriptionLifecycleService.RenewMembership(transaction_id=signature) extends period + pushes next entitlement window + records payment (idempotent on signature); advance last_pulled_period_start/next_pull_at. A credential-load failure for one tenant must not block others. Paid-through source of truth = the confirmed pull, not wall-clock; track on-chain current_period_start + period to avoid DB/chain drift.\n\n## Metadata\n\n- Category: feature\n- Depends on: #253, #255\n- Blocks: #257\n- Plan: docs/solana-subscriptions-plan.md (§7.3)\n\n## Cadence + wallet (decided)\n\nRun the worker HOURLY (cron, configurable 15-60m); due-query (next_pull_at<=now) filters to actually-due subs — worker frequency is decoupled from monthly billing frequency, like jobs_dunning.go. next_pull_at aligns to the on-chain period boundary. A run is N individual transfer_subscription pulls (one per due subscriber, optionally a few instructions batched per tx), NOT a single sweep. The signing/gas wallet is the per-tenant hot cranking wallet (Vault Transit); funds land in a separate cold receiving wallet (plan destination).",
       "tasks": [
-        "[ ] jobs_solana_rebill.go: River cron worker; QueueBilling; lease + backoff like dunning",
-        "[ ] Due-query over billing.solana_subscriptions grouped by tenant_id",
+        "[x] jobs_solana_rebill.go: River cron worker; QueueBilling; lease + backoff like dunning [jobs_solana_crank.go: hourly, registered]",
+        "[x] Due-query over billing.solana_subscriptions grouped by tenant_id",
         "[ ] Per-tenant signer load (cached); per-sub pull job; isolate per-tenant credential failures",
         "[x] Build/sign/submit transfer_subscription; confirm; classify result [CRANK validated on devnet: moves tokens]",
-        "[ ] On success: RenewMembership(processor=solana, processor_subscription_id=subscription_pda, transaction_id=signature); advance period state",
-        "[ ] Idempotency on signature (reuse GetByTransactionID guard pattern from the poller)",
+        "[x] On success: RenewMembership(processor=solana, processor_subscription_id=subscription_pda, transaction_id=signature); advance period state",
+        "[x] Idempotency on signature (reuse GetByTransactionID guard pattern from the poller) [RenewMembership keys on tx signature]",
         "[ ] Period-boundary alignment with on-chain state; avoid double-pull (on-chain amount_pulled_in_period makes it a no-op)",
         "[ ] Tests: due selection, multi-tenant fan-out, idempotent re-run, partial failure isolation"
       ],
@@ -1429,10 +1429,10 @@
         "[ ] Ghost-plan (created_at fingerprint mismatch) -> terminal + re-enroll notification",
         "[ ] SOL-gas/RPC failure -> retry, never dun the subscriber",
         "[ ] Tests for each failure branch + cancel/resume race with a due pull",
-        "[ ] Reuse the existing dunning machine unchanged: FailMembership -> past_due -> DunningInterval(3d) x MaxDunningFailures(5) -> cancel (same as NMI); only the charge primitive differs",
+        "[x] Reuse the existing dunning machine unchanged: FailMembership -> past_due -> DunningInterval(3d) x MaxDunningFailures(5) -> cancel (same as NMI); only the charge primitive differs [FailMembership wired in cranker]",
         "[ ] Worker requests the FULL plan amount only (never min(balance,cap)); rely on Solana atomicity so an underfunded pull reverts entirely (zero USDC moved, only SOL fee spent)",
         "[ ] Keep NextRetryAt within the on-chain period window (per-period cap resets each period; a fully-missed period cannot be clawed back next period unlike NMI arrears)",
-        "[ ] Grace (DECIDED: yes) — generalize the IsNMIBackedProcessor gate at lifecycle_service.go:1375 to a processorDrivesDunning() predicate (NMI-backed OR Solana) so Solana subscribers keep paid-through access via grace entitlement windows during the retry window, same as NMI; revoke only on dunning exhaustion"
+        "[x] Grace (DECIDED: yes) — generalize the IsNMIBackedProcessor gate at lifecycle_service.go:1375 to a processorDrivesDunning() predicate (NMI-backed OR Solana) so Solana subscribers keep paid-through access via grace entitlement windows during the retry window, same as NMI; revoke only on dunning exhaustion [OpenRailsDrivenDunning predicate]"
       ],
       "completed": false
     },
