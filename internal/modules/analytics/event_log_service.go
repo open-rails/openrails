@@ -21,8 +21,30 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/spool"
+	"github.com/open-rails/openrails/pkg/tenant"
 	log "github.com/sirupsen/logrus"
 )
+
+// ARCHITECTURAL BOUNDARY (issue #232 — Postgres is the system of record):
+//
+//	Postgres is the authoritative system of record for billing state and for
+//	every money / entitlement / authorization DECISION (balances, holds,
+//	credits, charges, subscription status, entitlements). ClickHouse is a
+//	DERIVED, tenant-scoped analytics / event sink ONLY.
+//
+// Three invariants this package must preserve:
+//  1. No money / entitlement / authorization decision ever READS from
+//     ClickHouse. This service therefore exposes only write/log methods and
+//     admin DISPLAY metrics (see AdminMetricsService); it must never be wired
+//     into a credit/hold/entitlement/charge/authz decision path.
+//  2. Every ClickHouse event is tenant-scoped: it carries the resolved
+//     tenant_id (tenant.FromContextOrDefault). Hosted multi-tenant analytics
+//     must never be written unscoped.
+//  3. ClickHouse is OPTIONAL: when unconfigured/unavailable, every Log* method
+//     is a no-op or spools-and-returns-nil — it never errors on the billing
+//     hot path, so billing correctness never depends on ClickHouse.
+//
+// Do NOT reintroduce ClickHouse as a source of truth for any decision.
 
 // EventLogService handles logging billing events to ClickHouse
 type EventLogService struct {
@@ -88,6 +110,19 @@ func (s *EventLogService) Clock() clockwork.Clock {
 	return s.clock
 }
 
+// resolveTenantID returns the tenant id to stamp on a ClickHouse analytics
+// event. It prefers a tenant_id already set on the event (e.g. resolved by an
+// upstream writer), otherwise resolves it from the request context, falling
+// back to the well-known default tenant for single-tenant / self-hosted
+// installs (issue #232). The result is never empty, so analytics events are
+// always tenant-scoped.
+func resolveTenantID(ctx context.Context, existing string) string {
+	if existing != "" {
+		return existing
+	}
+	return tenant.FromContextOrDefault(ctx).String()
+}
+
 func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 	for _, c := range clocks {
 		if c != nil {
@@ -139,28 +174,12 @@ func (s *EventLogService) Ready(ctx context.Context) error {
 	return s.ensureConn(ctx)
 }
 
-// SubscriptionEventExists checks if a subscription event of the given type already exists.
-// Used to avoid emitting duplicate lifecycle events when multiple webhooks report the same state change.
-func (s *EventLogService) SubscriptionEventExists(ctx context.Context, subscriptionID uuid.UUID, eventType string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.ensureConnLocked(ctx); err != nil {
-		return false, err
-	}
-
-	query := `SELECT 1 FROM subscription_events WHERE subscription_id = ? AND event_type = ? LIMIT 1`
-	rows, err := s.clickhouseConn.Query(ctx, query, subscriptionID, eventType)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-
-	hasRow := rows.Next()
-	if err := rows.Err(); err != nil {
-		return false, err
-	}
-	return hasRow, nil
-}
+// NOTE (issue #232): a ClickHouse-reading SubscriptionEventExists helper used to
+// live here. It was dead code (no caller) and a READ against ClickHouse, which
+// violates the boundary that no decision/dedup logic reads from the analytics
+// sink. Subscription-event de-duplication, like all billing decisions, must be
+// derived from Postgres state. The helper was removed; do not reintroduce
+// ClickHouse reads on any non-admin-display path.
 
 func (s *EventLogService) startBackgroundFlush() {
 	if s.spool == nil {
@@ -240,6 +259,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
+			d.TenantID = resolveTenantID(ctx, d.TenantID)
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
@@ -255,6 +275,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
+			d.TenantID = resolveTenantID(ctx, d.TenantID)
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
@@ -273,6 +294,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
+			d.TenantID = resolveTenantID(ctx, d.TenantID)
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
@@ -286,6 +308,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			}
 			transAsPayments = append(transAsPayments, PaymentEventData{
 				EventID:                d.EventID,
+				TenantID:               d.TenantID,
 				SubscriptionID:         d.SubscriptionID,
 				UserID:                 userID,
 				EventType:              d.EventType,
@@ -309,6 +332,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
+			d.TenantID = resolveTenantID(ctx, d.TenantID)
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
@@ -324,6 +348,7 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
+			d.TenantID = resolveTenantID(ctx, d.TenantID)
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
@@ -401,7 +426,11 @@ func (s *EventLogService) Close() error {
 
 // SubscriptionEventData represents data for subscription events
 type SubscriptionEventData struct {
-	EventID                 uuid.UUID  `json:"event_id"`
+	EventID uuid.UUID `json:"event_id"`
+	// TenantID scopes this analytics event to a tenant / billing namespace
+	// (issue #232). It is populated from the request context at log time via
+	// tenant.FromContextOrDefault; never write an unscoped hosted event.
+	TenantID                string     `json:"tenant_id"`
 	SubscriptionID          uuid.UUID  `json:"subscription_id"`
 	UserID                  string     `json:"user_id"`
 	EventType               string     `json:"event_type"`
@@ -458,7 +487,9 @@ const (
 
 // PaymentEventData represents data for payment events
 type PaymentEventData struct {
-	EventID                uuid.UUID  `json:"event_id"`
+	EventID uuid.UUID `json:"event_id"`
+	// TenantID scopes this analytics event to a tenant / billing namespace (issue #232).
+	TenantID               string     `json:"tenant_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                 string     `json:"user_id"`
 	EventType              string     `json:"event_type"`
@@ -474,7 +505,9 @@ type PaymentEventData struct {
 
 // TransactionEventData represents data for transaction events
 type TransactionEventData struct {
-	EventID                uuid.UUID  `json:"event_id"`
+	EventID uuid.UUID `json:"event_id"`
+	// TenantID scopes this analytics event to a tenant / billing namespace (issue #232).
+	TenantID               string     `json:"tenant_id"`
 	TransactionID          string     `json:"transaction_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                 *string    `json:"user_id,omitempty"`
@@ -490,7 +523,9 @@ type TransactionEventData struct {
 
 // ACUEventData represents data for Automatic Card Updater events
 type ACUEventData struct {
-	EventID                 uuid.UUID  `json:"event_id"`
+	EventID uuid.UUID `json:"event_id"`
+	// TenantID scopes this analytics event to a tenant / billing namespace (issue #232).
+	TenantID                string     `json:"tenant_id"`
 	SubscriptionID          *uuid.UUID `json:"subscription_id,omitempty"`
 	UserID                  *string    `json:"user_id,omitempty"`
 	EventType               string     `json:"event_type"`
@@ -506,7 +541,9 @@ type ACUEventData struct {
 
 // ChargebackEventData represents data for chargeback events
 type ChargebackEventData struct {
-	EventID                uuid.UUID  `json:"event_id"`
+	EventID uuid.UUID `json:"event_id"`
+	// TenantID scopes this analytics event to a tenant / billing namespace (issue #232).
+	TenantID               string     `json:"tenant_id"`
 	ChargebackID           string     `json:"chargeback_id"`
 	BatchID                string     `json:"batch_id"`
 	SubscriptionID         *uuid.UUID `json:"subscription_id,omitempty"`
@@ -551,6 +588,7 @@ func (s *EventLogService) LogSubscriptionEvent(ctx context.Context, data Subscri
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
+	data.TenantID = resolveTenantID(ctx, data.TenantID)
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
@@ -592,6 +630,7 @@ func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEvent
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
+	data.TenantID = resolveTenantID(ctx, data.TenantID)
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
@@ -637,6 +676,7 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
+	data.TenantID = resolveTenantID(ctx, data.TenantID)
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
@@ -676,6 +716,7 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 
 	ped := PaymentEventData{
 		EventID:                data.EventID,
+		TenantID:               data.TenantID,
 		SubscriptionID:         data.SubscriptionID,
 		UserID:                 *data.UserID,
 		EventType:              paymentType,
@@ -699,6 +740,7 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
+	data.TenantID = resolveTenantID(ctx, data.TenantID)
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
@@ -708,10 +750,10 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 
 	query := `
         INSERT INTO acu_events (
-            event_id, subscription_id, user_id, event_type, processor,
+            event_id, tenant_id, subscription_id, user_id, event_type, processor,
             processor_subscription_id, card_info, update_status, requires_action,
             reason, metadata, timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 
 	s.mu.Lock()
@@ -719,6 +761,7 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 	if err == nil {
 		err = s.clickhouseConn.Exec(ctx, query,
 			data.EventID,
+			data.TenantID,
 			data.SubscriptionID,
 			data.UserID,
 			data.EventType,
@@ -765,6 +808,7 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
+	data.TenantID = resolveTenantID(ctx, data.TenantID)
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
@@ -774,10 +818,10 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 
 	query := `
 		INSERT INTO chargeback_events (
-			event_id, chargeback_id, batch_id, subscription_id, user_id, event_type, processor,
+			event_id, tenant_id, chargeback_id, batch_id, subscription_id, user_id, event_type, processor,
 			processor_transaction_id, amount, currency, chargeback_type, reason,
 			status, metadata, timestamp
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	s.mu.Lock()
@@ -785,6 +829,7 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 	if err == nil {
 		err = s.clickhouseConn.Exec(ctx, query,
 			data.EventID,
+			data.TenantID,
 			data.ChargebackID,
 			data.BatchID,
 			nullableUUID(data.SubscriptionID),
@@ -998,14 +1043,15 @@ func (s *EventLogService) enqueue(kind string, v interface{}) error {
 func (s *EventLogService) insertSubscription(ctx context.Context, data SubscriptionEventData) error {
 	query := `
         INSERT INTO subscription_events (
-            event_id, subscription_id, user_id, event_type, status, cancel_type,
+            event_id, tenant_id, subscription_id, user_id, event_type, status, cancel_type,
             processor, processor_subscription_id, processor_transaction_id,
             price_amount, price_currency, billing_cycle_days, product_id, price_id,
             metadata, timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 	return s.clickhouseConn.Exec(ctx, query,
 		data.EventID,
+		data.TenantID,
 		data.SubscriptionID,
 		data.UserID,
 		data.EventType,
@@ -1025,12 +1071,12 @@ func (s *EventLogService) insertSubscription(ctx context.Context, data Subscript
 }
 
 func (s *EventLogService) insertSubscriptionBatch(ctx context.Context, rows []SubscriptionEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO subscription_events (event_id, subscription_id, user_id, event_type, status, cancel_type, processor, processor_subscription_id, processor_transaction_id, price_amount, price_currency, billing_cycle_days, product_id, price_id, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO subscription_events (event_id, tenant_id, subscription_id, user_id, event_type, status, cancel_type, processor, processor_subscription_id, processor_transaction_id, price_amount, price_currency, billing_cycle_days, product_id, price_id, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.SubscriptionID, d.UserID, d.EventType, d.Status, d.CancelType, d.Processor, nullableString2(d.ProcessorSubscriptionID), nullableString2(d.ProcessorTransactionID), d.PriceAmount, d.PriceCurrency, d.BillingCycleDays, nullableUUID(d.ProductID), nullableUUID(d.PriceID), d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.TenantID, d.SubscriptionID, d.UserID, d.EventType, d.Status, d.CancelType, d.Processor, nullableString2(d.ProcessorSubscriptionID), nullableString2(d.ProcessorTransactionID), d.PriceAmount, d.PriceCurrency, d.BillingCycleDays, nullableUUID(d.ProductID), nullableUUID(d.PriceID), d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -1054,13 +1100,14 @@ func nullableString2(value *string) any {
 func (s *EventLogService) insertPayment(ctx context.Context, data PaymentEventData) error {
 	query := `
         INSERT INTO payment_events (
-            event_id, subscription_id, user_id, event_type, processor,
+            event_id, tenant_id, subscription_id, user_id, event_type, processor,
             processor_transaction_id, amount, currency, billing_info,
             webhook_source, metadata, timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 	return s.clickhouseConn.Exec(ctx, query,
 		data.EventID,
+		data.TenantID,
 		data.SubscriptionID,
 		data.UserID,
 		data.EventType,
@@ -1076,12 +1123,12 @@ func (s *EventLogService) insertPayment(ctx context.Context, data PaymentEventDa
 }
 
 func (s *EventLogService) insertPaymentBatch(ctx context.Context, rows []PaymentEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO payment_events (event_id, subscription_id, user_id, event_type, processor, processor_transaction_id, amount, currency, billing_info, webhook_source, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO payment_events (event_id, tenant_id, subscription_id, user_id, event_type, processor, processor_transaction_id, amount, currency, billing_info, webhook_source, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorTransactionID, d.Amount, d.Currency, d.BillingInfo, d.WebhookSource, d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.TenantID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorTransactionID, d.Amount, d.Currency, d.BillingInfo, d.WebhookSource, d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -1089,12 +1136,12 @@ func (s *EventLogService) insertPaymentBatch(ctx context.Context, rows []Payment
 }
 
 func (s *EventLogService) insertACUBatch(ctx context.Context, rows []ACUEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO acu_events (event_id, subscription_id, user_id, event_type, processor, processor_subscription_id, card_info, update_status, requires_action, reason, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO acu_events (event_id, tenant_id, subscription_id, user_id, event_type, processor, processor_subscription_id, card_info, update_status, requires_action, reason, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorSubscriptionID, d.CardInfo, d.UpdateStatus, d.RequiresAction, d.Reason, d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.TenantID, d.SubscriptionID, d.UserID, d.EventType, d.Processor, d.ProcessorSubscriptionID, d.CardInfo, d.UpdateStatus, d.RequiresAction, d.Reason, d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -1102,12 +1149,12 @@ func (s *EventLogService) insertACUBatch(ctx context.Context, rows []ACUEventDat
 }
 
 func (s *EventLogService) insertChargebackBatch(ctx context.Context, rows []ChargebackEventData) error {
-	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO chargeback_events (event_id, chargeback_id, batch_id, subscription_id, user_id, event_type, processor, processor_transaction_id, amount, currency, chargeback_type, reason, status, metadata, timestamp) VALUES`)
+	batch, err := s.clickhouseConn.PrepareBatch(ctx, `INSERT INTO chargeback_events (event_id, tenant_id, chargeback_id, batch_id, subscription_id, user_id, event_type, processor, processor_transaction_id, amount, currency, chargeback_type, reason, status, metadata, timestamp) VALUES`)
 	if err != nil {
 		return err
 	}
 	for _, d := range rows {
-		if err := batch.Append(d.EventID, d.ChargebackID, d.BatchID, nullableUUID(d.SubscriptionID), nullableString2(d.UserID), d.EventType, d.Processor, nullableString2(d.ProcessorTransactionID), d.Amount, d.Currency, d.ChargebackType, d.Reason, d.Status, d.Metadata, d.Timestamp); err != nil {
+		if err := batch.Append(d.EventID, d.TenantID, d.ChargebackID, d.BatchID, nullableUUID(d.SubscriptionID), nullableString2(d.UserID), d.EventType, d.Processor, nullableString2(d.ProcessorTransactionID), d.Amount, d.Currency, d.ChargebackType, d.Reason, d.Status, d.Metadata, d.Timestamp); err != nil {
 			return err
 		}
 	}
