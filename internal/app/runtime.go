@@ -81,6 +81,12 @@ type Runtime struct {
 	// composition root once the tenant secret store is available; nil -> the
 	// cranker worker log-and-skips.
 	SolanaCranker *recurring.CrankService
+	// SolanaPlanService publishes on-chain recurring plans (#254) and
+	// SolanaEnrollService activates a wallet enrollment (#255). Both are injected
+	// by the composition root alongside the cranker; nil -> the HTTP handlers
+	// return 503 (recurring not configured).
+	SolanaPlanService   *recurring.PlanService
+	SolanaEnrollService *recurring.EnrollService
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	WebhookDispatcher            *webhooks.WebhookDispatcher
@@ -267,4 +273,11 @@ func (r *Runtime) HasExternalRiverClient() bool {
 // InitRiver so the cranker worker picks it up.
 func (r *Runtime) SetSolanaCranker(cranker *recurring.CrankService) {
 	r.SolanaCranker = cranker
+}
+
+// SetSolanaRecurringServices injects the plan-publish (#254) and enroll (#255)
+// services built once the tenant secret store is available (composition root).
+func (r *Runtime) SetSolanaRecurringServices(plan *recurring.PlanService, enroll *recurring.EnrollService) {
+	r.SolanaPlanService = plan
+	r.SolanaEnrollService = enroll
 }

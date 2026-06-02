@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/crypto"
+	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
@@ -197,14 +198,37 @@ func New(deps Dependencies) (*Server, error) {
 		}
 		s.tenancy = tsvc
 
-		// Recurring Solana cranker (#256): inject the per-tenant cranker BEFORE
-		// workers start (InitRiver). Transit signer when configured (key never
-		// leaves Vault), else a keypair signer over the secret store.
+		// Recurring Solana services (#254/#255/#256): build one per-tenant
+		// Submitter (Transit when configured so the key never leaves Vault, else a
+		// keypair signer over the secret store) and share it across the cranker,
+		// plan-publish, and enroll services. The cranker MUST be injected BEFORE
+		// workers start (InitRiver).
 		if deps.Runtime != nil && deps.Runtime.SolanaRPC != nil {
+			var submitter recurring.Submitter
 			if solanaTransit != nil {
-				deps.Runtime.SetSolanaCranker(recurring.NewCrankServiceFromTransit(solanaTransit, deps.Runtime.SolanaRPC, 0))
+				submitter = recurring.NewSignerSubmitterFromTransit(solanaTransit, deps.Runtime.SolanaRPC, 0)
 			} else {
-				deps.Runtime.SetSolanaCranker(recurring.NewCrankServiceFromStore(secretStore, deps.Runtime.SolanaRPC, 0))
+				submitter = recurring.NewSignerSubmitterFromStore(secretStore, deps.Runtime.SolanaRPC, 0)
+			}
+			network := "mainnet"
+			if pc := deps.Config.GetSolanaProcessor(); pc != nil && pc.Network != "" {
+				network = pc.Network
+			}
+			cranker := recurring.NewCrankService(submitter)
+			deps.Runtime.SetSolanaCranker(cranker)
+			// Plan-publish (#254) + enroll-confirm (#255) HTTP surfaces. Enroll needs
+			// the lifecycle (membership) + the on-chain subscription store.
+			if deps.Runtime.SubscriptionLifecycleService != nil && deps.Runtime.DB != nil {
+				planSvc := recurring.NewPlanService(submitter, network)
+				enrollSvc := recurring.NewEnrollService(
+					cranker,
+					deps.Runtime.SubscriptionLifecycleService,
+					dbrepo.NewSolanaSubscriptionRepo(deps.Runtime.DB),
+					deps.Runtime.SolanaRPC,
+					submitter,
+					network,
+				)
+				deps.Runtime.SetSolanaRecurringServices(planSvc, enrollSvc)
 			}
 		}
 

@@ -58,6 +58,13 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 		return wrapHandler(rt, fn)
 	}
 
+	// Pin a tenant-scoped DB connection for the request (tenant resolved by the
+	// global ResolveTenant middleware) so RLS constrains tenant-owned queries
+	// (issue #227).
+	if rt != nil && rt.DB != nil {
+		group.Use(middleware.TenantDBConn(rt.DB))
+	}
+
 	group.GET("/products", opts.AuthProvider.Optional(), wrap(httphandlers.GetProducts))
 	group.GET("/prices", opts.AuthProvider.Optional(), wrap(httphandlers.GetPrices))
 	group.GET("/solana/tokens", wrap(httphandlers.GetSupportedTokens))
@@ -70,6 +77,10 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 
 	group.GET("/checkout/:id/solana-pay", wrap(httphandlers.GetSolanaPay))
 	group.POST("/checkout/:id/solana-pay", wrap(httphandlers.PostSolanaPay))
+
+	// Solana recurring enrollment (#255): the wallet signs subscribe client-side,
+	// then confirms here to charge the first cycle + create the membership.
+	group.POST("/solana/recurring/enroll", wrap(httphandlers.ConfirmSolanaEnrollment))
 
 	me := group.Group("/me")
 	me.Use(opts.AuthProvider.Required())
@@ -91,6 +102,8 @@ func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
 	me.GET("/credits", wrap(httphandlers.GetMyCredits))
 	me.GET("/credits/:type", wrap(httphandlers.GetMyCreditsType))
 	me.GET("/credits/:type/transactions", wrap(httphandlers.GetMyCreditTransactions))
+	me.GET("/products", wrap(httphandlers.GetMyProducts))
+	me.GET("/products/:product_id/access", wrap(httphandlers.GetMyProductAccess))
 
 	stripe := group.Group("/stripe")
 	stripe.Use(opts.AuthProvider.Required())
@@ -110,6 +123,11 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	// path away from the global-admin fallback.
 	if opts.OperatorPermissionChecker != nil {
 		group.Use(authpolicy.OperatorPermissionRequired(opts.OperatorPermissionChecker, controlplane.PermAdmin))
+	}
+	// Pin a tenant-scoped DB connection for the request so RLS constrains
+	// tenant-owned admin queries (issue #227).
+	if rt != nil && rt.DB != nil {
+		group.Use(middleware.TenantDBConn(rt.DB))
 	}
 
 	group.GET("/subscriptions", wrap(httphandlers.GetAdminSubscriptions))
@@ -173,6 +191,20 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 	group.GET("/metrics/subscriptions", wrap(httphandlers.GetAdminMetricsSubscriptions))
 	group.GET("/metrics/processors", wrap(httphandlers.GetAdminMetricsProcessors))
 	group.GET("/metrics/churn", wrap(httphandlers.GetAdminMetricsChurn))
+
+	// Stripe-shaped entitlement features (issue #245): features CRUD,
+	// product-feature attachment, active-entitlements read. Operator-admin gated.
+	RegisterEntitlementFeatureRoutes(group, rt)
+
+	// Solana recurring plans — admin surface (#254). Create-only: on-chain plan
+	// terms are immutable, so editing core terms = sunset + publish a new plan.
+	group.POST("/solana/recurring/plans", wrap(httphandlers.AdminPublishSolanaPlan))
+
+	// Product access grants — admin surface (issue #250).
+	adminAccess := group.Group("/users/:user_id/product-access")
+	adminAccess.GET("", wrap(httphandlers.GetAdminUserProductAccess))
+	adminAccess.POST("", wrap(httphandlers.GrantAdminProductAccess))
+	adminAccess.DELETE("/:id", wrap(httphandlers.RevokeAdminProductAccess))
 }
 
 func RegisterWebhookRoutes(group *gin.RouterGroup, rt *app.Runtime) {
@@ -195,6 +227,11 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	}
 
 	group.Use(oatMW)
+	// Pin a tenant-scoped DB connection AFTER the OAT resolves the tenant, so RLS
+	// constrains every tenant-owned query (issue #227).
+	if rt != nil && rt.DB != nil {
+		group.Use(middleware.TenantDBConn(rt.DB))
+	}
 
 	// Browser-tier delegated-token MINT (issue #222). A host backend authenticated
 	// by an OAT holding PermSelfMint asks OpenRails to mint a short-lived,
@@ -228,15 +265,30 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	users := group.Group("/users/:user_id")
 	users.GET("/entitlements", middleware.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
 	users.GET("/credits", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
+	users.GET("/product-access", middleware.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
 
 	credits := group.Group("/credits")
-	credits.POST("/deposit", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceDepositCredits))
-	credits.POST("/withdraw", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceWithdrawCredits))
-	credits.POST("/hold", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceHoldCredits))
-	credits.POST("/holds/:id/capture", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
-	credits.POST("/holds/:id/release", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
-	credits.POST("/hold/:id/capture", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
-	credits.POST("/hold/:id/release", middleware.RequireOATPermission(controlplane.PermCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
+	// SPEND (hot-path billing) operations — authorize/hold/capture draw down a
+	// payer's balance, so they require BOTH the coarse credits:write operator
+	// capability AND the explicit billing:spend (credits:spend) "may you bill this
+	// payer" gate (issue #246). The two are checked in sequence; PermAdmin
+	// satisfies either. Release returns a remainder (un-bills), so it needs write
+	// but not spend.
+	creditsSpend := middleware.RequireOATPermission(controlplane.PermCreditsSpend)
+	creditsWrite := middleware.RequireOATPermission(controlplane.PermCreditsWrite)
+
+	// Unified authorize: policy decision + ATOMIC hold placement (issue #235/#247).
+	credits.POST("/authorize", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAuthorizeCredits))
+	// Payer balance snapshot (issue #235/#247): available = balance - held.
+	credits.GET("/balance", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditsBalance))
+
+	credits.POST("/deposit", creditsWrite, wrap(httphandlers.ServiceDepositCredits))
+	credits.POST("/withdraw", creditsWrite, wrap(httphandlers.ServiceWithdrawCredits))
+	credits.POST("/hold", creditsWrite, creditsSpend, wrap(httphandlers.ServiceHoldCredits))
+	credits.POST("/holds/:id/capture", creditsWrite, creditsSpend, wrap(httphandlers.ServiceCaptureHold))
+	credits.POST("/holds/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
+	credits.POST("/hold/:id/capture", creditsWrite, creditsSpend, wrap(httphandlers.ServiceCaptureHold))
+	credits.POST("/hold/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
 	credits.GET("/transactions/lookup", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
 	credits.GET("/users/:user_id", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
 
@@ -271,6 +323,11 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	}
 
 	group.Use(delegatedMW)
+	// Pin a tenant-scoped DB connection AFTER the delegated token resolves the
+	// tenant, so RLS constrains every tenant-owned query (issue #227).
+	if rt != nil && rt.DB != nil {
+		group.Use(middleware.TenantDBConn(rt.DB))
+	}
 
 	read := middleware.RequireDelegatedPermission(controlplane.PermSelfBillingRead)
 
@@ -282,6 +339,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 
 	// Payment / transaction history.
 	group.GET("/payments", read, wrap(httphandlers.GetUserPayments))
+	group.GET("/entitlements/active", read, wrap(httphandlers.SelfGetActiveEntitlements))
 
 	// Subscriptions: read for the whole group; cancel gated by the cancel scope.
 	subs := group.Group("/subscriptions")
@@ -331,6 +389,11 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	}
 
 	group.Use(delegatedMW)
+	// Pin a tenant-scoped DB connection AFTER the delegated token resolves the
+	// tenant, so RLS constrains every tenant-owned query (issue #227).
+	if rt != nil && rt.DB != nil {
+		group.Use(middleware.TenantDBConn(rt.DB))
+	}
 
 	read := middleware.RequireDelegatedPermission(controlplane.PermTenantBillingRead)
 	entWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantEntitlementsWrite)
