@@ -181,6 +181,19 @@ auth:
   #   # operator_oat_name: "openrails-bootstrap-operator"
 
 # =============================================================================
+# ENCRYPTION AT REST (issue #227)
+# =============================================================================
+# Per-tenant envelope encryption. The master key wraps each tenant's Data
+# Encryption Key (DEK); the DEK encrypts sensitive at-rest values (e.g. per-tenant
+# processor credentials in billing.tenant_secrets). The wrapped DEKs live in the
+# DB; the master key NEVER does.
+#
+# Self-hosted/dev: set ENCRYPTION_MASTER_KEY (base64 of 32 random bytes).
+# Production: source the master key from a KMS. Empty disables at-rest encryption.
+encryption:
+  # master_key: set via ENCRYPTION_MASTER_KEY env var (base64 of 32 bytes)
+
+# =============================================================================
 # PYTH PRICE FEEDS
 # =============================================================================
 
