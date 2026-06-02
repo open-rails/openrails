@@ -1370,9 +1370,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 
-		// For NMI-backed processors, we control retry timing; if the retry schedule would extend beyond
-		// the paid term end, model that access as explicit grace entitlement windows.
-		if processors.IsNMIBackedProcessor(subscription.Processor) && subscription.Status == models.StatusPastDue {
+		// For OpenRails-driven processors (NMI-backed + Solana), we control retry
+		// timing; if the retry schedule would extend beyond the paid term end, model
+		// that access as explicit grace entitlement windows. (#257: Solana gets the
+		// same paid-through grace as NMI.)
+		if processors.OpenRailsDrivenDunning(subscription.Processor) && subscription.Status == models.StatusPastDue {
 			if subscription.CurrentPeriodEndsAt != nil && subscription.NextRetryAt != nil && subscription.NextRetryAt.After(*subscription.CurrentPeriodEndsAt) {
 				paidEnd := subscription.CurrentPeriodEndsAt.UTC()
 				graceUntil := subscription.NextRetryAt.UTC()

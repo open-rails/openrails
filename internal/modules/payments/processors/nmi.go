@@ -56,6 +56,15 @@ func IsNMIBackedProcessor(processor models.Processor) bool {
 	return IsNMIBacked(string(processor))
 }
 
+// OpenRailsDrivenDunning reports whether OpenRails owns the retry timing for a
+// processor (so it models grace access as explicit entitlement windows during
+// dunning). True for NMI-backed gateways AND Solana recurring (#256/#257) — both
+// are charged by an OpenRails worker. Stripe is excluded: it drives its own
+// dunning and emits webhooks.
+func OpenRailsDrivenDunning(processor models.Processor) bool {
+	return IsNMIBackedProcessor(processor) || processor == models.ProcessorSolana
+}
+
 // SameProcessor reports whether two processor identifiers name the same configured provider.
 func SameProcessor(a, b models.Processor) bool {
 	left := normalize.Lower(string(a))
