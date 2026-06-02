@@ -37,6 +37,7 @@ var ModelRegistry = []any{
 	(*CreditAccountSettings)(nil),
 	(*CreditSpendLimit)(nil),
 	(*ProcessorCustomer)(nil),
+	(*SolanaSubscription)(nil),
 }
 
 func RegisterModels(db *bun.DB) {
