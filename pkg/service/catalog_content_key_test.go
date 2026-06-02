@@ -229,4 +229,3 @@ func fieldSet(events []models.CatalogDriftEvent) map[string]bool {
 	}
 	return out
 }
-

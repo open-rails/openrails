@@ -181,7 +181,7 @@ billing.NewHTTPHandler(embedded.HTTPHandlerOptions{
 	IncludeWebhooks: true,
 })
 
-// Internal service-to-service API (X-API-KEY protected; standalone private port)
+// Internal service-to-service API. Embedded hosts usually call Service() instead.
 billing.PrivateHandler() http.Handler
 ```
 

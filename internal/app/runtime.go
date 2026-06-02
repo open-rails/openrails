@@ -170,7 +170,6 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 }
 
 // RunWorkers starts River workers (and other background loops) and blocks until ctx is done.
-// This is intended to run in a dedicated worker process, not inside the HTTP server.
 //
 // If an external River client was provided via SetExternalRiverClient, this only starts
 // non-River background loops (e.g., Solana Pay poller). The host is responsible for
@@ -210,7 +209,13 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 
 	r.riverStarted = true
 	log.Info("Starting River background workers")
-	return r.RiverClient.Start(ctx)
+	if err := r.RiverClient.Start(ctx); err != nil {
+		r.riverStarted = false
+		return err
+	}
+
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 // AddBillingWorkersTo adds billing's River workers to the provided worker registry.

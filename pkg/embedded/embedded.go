@@ -89,19 +89,16 @@ func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 	})
 }
 
-// UserHandler exposes user/public billing APIs (and health endpoints).
-// Mount this under a prefix like `/billing`.
-// ServiceHandler returns the internal service-to-service HTTP API (X-API-KEY protected).
+// ServiceHandler returns the internal service-to-service HTTP API.
 // Embedded hosts should typically NOT mount this; use `Embedded.Service()` instead.
 func (e *Embedded) ServiceHandler() http.Handler {
 	if e == nil || e.server == nil {
 		return nil
 	}
-	return e.server.PrivateHandler()
+	return e.server.ServiceHandler()
 }
 
 // PrivateHandler returns the internal service-to-service HTTP API.
-// Deprecated: use ServiceHandler.
 func (e *Embedded) PrivateHandler() http.Handler {
 	return e.ServiceHandler()
 }

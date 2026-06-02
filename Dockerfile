@@ -82,8 +82,8 @@ USER billing
 ENV GIN_MODE=release \
     TZ=UTC
 
-# Expose ports (2053 public; 8060 private/internal)
-EXPOSE 2053 8060
+# Expose ports (2053 public; 2054 service mTLS)
+EXPOSE 2053 2054
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

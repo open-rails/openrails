@@ -8,21 +8,23 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLoad_APIKeyFromEnv(t *testing.T) {
-	t.Run("loads api_key from OPENRAILS_API_KEY", func(t *testing.T) {
-		t.Setenv("OPENRAILS_API_KEY", "test-openrails-api-key")
+func TestLoad_ServiceMTLSFromEnv(t *testing.T) {
+	t.Run("loads service mTLS config", func(t *testing.T) {
+		t.Setenv("SERVICE_MTLS_ENABLED", "true")
+		t.Setenv("SERVICE_MTLS_PORT", "2054")
+		t.Setenv("SERVICE_MTLS_CERT_FILE", "/run/secrets/mtls/server.crt")
+		t.Setenv("SERVICE_MTLS_KEY_FILE", "/run/secrets/mtls/server.key")
+		t.Setenv("SERVICE_MTLS_CLIENT_CA_FILE", "/run/secrets/mtls/ca.crt")
+		t.Setenv("SERVICE_MTLS_ALLOWED_CLIENT_SANS", "authkit.internal,orchestrator.internal")
 
 		cfg, err := Load("nonexistent-config.yaml")
 		assert.NoError(t, err)
-		assert.Equal(t, "test-openrails-api-key", cfg.APIKey)
-	})
-
-	t.Run("loads api_key from API_KEY", func(t *testing.T) {
-		t.Setenv("API_KEY", "test-api-key")
-
-		cfg, err := Load("nonexistent-config.yaml")
-		assert.NoError(t, err)
-		assert.Equal(t, "test-api-key", cfg.APIKey)
+		assert.True(t, cfg.ServiceMTLS.Enabled)
+		assert.Equal(t, FlexiblePort(2054), cfg.ServiceMTLS.Port)
+		assert.Equal(t, "/run/secrets/mtls/server.crt", cfg.ServiceMTLS.CertFile)
+		assert.Equal(t, "/run/secrets/mtls/server.key", cfg.ServiceMTLS.KeyFile)
+		assert.Equal(t, "/run/secrets/mtls/ca.crt", cfg.ServiceMTLS.ClientCAFile)
+		assert.Equal(t, []string{"authkit.internal", "orchestrator.internal"}, cfg.ServiceMTLS.AllowedClientSANs)
 	})
 
 	t.Run("loads nested keys via single underscore (db.url)", func(t *testing.T) {
@@ -283,7 +285,6 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
 		cfg.TestMode = nil
-		cfg.APIKey = "production-service-key"
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -320,7 +321,6 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
 		cfg.TestMode = &falseBool
-		cfg.APIKey = "production-service-key"
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -336,7 +336,6 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
 		cfg.TestMode = &falseBool
-		cfg.APIKey = "production-service-key"
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -353,7 +352,6 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
 		cfg.TestMode = &falseBool
-		cfg.APIKey = "production-service-key"
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -364,14 +362,10 @@ func TestProductionTestModeValidation(t *testing.T) {
 		assert.ErrorContains(t, Validate(cfg), "cors_origins must be configured outside development")
 	})
 
-	t.Run("prod env rejects default api key", func(t *testing.T) {
-		falseBool := false
+	t.Run("service mTLS enabled requires certificate config", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
-		cfg.Env = "prod"
-		cfg.TestMode = &falseBool
-		cfg.APIKey = "dev-service-api-key-change-me"
-		assembleDBURL(cfg)
-		assert.ErrorContains(t, Validate(cfg), "default service api_key is not allowed outside development")
+		cfg.ServiceMTLS.Enabled = true
+		assert.ErrorContains(t, Validate(cfg), "service_mtls.cert_file and service_mtls.key_file are required")
 	})
 }
 

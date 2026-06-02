@@ -83,17 +83,12 @@
       "id": "SEC-6",
       "name": "constant-time-api-key-compare",
       "priority": "high",
-      "description": "Fix the timing leak in X-API-KEY comparison. The early return on length mismatch leaks the secret's length. One-line fix: crypto/subtle.ConstantTimeCompare. Better: hash both sides with SHA-256 first so lengths are always equal.",
+      "description": "Superseded by SEC-12 / issue 220 hard cut. The X-API-KEY service-auth path should be removed entirely rather than repaired; there is no deprecated or legacy API-key support after the mTLS cutover.",
       "files": ["internal/http/middleware/apikey.go"],
       "tasks": [
-        "[ ] Replace the custom constantTimeCompare with:",
-        "    func constantTimeCompare(a, b string) bool {",
-        "        aHash := sha256.Sum256([]byte(a))",
-        "        bHash := sha256.Sum256([]byte(b))",
-        "        return subtle.ConstantTimeCompare(aHash[:], bHash[:]) == 1",
-        "    }",
-        "[ ] Import crypto/sha256 and crypto/subtle",
-        "[ ] Add unit test confirming equal timing for different-length inputs"
+        "[x] Delete `internal/http/middleware/apikey.go` if no non-service use remains",
+        "[x] Remove X-API-KEY service-auth tests instead of updating timing behavior",
+        "[x] Verify SEC-12 mTLS tests cover rejection of API-key-only service requests"
       ]
     },
     {
@@ -183,20 +178,22 @@
       "id": "SEC-12",
       "name": "mtls-service-to-service",
       "priority": "medium",
-      "description": "Replace the shared X-API-KEY bearer-secret model for service-to-service auth with mTLS using Vault PKI certs. This eliminates the single-secret-equals-full-access problem and enables per-service identity without key rotation downtime.",
+      "description": "Replace the shared X-API-KEY bearer-secret model for service-to-service auth with mTLS using HashiCorp Vault PKI certs. This eliminates the single-secret-equals-full-access problem and enables per-service identity without key rotation downtime. Tracked in implementation issue 220. This is a hard cut: remove API-key service auth entirely, with no deprecated compatibility path or legacy fallback. The default standalone service listener should be `SERVICE_MTLS_PORT=2054`, separate from public `PORT=2053`, replacing the old `PRIVATE_PORT=8060` model. Local Docker Compose/dev should use a Vault PKI profile/service, not OpenRails-owned root CA or self-signed certificate generation.",
       "files": [
         "internal/http/middleware/apikey.go",
         "internal/http/routes/routes.go",
-        "cmd/billing/main.go"
+        "cmd/billing/main.go",
+        "docs/mtls-vault-pki.md"
       ],
       "tasks": [
-        "[ ] Set up HashiCorp Vault PKI secret engine for issuing short-lived client certs",
-        "[ ] Configure the billing service TLS listener to require and verify client certificates",
-        "[ ] Map client cert CN/SAN to a service identity with defined scopes (credits:read, credits:write, etc.)",
-        "[ ] Update RegisterServiceRoutes to check the resolved service identity's scopes instead of a shared key",
-        "[ ] Keep the API key middleware as a fallback/migration path (deprecated, logged when used)",
-        "[ ] Document the cert rotation lifecycle and Vault PKI configuration",
-        "[ ] Add integration test with test certs verifying mutual auth handshake"
+        "[x] Set up HashiCorp Vault PKI secret engine for issuing short-lived service/client certs",
+        "[x] Add Docker Compose support for local mTLS through a HashiCorp Vault dev PKI profile/service; do not generate an OpenRails-owned root CA or self-signed cert chain",
+        "[x] Configure the billing service TLS listener on `SERVICE_MTLS_PORT=2054` to require and verify client certificates",
+        "[x] Map client cert CN/SAN to a service identity with defined scopes (credits:read, credits:write, etc.)",
+        "[x] Update RegisterServiceRoutes to check the resolved service identity's scopes instead of a shared key",
+        "[x] Remove API-key service-auth support entirely: delete middleware/config/docs/tests and reject API-key-only service requests",
+        "[x] Document the cert rotation lifecycle and Vault PKI configuration",
+        "[x] Add integration test with Vault PKI-issued test certs verifying mutual auth handshake and service-scope authorization"
       ]
     },
     {

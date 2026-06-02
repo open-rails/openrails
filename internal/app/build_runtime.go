@@ -36,8 +36,15 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+)
+
+const (
+	standaloneRiverDefaultQueueMaxWorkers = 10
+	standaloneRiverBillingQueueMaxWorkers = 20
+	riverSchema                           = "billing"
 )
 
 type runtimeOverrides struct {
@@ -705,16 +712,13 @@ func buildRiverClient(cfg *config.Config, workers *river.Workers) (*river.Client
 		return nil, nil, fmt.Errorf("failed creating pgx pool for River: %w", err)
 	}
 
-	// Get schema for River tables (same as billing schema)
-	schema := "billing" // Hardcoded schema
-
 	drv := riverpgxv5.New(pool)
 	client, err := river.NewClient(drv, &river.Config{
 		Queues: map[string]river.QueueConfig{
-			river.QueueDefault: {MaxWorkers: 10},
-			"billing":          {MaxWorkers: 20},
+			river.QueueDefault:     {MaxWorkers: standaloneRiverDefaultQueueMaxWorkers},
+			riverjobs.QueueBilling: {MaxWorkers: standaloneRiverBillingQueueMaxWorkers},
 		},
-		Schema:  schema, // Use billing schema for River tables
+		Schema:  riverSchema,
 		Workers: workers,
 	})
 	if err != nil {

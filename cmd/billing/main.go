@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/audit"
+	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
 )
@@ -51,7 +52,7 @@ func main() {
 		RunE:    runServer,
 		Short:   "Start the billing service server",
 	}
-	serverCmd.Flags().Bool("start-workers", false, "Start background workers alongside the HTTP server")
+	serverCmd.Flags().Bool("no-workers", false, "Disable background workers in this server process")
 
 	workerCmd := &cobra.Command{
 		Use:   "worker",
@@ -130,10 +131,11 @@ func main() {
 
 func runServer(cmd *cobra.Command, args []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	startWorkers, err := cmd.Flags().GetBool("start-workers")
+	noWorkers, err := cmd.Flags().GetBool("no-workers")
 	if err != nil {
-		return fmt.Errorf("failed to read start-workers flag: %w", err)
+		return fmt.Errorf("failed to read no-workers flag: %w", err)
 	}
+	startWorkers := !noWorkers
 
 	if cfg.Env == "production" || cfg.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
@@ -168,17 +170,22 @@ func runServer(cmd *cobra.Command, args []string) error {
 		MaxHeaderBytes:    1 << 20,
 	}
 
-	// Private/Service API server (X-API-KEY auth for server-to-server calls)
-	var privateSrv *http.Server
-	if cfg.PrivatePort > 0 {
-		privateSrv = &http.Server{
+	// Service API server (mTLS auth for server-to-server calls).
+	var serviceSrv *http.Server
+	if cfg.ServiceMTLS.Enabled {
+		tlsCfg, err := server.NewServiceTLSConfig(cfg.ServiceMTLS)
+		if err != nil {
+			return fmt.Errorf("configure service mTLS listener: %w", err)
+		}
+		serviceSrv = &http.Server{
 			Handler:           embeddedApp.ServiceHandler(),
-			Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.PrivatePort),
+			Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.ServiceMTLS.Port),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       15 * time.Second,
 			WriteTimeout:      30 * time.Second,
 			IdleTimeout:       60 * time.Second,
 			MaxHeaderBytes:    1 << 20,
+			TLSConfig:         tlsCfg,
 		}
 	}
 
@@ -190,22 +197,24 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Start private/service server in a goroutine (if configured)
-	if privateSrv != nil {
+	// Start service mTLS server in a goroutine (if configured).
+	if serviceSrv != nil {
 		go func() {
-			log.Infof("Starting private/service billing server on %s", privateSrv.Addr)
-			if err := privateSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.WithError(err).Fatal("Failed to start private server")
+			log.Infof("Starting service mTLS billing server on %s", serviceSrv.Addr)
+			if err := serviceSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				log.WithError(err).Fatal("Failed to start service mTLS server")
 			}
 		}()
 	}
 
 	var (
-		workerDone chan struct{}
-		workerErr  atomic.Pointer[error]
+		workerDone   chan struct{}
+		workerCancel context.CancelFunc
+		workerErr    atomic.Pointer[error]
 	)
 	if startWorkers {
-		workerCtx := cmd.Context()
+		workerCtx, cancel := context.WithCancel(cmd.Context())
+		workerCancel = cancel
 		workerDone = make(chan struct{})
 		go func() {
 			defer close(workerDone)
@@ -225,8 +234,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
-	// Wait for interrupt signal or worker termination. With --start-workers, HTTP
-	// must not continue serving webhook/async billing APIs after workers stop.
+	// Wait for interrupt signal or worker termination. HTTP must not continue
+	// serving webhook/async billing APIs after workers fail to start or stop
+	// unexpectedly.
 	workerStopped := false
 	if workerDone != nil {
 		select {
@@ -244,22 +254,21 @@ func runServer(cmd *cobra.Command, args []string) error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
+	if workerCancel != nil {
+		workerCancel()
+	}
 	if err := publicSrv.Shutdown(shutdownCtx); err != nil {
 		log.WithError(err).Error("Public server forced to shutdown")
 	}
-	if privateSrv != nil {
-		if err := privateSrv.Shutdown(shutdownCtx); err != nil {
-			log.WithError(err).Error("Private server forced to shutdown")
+	if serviceSrv != nil {
+		if err := serviceSrv.Shutdown(shutdownCtx); err != nil {
+			log.WithError(err).Error("Service mTLS server forced to shutdown")
 		}
 	}
 
 	if err := embeddedApp.Close(shutdownCtx); err != nil {
 		log.WithError(err).Error("Application shutdown encountered issues")
 	}
-
-	// Note: we intentionally do NOT cancel the worker context during shutdown.
-	// `embeddedApp.Close()` stops workers via River's Stop() and avoids generating
-	// noisy "context canceled" errors during normal shutdown.
 
 	if workerDone != nil {
 		select {

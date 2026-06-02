@@ -6,6 +6,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
@@ -147,25 +148,25 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, authMiddlewa
 	group.Use(authMiddleware)
 
 	users := group.Group("/users/:user_id")
-	users.GET("/entitlements", wrap(httphandlers.ServiceGetUserEntitlements))
-	users.GET("/credits", wrap(httphandlers.ServiceGetUserCredits))
+	users.GET("/entitlements", middleware.RequireServiceScope(middleware.ServiceScopeEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
+	users.GET("/credits", middleware.RequireServiceScope(middleware.ServiceScopeCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
 
 	credits := group.Group("/credits")
-	credits.POST("/deposit", wrap(httphandlers.ServiceDepositCredits))
-	credits.POST("/withdraw", wrap(httphandlers.ServiceWithdrawCredits))
-	credits.POST("/hold", wrap(httphandlers.ServiceHoldCredits))
-	credits.POST("/holds/:id/capture", wrap(httphandlers.ServiceCaptureHold))
-	credits.POST("/holds/:id/release", wrap(httphandlers.ServiceReleaseHold))
-	credits.POST("/hold/:id/capture", wrap(httphandlers.ServiceCaptureHold))
-	credits.POST("/hold/:id/release", wrap(httphandlers.ServiceReleaseHold))
-	credits.GET("/transactions/lookup", wrap(httphandlers.ServiceLookupCreditTransaction))
-	credits.GET("/users/:user_id", wrap(httphandlers.ServiceGetUserCredits))
+	credits.POST("/deposit", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceDepositCredits))
+	credits.POST("/withdraw", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceWithdrawCredits))
+	credits.POST("/hold", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceHoldCredits))
+	credits.POST("/holds/:id/capture", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
+	credits.POST("/holds/:id/release", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
+	credits.POST("/hold/:id/capture", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceCaptureHold))
+	credits.POST("/hold/:id/release", middleware.RequireServiceScope(middleware.ServiceScopeCreditsWrite), wrap(httphandlers.ServiceReleaseHold))
+	credits.GET("/transactions/lookup", middleware.RequireServiceScope(middleware.ServiceScopeCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
+	credits.GET("/users/:user_id", middleware.RequireServiceScope(middleware.ServiceScopeCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
 
 	creditTypes := group.Group("/credit-types")
-	creditTypes.POST("", wrap(httphandlers.ServiceCreateCreditType))
-	creditTypes.GET("", wrap(httphandlers.ServiceListCreditTypes))
-	creditTypes.PATCH("/:name", wrap(httphandlers.ServiceUpdateCreditType))
-	creditTypes.POST("/:name/deactivate", wrap(httphandlers.ServiceDeactivateCreditType))
-	creditTypes.POST("/:name/activate", wrap(httphandlers.ServiceActivateCreditType))
+	creditTypes.POST("", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceCreateCreditType))
+	creditTypes.GET("", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesRead), wrap(httphandlers.ServiceListCreditTypes))
+	creditTypes.PATCH("/:name", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceUpdateCreditType))
+	creditTypes.POST("/:name/deactivate", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceDeactivateCreditType))
+	creditTypes.POST("/:name/activate", middleware.RequireServiceScope(middleware.ServiceScopeCreditTypesWrite), wrap(httphandlers.ServiceActivateCreditType))
 
 }

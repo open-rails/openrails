@@ -38,7 +38,7 @@ List endpoints use a Stripe-like envelope:
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
 | User routes (`/v1/checkout`, `/v1/me/*`) | `Authorization: Bearer <JWT>` issued by AuthKit |
 | Admin routes (`/v1/admin/*`) | Same JWT header, user must have the `admin` role |
-| Service API (private port 8060) | `X-API-KEY` header matching `config.api_key` |
+| Service API (`SERVICE_MTLS_PORT`, default 2054) | Verified mTLS client certificate with an allowed service identity |
 | Webhooks (`/v1/webhooks/:provider`) | Provider-specific verification (see notes) |
 
 ## Health & Service Banner
@@ -240,9 +240,11 @@ Lists credit transactions for the credit type (including hold lifecycle rows). Q
 ### POST /v1/me/portal
 Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
 
-## Service API (Private Port 8060)
+## Service API (mTLS Port 2054)
 
-All endpoints require `X-API-KEY` and run on the private port.
+All endpoints require a verified mTLS client certificate and run on the dedicated service listener.
+The certificate identity must be configured under `service_mtls.clients` with the needed scopes:
+`entitlements:read`, `credits:read`, `credits:write`, `credit_types:read`, and/or `credit_types:write`.
 
 ### GET /v1/users/{user_id}/entitlements
 Returns active entitlements for the user at the current time. Optional query param `at` (RFC3339) to query

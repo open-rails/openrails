@@ -16,7 +16,7 @@
 - Postgres: `postgres:18-bookworm` (DB `doujins_db`, user `admin` / `admin_password`)
 - Garnet (Redis-compatible): `ghcr.io/microsoft/garnet` on `6379`
 - ClickHouse: `clickhouse/clickhouse-server` (DB `analytics`, user `analytics_user`, pass `analytics_password`)
-- Billing service: this server exposing public API on `:2053` and a private/internal port `:8060` (exposed to the compose network only).
+- Billing service: this server exposing public API on `:2053`; optional service-to-service mTLS API on `:2054` is exposed only to the compose network.
 
 #### Quick Start
 - Start services: `task docker-up` (or `docker compose -f docker-compose.yaml up -d`)
@@ -137,7 +137,7 @@ task dev
 
 The standalone server exposes:
 - **Port 2053** (public): User APIs, admin APIs, webhooks
-- **Port 8060** (private): Internal service-to-service APIs (credits, entitlements)
+- **Port 2054** (service mTLS): Internal service-to-service APIs (credits, entitlements), when `service_mtls.enabled=true`
 
 This is the default mode for production deployments where billing runs as a separate microservice.
 
@@ -273,9 +273,9 @@ result, _ := svc.HandleWebhook(ctx, service.HandleWebhookRequest{
 | Aspect | Standalone | Embedded |
 |--------|-----------|----------|
 | Deployment | Separate container/binary | Single binary with host app |
-| HTTP routing | Fixed routes on ports 2053/8060 | You choose which routes to mount |
+| HTTP routing | Fixed public routes on port 2053; optional service mTLS routes on 2054 | You choose which routes to mount |
 | Health endpoints | Built-in `/health/*`, `/healthz`, `/readyz` | Host app provides its own |
-| Internal ops | HTTP calls to port 8060 | Direct Go API calls |
+| Internal ops | mTLS HTTP calls to port 2054 | Direct Go API calls |
 | Workers | Built-in, always running | Call `billing.RunWorkers(ctx)` |
 | Config | Own config file/env vars | Passed via `embedded.Options` |
 | Auth | Own JWT verifier | Use host app's auth provider |
@@ -887,16 +887,20 @@ out, err = svc.UpdatePrice(ctx, priceID, service.UpdatePriceRequest{
 
 Networking
 - Public: port `2053` is published to the host.
-- Private: port `8060` is exposed to the Docker network for intra-service communication (same host, no TLS needed).
+- Service mTLS: port `2054` is exposed only to the Docker network when enabled. The listener requires client certificates signed by the configured HashiCorp Vault PKI CA.
 
-Service API access
-- Shared secret: private service API routes (port `8060`) are protected by header `X-API-KEY: <token>`.
-- Default (dev): `change-me-in-dev`.
-- Override via env `OPENRAILS_API_KEY` or config `api_key`.
+Local mTLS certificates
+- The Docker Compose `mtls` profile starts a local HashiCorp Vault dev server, enables the Vault PKI engine, and renders an OpenRails server cert plus service client certs into the shared `openrails_mtls` volume.
+- Render local certs with `docker compose -f docker-compose.yaml --profile mtls run --rm vault-mtls-render`.
+- Start OpenRails with `SERVICE_MTLS_ENABLED=true` after the certs are rendered. The default service listener is `https://openrails:2054`; sibling compose stacks can use `https://billing:2054` against the same server cert.
+- Per-caller certs are rendered under `/run/secrets/mtls/clients/<identity>/`, including `authkit.internal`, `orchestrator.internal`, `doujins.internal`, and `hentai0.internal`.
+- Server and client leaf certificate files are reloaded on new TLS handshakes so 7-day Vault renewals can roll forward without reintroducing API keys.
+- `SERVICE_MTLS_ALLOWED_CLIENT_SANS` is a local shorthand for full service access. For production, prefer `service_mtls.clients.<identity>.scopes`.
+- Deployment notes: [docs/mtls-vault-pki.md](docs/mtls-vault-pki.md).
 
 Private “definition” surface (host-owned catalog + credits)
 - OpenRails does **not** seed products/prices/credit types in production. Hosts should define them via:
-  - Private service API (port `8060`, `X-API-KEY`)
+  - Service mTLS API (port `2054`)
     - Credit types: `GET /v1/credit-types`, `POST /v1/credit-types`, `PATCH /v1/credit-types/{name}`, `POST /v1/credit-types/{name}/activate|deactivate`
     - Catalog: `POST /v1/catalog/products`, `PATCH /v1/catalog/products/{id}`, `POST /v1/catalog/prices`, `PATCH /v1/catalog/prices/{id}`
     - Credits funding: `POST /v1/credits/deposit`

@@ -69,11 +69,10 @@ type StoreConfig struct {
 }
 
 type Config struct {
-	Env         string       `koanf:"env,omitempty"`
-	Port        FlexiblePort `koanf:"port,omitempty"`         // Standalone only: public HTTP port (default 2053)
-	PrivatePort FlexiblePort `koanf:"private_port,omitempty"` // Standalone only: internal/service API port (default 8060)
-	Host        string       `koanf:"host,omitempty"`         // Standalone only: address to bind to (default 0.0.0.0)
-	APIKey      string       `koanf:"api_key,omitempty"`      // Shared secret for service-to-service auth (X-API-KEY header)
+	Env         string            `koanf:"env,omitempty"`
+	Port        FlexiblePort      `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
+	Host        string            `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
+	ServiceMTLS ServiceMTLSConfig `koanf:"service_mtls,omitempty"`
 
 	// Cloudflared contains Cloudflare Tunnel settings used for local/dev tooling.
 	// Billing does not run cloudflared, but we keep these keys in config so that
@@ -127,6 +126,44 @@ type Config struct {
 	RateLimits   *RateLimitsConfig `koanf:"rate_limits,omitempty"`
 	Captcha      *CaptchaConfig    `koanf:"captcha,omitempty"`
 	FeatureFlags *FeatureFlags     `koanf:"feature_flags,omitempty"`
+}
+
+// ServiceMTLSConfig controls the standalone service-to-service mTLS listener.
+type ServiceMTLSConfig struct {
+	Enabled           bool                               `koanf:"enabled,omitempty"`
+	Port              FlexiblePort                       `koanf:"port,omitempty"`
+	CertFile          string                             `koanf:"cert_file,omitempty"`
+	KeyFile           string                             `koanf:"key_file,omitempty"`
+	ClientCAFile      string                             `koanf:"client_ca_file,omitempty"`
+	AllowedClientSANs []string                           `koanf:"allowed_client_sans,omitempty"`
+	Clients           map[string]ServiceMTLSClientConfig `koanf:"clients,omitempty"`
+}
+
+// ServiceMTLSClientConfig maps a certificate identity to service route scopes.
+type ServiceMTLSClientConfig struct {
+	Scopes []string `koanf:"scopes,omitempty"`
+}
+
+// ClientScopes returns the configured service identities and their route scopes.
+func (c ServiceMTLSConfig) ClientScopes() map[string][]string {
+	out := make(map[string][]string, len(c.Clients)+len(c.AllowedClientSANs))
+	for identity, client := range c.Clients {
+		identity = strings.TrimSpace(identity)
+		if identity == "" {
+			continue
+		}
+		out[identity] = nonEmptyStrings(client.Scopes)
+	}
+	for _, identity := range c.AllowedClientSANs {
+		identity = strings.TrimSpace(identity)
+		if identity == "" {
+			continue
+		}
+		if _, exists := out[identity]; !exists {
+			out[identity] = []string{"*"}
+		}
+	}
+	return out
 }
 
 // DBConfig holds database configuration.
@@ -672,10 +709,6 @@ func Validate(cfg *Config) error {
 		if cfg.TestMode != nil && *cfg.TestMode {
 			return fmt.Errorf("test_mode=true is not allowed outside development")
 		}
-		apiKey := strings.TrimSpace(cfg.APIKey)
-		if apiKey == "change-me-in-dev" || apiKey == "dev-service-api-key-change-me" {
-			return fmt.Errorf("default service api_key is not allowed outside development")
-		}
 		if cfg.DB != nil {
 			if strings.TrimSpace(cfg.DB.Username) == "admin" || strings.TrimSpace(cfg.DB.Password) == "admin_password" {
 				return fmt.Errorf("default database credentials are not allowed outside development")
@@ -701,6 +734,9 @@ func Validate(cfg *Config) error {
 		if len(cfg.CorsOrigins) == 0 {
 			return fmt.Errorf("cors_origins must be configured outside development")
 		}
+	}
+	if err := validateServiceMTLSConfig(cfg); err != nil {
+		return err
 	}
 
 	// Validate Processors map
@@ -1136,13 +1172,49 @@ func validateDatabase(cfg *DBConfig) error {
 	return nil
 }
 
+func validateServiceMTLSConfig(cfg *Config) error {
+	if cfg == nil || !cfg.ServiceMTLS.Enabled {
+		return nil
+	}
+	if cfg.ServiceMTLS.Port <= 0 {
+		return fmt.Errorf("service_mtls.port must be configured when service_mtls.enabled=true")
+	}
+	if cfg.ServiceMTLS.Port == cfg.Port {
+		return fmt.Errorf("service_mtls.port must be different from public port")
+	}
+	if strings.TrimSpace(cfg.ServiceMTLS.CertFile) == "" || strings.TrimSpace(cfg.ServiceMTLS.KeyFile) == "" {
+		return fmt.Errorf("service_mtls.cert_file and service_mtls.key_file are required when service_mtls.enabled=true")
+	}
+	if strings.TrimSpace(cfg.ServiceMTLS.ClientCAFile) == "" {
+		return fmt.Errorf("service_mtls.client_ca_file is required when service_mtls.enabled=true")
+	}
+	if len(cfg.ServiceMTLS.ClientScopes()) == 0 {
+		return fmt.Errorf("service_mtls.clients or service_mtls.allowed_client_sans must include at least one identity when service_mtls.enabled=true")
+	}
+	return nil
+}
+
+func nonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
 // GetDefaultBillingConfig returns a billing configuration with sensible defaults
 func GetDefaultBillingConfig() *Config {
 	return &Config{
-		Env:         "development",
-		Host:        "0.0.0.0",
-		Port:        2053,
-		PrivatePort: 8060, // Private/service API port (internal only)
+		Env:  "development",
+		Host: "0.0.0.0",
+		Port: 2053,
+		ServiceMTLS: ServiceMTLSConfig{
+			Enabled: false,
+			Port:    2054,
+		},
 		DB: &DBConfig{
 			Host:     "localhost",
 			Port:     "5432",
@@ -1323,12 +1395,6 @@ func Load(configPath string) (*Config, error) {
 			return "api_url"
 		}
 
-		// Special case: API_KEY/OPENRAILS_API_KEY -> api_key (top-level, not api.key)
-		// Used for private/service API auth (X-API-KEY header).
-		if s == "api_key" || s == "openrails_api_key" {
-			return "api_key"
-		}
-
 		// Special case: TEST_MODE/OPENRAILS_TEST_MODE -> test_mode (top-level)
 		if s == "test_mode" || s == "openrails_test_mode" {
 			return "test_mode"
@@ -1341,9 +1407,11 @@ func Load(configPath string) (*Config, error) {
 			return "auth.expected_audience"
 		}
 
-		// Special case: PRIVATE_PORT -> private_port (top-level, not private.port)
-		if s == "private_port" {
-			return "private_port"
+		if s == "service_mtls_port" {
+			return "service_mtls.port"
+		}
+		if strings.HasPrefix(s, "service_mtls_") {
+			return "service_mtls." + strings.TrimPrefix(s, "service_mtls_")
 		}
 
 		// Special case: CORS_ORIGINS -> cors_origins (top-level, not cors.origins)
@@ -1402,7 +1470,7 @@ func Load(configPath string) (*Config, error) {
 			}
 			return mapped, out
 		}
-		if mapped == "auth.issuers" {
+		if mapped == "auth.issuers" || mapped == "service_mtls.allowed_client_sans" {
 			parts := strings.Split(v, ",")
 			out := make([]string, 0, len(parts))
 			for _, p := range parts {

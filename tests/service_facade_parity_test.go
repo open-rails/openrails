@@ -5,6 +5,8 @@ package tests
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -70,9 +72,10 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
 
-	// Build a private/service HTTP handler using the same runtime, but with APIKey enabled.
+	// Build a service HTTP handler using the same runtime and mTLS identity config.
 	cfg2 := *suite.Config
-	cfg2.APIKey = "test-service-key"
+	cfg2.ServiceMTLS.Enabled = true
+	cfg2.ServiceMTLS.AllowedClientSANs = []string{"authkit.internal"}
 	privateSrv, err := server.New(server.Dependencies{
 		Config:       (*config.Config)(&cfg2),
 		Cache:        suite.App.Cache,
@@ -82,6 +85,13 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	})
 	require.NoError(t, err)
 	privateHandler := privateSrv.PrivateHandler()
+	withServiceCert := func(req *http.Request) {
+		req.TLS = &tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{{
+				DNSNames: []string{"authkit.internal"},
+			}},
+		}
+	}
 
 	// 1) Create hold via Service facade, release via service HTTP.
 	hold1, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
@@ -96,7 +106,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.NotEqual(t, uuid.Nil, hold1.ID)
 
 	reqRelease := httptest.NewRequest(http.MethodPost, "/v1/credits/hold/"+hold1.ID.String()+"/release", nil)
-	reqRelease.Header.Set("X-API-KEY", cfg2.APIKey)
+	withServiceCert(reqRelease)
 	wRelease := httptest.NewRecorder()
 	privateHandler.ServeHTTP(wRelease, reqRelease)
 	require.Equal(t, http.StatusOK, wRelease.Code)
@@ -111,7 +121,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		"expires_at":  time.Now().Add(10 * time.Minute).Unix(),
 	})
 	reqHold := httptest.NewRequest(http.MethodPost, "/v1/credits/hold", bytes.NewReader(bodyHold))
-	reqHold.Header.Set("X-API-KEY", cfg2.APIKey)
+	withServiceCert(reqHold)
 	reqHold.Header.Set("Content-Type", "application/json")
 	wHold := httptest.NewRecorder()
 	privateHandler.ServeHTTP(wHold, reqHold)
@@ -135,7 +145,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Contains(t, ents, "premium-1")
 
 	reqEnt := httptest.NewRequest(http.MethodGet, "/v1/users/"+userID+"/entitlements", nil)
-	reqEnt.Header.Set("X-API-KEY", cfg2.APIKey)
+	withServiceCert(reqEnt)
 	wEnt := httptest.NewRecorder()
 	privateHandler.ServeHTTP(wEnt, reqEnt)
 	require.Equal(t, http.StatusOK, wEnt.Code)

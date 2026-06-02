@@ -38,8 +38,8 @@ type Server struct {
 	// It includes health + debug (dev only) + user + admin + webhook routes.
 	publicHandler *gin.Engine
 
-	// privateHandler is the service-to-service API (X-API-KEY auth).
-	// This runs on a separate port and should only be accessible within the Docker network.
+	// privateHandler is the service-to-service API. In standalone mode it is
+	// served only by the dedicated mTLS listener.
 	privateHandler *gin.Engine
 }
 
@@ -183,7 +183,11 @@ func (s *Server) wrap(fn func(r *httprequest.Request)) func(c *gin.Context) {
 // It is designed to be mounted at a path prefix via http.StripPrefix.
 func (s *Server) Handler() http.Handler { return s.publicHandler }
 
-// PrivateHandler returns the internal service-to-service HTTP API (X-API-KEY protected).
+// ServiceHandler returns the internal service-to-service HTTP API.
+// Standalone callers must serve this handler through the mTLS listener.
+func (s *Server) ServiceHandler() http.Handler { return s.privateHandler }
+
+// PrivateHandler returns the internal service-to-service HTTP API.
 func (s *Server) PrivateHandler() http.Handler { return s.privateHandler }
 
 // Close currently does not own underlying resources; callers should close the App.
