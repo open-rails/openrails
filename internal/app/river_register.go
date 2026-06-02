@@ -145,6 +145,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, solanaCrankWorker); err != nil {
 		return fmt.Errorf("add solana cranker worker: %w", err)
 	}
+	// Solana cranker-wallet gas-float alert (#258): warns when a tenant's cranker
+	// wallet is low on SOL. Alert-only, no auto-top-up.
+	if err := river.AddWorkerSafely(workers, &riverjobs.SolanaGasAlertWorker{
+		DB:  r.DB,
+		RPC: r.SolanaRPC,
+	}); err != nil {
+		return fmt.Errorf("add solana gas alert worker: %w", err)
+	}
 	return nil
 }
 
@@ -261,6 +269,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.SolanaCrankArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 6 hours: alert on low Solana cranker-wallet SOL gas (#258).
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(6*time.Hour),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.SolanaGasAlertArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

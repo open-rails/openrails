@@ -39,7 +39,7 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 		s.Status = models.SolanaSubscriptionActive
 	}
 
-	_, err := r.db.GetDB().NewInsert().
+	_, err := r.db.Q(ctx).NewInsert().
 		Model(s).
 		On("CONFLICT (subscription_pda) DO UPDATE").
 		Set("subscription_id = EXCLUDED.subscription_id").
@@ -54,7 +54,7 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 // GetBySubscriptionPDA returns the row for an on-chain subscription PDA.
 func (r *SolanaSubscriptionRepo) GetBySubscriptionPDA(ctx context.Context, pda string) (*models.SolanaSubscription, error) {
 	s := new(models.SolanaSubscription)
-	if err := r.db.GetDB().NewSelect().Model(s).Where("subscription_pda = ?", pda).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(s).Where("subscription_pda = ?", pda).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -63,7 +63,7 @@ func (r *SolanaSubscriptionRepo) GetBySubscriptionPDA(ctx context.Context, pda s
 // GetBySubscriptionID returns the row linked to a lifecycle subscription.
 func (r *SolanaSubscriptionRepo) GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error) {
 	s := new(models.SolanaSubscription)
-	if err := r.db.GetDB().NewSelect().Model(s).Where("subscription_id = ?", subscriptionID).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(s).Where("subscription_id = ?", subscriptionID).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -74,7 +74,7 @@ func (r *SolanaSubscriptionRepo) GetBySubscriptionID(ctx context.Context, subscr
 // caps the batch (0 = no limit).
 func (r *SolanaSubscriptionRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]*models.SolanaSubscription, error) {
 	var rows []*models.SolanaSubscription
-	q := r.db.GetDB().NewSelect().
+	q := r.db.Q(ctx).NewSelect().
 		Model(&rows).
 		Where("status = ?", models.SolanaSubscriptionActive).
 		Where("next_pull_at <= ?", now.UTC()).
@@ -93,7 +93,7 @@ func (r *SolanaSubscriptionRepo) ListDue(ctx context.Context, now time.Time, lim
 // confirmed pull, not wall-clock.
 func (r *SolanaSubscriptionRepo) AdvanceAfterPull(ctx context.Context, id uuid.UUID, periodStart time.Time, signature string, nextPullAt time.Time) error {
 	ps := periodStart.UTC()
-	_, err := r.db.GetDB().NewUpdate().
+	_, err := r.db.Q(ctx).NewUpdate().
 		Model((*models.SolanaSubscription)(nil)).
 		Set("last_pulled_period_start = ?", ps).
 		Set("last_signature = ?", signature).
@@ -104,9 +104,31 @@ func (r *SolanaSubscriptionRepo) AdvanceAfterPull(ctx context.Context, id uuid.U
 	return err
 }
 
+// MerchantWallet is a distinct (tenant, cranker wallet) pair with active subs.
+type MerchantWallet struct {
+	TenantID        uuid.UUID `bun:"tenant_id"`
+	MerchantAddress string    `bun:"merchant_address"`
+}
+
+// ListActiveMerchantWallets returns the distinct cranker (merchant) wallets that
+// have at least one active subscription — the wallets whose SOL float the
+// gas-alert worker monitors (#258).
+func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) ([]MerchantWallet, error) {
+	var rows []MerchantWallet
+	err := r.db.Q(ctx).NewSelect().
+		Model((*models.SolanaSubscription)(nil)).
+		ColumnExpr("DISTINCT tenant_id, merchant_address").
+		Where("status = ?", models.SolanaSubscriptionActive).
+		Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // SetStatus transitions the on-chain record's lifecycle (cancelled/expired).
 func (r *SolanaSubscriptionRepo) SetStatus(ctx context.Context, id uuid.UUID, status string) error {
-	_, err := r.db.GetDB().NewUpdate().
+	_, err := r.db.Q(ctx).NewUpdate().
 		Model((*models.SolanaSubscription)(nil)).
 		Set("status = ?", status).
 		Set("updated_at = ?", time.Now().UTC()).
