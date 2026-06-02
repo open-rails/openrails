@@ -15,6 +15,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
@@ -912,7 +913,7 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 		priceAmount = float64(subscription.Price.Amount) / 100.0
 		priceCurrency = subscription.Price.Currency
 		if subscription.Price.BillingCycleDays != nil {
-			billingDays = uint32(*subscription.Price.BillingCycleDays)
+			billingDays, _ = safecast.Convert[uint32](*subscription.Price.BillingCycleDays)
 		}
 		productID = &subscription.Price.ProductID
 		priceID = &subscription.Price.ID

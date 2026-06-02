@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -1504,7 +1505,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 			priceAmount = float64(sub.Price.Amount) / 100.0
 			priceCurrency = sub.Price.Currency
 			if sub.Price.BillingCycleDays != nil {
-				billingCycleDays = uint32(*sub.Price.BillingCycleDays)
+				billingCycleDays, _ = safecast.Convert[uint32](*sub.Price.BillingCycleDays)
 			}
 			productID = &sub.Price.ProductID
 			priceID = &sub.Price.ID
@@ -2449,7 +2450,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 			priceAmount = float64(subscription.Price.Amount) / 100.0
 			priceCurrency = subscription.Price.Currency
 			if subscription.Price.BillingCycleDays != nil {
-				billingCycleDays = uint32(*subscription.Price.BillingCycleDays)
+				billingCycleDays, _ = safecast.Convert[uint32](*subscription.Price.BillingCycleDays)
 			}
 			productID = &subscription.Price.ProductID
 			priceID = &subscription.Price.ID
@@ -2688,7 +2689,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			priceAmount = float64(subscription.Price.Amount) / 100.0
 			priceCurrency = subscription.Price.Currency
 			if subscription.Price.BillingCycleDays != nil {
-				billingCycleDays = uint32(*subscription.Price.BillingCycleDays)
+				billingCycleDays, _ = safecast.Convert[uint32](*subscription.Price.BillingCycleDays)
 			}
 			productID = &subscription.Price.ProductID
 			priceID = &subscription.Price.ID
@@ -2817,7 +2818,8 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 			PriceCurrency:  subscription.Price.Currency,
 			BillingCycleDays: func() uint32 {
 				if subscription.Price.BillingCycleDays != nil {
-					return uint32(*subscription.Price.BillingCycleDays)
+					v, _ := safecast.Convert[uint32](*subscription.Price.BillingCycleDays)
+					return v
 				}
 				return 0
 			}(),
@@ -2897,7 +2899,8 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			PriceCurrency:  subscription.Price.Currency,
 			BillingCycleDays: func() uint32 {
 				if subscription.Price.BillingCycleDays != nil {
-					return uint32(*subscription.Price.BillingCycleDays)
+					v, _ := safecast.Convert[uint32](*subscription.Price.BillingCycleDays)
+					return v
 				}
 				return 0
 			}(),

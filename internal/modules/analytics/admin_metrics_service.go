@@ -8,6 +8,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/config"
@@ -380,7 +381,8 @@ func (s *AdminMetricsService) getSummary(ctx context.Context, rng MetricsDateRan
 
 		avgActive := int64(0)
 		if r.DayCount > 0 {
-			avgActive = r.ActiveSum / int64(r.DayCount)
+			dayCount, _ := safecast.Convert[int64](r.DayCount)
+			avgActive = r.ActiveSum / dayCount
 		}
 		arpu := int64(0)
 		if avgActive > 0 {
@@ -488,8 +490,9 @@ func (s *AdminMetricsService) getRevenueSeries(ctx context.Context, rng MetricsD
 			Chargebacks:         r.Chargebacks,
 		}
 		if r.PaymentsSuccessful > 0 {
-			bucket.Payments.Count = int(r.PaymentsSuccessful)
-			bucket.Payments.AverageAmount = r.NetRevenue / int64(r.PaymentsSuccessful)
+			bucket.Payments.Count, _ = safecast.Convert[int](r.PaymentsSuccessful)
+			successful, _ := safecast.Convert[int64](r.PaymentsSuccessful)
+			bucket.Payments.AverageAmount = r.NetRevenue / successful
 		}
 		resp.Buckets = append(resp.Buckets, bucket)
 		resp.Totals.TotalRevenue += r.NetRevenue

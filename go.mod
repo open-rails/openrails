@@ -4,6 +4,7 @@ go 1.25.5
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.40.3
+	github.com/ccoveille/go-safecast/v2 v2.0.1
 	github.com/gagliardetto/solana-go v1.20.0
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.11.0

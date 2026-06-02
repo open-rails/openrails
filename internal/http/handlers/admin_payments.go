@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
@@ -51,7 +53,10 @@ func lockAdminRefund(paymentID string) func() {
 func adminRefundLockKey(paymentID string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("admin_refund:" + paymentID))
-	return int64(h.Sum64())
+	// Mask to 63 bits so the FNV hash is always a non-negative int64. Advisory-lock
+	// keys are opaque, so dropping the top bit is harmless and avoids any overflow.
+	key, _ := safecast.Convert[int64](h.Sum64() & math.MaxInt64)
+	return key
 }
 
 type adminOffChannelPaymentPath struct {

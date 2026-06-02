@@ -1675,9 +1675,13 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 			continue
 		}
 		visited[candidate] = struct{}{}
-		if _, err := os.Stat(candidate); err == nil {
-			if err := k.Load(file.Provider(candidate), yaml.Parser()); err != nil {
-				return fmt.Errorf("loading config file %s: %w", candidate, err)
+		// Normalize the path before touching the filesystem. The path is
+		// operator-supplied (CLI flag / env var / built-in default), but cleaning
+		// it removes any "../" traversal segments defensively.
+		cleaned := filepath.Clean(candidate)
+		if _, err := os.Stat(cleaned); err == nil {
+			if err := k.Load(file.Provider(cleaned), yaml.Parser()); err != nil {
+				return fmt.Errorf("loading config file %s: %w", cleaned, err)
 			}
 			return nil
 		}

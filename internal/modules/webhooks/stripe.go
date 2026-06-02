@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
@@ -1180,7 +1181,7 @@ func (s *StripeWebhookService) logStripePaymentFailure(ctx context.Context, sub 
 			priceCurrency = curr
 		}
 		if sub.Price.BillingCycleDays != nil {
-			billingCycleDays = uint32(*sub.Price.BillingCycleDays)
+			billingCycleDays, _ = safecast.Convert[uint32](*sub.Price.BillingCycleDays)
 		}
 		productID = &sub.Price.ProductID
 	}

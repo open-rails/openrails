@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
@@ -381,7 +382,7 @@ func priceSnapshotFromSubscription(sub *models.Subscription) (float64, string, u
 		priceAmount = float64(sub.Price.Amount) / 100.0
 		priceCurrency = sub.Price.Currency
 		if sub.Price.BillingCycleDays != nil {
-			billingDays = uint32(*sub.Price.BillingCycleDays)
+			billingDays, _ = safecast.Convert[uint32](*sub.Price.BillingCycleDays)
 		}
 		productID = &sub.Price.ProductID
 		priceID = &sub.Price.ID

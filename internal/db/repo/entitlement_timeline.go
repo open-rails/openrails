@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -18,7 +20,10 @@ func entitlementTimelineLockKey(userID, entitlement string) int64 {
 	_, _ = h.Write([]byte(userID))
 	_, _ = h.Write([]byte{':'})
 	_, _ = h.Write([]byte(entitlement))
-	return int64(h.Sum64())
+	// Mask to 63 bits so the FNV hash is always a non-negative int64. Advisory-lock
+	// keys are opaque, so dropping the top bit is harmless and avoids any overflow.
+	key, _ := safecast.Convert[int64](h.Sum64() & math.MaxInt64)
+	return key
 }
 
 // LockEntitlementTimeline serializes timeline updates per (user_id,

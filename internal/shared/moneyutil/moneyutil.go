@@ -27,14 +27,19 @@ func CentsToMajorUnits(cents int64) float64 {
 
 func FormatCentsDecimal(cents int64) string {
 	negative := cents < 0
-	abs := uint64(cents)
-	if negative {
-		abs = uint64(-(cents + 1)) + 1
+	// Work entirely in int64. |MinInt64/100| and |MinInt64%100| both fit in int64,
+	// so negating the quotient/remainder to their magnitudes never overflows
+	// (unlike negating cents itself at math.MinInt64) — and there is no int64↔uint64
+	// conversion for gosec G115 to flag.
+	major := cents / 100
+	minor := cents % 100
+	if major < 0 {
+		major = -major
 	}
-
-	major := abs / 100
-	minor := abs % 100
-	if cents < 0 {
+	if minor < 0 {
+		minor = -minor
+	}
+	if negative {
 		return fmt.Sprintf("-%d.%02d", major, minor)
 	}
 	return fmt.Sprintf("%d.%02d", major, minor)
