@@ -38,9 +38,11 @@ const (
 	seedSubscriptionAuthority = "SubscriptionAuthority"
 	seedPlan                  = "plan"
 	seedSubscription          = "subscription"
-	// seedEventAuthority is the conventional CPI-event authority seed. DEVNET-VERIFY:
-	// confirm against the deployed program before mainnet use.
-	seedEventAuthority = "__event_authority"
+	// seedEventAuthority is the CPI-event authority seed. Verified on devnet: this
+	// derives to 3Hnj4BYoDgtpBuqXfiy7Y8cNa3jXaNd4oqgSXBzkMcH7 (the program's fixed
+	// event authority). NOTE: it is "event_authority", not the Anchor-default
+	// "__event_authority".
+	seedEventAuthority = "event_authority"
 )
 
 // PlanTerms mirrors the on-chain planTerms struct (amount, periodHours, createdAt).
