@@ -30,11 +30,13 @@ func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Con
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
-	switch dbi := s.db.GetDB().(type) {
-	case *bun.DB:
-		return dbi.RunInTx(ctx, nil, fn)
-	case bun.Tx:
-		return fn(ctx, dbi)
+	// Run inside a tenant-scoped transaction so the migration-050 RLS policies
+	// constrain every entitlement query to the request's tenant (db.RunInTenantTx
+	// sets the app.tenant_id GUC from the context as the first statement). This is
+	// the shared chokepoint for tenant-owned entitlement writes/reads.
+	switch s.db.GetDB().(type) {
+	case *bun.DB, bun.Tx:
+		return s.db.RunInTenantTx(ctx, fn)
 	default:
 		return fmt.Errorf("unsupported db type for entitlement transaction")
 	}

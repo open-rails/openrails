@@ -135,6 +135,23 @@ type Config struct {
 	RateLimits   *RateLimitsConfig            `koanf:"rate_limits,omitempty"`
 	Captcha      *CaptchaConfig               `koanf:"captcha,omitempty"`
 	FeatureFlags *FeatureFlags                `koanf:"feature_flags,omitempty"`
+	Encryption   *EncryptionConfig            `koanf:"encryption,omitempty"`
+}
+
+// EncryptionConfig configures per-tenant encryption-at-rest (issue #227). The
+// master key wraps each tenant's Data Encryption Key (envelope encryption); the
+// DEK encrypts sensitive at-rest field values (e.g. per-tenant processor
+// credentials in billing.tenant_secrets).
+//
+// Self-hosted / dev: supply MasterKey (base64 of 32 raw bytes) via config or the
+// ENCRYPTION_MASTER_KEY env var. PRODUCTION: the master key should come from a
+// KMS (the wrapped DEKs in billing.tenant_deks stay in the DB; the master key
+// that unwraps them never does). When MasterKey is empty, encryption is disabled
+// and values are stored in plaintext (back-compat with pre-#227 deployments).
+type EncryptionConfig struct {
+	// MasterKey is the base64-encoded 32-byte AES-256 master key that wraps
+	// per-tenant DEKs. Empty disables at-rest encryption.
+	MasterKey string `koanf:"master_key,omitempty"`
 }
 
 // DBConfig holds database configuration.

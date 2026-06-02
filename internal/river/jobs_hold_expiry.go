@@ -81,9 +81,14 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 			break
 		}
 
-		// Group holds by user+credit_type to batch balance updates
+		// Group holds by the BALANCE KEY to batch balance updates. The unified
+		// lifecycle balance row (issue #221/#223) is keyed by
+		// (tenant_id, owner_id, credit_type_id) — user_id is ACTOR attribution
+		// only and is NOT part of the balance identity, so releasing held_balance
+		// must target the owner's row, not the actor's.
 		type key struct {
-			UserID       string
+			TenantID     uuid.UUID
+			OwnerID      uuid.UUID
 			CreditTypeID uuid.UUID
 		}
 		releasedTotals := make(map[key]int64)
@@ -93,7 +98,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 			if hold.Authorized == nil || *hold.Authorized <= 0 {
 				continue
 			}
-			k := key{UserID: hold.UserID, CreditTypeID: hold.CreditTypeID}
+			k := key{TenantID: hold.TenantID, OwnerID: hold.OwnerID, CreditTypeID: hold.CreditTypeID}
 			releasedTotals[k] += *hold.Authorized
 
 			// Mark hold as expired
@@ -117,7 +122,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 			bal := new(models.UserCreditBalance)
 			err := tx.NewSelect().
 				Model(bal).
-				Where("user_id = ? AND credit_type_id = ?", k.UserID, k.CreditTypeID).
+				Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", k.TenantID, k.OwnerID, k.CreditTypeID).
 				For("UPDATE").
 				Scan(ctx)
 			if err != nil {
@@ -135,14 +140,15 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 			if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 				Set("held_balance = ?", newHeldBalance).
 				Set("updated_at = ?", now).
-				Where("user_id = ? AND credit_type_id = ?", k.UserID, k.CreditTypeID).
+				Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", k.TenantID, k.OwnerID, k.CreditTypeID).
 				Exec(ctx); err != nil {
 				_ = tx.Rollback()
 				return err
 			}
 
 			logger.WithFields(log.Fields{
-				"user_id":        k.UserID,
+				"tenant_id":      k.TenantID,
+				"owner_id":       k.OwnerID,
 				"credit_type_id": k.CreditTypeID,
 				"amount":         amount,
 			}).Debug("released expired hold credits")
