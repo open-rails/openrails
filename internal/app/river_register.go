@@ -129,6 +129,18 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add credit reconcile worker: %w", err)
 	}
+	// Solana recurring cranker (#256). The Cranker (per-tenant signer + RPC) is
+	// wired once tenant Solana signing lands; until then it log-and-skips like the
+	// money-in workers above. Lifecycle is wired so renewals + dunning route
+	// correctly the moment the Cranker is connected.
+	if err := river.AddWorkerSafely(workers, &riverjobs.SolanaCrankWorker{
+		DB:        r.DB,
+		Config:    r.Config,
+		Clock:     clock,
+		Lifecycle: r.SubscriptionLifecycleService,
+	}); err != nil {
+		return fmt.Errorf("add solana cranker worker: %w", err)
+	}
 	return nil
 }
 
@@ -229,6 +241,20 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		river.PeriodicInterval(time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.CleanupExpiredDataArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every hour: crank due Solana recurring subscriptions (#256). Worker frequency
+	// is decoupled from the monthly billing cadence — the due-query (next_pull_at)
+	// filters to what's actually due.
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(time.Hour),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.SolanaCrankArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
