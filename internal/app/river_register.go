@@ -115,7 +115,34 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
 	}
+	// Billing reconciliation + orphan-hold cleanup (issue #243). Alert-first:
+	// records every divergence to billing.reconciliation_events before any safe
+	// auto-remediation of orphan holds / held_balance drift. Cross-system
+	// settlement drift (Tensorhub) is driven by the host via ReconcileSettlements,
+	// not on the timer. Sink defaults to nil (persist-only); a future ops notifier
+	// can be injected here without touching the detection loop.
+	if err := river.AddWorkerSafely(workers, &riverjobs.BillingReconciliationWorker{
+		DB:            r.DB,
+		Config:        r.Config,
+		Clock:         clock,
+		AutoRemediate: reconciliationAutoRemediate(),
+	}); err != nil {
+		return fmt.Errorf("add billing reconciliation worker: %w", err)
+	}
 	return nil
+}
+
+// reconciliationAutoRemediate gates the safe auto-repair half of the billing
+// reconciliation loop (issue #243). Defaults to ON; set
+// OPENRAILS_RECONCILIATION_AUTOREMEDIATE=false (or 0) to run the loop in pure
+// detect-and-report mode (alert-only) — the events are still persisted and
+// emitted, but orphan holds are not released and held_balance is not corrected.
+func reconciliationAutoRemediate() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("OPENRAILS_RECONCILIATION_AUTOREMEDIATE")))
+	if raw == "false" || raw == "0" || raw == "no" || raw == "off" {
+		return false
+	}
+	return true
 }
 
 // catalogReconciliationInterval returns the schedule for the alert-only Stripe
@@ -258,6 +285,22 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.LowBalanceAlertArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 30 minutes: billing reconciliation + orphan-hold cleanup (issue #243).
+	// Catches request-level orphans the 5-minute HoldExpiryWorker misses (e.g.
+	// holds whose expires_at was never set, or held_balance drift) and verifies
+	// the denormalized balances against the ledger. Alert-first; remediation is
+	// gated by OPENRAILS_RECONCILIATION_AUTOREMEDIATE.
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(30*time.Minute),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.BillingReconciliationArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 30 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

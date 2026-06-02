@@ -35,6 +35,7 @@ var ModelRegistry = []any{
 	(*CreditTransaction)(nil),
 	(*CreditBlock)(nil),
 	(*ProcessorCustomer)(nil),
+	(*ReconciliationEvent)(nil),
 }
 
 func RegisterModels(db *bun.DB) {
