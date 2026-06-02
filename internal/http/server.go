@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -47,6 +48,16 @@ type Server struct {
 	// verifier-only mode: the tenant webhook + provisioning admin routes are then
 	// not mounted and the single default tenant continues via the global webhook.
 	tenancy *tenancy.Service
+
+	// Platform superadmin layer (issue #226), DISTINCT from per-tenant operator
+	// admin. Built only when the control plane is present (they share the
+	// billing.* control-plane pool). platformAudit records every cross-tenant
+	// superadmin mutation; platformBreakGlass manages time-boxed elevation;
+	// platformMetrics aggregates platform-wide tenant metrics. nil in
+	// verifier-only mode: the /v1/platform/* surface is then not mounted.
+	platformAudit      *platform.AuditLog
+	platformBreakGlass *platform.BreakGlass
+	platformMetrics    *platform.Metrics
 
 	// publicHandler is the single "full surface" HTTP handler. It includes
 	// health + debug (dev only) + user + admin + webhook routes AND the
@@ -133,6 +144,24 @@ func New(deps Dependencies) (*Server, error) {
 			return nil, fmt.Errorf("build tenancy service: %w", terr)
 		}
 		s.tenancy = tsvc
+
+		// Platform superadmin layer (issue #226): cross-tenant audit, break-glass,
+		// and platform metrics over the same control-plane pool.
+		auditLog, aerr := platform.NewAuditLog(deps.ControlPlane.Pool())
+		if aerr != nil {
+			return nil, fmt.Errorf("build platform audit log: %w", aerr)
+		}
+		breakGlass, berr := platform.NewBreakGlass(deps.ControlPlane.Pool(), auditLog)
+		if berr != nil {
+			return nil, fmt.Errorf("build platform break-glass: %w", berr)
+		}
+		metrics, merr := platform.NewMetrics(deps.ControlPlane.Pool())
+		if merr != nil {
+			return nil, fmt.Errorf("build platform metrics: %w", merr)
+		}
+		s.platformAudit = auditLog
+		s.platformBreakGlass = breakGlass
+		s.platformMetrics = metrics
 	}
 
 	// Single (standalone-friendly) HTTP surface.
@@ -169,6 +198,11 @@ func New(deps Dependencies) (*Server, error) {
 	// Operator-gated tenant provisioning/lifecycle admin API (issue #225). No-op
 	// without the tenancy service.
 	s.registerTenantAdminRoutes(s.publicHandler)
+
+	// Platform-superadmin cross-tenant admin API (issue #226), gated by
+	// openrails:platform:superadmin in the SEPARATE platform org. No-op without
+	// the control plane / platform org configured.
+	s.registerPlatformRoutes(s.publicHandler)
 
 	log.Info("Billing service initialized successfully")
 	return s, nil

@@ -83,6 +83,19 @@ const (
 	// is always the CALLER's OAT tenant, so this permission can never mint
 	// cross-tenant.
 	PermSelfMint = "openrails:self:mint"
+
+	// PermPlatformSuperadmin is the PLATFORM-level cross-tenant administrative
+	// capability (issue #226), DISTINCT from PermAdmin. PermAdmin is per-tenant
+	// operator authority: it is held by an operator org and only governs THAT
+	// tenant. PermPlatformSuperadmin is held by a SEPARATE platform org/role
+	// (cfg.Auth.ControlPlane.PlatformOrgSlug) and authorizes managed-hosting
+	// platform operators to administer ANY tenant via the control plane:
+	// the cross-tenant `/v1/platform/*` surface, cross-tenant search, platform
+	// metrics, and break-glass elevation. A tenant operator admin does NOT hold
+	// this permission (it is never seeded into operator orgs), so it cannot pass
+	// the platform-superadmin gate. It is deliberately NOT part of selfCatalog:
+	// a browser delegated token can never carry it.
+	PermPlatformSuperadmin = "openrails:platform:superadmin"
 )
 
 // catalogEntries is the canonical ordered list of OpenRails permissions with
@@ -100,6 +113,7 @@ var catalogEntries = []Permission{
 	{Name: PermSelfSubscriptionCancel, Description: "Self-service: cancel your own subscriptions."},
 	{Name: PermSelfPaymentMethods, Description: "Self-service: manage your own payment methods."},
 	{Name: PermSelfMint, Description: "Mint short-lived, user-scoped delegated access tokens for your own tenant (server-to-server, browser tier)."},
+	{Name: PermPlatformSuperadmin, Description: "Platform superadmin: administer ANY tenant across the managed-hosting platform (cross-tenant control plane). Seeded ONLY to the platform org, never to per-tenant operator orgs (issue #226)."},
 }
 
 // selfCatalog is the set of self-service permissions accepted on delegated
@@ -148,15 +162,43 @@ func CatalogNames() []string {
 }
 
 // Operator-role identity. The operator role is granted every OpenRails
-// permission and is the admin authority for the operator org.
+// permission EXCEPT the platform-superadmin capability, and is the admin
+// authority for ONE tenant's operator org.
 const (
-	// OperatorRole is the OpenRails role seeded in the operator org that holds
-	// the full OpenRails permission catalog.
+	// OperatorRole is the OpenRails role seeded in a tenant's operator org. It
+	// holds the full OpenRails per-tenant catalog but NOT PermPlatformSuperadmin
+	// (which is cross-tenant platform authority, seeded only to PlatformRole).
 	OperatorRole = "openrails-operator"
+
+	// PlatformRole is the OpenRails role seeded in the SEPARATE platform org
+	// (cfg.Auth.ControlPlane.PlatformOrgSlug, issue #226). It holds
+	// PermPlatformSuperadmin — the cross-tenant managed-hosting authority — and
+	// is the only role granted that permission. It is distinct from OperatorRole
+	// so that a tenant operator admin can never reach the platform surface.
+	PlatformRole = "openrails-platform-superadmin"
 )
 
-// OperatorRolePermissions returns the permission names granted to the operator
-// role: the full OpenRails catalog.
+// OperatorRolePermissions returns the permission names granted to a tenant's
+// operator role: the full OpenRails catalog EXCEPT PermPlatformSuperadmin. The
+// platform-superadmin capability is cross-tenant and must never be carried by a
+// per-tenant operator org (issue #226).
 func OperatorRolePermissions() []string {
-	return CatalogNames()
+	all := CatalogNames()
+	out := make([]string, 0, len(all))
+	for _, p := range all {
+		if p == PermPlatformSuperadmin {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// PlatformRolePermissions returns the permission names granted to the platform
+// superadmin role: ONLY PermPlatformSuperadmin (issue #226). The platform role
+// is deliberately narrow — it is the cross-tenant admin gate, not a grab-bag of
+// per-tenant capabilities. Per-tenant mutations a superadmin performs go through
+// the control plane and are audited in billing.platform_audit.
+func PlatformRolePermissions() []string {
+	return []string{PermPlatformSuperadmin}
 }

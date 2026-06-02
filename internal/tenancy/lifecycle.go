@@ -248,6 +248,39 @@ func (s *Service) GetBySlug(ctx context.Context, slug string) (*Tenant, error) {
 	return s.tenantBySlug(ctx, normalizeSlug(slug))
 }
 
+// SearchTenants returns active tenant directory rows whose slug or name matches
+// the (case-insensitive) query substring. It is the cross-tenant search backing
+// the platform-superadmin API (issue #226); the CALLER is responsible for
+// auditing the search (it is a sensitive cross-tenant read). limit is clamped.
+func (s *Service) SearchTenants(ctx context.Context, q string, limit int) ([]Tenant, error) {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return nil, errors.New("tenancy: search requires a non-empty query")
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	pattern := "%" + strings.ToLower(q) + "%"
+	rows, err := s.pool.Query(ctx, `SELECT `+tenantSelectCols+`
+		FROM billing.tenants
+		WHERE deleted_at IS NULL
+		  AND (lower(slug) LIKE $1 OR lower(name) LIKE $1)
+		ORDER BY slug LIMIT $2`, pattern, limit)
+	if err != nil {
+		return nil, fmt.Errorf("tenancy: search tenants: %w", err)
+	}
+	defer rows.Close()
+	var out []Tenant
+	for rows.Next() {
+		t, serr := scanTenant(rows)
+		if serr != nil {
+			return nil, serr
+		}
+		out = append(out, *t)
+	}
+	return out, rows.Err()
+}
+
 func normalizeSlug(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }

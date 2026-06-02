@@ -2,7 +2,7 @@
 // OpenRails billing uses so that admin authority, the payer/billing owner, and
 // the usage actor can never be confused (issue #221).
 //
-// THE THREE-WAY IDENTITY SPLIT
+// # THE THREE-WAY IDENTITY SPLIT
 //
 // OpenRails distinguishes three orthogonal identities. Conflating them is the
 // single most dangerous class of bug in money-sensitive billing code, so each

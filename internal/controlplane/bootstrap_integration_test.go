@@ -125,10 +125,12 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.Equal(t, "operator", orgSlug)
 	require.Equal(t, res1.OperatorOrgID, orgID)
 
-	// Operator role holds the full catalog.
+	// Operator role holds the per-tenant operator catalog (full catalog EXCEPT
+	// the cross-tenant platform-superadmin permission, #226).
 	perms, err := cp.Core().GetRolePermissions(ctx, "operator", OperatorRole)
 	require.NoError(t, err)
-	require.ElementsMatch(t, CatalogNames(), perms)
+	require.ElementsMatch(t, OperatorRolePermissions(), perms)
+	require.NotContains(t, perms, PermPlatformSuperadmin)
 
 	// Second run: idempotent. No new org, no new OAT.
 	res2, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialOAT: true})
@@ -153,13 +155,15 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	_, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialOAT: false})
 	require.NoError(t, err)
 
-	// Every catalog permission is granted to the operator role and shows up as
-	// an effective role permission.
+	// Every per-tenant operator permission is granted to the operator role and
+	// shows up as an effective role permission; the cross-tenant platform
+	// superadmin permission is NOT (it is seeded only to the platform role, #226).
 	eff, err := cp.Core().EffectiveRolePermissions(ctx, "operator", OperatorRole)
 	require.NoError(t, err)
-	for _, want := range CatalogNames() {
+	for _, want := range OperatorRolePermissions() {
 		require.Containsf(t, eff, want, "operator role should effectively hold %q", want)
 	}
+	require.NotContains(t, eff, PermPlatformSuperadmin)
 
 	// Re-running with the same catalog keeps the grant stable (replace, not grow).
 	_, err = cp.Bootstrap(ctx, BootstrapOptions{MintInitialOAT: false})
@@ -167,6 +171,77 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	eff2, err := cp.Core().EffectiveRolePermissions(ctx, "operator", OperatorRole)
 	require.NoError(t, err)
 	require.ElementsMatch(t, eff, eff2, fmt.Sprintf("permissions should be stable across reruns: %v vs %v", eff, eff2))
+}
+
+// TestBootstrapPlatform_SeedsSuperadminInSeparateOrg proves the #226 platform
+// layer: BootstrapPlatform seeds a SEPARATE platform org whose role holds ONLY
+// openrails:platform:superadmin, and HasPlatformSuperadmin authorizes a member
+// of that org while a tenant operator admin (in the operator org) is denied.
+func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
+	ctx := context.Background()
+	pool := newBootstrapTestPool(t)
+
+	cfg := &config.Config{
+		Env: "test",
+		Auth: &config.AuthConfig{
+			ExpectedAudience: "openrails-app",
+			OperatorOrgSlug:  "operator",
+			ControlPlane: &config.ControlPlaneConfig{
+				Enabled:         true,
+				Issuer:          "https://billing.test",
+				OrgMode:         "multi",
+				TokenPrefix:     "openrails",
+				PlatformOrgSlug: "openrails-platform",
+			},
+		},
+	}
+	cp, err := New(ctx, cfg, pool)
+	require.NoError(t, err)
+	require.NotNil(t, cp)
+
+	// Bootstrap the tenant operator org AND the platform org.
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{MintInitialOAT: false})
+	require.NoError(t, err)
+	pres, err := cp.BootstrapPlatform(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, pres)
+	require.Equal(t, "openrails-platform", pres.PlatformOrgSlug)
+
+	// The platform role holds ONLY the platform-superadmin permission.
+	perms, err := cp.Core().GetRolePermissions(ctx, "openrails-platform", PlatformRole)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{PermPlatformSuperadmin}, perms)
+
+	// AuthKit user IDs are UUIDs of real profiles.users rows; create them.
+	pAdmin, err := cp.Core().CreateUser(ctx, "platform-admin@test.local", "platformadmin")
+	require.NoError(t, err)
+	platformAdminID := pAdmin.ID
+	tAdmin, err := cp.Core().CreateUser(ctx, "tenant-admin@test.local", "tenantadmin")
+	require.NoError(t, err)
+	tenantOperatorAdminID := tAdmin.ID
+
+	// A platform-org member with the platform role passes HasPlatformSuperadmin.
+	require.NoError(t, cp.Core().AddMember(ctx, "openrails-platform", platformAdminID))
+	require.NoError(t, cp.Core().AssignRole(ctx, "openrails-platform", platformAdminID, PlatformRole))
+	ok, err := cp.HasPlatformSuperadmin(ctx, platformAdminID)
+	require.NoError(t, err)
+	require.True(t, ok, "platform identity must hold platform superadmin")
+
+	// A tenant OPERATOR admin (operator org, openrails:admin) is NOT a platform
+	// superadmin: HasPlatformSuperadmin evaluates the platform org, where they are
+	// not a member.
+	require.NoError(t, cp.Core().AddMember(ctx, "operator", tenantOperatorAdminID))
+	require.NoError(t, cp.Core().AssignRole(ctx, "operator", tenantOperatorAdminID, OperatorRole))
+	opIsAdmin, err := cp.IsOperatorAdmin(ctx, "operator", tenantOperatorAdminID)
+	require.NoError(t, err)
+	require.True(t, opIsAdmin, "tenant operator admin should hold operator admin")
+	opIsPlatform, err := cp.HasPlatformSuperadmin(ctx, tenantOperatorAdminID)
+	require.NoError(t, err)
+	require.False(t, opIsPlatform, "tenant operator admin must NOT be a platform superadmin")
+
+	// Idempotent re-run.
+	_, err = cp.BootstrapPlatform(ctx)
+	require.NoError(t, err)
 }
 
 // TestDelegatedTenantResolution exercises the org->tenant mapping that

@@ -24,12 +24,12 @@ import (
 // middleware tests).
 
 const (
-	testDelegatedIssuer   = "https://billing.test.example"
-	testDelegatedKID      = "test-kid-1"
-	canonicalAudience     = "openrails"
-	testDelegatedSubject  = "end-user-42"
-	testDelegatedTenant   = "operator"
-	wrongAudience         = "tensorhub"
+	testDelegatedIssuer  = "https://billing.test.example"
+	testDelegatedKID     = "test-kid-1"
+	canonicalAudience    = "openrails"
+	testDelegatedSubject = "end-user-42"
+	testDelegatedTenant  = "operator"
+	wrongAudience        = "tensorhub"
 )
 
 // newTestDelegatedVerifier builds a Verifier identical to newDelegatedVerifier's

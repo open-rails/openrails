@@ -72,7 +72,7 @@ type CreditBlock struct {
 	// TenantID scopes this row to a tenant / billing namespace (issue #223).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	// OwnerID is the owner org that OWNS this block of credits (issue #221).
-	OwnerID             uuid.UUID  `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
+	OwnerID uuid.UUID `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
 	// UserID is the ACTOR that caused usage (issue #221, attribution only).
 	UserID              string     `bun:"user_id,notnull" json:"user_id"`
 	CreditTypeID        uuid.UUID  `bun:"credit_type_id,notnull" json:"credit_type_id"`

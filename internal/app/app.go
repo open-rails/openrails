@@ -194,7 +194,16 @@ func (a *App) RunControlPlaneBootstrap(ctx context.Context, opts controlplane.Bo
 	if !opts.MintInitialOAT {
 		opts.MintInitialOAT = true
 	}
-	return a.ControlPlane.Bootstrap(ctx, opts)
+	res, err := a.ControlPlane.Bootstrap(ctx, opts)
+	if err != nil {
+		return res, err
+	}
+	// #226: also ensure the managed-hosting platform superadmin org + role when
+	// configured. No-op when no platform org is set (single-tenant / non-managed).
+	if _, perr := a.ControlPlane.BootstrapPlatform(ctx); perr != nil {
+		return res, fmt.Errorf("platform superadmin bootstrap: %w", perr)
+	}
+	return res, nil
 }
 
 // Close releases all resources owned by the application.

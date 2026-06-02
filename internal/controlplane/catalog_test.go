@@ -25,6 +25,10 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		"openrails:self:payment-methods:manage",
 		// Browser-tier delegated-token MINT capability (server-to-server, #222).
 		"openrails:self:mint",
+		// Cross-tenant managed-hosting platform superadmin (#226). It is in the
+		// catalog (a valid grantable permission) but is NOT seeded into operator
+		// orgs — see TestOperatorRolePermissions_ExcludesPlatformSuperadmin.
+		"openrails:platform:superadmin",
 	}
 	got := map[string]bool{}
 	for _, p := range Catalog() {
@@ -57,17 +61,27 @@ func TestCatalog_IsACopy(t *testing.T) {
 	}
 }
 
-func TestOperatorRolePermissions_IsFullCatalog(t *testing.T) {
+// TestOperatorRolePermissions_ExcludesPlatformSuperadmin proves the #226
+// separation: a tenant operator role holds the FULL catalog EXCEPT the
+// cross-tenant platform-superadmin permission (which is seeded only to the
+// platform role). Every other catalog permission must be present.
+func TestOperatorRolePermissions_ExcludesPlatformSuperadmin(t *testing.T) {
 	perms := OperatorRolePermissions()
 	names := CatalogNames()
-	if len(perms) != len(names) {
-		t.Fatalf("operator role perms = %d, catalog = %d", len(perms), len(names))
+	if len(perms) != len(names)-1 {
+		t.Fatalf("operator role perms = %d, want catalog-1 = %d", len(perms), len(names)-1)
 	}
 	set := map[string]bool{}
 	for _, p := range perms {
 		set[p] = true
 	}
+	if set[PermPlatformSuperadmin] {
+		t.Fatalf("operator role must NOT include %q", PermPlatformSuperadmin)
+	}
 	for _, n := range names {
+		if n == PermPlatformSuperadmin {
+			continue
+		}
 		if !set[n] {
 			t.Errorf("operator role missing catalog permission %q", n)
 		}
@@ -87,12 +101,12 @@ func TestCatalogNames_StableOrder(t *testing.T) {
 
 func TestToGinPath(t *testing.T) {
 	cases := map[string]string{
-		"/token":                         "/token",
-		"/owners/{slug}":                 "/owners/:slug",
-		"/user/sessions/{id}":            "/user/sessions/:id",
-		"/orgs/{org}/members/{user_id}":  "/orgs/:org/members/:user_id",
-		"/user/providers/{provider}":     "/user/providers/:provider",
-		"":                               "",
+		"/token":                        "/token",
+		"/owners/{slug}":                "/owners/:slug",
+		"/user/sessions/{id}":           "/user/sessions/:id",
+		"/orgs/{org}/members/{user_id}": "/orgs/:org/members/:user_id",
+		"/user/providers/{provider}":    "/user/providers/:provider",
+		"":                              "",
 	}
 	for in, want := range cases {
 		if got := toGinPath(in); got != want {

@@ -115,14 +115,14 @@ type Config struct {
 	//       recipient_wallet: "..."
 	Processors map[string]*ProcessorConfig `koanf:"processors,omitempty"`
 
-	DB           *DBConfig         `koanf:"db,omitempty"`
-	Redis        *RedisConfig      `koanf:"redis,omitempty"`
-	Auth         *AuthConfig       `koanf:"auth,omitempty"`
-	ClickHouse   *ClickHouseConfig `koanf:"clickhouse,omitempty"`
-	Logger       *LoggerConfig     `koanf:"logger,omitempty"`
-	SendGrid     *SendGridConfig   `koanf:"sendgrid,omitempty"`
-	Pyth         *PythConfig       `koanf:"pyth,omitempty"`
-	CorsOrigins  []string          `koanf:"cors_origins,omitempty"`
+	DB          *DBConfig         `koanf:"db,omitempty"`
+	Redis       *RedisConfig      `koanf:"redis,omitempty"`
+	Auth        *AuthConfig       `koanf:"auth,omitempty"`
+	ClickHouse  *ClickHouseConfig `koanf:"clickhouse,omitempty"`
+	Logger      *LoggerConfig     `koanf:"logger,omitempty"`
+	SendGrid    *SendGridConfig   `koanf:"sendgrid,omitempty"`
+	Pyth        *PythConfig       `koanf:"pyth,omitempty"`
+	CorsOrigins []string          `koanf:"cors_origins,omitempty"`
 	// TenantCORS configures per-tenant browser-direct allowed origins (issue #222
 	// browser tier). It is keyed by tenant slug; each entry lists the exact
 	// origins a browser on that tenant's domain may use to call OpenRails
@@ -132,9 +132,9 @@ type Config struct {
 	// listed origin and is denied for any origin that is not listed in either
 	// CorsOrigins or some tenant's allowed origins.
 	TenantCORS   map[string]*TenantCORSConfig `koanf:"tenant_cors,omitempty"`
-	RateLimits   *RateLimitsConfig `koanf:"rate_limits,omitempty"`
-	Captcha      *CaptchaConfig    `koanf:"captcha,omitempty"`
-	FeatureFlags *FeatureFlags     `koanf:"feature_flags,omitempty"`
+	RateLimits   *RateLimitsConfig            `koanf:"rate_limits,omitempty"`
+	Captcha      *CaptchaConfig               `koanf:"captcha,omitempty"`
+	FeatureFlags *FeatureFlags                `koanf:"feature_flags,omitempty"`
 }
 
 // DBConfig holds database configuration.
@@ -504,6 +504,27 @@ type ControlPlaneConfig struct {
 	// OperatorOATName is the human-readable name of the initial operator OAT
 	// minted at bootstrap. Defaults to "openrails-bootstrap-operator".
 	OperatorOATName string `koanf:"operator_oat_name,omitempty"`
+
+	// PlatformOrgSlug is the AuthKit org slug for the managed-hosting PLATFORM
+	// superadmin org (issue #226), DISTINCT from any tenant operator org. The
+	// platform org holds the openrails-platform-superadmin role with the
+	// openrails:platform:superadmin permission and gates the cross-tenant
+	// /v1/platform/* surface. When empty (the default), platform-superadmin
+	// bootstrap and the /v1/platform/* routes are NOT enabled — a single-tenant
+	// or non-managed deployment never grows a cross-tenant superadmin.
+	PlatformOrgSlug string `koanf:"platform_org_slug,omitempty"`
+
+	// PlatformAdminUserID, when set, is assigned the platform-superadmin role in
+	// the platform org at bootstrap (issue #226). Optional: the platform org can
+	// be seeded empty and admins added later.
+	PlatformAdminUserID string `koanf:"platform_admin_user_id,omitempty"`
+}
+
+// PlatformOrgEnabled reports whether a managed-hosting platform-superadmin org
+// is configured (issue #226). When false, the cross-tenant /v1/platform/*
+// surface is not mounted and no platform-superadmin is bootstrapped.
+func (cp *ControlPlaneConfig) PlatformOrgEnabled() bool {
+	return cp != nil && strings.TrimSpace(cp.PlatformOrgSlug) != ""
 }
 
 // ControlPlaneEnabled reports whether the OpenRails-owned AuthKit control plane
