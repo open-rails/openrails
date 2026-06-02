@@ -133,12 +133,16 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// wired once tenant Solana signing lands; until then it log-and-skips like the
 	// money-in workers above. Lifecycle is wired so renewals + dunning route
 	// correctly the moment the Cranker is connected.
-	if err := river.AddWorkerSafely(workers, &riverjobs.SolanaCrankWorker{
+	solanaCrankWorker := &riverjobs.SolanaCrankWorker{
 		DB:        r.DB,
 		Config:    r.Config,
 		Clock:     clock,
 		Lifecycle: r.SubscriptionLifecycleService,
-	}); err != nil {
+	}
+	if r.SolanaCranker != nil {
+		solanaCrankWorker.Cranker = r.SolanaCranker
+	}
+	if err := river.AddWorkerSafely(workers, solanaCrankWorker); err != nil {
 		return fmt.Errorf("add solana cranker worker: %w", err)
 	}
 	return nil

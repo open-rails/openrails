@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
@@ -73,6 +74,10 @@ type Runtime struct {
 	SolanaRPC                *solana.RPCClient
 	SolanaPriceProvider      solanamodule.TokenPriceProvider
 	FXProvider               fx.Provider
+	// SolanaCranker drives recurring Solana pulls (#256). Injected by the
+	// composition root once the tenant secret store is available; nil -> the
+	// cranker worker log-and-skips.
+	SolanaCranker *recurring.CrankService
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	WebhookDispatcher            *webhooks.WebhookDispatcher
@@ -252,4 +257,11 @@ func (r *Runtime) HasExternalRiverClient() bool {
 		return false
 	}
 	return r.externalRiverClient
+}
+
+// SetSolanaCranker injects the recurring Solana cranker built once the tenant
+// secret store is available (composition root). It must be called before
+// InitRiver so the cranker worker picks it up.
+func (r *Runtime) SetSolanaCranker(cranker *recurring.CrankService) {
+	r.SolanaCranker = cranker
 }

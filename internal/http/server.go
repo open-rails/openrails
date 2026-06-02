@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/crypto"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/authprovider"
@@ -167,6 +168,15 @@ func New(deps Dependencies) (*Server, error) {
 			return nil, fmt.Errorf("build tenancy service: %w", terr)
 		}
 		s.tenancy = tsvc
+
+		// Recurring Solana cranker (#256): now that the per-tenant secret store
+		// exists, build the cranker over it + the Solana RPC and inject it into the
+		// runtime BEFORE workers start (InitRiver). Until this runs the cranker
+		// worker log-and-skips. The per-tenant solana/private_key resolves through
+		// the same store (DB+envelope here, or Vault when wired).
+		if deps.Runtime != nil && deps.Runtime.SolanaRPC != nil {
+			deps.Runtime.SetSolanaCranker(recurring.NewCrankServiceFromStore(secretStore, deps.Runtime.SolanaRPC, 0))
+		}
 
 		// Platform superadmin layer (issue #226): cross-tenant audit, break-glass,
 		// and platform metrics over the same control-plane pool.
