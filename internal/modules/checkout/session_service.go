@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	submodel "github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -86,14 +85,6 @@ type solanaTransactionService interface {
 	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, processedNotAfter *time.Time) error
 }
 
-// solanaMembershipCanceller soft-cancels the OLD subscription after a Solana
-// Model-B upgrade enrolls the new one (#267). CancelMembership flips the
-// lifecycle row to cancelled AND cascades to the solana_subscriptions row so the
-// hourly cranker stops pulling the old plan. Satisfied by
-// *subscriptions.SubscriptionLifecycleService.
-type solanaMembershipCanceller interface {
-	CancelMembership(ctx context.Context, params *submodel.CancelMembershipParams) error
-}
 type CheckoutSessionService struct {
 	db                       *db.DB
 	repo                     *repo.CheckoutSessionRepo
@@ -113,18 +104,6 @@ type CheckoutSessionService struct {
 	// composition root. nil -> solana+subscription checkout returns 503.
 	solanaPrepareSubscribe *recurring.PrepareSubscribeService
 	solanaEnroll           *recurring.EnrollService
-
-	// solanaUpgradeCanceller soft-cancels the OLD subscription after a Model-B
-	// upgrade enrolls the new one (#267). Injected via SetSolanaUpgradeCanceller;
-	// nil -> a Solana upgrade-via-subscribe is rejected (we never strand a user
-	// double-billed on two tiers).
-	solanaUpgradeCanceller solanaMembershipCanceller
-}
-
-// SetSolanaUpgradeCanceller wires the lifecycle cancel surface used to soft-cancel
-// the old subscription after a Solana Model-B upgrade enrolls the new one (#267).
-func (s *CheckoutSessionService) SetSolanaUpgradeCanceller(c solanaMembershipCanceller) {
-	s.solanaUpgradeCanceller = c
 }
 
 // SetSolanaRecurring wires the recurring-Solana subscribe (prepare) + enroll
@@ -325,13 +304,6 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 
 	if strings.TrimSpace(req.IdempotencyKey) != "" {
 		session.IdempotencyKey = normalize.OptionalString(req.IdempotencyKey)
-	}
-
-	// Carry a Solana Model-B upgrade request (#267) onto the session so
-	// initializeSolanaSubscriptionSession can compute the reduced first charge and
-	// remember which old subscription to soft-cancel after enrollment.
-	if upg := strings.TrimSpace(req.UpgradeFromSubscriptionID); upg != "" {
-		session.ProcessorState["upgrade_from_subscription_id"] = upg
 	}
 
 	if err := s.repo.Create(ctx, session); err != nil {
@@ -744,27 +716,14 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 		return fmt.Errorf("%w: price not found", ErrCheckoutSessionValidation)
 	}
 
-	// Model-B upgrade (#267): when the session names an old subscription to
-	// upgrade FROM, compute the reduced first charge now and remember the old sub
-	// to soft-cancel after enrollment. An upgrade legitimately holds two
-	// subscriptions in the same tier-group only momentarily (new enrolls, old is
-	// cancelled in the same confirm), so the duplicate-billing guard below is
-	// SKIPPED for a validated upgrade.
-	upgradeFromID := strings.TrimSpace(getStringField(session.ProcessorState, "upgrade_from_subscription_id"))
-	isUpgrade := upgradeFromID != ""
-	if isUpgrade {
-		if err := s.prepareSolanaUpgradeFirstCharge(ctx, session, price, upgradeFromID); err != nil {
-			return err
-		}
-	}
-
 	// Duplicate-billing guard (issue #269): a user must never hold two concurrent
 	// non-terminal subscriptions in the same product/tier-group (even at different
 	// tiers — that is double-billing; the correct operation is change-tier). Run
 	// this BEFORE preparing any on-chain transaction so we neither create the
-	// session nor ask the wallet to sign anything for a duplicate. Skipped for a
-	// validated upgrade (the old sub is cancelled at confirm time).
-	if s.checkoutService != nil && !isUpgrade {
+	// session nor ask the wallet to sign anything for a duplicate. A tier change on
+	// an EXISTING Solana subscription does NOT go through this subscribe flow — it
+	// uses the dedicated atomic prepare/confirm tier-change endpoints (#272).
+	if s.checkoutService != nil {
 		product, err := s.productService.GetByID(ctx, price.ProductID)
 		if err != nil || product == nil {
 			return fmt.Errorf("%w: product not found", ErrCheckoutSessionValidation)
@@ -813,83 +772,6 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 	session.ProcessorState["subscribe_step"] = res.Step
 	session.ProcessorState["sign_transactions"] = toAnySlice(res.Transactions)
 	return nil
-}
-
-// prepareSolanaUpgradeFirstCharge validates a Model-B upgrade request (#267) and
-// stashes the reduced first-charge (in stablecoin base units) plus the old
-// subscription id on the session's ProcessorState. The first charge is
-// new_full - old_unused (CalculateModelBUpgradeCharge), converted from cents to
-// stablecoin base units at the $1 peg (with the depeg failsafe). It does NOT pull
-// any funds — that happens on confirm via the enroll FirstChargeBaseUnits
-// override. The old subscription is soft-cancelled only AFTER the new enroll
-// succeeds (in confirmSolanaSubscriptionSession).
-func (s *CheckoutSessionService) prepareSolanaUpgradeFirstCharge(ctx context.Context, session *models.CheckoutSession, newPrice *models.Price, upgradeFromID string) error {
-	if s.solanaUpgradeCanceller == nil {
-		return fmt.Errorf("%w: solana upgrades are not configured", ErrCheckoutSessionValidation)
-	}
-	if s.db == nil {
-		return fmt.Errorf("%w: subscription store unavailable", ErrCheckoutSessionValidation)
-	}
-	oldSubID, err := uuid.Parse(upgradeFromID)
-	if err != nil {
-		return fmt.Errorf("%w: invalid upgrade_from_subscription_id", ErrCheckoutSessionValidation)
-	}
-	oldSub, err := repo.NewSubscriptionRepo(s.db).GetByID(ctx, oldSubID)
-	if err != nil || oldSub == nil {
-		return fmt.Errorf("%w: subscription to upgrade from not found", ErrCheckoutSessionValidation)
-	}
-	if oldSub.UserID != session.UserID {
-		return fmt.Errorf("%w: subscription to upgrade from not found", ErrCheckoutSessionValidation)
-	}
-	if oldSub.Processor != models.ProcessorSolana {
-		return fmt.Errorf("%w: upgrade source is not a solana subscription", ErrCheckoutSessionValidation)
-	}
-	oldPrice, err := s.priceService.GetByID(ctx, oldSub.PriceID)
-	if err != nil || oldPrice == nil {
-		return fmt.Errorf("%w: current price not found", ErrCheckoutSessionValidation)
-	}
-
-	// Model-B reduced first charge (cents) and reset cycle, reusing the shared
-	// card-billing math so every processor prorates identically (#268/#267).
-	firstChargeCents, _ := CalculateModelBUpgradeCharge(
-		oldPrice.Amount,
-		newPrice.Amount,
-		oldSub.CurrentPeriodEndsAt,
-		newPrice.BillingCycleDays,
-		s.now(),
-	)
-
-	// Convert cents -> stablecoin base units at the $1 peg (depeg failsafe inside).
-	mintSymbol := strings.TrimSpace(parseSolanaMintSymbol(newPrice))
-	firstChargeBaseUnits := solanamodule.FiatCentsToStablecoinBaseUnits(ctx, firstChargeCents, mintSymbol, s.priceProvider)
-	// A genuine upgrade reset-period first charge can round to 0 base units only
-	// when the unused old credit fully covers the new price. We still need a paid
-	// first cycle to activate the on-chain subscription, so pull the smallest
-	// non-zero amount (1 base unit, a fraction of a cent) in that degenerate case.
-	if firstChargeBaseUnits == 0 {
-		firstChargeBaseUnits = 1
-	}
-
-	if session.ProcessorState == nil {
-		session.ProcessorState = map[string]any{}
-	}
-	session.ProcessorState["upgrade_from_subscription_id"] = upgradeFromID
-	session.ProcessorState["first_charge_base_units"] = strconv.FormatUint(firstChargeBaseUnits, 10)
-	session.ProcessorState["first_charge_cents"] = strconv.FormatInt(firstChargeCents, 10)
-	return nil
-}
-
-// parseSolanaMintSymbol reads the recurring mint symbol from a price's Solana
-// processor config (the symbol used for the $1-peg stablecoin conversion).
-func parseSolanaMintSymbol(price *models.Price) string {
-	if price == nil {
-		return ""
-	}
-	cfg := price.GetProcessorConfig(models.ProcessorSolana)
-	if cfg == nil {
-		return ""
-	}
-	return strings.TrimSpace(cfg["mint_symbol"])
 }
 
 // confirmSolanaSubscriptionSession advances the two-step subscribe flow (#262).
@@ -960,53 +842,22 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 		email = *user.Email
 	}
 
-	// Model-B upgrade (#267): a reduced FIRST pull (new_full - old_unused, in
-	// stablecoin base units) was computed at session creation. The persisted row
-	// keeps the full per-cycle amount; only this first crank differs.
-	firstChargeBaseUnits := getUint64Field(session.ProcessorState, "first_charge_base_units")
-	upgradeFromID := strings.TrimSpace(getStringField(session.ProcessorState, "upgrade_from_subscription_id"))
-
 	sub, err := s.solanaEnroll.ConfirmEnrollment(ctx, recurring.EnrollInput{
-		TenantID:             tenantID,
-		UserID:               session.UserID,
-		UserEmail:            email,
-		PriceID:              session.PriceID,
-		SubscriberWallet:     wallet,
-		PlanID:               terms.planID,
-		MintSymbol:           terms.mintSymbol,
-		AmountBaseUnits:      terms.amount,
-		PeriodHours:          terms.period,
-		PlanCreatedAt:        terms.createdAt,
-		FiatAmount:           session.Amount,
-		Currency:             session.Currency,
-		FirstChargeBaseUnits: firstChargeBaseUnits,
+		TenantID:         tenantID,
+		UserID:           session.UserID,
+		UserEmail:        email,
+		PriceID:          session.PriceID,
+		SubscriberWallet: wallet,
+		PlanID:           terms.planID,
+		MintSymbol:       terms.mintSymbol,
+		AmountBaseUnits:  terms.amount,
+		PeriodHours:      terms.period,
+		PlanCreatedAt:    terms.createdAt,
+		FiatAmount:       session.Amount,
+		Currency:         session.Currency,
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	// Model-B upgrade: the new subscription is live and the (reduced) first cycle
-	// is paid → soft-cancel the OLD subscription so the cranker stops pulling it.
-	// CancelMembership cascades to the old solana_subscriptions row. Idempotent:
-	// cancelling an already-cancelled membership is a no-op, so a retried confirm
-	// is safe. We do this AFTER enroll so a failed enroll never strands the user
-	// with both subscriptions cancelled.
-	if upgradeFromID != "" && s.solanaUpgradeCanceller != nil {
-		if oldSubID, perr := uuid.Parse(upgradeFromID); perr == nil {
-			proc := models.ProcessorSolana
-			// Merchant-initiated: the old plan is superseded by the upgrade. This is
-			// a terminal cancel reason, so the cranker's active-status filter stops
-			// pulling the old plan immediately.
-			cancelType := models.CancelTypeMerchant
-			if cerr := s.solanaUpgradeCanceller.CancelMembership(ctx, &submodel.CancelMembershipParams{
-				SubscriptionID: &oldSubID,
-				Processor:      &proc,
-				CancelType:     cancelType,
-				RevokeAccess:   false,
-			}); cerr != nil {
-				return nil, fmt.Errorf("%w: upgraded but failed to cancel old subscription (retry confirm): %v", ErrCheckoutSessionConflict, cerr)
-			}
-		}
 	}
 
 	sig := strings.TrimSpace(req.Payment.Signature)

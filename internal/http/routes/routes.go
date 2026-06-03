@@ -375,6 +375,14 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	// of truth — there is no DB-only "soft cancel". Both gated by the cancel scope.
 	subs.POST("/:id/solana-cancel-tx", subscriptionManage, wrap(httphandlers.PrepareSolanaCancelTx))
 	subs.POST("/:id/solana-cancel", subscriptionManage, wrap(httphandlers.ConfirmSolanaCancel))
+	// App-driven on-chain tier change (#272): the prepare -> sign -> confirm ->
+	// mirror loop for changing tier on an existing Solana subscription. prepare
+	// returns the SINGLE ATOMIC cancel-old+subscribe-new tx (co-signed for an
+	// upgrade's prorated transfer); confirm verifies it landed on-chain and mirrors
+	// the switch into the DB (old cancelled, new active, next_pull_at per kind).
+	// Both ride the subscription-management (cancel) scope.
+	subs.POST("/:id/solana-tier-change", subscriptionManage, wrap(httphandlers.PrepareSolanaTierChange))
+	subs.POST("/:id/solana-tier-change/confirm", subscriptionManage, wrap(httphandlers.ConfirmSolanaTierChange))
 
 	// Payment methods: list is a read; mutations require the manage scope.
 	pm := group.Group("/payment-methods")

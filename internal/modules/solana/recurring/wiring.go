@@ -25,12 +25,26 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, tenantID tenant.ID, na
 	return sec.Value, nil
 }
 
+// NewSignerFromStore builds the per-tenant keypair signer reading
+// solana/private_key from the tenant secret store. Exposed (alongside the
+// Submitter constructors) so the composition root can share the SAME signer
+// between the Submitter-backed services and the signer-backed
+// PrepareTierChangeService (#272), which co-signs with the merchant key directly.
+func NewSignerFromStore(store tenancy.TenantSecretStore, ttl time.Duration) solanaint.Signer {
+	return solanaint.NewKeypairSigner(secretStoreGetter{store: store}, ttl)
+}
+
+// NewSignerFromTransit builds the per-tenant signer whose key lives in Vault
+// Transit (non-extractable). Shared with PrepareTierChangeService (#272).
+func NewSignerFromTransit(transit solanaint.TransitClient, ttl time.Duration) solanaint.Signer {
+	return solanaint.NewTransitSigner(transit, nil, ttl)
+}
+
 // NewSignerSubmitterFromStore builds the production Submitter: a per-tenant
 // keypair signer reading solana/private_key from the tenant secret store, wired
 // to the Solana RPC. ttl 0 uses the default signer cache TTL.
 func NewSignerSubmitterFromStore(store tenancy.TenantSecretStore, rpc *solanaint.RPCClient, ttl time.Duration) Submitter {
-	signer := solanaint.NewKeypairSigner(secretStoreGetter{store: store}, ttl)
-	return NewSignerSubmitter(signer, rpc)
+	return NewSignerSubmitter(NewSignerFromStore(store, ttl), rpc)
 }
 
 // NewCrankServiceFromStore builds a CrankService backed by the tenant secret
@@ -48,8 +62,7 @@ func NewPlanServiceFromStore(store tenancy.TenantSecretStore, rpc *solanaint.RPC
 // NewSignerSubmitterFromTransit builds a Submitter whose signing key lives in
 // Vault Transit (non-extractable) — the key never enters this process.
 func NewSignerSubmitterFromTransit(transit solanaint.TransitClient, rpc *solanaint.RPCClient, ttl time.Duration) Submitter {
-	signer := solanaint.NewTransitSigner(transit, nil, ttl)
-	return NewSignerSubmitter(signer, rpc)
+	return NewSignerSubmitter(NewSignerFromTransit(transit, ttl), rpc)
 }
 
 // NewCrankServiceFromTransit builds a CrankService whose per-tenant Solana key is

@@ -92,6 +92,12 @@ type Runtime struct {
 	// (#266). Injected alongside the other recurring services; nil -> the handler
 	// returns 503 (recurring not configured).
 	SolanaPrepareCancelService *recurring.PrepareCancelService
+	// SolanaPrepareTierChangeService builds the SINGLE ATOMIC co-signed tier-change
+	// transaction (cancel-old + subscribe-new [+ prorated transfer for an upgrade])
+	// a subscriber signs to change tier on an existing Solana subscription (#272).
+	// Injected alongside the other recurring services; nil -> the prepare handler
+	// returns 503 (recurring not configured).
+	SolanaPrepareTierChangeService *recurring.PrepareTierChangeService
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	WebhookDispatcher            *webhooks.WebhookDispatcher
@@ -291,4 +297,12 @@ func (r *Runtime) SetSolanaRecurringServices(plan *recurring.PlanService, enroll
 // built once the tenant secret store + RPC are available (composition root).
 func (r *Runtime) SetSolanaPrepareCancelService(svc *recurring.PrepareCancelService) {
 	r.SolanaPrepareCancelService = svc
+}
+
+// SetSolanaPrepareTierChangeService injects the atomic co-signed tier-change tx
+// builder (#272), built once the tenant secret store + RPC are available
+// (composition root). It uses the SAME per-tenant signer + RPC + network as the
+// cranker so the cranker slot it co-signs is the merchant's own key.
+func (r *Runtime) SetSolanaPrepareTierChangeService(svc *recurring.PrepareTierChangeService) {
+	r.SolanaPrepareTierChangeService = svc
 }

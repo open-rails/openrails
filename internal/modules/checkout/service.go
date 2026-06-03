@@ -2181,31 +2181,29 @@ func (s *CheckoutService) processTierChangeStripe(
 	}, nil
 }
 
-// processTierChangeSolana handles recurring-Solana subscription tier changes (#267).
+// processTierChangeSolana handles recurring-Solana subscription tier changes (#272).
 //
 // Solana plan terms are immutable and a subscription is bound to one plan PDA, so
-// a tier change cannot mutate the existing on-chain subscription. Instead:
+// a tier change is mechanically cancel-old + subscribe-new — done as a SINGLE
+// ATOMIC, wallet-signed on-chain transaction. The synchronous (card-style)
+// TierChange API cannot collect a wallet signature, so for BOTH directions this
+// returns requires_action directing the client to the dedicated prepare/confirm
+// endpoints (#272):
 //
-//   - UPGRADE: the wallet must sign a NEW subscribe to the target plan, with a
-//     Model-B reduced FIRST pull (new_full - old_unused). That requires a wallet
-//     signature, which the synchronous TierChange API cannot collect itself, so we
-//     return requires_action directing the client to start a Solana subscription
-//     checkout session with upgrade_from_subscription_id set to this subscription.
-//     That session computes the reduced first charge, has the wallet sign the new
-//     subscribe, enrolls, and then soft-cancels THIS subscription. No charge or
-//     state change happens here.
+//   - UPGRADE: the prepare endpoint returns a PARTIALLY-signed (cranker co-signed)
+//     [cancel + subscribe + prorated transfer] tx; the wallet completes + sends it,
+//     then confirms. The Model-B prorated first pull (new_full - old_unused) is
+//     charged atomically with the switch. The confirm step mirrors the new
+//     membership + cancels the old.
 //
-//   - DOWNGRADE: deferred to period end via ScheduledPriceID (identical convention
-//     to the card paths). No proration, no immediate charge.
+//   - DOWNGRADE: the prepare endpoint returns an UNSIGNED [cancel + subscribe] tx
+//     (no immediate charge); the wallet signs + sends, then confirms. The confirm
+//     step defers the new plan's first pull to the OLD period end, so the user
+//     keeps the higher tier they already paid for until then.
 //
-//     NOTE/TODO(#267): on Solana a downgrade cannot be auto-applied at the cranker
-//     boundary the way card renewals apply ScheduledPriceID, because the on-chain
-//     subscription stays bound to the OLD plan PDA — switching plans needs a new
-//     wallet-signed subscribe. We persist ScheduledPriceID for visibility (so the
-//     user/UI sees the pending change), but applying it still requires the user to
-//     re-subscribe at the lower tier. A follow-up issue tracks an at-boundary
-//     "downgrade requires re-subscribe" prompt; until then the scheduled downgrade
-//     is informational and the old plan keeps billing until cancelled.
+// No charge or DB state change happens in THIS method — it only routes the client
+// to the atomic endpoints (Solana is the source of truth; nothing is mirrored
+// until the on-chain switch is confirmed).
 func (s *CheckoutService) processTierChangeSolana(
 	ctx context.Context,
 	req *TierChangeRequest,
@@ -2226,47 +2224,28 @@ func (s *CheckoutService) processTierChangeSolana(
 	}
 
 	subID := existingSub.ID
-
-	if action == "downgrade" {
-		// Defer to period end (no immediate charge). Same ScheduledPriceID
-		// convention as the card paths.
-		if existingSub.ScheduledPriceID != nil {
-			return &TierChangeResponse{
-				Object:  "tier_change",
-				Status:  "blocked",
-				Mode:    "tier_change",
-				Action:  action,
-				PriceID: req.PriceID,
-				Payment: CheckoutSessionPaymentResponse{Processor: "solana"},
-				Message: "You already have a tier change scheduled. Cancel it before scheduling another.",
-			}, nil
-		}
-		existingSub.ScheduledPriceID = &newPrice.ID
-		if err := s.SubscriptionService.Update(ctx, existingSub); err != nil {
-			return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "failed to schedule downgrade"}
-		}
-		effectiveDate := "the end of your current billing period"
-		if existingSub.CurrentPeriodEndsAt != nil {
-			effectiveDate = existingSub.CurrentPeriodEndsAt.Format("January 2, 2006")
-		}
-		subIDStr := api.FormatSubscriptionID(subID)
-		return &TierChangeResponse{
-			Object:         "tier_change",
-			Status:         "succeeded",
-			Mode:           "tier_change",
-			Action:         action,
-			PriceID:        req.PriceID,
-			Payment:        CheckoutSessionPaymentResponse{Processor: "solana"},
-			SubscriptionID: &subIDStr,
-			Message:        fmt.Sprintf("Downgrade to %s scheduled for %s. To apply it you'll re-subscribe at the lower tier; your current plan keeps billing until then.", newProduct.DisplayName, effectiveDate),
-			DelayedStart:   existingSub.CurrentPeriodEndsAt,
-		}, nil
-	}
-
-	// UPGRADE: direct the client to start a Solana subscription checkout session
-	// with upgrade_from_subscription_id = this subscription. That flow charges the
-	// Model-B reduced first pull, enrolls the new plan, then soft-cancels this one.
 	subIDStr := api.FormatSubscriptionID(subID)
+
+	// Solana tier changes are a single ATOMIC on-chain transaction the subscriber
+	// signs (cancel-old + subscribe-new [+ prorated transfer for an upgrade]), so
+	// they cannot be driven from this server-side card path — they go through the
+	// dedicated prepare/confirm endpoints (#272), which build the co-signed tx and
+	// mirror the confirmed switch into the DB. Direct the client there for BOTH an
+	// upgrade (prorated first pull, charged atomically) and a downgrade (deferred
+	// to the old period end, no immediate charge).
+	endpoint := fmt.Sprintf("POST /v1/self/subscriptions/%s/solana-tier-change", subIDStr)
+	var msg string
+	if action == "downgrade" {
+		msg = fmt.Sprintf(
+			"To downgrade to %s, call %s with new_price_id=%s, sign the returned transaction in your wallet, then confirm it. There is no immediate charge — your current plan keeps billing until the period ends, then rebills at the lower tier.",
+			newProduct.DisplayName, endpoint, req.PriceID,
+		)
+	} else {
+		msg = fmt.Sprintf(
+			"To upgrade to %s, call %s with new_price_id=%s, sign the returned (co-signed) transaction in your wallet, then confirm it. You'll be charged the prorated difference atomically on the switch; your old plan is cancelled in the same transaction.",
+			newProduct.DisplayName, endpoint, req.PriceID,
+		)
+	}
 	return &TierChangeResponse{
 		Object:         "tier_change",
 		Status:         "requires_action",
@@ -2275,10 +2254,7 @@ func (s *CheckoutService) processTierChangeSolana(
 		PriceID:        req.PriceID,
 		Payment:        CheckoutSessionPaymentResponse{Processor: "solana"},
 		SubscriptionID: &subIDStr,
-		Message: fmt.Sprintf(
-			"To upgrade to %s, start a Solana subscription checkout for this price with upgrade_from_subscription_id=%s and sign the new subscribe in your wallet. You'll be charged the prorated difference on the first pull; your current plan is cancelled once the upgrade is confirmed.",
-			newProduct.DisplayName, subIDStr,
-		),
+		Message:        msg,
 	}, nil
 }
 

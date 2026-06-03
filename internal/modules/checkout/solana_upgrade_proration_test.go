@@ -9,11 +9,12 @@ import (
 )
 
 // TestSolanaUpgradeReducedFirstCharge composes the two pure functions the Solana
-// Model-B upgrade orchestration chains (#267): CalculateModelBUpgradeCharge to get
-// the reduced first charge in CENTS, then FiatCentsToStablecoinBaseUnits to get the
-// on-chain first pull in USDC base units. It pins that an upgrade computes the
-// RIGHT reduced amount (not the full new price) and that a non-upgrade / clamped
-// case behaves correctly.
+// tier-change PREPARE endpoint chains for an UPGRADE (#272, math shared with the
+// #267/#268 Model-B policy): CalculateModelBUpgradeCharge to get the reduced first
+// charge in CENTS, then FiatCentsToStablecoinBaseUnits to get the on-chain
+// FirstChargeBaseUnits in USDC base units. It pins that an upgrade composes the
+// RIGHT reduced amount (not the full new price) into PrepareTierChangeInput, and
+// that the clamped/no-credit cases behave correctly.
 func TestSolanaUpgradeReducedFirstCharge(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
@@ -75,5 +76,28 @@ func TestSolanaUpgradeReducedFirstCharge(t *testing.T) {
 				t.Fatalf("first pull base units: expected %d, got %d", tt.wantBaseUnits, gotUnits)
 			}
 		})
+	}
+}
+
+// TestSolanaDowngradeHasZeroFirstCharge pins that a DOWNGRADE composes a ZERO
+// FirstChargeBaseUnits into PrepareTierChangeInput (#272): there is no immediate
+// charge — the first pull is deferred to the old period end. The tier-change
+// prepare endpoint only computes the prorated first charge for an UPGRADE; a
+// downgrade leaves FirstChargeBaseUnits at its zero value and the prepare service
+// builds the unsigned [cancel + subscribe] bundle with no transfer.
+func TestSolanaDowngradeHasZeroFirstCharge(t *testing.T) {
+	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	cycle := 30
+
+	// A "downgrade" (newFull < oldFull) routed through the Model-B charge clamps to
+	// 0 cents, and the prepare endpoint additionally SKIPS this computation for a
+	// downgrade entirely — either way the composed first charge is zero.
+	firstCents, _ := CalculateModelBUpgradeCharge(5000, 2000, timePtr(now.Add(15*24*time.Hour)), &cycle, now)
+	if firstCents != 0 {
+		t.Fatalf("a downgrade must not produce a positive Model-B first charge, got %d cents", firstCents)
+	}
+	gotUnits := solanamodule.FiatCentsToStablecoinBaseUnits(context.Background(), firstCents, "USDC", nil)
+	if gotUnits != 0 {
+		t.Fatalf("downgrade FirstChargeBaseUnits must be 0, got %d", gotUnits)
 	}
 }

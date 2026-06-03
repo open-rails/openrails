@@ -84,6 +84,8 @@ func TestSelfService_SubscriptionMutationsMountedAndGated(t *testing.T) {
 		{"cancel", http.MethodPost, "/v1/self/subscriptions/sub_123/cancel"},
 		{"solana-cancel-tx", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-cancel-tx"},
 		{"solana-cancel-confirm", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-cancel"},
+		{"solana-tier-change", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-tier-change"},
+		{"solana-tier-change-confirm", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-tier-change/confirm"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

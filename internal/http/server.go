@@ -216,9 +216,15 @@ func New(deps Dependencies) (*Server, error) {
 		// workers start (InitRiver).
 		if deps.Runtime != nil && deps.Runtime.SolanaRPC != nil {
 			var submitter recurring.Submitter
+			// solanaSigner is the SAME per-tenant signer the Submitter wraps. The
+			// tier-change prepare service (#272) co-signs the merchant/cranker slot
+			// with it directly, so it MUST be the same key as the cranker.
+			var solanaSigner solanaint.Signer
 			if solanaTransit != nil {
+				solanaSigner = recurring.NewSignerFromTransit(solanaTransit, 0)
 				submitter = recurring.NewSignerSubmitterFromTransit(solanaTransit, deps.Runtime.SolanaRPC, 0)
 			} else {
+				solanaSigner = recurring.NewSignerFromStore(secretStore, 0)
 				submitter = recurring.NewSignerSubmitterFromStore(secretStore, deps.Runtime.SolanaRPC, 0)
 			}
 			network := "mainnet"
@@ -249,6 +255,17 @@ func New(deps Dependencies) (*Server, error) {
 					deps.Runtime.SolanaRPC,
 				))
 
+				// App-driven on-chain tier change (#272): the prepare/confirm pair.
+				// PrepareTierChangeService builds the SINGLE ATOMIC tx (cancel-old +
+				// subscribe-new [+ prorated transfer for an upgrade]); for an upgrade it
+				// co-signs the merchant/cranker slot with the SAME signer + RPC + network
+				// as the cranker, so the slot it pre-signs is the merchant's own key.
+				deps.Runtime.SetSolanaPrepareTierChangeService(recurring.NewPrepareTierChangeService(
+					solanaSigner,
+					deps.Runtime.SolanaRPC,
+					network,
+				))
+
 				// Subscribe-via-checkout (#261/#262): the prepare service builds the
 				// unsigned init/subscribe txns; enroll confirms. Wire both into the
 				// checkout session service so /v1/self/checkout(+confirm) drives the
@@ -256,9 +273,6 @@ func New(deps Dependencies) (*Server, error) {
 				if deps.Runtime.CheckoutSessionService != nil {
 					prepareSvc := recurring.NewPrepareSubscribeService(submitter, deps.Runtime.SolanaRPC, network)
 					deps.Runtime.CheckoutSessionService.SetSolanaRecurring(prepareSvc, enrollSvc)
-					// Model-B upgrade (#267): the lifecycle cancel surface used to
-					// soft-cancel the OLD subscription after the new upgrade enrolls.
-					deps.Runtime.CheckoutSessionService.SetSolanaUpgradeCanceller(deps.Runtime.SubscriptionLifecycleService)
 				}
 			}
 		}
