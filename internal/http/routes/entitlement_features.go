@@ -1,11 +1,11 @@
 package routes
 
 import (
-	"github.com/gin-gonic/gin"
+	"net/http"
 
 	"github.com/open-rails/openrails/internal/app"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
-	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/http/router"
 )
 
 // RegisterEntitlementFeatureRoutes mounts the Stripe-shaped entitlement-feature
@@ -30,18 +30,14 @@ import (
 // resolve any user). For the browser self-service surface, mount
 // httphandlers.SelfGetActiveEntitlements separately (it derives the user from the
 // delegated token instead of a query param).
-func RegisterEntitlementFeatureRoutes(group *gin.RouterGroup, rt *app.Runtime) {
-	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
-		return wrapHandler(rt, fn)
-	}
-
+func RegisterEntitlementFeatureRoutes(group router.Router, rt *app.Runtime) {
 	ent := group.Group("/entitlements")
-	ent.POST("/features", wrap(httphandlers.CreateEntitlementFeature))
-	ent.GET("/features", wrap(httphandlers.ListEntitlementFeatures))
-	ent.GET("/active_entitlements", wrap(httphandlers.ServiceGetActiveEntitlements))
+	ent.Handle(http.MethodPost, "/features", h(httphandlers.CreateEntitlementFeature))
+	ent.Handle(http.MethodGet, "/features", h(httphandlers.ListEntitlementFeatures))
+	ent.Handle(http.MethodGet, "/active_entitlements", h(httphandlers.ServiceGetActiveEntitlements))
 
 	products := group.Group("/products/:id/features")
-	products.GET("", wrap(httphandlers.ListProductFeatures))
-	products.POST("", wrap(httphandlers.AttachProductFeature))
-	products.DELETE("/:product_feature_id", wrap(httphandlers.DetachProductFeature))
+	products.Handle(http.MethodGet, "", h(httphandlers.ListProductFeatures))
+	products.Handle(http.MethodPost, "", h(httphandlers.AttachProductFeature))
+	products.Handle(http.MethodDelete, "/:product_feature_id", h(httphandlers.DetachProductFeature))
 }

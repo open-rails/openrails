@@ -12,18 +12,22 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/crypto"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/http/router"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 )
 
@@ -45,8 +49,14 @@ type Server struct {
 	runtime      *app.Runtime
 	rdb          *redis.Client
 	authProvider authprovider.Provider
-	controlPlane *controlplane.ControlPlane
-	captchaStore *captcha.ChallengeStore
+	// authenticator is the framework-neutral auth boundary used by the gin-free
+	// embedded surface (issue #282). It is derived from authProvider when that
+	// provider exposes one (AuthKit-backed + ProviderFromAuthenticator do); a host
+	// may also set it explicitly. nil when neither is available — embedded
+	// auth-gated routes then fail closed with 500 (see Options.requiredMW).
+	authenticator billingauth.Authenticator
+	controlPlane  *controlplane.ControlPlane
+	captchaStore  *captcha.ChallengeStore
 
 	// tenancy is the tenant provisioning + lifecycle + per-tenant secret service
 	// (issue #225). Built only when the control plane is present (it owns the
@@ -133,6 +143,15 @@ func New(deps Dependencies) (*Server, error) {
 		authProvider: deps.AuthProvider,
 		controlPlane: deps.ControlPlane,
 		captchaStore: captcha.NewChallengeStore(deps.Redis),
+	}
+	// Derive the gin-free authenticator from the provider when possible (issue
+	// #282). The AuthKit-backed provider and ProviderFromAuthenticator both expose
+	// one; a custom gin-only provider does not, in which case the embedded
+	// auth-gated routes fail closed (the standalone gin surface is unaffected).
+	if deps.AuthProvider != nil {
+		if a, ok := authprovider.AsAuthenticator(deps.AuthProvider); ok {
+			s.authenticator = a
+		}
 	}
 
 	// Build the tenant provisioning/lifecycle/secret service when the control
@@ -402,20 +421,53 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	return e
 }
 
-func (s *Server) newHTTPHandlerEngine(opts HTTPHandlerOptions) *gin.Engine {
+// newHTTPHandlerMux assembles the embedded billing surface as a gin-free
+// *http.ServeMux (issue #282). Route groups are registered via router.NewMux
+// (request.NewHTTP backend), and the captcha routes are plain net/http handlers.
+// The mux is wrapped with the net/http base middleware stack (security headers,
+// CORS, body limit, tenant resolution) — the gin-free analogue of the global
+// engine middleware. The returned handler imports zero gin on the request path.
+//
+// NOTE: rate-limiting + the captcha challenge flow are NOT applied here (they are
+// gin/captcha-flow-coupled; the standalone gin surface keeps them, and embedded
+// hosts front billing with their own gateway). See middleware/http_base.go.
+func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
 	opts = opts.withDefaults()
-	e := s.newPublicEngine()
+	mux := http.NewServeMux()
 
 	if opts.IncludeUser {
-		s.registerUserRoutesAt(e, EmbeddedV1Prefix)
+		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.
+		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandlerHTTP)
+		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandlerHTTP)
+		httproutes.RegisterUserRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.runtime), s.runtime, httproutes.Options{
+			AuthProvider:  s.authProvider,
+			Authenticator: s.embeddedAuthenticator(),
+		})
 	}
 	if opts.IncludeAdmin {
-		s.registerAdminRoutesAt(e, EmbeddedV1Prefix)
+		adminOpts := httproutes.Options{
+			AuthProvider:  s.authProvider,
+			Authenticator: s.embeddedAuthenticator(),
+		}
+		if s.controlPlane != nil {
+			adminOpts.OperatorPermissionChecker = authpolicy.OperatorPermissionChecker(s.controlPlane)
+		}
+		httproutes.RegisterAdminRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/admin", s.runtime), s.runtime, adminOpts)
 	}
 	if opts.IncludeWebhooks {
-		s.registerWebhookRoutesAt(e, EmbeddedV1Prefix)
+		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.runtime), s.runtime)
 	}
-	return e
+
+	var origins []string
+	if s.cfg != nil {
+		origins = s.cfg.AllowedCORSOrigins()
+	}
+	return middleware.ChainHTTP(mux,
+		middleware.SecurityHeadersHTTP(),
+		middleware.CORSHTTP(origins),
+		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+		middleware.ResolveTenantHTTP(),
+	)
 }
 
 // NewHTTPHandler returns a single mountable `http.Handler` for the selected route groups.
@@ -424,7 +476,13 @@ func (s *Server) newHTTPHandlerEngine(opts HTTPHandlerOptions) *gin.Engine {
 //
 // Embedded routes live under `/billing/v1/*`.
 func (s *Server) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
-	return s.newHTTPHandlerEngine(opts)
+	return s.newHTTPHandlerMux(opts)
+}
+
+// embeddedAuthenticator returns the framework-neutral Authenticator used by the
+// embedded route surface (issue #282), or nil when none is available.
+func (s *Server) embeddedAuthenticator() billingauth.Authenticator {
+	return s.authenticator
 }
 
 func (s *Server) wrap(fn func(r *httprequest.Request)) func(c *gin.Context) {

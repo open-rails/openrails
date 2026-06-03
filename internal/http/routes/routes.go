@@ -1,6 +1,9 @@
 package routes
 
 import (
+	"errors"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/open-rails/openrails/internal/app"
@@ -9,7 +12,9 @@ import (
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 // ServiceRoutePrefix is the path under the tenant-scoped public API where
@@ -40,11 +45,63 @@ const TenantAdminRoutePrefix = "/tenant-admin"
 type Options struct {
 	AuthProvider authprovider.Provider
 
+	// Authenticator is the framework-neutral auth boundary used when the routes
+	// are mounted on the gin-free net/http surface (issue #282). When set, the
+	// neutral Required/Optional middleware is built from it. On the gin standalone
+	// surface it is nil and AuthProvider.Required()/Optional() are used via an
+	// adapter. Exactly one of the two paths is exercised per mount.
+	Authenticator billingauth.Authenticator
+
 	// OperatorPermissionChecker, when set, makes the operator org the LIVE
 	// authority for admin routes (#224): after the operator-org gate, admin
 	// routes additionally require the openrails:admin permission evaluated live
 	// against the operator org. nil in verifier-only mode (legacy gate only).
 	OperatorPermissionChecker authpolicy.OperatorPermissionChecker
+}
+
+// requiredMW builds the neutral "authentication required" middleware for the
+// embedded surface. It authenticates via opts.Authenticator, aborts 401 on
+// failure, and pins the resulting UserContext on the request context (the single
+// contract handlers + the operator gates read via FromContext).
+func (opts Options) requiredMW() router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			a := opts.Authenticator
+			if a == nil {
+				r.AbortJSON(http.StatusInternalServerError, "authentication disabled")
+				return
+			}
+			uc, err := a.Authenticate(r.Request.Context(), r.Request)
+			if err != nil {
+				r.AbortJSON(http.StatusUnauthorized, unauthenticatedMessage(err))
+				return
+			}
+			r.Request = r.Request.WithContext(billingauth.SetUserContext(r.Request.Context(), uc))
+			next(r)
+		}
+	}
+}
+
+// optionalMW builds the neutral best-effort auth middleware: it attempts
+// authentication and pins the UserContext when it succeeds, but never aborts.
+func (opts Options) optionalMW() router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			if a := opts.Authenticator; a != nil {
+				if uc, err := a.Authenticate(r.Request.Context(), r.Request); err == nil {
+					r.Request = r.Request.WithContext(billingauth.SetUserContext(r.Request.Context(), uc))
+				}
+			}
+			next(r)
+		}
+	}
+}
+
+func unauthenticatedMessage(err error) string {
+	if err == nil || errors.Is(err, billingauth.ErrUnauthenticated) {
+		return "authentication required"
+	}
+	return err.Error()
 }
 
 func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFunc {
@@ -53,144 +110,146 @@ func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFu
 	}
 }
 
-func RegisterUserRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
-	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
-		return wrapHandler(rt, fn)
-	}
+// h adapts a handler func to the neutral router.Handler type.
+func h(fn func(r *httprequest.Request)) router.Handler {
+	return router.Handler(fn)
+}
+
+func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	required := opts.requiredMW()
+	optional := opts.optionalMW()
 
 	// Pin a tenant-scoped DB connection for the request (tenant resolved by the
 	// global ResolveTenant middleware) so RLS constrains tenant-owned queries
-	// (issue #227).
+	// (issue #227). It applies to every route in this group.
+	var group router.Router = rr
 	if rt != nil && rt.DB != nil {
-		group.Use(middleware.TenantDBConn(rt.DB))
+		group = rr.Group("", middleware.TenantDBConnMW(rt.DB))
 	}
 
-	group.GET("/products", opts.AuthProvider.Optional(), wrap(httphandlers.GetProducts))
-	group.GET("/prices", opts.AuthProvider.Optional(), wrap(httphandlers.GetPrices))
-	group.GET("/solana/tokens", wrap(httphandlers.GetSupportedTokens))
+	group.Handle(http.MethodGet, "/products", h(httphandlers.GetProducts), optional)
+	group.Handle(http.MethodGet, "/prices", h(httphandlers.GetPrices), optional)
+	group.Handle(http.MethodGet, "/solana/tokens", h(httphandlers.GetSupportedTokens))
 
-	checkout := group.Group("/checkout")
-	checkout.Use(opts.AuthProvider.Required())
-	checkout.POST("", wrap(httphandlers.CreateCheckoutSession))
-	checkout.GET("/:id", wrap(httphandlers.GetCheckoutSession))
-	checkout.POST("/:id/confirm", wrap(httphandlers.ConfirmCheckoutSession))
+	checkout := group.Group("/checkout", required)
+	checkout.Handle(http.MethodPost, "", h(httphandlers.CreateCheckoutSession))
+	checkout.Handle(http.MethodGet, "/:id", h(httphandlers.GetCheckoutSession))
+	checkout.Handle(http.MethodPost, "/:id/confirm", h(httphandlers.ConfirmCheckoutSession))
 
-	group.GET("/checkout/:id/solana-pay", wrap(httphandlers.GetSolanaPay))
-	group.POST("/checkout/:id/solana-pay", wrap(httphandlers.PostSolanaPay))
+	group.Handle(http.MethodGet, "/checkout/:id/solana-pay", h(httphandlers.GetSolanaPay))
+	group.Handle(http.MethodPost, "/checkout/:id/solana-pay", h(httphandlers.PostSolanaPay))
 
 	// Solana recurring enrollment (#255): the wallet signs subscribe client-side,
 	// then confirms here to charge the first cycle + create the membership.
-	group.POST("/solana/recurring/enroll", wrap(httphandlers.ConfirmSolanaEnrollment))
+	group.Handle(http.MethodPost, "/solana/recurring/enroll", h(httphandlers.ConfirmSolanaEnrollment))
 
-	me := group.Group("/me")
-	me.Use(opts.AuthProvider.Required())
-	me.GET("/status", wrap(httphandlers.GetMyBillingStatus))
-	me.GET("/subscriptions", wrap(httphandlers.GetMySubscriptions))
-	me.GET("/subscriptions/:id", wrap(httphandlers.GetSubscription))
-	me.PUT("/subscriptions/:id/payment-method", wrap(httphandlers.UpdateSubscriptionPaymentMethod))
-	me.POST("/subscriptions/:id/cancel", wrap(httphandlers.CancelSubscription))
-	me.POST("/subscriptions/:id/resume", wrap(httphandlers.ResumeSubscription))
-	me.POST("/subscriptions/:id/change-tier", wrap(httphandlers.ChangeTier))
-	me.GET("/payments", wrap(httphandlers.GetUserPayments))
-	me.GET("/payment-methods", wrap(httphandlers.ListPaymentMethods))
-	me.POST("/payment-methods", wrap(httphandlers.CreatePaymentMethod))
-	me.PUT("/payment-methods/:id", wrap(httphandlers.UpdatePaymentMethod))
-	me.DELETE("/payment-methods/:id", wrap(httphandlers.DeletePaymentMethod))
-	me.GET("/notifications", wrap(httphandlers.GetNotifications))
-	me.GET("/notifications/unread-count", wrap(httphandlers.GetUnreadNotificationCount))
-	me.POST("/notifications/:id/read", wrap(httphandlers.MarkNotificationRead))
-	me.GET("/credits", wrap(httphandlers.GetMyCredits))
-	me.GET("/credits/:type", wrap(httphandlers.GetMyCreditsType))
-	me.GET("/credits/:type/transactions", wrap(httphandlers.GetMyCreditTransactions))
-	me.GET("/products", wrap(httphandlers.GetMyProducts))
-	me.GET("/products/:product_id/access", wrap(httphandlers.GetMyProductAccess))
+	me := group.Group("/me", required)
+	me.Handle(http.MethodGet, "/status", h(httphandlers.GetMyBillingStatus))
+	me.Handle(http.MethodGet, "/subscriptions", h(httphandlers.GetMySubscriptions))
+	me.Handle(http.MethodGet, "/subscriptions/:id", h(httphandlers.GetSubscription))
+	me.Handle(http.MethodPut, "/subscriptions/:id/payment-method", h(httphandlers.UpdateSubscriptionPaymentMethod))
+	me.Handle(http.MethodPost, "/subscriptions/:id/cancel", h(httphandlers.CancelSubscription))
+	me.Handle(http.MethodPost, "/subscriptions/:id/resume", h(httphandlers.ResumeSubscription))
+	me.Handle(http.MethodPost, "/subscriptions/:id/change-tier", h(httphandlers.ChangeTier))
+	me.Handle(http.MethodGet, "/payments", h(httphandlers.GetUserPayments))
+	me.Handle(http.MethodGet, "/payment-methods", h(httphandlers.ListPaymentMethods))
+	me.Handle(http.MethodPost, "/payment-methods", h(httphandlers.CreatePaymentMethod))
+	me.Handle(http.MethodPut, "/payment-methods/:id", h(httphandlers.UpdatePaymentMethod))
+	me.Handle(http.MethodDelete, "/payment-methods/:id", h(httphandlers.DeletePaymentMethod))
+	me.Handle(http.MethodGet, "/notifications", h(httphandlers.GetNotifications))
+	me.Handle(http.MethodGet, "/notifications/unread-count", h(httphandlers.GetUnreadNotificationCount))
+	me.Handle(http.MethodPost, "/notifications/:id/read", h(httphandlers.MarkNotificationRead))
+	me.Handle(http.MethodGet, "/credits", h(httphandlers.GetMyCredits))
+	me.Handle(http.MethodGet, "/credits/:type", h(httphandlers.GetMyCreditsType))
+	me.Handle(http.MethodGet, "/credits/:type/transactions", h(httphandlers.GetMyCreditTransactions))
+	me.Handle(http.MethodGet, "/products", h(httphandlers.GetMyProducts))
+	me.Handle(http.MethodGet, "/products/:product_id/access", h(httphandlers.GetMyProductAccess))
 
-	stripe := group.Group("/stripe")
-	stripe.Use(opts.AuthProvider.Required())
-	stripe.POST("/portal", wrap(httphandlers.CreatePortalSession))
+	stripe := group.Group("/stripe", required)
+	stripe.Handle(http.MethodPost, "/portal", h(httphandlers.CreatePortalSession))
 }
 
-func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) {
-	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
-		return wrapHandler(rt, fn)
+func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	mw := []router.Middleware{
+		opts.requiredMW(),
+		authpolicy.OperatorAdminRequiredMW(rt.Config, rt.DB.GetDB()),
 	}
-
-	group.Use(opts.AuthProvider.Required())
-	group.Use(authpolicy.OperatorAdminRequired(rt.Config, rt.DB.GetDB()))
 	// #224: when the OpenRails-owned AuthKit control plane is present, the
 	// operator org is the LIVE authority — require the openrails:admin permission
 	// evaluated against the operator org at request time. This is the forward
 	// path away from the global-admin fallback.
 	if opts.OperatorPermissionChecker != nil {
-		group.Use(authpolicy.OperatorPermissionRequired(opts.OperatorPermissionChecker, controlplane.PermAdmin))
+		mw = append(mw, authpolicy.OperatorPermissionRequiredMW(opts.OperatorPermissionChecker, controlplane.PermAdmin))
 	}
 	// Pin a tenant-scoped DB connection for the request so RLS constrains
 	// tenant-owned admin queries (issue #227).
 	if rt != nil && rt.DB != nil {
-		group.Use(middleware.TenantDBConn(rt.DB))
+		mw = append(mw, middleware.TenantDBConnMW(rt.DB))
 	}
 
-	group.GET("/subscriptions", wrap(httphandlers.GetAdminSubscriptions))
-	group.GET("/subscriptions/:id", wrap(httphandlers.GetAdminSubscription))
-	group.POST("/subscriptions/:id/cancel", wrap(httphandlers.AdminCancelSubscription))
+	group := rr.Group("", mw...)
 
-	group.GET("/payments", wrap(httphandlers.GetAdminPayments))
-	group.GET("/payments/:id", wrap(httphandlers.GetAdminPayment))
-	group.POST("/payments/:id/refund", wrap(httphandlers.AdminRefundPayment))
-	group.GET("/users/:user_id/payments", wrap(httphandlers.GetAdminUserPayments))
-	group.POST("/users/:user_id/payments/off-channel", wrap(httphandlers.AdminCreateOffChannelPayment))
-	group.GET("/repair-alerts", wrap(httphandlers.GetAdminRepairAlerts))
-	group.GET("/manual-rebill-attempts", wrap(httphandlers.GetAdminManualRebillAttempts))
+	group.Handle(http.MethodGet, "/subscriptions", h(httphandlers.GetAdminSubscriptions))
+	group.Handle(http.MethodGet, "/subscriptions/:id", h(httphandlers.GetAdminSubscription))
+	group.Handle(http.MethodPost, "/subscriptions/:id/cancel", h(httphandlers.AdminCancelSubscription))
 
-	group.GET("/users/:user_id", wrap(httphandlers.GetAdminUserBillingProfile))
-	group.GET("/users/:user_id/entitlements", wrap(httphandlers.GetAdminUserEntitlements))
-	group.GET("/users/:user_id/nmi", wrap(httphandlers.GetAdminUserNMI))
-	group.GET("/users/:user_id/nmi/metrics", wrap(httphandlers.GetAdminUserNMIMetrics))
-	group.GET("/users/:user_id/ccbill", wrap(httphandlers.GetAdminUserCCBill))
-	group.GET("/users/:user_id/ccbill/metrics", wrap(httphandlers.GetAdminUserCCBillMetrics))
-	group.POST("/users/:user_id/entitlements", wrap(httphandlers.GrantAdminEntitlement))
-	group.DELETE("/users/:user_id/entitlements/:id", wrap(httphandlers.RevokeAdminEntitlement))
+	group.Handle(http.MethodGet, "/payments", h(httphandlers.GetAdminPayments))
+	group.Handle(http.MethodGet, "/payments/:id", h(httphandlers.GetAdminPayment))
+	group.Handle(http.MethodPost, "/payments/:id/refund", h(httphandlers.AdminRefundPayment))
+	group.Handle(http.MethodGet, "/users/:user_id/payments", h(httphandlers.GetAdminUserPayments))
+	group.Handle(http.MethodPost, "/users/:user_id/payments/off-channel", h(httphandlers.AdminCreateOffChannelPayment))
+	group.Handle(http.MethodGet, "/repair-alerts", h(httphandlers.GetAdminRepairAlerts))
+	group.Handle(http.MethodGet, "/manual-rebill-attempts", h(httphandlers.GetAdminManualRebillAttempts))
+
+	group.Handle(http.MethodGet, "/users/:user_id", h(httphandlers.GetAdminUserBillingProfile))
+	group.Handle(http.MethodGet, "/users/:user_id/entitlements", h(httphandlers.GetAdminUserEntitlements))
+	group.Handle(http.MethodGet, "/users/:user_id/nmi", h(httphandlers.GetAdminUserNMI))
+	group.Handle(http.MethodGet, "/users/:user_id/nmi/metrics", h(httphandlers.GetAdminUserNMIMetrics))
+	group.Handle(http.MethodGet, "/users/:user_id/ccbill", h(httphandlers.GetAdminUserCCBill))
+	group.Handle(http.MethodGet, "/users/:user_id/ccbill/metrics", h(httphandlers.GetAdminUserCCBillMetrics))
+	group.Handle(http.MethodPost, "/users/:user_id/entitlements", h(httphandlers.GrantAdminEntitlement))
+	group.Handle(http.MethodDelete, "/users/:user_id/entitlements/:id", h(httphandlers.RevokeAdminEntitlement))
 
 	// Admin catalog API (issue #205). Mounted alongside subscriptions/payments/users.
 	// Symmetric with pkg/service facade; embedded hosts may call the facade directly.
 	adminCatalog := group.Group("/catalog")
 	adminProducts := adminCatalog.Group("/products")
-	adminProducts.POST("", wrap(httphandlers.AdminCreateProduct))
-	adminProducts.GET("", wrap(httphandlers.AdminListProducts))
-	adminProducts.GET("/:id", wrap(httphandlers.AdminGetProduct))
-	adminProducts.GET("/by-slug/:slug", wrap(httphandlers.AdminGetProductBySlug))
-	adminProducts.PATCH("/:id", wrap(httphandlers.AdminUpdateProduct))
-	adminProducts.POST("/:id/activate", wrap(httphandlers.AdminActivateProduct))
-	adminProducts.POST("/:id/deactivate", wrap(httphandlers.AdminDeactivateProduct))
-	adminProducts.POST("/:id/reconcile", wrap(httphandlers.AdminReconcileProduct))
+	adminProducts.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct))
+	adminProducts.Handle(http.MethodGet, "", h(httphandlers.AdminListProducts))
+	adminProducts.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetProduct))
+	adminProducts.Handle(http.MethodGet, "/by-slug/:slug", h(httphandlers.AdminGetProductBySlug))
+	adminProducts.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdateProduct))
+	adminProducts.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivateProduct))
+	adminProducts.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivateProduct))
+	adminProducts.Handle(http.MethodPost, "/:id/reconcile", h(httphandlers.AdminReconcileProduct))
 
 	adminPrices := adminCatalog.Group("/prices")
-	adminPrices.POST("", wrap(httphandlers.AdminCreatePrice))
-	adminPrices.GET("", wrap(httphandlers.AdminListPrices))
-	adminPrices.GET("/:id", wrap(httphandlers.AdminGetPrice))
-	adminPrices.PATCH("/:id", wrap(httphandlers.AdminUpdatePrice))
-	adminPrices.POST("/:id/activate", wrap(httphandlers.AdminActivatePrice))
-	adminPrices.POST("/:id/deactivate", wrap(httphandlers.AdminDeactivatePrice))
-	adminPrices.POST("/:id/reconcile", wrap(httphandlers.AdminReconcilePrice))
+	adminPrices.Handle(http.MethodPost, "", h(httphandlers.AdminCreatePrice))
+	adminPrices.Handle(http.MethodGet, "", h(httphandlers.AdminListPrices))
+	adminPrices.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetPrice))
+	adminPrices.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdatePrice))
+	adminPrices.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivatePrice))
+	adminPrices.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivatePrice))
+	adminPrices.Handle(http.MethodPost, "/:id/reconcile", h(httphandlers.AdminReconcilePrice))
 
 	// Catalog reconciliation loop drift surface (issue #209). Alert-only:
 	// these endpoints never mutate Stripe, NMI, or the catalog rows. Operators
 	// resolve drift via the per-price reconcile action above. CCBill is never
 	// reconciled (no catalog-list API), so it never appears in these surfaces.
-	adminCatalog.GET("/drift", wrap(httphandlers.AdminListCatalogDrift))
-	adminCatalog.POST("/drift/refresh", wrap(httphandlers.AdminRefreshCatalogDrift))
+	adminCatalog.Handle(http.MethodGet, "/drift", h(httphandlers.AdminListCatalogDrift))
+	adminCatalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift))
 	// reconcile-all is the spec-named alias for an on-demand synchronous pull.
-	adminCatalog.POST("/drift/reconcile-all", wrap(httphandlers.AdminRefreshCatalogDrift))
+	adminCatalog.Handle(http.MethodPost, "/drift/reconcile-all", h(httphandlers.AdminRefreshCatalogDrift))
 	// /orphans is provider-filterable (?provider=stripe|nmi); /stripe/orphans is
 	// the operator-friendly convenience alias scoped to Stripe.
-	adminCatalog.GET("/orphans", wrap(httphandlers.AdminListCatalogOrphans))
-	adminCatalog.GET("/stripe/orphans", wrap(httphandlers.AdminListStripeOrphans))
+	adminCatalog.Handle(http.MethodGet, "/orphans", h(httphandlers.AdminListCatalogOrphans))
+	adminCatalog.Handle(http.MethodGet, "/stripe/orphans", h(httphandlers.AdminListStripeOrphans))
 
-	group.GET("/metrics/summary", wrap(httphandlers.GetAdminMetricsSummary))
-	group.GET("/metrics/revenue", wrap(httphandlers.GetAdminMetricsRevenue))
-	group.GET("/metrics/subscriptions", wrap(httphandlers.GetAdminMetricsSubscriptions))
-	group.GET("/metrics/processors", wrap(httphandlers.GetAdminMetricsProcessors))
-	group.GET("/metrics/churn", wrap(httphandlers.GetAdminMetricsChurn))
+	group.Handle(http.MethodGet, "/metrics/summary", h(httphandlers.GetAdminMetricsSummary))
+	group.Handle(http.MethodGet, "/metrics/revenue", h(httphandlers.GetAdminMetricsRevenue))
+	group.Handle(http.MethodGet, "/metrics/subscriptions", h(httphandlers.GetAdminMetricsSubscriptions))
+	group.Handle(http.MethodGet, "/metrics/processors", h(httphandlers.GetAdminMetricsProcessors))
+	group.Handle(http.MethodGet, "/metrics/churn", h(httphandlers.GetAdminMetricsChurn))
 
 	// Stripe-shaped entitlement features (issue #245): features CRUD,
 	// product-feature attachment, active-entitlements read. Operator-admin gated.
@@ -198,17 +257,17 @@ func RegisterAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, opts Options) 
 
 	// Solana recurring plans — admin surface (#254). Create-only: on-chain plan
 	// terms are immutable, so editing core terms = sunset + publish a new plan.
-	group.POST("/solana/recurring/plans", wrap(httphandlers.AdminPublishSolanaPlan))
+	group.Handle(http.MethodPost, "/solana/recurring/plans", h(httphandlers.AdminPublishSolanaPlan))
 
 	// Product access grants — admin surface (issue #250).
 	adminAccess := group.Group("/users/:user_id/product-access")
-	adminAccess.GET("", wrap(httphandlers.GetAdminUserProductAccess))
-	adminAccess.POST("", wrap(httphandlers.GrantAdminProductAccess))
-	adminAccess.DELETE("/:id", wrap(httphandlers.RevokeAdminProductAccess))
+	adminAccess.Handle(http.MethodGet, "", h(httphandlers.GetAdminUserProductAccess))
+	adminAccess.Handle(http.MethodPost, "", h(httphandlers.GrantAdminProductAccess))
+	adminAccess.Handle(http.MethodDelete, "/:id", h(httphandlers.RevokeAdminProductAccess))
 }
 
-func RegisterWebhookRoutes(group *gin.RouterGroup, rt *app.Runtime) {
-	group.POST(":provider", wrapHandler(rt, httphandlers.Webhook))
+func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
+	rr.Handle(http.MethodPost, "/:provider", h(httphandlers.Webhook))
 }
 
 // RegisterServiceRoutes mounts the server-to-server billing surface on a

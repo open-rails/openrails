@@ -15,8 +15,10 @@ import (
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/controlplane"
 	server "github.com/open-rails/openrails/internal/http"
+	"github.com/open-rails/openrails/internal/http/router/ginrouter"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/service"
 )
@@ -142,8 +144,9 @@ func (e *Embedded) RegisterUserRoutes(group *gin.RouterGroup, opts RouteOptions)
 	if auth == nil {
 		auth = e.app.AuthProvider
 	}
-	httproutes.RegisterUserRoutes(group, e.app.Runtime, httproutes.Options{
-		AuthProvider: auth,
+	httproutes.RegisterUserRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime, httproutes.Options{
+		AuthProvider:  auth,
+		Authenticator: authenticatorOf(auth),
 	})
 }
 
@@ -164,8 +167,9 @@ func (e *Embedded) RegisterAdminRoutes(group *gin.RouterGroup, opts RouteOptions
 	if auth == nil {
 		auth = e.app.AuthProvider
 	}
-	httproutes.RegisterAdminRoutes(group, e.app.Runtime, httproutes.Options{
-		AuthProvider: auth,
+	httproutes.RegisterAdminRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime, httproutes.Options{
+		AuthProvider:  auth,
+		Authenticator: authenticatorOf(auth),
 	})
 }
 
@@ -181,7 +185,20 @@ func (e *Embedded) RegisterWebhookRoutes(group *gin.RouterGroup) {
 	if e == nil || e.app == nil {
 		panic("embedded billing: not initialized")
 	}
-	httproutes.RegisterWebhookRoutes(group, e.app.Runtime)
+	httproutes.RegisterWebhookRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime)
+}
+
+// authenticatorOf recovers a framework-neutral Authenticator from a Provider for
+// the neutral route registration path (issue #282), or nil when the provider
+// only exposes gin middleware.
+func authenticatorOf(p authprovider.Provider) billingauth.Authenticator {
+	if p == nil {
+		return nil
+	}
+	if a, ok := authprovider.AsAuthenticator(p); ok {
+		return a
+	}
+	return nil
 }
 
 func (e *Embedded) RunWorkers(ctx context.Context) error {

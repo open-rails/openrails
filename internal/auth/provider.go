@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"context"
+	"net/http"
 	"strings"
 
 	"github.com/doujins-org/ginapi/response"
@@ -8,6 +10,7 @@ import (
 	authhttp "github.com/open-rails/authkit/http"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -21,6 +24,26 @@ func NewProvider(cfg *config.AuthConfig) (authprovider.Provider, error) {
 		return nil, err
 	}
 	return &authKitProvider{verifier: v}, nil
+}
+
+// Authenticate implements billingauth.Authenticator so the AuthKit-backed
+// provider can drive the gin-free embedded surface (issue #282). It verifies the
+// bearer token and returns the resulting UserContext, returning
+// billingauth.ErrUnauthenticated when no/invalid credential is present.
+func (p *authKitProvider) Authenticate(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
+	if p == nil || p.verifier == nil {
+		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
+	}
+	token := bearerToken(r.Header.Get("Authorization"))
+	if token == "" {
+		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
+	}
+	raw, err := p.verifier.Verify(token)
+	if err != nil {
+		log.WithError(err).Warn("jwt verification failed")
+		return billingauth.UserContext{}, err
+	}
+	return userContextFromClaims(raw), nil
 }
 
 func (p *authKitProvider) Required() gin.HandlerFunc {
