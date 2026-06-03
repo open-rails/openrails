@@ -19,6 +19,7 @@ import (
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/http/request/ginreq"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
@@ -483,7 +484,7 @@ func (s *Server) embeddedAuthenticator() billingauth.Authenticator {
 
 func (s *Server) wrap(fn func(r *httprequest.Request)) func(c *gin.Context) {
 	return func(c *gin.Context) {
-		fn(httprequest.New(c, s.runtime))
+		fn(ginreq.New(c, s.runtime))
 	}
 }
 

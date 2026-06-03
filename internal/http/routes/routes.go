@@ -12,6 +12,7 @@ import (
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/http/request/ginreq"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -100,7 +101,7 @@ func unauthenticatedMessage(err error) string {
 
 func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		fn(httprequest.New(c, rt))
+		fn(ginreq.New(c, rt))
 	}
 }
 
