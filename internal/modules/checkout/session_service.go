@@ -816,8 +816,14 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 		return fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutSessionValidation)
 	}
 	wallet := strings.TrimSpace(payment.Wallet)
+	// A subscribe session created WITHOUT a connected wallet is a Solana Pay
+	// (transaction-request) subscribe: the wallet is unknown until it scans the QR
+	// and POSTs its account to /solana-pay, where BuildSolanaPayTransaction calls
+	// PrepareSubscribeService and returns the init/subscribe tx. This is the
+	// recurring counterpart of the one-off transaction_request flow — driven purely
+	// by the price being recurring; the client never sends mode:one_off.
 	if wallet == "" {
-		return fmt.Errorf("%w: wallet is required for a solana subscription", ErrCheckoutSessionValidation)
+		return s.initializeSolanaSubscriptionPayRequest(ctx, session)
 	}
 	price, err := s.priceService.GetByID(ctx, session.PriceID)
 	if err != nil || price == nil {
@@ -879,6 +885,63 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 	session.ProcessorState["subscription_pda"] = res.SubscriptionPDA
 	session.ProcessorState["subscribe_step"] = res.Step
 	session.ProcessorState["sign_transactions"] = toAnySlice(res.Transactions)
+	return nil
+}
+
+// initializeSolanaSubscriptionPayRequest sets up a RECURRING subscribe over the
+// Solana Pay transaction-request flow (no wallet at create time). It persists the
+// canonical plan terms and marks the session flow=transaction_request so
+// sessionToResponse surfaces a solana_pay_url; the actual init/subscribe tx is
+// built later by BuildSolanaPayTransaction when the scanning wallet POSTs its
+// account. The decision to land here is purely price-driven (the price carries a
+// published Solana recurring plan → mode resolved to subscription) — no client
+// mode override. The duplicate-billing guard still runs up front so we never
+// hand out a QR that would double-bill.
+func (s *CheckoutSessionService) initializeSolanaSubscriptionPayRequest(ctx context.Context, session *models.CheckoutSession) error {
+	price, err := s.priceService.GetByID(ctx, session.PriceID)
+	if err != nil || price == nil {
+		return fmt.Errorf("%w: price not found", ErrCheckoutSessionValidation)
+	}
+
+	// Duplicate-billing guard (issue #269) — same as the wallet subscribe path:
+	// refuse to issue a Solana Pay QR that would create a second concurrent
+	// non-terminal subscription in the same product/tier-group.
+	if s.checkoutService != nil {
+		product, perr := s.productService.GetByID(ctx, price.ProductID)
+		if perr != nil || product == nil {
+			return fmt.Errorf("%w: product not found", ErrCheckoutSessionValidation)
+		}
+		conflict, cerr := s.checkoutService.CheckSubscriptionConflict(ctx, session.UserID, price, product)
+		if cerr != nil {
+			return fmt.Errorf("%w: failed to check existing subscriptions: %v", ErrCheckoutSessionValidation, cerr)
+		}
+		if conflict != nil && conflict.Blocked {
+			return fmt.Errorf("%w: %s", ErrCheckoutSessionConflict, conflict.Message)
+		}
+	}
+
+	terms, err := parseSolanaPlanTerms(price.GetProcessorConfig(models.ProcessorSolana))
+	if err != nil {
+		return err
+	}
+
+	expiresAt := s.now().Add(defaultCheckoutSessionTTL)
+	session.Status = models.CheckoutSessionStatusRequiresAction
+	session.ExpiresAt = &expiresAt
+	if session.ProcessorState == nil {
+		session.ProcessorState = map[string]any{}
+	}
+	// flow=transaction_request is what makes sessionToResponse build the
+	// solana_pay_url; the subscribe terms travel on ProcessorState exactly like the
+	// wallet path so BuildSolanaPayTransaction can re-derive the PrepareSubscribe
+	// input without trusting client input. subscribe_step starts empty — the first
+	// POST resolves it to "init" or "subscribe" from on-chain authority state.
+	session.ProcessorState["flow"] = "transaction_request"
+	session.ProcessorState["plan_id"] = strconv.FormatUint(terms.planID, 10)
+	session.ProcessorState["mint_symbol"] = terms.mintSymbol
+	session.ProcessorState["amount_base_units"] = strconv.FormatUint(terms.amount, 10)
+	session.ProcessorState["period_hours"] = strconv.FormatUint(terms.period, 10)
+	session.ProcessorState["plan_created_at"] = strconv.FormatInt(terms.createdAt, 10)
 	return nil
 }
 
@@ -1394,8 +1457,13 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 		if val, ok := session.ProcessorState["transaction_url"].(string); ok && strings.TrimSpace(val) != "" {
 			resp.Payment.TransactionURL = val
 		}
-		// Build solana_pay_url for transaction_request flow
-		if flow, ok := session.ProcessorState["flow"].(string); ok && flow == "transaction_request" {
+		// Build solana_pay_url for every Solana-Pay-capable session. The wallet POSTs
+		// its account to this URL and the matching BuildSolanaPayTransaction branch
+		// returns the right tx:
+		//   - transaction_request flow → one-off transfer OR recurring subscribe
+		//     (price-driven: BuildSolanaPayTransaction reads the session mode).
+		//   - solana_cancel / solana_tier_change modes → the lifecycle tx.
+		if solanaSessionUsesPayURL(session) {
 			// Construct the Solana Pay URL:
 			// - standalone: solana:{api_url}/v1/checkout/:id/solana-pay
 			// - embedded:   solana:{api_url}/v1/checkout/:id/solana-pay (api_url typically ends with /billing)
@@ -1508,6 +1576,25 @@ func (s *CheckoutSessionService) buildNextAction(resp *CheckoutSessionResponse) 
 		}
 	}
 	return nil
+}
+
+// solanaSessionUsesPayURL reports whether a session should surface a
+// solana_pay_url (i.e. the wallet completes it by scanning a QR / POSTing its
+// account to the solana-pay endpoint). True for the transaction_request flow
+// (one-off transfer OR recurring subscribe — the build endpoint picks based on
+// the session mode/price) and for the cancel / tier-change lifecycle modes.
+func solanaSessionUsesPayURL(session *models.CheckoutSession) bool {
+	if session == nil || session.Processor != models.ProcessorSolana {
+		return false
+	}
+	switch session.Mode {
+	case models.CheckoutSessionModeSolanaCancel, models.CheckoutSessionModeSolanaTierChange:
+		return true
+	}
+	if flow, ok := session.ProcessorState["flow"].(string); ok && flow == "transaction_request" {
+		return true
+	}
+	return false
 }
 
 // getAPIBaseURL returns the API base URL for building Solana Pay URLs.
@@ -2072,6 +2159,11 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		return s.buildSolanaCancelTransaction(ctx, session, account)
 	case models.CheckoutSessionModeSolanaTierChange:
 		return s.buildSolanaTierChangeTransaction(ctx, session, account)
+	case models.CheckoutSessionModeSubscription:
+		// RECURRING subscribe over Solana Pay (price-driven): build the init or the
+		// atomic [subscribe+transfer] tx via PrepareSubscribeService for the POSTed
+		// account, with the Solana Pay reference injected so the poller can detect it.
+		return s.buildSolanaSubscribeTransaction(ctx, session, account)
 	}
 
 	// Get token symbol from processor state
@@ -2187,6 +2279,88 @@ func (s *CheckoutSessionService) bindSolanaLifecycleReference(ctx context.Contex
 		return "", fmt.Errorf("%w: %v", ErrCheckoutSessionConflict, err)
 	}
 	return strings.TrimSpace(*session.Reference), nil
+}
+
+// buildSolanaSubscribeTransaction builds the RECURRING subscribe tx for a Solana
+// Pay (transaction-request) subscribe session. The decision to be here is purely
+// price-driven (mode==subscription, resolved from the price's recurring config) —
+// there is no client-supplied one-off override. It binds the Solana Pay reference
+// + payer to the POSTed account, calls PrepareSubscribeService for that wallet
+// with the reference injected, and tracks the init→subscribe step on
+// ProcessorState so a first-timer's second POST (after init lands) returns the
+// subscribe tx. The poller mirrors the confirmed subscribe via ConfirmEnrollment.
+func (s *CheckoutSessionService) buildSolanaSubscribeTransaction(ctx context.Context, session *models.CheckoutSession, account string) (*solanamodule.PayTransactionResponse, error) {
+	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
+		return nil, fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutSessionValidation)
+	}
+	if session.ProcessorState == nil {
+		session.ProcessorState = map[string]any{}
+	}
+	// The subscribe Solana Pay session is bound to the first wallet that POSTs its
+	// account (it becomes the subscriber + fee payer). A second, different wallet is
+	// rejected so the QR can't be hijacked mid-flow.
+	if existingPayer := strings.TrimSpace(getStringField(session.ProcessorState, "payer")); existingPayer != "" && existingPayer != account {
+		return nil, fmt.Errorf("%w: solana checkout session is already bound to a different payer", ErrCheckoutSessionConflict)
+	}
+	if session.Reference == nil || strings.TrimSpace(*session.Reference) == "" {
+		reference, err := solana.GenerateReference()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate reference: %w", err)
+		}
+		session.Reference = &reference
+	}
+	reference := strings.TrimSpace(*session.Reference)
+	session.ProcessorState["payer"] = account
+	session.ProcessorState["subscriber_wallet"] = account
+	if err := s.repo.BindSolanaTransactionRequest(ctx, session, account, s.now()); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionConflict, err)
+	}
+
+	terms := solanaPlanTerms{
+		planID:     getUint64Field(session.ProcessorState, "plan_id"),
+		mintSymbol: getStringField(session.ProcessorState, "mint_symbol"),
+		amount:     getUint64Field(session.ProcessorState, "amount_base_units"),
+		period:     getUint64Field(session.ProcessorState, "period_hours"),
+	}
+	if v := strings.TrimSpace(getStringField(session.ProcessorState, "plan_created_at")); v != "" {
+		terms.createdAt, _ = strconv.ParseInt(v, 10, 64)
+	}
+
+	res, err := s.solanaPrepareSubscribe.Prepare(ctx, recurring.PrepareSubscribeInput{
+		TenantID:         tenant.FromContextOrDefault(ctx),
+		SubscriberWallet: account,
+		PlanID:           terms.planID,
+		MintSymbol:       terms.mintSymbol,
+		AmountBaseUnits:  terms.amount,
+		PeriodHours:      terms.period,
+		PlanCreatedAt:    terms.createdAt,
+		Reference:        reference,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Transactions) == 0 {
+		return nil, fmt.Errorf("%w: no subscribe transaction produced", ErrCheckoutSessionConflict)
+	}
+
+	// Track the step so the poller knows whether the landed tx was init (advance,
+	// stay pending) or subscribe (enroll). A first-timer's second POST re-derives
+	// the step from on-chain authority state (now "subscribe" once init landed).
+	session.ProcessorState["subscribe_step"] = res.Step
+	session.ProcessorState["subscription_pda"] = res.SubscriptionPDA
+	session.UpdatedAt = s.now()
+	if err := s.repo.Update(ctx, session); err != nil {
+		return nil, err
+	}
+
+	message := "Sign to start your subscription"
+	if res.Step == "init" {
+		message = "Sign to initialize your subscription (one more signature follows)"
+	}
+	return &solanamodule.PayTransactionResponse{
+		TransactionBase64: res.Transactions[0],
+		Message:           message,
+	}, nil
 }
 
 // buildSolanaCancelTransaction builds the unsigned cancel_subscription tx (with
@@ -2324,6 +2498,118 @@ func (s *CheckoutSessionService) ConfirmSolanaLifecycleSession(ctx context.Conte
 	default:
 		return fmt.Errorf("%w: not a solana lifecycle session", ErrCheckoutSessionValidation)
 	}
+}
+
+// ConfirmSolanaSubscribeSession completes a RECURRING subscribe Solana Pay
+// session when the reference poller detects a confirmed reference-tagged tx. The
+// session's init tx and atomic [subscribe+transfer] tx share the SAME reference,
+// so this is step-aware:
+//   - if the SubscriptionAuthority does not yet exist on-chain, only the init tx
+//     (or nothing) has landed → return ErrSolanaSubscribePending so the poller
+//     keeps the reference alive and re-polls for the subscribe tx;
+//   - once the authority exists AND the subscription PDA is funded (the atomic
+//     [subscribe+transfer] landed), ConfirmEnrollment creates the membership +
+//     persists the on-chain row, and the session is marked succeeded.
+//
+// Idempotent: a re-confirm of an already-succeeded session is a no-op, and
+// ConfirmEnrollment upserts on the processor subscription id.
+func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Context, sessionID uuid.UUID, signature string) error {
+	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
+		return fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutSessionValidation)
+	}
+	session, err := s.repo.GetByID(ctx, sessionID)
+	if err != nil {
+		return ErrCheckoutSessionNotFound
+	}
+	if session.Status == models.CheckoutSessionStatusSucceeded {
+		return nil
+	}
+	signature = strings.TrimSpace(signature)
+	if signature == "" {
+		return fmt.Errorf("%w: signature is required", ErrCheckoutSessionValidation)
+	}
+
+	wallet := strings.TrimSpace(getStringField(session.ProcessorState, "subscriber_wallet"))
+	if wallet == "" {
+		// No wallet has POSTed yet — there is nothing to confirm.
+		return solanamodule.ErrSolanaSubscribePending
+	}
+	terms := solanaPlanTerms{
+		planID:     getUint64Field(session.ProcessorState, "plan_id"),
+		mintSymbol: getStringField(session.ProcessorState, "mint_symbol"),
+		amount:     getUint64Field(session.ProcessorState, "amount_base_units"),
+		period:     getUint64Field(session.ProcessorState, "period_hours"),
+	}
+	if v := strings.TrimSpace(getStringField(session.ProcessorState, "plan_created_at")); v != "" {
+		terms.createdAt, _ = strconv.ParseInt(v, 10, 64)
+	}
+	tenantID := tenant.FromContextOrDefault(ctx)
+
+	// Gate on authority existence: if Prepare still returns the init step, the
+	// authority is not on-chain yet (init has not landed / not visible) → the
+	// subscribe tx cannot have landed either. Stay pending.
+	prep, err := s.solanaPrepareSubscribe.Prepare(ctx, recurring.PrepareSubscribeInput{
+		TenantID:         tenantID,
+		SubscriberWallet: wallet,
+		PlanID:           terms.planID,
+		MintSymbol:       terms.mintSymbol,
+		AmountBaseUnits:  terms.amount,
+		PeriodHours:      terms.period,
+		PlanCreatedAt:    terms.createdAt,
+	})
+	if err != nil {
+		return err
+	}
+	if prep.Step != "subscribe" {
+		// Authority not yet visible → only the init tx (at most) has landed.
+		if session.ProcessorState == nil {
+			session.ProcessorState = map[string]any{}
+		}
+		session.ProcessorState["subscribe_step"] = prep.Step
+		session.UpdatedAt = s.now()
+		_ = s.repo.Update(ctx, session)
+		return solanamodule.ErrSolanaSubscribePending
+	}
+
+	// Authority exists. ConfirmEnrollment verifies the subscription PDA is funded
+	// (the atomic [subscribe+transfer] landed) before creating the membership; if it
+	// is not funded yet the subscribe tx has not landed → stay pending.
+	sub, err := s.solanaEnroll.ConfirmEnrollment(ctx, recurring.EnrollInput{
+		TenantID:         tenantID,
+		UserID:           session.UserID,
+		PriceID:          session.PriceID,
+		SubscriberWallet: wallet,
+		PlanID:           terms.planID,
+		MintSymbol:       terms.mintSymbol,
+		AmountBaseUnits:  terms.amount,
+		PeriodHours:      terms.period,
+		PlanCreatedAt:    terms.createdAt,
+		FiatAmount:       session.Amount,
+		Currency:         session.Currency,
+		Signature:        signature,
+	})
+	if err != nil {
+		// The subscription PDA is not funded yet (subscribe tx not landed/visible):
+		// treat as still-pending so the poller re-checks rather than failing.
+		if isSolanaSubscribeNotLandedErr(err) {
+			return solanamodule.ErrSolanaSubscribePending
+		}
+		return err
+	}
+
+	return s.MarkSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, sub.ID)
+}
+
+// isSolanaSubscribeNotLandedErr reports whether a ConfirmEnrollment error means
+// the atomic subscribe bundle has not landed / is not yet visible on-chain (the
+// subscription PDA is unfunded), as opposed to a genuine failure. Such an error
+// is an in-progress state for the Solana Pay subscribe poller, not a terminal
+// failure.
+func isSolanaSubscribeNotLandedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "not found on-chain")
 }
 
 // tierChangeConfirmInput reconstructs the confirm input from the persisted

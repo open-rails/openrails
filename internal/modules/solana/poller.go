@@ -49,6 +49,12 @@ type checkoutSessionMarker interface {
 	// tier-change for a lifecycle Solana Pay session and marks it succeeded. It is
 	// idempotent. Implemented by *checkout.CheckoutSessionService.
 	ConfirmSolanaLifecycleSession(ctx context.Context, sessionID uuid.UUID, signature string) error
+	// ConfirmSolanaSubscribeSession advances a RECURRING subscribe Solana Pay
+	// session on a confirmed reference: if only init landed it stays pending; once
+	// the subscription PDA is funded (the atomic [subscribe+transfer] landed) it
+	// enrolls the membership and marks the session succeeded. Idempotent.
+	// Implemented by *checkout.CheckoutSessionService.
+	ConfirmSolanaSubscribeSession(ctx context.Context, sessionID uuid.UUID, signature string) error
 }
 
 // SolanaPayPoller polls the blockchain for confirmed Solana Pay payments
@@ -300,6 +306,14 @@ func (p *SolanaPayPoller) checkPayment(ctx context.Context, reference string) {
 
 			// Process the confirmed payment
 			if err := p.processConfirmedPayment(ctx, reference, sig.Signature, pending); err != nil {
+				// Recurring subscribe whose init landed but subscribe has not yet: keep
+				// the reference alive (the subscribe tx carries the SAME reference) and
+				// re-poll. This is normal in-progress, not a failure — do NOT finalize.
+				if errors.Is(err, ErrSolanaSubscribePending) {
+					log.WithField("reference", reference).Debug("Solana subscribe init landed; awaiting subscribe step")
+					p.deferRetryFor(reference, solanaNoTxRetryInterval)
+					return
+				}
 				log.WithError(err).WithField("reference", reference).Error("Failed to process confirmed payment")
 				continue
 			}
@@ -377,6 +391,24 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 			Currency:  session.Currency,
 			CreatedAt: session.CreatedAt,
 			Lifecycle: true,
+		}
+		if session.ExpiresAt != nil {
+			pending.ExpiresAt = session.ExpiresAt.UTC()
+		}
+		return pending, nil
+	case models.CheckoutSessionModeSubscription:
+		// RECURRING subscribe over Solana Pay (flow=transaction_request, no token
+		// quote on state — the on-chain amount lives in the subscribe instruction).
+		// The confirmed reference is routed to ConfirmSolanaSubscribeSession, which
+		// advances init→subscribe and enrolls once the subscription PDA is funded.
+		pending := &PendingSolanaPayment{
+			UserID:    session.UserID,
+			PriceID:   session.PriceID.String(),
+			SessionID: session.ID.String(),
+			Amount:    session.Amount,
+			Currency:  session.Currency,
+			CreatedAt: session.CreatedAt,
+			Subscribe: true,
 		}
 		if session.ExpiresAt != nil {
 			pending.ExpiresAt = session.ExpiresAt.UTC()
@@ -510,11 +542,13 @@ func (p *SolanaPayPoller) deferRetryFor(reference string, backoff time.Duration)
 
 // verifyPayment validates that a transaction matches our expected payment
 func (p *SolanaPayPoller) verifyPayment(ctx context.Context, reference string, signature string, pending *PendingSolanaPayment) bool {
-	if pending != nil && pending.Lifecycle {
-		// Lifecycle (cancel / tier-change) sessions have no transfer to verify; the
-		// random reference appearing on this signature already proves it is the tx
-		// built for THIS session. The on-chain SUCCESS check happens in the
-		// ConfirmCancel / ConfirmTierChange mirror invoked by processConfirmedPayment.
+	if pending != nil && (pending.Lifecycle || pending.Subscribe) {
+		// Lifecycle (cancel / tier-change) and recurring-subscribe sessions have no
+		// transfer to verify here; the random reference appearing on this signature
+		// already proves it is a tx built for THIS session. The on-chain SUCCESS check
+		// happens in the mirror invoked by processConfirmedPayment (ConfirmCancel /
+		// ConfirmTierChange for lifecycle; ConfirmEnrollment — gated on the funded
+		// subscription PDA — for subscribe).
 		return true
 	}
 	if p.solanaTransactionSvc == nil {
@@ -586,6 +620,30 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 			"session_id": pending.SessionID,
 			"reference":  reference,
 		}).Info("Mirrored confirmed Solana lifecycle (cancel/tier-change) checkout session")
+		return nil
+	}
+
+	// Recurring subscribe over Solana Pay: advance the init→subscribe step and, once
+	// the subscription PDA is funded (the atomic [subscribe+transfer] landed), enroll
+	// the membership + mark the session succeeded. ConfirmSolanaSubscribeSession is
+	// idempotent and returns ErrSolanaSubscribePending while only init has landed —
+	// the caller keeps the reference alive (does NOT consume it) and re-polls for the
+	// subscribe tx, which carries the SAME reference.
+	if pending.Subscribe {
+		if p.checkoutSessionService == nil {
+			return fmt.Errorf("checkout session service is not configured")
+		}
+		sessionID, err := uuid.Parse(strings.TrimSpace(pending.SessionID))
+		if err != nil {
+			return fmt.Errorf("invalid checkout session id %q: %w", pending.SessionID, err)
+		}
+		if err := p.checkoutSessionService.ConfirmSolanaSubscribeSession(ctx, sessionID, signature); err != nil {
+			return err
+		}
+		log.WithFields(log.Fields{
+			"session_id": pending.SessionID,
+			"reference":  reference,
+		}).Info("Enrolled confirmed Solana recurring subscribe checkout session")
 		return nil
 	}
 

@@ -3,6 +3,7 @@ package solana
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -47,6 +48,15 @@ const (
 	eligibilityDowngrade = "downgrade"
 )
 
+// ErrSolanaSubscribePending is returned by ConfirmSolanaSubscribeSession (and
+// surfaced through the poller) when a RECURRING subscribe Solana Pay session has
+// only its init tx landed so far — the authority now exists but the atomic
+// [subscribe+transfer] bundle has not landed yet. The poller treats it as
+// "keep polling": it does NOT consume the reference (the subscribe tx carries the
+// SAME reference) and re-checks until the subscription PDA is funded. It is a
+// normal in-progress state, not a failure.
+var ErrSolanaSubscribePending = errors.New("solana: recurring subscribe pending subscribe step")
+
 // PendingSolanaPayment represents a pending Solana payment stored in Redis
 type PendingSolanaPayment struct {
 	UserID      string    `json:"user_id"`
@@ -67,6 +77,16 @@ type PendingSolanaPayment struct {
 	// skips token/amount verification (the random reference already identifies the
 	// tx) and routes the confirmed signature to ConfirmSolanaLifecycleSession.
 	Lifecycle bool `json:"lifecycle,omitempty"`
+
+	// Subscribe marks a checkout-session-backed pending record for a RECURRING
+	// subscribe over Solana Pay (mode=subscription, flow=transaction_request). Like
+	// Lifecycle, the poller skips token verification (the random reference already
+	// identifies the tx) and routes the confirmed signature to
+	// ConfirmSolanaSubscribeSession, which advances the init→subscribe step and, once
+	// the atomic [subscribe+transfer] bundle has landed, enrolls the membership. The
+	// init tx and the subscribe tx share this same reference, so confirmation is
+	// step-aware + idempotent.
+	Subscribe bool `json:"subscribe,omitempty"`
 }
 
 // SolanaPayService handles Solana Pay Transfer Request flow
