@@ -180,6 +180,28 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		return nil, fmt.Errorf("recurring: submit create_plan: %w", err)
 	}
 
+	// Ensure the receiving ATA(s) exist before the first crank. transfer_subscription
+	// deposits INTO the receiver's associated token account; if that ATA is missing
+	// the pull reverts. CreateIdempotent is a no-op when the ATA already exists, so
+	// this is safe to repeat on every publish. The cranker (merchant) signs + pays.
+	//
+	// Default case: the merchant collects into its own ATA. Cold-wallet case: funds
+	// land in the configured ReceivingWallet's ATA, so we ensure THAT one too (the
+	// crank's destination wiring for cold wallets is a separate follow-up — see the
+	// destinations/pullers note above).
+	if err := s.ensureReceivingATA(ctx, in.TenantID, merchant, mint); err != nil {
+		return nil, err
+	}
+	if in.ReceivingWallet != "" {
+		recv, err := solanago.PublicKeyFromBase58(in.ReceivingWallet)
+		if err != nil {
+			return nil, fmt.Errorf("recurring: invalid receiving wallet %q: %w", in.ReceivingWallet, err)
+		}
+		if err := s.ensureReceivingATA(ctx, in.TenantID, recv, mint); err != nil {
+			return nil, err
+		}
+	}
+
 	return &PlanHandle{
 		PlanPDA:         planPDA.String(),
 		PlanID:          in.PlanID,
@@ -191,6 +213,31 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		MerchantAddress: merchant.String(),
 		Signature:       sig.String(),
 	}, nil
+}
+
+// ensureReceivingATA idempotently provisions owner's associated token account for
+// mint (classic SPL Token), paid + signed by the tenant's cranker. A failure here
+// is surfaced as a hard error: the plan cannot be billed without a receiving ATA.
+func (s *PlanService) ensureReceivingATA(ctx context.Context, tenantID tenant.ID, owner, mint solanago.PublicKey) error {
+	ata, _, err := subscriptions.DeriveATA(owner, mint, solanago.TokenProgramID)
+	if err != nil {
+		return fmt.Errorf("recurring: derive receiving ata for %s: %w", owner, err)
+	}
+	payer, err := s.submitter.MerchantAddress(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("recurring: resolve cranker (ata payer) address: %w", err)
+	}
+	ix := subscriptions.BuildCreateIdempotentATA(subscriptions.CreateIdempotentATAParams{
+		Payer:        payer,
+		ATA:          ata,
+		Owner:        owner,
+		Mint:         mint,
+		TokenProgram: solanago.TokenProgramID,
+	})
+	if _, err := s.submitter.Submit(ctx, tenantID, []solanago.Instruction{ix}); err != nil {
+		return fmt.Errorf("recurring: ensure receiving ata for %s: %w", owner, err)
+	}
+	return nil
 }
 
 func normalizeSymbol(s string) string {

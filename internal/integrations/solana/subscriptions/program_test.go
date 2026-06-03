@@ -125,6 +125,53 @@ func TestInstructionAccountLayouts(t *testing.T) {
 		}
 	})
 
+	t.Run("create_idempotent_ata", func(t *testing.T) {
+		owner, mint := k(), k()
+		ata, _, err := DeriveATA(owner, mint, solanago.TokenProgramID)
+		if err != nil {
+			t.Fatalf("derive ata: %v", err)
+		}
+		payer := k()
+		ix := BuildCreateIdempotentATA(CreateIdempotentATAParams{
+			Payer: payer, ATA: ata, Owner: owner, Mint: mint, TokenProgram: solanago.TokenProgramID,
+		})
+		if !ix.ProgramID().Equals(AssociatedTokenProgramID) {
+			t.Fatal("ensure-ata must target the associated-token program")
+		}
+		accs := ix.Accounts()
+		if len(accs) != 6 {
+			t.Fatalf("ata accounts = %d, want 6", len(accs))
+		}
+		// payer(0) signer+writable, ata(1) writable, rest read-only non-signers.
+		if !accs[0].IsSigner || !accs[0].IsWritable {
+			t.Fatal("payer must be signer+writable")
+		}
+		if !accs[0].PublicKey.Equals(payer) {
+			t.Fatal("account 0 must be the payer")
+		}
+		if !accs[1].IsWritable || accs[1].IsSigner {
+			t.Fatal("ata must be writable, non-signer")
+		}
+		if !accs[1].PublicKey.Equals(ata) {
+			t.Fatal("account 1 must be the derived ata")
+		}
+		if !accs[2].PublicKey.Equals(owner) || !accs[3].PublicKey.Equals(mint) {
+			t.Fatal("owner/mint accounts misordered")
+		}
+		if !accs[4].PublicKey.Equals(solanago.SystemProgramID) || !accs[5].PublicKey.Equals(solanago.TokenProgramID) {
+			t.Fatal("system/token program accounts misordered")
+		}
+		for i, a := range accs {
+			if i != 0 && a.IsSigner {
+				t.Fatalf("account %d unexpectedly a signer", i)
+			}
+		}
+		d, _ := ix.Data()
+		if len(d) != 1 || d[0] != discATACreateIdempotent {
+			t.Fatalf("ata data = %v, want [%d] (CreateIdempotent)", d, discATACreateIdempotent)
+		}
+	})
+
 	t.Run("cancel", func(t *testing.T) {
 		ix := BuildCancelSubscription(CancelOrResumeParams{Subscriber: k(), PlanPDA: k(), SubscriptionPDA: k(), EventAuthority: k()})
 		accs := ix.Accounts()

@@ -204,6 +204,36 @@ func buildCancelResume(disc byte, p CancelOrResumeParams) solanago.Instruction {
 	return solanago.NewInstruction(ProgramID, accounts, []byte{disc})
 }
 
+// discATACreateIdempotent is the SPL Associated-Token-Account program's
+// CreateIdempotent instruction selector (a no-op if the ATA already exists).
+const discATACreateIdempotent byte = 1
+
+// CreateIdempotentATAParams are inputs for the associated-token CreateIdempotent.
+type CreateIdempotentATAParams struct {
+	Payer        solanago.PublicKey // signer + writable; funds rent if the ATA is created
+	ATA          solanago.PublicKey // writable; derive via DeriveATA(Owner, Mint, TokenProgram)
+	Owner        solanago.PublicKey // the wallet the ATA belongs to
+	Mint         solanago.PublicKey
+	TokenProgram solanago.PublicKey
+}
+
+// BuildCreateIdempotentATA builds the SPL Associated-Token-Account program's
+// CreateIdempotent instruction for (Owner, Mint). It creates the receiving ATA
+// if absent and is a no-op if it already exists, so it is safe to repeat.
+// Accounts (ATA-program order): payer(s,w), ata(w), owner, mint, systemProgram,
+// tokenProgram. Data: [1] (CreateIdempotent selector).
+func BuildCreateIdempotentATA(p CreateIdempotentATAParams) solanago.Instruction {
+	accounts := solanago.AccountMetaSlice{
+		solanago.NewAccountMeta(p.Payer, true, true),
+		solanago.NewAccountMeta(p.ATA, true, false),
+		solanago.NewAccountMeta(p.Owner, false, false),
+		solanago.NewAccountMeta(p.Mint, false, false),
+		solanago.NewAccountMeta(solanago.SystemProgramID, false, false),
+		solanago.NewAccountMeta(p.TokenProgram, false, false),
+	}
+	return solanago.NewInstruction(AssociatedTokenProgramID, accounts, []byte{discATACreateIdempotent})
+}
+
 // BuildRevokeDelegation builds revoke_delegation (3) — closes a delegation /
 // subscription account after expiry, reclaiming rent. Accounts:
 // authority(s,w), delegationAccount(w).

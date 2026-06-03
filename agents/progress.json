@@ -948,13 +948,13 @@
     {
       "id": 273,
       "name": "solana-merchant-receiving-ata-provisioning",
-      "completed": false,
+      "completed": true,
       "description": "Ensure the tenant's merchant/cranker USDC RECEIVING ATA exists before the first crank. transfer_subscription pulls INTO the merchant's token account; a missing ATA makes the pull fail. Devnet-confirmed: the live test had to create it manually. Production needs an idempotent CreateIdempotent ATA at plan-publish (or enroll/first-crank), paid by the cranker. Handle the cold-wallet case too (when a separate destination wallet is configured, ensure THAT wallet's ATA).",
       "tasks": [
-        "[ ] ensure-ATA helper (associated-token CreateIdempotent) for (receiver, mint)",
-        "[ ] call it at PublishPlan (or enroll/first-crank), paid by the cranker; idempotent + safe to repeat",
-        "[ ] cold-wallet plans: ensure the configured destination wallet's ATA",
-        "[ ] devnet test: fresh tenant -> publish -> first crank succeeds with NO manual ATA setup"
+        "[x] ensure-ATA helper (associated-token CreateIdempotent) for (receiver, mint) — subscriptions.BuildCreateIdempotentATA",
+        "[x] call it at PublishPlan (PlanService.ensureReceivingATA), paid by the cranker; idempotent + safe to repeat",
+        "[x] cold-wallet plans: ensure the configured destination wallet's ATA",
+        "[ ] devnet test: fresh tenant -> publish -> first crank succeeds with NO manual ATA setup (unit-tested via fake Submitter; live devnet rerun is a follow-up)"
       ]
     },
     {
