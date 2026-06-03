@@ -87,6 +87,11 @@ type Runtime struct {
 	// return 503 (recurring not configured).
 	SolanaPlanService   *recurring.PlanService
 	SolanaEnrollService *recurring.EnrollService
+	// SolanaPrepareCancelService builds the unsigned on-chain cancel transaction a
+	// subscriber signs to trustlessly revoke a recurring Solana subscription
+	// (#266). Injected alongside the other recurring services; nil -> the handler
+	// returns 503 (recurring not configured).
+	SolanaPrepareCancelService *recurring.PrepareCancelService
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	WebhookDispatcher            *webhooks.WebhookDispatcher
@@ -280,4 +285,10 @@ func (r *Runtime) SetSolanaCranker(cranker *recurring.CrankService) {
 func (r *Runtime) SetSolanaRecurringServices(plan *recurring.PlanService, enroll *recurring.EnrollService) {
 	r.SolanaPlanService = plan
 	r.SolanaEnrollService = enroll
+}
+
+// SetSolanaPrepareCancelService injects the on-chain cancel-tx builder (#266),
+// built once the tenant secret store + RPC are available (composition root).
+func (r *Runtime) SetSolanaPrepareCancelService(svc *recurring.PrepareCancelService) {
+	r.SolanaPrepareCancelService = svc
 }

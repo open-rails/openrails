@@ -230,6 +230,14 @@ func New(deps Dependencies) (*Server, error) {
 				)
 				deps.Runtime.SetSolanaRecurringServices(planSvc, enrollSvc)
 
+				// App-driven on-chain cancel (#266): builds the unsigned
+				// cancel_subscription tx the subscriber signs to trustlessly revoke a
+				// recurring subscription on-chain (additive to the soft cancel #264).
+				deps.Runtime.SetSolanaPrepareCancelService(recurring.NewPrepareCancelService(
+					dbrepo.NewSolanaSubscriptionRepo(deps.Runtime.DB),
+					deps.Runtime.SolanaRPC,
+				))
+
 				// Subscribe-via-checkout (#261/#262): the prepare service builds the
 				// unsigned init/subscribe txns; enroll confirms. Wire both into the
 				// checkout session service so /v1/self/checkout(+confirm) drives the

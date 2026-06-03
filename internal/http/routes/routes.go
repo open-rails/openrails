@@ -292,6 +292,14 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	credits.GET("/transactions/lookup", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
 	credits.GET("/users/:user_id", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
 
+	// Org billing-account admin surface (issue #242): configure prepaid|arrears
+	// mode + spend caps + auto-top-up, read settings, and list usage. Tensorhub's
+	// billing-admin proxies to these with its service OAT; OpenRails owns the model.
+	creditsRead := middleware.RequireOATPermission(controlplane.PermCreditsRead)
+	credits.PUT("/account-settings", creditsWrite, wrap(httphandlers.ServiceSetCreditAccountSettings))
+	credits.GET("/account-settings", creditsRead, wrap(httphandlers.ServiceGetCreditAccountSettings))
+	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListOwnerCreditTransactions))
+
 	// Credit-type definition writes are catalog-definition operations: gate them
 	// behind the explicit catalog-write permission (issue #222 — catalog/definition
 	// writes available to OATs only under an explicit permission). Reads use the
@@ -346,6 +354,10 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	subs.GET("", read, wrap(httphandlers.GetMySubscriptions))
 	subs.GET("/:id", read, wrap(httphandlers.GetSubscription))
 	subs.POST("/:id/cancel", middleware.RequireDelegatedPermission(controlplane.PermSelfSubscriptionCancel), wrap(httphandlers.CancelSubscription))
+	// App-driven on-chain cancel/revoke (#266): build the unsigned cancel tx the
+	// wallet signs to trustlessly stop OpenRails from ever pulling again. Gated by
+	// the same cancel scope as the soft cancel (it is the on-chain form of cancel).
+	subs.POST("/:id/solana-cancel-tx", middleware.RequireDelegatedPermission(controlplane.PermSelfSubscriptionCancel), wrap(httphandlers.PrepareSolanaCancelTx))
 
 	// Payment methods: list is a read; mutations require the manage scope.
 	pm := group.Group("/payment-methods")

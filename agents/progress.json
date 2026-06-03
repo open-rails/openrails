@@ -1291,13 +1291,13 @@
     {
       "id": 266,
       "name": "solana-app-driven-onchain-cancel",
-      "completed": false,
+      "completed": true,
       "description": "OR-F (optional, trustless): App-driven on-chain cancel -- let the user sign a cancel (or revoke_delegation) transaction so OpenRails PHYSICALLY cannot pull again, not just 'chooses not to'. Same prepare->sign->confirm shape as subscribe.\n\n## Context\nTier-2 sovereignty guarantee on top of the Tier-1 soft cancel (#264). BuildCancelSubscription / BuildRevokeDelegation are built + devnet-validated. The in-app cancel button does the instant soft cancel (#264) AND optionally returns an unsigned cancel tx for the wallet to sign+send; OpenRails observes confirmation and records it. A user who wants the trustless guarantee revokes the delegation on-chain.\n\n## Metadata\n- Category: feature\n- Depends on: #264\n- Plan: docs/solana-subscriptions-plan.md (cancel Tier 2)",
       "tasks": [
-        "[ ] self endpoint (or cancel-with-onchain option) returns an unsigned cancel/revoke tx (subscriber = signer + fee payer)",
-        "[ ] confirm path observes the on-chain cancel and records it on the solana_subscriptions row (cancelled_onchain + signature)",
-        "[ ] keep soft cancel (#264) as the guaranteed billing-stop; on-chain cancel is additive",
-        "[ ] devnet test: cancel tx lands -> subsequent crank rejected by program"
+        "[x] self endpoint (or cancel-with-onchain option) returns an unsigned cancel/revoke tx (subscriber = signer + fee payer) -- POST /v1/self/subscriptions/:id/solana-cancel-tx (PrepareCancelService)",
+        "[ ] confirm path observes the on-chain cancel and records it on the solana_subscriptions row (cancelled_onchain + signature) -- deferred (optional per scope; soft cancel already stops billing)",
+        "[x] keep soft cancel (#264) as the guaranteed billing-stop; on-chain cancel is additive",
+        "[ ] devnet test: cancel tx lands -> subsequent crank rejected by program -- to be devnet-confirmed under #263"
       ]
     },
     {

@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -9,6 +11,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -160,4 +164,67 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(sub)
+}
+
+// PrepareSolanaCancelTx builds the UNSIGNED on-chain cancel_subscription
+// transaction the subscriber's wallet signs to TRUSTLESSLY revoke a recurring
+// Solana subscription (#266). The soft cancel (#264) already stops billing; this
+// is additive — once signed + sent, the program itself refuses further pulls so
+// OpenRails physically cannot charge again. The caller must own the
+// subscription; the response is `{ "transaction": "<base64>", "subscription_pda":
+// "<pda>" }` for the wallet to deserialize, sign, and send.
+func PrepareSolanaCancelTx(r *httprequest.Request) {
+	svc := r.State.SolanaPrepareCancelService
+	if svc == nil {
+		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
+		return
+	}
+
+	uc, ok := authprovider.UserContextFromGin(r.GinCtx)
+	if !ok || uc.UserID == "" {
+		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		return
+	}
+
+	subscriptionIDStr := r.GinCtx.Param("id")
+	if subscriptionIDStr == "" {
+		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
+		return
+	}
+	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
+		return
+	}
+
+	// Authorize: the acting user must own the lifecycle subscription before we
+	// reveal its on-chain identifiers.
+	if r.State.SubscriptionService == nil {
+		r.ErrorJSON(http.StatusServiceUnavailable, "subscriptions are not configured")
+		return
+	}
+	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			r.ErrorJSON(http.StatusNotFound, "subscription not found")
+			return
+		}
+		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
+		return
+	}
+	if sub.UserID != uc.UserID {
+		r.ErrorJSON(http.StatusNotFound, "subscription not found")
+		return
+	}
+
+	res, err := svc.Prepare(r.Request.Context(), subscriptionID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	r.SuccessJSON(map[string]any{
+		"transaction":      res.Transaction,
+		"subscription_pda": res.SubscriptionPDA,
+	})
 }
