@@ -8,6 +8,7 @@ import (
 	solanago "github.com/doujins-org/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -117,9 +118,21 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 	}
 
 	// Confirm the subscription exists on-chain (subscribe funds the PDA atomically).
-	if bal, berr := s.rpc.GetBalance(ctx, subPDA); berr != nil {
-		return nil, fmt.Errorf("recurring: check subscription on-chain: %w", berr)
-	} else if bal == 0 {
+	//
+	// READ-AFTER-CONFIRM LAG: the wallet signed + sent the subscribe and confirmed
+	// it client-side, so the server never saw that tx's slot to gate this read on.
+	// A single GetBalance right after can hit a lagging RPC node that does not yet
+	// see the just-created PDA (balance 0), spuriously rejecting a valid enrollment.
+	// Poll until the PDA is funded (eventual consistency) — the production analogue
+	// of the test-side awaitTokenCredit poller.
+	bal, berr := solanaint.ReadUntilConsistent(ctx, solanaint.ReadUntilConsistentOpts{},
+		func(ctx context.Context) (uint64, error) { return s.rpc.GetBalance(ctx, subPDA) },
+		func(b uint64) bool { return b > 0 },
+	)
+	if berr != nil {
+		return nil, fmt.Errorf("recurring: subscription %s not found on-chain — did the wallet run subscribe? (%w)", subPDA, berr)
+	}
+	if bal == 0 {
 		return nil, fmt.Errorf("recurring: subscription %s not found on-chain — did the wallet run subscribe?", subPDA)
 	}
 

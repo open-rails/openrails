@@ -53,6 +53,13 @@ func (c *RPCClient) GetBalance(ctx context.Context, address solanago.PublicKey) 
 	return c.fallback.GetBalance(ctx, address)
 }
 
+// GetBalanceAtSlot returns the SOL balance evaluated at >= minSlot (the slot a
+// preceding write confirmed at), so a lagging RPC node returns a retryable error
+// instead of stale data. minSlot == 0 behaves like GetBalance.
+func (c *RPCClient) GetBalanceAtSlot(ctx context.Context, address solanago.PublicKey, minSlot uint64) (uint64, error) {
+	return c.fallback.GetBalanceAtSlot(ctx, address, minSlot)
+}
+
 // GetTokenBalance returns the SPL token balance for an address and mint
 func (c *RPCClient) GetTokenBalance(ctx context.Context, tokenAccount solanago.PublicKey) (*rpc.UiTokenAmount, error) {
 	resp, err := c.fallback.GetTokenAccountBalance(ctx, tokenAccount)
@@ -60,6 +67,37 @@ func (c *RPCClient) GetTokenBalance(ctx context.Context, tokenAccount solanago.P
 		return nil, err
 	}
 	return resp.Value, nil
+}
+
+// GetTokenBalanceForMintAtSlot is GetTokenBalanceForMint gated on minSlot: the
+// ATA balance is read only against a node that has reached minSlot (the slot a
+// preceding write — e.g. a pull/crank — confirmed at), so a lagging node returns
+// a retryable error instead of a stale balance. minSlot == 0 behaves exactly like
+// GetTokenBalanceForMint. Returns 0 when the ATA does not exist.
+func (c *RPCClient) GetTokenBalanceForMintAtSlot(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey, minSlot uint64) (uint64, error) {
+	if minSlot == 0 {
+		return c.GetTokenBalanceForMint(ctx, owner, mint)
+	}
+	ata, _, err := solanago.FindAssociatedTokenAddress(owner, mint)
+	if err != nil {
+		return 0, fmt.Errorf("failed to derive ATA for mint %s: %w", mint.String(), err)
+	}
+	resp, err := c.fallback.GetTokenAccountBalanceAtSlot(ctx, ata, minSlot)
+	if err != nil {
+		if strings.Contains(err.Error(), "could not find account") ||
+			strings.Contains(err.Error(), "Invalid param") {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("failed to get token balance: %w", err)
+	}
+	if resp.Value == nil {
+		return 0, nil
+	}
+	balance, err := strconv.ParseUint(resp.Value.Amount, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse token balance %q: %w", resp.Value.Amount, err)
+	}
+	return balance, nil
 }
 
 // SimulateTransaction simulates a transaction to check if it would succeed
@@ -172,6 +210,14 @@ func (c *RPCClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataS
 // SubscriptionAuthority initId for building a subscribe instruction).
 func (c *RPCClient) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
 	return c.fallback.GetAccountData(ctx, address)
+}
+
+// GetAccountDataAtSlot is GetAccountData gated on minContextSlot: the account is
+// read only against a node that has reached minSlot (the slot a preceding write
+// confirmed at), so a lagging node returns a retryable error rather than a stale
+// (or "missing") account. minSlot == 0 behaves like GetAccountData.
+func (c *RPCClient) GetAccountDataAtSlot(ctx context.Context, address solanago.PublicKey, minSlot uint64) ([]byte, error) {
+	return c.fallback.GetAccountDataAtSlot(ctx, address, minSlot)
 }
 
 // GetEndpoint returns the current RPC endpoint

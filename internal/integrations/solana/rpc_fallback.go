@@ -322,6 +322,136 @@ func (c *RPCFallbackClient) GetAccountData(ctx context.Context, address solanago
 	return data, err
 }
 
+// minContextSlotReadAttempts / Backoff bound the slot-gated read retry. A node
+// that lags the requested minContextSlot returns an error; we retry the whole
+// fallback chain (a different node may already be caught up) until one answers at
+// or beyond the slot, or the bound is reached.
+const minContextSlotReadAttempts = 8
+
+// minContextSlotReadBackoff is a var (not const) only so tests can shrink it;
+// production keeps the ~500ms pacing while lagging nodes catch up.
+var minContextSlotReadBackoff = 500 * time.Millisecond
+
+// GetAccountDataAtSlot is GetAccountData gated on minContextSlot: the read is
+// evaluated only against a node that has reached `minSlot` (the slot our write
+// confirmed at), so a lagging node returns a retryable error instead of stale
+// data. minSlot == 0 behaves exactly like GetAccountData (no gating).
+func (c *RPCFallbackClient) GetAccountDataAtSlot(ctx context.Context, address solanago.PublicKey, minSlot uint64) ([]byte, error) {
+	if minSlot == 0 {
+		return c.GetAccountData(ctx, address)
+	}
+	opts := &rpc.GetAccountInfoOpts{
+		Commitment:     rpc.CommitmentConfirmed,
+		MinContextSlot: &minSlot,
+	}
+	var data []byte
+	read := func(ctx context.Context) error {
+		return c.withFallback(ctx, "GetAccountDataAtSlot", func(client *rpc.Client) error {
+			ai, err := client.GetAccountInfoWithOpts(ctx, address, opts)
+			if err != nil {
+				if errors.Is(err, rpc.ErrNotFound) {
+					data = nil
+					return nil
+				}
+				return err
+			}
+			if ai == nil || ai.Value == nil {
+				data = nil
+				return nil
+			}
+			data = ai.Value.Data.GetBinary()
+			return nil
+		})
+	}
+	if err := retryMinContextSlot(ctx, read); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// GetBalanceAtSlot is GetBalance gated on minContextSlot. The vendored
+// getBalance lacks a MinContextSlot opts variant, so we read the slot the node
+// served the response at (RPCContext.Context.Slot) and retry the fallback chain
+// until a node answers at or beyond minSlot. minSlot == 0 == GetBalance.
+func (c *RPCFallbackClient) GetBalanceAtSlot(ctx context.Context, address solanago.PublicKey, minSlot uint64) (uint64, error) {
+	if minSlot == 0 {
+		return c.GetBalance(ctx, address)
+	}
+	var balance uint64
+	read := func(ctx context.Context) error {
+		return c.withFallback(ctx, "GetBalanceAtSlot", func(client *rpc.Client) error {
+			resp, err := client.GetBalance(ctx, address, rpc.CommitmentConfirmed)
+			if err != nil {
+				return err
+			}
+			if resp.Context.Slot < minSlot {
+				return fmt.Errorf("minimum context slot has not been reached: served=%d want>=%d", resp.Context.Slot, minSlot)
+			}
+			balance = resp.Value
+			return nil
+		})
+	}
+	if err := retryMinContextSlot(ctx, read); err != nil {
+		return 0, err
+	}
+	return balance, nil
+}
+
+// GetTokenAccountBalanceAtSlot is GetTokenAccountBalance gated on minContextSlot.
+// As with GetBalanceAtSlot, the vendored method lacks a MinContextSlot opts
+// variant, so we gate on the served RPCContext slot. minSlot == 0 ==
+// GetTokenAccountBalance.
+func (c *RPCFallbackClient) GetTokenAccountBalanceAtSlot(ctx context.Context, account solanago.PublicKey, minSlot uint64) (*rpc.GetTokenAccountBalanceResult, error) {
+	if minSlot == 0 {
+		return c.GetTokenAccountBalance(ctx, account)
+	}
+	var result *rpc.GetTokenAccountBalanceResult
+	read := func(ctx context.Context) error {
+		return c.withFallback(ctx, "GetTokenAccountBalanceAtSlot", func(client *rpc.Client) error {
+			resp, err := client.GetTokenAccountBalance(ctx, account, rpc.CommitmentConfirmed)
+			if err != nil {
+				return err
+			}
+			if resp.Context.Slot < minSlot {
+				return fmt.Errorf("minimum context slot has not been reached: served=%d want>=%d", resp.Context.Slot, minSlot)
+			}
+			result = resp
+			return nil
+		})
+	}
+	if err := retryMinContextSlot(ctx, read); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// retryMinContextSlot runs read() until it succeeds without a min-context-slot
+// error, ctx is cancelled, or the attempt bound is reached. A min-context-slot
+// error means every active node still lags the requested slot; we back off and
+// retry (nodes catch up within a few hundred ms). Non-slot errors and success
+// return immediately.
+func retryMinContextSlot(ctx context.Context, read func(context.Context) error) error {
+	var lastErr error
+	for attempt := 0; attempt < minContextSlotReadAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(minContextSlotReadBackoff):
+			}
+		}
+		err := read(ctx)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isMinContextSlotError(err) {
+			return err // a real error (not lag) — surface it immediately
+		}
+	}
+	return fmt.Errorf("solana: node never reached minimum context slot after %d attempts: %w", minContextSlotReadAttempts, lastErr)
+}
+
 // GetLatestBlockhash gets the latest blockhash with automatic failover.
 func (c *RPCFallbackClient) GetLatestBlockhash(ctx context.Context) (solanago.Hash, error) {
 	var blockhash solanago.Hash
