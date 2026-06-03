@@ -3,6 +3,8 @@ package server
 import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
+
+	cpginroutes "github.com/open-rails/openrails/internal/controlplane/ginroutes"
 )
 
 // ControlPlaneAuthPrefix is where OpenRails mounts the selected AuthKit route
@@ -18,7 +20,7 @@ func (s *Server) registerControlPlaneAuthRoutes(e *gin.Engine) {
 		return
 	}
 	group := e.Group(ControlPlaneAuthPrefix)
-	n := s.controlPlane.MountAuthRoutes(group)
+	n := cpginroutes.MountAuthRoutes(s.controlPlane, group)
 	log.WithFields(log.Fields{
 		"prefix":      ControlPlaneAuthPrefix,
 		"routes":      n,
