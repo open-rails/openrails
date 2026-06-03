@@ -1,7 +1,9 @@
 package authprovider
 
 import (
+	"context"
 	"errors"
+	"net/http"
 
 	"github.com/doujins-org/ginapi/response"
 	"github.com/gin-gonic/gin"
@@ -26,6 +28,28 @@ func ProviderFromAuthenticator(a billingauth.Authenticator) Provider {
 
 type authenticatorProvider struct {
 	a billingauth.Authenticator
+}
+
+// Authenticate exposes the wrapped Authenticator so this Provider satisfies
+// billingauth.Authenticator too, letting AsAuthenticator recover it for the
+// gin-free embedded surface (issue #282).
+func (p *authenticatorProvider) Authenticate(ctx context.Context, r *http.Request) (billingauth.UserContext, error) {
+	if p == nil || p.a == nil {
+		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
+	}
+	return p.a.Authenticate(ctx, r)
+}
+
+// AsAuthenticator recovers a framework-neutral billingauth.Authenticator from a
+// Provider when the provider implementation supports one (issue #282). Both the
+// AuthKit-backed provider and ProviderFromAuthenticator do. It returns
+// (nil, false) for providers that only expose gin middleware, so callers can
+// fall back gracefully.
+func AsAuthenticator(p Provider) (billingauth.Authenticator, bool) {
+	if a, ok := p.(billingauth.Authenticator); ok && a != nil {
+		return a, true
+	}
+	return nil, false
 }
 
 func (p *authenticatorProvider) Required() gin.HandlerFunc {

@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 )
 
@@ -45,8 +46,14 @@ type Server struct {
 	runtime      *app.Runtime
 	rdb          *redis.Client
 	authProvider authprovider.Provider
-	controlPlane *controlplane.ControlPlane
-	captchaStore *captcha.ChallengeStore
+	// authenticator is the framework-neutral auth boundary used by the gin-free
+	// embedded surface (issue #282). It is derived from authProvider when that
+	// provider exposes one (AuthKit-backed + ProviderFromAuthenticator do); a host
+	// may also set it explicitly. nil when neither is available — embedded
+	// auth-gated routes then fail closed with 500 (see Options.requiredMW).
+	authenticator billingauth.Authenticator
+	controlPlane  *controlplane.ControlPlane
+	captchaStore  *captcha.ChallengeStore
 
 	// tenancy is the tenant provisioning + lifecycle + per-tenant secret service
 	// (issue #225). Built only when the control plane is present (it owns the
@@ -133,6 +140,15 @@ func New(deps Dependencies) (*Server, error) {
 		authProvider: deps.AuthProvider,
 		controlPlane: deps.ControlPlane,
 		captchaStore: captcha.NewChallengeStore(deps.Redis),
+	}
+	// Derive the gin-free authenticator from the provider when possible (issue
+	// #282). The AuthKit-backed provider and ProviderFromAuthenticator both expose
+	// one; a custom gin-only provider does not, in which case the embedded
+	// auth-gated routes fail closed (the standalone gin surface is unaffected).
+	if deps.AuthProvider != nil {
+		if a, ok := authprovider.AsAuthenticator(deps.AuthProvider); ok {
+			s.authenticator = a
+		}
 	}
 
 	// Build the tenant provisioning/lifecycle/secret service when the control
@@ -425,6 +441,12 @@ func (s *Server) newHTTPHandlerEngine(opts HTTPHandlerOptions) *gin.Engine {
 // Embedded routes live under `/billing/v1/*`.
 func (s *Server) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 	return s.newHTTPHandlerEngine(opts)
+}
+
+// embeddedAuthenticator returns the framework-neutral Authenticator used by the
+// embedded route surface (issue #282), or nil when none is available.
+func (s *Server) embeddedAuthenticator() billingauth.Authenticator {
+	return s.authenticator
 }
 
 func (s *Server) wrap(fn func(r *httprequest.Request)) func(c *gin.Context) {

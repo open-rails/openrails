@@ -13,13 +13,17 @@ import (
 	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/http/router"
 )
 
 func (s *Server) registerUserRoutesAt(e *gin.Engine, apiPrefix string) {
 	api := e.Group(apiPrefix)
 	api.GET("/captcha/status", s.captchaStatusHandler)
 	api.GET("/captcha/client.js", s.captchaClientScriptHandler)
-	httproutes.RegisterUserRoutes(api, s.runtime, httproutes.Options{AuthProvider: s.authProvider})
+	httproutes.RegisterUserRoutes(router.NewGin(api, s.runtime), s.runtime, httproutes.Options{
+		AuthProvider:  s.authProvider,
+		Authenticator: s.embeddedAuthenticator(),
+	})
 }
 
 func (s *Server) captchaStatusHandler(c *gin.Context) {
@@ -117,7 +121,7 @@ func (s *Server) registerUserRoutes(e *gin.Engine) {
 func (s *Server) registerWebhookRoutesAt(e *gin.Engine, apiPrefix string) {
 	api := e.Group(apiPrefix)
 	webhooks := api.Group("/webhooks")
-	httproutes.RegisterWebhookRoutes(webhooks, s.runtime)
+	httproutes.RegisterWebhookRoutes(router.NewGin(webhooks, s.runtime), s.runtime)
 }
 
 func (s *Server) registerWebhookRoutes(e *gin.Engine) {
