@@ -43,6 +43,52 @@ var operationalSignatures = []string{
 	"found no record of a prior credit",
 }
 
+// terminalSignatures are substrings (matched case-insensitively against the
+// crank error) that indicate the subscription is GONE/inactive on-chain: the
+// subscriber cancelled or revoked the delegation directly via a wallet/explorer,
+// bypassing the app (#265). These are terminal: immediately cancel the
+// subscription and stop — NEVER dun, since dunning would burn ~15 days of
+// pointless retries against a subscription the user already killed.
+//
+// IMPORTANT: the EXACT on-chain program error code/string is NOT yet
+// devnet-confirmed. These are conservative matches against common phrasings of
+// "subscription cancelled / delegation revoked / not active / PDA closed". The
+// exact program error MUST be confirmed on devnet (#265) and this matcher
+// tightened to that string then — kept deliberately narrow here to avoid
+// misclassifying a RECOVERABLE subscriber-fault (e.g. insufficient USDC) as
+// terminal, which would wrongly cancel a paying subscriber's access.
+var terminalSignatures = []string{
+	"cancelled",
+	"canceled",
+	"revoked",
+	"delegation",
+	"not active",
+	"inactive",
+	"subscription closed",
+	"account does not exist",
+	"accountnotfound",
+}
+
+// IsTerminalFailure reports whether a crank error is terminal: the subscription
+// no longer exists / is no longer active on-chain (subscriber cancelled or
+// revoked the delegation out-of-band, #265). Terminal errors must cancel the
+// subscription and stop — they must NEVER be dunned. Operational errors are
+// checked FIRST (a transient RPC/network blip must not be mistaken for a
+// terminal cancel), so callers MUST order: IsOperationalFailure -> retry, then
+// IsTerminalFailure -> cancel, else -> dun.
+func IsTerminalFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, sig := range terminalSignatures {
+		if strings.Contains(msg, sig) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsOperationalFailure reports whether a crank error is operational (retry, do
 // not dun) rather than a subscriber fault (insufficient USDC, revoked
 // delegation, plan mismatch -> dun via the existing dunning machine). Context

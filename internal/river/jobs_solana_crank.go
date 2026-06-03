@@ -44,6 +44,9 @@ type solanaCranker interface {
 type membershipManager interface {
 	RenewMembership(ctx context.Context, params *subscriptions.RenewMembershipParams) error
 	FailMembership(ctx context.Context, params *subscriptions.FailMembershipParams) error
+	// CancelMembership terminates the subscription (used for out-of-band cancels
+	// detected at rebill time, #265: subscriber revoked the delegation on-chain).
+	CancelMembership(ctx context.Context, params *subscriptions.CancelMembershipParams) error
 }
 
 // SolanaCrankWorker queries due Solana subscriptions and cranks each: pull the
@@ -131,6 +134,31 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo *dbrepo.SolanaSub
 			log.WithContext(ctx).WithError(crankErr).WithField("subscription_pda", row.SubscriptionPDA).
 				Warn("Solana cranker: operational pull failure; will retry next run (no dunning)")
 			return crankErr
+		}
+		// Terminal failure (#265): the subscriber cancelled or revoked the
+		// delegation directly on-chain (via a wallet/explorer, bypassing the app),
+		// so the subscription is gone/inactive. Cancel immediately and STOP — never
+		// dun, since dunning would burn ~15 days of pointless retries against a
+		// subscription the user already killed.
+		if recurring.IsTerminalFailure(crankErr) {
+			log.WithContext(ctx).WithError(crankErr).WithField("subscription_pda", row.SubscriptionPDA).
+				Warn("Solana cranker: terminal pull failure (out-of-band cancel/revoke); cancelling subscription (no dunning)")
+			if err := repo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCancelled); err != nil {
+				return fmt.Errorf("solana crank: set cancelled status: %w", err)
+			}
+			subID := row.SubscriptionID
+			proc := models.ProcessorSolana
+			reason := crankErr.Error()
+			if err := w.Lifecycle.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+				Processor:      &proc,
+				SubscriptionID: &subID,
+				CancelType:     models.CancelTypeUser,
+				CancelFeedback: &reason,
+				RevokeAccess:   true,
+			}); err != nil {
+				return fmt.Errorf("solana crank: cancel membership: %w", err)
+			}
+			return nil
 		}
 		// Subscriber fault (insufficient USDC, revoked delegation, etc.) -> dunning.
 		// Advance next_pull_at by the dunning interval so the next attempt aligns
