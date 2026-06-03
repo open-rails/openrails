@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	solanago "github.com/doujins-org/solana-go"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -17,6 +18,18 @@ import (
 // init_subscription_authority has executed and written the account. Proven by
 // the devnet lifecycle test (reads offset 98 between init and subscribe).
 const subscriptionAuthorityInitIDOffset = 98
+
+// authorityReadMaxAttempts / authorityReadBackoff bound the read-after-write
+// retry on the SubscriptionAuthority account (#274). After init_subscription_authority
+// confirms, the RPC node serving the re-prepare may still lag behind that write,
+// so a single GetAccountData can observe a missing or short account. We retry up
+// to ~10 attempts ~1s apart (capped, context-aware) until the account is present
+// AND long enough to read initId.
+const authorityReadMaxAttempts = 10
+
+// authorityReadBackoff is a var (not const) only so tests can shrink the delay;
+// production keeps the ~1s read-after-write pacing.
+var authorityReadBackoff = time.Second
 
 // prepareRPC is the minimal RPC surface PrepareSubscribe needs (satisfied by
 // *solanaint.RPCClient): read on-chain account state + a recent blockhash to
@@ -132,15 +145,19 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		Mint:            mint.String(),
 	}
 
-	authData, err := s.rpc.GetAccountData(ctx, saPDA)
+	// Read the authority with a bounded, read-after-write-tolerant retry (#274):
+	// on the re-prepare right after init confirms, the RPC node may not yet serve
+	// the just-written account, so we retry until it is present and readable rather
+	// than racing a single read.
+	initID, exists, err := readAuthorityInitID(ctx, s.rpc, saPDA)
 	if err != nil {
-		return nil, fmt.Errorf("recurring: read subscription authority: %w", err)
+		return nil, err
 	}
 
 	// First-time subscriber for this mint: the authority must be initialized
 	// before subscribe can be built (subscribe needs its initId). Return the init
 	// tx; the caller signs+sends it, then re-prepares for the subscribe tx.
-	if len(authData) == 0 {
+	if !exists {
 		initIx := subscriptions.BuildInitSubscriptionAuthority(subscriptions.InitSubscriptionAuthorityParams{
 			Owner:                 subscriber,
 			SubscriptionAuthority: saPDA,
@@ -158,11 +175,16 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		return result, nil
 	}
 
-	// Authority exists: read its initId and build the subscribe tx.
-	initID, err := readInitID(authData)
-	if err != nil {
-		return nil, err
-	}
+	// Authority exists and its initId was read above; build the subscribe tx.
+	//
+	// TODO(#274): the repeated-subscribe-by-same-wallet path can still fail
+	// on-chain with Custom:519. The leading hypothesis is that the program expects
+	// the authority's CURRENT counter rather than the original init_id passed as
+	// ExpectedSubscriptionAuthInitID — i.e. the value at offset 98 may need to track
+	// accumulated authority state across subscribes. This is NOT yet confirmed on
+	// devnet; do NOT change the offset/semantics until a devnet root-cause check
+	// (current authority counter vs original init_id) proves what value subscribe
+	// must echo back. This change only makes the read robust against RPC lag.
 	eventAuth, _, err := subscriptions.DeriveEventAuthority()
 	if err != nil {
 		return nil, fmt.Errorf("recurring: derive event authority: %w", err)
@@ -218,4 +240,59 @@ func readInitID(data []byte) (int64, error) {
 		return 0, fmt.Errorf("recurring: subscription authority data too short (%d bytes, need %d)", len(data), end)
 	}
 	return int64(binary.LittleEndian.Uint64(data[subscriptionAuthorityInitIDOffset:end])), nil
+}
+
+// readAuthorityInitID reads the SubscriptionAuthority initId with a bounded,
+// read-after-write-tolerant retry (#274). It returns:
+//
+//   - (initId, true, nil)  when the account is present and long enough to read initId;
+//   - (0, false, nil)      when the account is genuinely absent (first-time subscriber:
+//     GetAccountData returns empty across every attempt) — the caller returns the init tx;
+//   - (0, false, err)      on a hard RPC error, or when an account appeared but stayed
+//     too short to read initId after all attempts (a clear "never settled" error).
+//
+// The distinction matters: an empty read is ambiguous (either truly first-time OR
+// the just-written account not yet visible), so we keep retrying empties up to the
+// bound. If it is still empty after the bound, we treat the subscriber as first-time
+// and return the init tx — re-preparing again will retry the read. A present-but-short
+// account is always an error (it should never happen once the account exists).
+func readAuthorityInitID(ctx context.Context, rpc prepareRPC, saPDA solanago.PublicKey) (int64, bool, error) {
+	var lastShort int
+	sawShort := false
+	for attempt := 0; attempt < authorityReadMaxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return 0, false, fmt.Errorf("recurring: subscription authority read canceled: %w", ctx.Err())
+			case <-time.After(authorityReadBackoff):
+			}
+		}
+		data, err := rpc.GetAccountData(ctx, saPDA)
+		if err != nil {
+			return 0, false, fmt.Errorf("recurring: read subscription authority: %w", err)
+		}
+		if len(data) == 0 {
+			continue // absent OR not-yet-visible: keep retrying within the bound
+		}
+		if len(data) < subscriptionAuthorityInitIDOffset+8 {
+			// Account exists but is shorter than the initId offset — likely a
+			// partially-visible read under RPC lag; retry within the bound.
+			sawShort = true
+			lastShort = len(data)
+			continue
+		}
+		initID, err := readInitID(data)
+		if err != nil {
+			return 0, false, err
+		}
+		return initID, true, nil
+	}
+	if sawShort {
+		return 0, false, fmt.Errorf(
+			"recurring: subscription authority never settled (last read %d bytes, need %d) after %d attempts",
+			lastShort, subscriptionAuthorityInitIDOffset+8, authorityReadMaxAttempts)
+	}
+	// Stayed empty across every attempt → treat as a genuinely absent authority
+	// (first-time subscriber): caller returns the init tx.
+	return 0, false, nil
 }
