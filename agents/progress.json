@@ -115,7 +115,7 @@
     {
       "id": 127,
       "name": "durable-workflow-execution",
-      "description": "Evaluate and potentially adopt embedded durable workflow execution for critical payment flows\n\n## Metadata\n\n- Category: architecture\n- Status: on_hold\n- Passes: false\n\n## Details\n\n- status_update: {\"date\":\"2025-12-14\",\"decision\":\"On hold - focus on simpler solutions first\",\"reasoning\":[\"Ad-hoc durable workflow system was built and then reverted\",\"Durable workflows don't compensate for faulty code - unit tests do\",\"Idempotency keys on NMI calls solve the double-charge problem more simply\",\"If we need durable workflows later, use a proper library like go-workflows\"],\"prerequisite\":\"Implement wrap-nmi-calls-with-idempotency first, then reassess if durable workflows are still needed\"}\n- candidate_library: {\"go_workflows\":{\"repo\":\"github.com/cschleiden/go-workflows\",\"maturity\":\"Production-ready, supports PostgreSQL\",\"when_to_adopt\":[\"Multi-step flows that genuinely need crash recovery\",\"Workflows with long-running waits (e.g., approval flows)\",\"Complex saga patterns with compensating transactions\"]}}\n- candidate_workflows: [\"Checkout flow (charge \u2192 record \u2192 grant entitlements)\",\"Subscription upgrade (charge proration \u2192 cancel old \u2192 create new)\",\"Dunning/rebill (charge \u2192 renew or \u2192 escalate failure)\",\"Refund flow (refund at processor \u2192 revoke entitlements \u2192 update records)\"]\n- when_to_reconsider: [\"After idempotency keys are implemented and we still see issues\",\"When we add complex multi-step flows (e.g., multi-party payouts)\",\"If reconciliation reports show frequent partial-completion issues\"]",
+      "description": "Evaluate and potentially adopt embedded durable workflow execution for critical payment flows\n\n## Metadata\n\n- Category: architecture\n- Status: on_hold\n- Passes: false\n\n## Details\n\n- status_update: {\"date\":\"2025-12-14\",\"decision\":\"On hold - focus on simpler solutions first\",\"reasoning\":[\"Ad-hoc durable workflow system was built and then reverted\",\"Durable workflows don't compensate for faulty code - unit tests do\",\"Idempotency keys on NMI calls solve the double-charge problem more simply\",\"If we need durable workflows later, use a proper library like go-workflows\"],\"prerequisite\":\"Implement wrap-nmi-calls-with-idempotency first, then reassess if durable workflows are still needed\"}\n- candidate_library: {\"go_workflows\":{\"repo\":\"github.com/cschleiden/go-workflows\",\"maturity\":\"Production-ready, supports PostgreSQL\",\"when_to_adopt\":[\"Multi-step flows that genuinely need crash recovery\",\"Workflows with long-running waits (e.g., approval flows)\",\"Complex saga patterns with compensating transactions\"]}}\n- candidate_workflows: [\"Checkout flow (charge → record → grant entitlements)\",\"Subscription upgrade (charge proration → cancel old → create new)\",\"Dunning/rebill (charge → renew or → escalate failure)\",\"Refund flow (refund at processor → revoke entitlements → update records)\"]\n- when_to_reconsider: [\"After idempotency keys are implemented and we still see issues\",\"When we add complex multi-step flows (e.g., multi-party payouts)\",\"If reconciliation reports show frequent partial-completion issues\"]",
       "tasks": [
         "ON HOLD - Reassess after implementing idempotency keys",
         "Previous ad-hoc implementation was reverted on 2025-12-14",
@@ -167,12 +167,12 @@
         "[x] Expiration: mark ended/expired and end/revoke entitlements",
         "",
         "CODE CHANGES (expected touch points):",
-        "[x] `internal/services/webhook_ccbill.go`: parse and apply `nextRenewalDate` on `NewSaleSuccess` and `RenewalSuccess` (don\u2019t rely solely on `price.billing_cycle_days`)",
+        "[x] `internal/services/webhook_ccbill.go`: parse and apply `nextRenewalDate` on `NewSaleSuccess` and `RenewalSuccess` (don’t rely solely on `price.billing_cycle_days`)",
         "[x] `internal/services/webhook_ccbill.go`: on `RenewalFailure`, parse `nextRetryDate` and update `subscriptions.status=past_due` + `subscriptions.next_retry_at` (avoid calling `SubscriptionLifecycleService.FailMembership`, which schedules NMI-style retries)",
         "[x] `internal/services/webhook_ccbill.go`: on `Cancellation`, call `CancelMembership` with `RevokeAccess=false` (today it passes true)",
         "[x] `internal/services/lifecycle_service.go`: update `CreateMembership` entitlement grant behavior for CCBill to create finite windows ending at `current_period_ends_at` (instead of indefinite `end_at=NULL`)",
-        "[x] `internal/services/lifecycle_service.go`: update `RenewMembership` for CCBill to extend entitlements to match the new `current_period_ends_at` (today renewal doesn\u2019t extend entitlements at all unless a downgrade changes entitlement set)",
-        "[x] `internal/db/repo/entitlement.go`: make `IsEntitled` / \u201cactive entitlement\u201d queries explicitly exclude `deleted_at` (don\u2019t rely on implicit soft-delete behavior)",
+        "[x] `internal/services/lifecycle_service.go`: update `RenewMembership` for CCBill to extend entitlements to match the new `current_period_ends_at` (today renewal doesn’t extend entitlements at all unless a downgrade changes entitlement set)",
+        "[x] `internal/db/repo/entitlement.go`: make `IsEntitled` / “active entitlement” queries explicitly exclude `deleted_at` (don’t rely on implicit soft-delete behavior)",
         "[x] `config/config.go`: add a feature flag / config for CCBill grace behavior (enable/disable + max cap)",
         "",
         "ANALYTICS:",
@@ -202,7 +202,7 @@
         "[ ] Ensure README.md does not mention removed keys; update if needed",
         "",
         "COMPAT / SAFETY:",
-        "[ ] Confirm unknown config keys do not crash koanf load/validate (so removal doesn\u2019t break old config files)",
+        "[ ] Confirm unknown config keys do not crash koanf load/validate (so removal doesn’t break old config files)",
         "",
         "VERIFY:",
         "[ ] `go test ./...` passes"
@@ -216,7 +216,7 @@
       "tasks": [
         "DESIGN:",
         "[ ] Decide opt-in mechanism: (A) standalone CLI subcommand `openrails cloudflared up` that supervises both OpenRails + cloudflared, or (B) OpenRails spawns cloudflared when `cloudflared.tunnel_token` is set and `env=dev`",
-        "[ ] Decide what constitutes \u201csuccess\u201d: tunnel established + /health/ready reachable via public hostname",
+        "[ ] Decide what constitutes “success”: tunnel established + /health/ready reachable via public hostname",
         "",
         "IMPLEMENTATION (if spawning subprocess):",
         "[ ] Add a small `pkg/cloudflared` supervisor that starts `cloudflared tunnel run` with the configured token and captures stdout/stderr into structured logs",
@@ -278,98 +278,6 @@
         "[ ] Surface pre-pull BALANCE HEALTH from the recurring engine so the UI can trigger a top-up before a pull would fail (engine likely already knows; just expose it). No change to delegation/pull logic; MoonPay is non-custodial and never holds OpenRails funds.",
         "[ ] Geo-gate the CTA for unsupported locales (LA, USVI, sanctioned) using user-locale signals.",
         "[ ] OPEN DECISIONS (user): (1) primary use = bootstrap-from-zero vs top-up existing sub? (2) prefund horizon (3/6/12 months)? (3) webhooks in phase 1 or defer? (4) where sk_ lives (OpenRails route vs edge fn)? (5) confirm external-wallet-required. (6) lock the USDC amount = needed+buffer? (7) honest framing: position as 'fund your wallet', keep steering pure-card users to Stripe/NMI."
-      ],
-      "completed": false
-    },
-    {
-      "id": 279,
-      "name": "embed-neutral-auth-boundary",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: the framework-neutral AUTH boundary. Host validates the request (any scheme) and yields identity; OpenRails attaches it to the request context. Mirror authkit's net/http middleware shape, NOT gin. AuthKit becomes ONE optional implementation, not a dependency. PACKAGING: the neutral pieces (Authenticator/AuthenticatorFunc/UserContext/SetUserContext/FromContext + net/http Required/Optional) MUST live in a gin-free, authkit-free package (stdlib + net/http only). The gin Provider + ProviderFromAuthenticator bridge + UserContextFromGin move to an app-side gin adapter subpackage that ONLY the standalone/gin path imports. See #285.",
-      "tasks": [
-        "[x] billingauth.Authenticator: Authenticate(ctx, *http.Request) (UserContext, error) \u2014 gin-free, authkit-free core package pkg/billingauth.",
-        "[x] billingauth.AuthenticatorFunc closure adapter.",
-        "[x] net/http Required/Optional middleware (mirror authkit http.Required/Optional); store UserContext in request context; neutral JSON 401 via WriteJSONError. Unit-tested.",
-        "[x] Gin bridge authprovider.ProviderFromAuthenticator(billingauth.Authenticator) Provider (transitional, for today's gin routes).",
-        "[x] pkg/authprovider now aliases billingauth (UserContext/SetUserContext/FromContext/ErrUnauthenticated) so existing importers keep building; authprovider is the gin adapter.",
-        "[x] ACCEPTANCE met: `go list -deps ./pkg/billingauth` has 0 gin + 0 authkit. authprovider tests + internal/auth build green.",
-        "[ ] Wire embedded.Options.Authenticator (billingauth.Authenticator) \u2014 pending: pkg/embedded currently blocked by unrelated solana-recurring WIP; trivial additive change once the tree builds.",
-        "[ ] Handlers read identity via billingauth.FromContext(r.Context()) on the net/http path \u2014 done as part of #282.",
-        "[ ] Final UserContext shape pending #280."
-      ],
-      "completed": false
-    },
-    {
-      "id": 280,
-      "name": "embed-identity-authz-contract",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE (DESIGN): decide the MINIMAL, flexible host<->library identity/authorization contract billing needs, so UserContext isn't over-fit to AuthKit. Output feeds #279/#281/#282.",
-      "tasks": [
-        "[ ] Enumerate exactly what billing handlers read from identity today (UserID/payer, Org/tenant, OrgRoles, Roles, Entitlements) and every admin-authority gate.",
-        "[ ] Decide minimal shape: Subject/principal (required, the payer), Tenant/Org (optional), + an authorization signal. RECOMMENDATION: admin gating via an OpenRails-DEFINED capability the host populates (e.g. CanAdministerBilling / per-tenant) rather than OpenRails interpreting host role NAMES.",
-        "[ ] Decide single-tenant vs multi-tenant ergonomics (host with no orgs must work with Org empty).",
-        "[ ] Document optionality + a mapping guide (AuthKit host, no-org host, custom-claims host).",
-        "[ ] Finalize UserContext (or v2) + keep helpers (HasRole/HasEntitlement/capability checks). Keep backward-compatible fields where cheap."
-      ],
-      "completed": false
-    },
-    {
-      "id": 281,
-      "name": "embed-route-manifest",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: expose billing routes as a framework-agnostic MANIFEST the host mounts anywhere, mirroring authkit Routes()/APIRoutes(). Pairs with #282 (the handlers must be net/http first).",
-      "tasks": [
-        "[ ] Add billing RouteSpec{ Method string, Path string (net/http ServeMux syntax e.g. /v1/me/subscriptions/{id}), Group RouteGroup, Handler http.Handler }.",
-        "[ ] Expose Routes() / APIRoutes(groups ...RouteGroup) []RouteSpec on the embedded surface (groups: user, admin, webhooks) \u2014 mirrors HTTPHandlerOptions Include* as group selection.",
-        "[ ] Keep a convenience Handler()/NewHTTPHandler() that assembles the manifest into an http.NewServeMux at a base prefix (drop-in for today's single-handler mount).",
-        "[ ] Document mounting into net/http ServeMux, gin (gin.WrapH), and chi \u2014 host chooses framework + base path; OpenRails owns the stable sub-paths.",
-        "[ ] Depends on #282 (handlers are http.Handler) + #279 (auth middleware wraps groups)."
-      ],
-      "completed": false
-    },
-    {
-      "id": 282,
-      "name": "embed-degin-handlers",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE (LARGE, phased): migrate billing HTTP handlers off gin to pure net/http http.HandlerFunc so the exposed surface pulls in ZERO gin. This is the bulk of the work; do it per route group and gate on appetite.",
-      "tasks": [
-        "[x] DONE+pushed (e524733): embedded route layer converted to net/http (neutral Router + ServeMux adapters in internal/http/router; gin adapter isolated in router/ginrouter; Register{User,Admin,Webhook}Routes on router.Router; neutral auth/tenant-conn/operator middleware; server assembles embedded surface as http.ServeMux via request.NewHTTP; standalone keeps gin). 78 routes. Build+test green.",
-        "[x] DONE+pushed (72fad9a): handler layer gin-free (removed Request.Inner()).",
-        "[x] DONE+pushed (efe2fbf): Request transport interface + gin-free net/http backend (NewHTTP/httpTransport) with gin-identical binding (validator SetTagName(binding)) + reflection form/uri decoder. Unit-tested. Additive: gin path unchanged.",
-        "[ ] ROUTE LAYER (the remaining bulk): convert the embedded route registration to net/http. Recommended: a neutral Router abstraction (Handle(method,path,fn func(*request.Request)); Group(prefix); Use(mw)) with a gin impl (standalone) + a net/http ServeMux impl (embedded), so RegisterUserRoutes/RegisterAdminRoutes/RegisterWebhookRoutes register on either. Counts: user=30, admin=47, webhook=1 routes.",
-        "[ ] NEUTRALIZE the embedded middleware to net/http (currently gin): opts.AuthProvider.Required()/Optional() -> billingauth.Required/Optional over a billingauth.Authenticator (#284); middleware.TenantDBConn; authpolicy.OperatorAdminRequired; authpolicy.OperatorPermissionRequired. (Service/OAT + standalone-only routes keep gin.)",
-        "[ ] wrapHandlerHTTP(rt, fn) http.HandlerFunc = fn(request.NewHTTP(w,r,rt)); switch server.newHTTPHandlerEngine to assemble an http.ServeMux (Go 1.22 {id} patterns) for the embedded surface; standalone keeps its gin engine.",
-        "[ ] Then #285: move the now-gin-free library packages internal/->pkg/ and assert the dep-isolation gate (0 gin/0 authkit) for the whole embedded surface."
-      ],
-      "completed": false
-    },
-    {
-      "id": 283,
-      "name": "embed-neutral-responses",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: framework-neutral JSON response/error writing to a plain http.ResponseWriter (today billing uses gin + doujins-org/ginapi/response). Supports #282 and #279's 401.",
-      "tasks": [
-        "[ ] Neutral response writing already seeded: billingauth.WriteJSONError writes the {object:error, error:{type,message}} envelope to http.ResponseWriter. Extend to full parity with api.SimpleErrorResponse / message.Json list envelope used by request.go (SuccessJSON/SuccessJSONPaginated/AbortJSON/ErrorJSON/APIError).",
-        "[ ] httpTransport's response methods write via these neutral writers (no gin). Keep error type/code constants stable.",
-        "[ ] Tests: envelope parity vs the current gin output."
-      ],
-      "completed": false
-    },
-    {
-      "id": 284,
-      "name": "embed-authkit-optional",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: ensure embedded OpenRails makes NO AuthKit assumption \u2014 runs with only a host Authenticator, and does not require AuthKit's profiles.* user store. Standalone OpenRails keeps AuthKit for its own tenant management (own DB), unchanged.",
-      "tasks": [
-        "[ ] PACKAGE-GRAPH (authkit out of pkg/embedded graph): authkit enters via internal/auth (wired by internal/app) and internal/controlplane (imported directly by pkg/embedded + internal/app + internal/http + routes + middleware). Make the embedded construction NOT wire the AuthKit provider or the control plane: embedded uses a host billingauth.Authenticator (already supported via authprovider.AsAuthenticator); the AuthKit provider (internal/auth) + control plane (internal/controlplane) become standalone-only. Gate: go list -deps ./pkg/embedded | grep open-rails/authkit is EMPTY.",
-        "[ ] Make internal/controlplane optional on the embedded path: trace each pkg/embedded->controlplane import (app, http, routes, middleware, direct) and gate it behind standalone-only assembly so embedded NewHTTPHandler + billing services do not need it.",
-        "[ ] SCHEMA COUPLING (profiles.* AuthKit user store): billing reads profiles.* in internal/db/repo/profile.go, internal/modules/subscriptions/email_service.go, internal/modules/checkout/service.go, internal/modules/reconcile/reconcile.go, pkg/service/reconcile.go. For a non-AuthKit host these tables do not exist. Decouple: treat the principal as an OPAQUE id from the Authenticator; make profiles.* reads (user existence/enrichment for reconcile/email) host-provided hooks or optional/no-op when absent. DESIGN DECISION needed \u2014 flag options, do not silently break reconcile/email.",
-        "[ ] After both: go list -deps ./pkg/embedded has 0 gin (#285) AND 0 authkit (#284). Build + test green. Standalone keeps authkit + control plane + profiles."
-      ],
-      "completed": false
-    },
-    {
-      "id": 285,
-      "name": "split-library-vs-standalone",
-      "description": "EPIC embed-as-library (#279-284 siblings). THIS ISSUE (structural backbone): physically split OpenRails into (a) an IMPORTABLE library in pkg/ \u2014 the embeddable billing domain/service + framework-neutral HTTP surface (net/http handlers, route manifest, Authenticator boundary, neutral responses) with NO gin/AuthKit assumption \u2014 and (b) the STANDALONE app, which imports the library and adds AuthKit (as the Authenticator impl), the gin router, the control-plane/tenant management, and its own DB bootstrap. Standalone keeps gin + AuthKit; only the library must be neutral.",
-      "tasks": [
-        "[x] DONE+pushed (c25fb00): migrated 19 handlers off r.GinCtx (the keystone + a real embedded nil-panic fix). Handlers fully framework-agnostic.",
-        "[ ] CORRECTED SCOPE (per dep analysis): pkg/embedded pulls gin via ~11 pkgs, not 5. Remaining splits (dep-ordered): (1) pkg/query: delete dead ParseQueryOptions (0 callers) -> drops gin. (2) pkg/authprovider: move gin Provider+bridge+UserContextFromGin into a gin subpackage; keep gin-free alias core. (3) internal/auth: move authKitProvider gin Required/Optional to a gin subpkg (keep the gin-free Authenticate). (4) internal/auth/policy: split admin.go gin middleware -> ginmw, keep gin-free helpers. (5) internal/controlplane: move MountAuthRoutes/adaptHandler gin to a ginroutes subpkg. (6) internal/http/request: move ginTransport+New into request/ginreq, export Transport, REMOVE the GinCtx field (now that handlers are migrated; the ~128 route/middleware GinCtx uses on the gin path move to ginreq access). (7) internal/http/{middleware,routes,server}: split gin (standalone) from gin-free (embedded). (8) pkg/embedded: move RegisterXxxRoutes(*gin.RouterGroup) + ginrouter import into pkg/embedded/gin.",
-        "[ ] GATE: go list -deps ./pkg/embedded | grep gin-gonic/gin EMPTY. Build+test green; standalone keeps gin."
       ],
       "completed": false
     },
