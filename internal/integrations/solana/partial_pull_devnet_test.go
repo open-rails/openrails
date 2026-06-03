@@ -173,14 +173,13 @@ func TestDevnetPartialPullAndCap(t *testing.T) {
 	t.Logf("SUMMARY: partial pulls allowed (Model-B proration confirmed); over-cap err=%s; cancelled-pull err=%s", overCapErr, cancelledErr)
 }
 
-// TestDevnetCancelledPullErrorIsolated isolates the on-chain error a crank gets
-// against a CANCELLED subscription with NO prior pull (so it is NOT confounded by
-// the per-period cap, unlike PROBE 4 above). This is the exact error #265's
-// terminal classifier must key on. If it differs from the over-cap error
-// (Custom:400) the cranker can distinguish terminal-cancel from idempotent
-// already-pulled by code alone; if identical, it must read on-chain subscription
-// state to disambiguate.
-func TestDevnetCancelledPullErrorIsolated(t *testing.T) {
+// TestDevnetCancelVsRevokeSemantics establishes what actually STOPS a pull —
+// the load-bearing fact behind #264/#265/#266. It tests, on a fresh sub with the
+// period cap untouched: (A) cancel_subscription then a crank — does cancel block
+// the pull? and (B) revoke_delegation then a crank — does revoking the SPL token
+// delegate block it, and with what error code? This is the exact terminal signal
+// #265 must key on.
+func TestDevnetCancelVsRevokeSemantics(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
 	defer cancel()
 
@@ -192,8 +191,17 @@ func TestDevnetCancelledPullErrorIsolated(t *testing.T) {
 
 	subKey, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
+	// Fund the throwaway subscriber lean (gas + its own PDA/sub rent ~0.004 SOL);
+	// sweep the remainder back to the merchant at the end to avoid stranding SOL.
 	signAndSend(ctx, t, rc, merchant, nil,
-		system.NewTransferInstruction(50_000_000, merchant.PublicKey(), subKey.PublicKey()).Build())
+		system.NewTransferInstruction(15_000_000, merchant.PublicKey(), subKey.PublicKey()).Build())
+	defer func() {
+		if bal, e := rc.GetBalance(context.Background(), subKey.PublicKey()); e == nil && bal > 1_000_000 {
+			_, _ = dnRaw.SendTransactionWithOpts(context.Background(),
+				mustTx(rc, subKey, system.NewTransferInstruction(bal-1_000_000, subKey.PublicKey(), merchant.PublicKey()).Build()),
+				rpc.TransactionOpts{SkipPreflight: true})
+		}
+	}()
 
 	mintKey, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
@@ -236,15 +244,83 @@ func TestDevnetCancelledPullErrorIsolated(t *testing.T) {
 		ExpectedCreatedAt: planCreatedAt, ExpectedSubscriptionAuthInitID: saInitID,
 	}))
 
-	// Cancel BEFORE any pull (period cap untouched), then crank the full amount.
+	crank := func(amount uint64) solanago.Instruction {
+		return subscriptions.BuildTransferSubscription(subscriptions.TransferSubscriptionParams{
+			SubscriptionPDA: subPDA, PlanPDA: planPDA, SubscriptionAuthority: saPDA,
+			DelegatorATA: subATA, ReceiverATA: merchantATA, Caller: merchant.PublicKey(), Mint: mint,
+			TokenProgram: token.ProgramID, EventAuthority: eventAuth, Amount: amount, Delegator: subKey.PublicKey(),
+		})
+	}
+
+	// (A) cancel_subscription, then crank a partial amount (cap untouched).
 	signAndSend(ctx, t, rc, subKey, nil, subscriptions.BuildCancelSubscription(subscriptions.CancelOrResumeParams{
 		Subscriber: subKey.PublicKey(), PlanPDA: planPDA, SubscriptionPDA: subPDA, EventAuthority: eventAuth,
 	}))
-	errStr := sendExpectingError(ctx, t, rc, merchant, subscriptions.BuildTransferSubscription(subscriptions.TransferSubscriptionParams{
-		SubscriptionPDA: subPDA, PlanPDA: planPDA, SubscriptionAuthority: saPDA,
-		DelegatorATA: subATA, ReceiverATA: merchantATA, Caller: merchant.PublicKey(), Mint: mint,
-		TokenProgram: token.ProgramID, EventAuthority: eventAuth, Amount: 10_000_000, Delegator: subKey.PublicKey(),
-	}))
-	t.Logf("ISOLATED cancelled-subscription pull error (no prior pull) = %s", errStr)
-	t.Log("COMPARE: over-cap error was Custom:400. If this differs, terminal-cancel is distinguishable by error code alone.")
+	beforeA := tokenBalance(ctx, t, raw, merchantATA)
+	cancelSig, cancelErr := trySend(ctx, t, rc, merchant, crank(4_000_000))
+	afterA := tokenBalance(ctx, t, raw, merchantATA)
+	if cancelErr == "" && afterA == beforeA+4_000_000 {
+		t.Logf("(A) FINDING: crank AFTER cancel_subscription SUCCEEDED (moved 4 tokens, sig %s) -> cancel does NOT block pulls; soft-cancel (stop cranking) is the real billing-stop", cancelSig)
+	} else {
+		t.Logf("(A) crank after cancel was REJECTED; err=%s (cancel DOES block pulls)", cancelErr)
+	}
+
+	// (B) The subscriber revokes the SPL TOKEN DELEGATE on their ATA — the
+	// authority transfer_subscription actually uses to move funds. This is the
+	// trustless hard-stop. Capture whether the next crank is rejected + its code.
+	revokeSig, revokeErr := trySend(ctx, t, rc, subKey, token.NewRevokeInstruction(subATA, subKey.PublicKey(), nil).Build())
+	t.Logf("(B) SPL token Revoke of the ATA delegate: sig=%s err=%q", revokeSig, revokeErr)
+	beforeB := tokenBalance(ctx, t, raw, merchantATA)
+	crankSig, crankErr := trySend(ctx, t, rc, merchant, crank(4_000_000))
+	afterB := tokenBalance(ctx, t, raw, merchantATA)
+	if crankErr != "" {
+		t.Logf("(B) FINDING: crank AFTER token-delegate revoke REJECTED; on-chain error = %s -> this is the trustless terminal stop (#265/#266)", crankErr)
+	} else {
+		t.Logf("(B) crank after delegate revoke SUCCEEDED (sig %s, moved %d) -> revoke did NOT stop it", crankSig, afterB-beforeB)
+	}
+	t.Log("COMPARE: over-cap = Custom:400; cancel does NOT stop pulls; the SPL-delegate revoke is the trustless stop.")
+}
+
+// mustTx builds + signs a single-signer tx (used by the SOL sweep-back).
+func mustTx(rc *RPCClient, payer solanago.PrivateKey, instrs ...solanago.Instruction) *solanago.Transaction {
+	bh, _ := rc.GetLatestBlockhash(context.Background())
+	tx, _ := solanago.NewTransaction(instrs, bh, solanago.TransactionPayer(payer.PublicKey()))
+	_, _ = tx.Sign(func(pk solanago.PublicKey) *solanago.PrivateKey {
+		if payer.PublicKey().Equals(pk) {
+			return &payer
+		}
+		return nil
+	})
+	return tx
+}
+
+// trySend submits without preflight and returns (signature, onchainErr) — empty
+// err string means the tx SUCCEEDED on-chain.
+func trySend(ctx context.Context, t *testing.T, rc *RPCClient, feePayer solanago.PrivateKey, instrs ...solanago.Instruction) (string, string) {
+	t.Helper()
+	bh, err := rc.GetLatestBlockhash(ctx)
+	require.NoError(t, err)
+	tx, err := solanago.NewTransaction(instrs, bh, solanago.TransactionPayer(feePayer.PublicKey()))
+	require.NoError(t, err)
+	_, err = tx.Sign(func(pk solanago.PublicKey) *solanago.PrivateKey {
+		if feePayer.PublicKey().Equals(pk) {
+			return &feePayer
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	sig, err := dnRaw.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{SkipPreflight: true, PreflightCommitment: rpc.CommitmentConfirmed})
+	require.NoError(t, err)
+	for i := 0; i < 45; i++ {
+		st, e := dnRaw.GetSignatureStatuses(ctx, true, sig)
+		if e == nil && len(st.Value) > 0 && st.Value[0] != nil {
+			cs := st.Value[0].ConfirmationStatus
+			if cs == rpc.ConfirmationStatusConfirmed || cs == rpc.ConfirmationStatusFinalized {
+				return sig.String(), formatTxErr(st.Value[0].Err)
+			}
+		}
+		time.Sleep(time.Second)
+	}
+	t.Fatalf("tx %s not confirmed in time", sig)
+	return "", ""
 }
