@@ -55,6 +55,15 @@ func newSelfRouter(t *testing.T, perms []string) *gin.Engine {
 	return e
 }
 
+func newTenantAdminRouter(t *testing.T, perms []string) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	group := e.Group("/v1/tenant-admin")
+	RegisterTenantAdminRoutes(group, nil, middleware.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
+	return e
+}
+
 func doSelf(e *gin.Engine, method, path string, withAuth bool) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader("{}"))
 	req.Header.Set("Content-Type", "application/json")
@@ -134,4 +143,26 @@ func TestSelfService_ResumeRejectedWithoutToken(t *testing.T) {
 	e := newSelfRouter(t, []string{controlplane.PermSelfSubscriptionCancel})
 	w := doSelf(e, http.MethodPost, "/v1/self/subscriptions/sub_123/resume", false)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestTenantAdmin_OperationalListsMountedAndGated(t *testing.T) {
+	readless := []string{controlplane.PermSelfBillingRead}
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"subscriptions-list", "/v1/tenant-admin/subscriptions"},
+		{"subscription-detail", "/v1/tenant-admin/subscriptions/sub_123"},
+		{"repair-alerts", "/v1/tenant-admin/repair-alerts"},
+		{"manual-rebill-attempts", "/v1/tenant-admin/manual-rebill-attempts"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTenantAdminRouter(t, readless)
+			w := doSelf(e, http.MethodGet, tc.path, true)
+			require.Equal(t, http.StatusForbidden, w.Code,
+				"%s must be mounted and gated (403, not 404): %s", tc.name, w.Body.String())
+		})
+	}
 }

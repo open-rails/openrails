@@ -432,6 +432,7 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	}
 
 	read := middleware.RequireDelegatedPermission(controlplane.PermTenantBillingRead)
+	subRead := middleware.RequireDelegatedPermission(controlplane.PermTenantBillingRead)
 	entWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantEntitlementsWrite)
 	payWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantPaymentsWrite)
 	subWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantSubscriptionsWrite)
@@ -448,6 +449,11 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	metrics.GET("/subscriptions", metricsRead, wrap(httphandlers.GetAdminMetricsSubscriptions))
 	metrics.GET("/processors", metricsRead, wrap(httphandlers.GetAdminMetricsProcessors))
 	metrics.GET("/churn", metricsRead, wrap(httphandlers.GetAdminMetricsChurn))
+
+	// Tenant-wide operational lists. They reuse admin handlers, but the delegated
+	// middleware pins the tenant before RLS-aware queries run.
+	group.GET("/repair-alerts", read, wrap(httphandlers.GetAdminRepairAlerts))
+	group.GET("/manual-rebill-attempts", read, wrap(httphandlers.GetAdminManualRebillAttempts))
 
 	users := group.Group("/users/:user_id")
 
@@ -471,5 +477,7 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	// its tenant. Subscriptions are addressed by id; the handler operates within
 	// the pinned tenant, so a sub outside the tenant is unreachable (fail closed).
 	subs := group.Group("/subscriptions")
+	subs.GET("", subRead, wrap(httphandlers.GetAdminSubscriptions))
+	subs.GET("/:id", subRead, wrap(httphandlers.GetAdminSubscription))
 	subs.POST("/:id/cancel", subWrite, wrap(httphandlers.AdminCancelSubscription))
 }
