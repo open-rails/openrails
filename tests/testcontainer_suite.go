@@ -7,6 +7,8 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,6 +128,10 @@ func (suite *TestContainerSuite) SetupSuite() {
 func (suite *TestContainerSuite) startPostgresContainer() {
 	suite.t.Helper()
 
+	if strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL")) != "" || strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")) != "" {
+		return
+	}
+
 	container, err := postgres.Run(suite.ctx,
 		"postgres:18-alpine",
 		postgres.WithDatabase("test_db"),
@@ -146,6 +152,10 @@ func (suite *TestContainerSuite) startPostgresContainer() {
 func (suite *TestContainerSuite) startRedisContainer() {
 	suite.t.Helper()
 
+	if strings.TrimSpace(os.Getenv("OPENRAILS_TEST_REDIS_ADDR")) != "" {
+		return
+	}
+
 	container, err := redismodule.Run(suite.ctx,
 		"redis:7-alpine",
 		testcontainers.WithWaitStrategy(
@@ -161,6 +171,10 @@ func (suite *TestContainerSuite) startRedisContainer() {
 // startClickHouseContainer starts a ClickHouse test container
 func (suite *TestContainerSuite) startClickHouseContainer() {
 	suite.t.Helper()
+
+	if strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_HTTP_ADDR")) != "" {
+		return
+	}
 
 	container, err := clickhouse.Run(suite.ctx,
 		"clickhouse/clickhouse-server:23.8-alpine",
@@ -183,19 +197,15 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	suite.t.Helper()
 
 	// Get PostgreSQL connection string
-	postgresConnStr, err := suite.postgresContainer.ConnectionString(suite.ctx, "sslmode=disable")
+	postgresConnStr, err := suite.postgresConnectionString()
 	require.NoError(suite.t, err)
 
 	// Get Redis connection details
-	redisHost, err := suite.redisContainer.Host(suite.ctx)
-	require.NoError(suite.t, err)
-	redisPort, err := suite.redisContainer.MappedPort(suite.ctx, "6379")
+	redisAddr, err := suite.redisAddress()
 	require.NoError(suite.t, err)
 
 	// Get ClickHouse connection details
-	clickhouseHost, err := suite.clickhouseContainer.Host(suite.ctx)
-	require.NoError(suite.t, err)
-	clickhousePort, err := suite.clickhouseContainer.MappedPort(suite.ctx, "8123")
+	clickhouseHTTPAddr, clickhouseClientAddr, err := suite.clickhouseAddresses()
 	require.NoError(suite.t, err)
 
 	// Create configuration
@@ -210,15 +220,16 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			URL: postgresConnStr,
 		},
 		Redis: &config.RedisConfig{
-			Addr:     fmt.Sprintf("%s:%s", redisHost, redisPort.Port()),
+			Addr:     redisAddr,
 			Password: "",
 			DB:       0,
 		},
 		ClickHouse: &config.ClickHouseConfig{
-			HTTPAddr: fmt.Sprintf("http://%s:%s", clickhouseHost, clickhousePort.Port()),
-			Database: "test_analytics",
-			Username: "test_user",
-			Password: "test_password",
+			HTTPAddr:   clickhouseHTTPAddr,
+			ClientAddr: clickhouseClientAddr,
+			Database:   envOrDefault("OPENRAILS_TEST_CH_DATABASE", "test_analytics"),
+			Username:   envOrDefault("OPENRAILS_TEST_CH_USERNAME", "test_user"),
+			Password:   envOrDefault("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
 		},
 		Auth: &config.AuthConfig{
 			Issuers:          []string{jwksIssuer},
@@ -285,7 +296,7 @@ func (suite *TestContainerSuite) runDatabaseMigrations() {
 	suite.t.Helper()
 
 	// First, create the required schemas (normally done by bootstrap SQL)
-	postgresConnStr, err := suite.postgresContainer.ConnectionString(suite.ctx, "sslmode=disable")
+	postgresConnStr, err := suite.postgresConnectionString()
 	require.NoError(suite.t, err)
 
 	// Connect directly to create schemas
@@ -312,6 +323,66 @@ func (suite *TestContainerSuite) runDatabaseMigrations() {
 	// Run all migrations using the migrate package
 	err = migrate.RunPostgres(suite.ctx, suite.Config)
 	require.NoError(suite.t, err)
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func (suite *TestContainerSuite) postgresConnectionString() (string, error) {
+	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL")); dsn != "" {
+		return dsn, nil
+	}
+	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")); dsn != "" {
+		return dsn, nil
+	}
+	if suite.postgresContainer == nil {
+		return "", fmt.Errorf("postgres test container is not initialized")
+	}
+	return suite.postgresContainer.ConnectionString(suite.ctx, "sslmode=disable")
+}
+
+func (suite *TestContainerSuite) redisAddress() (string, error) {
+	if addr := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_REDIS_ADDR")); addr != "" {
+		return addr, nil
+	}
+	if suite.redisContainer == nil {
+		return "", fmt.Errorf("redis test container is not initialized")
+	}
+	host, err := suite.redisContainer.Host(suite.ctx)
+	if err != nil {
+		return "", err
+	}
+	port, err := suite.redisContainer.MappedPort(suite.ctx, "6379")
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s:%s", host, port.Port()), nil
+}
+
+func (suite *TestContainerSuite) clickhouseAddresses() (string, string, error) {
+	if httpAddr := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_HTTP_ADDR")); httpAddr != "" {
+		return httpAddr, envOrDefault("OPENRAILS_TEST_CH_ADDR", "localhost:9000"), nil
+	}
+	if suite.clickhouseContainer == nil {
+		return "", "", fmt.Errorf("clickhouse test container is not initialized")
+	}
+	host, err := suite.clickhouseContainer.Host(suite.ctx)
+	if err != nil {
+		return "", "", err
+	}
+	httpPort, err := suite.clickhouseContainer.MappedPort(suite.ctx, "8123")
+	if err != nil {
+		return "", "", err
+	}
+	nativePort, err := suite.clickhouseContainer.MappedPort(suite.ctx, "9000")
+	if err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("http://%s:%s", host, httpPort.Port()), fmt.Sprintf("%s:%s", host, nativePort.Port()), nil
 }
 
 // initializeServer starts the billing server for testing

@@ -10,9 +10,10 @@
 // are responsible for any per-test isolation/cleanup they need (most scope rows
 // by a freshly-generated owner id).
 //
-// If OPENRAILS_TEST_DB_URL is set, that database is used instead of a
-// testcontainer (e.g. a docker-compose Postgres stack). Migrations are still
-// applied; migratekit/River migrations are idempotent, so this is safe to repeat.
+// If OPENRAILS_TEST_DB_URL or OPENRAILS_TEST_DB_DSN is set, that database is
+// used instead of a testcontainer (e.g. a docker-compose Postgres stack).
+// Migrations are still applied; migratekit/River migrations are idempotent, so
+// this is safe to repeat.
 package dbtest
 
 import (
@@ -20,6 +21,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -53,7 +55,10 @@ func SharedPostgresDSN(t *testing.T) string {
 }
 
 func provision(ctx context.Context) (string, error) {
-	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
+	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL"))
+	if dsn == "" {
+		dsn = strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN"))
+	}
 	if dsn == "" {
 		container, err := postgres.Run(ctx,
 			"postgres:18-alpine",
