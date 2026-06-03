@@ -1,5 +1,5 @@
 {
-  "next_id": 277,
+  "next_id": 278,
   "issues": [
     {
       "id": 103,
@@ -629,6 +629,21 @@
         "[x] document the universal Model-B upgrade policy in one place (doc comment on CalculateModelBUpgradeCharge + CalculateProration)",
         "[x] REVIEW GATE VERIFIED (real Stripe TEST mode, via OpenRails StripeService.UpdateSubscriptionPrice with proration_behavior=always_invoice + billing_cycle_anchor=now): subscribed $20.00/mo -> upgraded to $50.00/mo; upgrade invoice collected NOW = $30.00 PAID = new_full($50.00) - old_unused($20.00) (invoice lines: -$20.00 unused time credit + $50.00 new full period). current_period_end RESET to ~30 days (+719h59m) out from the upgrade instant (cycle reset confirmed). Model-B confirmed CORRECT. Test: internal/modules/subscriptions/stripe_model_b_integration_test.go (build tag stripe_integration; run with STRIPE_SECRET_KEY)."
       ]
+    },
+    {
+      "id": 277,
+      "name": "solana-moonpay-usdc-onramp",
+      "description": "Let a card-only user (no USDC, no funded wallet) buy USDC on Solana via MoonPay and then start / keep funded an OpenRails recurring Solana subscription. MoonPay is a fiat->crypto on-ramp (iframe widget / @moonpay/moonpay-js / @moonpay/moonpay-react).\n\n## Key findings (research 2026-06-03)\n- USDC on Solana IS supported, currencyCode=`usdc_sol` (NOT bare `usdc`, which defaults to Ethereum), delivered to a user-supplied Solana address. Classic SPL mint = matches our engine.\n- The user STILL needs a self-custody wallet (Phantom/Backpack): MoonPay only delivers tokens, it cannot SIGN the OpenRails SPL-delegation/subscribe tx. MoonPay's hosted wallet can't sign delegation -> require an external wallet.\n- URL signing is REQUIRED whenever the widget URL carries walletAddress: HMAC-SHA256 over the query string keyed by the secret key (sk_), base64. So even minimal integration needs ONE backend route to sign URLs (frontend generateUrlForSigning -> backend HMAC -> updateSignature). pk_ is frontend, sk_ is backend-only.\n- Webhooks (transaction_created/updated/failed, verify Moonpay-Signature-V2, de-dupe) are OPTIONAL for basic UX -- we can instead POLL the wallet's USDC ATA balance since the deliverable is an on-chain transfer to a known address.\n- KYC always required; card fee ~up to 4.5% with a $3.99 minimum; min purchase ~$20-30; brutal on small amounts (a $10 buy can pay ~40% fee). Geo: 150+ countries, excludes LA/USVI + sanctioned; NY now OK (BitLicense).\n- RECURRING-FUNDING GAP (central tension): MoonPay is a ONE-TIME buy; it does NOT auto-refill each period. Our engine pulls USDC every period via SPL delegation, so the ATA must STAY funded. Either pre-buy many periods up front (amortizes the fee/minimum) or re-onramp each period (bad). There is no MoonPay recurring on-ramp.\n- STRATEGIC POSITION: a pure card user who wants recurring should usually just use OpenRails' existing Stripe/NMI card rails. Position MoonPay as a 'fund/top-up your Solana wallet' convenience for self-custody/crypto-native users + one-time top-ups to keep a Solana sub funded + hard-to-card regions + larger prepayments -- NOT as the recurring payment method. The recurring engine stays pure Solana; MoonPay is the bootstrap/top-up step.\n\nSources: dev.moonpay.com/docs (quickstart, signed-urls, web-sdk, buy params), npm @moonpay/moonpay-js + moonpay-react, support.moonpay.com simplified-buy-for-solana, moonpay.com/newsroom/usdc-solana-moonpay, docs.solanaappkit.com moonpay (usdc_sol), dev.moonpay.com webhooks + sandbox, moonpay.com/legal/pricing_disclosure.",
+      "tasks": [
+        "[ ] Canonical flow: connect Phantom/Backpack -> read walletPubkey -> check USDC ATA balance -> if < (period amount x N)+buffer, show 'Buy USDC' -> launch MoonPay buy widget (currencyCode=usdc_sol, walletAddress=pubkey, signed URL) -> KYC+card -> USDC lands in ATA -> detect arrival -> user signs subscribe/delegation -> recurring pulls begin.",
+        "[ ] PHASE 1 (minimal): backend POST /moonpay/sign-url (holds sk_, HMAC-SHA256 the query string) + frontend 'Buy USDC on Solana' CTA gated on a low-ATA-balance check; detect funding by POLLING the ATA balance (no webhook infra); pre-fill baseCurrencyAmount = needed+buffer; sandbox first (environment=sandbox, pk_test_).",
+        "[ ] PHASE 2: embedded widget; lockAmount = subscriptionAmount x prefundPeriods + buffer (so the user funds N periods up front, amortizing fees); add webhook receiver (transaction_*, verify Moonpay-Signature-V2, de-dupe, correlate via externalTransactionId=sub/user id); low-balance 'top up' CTA on the subscription dashboard (MoonPay won't auto-refill).",
+        "[ ] Require an EXTERNAL signing wallet; explicitly disallow MoonPay's auto-created hosted wallet (can't sign delegation).",
+        "[ ] Surface pre-pull BALANCE HEALTH from the recurring engine so the UI can trigger a top-up before a pull would fail (engine likely already knows; just expose it). No change to delegation/pull logic; MoonPay is non-custodial and never holds OpenRails funds.",
+        "[ ] Geo-gate the CTA for unsupported locales (LA, USVI, sanctioned) using user-locale signals.",
+        "[ ] OPEN DECISIONS (user): (1) primary use = bootstrap-from-zero vs top-up existing sub? (2) prefund horizon (3/6/12 months)? (3) webhooks in phase 1 or defer? (4) where sk_ lives (OpenRails route vs edge fn)? (5) confirm external-wallet-required. (6) lock the USDC amount = needed+buffer? (7) honest framing: position as 'fund your wallet', keep steering pure-card users to Stripe/NMI."
+      ],
+      "completed": false
     }
   ]
 }
