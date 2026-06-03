@@ -1,5 +1,5 @@
 {
-  "next_id": 285,
+  "next_id": 287,
   "issues": [
     {
       "id": 103,
@@ -664,7 +664,7 @@
     {
       "id": 279,
       "name": "embed-neutral-auth-boundary",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: the framework-neutral AUTH boundary. Host validates the request (any scheme) and yields identity; OpenRails attaches it to the request context. Mirror authkit's net/http middleware shape, NOT gin. AuthKit becomes ONE optional implementation, not a dependency.",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: the framework-neutral AUTH boundary. Host validates the request (any scheme) and yields identity; OpenRails attaches it to the request context. Mirror authkit's net/http middleware shape, NOT gin. AuthKit becomes ONE optional implementation, not a dependency. PACKAGING: the neutral pieces (Authenticator/AuthenticatorFunc/UserContext/SetUserContext/FromContext + net/http Required/Optional) MUST live in a gin-free, authkit-free package (stdlib + net/http only). The gin Provider + ProviderFromAuthenticator bridge + UserContextFromGin move to an app-side gin adapter subpackage that ONLY the standalone/gin path imports. See #285.",
       "tasks": [
         "[ ] Define authprovider.Authenticator: Authenticate(ctx context.Context, r *http.Request) (UserContext, error) \u2014 pure net/http, no gin, no AuthKit. Return ErrUnauthenticated/any error => unauthenticated.",
         "[ ] Add authprovider.AuthenticatorFunc closure adapter.",
@@ -672,7 +672,8 @@
         "[ ] Handlers read identity via authprovider.FromContext(r.Context()) \u2014 never gin. (Migrate UserContextFromGin call sites; tracked with #282.)",
         "[ ] Wire embedded.Options.Authenticator; deprecate/keep the gin Provider only until #282 removes gin. AuthProvider precedence for back-compat.",
         "[ ] Tests: Required=>401 on error, Optional=>anonymous, UserContext readable from request context on success.",
-        "[ ] Depends on #280 for the final UserContext shape; pairs with #283 for the 401 envelope."
+        "[ ] Depends on #280 for the final UserContext shape; pairs with #283 for the 401 envelope.",
+        "[ ] ACCEPTANCE: the package holding the neutral contract imports NO gin and NO authkit (verify: go list -deps <pkg> | grep -E 'gin-gonic/gin|open-rails/authkit' is empty)."
       ],
       "completed": false
     },
@@ -737,6 +738,37 @@
         "[ ] SCHEMA COUPLING audit: find every billing read that JOINs/depends on AuthKit's profiles.* (e.g. the UserExists checker, owner-resolve, user enrichment). Treat the principal as an OPAQUE id from the Authenticator; remove hard profiles.* dependencies on the embedded path (host-provided existence/enrichment hook if needed).",
         "[ ] Refactor internal/auth AuthKitProvider to implement authprovider.Authenticator (dogfood #279); it becomes one optional impl, not the embedded default.",
         "[ ] Tests: embedded boot + a request authenticated by a STUB Authenticator with NO AuthKit config and NO profiles.* schema present."
+      ],
+      "completed": false
+    },
+    {
+      "id": 285,
+      "name": "split-library-vs-standalone",
+      "description": "EPIC embed-as-library (#279-284 siblings). THIS ISSUE (structural backbone): physically split OpenRails into (a) an IMPORTABLE library in pkg/ \u2014 the embeddable billing domain/service + framework-neutral HTTP surface (net/http handlers, route manifest, Authenticator boundary, neutral responses) with NO gin/AuthKit assumption \u2014 and (b) the STANDALONE app, which imports the library and adds AuthKit (as the Authenticator impl), the gin router, the control-plane/tenant management, and its own DB bootstrap. Standalone keeps gin + AuthKit; only the library must be neutral.",
+      "tasks": [
+        "[ ] DEP-ISOLATION ACCEPTANCE (the whole point): a host importing the library must NOT transitively pull gin-gonic/gin or open-rails/authkit. Gate: `go list -deps ./pkg/<library>...` contains neither. Those deps appear ONLY in the standalone app's module graph.",
+        "[ ] Inventory: what billing logic embedded hosts need that currently lives in internal/ (not importable) \u2014 internal/modules/*, internal/http/* handlers, internal/db/*, service layer.",
+        "[ ] Decide the library package boundary (pkg/billing or expand pkg/service + pkg/embedded) and what stays app-only (control plane, tenant mgmt, gin assembly, standalone main).",
+        "[ ] Move reusable domain/service/handlers from internal/ to pkg/ incrementally, co-sequenced with #282 (de-gin handlers as they move) and #283 (neutral responses).",
+        "[ ] Standalone app: keep cmd/ + app-only internal/ wiring AuthKit (via authprovider.Authenticator), gin router, control-plane. Standalone behavior unchanged.",
+        "[ ] Guard against import cycles + keep internal/ for genuinely app-private code; verify `go build ./...` for both the library surface and the standalone binary.",
+        "[ ] NOTE: large, cross-cutting; this is the backbone the API-neutrality issues (#279-284) hang off \u2014 execute together, not as a big-bang.",
+        "[ ] Split pkg/authprovider: keep the NEUTRAL contract (UserContext, Authenticator, net/http middleware) gin-free; move the gin Provider + ProviderFromAuthenticator + UserContextFromGin into an app-side adapter package (e.g. pkg/authprovider/ginauth) imported only by the standalone/gin server. Use type aliases during migration so existing importers don't break in one shot.",
+        "[ ] The AuthKit Authenticator implementation (wraps the authkit verifier) lives app-side too, so the library never imports authkit."
+      ],
+      "completed": false
+    },
+    {
+      "id": 286,
+      "name": "solana-atomic-cosigned-subscribe-plus-preflight-balance",
+      "description": "Two complementary improvements to the Solana subscribe path so an underfunded user never gets a useless transaction and the success/failure boundary is crisp.\n\n## A. Pre-flight balance check\nBefore offering/sending a subscribe, compare the wallet's USDC balance to the first-period amount.\n- Client (doujins/hentai0): the balance UI already reads wallet token balances; if USDC < first-period amount, block subscribe and show 'need $X, have $Y -> buy USDC' (MoonPay #277).\n- Server (defense in depth): at CreateCheckoutSession / BuildSolanaPayTransaction, read the account's USDC balance (read-lag-safe via *AtSlot/ReadUntilConsistent) and reject early with a clear code (important for Solana Pay where the account arrives in the POST).\n- Caveats (document): point-in-time (race between check and pull); validates only the FIRST period (future periods = the low-balance top-up CTA).\n\n## B. Atomic co-signed subscribe (bundle subscribe + first pull)\nMake a NEW subscribe atomic like upgrade: one tx = [subscribe(new) + transfer_subscription(first period, cranker pre-signed)]. Reuse the existing partial-sign/co-sign machinery (BuildPartiallySignedTx) and the Solana Pay co-signed-tx path.\n- Benefits: ONE confirmation (vs subscribe-then-separate-crank), no 'subscribed-but-not-charged' window, fewer txs (returning user 1 vs 2; first-timer 2 vs 3), single clean failure boundary (both land or both revert -> say 'subscribed' / 'failed, top up' with certainty).\n- Constraint: init_authority STILL can't be in the same tx as subscribe (subscribe echoes the runtime init_id), so first-timers stay [init] then [subscribe+transfer]; returning users get a single tx.\n- Confirm path simplifies: verify the atomic tx landed (subscribe + first pull both succeeded) -> create membership; no separate crank in confirm. Poller (Solana Pay) detects via reference -> create membership.\n- Keep upgrade atomic (already), downgrade simple (no immediate charge).\n\nDECISION (user, 2026-06-03): adopt the atomic co-signed subscribe; the single-failure-boundary + lower latency + fewer txs outweigh the slightly more complex tx build. Pair with pre-flight so most failures are caught before any signing.",
+      "tasks": [
+        "[ ] PrepareSubscribeService: for the subscribe step, return a co-signed [subscribe + transfer_subscription(first period)] tx (cranker pre-signs the transfer slot via BuildPartiallySignedTx), instead of a plain user-only subscribe. First-timer init step unchanged.",
+        "[ ] Confirm/Enroll path: verify the atomic tx (subscribe+pull) landed, then CreateMembership; drop the separate first-crank. Solana Pay poller: same (reference -> membership).",
+        "[ ] Pre-flight balance check: server-side at session create/build (read USDC ATA balance vs first-period amount, read-lag-safe, reject early with a typed 'insufficient_usdc' error).",
+        "[ ] Frontend pre-flight (doujins canonical + hentai0): block subscribe + show 'buy USDC' (MoonPay) when wallet USDC < first-period amount, using the existing balance UI.",
+        "[ ] Devnet validation: atomic subscribe+pull lands in ONE tx (returning user) and [init]+[subscribe+pull] (first-timer); underfunded wallet -> pre-flight blocks AND the atomic tx (if forced) reverts cleanly with no membership.",
+        "[ ] Keep upgrade atomic + downgrade simple; method order unchanged (card default, CCBill backup, Solana third)."
       ],
       "completed": false
     }
