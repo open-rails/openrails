@@ -1089,6 +1089,22 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 			"period_end":      subscription.CurrentPeriodEndsAt,
 		}).Info("Updated subscription record during cancellation")
 
+		// Cancel cascade to stop the Solana cranker (#264). OpenRails is the only
+		// puller of recurring Solana subscriptions; the hourly cranker's ListDue
+		// query filters status = active, so flipping the linked solana_subscriptions
+		// row to cancelled stops it from ever pulling again. Runs inside the same
+		// tenant tx (via the tx-bound db handle) so the cascade commits atomically
+		// with the lifecycle cancellation. Idempotent and tolerant of a missing row
+		// (a Solana sub that was never enrolled): we log and continue rather than
+		// failing the cancel. No-op for non-Solana processors.
+		if subscription.Processor == models.ProcessorSolana {
+			if err := cancelSolanaSubscriptionCascade(ctx, db, subscription.ID); err != nil {
+				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+				}).Error("failed to cascade cancellation to solana_subscriptions row; cranker may keep pulling")
+			}
+		}
+
 		// Entitlement windows are immutable; period-end cancellations require no entitlement mutation.
 		// Only immediate cancellations/revocations remove access now by revoking the subscription's entitlement windows.
 		if entSvc != nil && (params.RevokeAccess || subscription.CurrentPeriodEndsAt == nil || !subscription.CurrentPeriodEndsAt.After(now)) {
@@ -1149,6 +1165,39 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		}
 	}
 
+	return nil
+}
+
+// cancelSolanaSubscriptionCascade flips the linked billing.solana_subscriptions
+// row to cancelled so the hourly Solana cranker's ListDue (which filters
+// status = active) no longer returns it — billing stops because OpenRails is the
+// only puller (#264). `d` must be the tx-bound db handle so the cascade commits
+// atomically with the lifecycle cancellation. Idempotent: setting an
+// already-cancelled row to cancelled is a no-op. Tolerant of a missing row (a
+// Solana sub that was never enrolled): returns nil after logging so the cancel
+// itself never fails on the cascade.
+func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscriptionID uuid.UUID) error {
+	solanaRepo := repo.NewSolanaSubscriptionRepo(d)
+	row, err := solanaRepo.GetBySubscriptionID(ctx, subscriptionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscriptionID,
+			}).Info("no solana_subscriptions row linked to cancelled subscription; nothing to cascade")
+			return nil
+		}
+		return fmt.Errorf("lookup solana_subscriptions row: %w", err)
+	}
+	if row.Status == models.SolanaSubscriptionCancelled {
+		return nil
+	}
+	if err := solanaRepo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCancelled); err != nil {
+		return fmt.Errorf("set solana_subscriptions status cancelled: %w", err)
+	}
+	log.WithContext(ctx).WithFields(log.Fields{
+		"subscription_id":        subscriptionID,
+		"solana_subscription_id": row.ID,
+	}).Info("cascaded cancellation to solana_subscriptions row; cranker stopped")
 	return nil
 }
 
