@@ -129,8 +129,18 @@ func main() {
 	mintOperatorOATCmd.Flags().String("name", "openrails-operator-manual", "OAT display name")
 	mintOperatorOATCmd.Flags().String("org", "", "Operator org slug (defaults to config/operator)")
 
+	mintOperatorJWTCmd := &cobra.Command{
+		Use:   "mint-operator-jwt",
+		Short: "Mint a JWKS-verifiable operator-org user JWT (for /v1/admin/* e2e provisioning)",
+		RunE:  mintOperatorJWT,
+	}
+	mintOperatorJWTCmd.Flags().String("org", "", "Operator org slug (defaults to config/operator)")
+	mintOperatorJWTCmd.Flags().String("email", "", "Test user email (default e2e-operator@doujins.test)")
+	mintOperatorJWTCmd.Flags().String("username", "", "Test user username (default e2e-operator)")
+	mintOperatorJWTCmd.Flags().String("role", "", "Org role to assign (default openrails-operator)")
+
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, mintOperatorOATCmd, newCatalogCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, mintOperatorOATCmd, mintOperatorJWTCmd, newCatalogCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		log.WithError(err).Fatal("Failed to execute command")

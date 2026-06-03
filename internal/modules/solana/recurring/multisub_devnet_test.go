@@ -7,20 +7,22 @@
 //
 // Two tests (each fresh-funds its own wallet; cancelling A is destructive, so they
 // can't share one):
+//
 //   - MultiProductRules : a user CAN hold subs to two DIFFERENT plans under one
 //     merchant (each atomic subscribe pulls its own 1 USDC independently); and
 //     re-subscribing the SAME plan is rejected on-chain (the Subscription PDA
 //     already exists), backstopping the app-layer duplicate-billing guard (#269).
 //     This also exercises the Custom:519 fix: the 2nd distinct subscribe lands
 //     correctly through the shared atomic-subscribe path (no client created_at drift).
+//
 //   - IndependentPerSubCancel : cancelling ONE subscription (A) on-chain stops A's
 //     pulls while subscription B keeps pulling — the SPL delegate is shared per
 //     (user,mint), so the program's own cancel_subscription/revoke_delegation must
 //     target a SINGLE sub. Proven by: crank A fails, crank B succeeds.
 //
-//	SOLANA_DEVNET_PAYER_KEY=<funded> SOLANA_DEVNET_SUBSCRIBER_KEY=<usdc-funded> \
-//	HELIUS_API_KEY=<key> go test -tags devnet -run TestDevnetMultiSub -v \
-//	  -timeout 900s ./internal/modules/solana/recurring/...
+//     SOLANA_DEVNET_PAYER_KEY=<funded> SOLANA_DEVNET_SUBSCRIBER_KEY=<usdc-funded> \
+//     HELIUS_API_KEY=<key> go test -tags devnet -run TestDevnetMultiSub -v \
+//     -timeout 900s ./internal/modules/solana/recurring/...
 package recurring
 
 import (

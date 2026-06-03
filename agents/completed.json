@@ -4699,6 +4699,32 @@
       "completed": true,
       "status": "DONE (2026-06-03): atomic co-signed subscribe ([subscribe+first transfer] one tx, cranker pre-signs) \u2014 DEVNET-VALIDATED (TestDevnetAtomicSubscribe: one tx created the sub + pulled 1 USDC). First-timer = [init] then atomic. Server pre-flight USDC check on subscribe (1a883ac) AND upgrade (fdcd6ca) -> 402 insufficient_funds. Frontend pre-flight gate + Buy-USDC CTA in both apps.",
       "completed_at": "2026-06-03"
+    },
+    {
+      "id": 155,
+      "name": "authkit-http-adapter-migration",
+      "completed": true,
+      "description": "Stop depending on the removed `github.com/open-rails/authkit/adapters/gin` package and migrate Billing to AuthKit's new `http` verifier + middleware surface.\n\n## Metadata\n\n- Category: auth\n- Status: in_progress\n- Passes: false\n\n## Context\n\n- Previously, `go mod tidy` failed with (fixed 2026-01-29):\n  - `module github.com/open-rails/authkit@latest found (v0.4.1), but does not contain package github.com/open-rails/authkit/adapters/gin`\n- Previously, OpenRails imported `authkit/adapters/gin` (removed 2026-01-29):\n  - `internal/auth/verifier.go`\n  - `internal/server/admin_authkit.go`\n  - `internal/server/server.go`\n- In local `/home/fidika/authkit`, Gin adapters were removed and replaced with net/http-based adapters under `github.com/open-rails/authkit/http`.\n\n## Decision\n\n- Prefer using `http` for token verification (and optionally auth middleware), but keep Billing's current API error envelope (ginapi/response) consistent.\n- Avoid adopting `http`'s JSON error shape (`{\"error\":\"...\"}`) unless we explicitly decide to change Billing's error responses.\n\n## Implementation Notes\n\n- `authhttp.NewVerifier(accept)` (package `github.com/open-rails/authkit/http`) supports multi-issuer verify-only mode (AcceptConfig).\n- `authhttp.Required/Optional/RequireAdmin` are net/http middleware; using them directly in Gin will require a small adapter layer OR re-implementing the same checks as Gin middleware.\n- Admin gating can be implemented locally by querying Postgres (same query as AuthKit's `authhttp.RequireAdmin`).",
+      "tasks": [
+        "PHASE 1 - Remove `authkit/adapters/gin` imports:",
+        "[x] Update `internal/auth/verifier.go` to use `github.com/open-rails/authkit/http` (authhttp) for verifier construction",
+        "[x] Remove `authgin` usage from `internal/server/admin_authkit.go` and `internal/server/server.go` (remove `adminAuth *authgin.Auth` field)",
+        "",
+        "PHASE 2 - Replace admin role gate:",
+        "[x] Implement admin gate in Billing using `internal/auth/policy.AdminRequired` (live Postgres check against roles/users)",
+        "[x] Update `internal/server/routes_admin.go` to use the new admin gate middleware (instead of `authkit/adapters/gin` RequireAdmin)",
+        "",
+        "PHASE 3 - Optional: adopt `http` middleware fully:",
+        "[ ] Decide if Billing should keep current error response envelope or adopt AuthKit's `{\"error\":\"code\"}` responses",
+        "[ ] If keeping current envelope: keep Billing-owned Gin middleware for Required/Optional but use `authhttp.Verifier.Verify` for verification",
+        "[ ] If adopting AuthKit middleware: add a small Gin adapter for net/http middleware and update error handling docs/tests accordingly",
+        "",
+        "VERIFY:",
+        "[x] Run `go mod tidy` and ensure there are no imports of `github.com/open-rails/authkit/adapters/gin`",
+        "[ ] Add targeted tests for the new admin gate (admin/non-admin/banned/deleted cases) if the repo has a testing pattern for middleware"
+      ],
+      "completed_at": "2026-06-03",
+      "status": "DONE (2026-06-03): migration complete. ZERO imports of the removed github.com/open-rails/authkit/adapters/gin remain; Billing verifies via the new authkit/http surface wired in internal/auth/{provider,verifier}.go on authkit v0.12.2; go build ./... clean. Error-envelope decision resolved by keeping Billing's own {object:error,...} envelope with Billing-owned Required/Optional middleware over the authkit/http verifier. Admin-gate tests present: internal/auth/policy/admin_test.go + internal/auth/policy/ginmw/admin_test.go (+ provider_test.go)."
     }
   ]
 }

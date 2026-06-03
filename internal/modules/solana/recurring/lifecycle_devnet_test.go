@@ -19,16 +19,18 @@
 // one pre-signed) is asserted network-free in atomic_subscribe_test.go.
 //
 // Two tests:
+//
 //   - LifecycleFastPlan : the fast end-to-end (720h plan) — publish, atomic
 //     subscribe (period 1 pulled), cancel. Proves the happy path + the co-signed
 //     subscribe land on real chain in ~minutes. Run this in the normal devnet pass.
+//
 //   - CancelStopsAtPeriodEnd : the SLOW (~1h) proof that cancel genuinely stops
 //     future pulls — subscribe (period 1), cancel, then prove a post-rollover pull
 //     is rejected with Custom:508 (SubscriptionCancelled), never a period-2 charge.
 //
-//	SOLANA_DEVNET_PAYER_KEY=<funded> SOLANA_DEVNET_SUBSCRIBER_KEY=<usdc-funded> \
-//	HELIUS_API_KEY=<key> go test -tags devnet -run TestDevnetLifecycle -v \
-//	  -timeout 2h ./internal/modules/solana/recurring/...
+//     SOLANA_DEVNET_PAYER_KEY=<funded> SOLANA_DEVNET_SUBSCRIBER_KEY=<usdc-funded> \
+//     HELIUS_API_KEY=<key> go test -tags devnet -run TestDevnetLifecycle -v \
+//     -timeout 2h ./internal/modules/solana/recurring/...
 package recurring
 
 import (

@@ -12,17 +12,20 @@
 // revoked) without waiting for a rollover.
 //
 // Subtests:
+//
 //   - AlreadyPaid       : after the atomic subscribe (period 1 paid), an immediate
 //     crank is rejected by the cap -> Custom:400 -> AlreadyPaid.
+//
 //   - InsufficientUSDC  : subscriber funded < the plan amount, so the atomic
 //     subscribe's first pull fails -> token Custom:1 -> Recoverable (dun). (Proves
 //     the pre-flight + on-chain atomicity: zero USDC moves.)
+//
 //   - RevokeDelegate    : subscriber revokes the SPL delegate (the TRUSTLESS,
 //     chain-enforced cancel) -> token Custom:4 (OwnerMismatch) -> Terminal.
 //
-//	SOLANA_DEVNET_PAYER_KEY=<funded> SOLANA_DEVNET_SUBSCRIBER_KEY=<usdc-funded> \
-//	HELIUS_API_KEY=<key> go test -tags devnet -run TestDevnetFailurePaths -v \
-//	  -timeout 900s ./internal/modules/solana/recurring/...
+//     SOLANA_DEVNET_PAYER_KEY=<funded> SOLANA_DEVNET_SUBSCRIBER_KEY=<usdc-funded> \
+//     HELIUS_API_KEY=<key> go test -tags devnet -run TestDevnetFailurePaths -v \
+//     -timeout 900s ./internal/modules/solana/recurring/...
 package recurring
 
 import (

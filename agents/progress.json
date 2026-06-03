@@ -1,5 +1,5 @@
 {
-  "next_id": 287,
+  "next_id": 292,
   "issues": [
     {
       "id": 107,
@@ -141,30 +141,6 @@
         "[ ] Ensure card data is never stored (only vault token after successful charge)",
         "[ ] Pass PCI compliance assessment",
         "[ ] Update frontend to use direct form instead of Mobius iframe"
-      ],
-      "completed": false
-    },
-    {
-      "id": 155,
-      "name": "authkit-http-adapter-migration",
-      "description": "Stop depending on the removed `github.com/open-rails/authkit/adapters/gin` package and migrate Billing to AuthKit's new `http` verifier + middleware surface.\n\n## Metadata\n\n- Category: auth\n- Status: in_progress\n- Passes: false\n\n## Context\n\n- Previously, `go mod tidy` failed with (fixed 2026-01-29):\n  - `module github.com/open-rails/authkit@latest found (v0.4.1), but does not contain package github.com/open-rails/authkit/adapters/gin`\n- Previously, OpenRails imported `authkit/adapters/gin` (removed 2026-01-29):\n  - `internal/auth/verifier.go`\n  - `internal/server/admin_authkit.go`\n  - `internal/server/server.go`\n- In local `/home/fidika/authkit`, Gin adapters were removed and replaced with net/http-based adapters under `github.com/open-rails/authkit/http`.\n\n## Decision\n\n- Prefer using `http` for token verification (and optionally auth middleware), but keep Billing's current API error envelope (ginapi/response) consistent.\n- Avoid adopting `http`'s JSON error shape (`{\"error\":\"...\"}`) unless we explicitly decide to change Billing's error responses.\n\n## Implementation Notes\n\n- `authhttp.NewVerifier(accept)` (package `github.com/open-rails/authkit/http`) supports multi-issuer verify-only mode (AcceptConfig).\n- `authhttp.Required/Optional/RequireAdmin` are net/http middleware; using them directly in Gin will require a small adapter layer OR re-implementing the same checks as Gin middleware.\n- Admin gating can be implemented locally by querying Postgres (same query as AuthKit's `authhttp.RequireAdmin`).",
-      "tasks": [
-        "PHASE 1 - Remove `authkit/adapters/gin` imports:",
-        "[x] Update `internal/auth/verifier.go` to use `github.com/open-rails/authkit/http` (authhttp) for verifier construction",
-        "[x] Remove `authgin` usage from `internal/server/admin_authkit.go` and `internal/server/server.go` (remove `adminAuth *authgin.Auth` field)",
-        "",
-        "PHASE 2 - Replace admin role gate:",
-        "[x] Implement admin gate in Billing using `internal/auth/policy.AdminRequired` (live Postgres check against roles/users)",
-        "[x] Update `internal/server/routes_admin.go` to use the new admin gate middleware (instead of `authkit/adapters/gin` RequireAdmin)",
-        "",
-        "PHASE 3 - Optional: adopt `http` middleware fully:",
-        "[ ] Decide if Billing should keep current error response envelope or adopt AuthKit's `{\"error\":\"code\"}` responses",
-        "[ ] If keeping current envelope: keep Billing-owned Gin middleware for Required/Optional but use `authhttp.Verifier.Verify` for verification",
-        "[ ] If adopting AuthKit middleware: add a small Gin adapter for net/http middleware and update error handling docs/tests accordingly",
-        "",
-        "VERIFY:",
-        "[x] Run `go mod tidy` and ensure there are no imports of `github.com/open-rails/authkit/adapters/gin`",
-        "[ ] Add targeted tests for the new admin gate (admin/non-admin/banned/deleted cases) if the repo has a testing pattern for middleware"
       ],
       "completed": false
     },
@@ -394,6 +370,119 @@
         "[x] DONE+pushed (c25fb00): migrated 19 handlers off r.GinCtx (the keystone + a real embedded nil-panic fix). Handlers fully framework-agnostic.",
         "[ ] CORRECTED SCOPE (per dep analysis): pkg/embedded pulls gin via ~11 pkgs, not 5. Remaining splits (dep-ordered): (1) pkg/query: delete dead ParseQueryOptions (0 callers) -> drops gin. (2) pkg/authprovider: move gin Provider+bridge+UserContextFromGin into a gin subpackage; keep gin-free alias core. (3) internal/auth: move authKitProvider gin Required/Optional to a gin subpkg (keep the gin-free Authenticate). (4) internal/auth/policy: split admin.go gin middleware -> ginmw, keep gin-free helpers. (5) internal/controlplane: move MountAuthRoutes/adaptHandler gin to a ginroutes subpkg. (6) internal/http/request: move ginTransport+New into request/ginreq, export Transport, REMOVE the GinCtx field (now that handlers are migrated; the ~128 route/middleware GinCtx uses on the gin path move to ginreq access). (7) internal/http/{middleware,routes,server}: split gin (standalone) from gin-free (embedded). (8) pkg/embedded: move RegisterXxxRoutes(*gin.RouterGroup) + ginrouter import into pkg/embedded/gin.",
         "[ ] GATE: go list -deps ./pkg/embedded | grep gin-gonic/gin EMPTY. Build+test green; standalone keeps gin."
+      ],
+      "completed": false
+    },
+    {
+      "id": 288,
+      "name": "processor-routing-and-fallback-policy",
+      "description": "Add deterministic processor selection and fallback policy so checkout can choose the best available rail for a tenant/product/tier/user context before creating a one-processor checkout session.\n\n## Metadata\n\n- Category: feature\n- Status: planned\n- Passes: false\n\n## Motivation\n\n- Hyperswitch wins on payment orchestration. OpenRails should not chase broad smart-routing, but customers do need basic processor redundancy and product/tenant-aware routing, especially high-risk merchants with Stripe plus NMI/Mobius/CCBill/Solana.\n- Keep checkout sessions one-processor-at-a-time; route before session creation.\n\n## Non-goals\n\n- No ML routing.\n- No 200-connector orchestration platform.\n- No automatic retry to a second processor after a successful authorization attempt unless the processor contract makes that safe.\n",
+      "tasks": [
+        "DESIGN:",
+        "[ ] Define routing inputs: tenant_id, product_id, price_id, tier_group, amount, currency, billing cycle, user country/state when known, processor availability, processor capability metadata (#291), and explicit client preference.",
+        "[ ] Define routing outputs: selected processor, fallback candidates, reason, and policy version.",
+        "[ ] Decide precedence: explicit price/provider config > tenant policy > product/tier_group policy > global default.",
+        "[ ] Decide failure classes that can trigger fallback before checkout finalization: processor unavailable, unsupported capability, credential missing, sandbox/live mismatch, hard validation failure. Do not fallback after a successful charge.",
+        "",
+        "DATA MODEL / CONFIG:",
+        "[ ] Add routing policy representation in DB or catalog manifest: allowed processors, preferred order, disabled processors, and optional per-tier overrides.",
+        "[ ] Extend catalog-as-code manifest only if needed; prefer using existing provider lists as the first version.",
+        "[ ] Record selected processor and routing reason on checkout_sessions for auditability.",
+        "",
+        "IMPLEMENTATION:",
+        "[ ] Add a ProcessorRouter service used before checkout session creation and legacy checkout flows.",
+        "[ ] Integrate with processor health/capability metadata so unsupported processors are filtered with explicit errors.",
+        "[ ] Add dry-run endpoint/CLI to explain routing for a price/user/tenant without creating a checkout.",
+        "[ ] Ensure idempotency keys bind to the resolved processor/policy so retries do not unexpectedly switch rails.",
+        "",
+        "VERIFY:",
+        "[ ] Unit-test policy precedence and fallback filtering.",
+        "[ ] Integration-test Stripe primary -> Mobius fallback when Stripe is disabled/unavailable before charge.",
+        "[ ] Integration-test product constrained to Mobius does not route to Stripe even if Stripe is configured."
+      ],
+      "completed": false
+    },
+    {
+      "id": 289,
+      "name": "credit-ledger-usage-event-pricing",
+      "description": "Make usage billing a first-class extension of the existing credit billing system used by Tensorhub and gen-orchestrator: ingest idempotent usage events, price them with configured rules, then authorize/hold/capture/release credits through the current ledger.\n\n## Metadata\n\n- Category: feature\n- Status: planned\n- Passes: false\n\n## Motivation\n\n- Lago is strongest at usage events, metrics, and invoices. OpenRails should not clone Lago, but customers using OpenRails for AI/API workloads need a clean event-to-credit-charge path instead of each host manually calculating all debits.\n- This should reuse the current credit ledger, holds, capture/release, prepaid/arrears behavior, spend caps, and owner/actor model.\n\n## Non-goals\n\n- No invoice PDF/e-invoicing/tax product in this issue.\n- No full Lago-style billing engine.\n- No replacement for Tensorhub/gen-orchestrator pricing if those systems remain the pricing source of truth; support both host-computed and OpenRails-computed amounts.\n",
+      "tasks": [
+        "CONTRACT:",
+        "[ ] Define a usage event API: owner_id, actor_user_id, subject/user_id, event_type, quantity, unit, source, source_id/idempotency key, metadata, occurred_at.",
+        "[ ] Define two modes: host-priced events that provide a final credit amount, and OpenRails-priced events that reference a pricing rule.",
+        "[ ] Ensure idempotency is based on source/source_id/event_type so replays cannot double charge.",
+        "",
+        "PRICING RULES:",
+        "[ ] Define minimal pricing rules for common AI/API workloads: per event, per unit, per output, per second, per token, and tiered quantity bands if needed.",
+        "[ ] Attach pricing rules to credit_type/product/price/catalog entries without requiring invoice semantics.",
+        "[ ] Support preview/estimate before spend so hosts can show cost before doing expensive work.",
+        "",
+        "LEDGER INTEGRATION:",
+        "[ ] Convert priced usage into existing HoldCredits/CaptureHold/ReleaseHold flows where work has a pending phase.",
+        "[ ] Support immediate debit for fire-and-forget usage where no hold is needed.",
+        "[ ] Preserve owner/actor separation from pkg/identity and existing service credit routes.",
+        "[ ] Add usage event rows or references that link back to credit_transactions for audit and support.",
+        "",
+        "CROSS-REPO FIT:",
+        "[ ] Validate the contract against Tensorhub and gen-orchestrator current billing paths; do not force them to abandon existing pricing ownership.",
+        "[ ] Document examples for model inference: estimate -> hold -> actual usage -> capture/release.",
+        "",
+        "VERIFY:",
+        "[ ] Add integration tests for idempotent usage event ingestion, host-priced debit, OpenRails-priced debit, partial capture, release-on-failure, and owner scoping.",
+        "[ ] Run the existing unified billing e2e after adding usage-event pricing."
+      ],
+      "completed": false
+    },
+    {
+      "id": 290,
+      "name": "provider-certification-matrix",
+      "description": "Publish and maintain a provider certification matrix for Stripe, NMI/Mobius, CCBill, and Solana that records exactly which customer-visible flows are supported, sandbox/devnet tested, live/test-mode tested, and known-limited.\n\n## Metadata\n\n- Category: product\n- Status: planned\n- Passes: false\n\n## Motivation\n\n- OpenRails' strongest differentiator is deep support for real non-Stripe rails, especially NMI-compatible high-risk gateways like Mobius. Customers need confidence that the specific flows they care about actually work.\n- This should become both documentation and an executable certification harness where practical.\n",
+      "tasks": [
+        "MATRIX DESIGN:",
+        "[ ] Define provider capabilities and certification statuses: not_supported, manual_only, unit_tested, integration_tested, sandbox_certified, live_test_mode_certified, devnet_certified, production_certified.",
+        "[ ] Define flows to track: catalog/product push, price/recurring-plan push, one-time checkout, recurring checkout, vault/tokenization, rebill, cancellation, deferred cancellation, refund, dispute/chargeback, webhook handling, subscription sync/backfill, catalog drift detection.",
+        "[ ] Include processor-specific notes: NMI product/prices are local while recurring prices push as NMI recurring plans; CCBill catalog actions may be manual; Solana recurring requires on-chain readback/devnet certification.",
+        "",
+        "DOCS:",
+        "[ ] Add docs/providers.md or equivalent with the current matrix and exact tested commands.",
+        "[ ] Add NMI-compatible gateway guidance: required security_key, Collect.js/tokenization key if needed, direct/query endpoints, test_mode behavior, and how Mobius/NMI white-label accounts map to the same interface.",
+        "[ ] Add troubleshooting for common provider failures: bad endpoint, key belongs to different gateway user, sandbox URL not supported, recurring plan query mismatch, webhook signature failure.",
+        "",
+        "EXECUTABLE CERTIFICATION:",
+        "[ ] Add or formalize focused integration tests for NMI/Mobius sale, vault, recurring plan create/readback, and query API.",
+        "[ ] Add Stripe test-mode catalog apply + subscription sync certification steps.",
+        "[ ] Add Solana devnet read-back certification for plan accounts and recurring lifecycle.",
+        "[ ] Add CCBill manual-action verification path so unsupported remote catalog operations surface as pending_manual_actions rather than errors.",
+        "",
+        "PROCESS:",
+        "[ ] Make certification matrix updates part of provider-related PRs.",
+        "[ ] Record last verified date, environment, and command for each provider flow without exposing secrets."
+      ],
+      "completed": false
+    },
+    {
+      "id": 291,
+      "name": "processor-capability-metadata",
+      "description": "Expose processor capability metadata in code, APIs, catalog planning, checkout validation, and admin/provider status so OpenRails can explain what each rail supports instead of relying on scattered processor-specific conditionals.\n\n## Metadata\n\n- Category: architecture\n- Status: planned\n- Passes: false\n\n## Motivation\n\n- Stripe, NMI/Mobius, CCBill, and Solana have different lifecycle semantics. Customers need predictable errors and routing decisions. OpenRails also needs a shared capability source for routing/fallback, catalog-as-code, checkout validation, and the provider certification matrix.\n",
+      "tasks": [
+        "CAPABILITY MODEL:",
+        "[ ] Define ProcessorCapabilities with booleans/enums for recurring, one_time, vault/tokenization, hosted checkout, redirect checkout, direct sale, catalog push, recurring plan push, refund, dispute, cancel immediate, cancel deferred, remote subscription listing, remote dedup check, webhooks, drift enumeration, and manual actions.",
+        "[ ] Add capability details for current processors: stripe, mobius/NMI-backed, ccbill, solana.",
+        "[ ] Distinguish processor class capabilities (NMI-backed) from named provider overrides (Mobius).",
+        "",
+        "INTEGRATION POINTS:",
+        "[ ] Use capabilities in checkout validation instead of hard-coded processor switches where practical.",
+        "[ ] Use capabilities in catalog apply/plan to decide provider actions and pending_manual_actions.",
+        "[ ] Use capabilities in routing/fallback policy (#288) so unsupported rails are filtered before checkout.",
+        "[ ] Surface capabilities through admin/provider status endpoints and docs.",
+        "",
+        "ERRORS / UX:",
+        "[ ] Return structured unsupported-capability errors with processor, capability, and suggested alternative when possible.",
+        "[ ] Ensure user-facing errors are clean while admin/debug surfaces retain processor detail.",
+        "",
+        "VERIFY:",
+        "[ ] Unit-test capability metadata for each supported processor.",
+        "[ ] Regression-test known special cases: CCBill manual catalog actions, NMI recurring plan push, Stripe remote dedup check, Solana one-off/recurring distinction."
       ],
       "completed": false
     }
