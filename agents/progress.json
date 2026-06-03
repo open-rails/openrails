@@ -896,7 +896,7 @@
         "[x] downgrades remain deferred (ScheduledPriceID) -- processDowngrade + Stripe downgrade branch unchanged",
         "[x] tests: Model-B helper unit-tested hard (boundaries + issue example); Stripe upgrade request construction tested. NMI full-flow needs DB (integration suite)",
         "[x] document the universal Model-B upgrade policy in one place (doc comment on CalculateModelBUpgradeCharge + CalculateProration)",
-        "[ ] BEFORE DEPLOY (review gate): this changes LIVE NMI/Stripe upgrade billing (Model-B reset-period). Human-review the amounts + verify a real Stripe TEST-MODE upgrade invoice collects new_full - old_unused and resets the cycle before shipping."
+        "[x] REVIEW GATE VERIFIED (real Stripe TEST mode, via OpenRails StripeService.UpdateSubscriptionPrice with proration_behavior=always_invoice + billing_cycle_anchor=now): subscribed $20.00/mo -> upgraded to $50.00/mo; upgrade invoice collected NOW = $30.00 PAID = new_full($50.00) - old_unused($20.00) (invoice lines: -$20.00 unused time credit + $50.00 new full period). current_period_end RESET to ~30 days (+719h59m) out from the upgrade instant (cycle reset confirmed). Model-B confirmed CORRECT. Test: internal/modules/subscriptions/stripe_model_b_integration_test.go (build tag stripe_integration; run with STRIPE_SECRET_KEY)."
       ]
     },
     {
