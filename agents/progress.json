@@ -1,5 +1,5 @@
 {
-  "next_id": 279,
+  "next_id": 285,
   "issues": [
     {
       "id": 103,
@@ -650,13 +650,93 @@
       "name": "solana-pay-v2-cancel-and-tier-change-plus-frontend-qr",
       "description": "Support BOTH Solana flows for the full subscription lifecycle: (A) browser-extension wallet (wallet-adapter, sign in-page) AND (B) Solana Pay v2 transaction-request (mobile: QR on desktop / deep-link on phone -> wallet app fetches the tx + signs). Flow B uses the SECOND Solana Pay spec (arbitrary transactions, not transfer-only) -- required for the on-chain rebilling-authorization txs.\n\n## What already exists\n- OpenRails ALREADY implements Solana Pay v2 transaction-request for CHECKOUT/subscribe: public GET/POST /v1/.../checkout/:id/solana-pay (session id = capability; GET->{label,icon}, POST {account}->{transaction}) + reference-based completion via internal/modules/solana/poller.go. So SUBSCRIBE flow B is backend-ready; only the FRONTEND QR/deeplink is missing.\n- Browser flow (A) for subscribe is built in both apps; cancel+tier-change (A) is built canonically in doujins (3ebe3ddf), pending hentai0 port.\n\n## Backend gap (this issue)\nExtend the checkout-session Solana Pay machinery to CANCEL + TIER-CHANGE by adding them as new session MODES (reusing the public endpoint + poller + reference completion):\n- Add CheckoutSessionMode solana_cancel (carries subscription_id) and solana_tier_change (carries subscription_id + new_price_id).\n- CreateCheckoutSession (AUTH-gated) accepts these modes (owner-only).\n- BuildSolanaPayTransaction branches on mode -> build cancel tx (PrepareCancelService) / tier-change tx (PrepareTierChangeService, cranker pre-signs the co-signed upgrade), INJECT the Solana Pay reference key so the poller can detect it.\n- Poller processConfirmedPayment branches on mode -> mirror via ConfirmCancelService / ConfirmTierChangeService (instead of enroll).\n\n## Frontend gap (this issue)\nCanonical (doujins, copy to hentai0): a Solana Pay path ALONGSIDE the browser-extension path, for subscribe + cancel + tier-change. Generate solana:<baseUrl>/.../solana-pay URL + QR (desktop) / deep-link button (mobile) via @solana/pay; poll the session status until the poller mirrors completion. Method order unchanged (card NMI/Mobius default, CCBill backup, Solana third); within Solana, offer 'browser wallet' (extension) and 'mobile wallet' (Solana Pay QR).",
       "tasks": [
-        "[ ] Backend: CheckoutSessionMode solana_cancel + solana_tier_change; CreateCheckoutSession accepts them (owner-gated, carries subscription_id / new_price_id).",
-        "[ ] Backend: BuildSolanaPayTransaction branches on mode -> PrepareCancelService / PrepareTierChangeService; inject the Solana Pay reference account into the tx for poller detection.",
-        "[ ] Backend: poller branches on mode -> ConfirmCancelService / ConfirmTierChangeService on confirmation.",
-        "[ ] Backend: tests (session create per mode; build tx per mode; poller mirrors per mode). go build/vet/test green.",
+        "[x] Backend: CheckoutSessionMode solana_cancel + solana_tier_change; CreateCheckoutSession accepts them (owner-gated, carries subscription_id / new_price_id).",
+        "[x] Backend: BuildSolanaPayTransaction branches on mode -> PrepareCancelService / PrepareTierChangeService; inject the Solana Pay reference account into the tx for poller detection.",
+        "[x] Backend: poller branches on mode -> ConfirmCancelService / ConfirmTierChangeService on confirmation.",
+        "[x] Backend: tests (session create per mode; build tx per mode; poller mirrors per mode). go build/vet/test green.",
         "[ ] Frontend (doujins canonical): @solana/pay QR/deeplink component + session-status poll; offer browser-wallet vs mobile-wallet (Solana Pay) within the Solana option for subscribe/cancel/tier-change.",
         "[ ] Frontend (hentai0): port the canonical Solana Pay component.",
-        "[ ] Devnet validation: subscribe + cancel + tier-change each via the Solana Pay transaction-request path (POST {account} -> tx -> sign+send -> poller mirrors)."
+        "[ ] Devnet validation: subscribe + cancel + tier-change each via the Solana Pay transaction-request path (POST {account} -> tx -> sign+send -> poller mirrors).",
+        "[x] BACKEND DONE (a17bbdb): solana_cancel/solana_tier_change session modes; subscription_id/new_price_id carried on ProcessorState (no migration); BuildSolanaPayTransaction branches via PrepareCancel/PrepareTierChange; reference pubkey injected as read-only non-signer on the cancel ix (poller getSignaturesForAddress); poller routes confirmation to ConfirmSolanaLifecycleSession -> ConfirmCancel/ConfirmTierChange. build/vet/tests green."
+      ],
+      "completed": false
+    },
+    {
+      "id": 279,
+      "name": "embed-neutral-auth-boundary",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: the framework-neutral AUTH boundary. Host validates the request (any scheme) and yields identity; OpenRails attaches it to the request context. Mirror authkit's net/http middleware shape, NOT gin. AuthKit becomes ONE optional implementation, not a dependency.",
+      "tasks": [
+        "[ ] Define authprovider.Authenticator: Authenticate(ctx context.Context, r *http.Request) (UserContext, error) \u2014 pure net/http, no gin, no AuthKit. Return ErrUnauthenticated/any error => unauthenticated.",
+        "[ ] Add authprovider.AuthenticatorFunc closure adapter.",
+        "[ ] Provide net/http middleware (mirror authkit http.Required/Optional): Required(Authenticator) func(http.Handler)http.Handler => 401 on error; Optional(...) => proceed anonymous. Both store UserContext in the REQUEST context (authprovider.SetUserContext); single source of truth, no gin context key.",
+        "[ ] Handlers read identity via authprovider.FromContext(r.Context()) \u2014 never gin. (Migrate UserContextFromGin call sites; tracked with #282.)",
+        "[ ] Wire embedded.Options.Authenticator; deprecate/keep the gin Provider only until #282 removes gin. AuthProvider precedence for back-compat.",
+        "[ ] Tests: Required=>401 on error, Optional=>anonymous, UserContext readable from request context on success.",
+        "[ ] Depends on #280 for the final UserContext shape; pairs with #283 for the 401 envelope."
+      ],
+      "completed": false
+    },
+    {
+      "id": 280,
+      "name": "embed-identity-authz-contract",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE (DESIGN): decide the MINIMAL, flexible host<->library identity/authorization contract billing needs, so UserContext isn't over-fit to AuthKit. Output feeds #279/#281/#282.",
+      "tasks": [
+        "[ ] Enumerate exactly what billing handlers read from identity today (UserID/payer, Org/tenant, OrgRoles, Roles, Entitlements) and every admin-authority gate.",
+        "[ ] Decide minimal shape: Subject/principal (required, the payer), Tenant/Org (optional), + an authorization signal. RECOMMENDATION: admin gating via an OpenRails-DEFINED capability the host populates (e.g. CanAdministerBilling / per-tenant) rather than OpenRails interpreting host role NAMES.",
+        "[ ] Decide single-tenant vs multi-tenant ergonomics (host with no orgs must work with Org empty).",
+        "[ ] Document optionality + a mapping guide (AuthKit host, no-org host, custom-claims host).",
+        "[ ] Finalize UserContext (or v2) + keep helpers (HasRole/HasEntitlement/capability checks). Keep backward-compatible fields where cheap."
+      ],
+      "completed": false
+    },
+    {
+      "id": 281,
+      "name": "embed-route-manifest",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: expose billing routes as a framework-agnostic MANIFEST the host mounts anywhere, mirroring authkit Routes()/APIRoutes(). Pairs with #282 (the handlers must be net/http first).",
+      "tasks": [
+        "[ ] Add billing RouteSpec{ Method string, Path string (net/http ServeMux syntax e.g. /v1/me/subscriptions/{id}), Group RouteGroup, Handler http.Handler }.",
+        "[ ] Expose Routes() / APIRoutes(groups ...RouteGroup) []RouteSpec on the embedded surface (groups: user, admin, webhooks) \u2014 mirrors HTTPHandlerOptions Include* as group selection.",
+        "[ ] Keep a convenience Handler()/NewHTTPHandler() that assembles the manifest into an http.NewServeMux at a base prefix (drop-in for today's single-handler mount).",
+        "[ ] Document mounting into net/http ServeMux, gin (gin.WrapH), and chi \u2014 host chooses framework + base path; OpenRails owns the stable sub-paths.",
+        "[ ] Depends on #282 (handlers are http.Handler) + #279 (auth middleware wraps groups)."
+      ],
+      "completed": false
+    },
+    {
+      "id": 282,
+      "name": "embed-degin-handlers",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE (LARGE, phased): migrate billing HTTP handlers off gin to pure net/http http.HandlerFunc so the exposed surface pulls in ZERO gin. This is the bulk of the work; do it per route group and gate on appetite.",
+      "tasks": [
+        "[ ] Audit: list every gin handler under the embedded billing surface (user/admin/webhooks) + every use of gin.Context (param binding, query, JSON bind, responses).",
+        "[ ] Establish the net/http handler idiom: path params via ServeMux {id} + r.PathValue; query via r.URL.Query(); body via json.Decode; identity via authprovider.FromContext(r.Context()); responses via #283.",
+        "[ ] Migrate group by group (webhooks -> user -> admin), keeping a gin shim/back-compat until each group is done; remove gin from the embedded path when complete.",
+        "[ ] Replace internal gin engine assembly with http.NewServeMux (Go 1.22 patterns).",
+        "[ ] Keep route+behavior parity: add/port handler tests per group; no path or status-code changes.",
+        "[ ] NOTE: large refactor; depends on #283 (responses) and #279/#280 (identity from context). Standalone server can keep its own router until/unless unified."
+      ],
+      "completed": false
+    },
+    {
+      "id": 283,
+      "name": "embed-neutral-responses",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: framework-neutral JSON response/error writing to a plain http.ResponseWriter (today billing uses gin + doujins-org/ginapi/response). Supports #282 and #279's 401.",
+      "tasks": [
+        "[ ] Provide response helpers that write the SAME JSON envelope (object/error{type,code,message,param}, list{object,data,total,limit,offset,has_more}) to an http.ResponseWriter \u2014 no gin.Context.",
+        "[ ] Map existing response.* call sites to the neutral writer as handlers migrate (#282).",
+        "[ ] Ensure error type/code constants stay stable (clients parse them).",
+        "[ ] Tests: envelope parity vs the current ginapi/response output."
+      ],
+      "completed": false
+    },
+    {
+      "id": 284,
+      "name": "embed-authkit-optional",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: ensure embedded OpenRails makes NO AuthKit assumption \u2014 runs with only a host Authenticator, and does not require AuthKit's profiles.* user store. Standalone OpenRails keeps AuthKit for its own tenant management (own DB), unchanged.",
+      "tasks": [
+        "[ ] Audit bootstrap/app/server for hard AuthKit import/init on the EMBEDDED path; make AuthKit wiring opt-in (only when the host chooses the AuthKit Authenticator).",
+        "[ ] SCHEMA COUPLING audit: find every billing read that JOINs/depends on AuthKit's profiles.* (e.g. the UserExists checker, owner-resolve, user enrichment). Treat the principal as an OPAQUE id from the Authenticator; remove hard profiles.* dependencies on the embedded path (host-provided existence/enrichment hook if needed).",
+        "[ ] Refactor internal/auth AuthKitProvider to implement authprovider.Authenticator (dogfood #279); it becomes one optional impl, not the embedded default.",
+        "[ ] Tests: embedded boot + a request authenticated by a STUB Authenticator with NO AuthKit config and NO profiles.* schema present."
       ],
       "completed": false
     }
