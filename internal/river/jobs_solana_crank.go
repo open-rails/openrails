@@ -153,10 +153,14 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo *dbrepo.SolanaSub
 			next := w.now().Add(time.Duration(periodHours) * time.Hour)
 			return repo.SetNextPullAt(ctx, row.ID, next)
 		case declinecode.Terminal:
-			// The subscriber revoked the SPL token delegate on-chain (the trustless
-			// cancel) — transfer_subscription can no longer move funds. Cancel + stop,
-			// never dun. NOTE: a plain cancel_subscription does NOT reach here (it
-			// produces no crank error, #263), so our soft cancel is the real stop.
+			// The subscriber revoked the SPL token delegate on-chain — transfer_subscription
+			// can no longer move funds. Mirror it: cancel + stop, never dun. NOTE: a
+			// plain cancel_subscription does NOT reach here (it stops FUTURE-period
+			// pulls but not the current period, so it produces no crank error this
+			// period, #263); the standard user cancel is an immediate on-chain
+			// cancel_subscription the user signs, which OpenRails then mirrors here/at
+			// confirm. Solana never uses a scheduled-cancel (the card "cancel at period
+			// end" deferral) — Solana cancels are immediate and on-chain.
 			llog.Warn("Solana cranker: terminal pull failure (delegate revoked); cancelling subscription (no dunning)")
 			if err := repo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCancelled); err != nil {
 				return fmt.Errorf("solana crank: set cancelled status: %w", err)
