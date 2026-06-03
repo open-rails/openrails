@@ -42,7 +42,9 @@ func (d *dbSecretStore) Get(ctx context.Context, tenantID tenant.ID, name string
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Secret{}, ErrSecretNotFound
 		}
-		return Secret{}, fmt.Errorf("tenancy: get tenant secret: %w", err)
+		// A query/transport failure is operational, not "secret absent" — callers
+		// must retry, not treat as missing.
+		return Secret{}, fmt.Errorf("tenancy: get tenant secret: %w", errors.Join(ErrSecretBackendUnavailable, err))
 	}
 	return s, nil
 }

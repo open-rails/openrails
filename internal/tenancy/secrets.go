@@ -32,9 +32,26 @@ const (
 )
 
 // ErrSecretNotFound is returned by a TenantSecretStore when no secret exists for
-// the (tenant, name) pair. Callers distinguish "not configured" from a backend
-// error with errors.Is.
+// the (tenant, name) pair. This is a TERMINAL condition for that (tenant, name):
+// the secret is genuinely absent (tenant never configured it, or was
+// deprovisioned). Callers distinguish "not configured" from a backend error with
+// errors.Is.
 var ErrSecretNotFound = errors.New("tenancy: tenant secret not found")
+
+// ErrSecretBackendUnavailable wraps any OPERATIONAL failure of the underlying
+// secret backend — Vault unreachable / sealed / permission-denied, a DB query
+// error, or a not-yet-wired Vault client. It is distinct from ErrSecretNotFound
+// (terminal absence) precisely so money-path callers can fail closed correctly:
+//
+//   - secret ABSENT (ErrSecretNotFound)      -> terminal for that tenant; never
+//     retry, and (critically) NEVER treat as "verification disabled".
+//   - backend UNAVAILABLE (this error)       -> RETRY; do NOT cancel a
+//     subscription, suspend a tenant, or skip a webhook signature check.
+//
+// The recurring Solana pull worker and the webhook signature verifier both branch
+// on errors.Is(err, ErrSecretBackendUnavailable) to retry rather than treat a
+// transient Vault outage as "no secret".
+var ErrSecretBackendUnavailable = errors.New("tenancy: tenant secret backend unavailable")
 
 // Secret is a stored per-tenant secret value plus its version (bumped on every
 // rotation), so callers can audit/rotate without re-reading the plaintext.

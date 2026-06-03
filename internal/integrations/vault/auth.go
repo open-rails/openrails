@@ -16,8 +16,12 @@ import (
 type Config struct {
 	// Address is the Vault server URL (VAULT_ADDR). Empty uses the api default.
 	Address string
-	// AuthMethod is "approle" or "kubernetes".
+	// AuthMethod is "token", "approle", or "kubernetes". Empty defaults to
+	// "token" when a Token is supplied, otherwise it is an error.
 	AuthMethod string
+	// Token is a pre-issued Vault token (VAULT_TOKEN). Used directly when
+	// AuthMethod == "token" (dev / e2e). Not renewed by us — the operator owns it.
+	Token string
 	// AppRole credentials (AuthMethod == "approle").
 	RoleID   string
 	SecretID string
@@ -46,6 +50,25 @@ func Login(ctx context.Context, cfg Config) (*vaultapi.Client, error) {
 	client, err := vaultapi.NewClient(apiCfg)
 	if err != nil {
 		return nil, fmt.Errorf("vault: new client: %w", err)
+	}
+
+	// Token auth short-circuits the login flow: the operator supplied a token
+	// directly (dev server, e2e, or a sidecar-managed token). We set it and do
+	// not run a renewer — its lifecycle is owned outside the process.
+	method := strings.ToLower(strings.TrimSpace(cfg.AuthMethod))
+	if method == "" && strings.TrimSpace(cfg.Token) != "" {
+		method = "token"
+	}
+	if method == "token" {
+		token := strings.TrimSpace(cfg.Token)
+		if token == "" {
+			token = strings.TrimSpace(os.Getenv("VAULT_TOKEN"))
+		}
+		if token == "" {
+			return nil, fmt.Errorf("vault: token auth selected but no token (set VAULT_TOKEN)")
+		}
+		client.SetToken(token)
+		return client, nil
 	}
 
 	secret, err := login(ctx, client, cfg)

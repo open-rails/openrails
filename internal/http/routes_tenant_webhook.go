@@ -76,6 +76,14 @@ func (s *Server) tenantWebhookHandler() gin.HandlerFunc {
 		creds, err := s.tenancy.LoadStripeCredentials(ctx, route.TenantID)
 		if err != nil {
 			log.WithError(err).Error("tenant webhook: load tenant credentials failed")
+			// Distinguish a transient secret-backend outage (Vault unreachable/sealed)
+			// from any other failure: a 503 tells Stripe to REDELIVER, so a brief Vault
+			// blip never drops a webhook. We never fall through to "no secret" here —
+			// an unverifiable webhook is rejected, not accepted.
+			if errors.Is(err, tenancy.ErrSecretBackendUnavailable) {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "secret backend temporarily unavailable, retry"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "credential load failed"})
 			return
 		}

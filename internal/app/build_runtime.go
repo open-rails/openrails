@@ -45,8 +45,20 @@ import (
 const (
 	standaloneRiverDefaultQueueMaxWorkers = 10
 	standaloneRiverBillingQueueMaxWorkers = 20
-	riverSchema                           = "billing"
 )
+
+// standaloneRiverSchema returns the schema for River tables when OpenRails
+// constructs its own River client (standalone mode). Per issue #165 the standalone
+// River schema is the same as the OpenRails Postgres schema (db.schema, default
+// `billing`) — it is NOT separately configurable. In embedded/library mode the
+// host instead injects its own River client via embedded.SetRiverClient, and that
+// client owns its schema; OpenRails never overrides it.
+func standaloneRiverSchema(cfg *config.Config) string {
+	if cfg == nil || cfg.DB == nil {
+		return config.DefaultSchema
+	}
+	return cfg.DB.SchemaName()
+}
 
 type runtimeOverrides struct {
 	DB    *db.DB
@@ -318,7 +330,7 @@ func buildRiverProducer(cfg *config.Config) (*river.Client[pgx.Tx], *pgxpool.Poo
 	}
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Schema:              "billing",
+		Schema:              standaloneRiverSchema(cfg),
 		SkipUnknownJobCheck: true,
 	})
 	if err != nil {
@@ -741,7 +753,7 @@ func buildRiverClient(cfg *config.Config, workers *river.Workers) (*river.Client
 			river.QueueDefault:     {MaxWorkers: standaloneRiverDefaultQueueMaxWorkers},
 			riverjobs.QueueBilling: {MaxWorkers: standaloneRiverBillingQueueMaxWorkers},
 		},
-		Schema:  riverSchema,
+		Schema:  standaloneRiverSchema(cfg),
 		Workers: workers,
 	})
 	if err != nil {

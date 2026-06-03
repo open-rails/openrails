@@ -20,8 +20,13 @@ import (
 )
 
 // RunPostgres applies all Postgres migrations:
-// 0. River (billing schema) - via rivermigrate
-// 1. Billing (billing schema) - via migratekit
+// 0. River (OpenRails schema, == DB.SchemaName()) - via rivermigrate
+// 1. Billing (OpenRails schema, == DB.SchemaName()) - via migratekit
+//
+// The OpenRails Postgres schema is configurable via db.schema / DB_SCHEMA and
+// defaults to `billing` (#165). In standalone mode the River job-queue tables
+// live in this same schema. (Embedded hosts own River separately via an injected
+// River client — see pkg/embedded.)
 func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	if cfg == nil || cfg.DB == nil {
 		return fmt.Errorf("missing database config")
@@ -39,10 +44,12 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	}
 	sqlDB := bunDB.DB
 
-	schema := "billing" // Hardcoded schema
+	// Effective OpenRails schema (defaults to `billing`). Standalone River tables
+	// share this schema. Validated as a safe identifier during config load (#165).
+	schema := cfg.DB.SchemaName()
 
 	// ---------- 0. Bootstrap schema/extensions ----------
-	if err := ensurePostgresBootstrap(ctx, sqlDB); err != nil {
+	if err := ensurePostgresBootstrap(ctx, sqlDB, schema); err != nil {
 		return fmt.Errorf("postgres bootstrap failed: %w", err)
 	}
 
@@ -58,20 +65,26 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	}
 	log.Info("✓ AuthKit migrations completed successfully")
 
-	// ---------- 2. River Migrations (billing schema) ----------
-	log.Info("Running River migrations (billing schema)...")
+	// ---------- 2. River Migrations (OpenRails schema) ----------
+	log.Infof("Running River migrations (schema %q)...", schema)
 	if err := runRiverMigrations(ctx, cfg, schema); err != nil {
 		return fmt.Errorf("river migrations failed: %w", err)
 	}
 
-	// ---------- 3. Billing Migrations (billing schema) ----------
-	log.Info("Running Billing migrations (billing schema)...")
+	// ---------- 3. Billing Migrations (OpenRails schema) ----------
+	log.Infof("Running Billing migrations (schema %q)...", schema)
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	if err != nil {
 		return fmt.Errorf("billing: load migrations: %w", err)
 	}
 
-	m := migratekit.NewPostgres(sqlDB, "billing")
+	// "billing" here is migratekit's app/tracking key (public.migrations.app), not
+	// the schema. WithSchema sets a search_path so unqualified DDL lands in the
+	// configured schema; note OpenRails' billing migration SQL is itself
+	// schema-qualified to `billing.*`, so relocating billing tables fully also
+	// requires schema-templating those files (out of scope for #165, which makes
+	// the schema explicit/configurable and relocates the River tables).
+	m := migratekit.NewPostgres(sqlDB, "billing").WithSchema(schema)
 	// ApplyMigrations now calls Setup() automatically within the lock
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {
 		return fmt.Errorf("billing: apply migrations: %w", err)
@@ -80,12 +93,20 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-func ensurePostgresBootstrap(ctx context.Context, db *sql.DB) error {
+// ensurePostgresBootstrap creates the OpenRails schema (configurable via
+// db.schema, default `billing` — #165), shared extensions, and the migration
+// tracking table. schema is a pre-validated SQL identifier (config.validateSchema),
+// so it is safe to interpolate. CREATE SCHEMA IF NOT EXISTS is a no-op when the
+// host already owns the schema.
+func ensurePostgresBootstrap(ctx context.Context, db *sql.DB, schema string) error {
 	if db == nil {
 		return fmt.Errorf("missing sql db")
 	}
-	_, err := db.ExecContext(ctx, `
-		CREATE SCHEMA IF NOT EXISTS billing;
+	if schema == "" {
+		schema = "billing"
+	}
+	_, err := db.ExecContext(ctx, fmt.Sprintf(`
+		CREATE SCHEMA IF NOT EXISTS %s;
 		CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 		CREATE TABLE IF NOT EXISTS public.migrations (
 			id BIGSERIAL PRIMARY KEY,
@@ -95,7 +116,7 @@ func ensurePostgresBootstrap(ctx context.Context, db *sql.DB) error {
 			migrated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			UNIQUE(app, database, name)
 		);
-	`)
+	`, schema))
 	return err
 }
 

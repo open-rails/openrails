@@ -27,6 +27,24 @@ func TestLoad_EnvMapping(t *testing.T) {
 		assert.Equal(t, []string{"http://a.test", "http://b.test"}, cfg.Auth.Issuers)
 	})
 
+	t.Run("maps canonical Vault env vars to vault.* (#251)", func(t *testing.T) {
+		t.Setenv("VAULT_ENABLED", "true")
+		t.Setenv("VAULT_ADDR", "http://127.0.0.1:8200")
+		t.Setenv("VAULT_TOKEN", "root")
+		t.Setenv("VAULT_AUTH_METHOD", "token")
+		t.Setenv("VAULT_KV_MOUNT", "secret")
+
+		cfg, err := Load("nonexistent-config.yaml")
+		assert.NoError(t, err)
+		if assert.NotNil(t, cfg.Vault) {
+			assert.True(t, cfg.Vault.Enabled)
+			assert.Equal(t, "http://127.0.0.1:8200", cfg.Vault.Address)
+			assert.Equal(t, "root", cfg.Vault.Token)
+			assert.Equal(t, "token", cfg.Vault.AuthMethod)
+			assert.Equal(t, "secret", cfg.Vault.KVMount)
+		}
+	})
+
 }
 
 func TestLoad_ConfigFileAndEnvPrecedence(t *testing.T) {
@@ -587,4 +605,68 @@ func TestAllowedCORSOrigins_NilSafe(t *testing.T) {
 	var cfg *Config
 	assert.Nil(t, cfg.AllowedCORSOrigins())
 	assert.Empty(t, (&Config{}).AllowedCORSOrigins())
+}
+
+// TestDBConfig_SchemaName covers the issue #165 schema accessor: default `billing`,
+// normalization (trim + lower-case), and nil-safety.
+func TestDBConfig_SchemaName(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty defaults to billing", "", "billing"},
+		{"explicit value preserved", "host_billing", "host_billing"},
+		{"trimmed", "  custom  ", "custom"},
+		{"lower-cased", "Billing", "billing"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, (&DBConfig{Schema: tc.raw}).SchemaName())
+		})
+	}
+
+	t.Run("nil receiver defaults to billing", func(t *testing.T) {
+		var c *DBConfig
+		assert.Equal(t, "billing", c.SchemaName())
+	})
+
+	// The exported default constant is the historical schema.
+	assert.Equal(t, "billing", DefaultSchema)
+}
+
+// TestValidateSchema enforces that only safe SQL identifiers are accepted (#165).
+func TestValidateSchema(t *testing.T) {
+	valid := []string{"", "billing", "host_billing", "_x", "Schema1"}
+	for _, s := range valid {
+		assert.NoError(t, validateSchema(s), "expected %q valid", s)
+	}
+	invalid := []string{"1schema", "bad schema", "bad-schema", "bill;drop", `"quoted"`, "a.b"}
+	for _, s := range invalid {
+		assert.Error(t, validateSchema(s), "expected %q invalid", s)
+	}
+}
+
+// TestLoad_DBSchemaEnv is the #165 regression test: DB_SCHEMA flows through config
+// load, is normalized, and (default) resolves to billing. A custom value is honored.
+func TestLoad_DBSchemaEnv(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		cfg, err := Load("nonexistent-config.yaml")
+		assert.NoError(t, err)
+		assert.Equal(t, "billing", cfg.DB.SchemaName())
+	})
+
+	t.Run("custom honored and normalized", func(t *testing.T) {
+		t.Setenv("DB_SCHEMA", "  Custom_Billing  ")
+		cfg, err := Load("nonexistent-config.yaml")
+		assert.NoError(t, err)
+		assert.Equal(t, "custom_billing", cfg.DB.Schema)
+		assert.Equal(t, "custom_billing", cfg.DB.SchemaName())
+	})
+
+	t.Run("invalid rejected by Validate", func(t *testing.T) {
+		t.Setenv("DB_SCHEMA", "bad schema")
+		_, err := Load("nonexistent-config.yaml")
+		assert.Error(t, err)
+	})
 }

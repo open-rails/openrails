@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -153,7 +154,7 @@ func New(deps Dependencies) (*Server, error) {
 				kvMount = "secret"
 			}
 			vclient, verr := vault.Login(context.Background(), vault.Config{
-				Address: vc.Address, AuthMethod: vc.AuthMethod, RoleID: vc.RoleID,
+				Address: vc.Address, AuthMethod: vc.AuthMethod, Token: vc.Token, RoleID: vc.RoleID,
 				SecretID: vc.SecretID, K8sRole: vc.K8sRole, KVMount: kvMount, TransitMount: vc.TransitMount,
 			})
 			if verr != nil {
@@ -191,6 +192,16 @@ func New(deps Dependencies) (*Server, error) {
 				return nil, fmt.Errorf("wrap tenant secret store with encryption: %w", sserr)
 			}
 		}
+
+		// Front the chosen store with an in-process TTL cache (#251) so workers and
+		// hot paths resolve a tenant's secret once per window instead of per row /
+		// request. Default 45s; a rotation through this node invalidates immediately.
+		// Negative TTL disables it (NewCachedSecretStore returns the store unchanged).
+		secretCacheTTL := tenancy.DefaultSecretCacheTTL
+		if deps.Config != nil && deps.Config.Vault != nil && deps.Config.Vault.SecretCacheTTLSeconds != 0 {
+			secretCacheTTL = time.Duration(deps.Config.Vault.SecretCacheTTLSeconds) * time.Second
+		}
+		secretStore = tenancy.NewCachedSecretStore(secretStore, secretCacheTTL)
 
 		tsvc, terr := tenancy.NewService(deps.ControlPlane.Pool(), deps.ControlPlane, secretStore)
 		if terr != nil {

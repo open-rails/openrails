@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -215,10 +216,13 @@ type EncryptionConfig struct {
 type VaultConfig struct {
 	Enabled    bool   `koanf:"enabled,omitempty"`
 	Address    string `koanf:"address,omitempty"`     // VAULT_ADDR; empty uses the api default
-	AuthMethod string `koanf:"auth_method,omitempty"` // "approle" | "kubernetes"
-	RoleID     string `koanf:"role_id,omitempty"`
-	SecretID   string `koanf:"secret_id,omitempty"`
-	K8sRole    string `koanf:"k8s_role,omitempty"`
+	AuthMethod string `koanf:"auth_method,omitempty"` // "token" | "approle" | "kubernetes"
+	// Token is a pre-issued Vault token (VAULT_TOKEN). When set with no explicit
+	// auth_method, token auth is selected (dev / e2e against a -dev Vault).
+	Token    string `koanf:"token,omitempty"`
+	RoleID   string `koanf:"role_id,omitempty"`
+	SecretID string `koanf:"secret_id,omitempty"`
+	K8sRole  string `koanf:"k8s_role,omitempty"`
 	// KVMount is the KV-v2 mount for tenant secrets (default "secret").
 	KVMount string `koanf:"kv_mount,omitempty"`
 	// TransitMount is the Transit mount for tenant signing keys (default "transit").
@@ -226,6 +230,12 @@ type VaultConfig struct {
 	// UseTransitForSolana signs the per-tenant Solana key via Vault Transit
 	// (non-extractable) rather than fetching solana/private_key from KV.
 	UseTransitForSolana bool `koanf:"use_transit_for_solana,omitempty"`
+	// SecretCacheTTLSeconds is the in-process per-(tenant,name) secret cache TTL.
+	// Workers/handlers resolve a tenant's secret once per TTL window instead of
+	// hitting the backend per row/request. 0 uses the default (45s); negative
+	// disables caching. A rotation (Put/Delete in this process) invalidates the
+	// entry immediately; cross-process rotations take effect within one TTL.
+	SecretCacheTTLSeconds int `koanf:"secret_cache_ttl_seconds,omitempty"`
 }
 
 // DBConfig holds database configuration.
@@ -242,6 +252,21 @@ type DBConfig struct {
 	Username string `koanf:"username"`
 	Password string `koanf:"password"`
 	SSLMode  string `koanf:"sslmode"`
+
+	// Schema is the Postgres schema OpenRails owns (issue #165). It is used for
+	// OpenRails' own DDL/DML (billing tables) and, in STANDALONE mode, for the
+	// River job-queue tables as well — i.e. standalone River schema == DB.Schema.
+	//
+	// Default: "billing" (zero-config; preserves historical behavior). Configure
+	// via config `db.schema` or env `DB_SCHEMA`.
+	//
+	// Embedded/library mode: the host controls where River tables live by injecting
+	// its own River client (embedded.SetRiverClient); that client owns its schema and
+	// OpenRails never overrides it. See pkg/embedded for the full schema contract.
+	//
+	// Read the effective value via DBConfig.SchemaName() (it applies the default and
+	// normalization). Do not read this field directly.
+	Schema string `koanf:"schema"`
 
 	// RequireRLS makes startup FAIL if the connected role does not enforce Row
 	// Level Security (i.e. it is a superuser or a BYPASSRLS role). Set this in
@@ -295,6 +320,51 @@ func (c *DBConfig) GetConnectionString() string {
 
 	// 3. No URL and incomplete atomic parameters - return empty (caller handles defaults)
 	return ""
+}
+
+// DefaultSchema is the Postgres schema OpenRails uses when none is configured.
+// It preserves historical (pre-#165) behavior where everything lived in `billing`.
+const DefaultSchema = "billing"
+
+// schemaIdentRe restricts the OpenRails schema to a safe SQL identifier: it must
+// start with a letter or underscore and contain only letters, digits, and
+// underscores. This forbids quotes, spaces, and dots, so the value can be used to
+// build search_path / River schema names without quoting hazards.
+var schemaIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// SchemaName returns the effective OpenRails Postgres schema (issue #165),
+// applying the `billing` default and normalization (trim + lower-case). All
+// OpenRails code that needs the schema (migrator, River client construction)
+// MUST go through this accessor rather than reading DBConfig.Schema directly or
+// hardcoding "billing".
+func (c *DBConfig) SchemaName() string {
+	if c == nil {
+		return DefaultSchema
+	}
+	return normalizeSchema(c.Schema)
+}
+
+// normalizeSchema trims and lower-cases a schema identifier, falling back to the
+// default when empty. Lower-casing keeps the value consistent with unquoted SQL
+// identifier folding.
+func normalizeSchema(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "" {
+		return DefaultSchema
+	}
+	return s
+}
+
+// validateSchema ensures a configured schema is a safe SQL identifier (#165).
+func validateSchema(raw string) error {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return nil // empty == use default; valid
+	}
+	if !schemaIdentRe.MatchString(s) {
+		return fmt.Errorf("db.schema %q is not a valid Postgres identifier (letters, digits, underscore only; must start with a letter or underscore)", raw)
+	}
+	return nil
 }
 
 type StripeConfig struct {
@@ -1396,6 +1466,11 @@ func validateDatabase(cfg *DBConfig) error {
 		return fmt.Errorf("database URL could not be determined")
 	}
 
+	// OpenRails Postgres schema must be a safe identifier (#165).
+	if err := validateSchema(cfg.Schema); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1412,6 +1487,7 @@ func GetDefaultBillingConfig() *Config {
 			Username: "admin",
 			Password: "admin_password",
 			SSLMode:  "disable",
+			Schema:   DefaultSchema,
 		},
 		Redis: &RedisConfig{
 			// Match docker-compose Garnet (service: garnet)
@@ -1590,6 +1666,13 @@ func Load(configPath string) (*Config, error) {
 			return "test_mode"
 		}
 
+		// Canonical Vault env vars: VAULT_ADDR is HashiCorp's standard name for
+		// the server URL, so map it to vault.address (the default first-underscore
+		// split would yield vault.addr). VAULT_TOKEN already splits correctly.
+		if s == "vault_addr" {
+			return "vault.address"
+		}
+
 		if s == "auth_issuers" {
 			return "auth.issuers"
 		}
@@ -1730,6 +1813,13 @@ func Load(configPath string) (*Config, error) {
 
 	// Assemble DB URL from pieces if not explicitly set
 	assembleDBURL(cfg)
+
+	// Normalize the OpenRails Postgres schema to its canonical form (#165) so the
+	// stored config value matches what SchemaName() resolves to. Validation of the
+	// identifier happens in Validate(). Defaults to `billing`.
+	if cfg.DB != nil {
+		cfg.DB.Schema = normalizeSchema(cfg.DB.Schema)
+	}
 
 	// Log test mode status clearly at startup
 	logTestModeStatus(cfg)

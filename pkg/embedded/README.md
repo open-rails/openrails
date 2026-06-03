@@ -32,6 +32,17 @@ func main() {
 }
 ```
 
+## Postgres & River schema contract
+
+OpenRails owns a single configurable Postgres schema, set via config `db.schema` (env `DB_SCHEMA`), defaulting to `billing`. It holds OpenRails' own billing tables.
+
+River job-queue tables (`river_*`) follow these rules:
+
+- **Standalone:** OpenRails builds its own River client and the River schema equals the OpenRails schema (`db.schema`). It is not separately configurable.
+- **Embedded (this package):** the **host owns River**. Inject your unified River client via `SetRiverClient` — OpenRails enqueues through it and never constructs a River client or assumes/overrides a River schema. Your injected client's schema decides where River tables live, so they can sit in the host's primary schema even though OpenRails' billing tables sit under `db.schema`.
+
+**Migration safety:** changing `db.schema` does not move existing tables; it creates a second set under the new schema. OpenRails does not auto-migrate River tables across schemas — decommission old objects yourself if you switch.
+
 ## River Integration (Background Jobs)
 
 If your application uses [River](https://riverqueue.com) for background jobs, you can share a single River client with billing instead of running separate clients.

@@ -15,7 +15,11 @@ import (
 // can reference it) but deliberately fails closed rather than silently returning
 // empty secrets — a missing webhook signing secret must NEVER be treated as
 // "verification disabled".
-var ErrVaultNotConfigured = errors.New("tenancy: vault-backed secret store is not configured (no live Vault client)")
+//
+// It wraps ErrSecretBackendUnavailable: an unconfigured Vault is an OPERATIONAL
+// (retryable) state, NOT a terminal "secret absent" — callers must never read it
+// as "verification disabled".
+var ErrVaultNotConfigured = fmt.Errorf("%w: vault-backed secret store is not configured (no live Vault client)", ErrSecretBackendUnavailable)
 
 // VaultKV is the minimal KV-v2 surface the Vault-backed store needs. A real
 // adapter satisfies it with hashicorp/vault/api (logical Read/Write/Delete/List)
@@ -72,7 +76,10 @@ func (v *vaultSecretStore) Get(ctx context.Context, tenantID tenant.ID, name str
 	}
 	data, err := v.client.ReadSecret(ctx, v.pathFor(tenantID, name))
 	if err != nil {
-		return Secret{}, fmt.Errorf("tenancy: vault read %q: %w", name, err)
+		// A read error is an OPERATIONAL failure (Vault unreachable / sealed /
+		// permission). Absence is signalled by missing "value" below, NOT by an
+		// error — so any error here is retryable, never "secret absent".
+		return Secret{}, fmt.Errorf("tenancy: vault read %q: %w", name, errors.Join(ErrSecretBackendUnavailable, err))
 	}
 	val, ok := data["value"]
 	if !ok {
@@ -89,7 +96,7 @@ func (v *vaultSecretStore) Put(ctx context.Context, tenantID tenant.ID, name, va
 		return Secret{}, ErrVaultNotConfigured
 	}
 	if err := v.client.WriteSecret(ctx, v.pathFor(tenantID, name), map[string]string{"value": value}); err != nil {
-		return Secret{}, fmt.Errorf("tenancy: vault write %q: %w", name, err)
+		return Secret{}, fmt.Errorf("tenancy: vault write %q: %w", name, errors.Join(ErrSecretBackendUnavailable, err))
 	}
 	return Secret{Name: name, Value: value, Version: 1}, nil
 }
@@ -102,7 +109,7 @@ func (v *vaultSecretStore) Delete(ctx context.Context, tenantID tenant.ID, name 
 		return ErrVaultNotConfigured
 	}
 	if err := v.client.DeleteSecret(ctx, v.pathFor(tenantID, name)); err != nil {
-		return fmt.Errorf("tenancy: vault delete %q: %w", name, err)
+		return fmt.Errorf("tenancy: vault delete %q: %w", name, errors.Join(ErrSecretBackendUnavailable, err))
 	}
 	return nil
 }
@@ -117,7 +124,7 @@ func (v *vaultSecretStore) List(ctx context.Context, tenantID tenant.ID) ([]stri
 	prefix := path.Join(v.mount, "openrails", "tenants", tenantID.String())
 	names, err := v.client.ListSecrets(ctx, prefix)
 	if err != nil {
-		return nil, fmt.Errorf("tenancy: vault list: %w", err)
+		return nil, fmt.Errorf("tenancy: vault list: %w", errors.Join(ErrSecretBackendUnavailable, err))
 	}
 	return names, nil
 }
