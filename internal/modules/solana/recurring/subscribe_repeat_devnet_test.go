@@ -49,7 +49,7 @@ func TestDevnetSubscribeRepeat519(t *testing.T) {
 	signer := solanaint.NewKeypairSigner(memSecretGetter{key: merchant.String()}, 0)
 	submitter := NewSignerSubmitter(signer, rc)
 	planSvc := NewPlanService(submitter, "devnet")
-	prepSvc := NewPrepareSubscribeService(submitter, rc, "devnet")
+	prepSvc := NewPrepareSubscribeService(submitter, signer, rc, "devnet")
 
 	saPDA, _, _ := subscriptions.DeriveSubscriptionAuthority(subscriber.PublicKey(), usdc)
 	dumpSA := func(label string) {

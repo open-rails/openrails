@@ -65,7 +65,7 @@ func TestDevnetTierChangeUSDC(t *testing.T) {
 	signer := solanaint.NewKeypairSigner(memSecretGetter{key: merchant.String()}, 0)
 	submitter := NewSignerSubmitter(signer, rc)
 	planSvc := NewPlanService(submitter, "devnet")
-	prepSvc := NewPrepareSubscribeService(submitter, rc, "devnet")
+	prepSvc := NewPrepareSubscribeService(submitter, signer, rc, "devnet")
 	tierSvc := NewPrepareTierChangeService(signer, rc, "devnet")
 
 	const lowTier = uint64(1_000_000)  // 1 USDC plan A

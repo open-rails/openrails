@@ -115,7 +115,7 @@ func TestDevnetServiceLayerUSDC(t *testing.T) {
 	signer := solanaint.NewKeypairSigner(memSecretGetter{key: merchant.String()}, 0)
 	submitter := NewSignerSubmitter(signer, rc)
 	planSvc := NewPlanService(submitter, "devnet")
-	prepSvc := NewPrepareSubscribeService(submitter, rc, "devnet")
+	prepSvc := NewPrepareSubscribeService(submitter, signer, rc, "devnet")
 	crankSvc := NewCrankService(submitter)
 
 	// 1) Publish a 1-USDC / 720h plan on-chain (real PlanService path).

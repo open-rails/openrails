@@ -82,7 +82,7 @@ func TestDevnetSustainedRebill(t *testing.T) {
 	signer := solanaint.NewKeypairSigner(memSecretGetter{key: merchant.String()}, 0)
 	submitter := NewSignerSubmitter(signer, rc)
 	planSvc := NewPlanService(submitter, "devnet")
-	prepSvc := NewPrepareSubscribeService(submitter, rc, "devnet")
+	prepSvc := NewPrepareSubscribeService(submitter, signer, rc, "devnet")
 	crankSvc := NewCrankService(submitter)
 
 	// 1-USDC / 1-HOUR plan — 1 hour is the minimum period, so the cap resets ~1h
