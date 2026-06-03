@@ -16,6 +16,7 @@ import (
 type tierChangeRPC interface {
 	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
 	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
+	GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error)
 }
 
 // PrepareTierChangeService builds the SINGLE ATOMIC on-chain transaction a tier
@@ -194,6 +195,15 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		result.Transaction = tx
 		result.Kind = "downgrade"
 		return result, nil
+	}
+
+	// Pre-flight: an upgrade pulls the prorated first charge NOW (atomically), so
+	// verify the subscriber holds enough USDC before handing them a tx that would
+	// just revert. Same typed InsufficientUSDCError the subscribe pre-flight uses
+	// (-> HTTP 402 insufficient_funds) so the UI can prompt a top-up. Fail-open on a
+	// read error (the atomic tx's all-or-nothing revert is the real guarantee).
+	if have, berr := s.rpc.GetTokenBalanceForMint(ctx, subscriber, mint); berr == nil && have < in.FirstChargeBaseUnits {
+		return nil, &InsufficientUSDCError{HaveBaseUnits: have, NeedBaseUnits: in.FirstChargeBaseUnits}
 	}
 
 	// Upgrade: add the prorated first pull. transfer_subscription requires the

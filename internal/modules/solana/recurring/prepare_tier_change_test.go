@@ -30,6 +30,12 @@ func (tcFakeRPC) GetLatestBlockhash(context.Context) (solanago.Hash, error) {
 	return solanago.Hash{}, nil
 }
 
+// GetTokenBalanceForMint returns a large balance so the upgrade pre-flight passes
+// in the existing tests (the insufficient case is covered separately).
+func (tcFakeRPC) GetTokenBalanceForMint(context.Context, solanago.PublicKey, solanago.PublicKey) (uint64, error) {
+	return 1_000_000_000, nil
+}
+
 func randKeyStr(t *testing.T) string {
 	t.Helper()
 	k, err := solanago.NewRandomPrivateKey()
