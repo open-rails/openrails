@@ -8,12 +8,13 @@
 //     would exceed the plan amount within a period. This is the on-chain basis
 //     for Model-B upgrade proration (charge new_full - old_unused on the first
 //     pull) — proving "full payments only" is policy, not a program constraint.
+//
 //  2. CANCELLED-SUBSCRIPTION PULL ERROR: after cancel_subscription, a crank is
 //     rejected; capture the on-chain error so #265's terminal classifier can be
 //     tightened to the real program error string.
 //
-//	Run: SOLANA_DEVNET_PAYER_KEY=<funded> HELIUS_API_KEY=<key> \
-//		go test -tags devnet -run PartialPull -v -timeout 580s ./internal/integrations/solana/...
+//     Run: SOLANA_DEVNET_PAYER_KEY=<funded> HELIUS_API_KEY=<key> \
+//     go test -tags devnet -run PartialPull -v -timeout 580s ./internal/integrations/solana/...
 package solana
 
 import (
@@ -170,4 +171,80 @@ func TestDevnetPartialPullAndCap(t *testing.T) {
 
 	t.Log("PARTIAL-PULL + CAP + CANCEL-ERROR VALIDATED ON DEVNET ✅")
 	t.Logf("SUMMARY: partial pulls allowed (Model-B proration confirmed); over-cap err=%s; cancelled-pull err=%s", overCapErr, cancelledErr)
+}
+
+// TestDevnetCancelledPullErrorIsolated isolates the on-chain error a crank gets
+// against a CANCELLED subscription with NO prior pull (so it is NOT confounded by
+// the per-period cap, unlike PROBE 4 above). This is the exact error #265's
+// terminal classifier must key on. If it differs from the over-cap error
+// (Custom:400) the cranker can distinguish terminal-cancel from idempotent
+// already-pulled by code alone; if identical, it must read on-chain subscription
+// state to disambiguate.
+func TestDevnetCancelledPullErrorIsolated(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
+	defer cancel()
+
+	endpoint := devnetEndpoint()
+	rc := NewRPCClientWithConfig(RPCClientConfig{Endpoint: endpoint, Network: "devnet"})
+	raw := rpc.New(endpoint)
+	dnRaw = raw
+	merchant := fundedMerchant(ctx, t, raw)
+
+	subKey, err := solanago.NewRandomPrivateKey()
+	require.NoError(t, err)
+	signAndSend(ctx, t, rc, merchant, nil,
+		system.NewTransferInstruction(50_000_000, merchant.PublicKey(), subKey.PublicKey()).Build())
+
+	mintKey, err := solanago.NewRandomPrivateKey()
+	require.NoError(t, err)
+	mintRent, err := rc.GetMinimumBalanceForRentExemption(ctx, 82)
+	require.NoError(t, err)
+	signAndSend(ctx, t, rc, merchant, []solanago.PrivateKey{mintKey},
+		system.NewCreateAccountInstruction(mintRent, 82, token.ProgramID, merchant.PublicKey(), mintKey.PublicKey()).Build(),
+		token.NewInitializeMint2Instruction(6, merchant.PublicKey(), merchant.PublicKey(), mintKey.PublicKey()).Build())
+	mint := mintKey.PublicKey()
+	merchantATA := createATA(ctx, t, rc, merchant, merchant.PublicKey(), mint)
+	subATA := createATA(ctx, t, rc, merchant, subKey.PublicKey(), mint)
+	signAndSend(ctx, t, rc, merchant, nil,
+		token.NewMintToInstruction(100_000_000, mint, subATA, merchant.PublicKey(), nil).Build())
+
+	planID := uint64(time.Now().UnixNano())
+	planPDA, planBump, err := subscriptions.DerivePlanPDA(merchant.PublicKey(), planID)
+	require.NoError(t, err)
+	createPlanIx, err := subscriptions.BuildCreatePlan(subscriptions.CreatePlanParams{
+		Merchant: merchant.PublicKey(), PlanPDA: planPDA, Mint: mint, TokenProgram: token.ProgramID,
+		PlanID: planID, Terms: subscriptions.PlanTerms{Amount: 10_000_000, PeriodHours: 720, CreatedAt: time.Now().Unix()},
+	})
+	require.NoError(t, err)
+	signAndSend(ctx, t, rc, merchant, nil, createPlanIx)
+	planCreatedAt := readI64(ctx, t, raw, planPDA, 91)
+
+	saPDA, _, err := subscriptions.DeriveSubscriptionAuthority(subKey.PublicKey(), mint)
+	require.NoError(t, err)
+	signAndSend(ctx, t, rc, subKey, nil, subscriptions.BuildInitSubscriptionAuthority(subscriptions.InitSubscriptionAuthorityParams{
+		Owner: subKey.PublicKey(), SubscriptionAuthority: saPDA, TokenMint: mint, UserATA: subATA, TokenProgram: token.ProgramID,
+	}))
+	saInitID := readI64(ctx, t, raw, saPDA, 98)
+	subPDA, _, err := subscriptions.DeriveSubscriptionPDA(planPDA, subKey.PublicKey())
+	require.NoError(t, err)
+	eventAuth, _, err := subscriptions.DeriveEventAuthority()
+	require.NoError(t, err)
+	signAndSend(ctx, t, rc, subKey, nil, subscriptions.BuildSubscribe(subscriptions.SubscribeParams{
+		Subscriber: subKey.PublicKey(), Merchant: merchant.PublicKey(), PlanPDA: planPDA, SubscriptionPDA: subPDA,
+		SubscriptionAuthorityPDA: saPDA, EventAuthority: eventAuth,
+		PlanID: planID, PlanBump: planBump, ExpectedMint: mint, ExpectedAmount: 10_000_000, ExpectedPeriodHours: 720,
+		ExpectedCreatedAt: planCreatedAt, ExpectedSubscriptionAuthInitID: saInitID,
+	}))
+
+	// Cancel BEFORE any pull (period cap untouched), then crank the full amount.
+	signAndSend(ctx, t, rc, subKey, nil, subscriptions.BuildCancelSubscription(subscriptions.CancelOrResumeParams{
+		Subscriber: subKey.PublicKey(), PlanPDA: planPDA, SubscriptionPDA: subPDA, EventAuthority: eventAuth,
+	}))
+	errStr := sendExpectingError(ctx, t, rc, merchant, subscriptions.BuildTransferSubscription(subscriptions.TransferSubscriptionParams{
+		SubscriptionPDA: subPDA, PlanPDA: planPDA, SubscriptionAuthority: saPDA,
+		DelegatorATA: subATA, ReceiverATA: merchantATA, Caller: merchant.PublicKey(), Mint: mint,
+		TokenProgram: token.ProgramID, EventAuthority: eventAuth, Amount: 10_000_000, Delegator: subKey.PublicKey(),
+	}))
+	t.Logf("ISOLATED cancelled-subscription pull error (no prior pull) = %s", errStr)
+	t.Log("COMPARE: over-cap error was Custom:400. If this differs, terminal-cancel is distinguishable by error code alone.")
 }
