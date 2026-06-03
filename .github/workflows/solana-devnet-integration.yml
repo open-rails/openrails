@@ -1,0 +1,129 @@
+name: Solana Devnet Integration
+
+# Scheduled on-chain validation of the recurring-Solana flow against REAL devnet
+# USDC (#275). These tests carry the `//go:build devnet` tag and need a funded
+# devnet wallet + devnet USDC, so they CANNOT run on the normal PR/push CI
+# (which has no funded keys and must stay fast/free). They run on a daily cron
+# and on-demand instead.
+#
+# Required GitHub Actions secrets (Settings -> Secrets and variables -> Actions):
+#   GH_TOKEN                     — read access to the private doujins-org/* Go
+#                                  modules (same secret the main CI uses).
+#   HELIUS_API_KEY               — Helius devnet RPC API key.
+#   SOLANA_DEVNET_PAYER_KEY      — base58 secret key of a SOL-funded devnet payer
+#                                  (funds the subscriber's gas; in the multi-rebill
+#                                  test also funds the fresh subscriber's USDC).
+#   SOLANA_DEVNET_SUBSCRIBER_KEY — base58 secret key of a devnet wallet whose USDC
+#                                  ATA is funded from https://faucet.circle.com
+#                                  (Solana devnet, USDC). The allowlist only
+#                                  resolves real USDC, not a self-minted token.
+#
+# Locally these live in `.env.devnet` (gitignored); in CI they come from the
+# secrets above.
+
+on:
+  schedule:
+    # 07:00 UTC daily — the fast USDC service-layer test only (~8 min budget).
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      run_multirebill:
+        description: 'Also run the multi-HOUR multi-rebill test (TestDevnetMultiRebillHourly, ~3h). Off by default — too slow/expensive for the daily run.'
+        type: boolean
+        default: false
+
+jobs:
+  # Fast (~8 min) real-USDC publish -> subscribe -> crank -> cancel against the
+  # production service layer. This is the one that runs on the daily schedule.
+  devnet-service-layer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Configure private module access
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "GH_TOKEN secret is required for private module access" >&2
+            exit 1
+          fi
+          go env -w GOPRIVATE=github.com/doujins-org/*
+          go env -w GONOSUMDB=github.com/doujins-org/*
+          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          go mod download
+          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+        continue-on-error: true
+      - name: Devnet USDC service-layer test
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          SOLANA_DEVNET_PAYER_KEY: ${{ secrets.SOLANA_DEVNET_PAYER_KEY }}
+          SOLANA_DEVNET_SUBSCRIBER_KEY: ${{ secrets.SOLANA_DEVNET_SUBSCRIBER_KEY }}
+        run: |
+          if [ -z "${HELIUS_API_KEY}" ] || [ -z "${SOLANA_DEVNET_PAYER_KEY}" ] || [ -z "${SOLANA_DEVNET_SUBSCRIBER_KEY}" ]; then
+            echo "HELIUS_API_KEY, SOLANA_DEVNET_PAYER_KEY and SOLANA_DEVNET_SUBSCRIBER_KEY secrets are required" >&2
+            exit 1
+          fi
+          go test -tags devnet -run TestDevnetServiceLayerUSDC -v -timeout 480s ./internal/modules/solana/recurring/...
+
+  # Multi-HOUR (~3h) real recurring rebill: publishes period_hours=1, subscribes,
+  # pulls, WAITS for the on-chain period to roll over (~1h), pulls a SECOND time.
+  # Gated behind workflow_dispatch ONLY (the `run_multirebill` input) — far too
+  # slow and USDC-expensive to run daily. Trigger it by hand when you want a real
+  # rebill proof.
+  devnet-multirebill:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_multirebill }}
+    # ~1h idle between pulls + RPC retries; give the whole job 3.5h so the test's
+    # own 3h timeout is the limiting factor, not the runner.
+    timeout-minutes: 210
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Configure private module access
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "GH_TOKEN secret is required for private module access" >&2
+            exit 1
+          fi
+          go env -w GOPRIVATE=github.com/doujins-org/*
+          go env -w GONOSUMDB=github.com/doujins-org/*
+          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          go mod download
+          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+        continue-on-error: true
+      - name: Devnet multi-rebill test (multi-hour)
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          SOLANA_DEVNET_PAYER_KEY: ${{ secrets.SOLANA_DEVNET_PAYER_KEY }}
+          SOLANA_DEVNET_SUBSCRIBER_KEY: ${{ secrets.SOLANA_DEVNET_SUBSCRIBER_KEY }}
+        run: |
+          if [ -z "${HELIUS_API_KEY}" ] || [ -z "${SOLANA_DEVNET_PAYER_KEY}" ] || [ -z "${SOLANA_DEVNET_SUBSCRIBER_KEY}" ]; then
+            echo "HELIUS_API_KEY, SOLANA_DEVNET_PAYER_KEY and SOLANA_DEVNET_SUBSCRIBER_KEY secrets are required" >&2
+            exit 1
+          fi
+          go test -tags devnet -run TestDevnetMultiRebillHourly -v -timeout 3h ./internal/modules/solana/recurring/...

@@ -84,7 +84,93 @@ Browser (doujins/hentai0) or API directly:
 - **A wallet that can sign** in the browser for the true UI e2e (or sign the
   returned base64 txns programmatically with a test keypair for an API-level e2e).
 
+## Browser wallet-signing e2e (#275) — runbook
+
+The API-level e2e above can sign the returned base64 txns with a test keypair.
+The *true* browser e2e instead drives the **doujins React frontend** and has a
+**real wallet extension approve the transactions** — the one thing the headless
+service-layer tests can't prove (the wallet adapter -> `signAllTransactions` ->
+`POST .../confirm` round trip through the UI). It is **manual** by nature: a
+human (or a pre-unlocked extension) must click "Approve" in the wallet popup,
+which cannot be fully scripted without a mock-wallet shim (see "Automation
+limits" below).
+
+### 0. One-time wallet prep (devnet)
+- Install a browser wallet (Phantom/Backpack) and switch it to **Devnet**.
+- Import the **subscriber** keypair (`SOLANA_DEVNET_SUBSCRIBER_KEY`, same one CI
+  uses) so the wallet holds the funded devnet USDC + SOL gas. Fund its USDC ATA
+  at https://faucet.circle.com (Solana devnet, USDC) and top up SOL via
+  `solana airdrop 1 <addr> --url devnet` if needed.
+
+### 1–3. Bring up the stack + plan
+Identical to the full-stack steps above:
+1. `cd ~/openrails && docker build -t openrails:local .` (needs a green `go build ./...`).
+2. `~/doujins/docker-compose.override.yaml` pinning `image: openrails:local` +
+   `SOLANA_NETWORK: devnet` / `SOLANA_RPC_URL: https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
+   then `docker compose up -d postgres openrails`.
+3. Seed the tenant cranker secret `solana/private_key` and publish a USDC plan
+   (`POST /v1/admin/solana/recurring/plans` with `token_symbol:"USDC"`,
+   `period_hours`, `price_id`).
+4. Bring up the doujins frontend pointed at the local OpenRails
+   (`cd ~/doujins/frontend && pnpm dev`, default `http://localhost:13000`).
+
+### 4. Walk the subscribe → sign → confirm → cancel flow in the doujins UI
+1. Log into doujins as a test user; open the premium/subscribe entry point for
+   the price tied to the published plan.
+2. Pick **Solana / wallet** as the payment method and connect the devnet wallet
+   (the subscriber keypair from step 0).
+3. Click **Subscribe**. The frontend calls
+   `POST /v1/self/checkout {mode:"subscription", payment:{processor:"solana"}}`
+   and receives `next_action: solana_sign_transactions [base64...]` (first-timer:
+   init-authority **then** subscribe).
+4. The wallet adapter pops up one approval **per transaction** — **Approve each**.
+   Watch the popup show the program + USDC token accounts.
+5. The UI submits the signed txns and calls
+   `POST /v1/self/checkout/:id/confirm {payment:{processor:"solana", wallet, signature}}`.
+   This verifies the on-chain subscription, runs the first crank (pulls USDC),
+   and creates the membership.
+6. **Cancel:** open the subscription in the account UI and click **Cancel**
+   (`POST /v1/self/subscriptions/:id/cancel` — soft cancel = cranker stops).
+
+### What to assert (manual)
+- **UI:** subscribe shows a wallet popup per tx; after confirm the UI flips to an
+  active/subscribed state; the account page lists the subscription; cancel flips
+  it to canceled/ending.
+- **On-chain (devnet explorer / RPC):** the subscriber's USDC ATA balance drops
+  by the plan amount on the first crank; the subscription + subscription-authority
+  PDAs exist; the `transfer_subscription` signature returned by confirm is present
+  and succeeded.
+- **OpenRails side:** `solana_subscriptions` row created with the right PDAs; a
+  membership/entitlement row created on confirm; after cancel the cranker no
+  longer schedules a `next_pull_at` (soft cancel ≠ on-chain revoke — pulls only
+  truly stop on SPL `Revoke`, per the on-chain runbook above).
+- **Logs:** the OpenRails container logs the checkout → confirm → first-crank
+  path without allowlist/mint-resolution errors (proves real USDC resolved).
+
+### Automation limits + the skeleton
+A fully-automated browser e2e is **best-effort, not the deliverable**: a real
+wallet extension's approval popup runs in the extension's own context and can't
+be reliably driven by Playwright without one of:
+- a **mock-wallet adapter** injected into the frontend (a `window.solana`-style
+  stub that auto-signs with the subscriber keypair and skips the popup), or
+- a pre-unlocked extension + `@synthetixio/synpress`-style extension automation.
+
+A Playwright **skeleton** that drives the doujins frontend up to the
+wallet-approval boundary lives at
+`~/doujins/frontend/e2e/premium/solana-subscribe.skeleton.spec.ts` (separate
+repo — not committed by the OpenRails workflow). It loads the subscribe entry
+point, selects Solana, and asserts the checkout call returns
+`solana_sign_transactions`; it then **stops at the wallet popup** and is
+`test.fixme()`-skipped by default. To make it run end-to-end, wire in a
+mock-wallet adapter (auto-sign with the subscriber key) so the popup is bypassed
+— at which point it becomes a genuine UI regression test for everything except
+the human approval click itself.
+
 ## Status
 On-chain mechanics, the confirm path, and the service-unit logic are validated.
-The full-stack run is gated on: a green tree (for the image build), devnet USDC,
-and a stable billing DB — none code blockers, all environment provisioning.
+The fast real-USDC service-layer test (`TestDevnetServiceLayerUSDC`) now runs on
+a **daily schedule** in CI (`.github/workflows/solana-devnet-integration.yml`),
+and the multi-hour real-rebill test (`TestDevnetMultiRebillHourly`) is a manual
+`workflow_dispatch` job there. The full-stack/browser run is gated on: a green
+tree (for the image build), devnet USDC, a stable billing DB, and a wallet that
+can sign in-browser — none code blockers, all environment provisioning.

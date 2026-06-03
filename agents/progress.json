@@ -979,8 +979,8 @@
       "tasks": [
         "[x] FAST clock-driven test: fake clock advances; assert multi-rebill (RenewMembership advances next_pull_at one period), dunning escalation past_due->retries->cancel at MaxDunningFailures (next_pull_at by DunningInterval), AlreadyPaid/Operational(no-dun, no-reschedule)/Terminal(cancel, no-dun) classifier branches + ghost-plan expiry (stub only the pull) — internal/river/jobs_solana_crank_statemachine_test.go (refactored crankOne onto solanaSubStore + resolvePlanFn seams)",
         "[x] SLOW on-chain devnet test: period_hours=1 -> subscribe -> crank -> immediate re-pull rejected (Custom:400) -> wait for the period to roll (~1h, polled) -> crank again (cap reset, real 2nd rebill, distinct sig) -> cancel; build-tag devnet, 3h timeout, run manually/scheduled — internal/modules/solana/recurring/service_devnet_multirebill_test.go (NOT run: multi-hour + scarce devnet USDC)",
-        "[ ] full-stack/browser e2e in the docker stack (local image + devnet USDC) per docs/solana-recurring-e2e-runbook.md",
-        "[ ] CI: schedule the devnet integration test with a funded-wallet secret so the real flow is continuously verified"
+        "[x] full-stack/browser e2e in the docker stack (local image + devnet USDC): RUNBOOK written (docs/solana-recurring-e2e-runbook.md 'Browser wallet-signing e2e' — bring-up, fund, subscribe->sign->confirm->cancel, assertions) + best-effort Playwright skeleton at doujins frontend e2e/premium/solana-subscribe.skeleton.spec.ts (test.fixme, drives UI to the wallet-approval boundary; needs a mock-wallet adapter to run end-to-end)",
+        "[x] CI: scheduled devnet integration workflow .github/workflows/solana-devnet-integration.yml — daily cron runs the fast TestDevnetServiceLayerUSDC (480s); workflow_dispatch-only job runs the multi-hour TestDevnetMultiRebillHourly (3h); secrets: GH_TOKEN, HELIUS_API_KEY, SOLANA_DEVNET_PAYER_KEY, SOLANA_DEVNET_SUBSCRIBER_KEY"
       ]
     }
   ]
