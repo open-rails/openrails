@@ -17,9 +17,6 @@ import (
 const (
 	DefaultDirectPostURL = "https://secure.networkmerchants.com/api/transact.php"
 	DefaultQueryAPIURL   = "https://secure.nmi.com/api/query.php"
-
-	SandboxDirectPostURL = "https://sandbox.nmi.com/api/transact.php"
-	SandboxQueryAPIURL   = "https://sandbox.nmi.com/api/query.php"
 )
 
 type NMIClient struct {
@@ -157,28 +154,11 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 		log.WithField("provider", provider).Warn("NMI security_key not configured - NMI API calls will be disabled")
 	}
 
-	directPostURL := strings.TrimSpace(cfg.DirectPostURL)
-	queryURL := strings.TrimSpace(cfg.QueryURL)
-	if directPostURL == "" {
-		if testMode {
-			directPostURL = SandboxDirectPostURL
-		} else {
-			directPostURL = DefaultDirectPostURL
-		}
-	}
-	if queryURL == "" {
-		if testMode {
-			queryURL = SandboxQueryAPIURL
-		} else {
-			queryURL = DefaultQueryAPIURL
-		}
-	}
-
 	log.WithFields(log.Fields{
 		"provider":    provider,
 		"test_mode":   testMode,
-		"direct_post": directPostURL,
-		"query":       queryURL,
+		"direct_post": DefaultDirectPostURL,
+		"query":       DefaultQueryAPIURL,
 	}).Info("NMI endpoint selection")
 
 	return &NMIClient{
@@ -186,8 +166,8 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 		config:        cfg,
 		SecurityKey:   securityKey,
 		WebhookSecret: webhookSecret,
-		DirectPostURL: directPostURL,
-		QueryURL:      queryURL,
+		DirectPostURL: DefaultDirectPostURL,
+		QueryURL:      DefaultQueryAPIURL,
 		TestMode:      testMode,
 	}, nil
 }

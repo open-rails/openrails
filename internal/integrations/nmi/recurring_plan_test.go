@@ -16,11 +16,11 @@ import (
 func newTestClient(t *testing.T, serverURL string) *NMIClient {
 	t.Helper()
 	client, err := NewClient("mobius", &config.NMIProviderSettings{
-		SecurityKey:   "test-security-key",
-		DirectPostURL: serverURL,
-		QueryURL:      serverURL,
+		SecurityKey: "test-security-key",
 	}, false)
 	require.NoError(t, err)
+	client.DirectPostURL = serverURL
+	client.QueryURL = serverURL
 	return client
 }
 
@@ -131,7 +131,7 @@ func TestGetRecurringPlanByID_FoundParsesAmount(t *testing.T) {
 	assert.True(t, found)
 	assert.Equal(t, "Premium Monthly", name)
 	assert.Equal(t, int64(999), cents)
-	assert.Equal(t, "recurring_plans", seen.Get("Servicert_type"))
+	assert.Equal(t, "recurring_plans", seen.Get("report_type"))
 	assert.Equal(t, "openrails-abc", seen.Get("plan_id"))
 }
 

@@ -15,11 +15,11 @@ func TestNewClient_EndpointSelection(t *testing.T) {
 		SecurityKey: "test-security-key",
 	}
 
-	t.Run("test mode uses sandbox endpoints", func(t *testing.T) {
+	t.Run("test mode uses fixed endpoints", func(t *testing.T) {
 		client, err := NewClient("mobius", baseCfg, true)
 		require.NoError(t, err)
-		assert.Equal(t, SandboxDirectPostURL, client.DirectPostURL, "should use sandbox direct post URL")
-		assert.Equal(t, SandboxQueryAPIURL, client.QueryURL, "should use sandbox query URL")
+		assert.Equal(t, DefaultDirectPostURL, client.DirectPostURL, "should use fixed direct post URL")
+		assert.Equal(t, DefaultQueryAPIURL, client.QueryURL, "should use fixed query URL")
 		assert.True(t, client.TestMode)
 	})
 
@@ -29,30 +29,6 @@ func TestNewClient_EndpointSelection(t *testing.T) {
 		assert.Equal(t, DefaultDirectPostURL, client.DirectPostURL, "should use production direct post URL")
 		assert.Equal(t, DefaultQueryAPIURL, client.QueryURL, "should use production query URL")
 		assert.False(t, client.TestMode)
-	})
-
-	t.Run("test mode uses custom URLs if provided", func(t *testing.T) {
-		customCfg := &config.NMIProviderSettings{
-			SecurityKey:   "test-security-key",
-			DirectPostURL: "https://custom.example.com/transact",
-			QueryURL:      "https://custom.example.com/query",
-		}
-		client, err := NewClient("mobius", customCfg, true)
-		require.NoError(t, err)
-		assert.Equal(t, "https://custom.example.com/transact", client.DirectPostURL)
-		assert.Equal(t, "https://custom.example.com/query", client.QueryURL)
-	})
-
-	t.Run("production mode uses custom URLs if provided", func(t *testing.T) {
-		customCfg := &config.NMIProviderSettings{
-			SecurityKey:   "test-security-key",
-			DirectPostURL: "https://custom.example.com/transact",
-			QueryURL:      "https://custom.example.com/query",
-		}
-		client, err := NewClient("mobius", customCfg, false)
-		require.NoError(t, err)
-		assert.Equal(t, "https://custom.example.com/transact", client.DirectPostURL)
-		assert.Equal(t, "https://custom.example.com/query", client.QueryURL)
 	})
 
 	t.Run("production mode requires security key", func(t *testing.T) {
@@ -83,11 +59,11 @@ func TestAttemptManualRebill_SendsStableOrderReferences(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client, err := NewClient("mobius", &config.NMIProviderSettings{
-		SecurityKey:   "test-security-key",
-		DirectPostURL: server.URL,
-		QueryURL:      server.URL,
+		SecurityKey: "test-security-key",
 	}, false)
 	require.NoError(t, err)
+	client.DirectPostURL = server.URL
+	client.QueryURL = server.URL
 
 	resp, err := client.AttemptManualRebill(ManualRebillParams{
 		VaultID:        "vault_123",

@@ -42,10 +42,6 @@ PROCESSORS_MOBIUS_TOKENIZATION_KEY=...          # public (Collect.js)
 PROCESSORS_MOBIUS_TOKENIZATION_URL=...          # Collect.js script URL you want to test
 PROCESSORS_MOBIUS_WEBHOOK_SECRET=...            # HMAC shared secret for webhooks
 
-# Optional endpoint overrides (use these if sandbox.nmi.com is NOT correct for your Mobius account):
-# PROCESSORS_MOBIUS_DIRECT_POST_URL=https://...
-# PROCESSORS_MOBIUS_QUERY_URL=https://...
-
 # Cloudflared (deterministic webhook hostname)
 CLOUDFLARED_TUNNEL_TOKEN=...
 CLOUDFLARED_PUBLIC_HOSTNAME=openrails-webhooks.example.com
@@ -55,7 +51,7 @@ E2E_MOBIUS_PLAN_ID=YOUR_SANDBOX_PLAN_ID
 ```
 
 Notes:
-- Billing uses `TEST_MODE=true` to pick sandbox endpoints, **unless** `PROCESSORS_MOBIUS_DIRECT_POST_URL` / `PROCESSORS_MOBIUS_QUERY_URL` are set (overrides always win).
+- Billing uses fixed NMI gateway endpoints for Mobius/NMI direct-post and query calls. Use sandbox/test credentials when `TEST_MODE=true`.
 - Collect.js origin restrictions: if your tokenization key is origin-locked, you must load the harness over **HTTPS** via Cloudflared (not `http://localhost`).
 
 ## 2) Start the local stack (+ local issuer)

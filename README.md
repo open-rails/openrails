@@ -45,12 +45,12 @@
 The `test_mode` setting controls whether payment processors use sandbox/test environments:
 
 ```yaml
-test_mode: true   # Default - use sandbox endpoints (safe for testing)
+test_mode: true   # Default - use processor test/sandbox modes (safe for testing)
 test_mode: false  # Production mode - use real payment endpoints
 ```
 
 **What test_mode controls:**
-- **NMI-backed processors**: Use `sandbox.nmi.com` instead of `secure.networkmerchants.com`
+- **NMI-backed processors**: Use the fixed NMI gateway endpoints; test-mode transactions are sent with test credentials
 - **CCBill**: Uses `sandbox-api.ccbill.com` instead of `api.ccbill.com`
 - **Solana**: Uses devnet instead of mainnet
 - **Stripe**: Validates key prefix matches mode (`sk_test_*` vs `sk_live_*`)

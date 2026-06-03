@@ -162,10 +162,10 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
 		SecurityKey:   "test_security_key",
 		WebhookSecret: "test_secret",
-		DirectPostURL: srv.URL,
-		QueryURL:      srv.URL,
 	}, true)
 	require.NoError(t, err)
+	client.DirectPostURL = srv.URL
+	client.QueryURL = srv.URL
 
 	worker := &DunningWorker{
 		DB:         dbi,

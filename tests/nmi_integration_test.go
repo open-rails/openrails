@@ -111,11 +111,6 @@ func TestNMIMobiusConfiguredAccountSale(t *testing.T) {
 		t.Skip("PROCESSORS_MOBIUS_SECURITY_KEY with a real Mobius/NMI test account key is required")
 	}
 
-	directPostURL := strings.TrimSpace(os.Getenv("PROCESSORS_MOBIUS_DIRECT_POST_URL"))
-	if directPostURL == "" {
-		directPostURL = nmi.SandboxDirectPostURL
-	}
-
 	amount := fmt.Sprintf("1.%02d", time.Now().UnixNano()%90+10)
 	values := url.Values{
 		"type":         {"sale"},
@@ -132,7 +127,7 @@ func TestNMIMobiusConfiguredAccountSale(t *testing.T) {
 		"test_mode":    {"enabled"},
 	}
 
-	resp, err := http.PostForm(directPostURL, values)
+	resp, err := http.PostForm(nmi.DefaultDirectPostURL, values)
 	require.NoError(t, err, "Should be able to connect to configured Mobius/NMI endpoint")
 	defer resp.Body.Close()
 
@@ -436,16 +431,8 @@ func TestNMIRuntimeClientConfigured(t *testing.T) {
 		strings.HasPrefix(client.DirectPostURL, "http://") ||
 			strings.HasPrefix(client.DirectPostURL, "https://"),
 		"NMI direct post URL should be absolute, got: %s", client.DirectPostURL)
-	expectedDirectPostURL := strings.TrimSpace(os.Getenv("PROCESSORS_MOBIUS_DIRECT_POST_URL"))
-	if expectedDirectPostURL == "" {
-		expectedDirectPostURL = nmi.SandboxDirectPostURL
-	}
-	expectedQueryURL := strings.TrimSpace(os.Getenv("PROCESSORS_MOBIUS_QUERY_URL"))
-	if expectedQueryURL == "" {
-		expectedQueryURL = nmi.SandboxQueryAPIURL
-	}
-	assert.Equal(t, expectedDirectPostURL, client.DirectPostURL)
-	assert.Equal(t, expectedQueryURL, client.QueryURL)
+	assert.Equal(t, nmi.DefaultDirectPostURL, client.DirectPostURL)
+	assert.Equal(t, nmi.DefaultQueryAPIURL, client.QueryURL)
 
 	t.Logf("NMI client configured with DirectPostURL: %s", client.DirectPostURL)
 }
@@ -456,13 +443,12 @@ func createNMIDemoClient(t *testing.T) *nmi.NMIClient {
 	t.Helper()
 
 	settings := &config.NMIProviderSettings{
-		Name:          "mobius",
-		SecurityKey:   NMIDemoSecurityKey,
-		DirectPostURL: NMIDirectPostURL,
-		TestMode:      true,
+		Name:        "mobius",
+		SecurityKey: NMIDemoSecurityKey,
+		TestMode:    true,
 	}
 
-	client, err := nmi.NewClient("mobius", settings, true) // true = test mode (sandbox endpoints)
+	client, err := nmi.NewClient("mobius", settings, true)
 	require.NoError(t, err)
 
 	return client

@@ -51,15 +51,7 @@ if [ -z "$TXN_ID" ] && [ -z "$SUB_ID" ]; then
   exit 1
 fi
 
-# Prefer explicit override; otherwise pick based on TEST_MODE.
-QUERY_URL="${PROCESSORS_MOBIUS_QUERY_URL:-}"
-if [ -z "$QUERY_URL" ]; then
-  if [ "${TEST_MODE:-false}" = "true" ]; then
-    QUERY_URL="https://sandbox.nmi.com/api/query.php"
-  else
-    QUERY_URL="https://secure.nmi.com/api/query.php"
-  fi
-fi
+QUERY_URL="https://secure.nmi.com/api/query.php"
 
 echo "Query URL: $QUERY_URL"
 
@@ -82,4 +74,3 @@ if [ -n "$SUB_ID" ]; then
     -d "recurring_id=$SUB_ID"
   echo ""
 fi
-

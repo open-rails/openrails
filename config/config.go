@@ -81,7 +81,7 @@ type Config struct {
 	Cloudflared *CloudflaredConfig `koanf:"cloudflared,omitempty"`
 
 	// TestMode controls whether payment processors use sandbox/test environments.
-	// When true: NMI uses sandbox.nmi.com, CCBill uses sandbox-api.ccbill.com,
+	// When true: NMI submits test-mode transactions, CCBill uses sandbox-api.ccbill.com,
 	// Solana uses devnet, Stripe requires sk_test_* key.
 	// When false: All processors use production environments (real charges).
 	// Defaults to true for safety. Set to false only for production deployments.
@@ -412,8 +412,6 @@ type ProcessorConfig struct {
 	// Billing does not fetch this URL; it is intended for configuration parity and sandbox experimentation.
 	TokenizationURL string `koanf:"tokenization_url"`
 	WebhookSecret   string `koanf:"webhook_secret"`
-	DirectPostURL   string `koanf:"direct_post_url"`
-	QueryURL        string `koanf:"query_url"`
 
 	// --- CCBill fields (type: ccbill) ---
 	Salt               string `koanf:"salt"`
@@ -492,8 +490,6 @@ func (p *ProcessorConfig) ToNMIProviderSettings(name string) *NMIProviderSetting
 		SecurityKey:     p.SecurityKey,
 		TokenizationKey: p.TokenizationKey,
 		WebhookSecret:   p.WebhookSecret,
-		DirectPostURL:   p.DirectPostURL,
-		QueryURL:        p.QueryURL,
 		TestMode:        false, // Will be set by caller based on global test_mode
 	}
 }
@@ -541,8 +537,6 @@ type NMIProviderSettings struct {
 	TokenizationKey string
 	WebhookSecret   string
 	TestMode        bool
-	DirectPostURL   string
-	QueryURL        string
 }
 
 type CCBillConfig struct {
@@ -1215,18 +1209,6 @@ func validateNMIProcessor(name string, proc *ProcessorConfig, isDev bool) error 
 		log.Warnf("processor '%s' (nmi): webhook_secret not configured; signature verification disabled", name)
 	}
 
-	if proc.DirectPostURL != "" {
-		if _, err := url.Parse(proc.DirectPostURL); err != nil {
-			return fmt.Errorf("processor '%s' (nmi): invalid direct_post_url: %w", name, err)
-		}
-	}
-
-	if proc.QueryURL != "" {
-		if _, err := url.Parse(proc.QueryURL); err != nil {
-			return fmt.Errorf("processor '%s' (nmi): invalid query_url: %w", name, err)
-		}
-	}
-
 	return nil
 }
 
@@ -1876,7 +1858,7 @@ func logTestModeStatus(cfg *Config) {
 	if cfg.IsTestMode() {
 		log.Warn("⚠️  TEST MODE ENABLED - No real charges will be processed")
 		log.Info("   Payment providers will use sandbox/test environments:")
-		log.Info("   - NMI: sandbox.nmi.com")
+		log.Info("   - NMI: secure.networkmerchants.com with test-mode transactions")
 		log.Info("   - CCBill: sandbox-api.ccbill.com")
 		log.Info("   - Stripe: requires sk_test_* key")
 		log.Info("   - Solana: devnet")

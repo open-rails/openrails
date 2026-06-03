@@ -10,8 +10,8 @@
 # Controls logging verbosity and debug features (NOT payment mode)
 env: "development"
 
-# Test Mode: Controls whether payment processors use sandbox/test environments
-# - true (default): NMI uses sandbox.nmi.com, CCBill uses sandbox-api, Solana uses devnet
+# Test Mode: Controls whether payment processors use sandbox/test behavior
+# - true (default): NMI uses test credentials, CCBill uses sandbox-api, Solana uses devnet
 # - false: All processors use production endpoints
 #
 # This is separate from 'env' - you can run env=prod with test_mode=true for
@@ -230,11 +230,7 @@ processors:
     # tokenization_url: "https://secure.networkmerchants.com/token/Collect.js"
     # webhook_secret: ""
 
-    # Provider-specific URLs (optional - defaults to standard NMI)
-    # direct_post_url: "https://secure.mobiusgateway.com/api/transact.php"
-    # query_url: "https://secure.mobiusgateway.com/api/query.php"
-
-  # Example: Another NMI provider (just add config, no code changes needed)
+	  # Example: Another NMI provider (just add config, no code changes needed)
   # acme:
   #   type: nmi
   #   security_key: ""  # or via PROCESSORS_ACME_SECURITY_KEY

@@ -94,7 +94,6 @@ func seedClickHouseDailyMetrics(t *testing.T, suite *TestContainerSuite, amount 
 }
 
 func TestAdminMetricsSummary(t *testing.T) {
-	t.Parallel()
 	suite, adminToken := setupAdminTestSuite(t)
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
@@ -115,7 +114,6 @@ func TestAdminMetricsSummary(t *testing.T) {
 }
 
 func TestAdminMetricsRevenue(t *testing.T) {
-	t.Parallel()
 	suite, adminToken := setupAdminTestSuite(t)
 	products := suite.SeedProducts()
 	seedMetricsData(t, suite, products[0].Prices[0].ID)
@@ -134,7 +132,6 @@ func TestAdminMetricsRevenue(t *testing.T) {
 }
 
 func TestAdminMetricsSubscriptions(t *testing.T) {
-	t.Parallel()
 	suite, adminToken := setupAdminTestSuite(t)
 	products := suite.SeedProducts()
 	seedMetricsData(t, suite, products[0].Prices[0].ID)
@@ -153,7 +150,6 @@ func TestAdminMetricsSubscriptions(t *testing.T) {
 }
 
 func TestAdminMetricsProcessors(t *testing.T) {
-	t.Parallel()
 	suite, adminToken := setupAdminTestSuite(t)
 	products := suite.SeedProducts()
 	seedMetricsData(t, suite, products[0].Prices[0].ID)
@@ -172,7 +168,6 @@ func TestAdminMetricsProcessors(t *testing.T) {
 }
 
 func TestAdminMetricsChurn(t *testing.T) {
-	t.Parallel()
 	suite, adminToken := setupAdminTestSuite(t)
 	products := suite.SeedProducts()
 	seedMetricsData(t, suite, products[0].Prices[0].ID)

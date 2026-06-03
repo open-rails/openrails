@@ -172,7 +172,8 @@ func (suite *TestContainerSuite) startRedisContainer() {
 func (suite *TestContainerSuite) startClickHouseContainer() {
 	suite.t.Helper()
 
-	if strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_HTTP_ADDR")) != "" {
+	if strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_HTTP_ADDR")) != "" ||
+		strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_HTTP_URL")) != "" {
 		return
 	}
 
@@ -264,8 +265,6 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 				TokenizationKey: envOrDefault("PROCESSORS_MOBIUS_TOKENIZATION_KEY", ""),
 				TokenizationURL: envOrDefault("PROCESSORS_MOBIUS_TOKENIZATION_URL", ""),
 				WebhookSecret:   envOrDefault("PROCESSORS_MOBIUS_WEBHOOK_SECRET", ""),
-				DirectPostURL:   envOrDefault("PROCESSORS_MOBIUS_DIRECT_POST_URL", ""),
-				QueryURL:        envOrDefault("PROCESSORS_MOBIUS_QUERY_URL", ""),
 			},
 		},
 		// Pyth price-feed config is required whenever a Solana processor is
@@ -338,6 +337,15 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func (suite *TestContainerSuite) postgresConnectionString() (string, error) {
 	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL")); dsn != "" {
 		return dsn, nil
@@ -370,8 +378,8 @@ func (suite *TestContainerSuite) redisAddress() (string, error) {
 }
 
 func (suite *TestContainerSuite) clickhouseAddresses() (string, string, error) {
-	if httpAddr := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_HTTP_ADDR")); httpAddr != "" {
-		return httpAddr, envOrDefault("OPENRAILS_TEST_CH_ADDR", "localhost:9000"), nil
+	if httpAddr := firstNonEmptyEnv("OPENRAILS_TEST_CH_HTTP_ADDR", "OPENRAILS_TEST_CH_HTTP_URL"); httpAddr != "" {
+		return httpAddr, envOrDefault("OPENRAILS_TEST_CH_ADDR", envOrDefault("OPENRAILS_TEST_CH_NATIVE_ADDR", "localhost:9000")), nil
 	}
 	if suite.clickhouseContainer == nil {
 		return "", "", fmt.Errorf("clickhouse test container is not initialized")

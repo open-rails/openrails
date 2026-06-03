@@ -293,7 +293,7 @@ func (c *NMIClient) GetTransactionDetails(transactionID string) (string, error) 
 	}
 
 	values := url.Values{
-		"Servicert_type": {"transaction"},
+		"report_type":    {"transaction"},
 		"security_key":   {c.SecurityKey},
 		"transaction_id": {transactionID},
 	}
@@ -306,8 +306,8 @@ func (c *NMIClient) GetCustomerVaultData(customerVaultID string) (string, error)
 	}
 
 	values := url.Values{
-		"Servicert_type": {"customer_vault"},
-		"security_key":   {c.SecurityKey},
+		"report_type":  {"customer_vault"},
+		"security_key": {c.SecurityKey},
 	}
 	if customerVaultID != "" {
 		values.Set("customer_vault_id", customerVaultID)
@@ -326,8 +326,8 @@ func (c *NMIClient) GetRecurringPlanData() (string, error) {
 	}
 
 	values := url.Values{
-		"Servicert_type": {"recurring_plans"},
-		"security_key":   {c.SecurityKey},
+		"report_type":  {"recurring_plans"},
+		"security_key": {c.SecurityKey},
 	}
 	return c.sendQueryRequest(values)
 }
@@ -502,9 +502,9 @@ func (c *NMIClient) GetRecurringPlanByID(planID string) (found bool, name string
 	}
 
 	values := url.Values{
-		"Servicert_type": {"recurring_plans"},
-		"security_key":   {c.SecurityKey},
-		"plan_id":        {planID},
+		"report_type":  {"recurring_plans"},
+		"security_key": {c.SecurityKey},
+		"plan_id":      {planID},
 	}
 
 	response, err := c.sendQueryRequest(values)
@@ -558,8 +558,8 @@ func (c *NMIClient) SearchTransactions(filter QueryFilter) (string, error) {
 	}
 
 	values := url.Values{
-		"Servicert_type": {"transaction"},
-		"security_key":   {c.SecurityKey},
+		"report_type":  {"transaction"},
+		"security_key": {c.SecurityKey},
 	}
 	if filter.StartDate != "" {
 		values.Set("start_date", filter.StartDate)

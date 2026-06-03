@@ -134,10 +134,8 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 
 	provider = strings.ToLower(provider)
 	suite.Config.Processors[provider] = &config.ProcessorConfig{
-		Type:          config.ProcessorTypeNMI,
-		SecurityKey:   "test-security-key-" + provider,
-		DirectPostURL: mock.URL(),
-		QueryURL:      mock.URL(),
+		Type:        config.ProcessorTypeNMI,
+		SecurityKey: "test-security-key-" + provider,
 	}
 	processors.InitNMIBackedProcessors(suite.Config)
 
@@ -149,6 +147,7 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	client, err := nmi.NewClient(provider, settings, true)
 	require.NoError(t, err)
 	client.DirectPostURL = mock.URL()
+	client.QueryURL = mock.URL()
 
 	suite.App.Runtime.NMIClients[provider] = client
 	if suite.App.Runtime.SubscriptionService != nil {

@@ -22,13 +22,13 @@ func strPtr(s string) *string { return &s }
 func newMobiusAdapterWithServer(t *testing.T, serverURL string) *mobiusAdapter {
 	t.Helper()
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
-		SecurityKey:   "test-security-key",
-		DirectPostURL: serverURL,
-		QueryURL:      serverURL,
+		SecurityKey: "test-security-key",
 	}, false)
 	if err != nil {
 		t.Fatalf("new nmi client: %v", err)
 	}
+	client.DirectPostURL = serverURL
+	client.QueryURL = serverURL
 	svc := &Service{rt: &app.Runtime{NMIClients: map[string]*nmi.NMIClient{"mobius": client}}}
 	return &mobiusAdapter{svc: svc}
 }
