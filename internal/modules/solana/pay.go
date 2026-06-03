@@ -394,6 +394,26 @@ func (s *SolanaPayService) GetAllPendingReferences(ctx context.Context) ([]strin
 	return refs, nil
 }
 
+// RegisterPendingReference adds an already-bound checkout-session reference to the
+// poller's pending set so the reference poller actually iterates it. The one-off
+// transfer-request flow seeds its reference via GeneratePayment; the
+// transaction-request lifecycle (cancel/tier-change) + recurring-subscribe flows
+// instead bind the reference to the DB session and call this — the poller then
+// recovers the session via GetByReference. Idempotent (SAdd on a set).
+func (s *SolanaPayService) RegisterPendingReference(ctx context.Context, reference string) error {
+	if s.redis == nil {
+		return nil
+	}
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return nil
+	}
+	if err := s.redis.SAdd(ctx, pendingSolanaPaymentsKey, reference).Err(); err != nil {
+		return fmt.Errorf("failed to add reference to pending set: %w", err)
+	}
+	return nil
+}
+
 // RemovePendingPayment removes a pending payment from Redis
 func (s *SolanaPayService) RemovePendingPayment(ctx context.Context, reference string) error {
 	if s.redis == nil {

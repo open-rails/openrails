@@ -78,6 +78,9 @@ type checkoutSessionExecutor interface {
 type solanaPaymentService interface {
 	GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*solanamodule.PayResult, error)
 	ConsumeAndRemovePending(ctx context.Context, reference, transactionID string) error
+	// RegisterPendingReference seeds a transaction-request reference into the
+	// poller's pending set (the transfer-request flow does this via GeneratePayment).
+	RegisterPendingReference(ctx context.Context, reference string) error
 }
 
 type solanaTransactionService interface {
@@ -2155,15 +2158,32 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 	// recurring services, with the Solana Pay reference injected, instead of the
 	// transfer-request quote path.
 	switch session.Mode {
-	case models.CheckoutSessionModeSolanaCancel:
-		return s.buildSolanaCancelTransaction(ctx, session, account)
-	case models.CheckoutSessionModeSolanaTierChange:
-		return s.buildSolanaTierChangeTransaction(ctx, session, account)
-	case models.CheckoutSessionModeSubscription:
-		// RECURRING subscribe over Solana Pay (price-driven): build the init or the
-		// atomic [subscribe+transfer] tx via PrepareSubscribeService for the POSTed
-		// account, with the Solana Pay reference injected so the poller can detect it.
-		return s.buildSolanaSubscribeTransaction(ctx, session, account)
+	case models.CheckoutSessionModeSolanaCancel, models.CheckoutSessionModeSolanaTierChange, models.CheckoutSessionModeSubscription:
+		var resp *solanamodule.PayTransactionResponse
+		switch session.Mode {
+		case models.CheckoutSessionModeSolanaCancel:
+			resp, err = s.buildSolanaCancelTransaction(ctx, session, account)
+		case models.CheckoutSessionModeSolanaTierChange:
+			resp, err = s.buildSolanaTierChangeTransaction(ctx, session, account)
+		default:
+			// RECURRING subscribe over Solana Pay (price-driven): build the init or the
+			// atomic [subscribe+transfer] tx via PrepareSubscribeService for the POSTed
+			// account, with the Solana Pay reference injected so the poller can detect it.
+			resp, err = s.buildSolanaSubscribeTransaction(ctx, session, account)
+		}
+		if err != nil {
+			return nil, err
+		}
+		// The lifecycle/subscribe build binds the reference to the DB session but does
+		// NOT seed the poller's pending set (only the one-off transfer flow does, via
+		// GeneratePayment). Register it here so the reference poller actually picks up
+		// the landed cancel/tier-change/subscribe tx; otherwise it would never confirm.
+		if s.solanaPayService != nil && session.Reference != nil {
+			if rerr := s.solanaPayService.RegisterPendingReference(ctx, strings.TrimSpace(*session.Reference)); rerr != nil {
+				return nil, fmt.Errorf("%w: register solana pay reference: %v", ErrCheckoutSessionValidation, rerr)
+			}
+		}
+		return resp, nil
 	}
 
 	// Get token symbol from processor state
