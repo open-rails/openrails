@@ -2,28 +2,6 @@
   "next_id": 287,
   "issues": [
     {
-      "id": 103,
-      "name": "nmi-test-account-integration",
-      "description": "Set up real Mobius/NMI test account for integration tests that hit the NMI API\n\n## Metadata\n\n- Category: testing-infra\n- Passes: false",
-      "tasks": [
-        "STEPS:",
-        "CURRENT: Tests use public NMI demo key which rejects operations on non-existent subscriptions",
-        "TARGET: Use real Mobius test account so we can create/cancel real test subscriptions",
-        "[ ] Obtain test credentials from Mobius (security_key, api_key)",
-        "[ ] Update testcontainer_suite.go NMI config with Mobius test credentials",
-        "[ ] Tests can then create real subscriptions via webhook simulation and cancel them via API",
-        "BENEFIT: Full integration testing of NMI flows with real data",
-        "BLOCKED TESTS:",
-        "- TestCancelSubscriptionNMI - tries to cancel non-existent subscription",
-        "- TestCancelSubscriptionEmptyFeedback - tries to cancel non-existent subscription",
-        "- TestCancelSubscriptionAuthBoundaries/user_B_can_cancel_their_own_subscription - tries to cancel non-existent subscription",
-        "- TestAdminCancelSubscription/admin_can_cancel_any_user_subscription_by_subscription_ID - tries to cancel non-existent subscription",
-        "- TestAdminCancelSubscription/admin_can_cancel_any_user_subscription_by_user_ID - tries to cancel non-existent subscription",
-        "- TestSubscribeNMISuccess - requires valid NMI subscription creation"
-      ],
-      "completed": false
-    },
-    {
       "id": 107,
       "name": "processor-sync",
       "description": "CLI tool to detect and fix discrepancies between local database state and external processor state (NMI/Mobius, CCBill)\n\n## Metadata\n\n- Category: tooling\n- Status: not_started\n- Passes: false\n\n## Details\n\n- ccbill_datalink: {\"description\":\"CCBill DataLink provides SFTP/API access to batch export files\",\"data_available\":[\"Subscription transactions (new, rebill, cancel, expire, chargeback)\",\"Consumer info (partial - for support lookups)\",\"Daily/weekly/monthly batch files\"],\"sync_flow\":[\"1. Fetch DataLink export for date range\",\"2. Parse transactions by type\",\"3. For each transaction, check if we have matching record\",\"4. Flag discrepancies (missing records, status mismatches)\"],\"existing_code\":\"internal/integrations/ccbill/datalink.go exists but may be incomplete\"}\n- cli_design: {\"command\":\"billing-cli processor-sync\",\"subcommands\":[\"billing-cli processor-sync check - find discrepancies (dry run)\",\"billing-cli processor-sync fix - find and fix discrepancies\",\"billing-cli processor-sync report - generate detailed report\"],\"flags\":[\"--processor=ccbill|nmi|all - which processor(s) to check\",\"--since=DATE - start date for checking\",\"--until=DATE - end date for checking (default: now)\",\"--user=USER_ID - check specific user only\",\"--subscription=SUB_ID - check specific subscription only\",\"--format=table|json|csv - output format\",\"--dry-run - show what would be fixed without making changes\",\"--auto-fix - automatically fix safe discrepancies\",\"--output=FILE - write report to file\"]}\n- context: {\"problem\":\"Our database may drift out of sync with processor records due to missed webhooks, failed processing, network issues, or bugs\",\"data_sources\":{\"ccbill\":\"DataLink API - provides batch export of subscription and transaction data\",\"nmi\":\"Transaction Query API and Customer Vault Query API - query transactions and stored payment methods\"},\"use_cases\":[\"Detect subscriptions in processor that we don't have locally\",\"Detect subscriptions we have locally that processor cancelled/expired\",\"Find payments we missed (charged but no Payment record)\",\"Find chargebacks/refunds we didn't process\",\"Reconcile payment method/vault status\"]}\n- discrepancy_types: [{\"id\":\"PS-1\",\"name\":\"processor_subscription_not_local\",\"description\":\"Subscription exists at processor but not in our database\",\"severity\":\"CRITICAL\",\"action\":\"Create local subscription record or investigate orphan at processor\"},{\"id\":\"PS-2\",\"name\":\"local_subscription_not_at_processor\",\"description\":\"We have an active subscription but processor shows cancelled/expired\",\"severity\":\"HIGH\",\"action\":\"Update local status to match processor\"},{\"id\":\"PS-3\",\"name\":\"status_mismatch\",\"description\":\"Local status differs from processor status (e.g., we show active, they show past_due)\",\"severity\":\"MEDIUM\",\"action\":\"Reconcile to processor's status (source of truth)\"},{\"id\":\"PS-4\",\"name\":\"payment_missing_locally\",\"description\":\"Processor has successful charge but no Payment record locally\",\"severity\":\"HIGH\",\"action\":\"Create Payment record and grant entitlements if needed\"},{\"id\":\"PS-5\",\"name\":\"refund_not_processed\",\"description\":\"Processor shows refund but no refund record locally\",\"severity\":\"HIGH\",\"action\":\"Create refund record, revoke entitlements if appropriate\"},{\"id\":\"PS-6\",\"name\":\"chargeback_not_processed\",\"description\":\"Processor shows chargeback but subscription still active locally\",\"severity\":\"CRITICAL\",\"action\":\"Terminate subscription, revoke entitlements\"},{\"id\":\"PS-7\",\"name\":\"payment_method_vault_mismatch\",\"description\":\"Local payment method record differs from processor vault (wrong card, inactive)\",\"severity\":\"MEDIUM\",\"action\":\"Update local record to match processor\"}]\n- fix_actions: {\"auto_fixable\":[\"PS-2: Update local status to match processor\",\"PS-3: Update local status to match processor\",\"PS-7: Update local payment method record\"],\"requires_manual_review\":[\"PS-1: Orphan processor subscription needs investigation\",\"PS-4: Missing payment needs entitlement check\",\"PS-5: Refund may need entitlement revocation decision\",\"PS-6: Chargeback needs entitlement revocation\"]}\n- nmi_batch_api: {\"description\":\"NMI Query API allows transaction and subscription lookup\",\"endpoints\":[\"GET transactions - query by date range, customer, subscription\",\"GET customers - query customer vault records\",\"GET recurring - query subscription status\"],\"sync_flow\":[\"1. Query NMI for transactions in date range\",\"2. Query NMI for active/cancelled subscriptions\",\"3. Compare with local subscription/payment records\",\"4. Flag discrepancies\"]}",
@@ -137,7 +115,7 @@
     {
       "id": 127,
       "name": "durable-workflow-execution",
-      "description": "Evaluate and potentially adopt embedded durable workflow execution for critical payment flows\n\n## Metadata\n\n- Category: architecture\n- Status: on_hold\n- Passes: false\n\n## Details\n\n- status_update: {\"date\":\"2025-12-14\",\"decision\":\"On hold - focus on simpler solutions first\",\"reasoning\":[\"Ad-hoc durable workflow system was built and then reverted\",\"Durable workflows don't compensate for faulty code - unit tests do\",\"Idempotency keys on NMI calls solve the double-charge problem more simply\",\"If we need durable workflows later, use a proper library like go-workflows\"],\"prerequisite\":\"Implement wrap-nmi-calls-with-idempotency first, then reassess if durable workflows are still needed\"}\n- candidate_library: {\"go_workflows\":{\"repo\":\"github.com/cschleiden/go-workflows\",\"maturity\":\"Production-ready, supports PostgreSQL\",\"when_to_adopt\":[\"Multi-step flows that genuinely need crash recovery\",\"Workflows with long-running waits (e.g., approval flows)\",\"Complex saga patterns with compensating transactions\"]}}\n- candidate_workflows: [\"Checkout flow (charge → record → grant entitlements)\",\"Subscription upgrade (charge proration → cancel old → create new)\",\"Dunning/rebill (charge → renew or → escalate failure)\",\"Refund flow (refund at processor → revoke entitlements → update records)\"]\n- when_to_reconsider: [\"After idempotency keys are implemented and we still see issues\",\"When we add complex multi-step flows (e.g., multi-party payouts)\",\"If reconciliation reports show frequent partial-completion issues\"]",
+      "description": "Evaluate and potentially adopt embedded durable workflow execution for critical payment flows\n\n## Metadata\n\n- Category: architecture\n- Status: on_hold\n- Passes: false\n\n## Details\n\n- status_update: {\"date\":\"2025-12-14\",\"decision\":\"On hold - focus on simpler solutions first\",\"reasoning\":[\"Ad-hoc durable workflow system was built and then reverted\",\"Durable workflows don't compensate for faulty code - unit tests do\",\"Idempotency keys on NMI calls solve the double-charge problem more simply\",\"If we need durable workflows later, use a proper library like go-workflows\"],\"prerequisite\":\"Implement wrap-nmi-calls-with-idempotency first, then reassess if durable workflows are still needed\"}\n- candidate_library: {\"go_workflows\":{\"repo\":\"github.com/cschleiden/go-workflows\",\"maturity\":\"Production-ready, supports PostgreSQL\",\"when_to_adopt\":[\"Multi-step flows that genuinely need crash recovery\",\"Workflows with long-running waits (e.g., approval flows)\",\"Complex saga patterns with compensating transactions\"]}}\n- candidate_workflows: [\"Checkout flow (charge \u2192 record \u2192 grant entitlements)\",\"Subscription upgrade (charge proration \u2192 cancel old \u2192 create new)\",\"Dunning/rebill (charge \u2192 renew or \u2192 escalate failure)\",\"Refund flow (refund at processor \u2192 revoke entitlements \u2192 update records)\"]\n- when_to_reconsider: [\"After idempotency keys are implemented and we still see issues\",\"When we add complex multi-step flows (e.g., multi-party payouts)\",\"If reconciliation reports show frequent partial-completion issues\"]",
       "tasks": [
         "ON HOLD - Reassess after implementing idempotency keys",
         "Previous ad-hoc implementation was reverted on 2025-12-14",
@@ -163,116 +141,6 @@
         "[ ] Ensure card data is never stored (only vault token after successful charge)",
         "[ ] Pass PCI compliance assessment",
         "[ ] Update frontend to use direct form instead of Mobius iframe"
-      ],
-      "completed": false
-    },
-    {
-      "id": 148,
-      "name": "mobius-nmi-sandbox-api-testing",
-      "description": "Determine how to reliably test Mobius/NMI sandbox API calls from billing.\n\n## Metadata\n\n- Category: testing-infra\n- Status: investigating\n- Passes: false\n\n## Key Unknown\n\nWe don't yet know whether Mobius sandbox transactions should be sent to:\n- https://secure.mobiusgateway.com/api/transact.php (Mobius-branded gateway)\n- https://sandbox.nmi.com/api/transact.php (NMI sandbox)\n- or whether both accept the same sandbox credentials.\n\nCurrent code behavior: when `test_mode=true`, billing hardcodes `sandbox.nmi.com` endpoints and ignores configured URLs.\n\n## Constraints\n\n- Do not commit credentials (security keys, webhook secrets, tokenization keys).\n- Prefer experimentation via local env vars and/or one-off curl/go snippets.\n\n## Experiment Plan\n\n- Step 1: Validate account material\n  - [ ] Confirm we have a Mobius/NMI private security key intended for API (not portal login)\n  - [ ] Confirm we have a webhook signing secret and which header is used (`X-Signature`, `X-NMI-Signature`, or `X-Mobius-Signature`)\n  - [ ] If Collect.js is used, confirm we have a public tokenization key (client-side only)\n\n- Step 2: Direct Post smoke test against both endpoints\n  - [ ] POST `customer_vault=add_customer` (test card) with `security_key=...` to `secure.mobiusgateway.com/api/transact.php`\n  - [ ] POST the same payload to `sandbox.nmi.com/api/transact.php`\n  - [ ] Record: HTTP status, response `response`/`responsetext`, and whether a `customer_vault_id` is returned\n  - [ ] Repeat with and without `test_mode=enabled` to see which combinations are accepted\n\n- Step 3: Transaction + query test\n  - [ ] If vault creation works, run a minimal sale using the vault ID\n  - [ ] Verify query endpoint (`/api/query.php`) works for the resulting transaction\n\n- Step 4: Align billing behavior with reality\n  - [ ] If `sandbox.nmi.com` is correct: keep `test_mode=true` and only require `PROCESSORS_MOBIUS_SECURITY_KEY`\n  - [ ] If `secure.mobiusgateway.com` is required for sandbox: change billing to allow provider-specific sandbox endpoints (config override even when `test_mode=true`)\n  - [ ] Update `.env.example` comments to clarify which endpoint(s) work for Mobius sandbox\n\n- Step 5: Webhook verification sanity\n  - [ ] In non-test mode, ensure webhook signature verification passes with configured `PROCESSORS_MOBIUS_WEBHOOK_SECRET`\n  - [ ] Confirm signature scheme matches `sha256=` + hex(HMAC_SHA256(body, secret))\n\n## Exit Criteria\n\n- We can create a vault and run a test transaction end-to-end using a sandbox key.\n- We know which endpoint(s) work and have documented the required config.\n- If code changes are needed (sandbox endpoint selection), we have a clear patch plan and tests.",
-      "tasks": [
-        "[ ] Run endpoint experiments and capture results",
-        "[ ] Decide on canonical sandbox endpoint for Mobius",
-        "[ ] Update billing config/docs (and code if needed)",
-        "[ ] Add/adjust integration test coverage accordingly"
-      ],
-      "completed": false
-    },
-    {
-      "id": 149,
-      "name": "mobius-collectjs-endpoint-config-billing",
-      "description": "Add a configurable Mobius/NMI Collect.js tokenization endpoint URL to billing configuration and define a concrete way to test tokenization end-to-end.\n\n## Metadata\n\n- Category: testing-infra\n- Status: in_progress\n- Passes: false\n\n## Context\n\nCollect.js is loaded client-side from a script URL like:\n- https://secure.networkmerchants.com/token/Collect.js\n- https://secure.mobiusgateway.com/token/Collect.js\n\nWe want this URL configurable so we can experiment in sandbox environments and avoid assuming a single host.\n\nBilling itself does not run Collect.js; it only consumes the resulting `payment_token`. To make tokenization testable from the billing repo, we should provide a small dev-only harness page (served by billing) that:\n- loads Collect.js from the configured URL,\n- produces a token with the configured tokenization key,\n- and optionally calls billing endpoints with the token.\n\n## Testing Plan (Billing Repo)\n\nTier A (offline/dev, no external dependency):\n- Serve a dev-only HTML page that can load a locally-stubbed Collect.js script for smoke testing wiring.\n\nTier B (real sandbox, manual):\n- Serve the same page over an origin allowed by the Mobius/NMI tokenization key.\n- Load real Collect.js from the configured URL and generate a real `payment_token`.\n- POST the token to billing (`/v1/me/payment-methods` and/or `/v1/checkout`) and verify NMI vault/transactions.\n\n## Exit Criteria\n\n- We can generate a token in a browser and successfully create a payment method / checkout session using billing.\n- We can swap Collect.js hosts via config to test Mobius vs NMI sandbox behavior.",
-      "tasks": [
-        "[x] Add `processors.<provider>.tokenization_url` (Collect.js script URL) to ProcessorConfig",
-        "[x] Add env var support: `PROCESSORS_MOBIUS_TOKENIZATION_URL`",
-        "[x] Update `.env.example` and `config.example.yaml`",
-        "[x] Add dev-only tokenization test page endpoint (e.g., `GET /debug/mobius/tokenization`)",
-        "[x] Page loads Collect.js from `processors.mobius.tokenization_url` and uses `processors.mobius.tokenization_key`",
-        "[x] Add a simple \"send token\" action to call billing endpoints with the generated `payment_token` (optional but recommended)",
-        "[x] Document the sandbox runbook (allowed origins, required env vars, expected responses)",
-        "[ ] (Optional) Add a no-network automated test using a locally-stubbed Collect.js script"
-      ],
-      "completed": false
-    },
-    {
-      "id": 150,
-      "name": "cloudflared-deterministic-webhook-url-for-mobius-sandbox",
-      "description": "Set up a deterministic public webhook URL for Mobius/NMI sandbox testing by running billing locally and exposing it via a Cloudflare Tunnel.\n\n## Metadata\n\n- Category: testing-infra\n- Status: in_progress\n- Passes: false\n\n## Problem\n\nFor real Mobius/NMI sandbox testing we need a stable, publicly reachable webhook endpoint (e.g. `https://billing-sandbox-webhooks.doujins.ai/v1/webhooks/mobius`) that forwards to a developer's localhost billing instance.\n\nLocalhost URLs (or random ngrok URLs) are not acceptable for configuring processor webhooks long-term. We want a consistent domain that we can register once in Mobius/NMI and reuse.\n\n## Proposed Approach\n\nUse Cloudflare Tunnel (`cloudflared`) with a dedicated Cloudflare account + API token so we can:\n- create a named tunnel,\n- map a fixed hostname to it (DNS CNAME managed by Cloudflare),\n- route incoming HTTPS traffic to `http://localhost:<billing-port>`.\n\n## Security & Operational Notes\n\n- This is for sandbox testing only.\n- Ensure webhook signature verification remains enabled.\n- Lock down access where possible (Cloudflare Access, IP allowlists, or at minimum random/unguessable hostnames).\n- Never commit tunnel credentials, certs, or tokens.\n\n## Tasks\n\n- [ ] Create/obtain Cloudflare account for testing infrastructure\n- [ ] Create an API token with minimum required scopes for Tunnel + DNS management\n- [ ] Choose a stable hostname for webhooks (e.g. `billing-webhooks-sandbox.<domain>`)\n- [ ] Create a named Cloudflare Tunnel (e.g. `doujins-billing-dev-webhooks`)\n- [ ] Configure tunnel ingress rules to route:\n  - `https://<hostname>/v1/webhooks/*` → `http://localhost:2053/v1/webhooks/*` (or configured port)\n- [ ] Document local developer setup:\n  - installing `cloudflared`\n  - authenticating with token\n  - running tunnel + billing concurrently\n  - verifying with a local curl hit + observing tunnel logs\n- [ ] Register the deterministic webhook URL in Mobius/NMI portal for the sandbox account\n- [ ] Validate end-to-end webhook delivery + signature verification with a real event\n\n## Exit Criteria\n\n- We can run billing locally and receive real Mobius/NMI sandbox webhooks at a fixed hostname.\n- The webhook endpoint is stable across restarts and across developers.\n- Setup is documented and repeatable.",
-      "tasks": [
-        "[ ] Create Cloudflare tunnel + DNS hostname",
-        "[x] Add local runbook docs for developers",
-        "[ ] Register webhook URL in Mobius/NMI sandbox",
-        "[ ] Validate webhook delivery + signature verification"
-      ],
-      "completed": false
-    },
-    {
-      "id": 151,
-      "name": "debrand-doujins-hentai0-defaults",
-      "description": "Remove hard-coded references to specific host apps from billing defaults and examples (other than the repo/module path), so doujins-billing can be presented as a generic standalone billing service.\n\n## Metadata\n\n- Category: cleanup\n- Status: completed\n- Passes: true\n\n## Scope\n\nThis issue targets *defaults and examples*, not the Go module path.\n\nPrimary targets:\n- Default Postgres DB name\n- Default ClickHouse cluster name\n- Default JWT issuer examples\n\nAfter this repo switches to generic defaults, update `~/doujins` and `~/hentai0` so that when they run billing they explicitly provide (via their docker-compose stacks):\n- JWT issuer(s) for billing verification (`auth.issuers` / `AUTH_ISSUERS`)\n- Postgres DB name (`db.database` / `DB_DATABASE`, or `DB_URL`)\n- ClickHouse cluster/db settings (cluster name and/or database name, as appropriate)\n\n## Exit Criteria\n\n- A developer can clone doujins-billing and run it without seeing app-specific defaults in config/examples.\n- Host apps continue to work by explicitly providing required configuration.",
-      "tasks": [
-        "[x] Inventory app-specific references in defaults/examples",
-        "[x] Pick generic defaults (DB name, ClickHouse cluster name, issuer examples)",
-        "[x] Update billing defaults: `config/config.go` and `docker-compose.yaml`",
-        "[x] Update ClickHouse cluster config: `config/clickhouse-cluster.xml` (and compose bootstrap SQL if needed)",
-        "[x] Update docs/examples: `config.example.yaml`, `.env.example`, `README.md`, `docs/*`",
-        "[x] Update `~/doujins` docker-compose to pass issuers + DB + ClickHouse config when running billing",
-        "[x] Update `~/hentai0` docker-compose to pass issuers + DB + ClickHouse config when running billing",
-        "[x] Ensure host docker-compose stacks explicitly set: `AUTH_ISSUERS`, `DB_DATABASE`/`DB_URL`, and `CLICKHOUSE_DB` + `CLICKHOUSE_CLUSTER` (no reliance on billing defaults)"
-      ],
-      "completed": false
-    },
-    {
-      "id": 153,
-      "name": "mobius-nmi-sandbox-e2e-harness",
-      "description": "Build a repeatable end-to-end Mobius/NMI sandbox testing harness for doujins-billing.\n\n## Metadata\n\n- Category: testing-infra\n- Status: planned\n- Passes: false\n\n## Goal\n\nA developer can run a documented flow to:\n- start local infra (Postgres/ClickHouse/Redis + billing)\n- expose a deterministic public webhook URL via Cloudflared\n- mint JWTs for API calls (local issuer)\n- seed a minimal local catalog (product + price) that matches sandbox plan IDs\n- perform real Collect.js tokenization in a browser and then complete a purchase\n- verify the outcome locally (DB) and remotely (NMI Query API)\n\n## Notes\n\n- This repo is single-store, single-tenant.\n- Tokenization (Collect.js) is browser-side; billing should provide a dev-only harness page.\n- Webhook signature verification must stay enabled in test mode.\n- Local JWT issuer: use the AuthKit devserver/dummy app (see `~/authkit/DEVSERVER.md`, built via `~/authkit/Dockerfile.devserver`) as a stable issuer at `http://issuer:8080`.\n  - Provides `GET /.well-known/jwks.json`.\n  - Provides dev-only `POST /auth/dev/mint` (guarded by `AUTHKIT_DEV_MODE=true` + `AUTHKIT_DEV_MINT_SECRET`).\n  - Billing remains a verifier only and never mints tokens.\n\n## Exit Criteria\n\n- `docs/e2e-mobius-sandbox.md` is sufficient to complete: tokenize -> purchase -> webhook received/verified -> query remote -> cancel -> webhook received/verified.\n- E2E works against either `secure.mobiusgateway.com` or `sandbox.nmi.com` based on processor config (no guessing).",
-      "tasks": [
-        "DOCS (SINGLE RUNBOOK):",
-        "[x] Add `docs/e2e-mobius-sandbox.md` with exact env vars + step-by-step commands",
-        "[x] Include Mobius portal setup: webhook URL + signing secret + plan creation/IDs",
-        "",
-        "LOCAL STACK + CLOUDFARED ROUTING:",
-        "[x] Ensure `task docker-up` starts: Postgres + ClickHouse + Redis/Garnet + billing-migrate + billing (with embedded workers)",
-        "[x] Add `task tunnel-webhooks` to run `cloudflared tunnel run --token $CLOUDFLARED_TUNNEL_TOKEN` (foreground)",
-        "[x] Add `task verify-webhook-tunnel` that curls `https://$CLOUDFLARED_PUBLIC_HOSTNAME/health/live` and `/health/ready`",
-        "",
-        "LOCAL JWT ISSUER (FOR E2E API CALLS):",
-        "[x] Add `e2e-sandbox` profile service for AuthKit devserver (build from `../authkit`) as `issuer:8080` (Postgres-backed)",
-        "[x] Configure billing to trust issuer (`AUTH_ISSUERS='[\"http://issuer:8080\"]'`) and set `AUTH_EXPECTED_AUDIENCE`",
-        "[x] Add `task mint-jwt` (or `scripts/mint-jwt.sh`) that calls `POST http://issuer:8080/auth/dev/mint` and prints a token",
-        "[x] Ensure issuer signing keys persist across restarts (DB table or volume-backed file)",
-        "",
-        "DATA HYGIENE (REPEATABLE RUNS / NO SANDBOX WIPE REQUIRED):",
-        "[x] Standardize a per-run `E2E_RUN_ID` (uuid/ts) used in metadata, idempotency keys, and processor order IDs",
-        "[x] Update `task mint-jwt`/script to generate a fresh random user id (`sub`) per run (and optionally unique email/username claims)",
-        "[x] Ensure all client calls use `X-Idempotency-Key: e2e_<run_id>_<step>` so retries don't create duplicate local objects",
-        "[x] Ensure checkout/payment creation writes `metadata.e2e_run_id` so local DB queries can isolate a single run",
-        "[x] Ensure NMI/Mobius requests include an order/invoice identifier containing `E2E_RUN_ID` so Query API lookups are deterministic",
-        "[x] Prefer creating a fresh vault/payment method per run (or namespace vault IDs with `E2E_RUN_ID`) to avoid cross-run coupling",
-        "[x] Document optional cleanup (NMI portal flush + wiping local docker volumes) but keep the harness runnable without cleanup",
-        "",
-        "CATALOG SEED (LOCAL DB) + PLAN PARITY (SANDBOX):",
-        "[x] Add `scripts/seed_e2e_mobius.sql` to insert 1 product + 1 price (with `prices.processors.mobius.plan_id`)",
-        "[x] Add `task seed-e2e-mobius` to run the SQL against the compose Postgres container",
-        "[x] Document which sandbox plan id(s) must exist and how to create them (incl. 1-day cadence for rebill tests)",
-        "",
-        "DEV-ONLY COLLECT.JS TOKENIZATION HARNESS:",
-        "[x] Add a gated route `GET /debug/mobius/tokenization` that loads Collect.js from configured URL + uses the public tokenization key",
-        "[x] Page flow: enter card -> tokenize -> display `payment_token` + copy-to-clipboard",
-        "[x] Include copy/paste API snippets on the page (add payment method, create checkout, confirm)",
-        "",
-        "E2E VERIFICATION (LOCAL + REMOTE):",
-        "[x] Add helper script/task to dump local rows (`billing.subscriptions`, `billing.payments`, `billing.payment_methods`) for the test run",
-        "[x] Add `scripts/nmi_query.sh` (or Taskfile target) that hits `processors.mobius.query_url` to confirm remote transaction/subscription",
-        "[ ] Validate webhooks: billing logs show signature verified + DB transitions match expected webhook type(s)",
-        "",
-        "RECURRING / CANCEL FLOWS:",
-        "[x] Add cancellation runbook (billing cancel endpoint -> NMI query -> webhook -> local state)",
-        "[x] Document rebill testing approach (no time travel; use 1-day plans or portal-triggered rebills if supported)",
-        "",
-        "ENDPOINT SELECTION FIX (CURRENT LIMITATION):",
-        "[x] Update NMI integration: if processor provides `direct_post_url`/`query_url`, use them even when `test_mode=true`",
-        "[x] Add unit test for endpoint selection (override vs default sandbox/prod)"
       ],
       "completed": false
     },
@@ -323,12 +191,12 @@
         "[x] Expiration: mark ended/expired and end/revoke entitlements",
         "",
         "CODE CHANGES (expected touch points):",
-        "[x] `internal/services/webhook_ccbill.go`: parse and apply `nextRenewalDate` on `NewSaleSuccess` and `RenewalSuccess` (don’t rely solely on `price.billing_cycle_days`)",
+        "[x] `internal/services/webhook_ccbill.go`: parse and apply `nextRenewalDate` on `NewSaleSuccess` and `RenewalSuccess` (don\u2019t rely solely on `price.billing_cycle_days`)",
         "[x] `internal/services/webhook_ccbill.go`: on `RenewalFailure`, parse `nextRetryDate` and update `subscriptions.status=past_due` + `subscriptions.next_retry_at` (avoid calling `SubscriptionLifecycleService.FailMembership`, which schedules NMI-style retries)",
         "[x] `internal/services/webhook_ccbill.go`: on `Cancellation`, call `CancelMembership` with `RevokeAccess=false` (today it passes true)",
         "[x] `internal/services/lifecycle_service.go`: update `CreateMembership` entitlement grant behavior for CCBill to create finite windows ending at `current_period_ends_at` (instead of indefinite `end_at=NULL`)",
-        "[x] `internal/services/lifecycle_service.go`: update `RenewMembership` for CCBill to extend entitlements to match the new `current_period_ends_at` (today renewal doesn’t extend entitlements at all unless a downgrade changes entitlement set)",
-        "[x] `internal/db/repo/entitlement.go`: make `IsEntitled` / “active entitlement” queries explicitly exclude `deleted_at` (don’t rely on implicit soft-delete behavior)",
+        "[x] `internal/services/lifecycle_service.go`: update `RenewMembership` for CCBill to extend entitlements to match the new `current_period_ends_at` (today renewal doesn\u2019t extend entitlements at all unless a downgrade changes entitlement set)",
+        "[x] `internal/db/repo/entitlement.go`: make `IsEntitled` / \u201cactive entitlement\u201d queries explicitly exclude `deleted_at` (don\u2019t rely on implicit soft-delete behavior)",
         "[x] `config/config.go`: add a feature flag / config for CCBill grace behavior (enable/disable + max cap)",
         "",
         "ANALYTICS:",
@@ -340,111 +208,6 @@
         "[x] Add unit test for `EntitlementRepo.IsEntitled` to ensure deleted rows are excluded (regression guard)"
       ],
       "completed": false
-    },
-    {
-      "id": 161,
-      "name": "entitlement-timeline-abstraction-no-gaps-no-overlaps",
-      "description": "Replace the current entitlement-write APIs with a minimal, stack-like model: entitlements are immutable windows appended to a per-(user_id, entitlement) timeline. Writes are done via exactly two operations: PushNewEntitlement (append a new window; can be indefinite) and RevokeExistingEntitlement (immediately revoke active window(s) and delete future scheduled windows; does not mutate end_at). This removes end_at mutation + timeline shifting and makes grace/dunning modeled as explicit windows (source_type='grace').",
-      "tasks": [
-        "SPEC:",
-        "[x] Define the minimal API surface (only two operations): PushNewEntitlement + RevokeExistingEntitlement",
-        "[x] Make end_at immutable: do not extend/shorten existing windows; model changes as new windows or revocations",
-        "[x] Define grace semantics: grace is source_type='grace' windows appended on dunning; on recovery or terminal failure, revoke grace windows (do not mutate the paid window)",
-        "[x] Decide time precision policy for processors with date-only fields (CCBill nextRetryDate/nextRenewalDate): choose a generous, deterministic interpretation (e.g., end-of-day UTC) to avoid access gaps",
-        "[x] Decide policy for revocation vs deletion: revoke active windows (revoked_at + reason), soft-delete future scheduled windows to prevent access resuming",
-        "[x] Decide idempotency rules for PushNewEntitlement (recommended: when pushing with absolute end_at, treat end_at <= computed start_at as a no-op)",
-        "[x] Decide whether to support sub-day durations explicitly (recommended: accept time.Duration and/or absolute end_at; store TIMESTAMPTZ)",
-        "",
-        "DATA MODEL / CONSTRAINTS:",
-        "[x] Add `source_type='grace'` support (model + DB CHECK constraint migration)",
-        "[x] (Optional) Enforce no-overlap at the DB layer with an exclusion constraint for non-revoked/non-deleted rows (end_at NULL handled via sentinel); only after existing writers stop mutating windows",
-        "",
-        "IMPLEMENTATION:",
-        "[x] Replace `internal/services/entitlement_service.go` write methods with only:",
-        "[x] - `PushNewEntitlement(ctx, params)` (append window; can be indefinite; supports duration or absolute end_at)",
-        "[x] - `RevokeExistingEntitlement(ctx, params)` (revoke active + delete future; no end_at mutation)",
-        "[x] Remove/stop exporting older write APIs that mutate or shift timelines (GrantWindow/Append*/PushUntil/SetEndAt/PopNow/ClearNow/End*/Extend*) and delete/adjust unused repo helpers",
-        "",
-        "INTEGRATION (refactor call sites to only use Push/Revoke):",
-        "[x] Update subscription lifecycle entitlements (create/renew/downgrade/cancel/expire) to use PushNewEntitlement/RevokeExistingEntitlement only",
-        "[x] Update CCBill dunning/recovery: RenewalFailure appends grace windows via PushNewEntitlement; RenewalSuccess revokes grace windows via RevokeExistingEntitlement (reason=superseded) and then pushes remaining paid time if needed",
-        "[x] Update admin entitlement grant/revoke endpoints to use PushNewEntitlement/RevokeExistingEntitlement",
-        "[x] Update one-off purchase entitlement grants to use PushNewEntitlement",
-        "",
-        "TESTS:",
-        "[x] Integration test: state-machine style dunning (advance fake time; multiple CCBill failures append grace; success clears grace + pushes paid remainder)",
-        "[x] Unit test: PushNewEntitlement schedules after active window and supports duration + absolute endAt idempotency",
-        "[x] Unit test: RevokeExistingEntitlement revokes active + deletes future windows without mutating end_at",
-        "[x] Regression test: no code path updates entitlements.end_at after creation (grep + targeted integration tests)",
-        "[x] Integration test: CCBill RenewalFailure appends grace entitlement windows without changing paid subscription entitlement end_at",
-        "[x] Integration test: CCBill RenewalSuccess revokes grace windows (not soft-delete) and does not leave overlap",
-        "",
-        "DOCS:",
-        "[x] Update docs to describe the two-operation API and immutable windows (remove mentions of shifting/extend/setEndAt)",
-        "",
-        "VERIFY:",
-        "[x] `go test ./...` passes"
-      ],
-      "completed": false
-    },
-    {
-      "id": 162,
-      "name": "catalog-as-code-apply-manifest",
-      "description": "Add an idiomatic “catalog as code + idempotent apply” workflow for hosts embedding OpenRails (Go API) and for standalone deployments (private API). Hosts define credit types + products + prices declaratively (e.g. `billing_catalog.yaml`) and run an explicit deploy-time apply step to upsert definitions and link processor IDs (link-only by default; processor objects created elsewhere/IaC).",
-      "tasks": [
-        "SPEC / UX:",
-        "[ ] Define manifest shape + versioning: `apiVersion`, `kind: BillingCatalog`, `metadata.name`, `metadata.version`, `spec`",
-        "[ ] Define apply ordering + dependency rules: credit_types -> products -> prices; fail-fast on missing refs",
-        "[ ] Define stable identity keys for upserts:",
-        "[ ] - credit types: `name` (existing unique key)",
-        "[ ] - products: `slug` (existing unique key)",
-        "[ ] - prices: introduce a stable `code` (string) or require host-provided UUIDs; document the choice",
-        "[ ] Define immutability/versioning rules (default-safe):",
-        "[ ] - credit types: allow display_name/unit/decimal_places; allow deactivate/reactivate; forbid renames",
-        "[ ] - products: allow display_name/description/spec updates; forbid slug changes",
-        "[ ] - prices: forbid amount/currency/billing_cycle_days edits; allow display_name/is_active/processor mappings; require “new price” for pricing changes",
-        "[ ] Define processor mapping schema (link-only baseline): per price `processors` map with per-processor required fields; validate known processors/keys",
-        "[ ] Define conflict + safety rails: reject forbidden edits unless `force=true`; support `dry_run` + structured diff output",
-        "[ ] Define apply results format: planned/applied/updated/unchanged/skipped/errors with stable machine-readable JSON for CI",
-        "",
-        "DATA MODEL / MIGRATIONS:",
-        "[ ] Add a stable price upsert key (recommended: `billing.prices.code TEXT UNIQUE`); add migration + backfill plan",
-        "[ ] Ensure any needed additional uniqueness constraints exist (credit_types.name, products.slug already unique)",
-        "[ ] Decide if we need a catalog-level “applied manifest history” table for observability/audit (optional)",
-        "",
-        "CORE APPLY ENGINE (shared):",
-        "[ ] Add a `catalog` package (manifest types + validation + diff planning) used by both embedded and standalone",
-        "[ ] Implement `PlanCatalog(ctx, manifest)` (diff) and `ApplyCatalog(ctx, manifest, opts)` (execute) with optional advisory lock",
-        "[ ] Ensure apply is idempotent (running twice yields no changes) and order-insensitive within each section",
-        "",
-        "EMBEDDED GO API:",
-        "[ ] Add `Service.ApplyCatalog(ctx, manifest, opts)` and `Service.DiffCatalog(ctx, manifest)` public methods",
-        "[ ] Expose granular errors (path to offending manifest field) for good host-deploy UX",
-        "",
-        "STANDALONE PRIVATE API (port 8060):",
-        "[ ] Add `POST /v1/catalog/apply` accepting JSON (client may submit YAML -> JSON) with `dry_run=true` support",
-        "[ ] Add `POST /v1/catalog/diff` (or `dry_run=true`) returning the plan without writes",
-        "[ ] Keep existing single-resource endpoints (`/v1/credit-types`, `/v1/catalog/products`, `/v1/catalog/prices`) for incremental ops",
-        "",
-        "CLI / TOOLING:",
-        "[ ] Add `openrails catalog apply --file billing_catalog.yaml --api-key ... --addr ...` (standalone)",
-        "[ ] Add `--dry-run` and `--json` output; exit non-zero on diff/apply errors (CI-friendly)",
-        "",
-        "TESTS:",
-        "[ ] Unit tests: manifest validation (missing keys, unknown processors, forbidden price edits), diff determinism",
-        "[ ] DB integration tests: apply idempotency; allowed updates; forbidden mutations; price code uniqueness",
-        "[ ] HTTP integration tests: apply endpoint end-to-end (with API key); single-resource endpoints still work",
-        "",
-        "DOCS:",
-        "[ ] Add an example `billing_catalog.yaml` (credit types + products + prices + processors mappings)",
-        "[ ] Document recommended workflow: manage processor objects elsewhere (IaC), link IDs here; use new prices for pricing changes",
-        "",
-        "VERIFY:",
-        "[ ] `go test ./...` passes",
-        "[ ] `docker compose --profile all up --build` boots and applying the example manifest succeeds (no manual SQL)"
-      ],
-      "completed": false,
-      "status": "CODE COMPLETE + unit-tested (2026-06-02): terraform-style catalog-as-code shipped. NEW pkg/catalog (manifest.go tier_groups>products>prices, cozy-art-compatible + per-product/price providers[]/provider_links + default_providers inheritance; load.go parse+validate incl. dup-price-by-financial-terms + solana stablecoin-eligibility; plan.go terraform-style diff with price-set semantics, identity=financial substance; apply.go idempotent convergence surfacing pending_manual_actions) + Applier interface with in-process (service.Service) AND HTTP (admin-API bearer) impls + `billing catalog apply -f <file> [--dry-run] [--api-url --api-token]` CLI. Drives the #208 providers[] dispatch so apply reconciles OpenRails + Stripe + NMI + CCBill(link/pending) + Solana(create_plan). 15 pkg/catalog unit tests green; go build ./... + vet clean. PENDING: e2e against a live catalog DB + devnet solana plan publish before marking fully done."
     },
     {
       "id": 163,
@@ -463,7 +226,7 @@
         "[ ] Ensure README.md does not mention removed keys; update if needed",
         "",
         "COMPAT / SAFETY:",
-        "[ ] Confirm unknown config keys do not crash koanf load/validate (so removal doesn’t break old config files)",
+        "[ ] Confirm unknown config keys do not crash koanf load/validate (so removal doesn\u2019t break old config files)",
         "",
         "VERIFY:",
         "[ ] `go test ./...` passes"
@@ -477,7 +240,7 @@
       "tasks": [
         "DESIGN:",
         "[ ] Decide opt-in mechanism: (A) standalone CLI subcommand `openrails cloudflared up` that supervises both OpenRails + cloudflared, or (B) OpenRails spawns cloudflared when `cloudflared.tunnel_token` is set and `env=dev`",
-        "[ ] Decide what constitutes “success”: tunnel established + /health/ready reachable via public hostname",
+        "[ ] Decide what constitutes \u201csuccess\u201d: tunnel established + /health/ready reachable via public hostname",
         "",
         "IMPLEMENTATION (if spawning subprocess):",
         "[ ] Add a small `pkg/cloudflared` supervisor that starts `cloudflared tunnel run` with the configured token and captures stdout/stderr into structured logs",
@@ -497,93 +260,6 @@
         "[ ] Manual dev verification: start stack + tunnel and hit /health/ready from an external device"
       ],
       "completed": false
-    },
-    {
-      "id": 165,
-      "name": "configurable-river-schema-for-embedded-hosts",
-      "description": "Make OpenRails schema usage correct and explicit across standalone vs embedded/library mode.\n\nToday OpenRails implicitly assumes:\n- Billing Postgres objects live in schema `billing`.\n- River tables also live in schema `billing`.\n\nThat’s acceptable for standalone billing, but it’s leaky for embedded/library mode: the host app may want to keep billing tables under a billing schema while placing shared River tables in the host’s primary schema.\n\n## Desired behavior\n\n### 1) OpenRails Postgres schema (billing tables)\n- **Configurable in both modes**.\n- Default: `billing` (zero-config).\n- Standalone: read from config/env.\n- Embedded/library: host supplies it via config (or an embedded option override).\n\n### 2) River schema (river_* tables)\n- **Standalone:** River tables live in the same schema as OpenRails billing tables.\n  - That means: River schema = OpenRails configured Postgres schema.\n  - Not separately configurable.\n- **Embedded/library:** River tables live in the host’s chosen schema.\n  - The host either injects a River client via `embedded.SetRiverClient(client)` (preferred), or supplies an explicit schema override if OpenRails must construct its own River client.\n\n## Goals\n\n- Remove hardcoded `billing` schema assumptions from production code paths.\n- Preserve backwards compatibility: default schema remains `billing`.\n- Make embedded mode schema boundaries explicit and documented.\n\n## Non-goals\n\n- Do not auto-migrate River tables across schemas.\n- Do not change queue names (billing queue remains `billing`).\n\n## Proposed config/API surface\n\n- Add `db.schema` (or `postgres.schema`) to OpenRails `config.Config`:\n  - Default: `billing`.\n  - Used for all OpenRails Postgres DDL/DML (billing tables).\n- River:\n  - Standalone: River schema = `db.schema`.\n  - Embedded: River schema is host-controlled via the injected River client (or a host-supplied explicit override if we add one).\n\n\n\n## RESCOPED (2026-06-03)\nHEADLINE DONE: db.schema config surface (DBConfig.SchemaName, env DB_SCHEMA, default billing) + standalone River schema == db.schema (build_runtime + migrator) + embedded SetRiverClient (host OWNS River, OpenRails never overrides its schema) + pkg/embedded docs. This delivers the real value: an embedded host can keep billing tables in a billing schema while its shared River tables live in the host primary schema.\nDEFERRED (low value, NOT done): making db.schema actually RELOCATE billing tables in STANDALONE requires rewriting ~60 migration CREATE TABLEs + RLS policies + GRANTs + ~100 runtime schema-qualified SQL refs from hardcoded billing. to a placeholder — a large refactor through RLS + money paths with no real user (nobody needs standalone billing tables under a non-billing schema). Per owner (2026-06-03), not worth doing now; standalone keeps schema=billing.",
-      "tasks": [
-        "DESIGN / CONFIG:",
-        "[ ] Add config surface for OpenRails Postgres schema: `db.schema` (koanf + env var like `DB_SCHEMA`) with default `billing`",
-        "[ ] Decide embedded override mechanism for billing schema (prefer `embedded.Options` field; config still works too)",
-        "[ ] Validate schema identifier (letters/numbers/underscore; no quotes/spaces) and normalise (trim; optionally lower-case)",
-        "",
-        "IMPLEMENTATION:",
-        "[ ] Update all Postgres SQL/migrations to use configured schema instead of assuming `billing`",
-        "[ ] Update Postgres migrator: run River migrations in schema = `db.schema` (standalone rule)",
-        "[ ] Update runtime builder: when OpenRails constructs River, set River schema = `db.schema` (standalone rule)",
-        "[ ] Ensure embedded `SetRiverClient` path never assumes/overwrites schema (host client owns it)",
-        "",
-        "TESTS / DOCS:",
-        "[ ] Update tests to stop hardcoding `billing.river_job` (derive schema from config; add coverage for non-default schema)",
-        "[ ] Add regression test: set `db.schema=custom` → billing tables under `custom.*` and standalone River tables under `custom.river_*`",
-        "[ ] Update embedded docs: billing schema is configurable; River schema in embedded mode is host-controlled via injected River client (or explicit embedded override if added)",
-        "[ ] Document migration steps + safety notes (switching schemas creates a second set of tables unless old ones are removed)"
-      ],
-      "completed": false
-    },
-    {
-      "id": 209,
-      "name": "catalog-reconciliation-loop (periodic pull-based drift + orphan detection for Stripe + NMI, alert-only)",
-      "description": "Background job that periodically pulls the full Stripe catalog (Products + Prices), diffs against the OpenRails DB, and surfaces (a) drift between OpenRails-owned objects and their Stripe mirrors, and (b) Stripe objects that have no matching OpenRails row (\"orphans\"). Alert-only — never auto-mutates either side. Operators resolve drift via the existing `POST /admin/catalog/{products,prices}/:id/reconcile` admin action.\n\n## Replaces two earlier ideas\n\nThis issue subsumes the originally planned `stripe-catalog-drift-observer` (webhook-based) and `stripe-catalog-orphan-discovery` (separate List-API endpoint) follow-ups from issue #205. After consideration: at OpenRails's expected catalog scale (single-digit to ~hundred items per deployment), a periodic pull beats webhook subscription and consolidates the two surfaces:\n\n- **Pull beats webhook here**: catalog volume is tiny (5-10 List API calls covers thousands of items); webhook delivery is best-effort and can miss events; webhooks don't help with drift that existed before the subscription was attached; pull is stateless and reliable; less infra (no webhook secret per environment, no signature verification, no dedup table).\n- **One loop handles both drift + orphans**: once you're enumerating Stripe Products and Prices, finding ones without `metadata.openrails_product_id` / `openrails_price_id` is free.\n\n## Goal\n\nMake drift and orphans observable without operator effort. Resolving them stays explicit (via the existing `reconcile` action). No silent mutation by a background loop.\n\n## Non-goals\n\n- Auto-resolution of drift. The loop only logs and surfaces; operators decide what to do. Auto-mutation is the failure mode of badly-designed reconcilers (silent overwrites in production); we are deliberately not building it.\n- Webhook handlers for `product.*` / `price.*`. If a future deployment has tens of thousands of catalog items where pull latency becomes an issue, a webhook listener can be added then as an additive optimization.\n- Multi-tenant aware loop. This loop runs once per OpenRails instance against the configured Stripe account. Multi-tenant SaaS (future #201) will need a fan-out story but that is out of scope here.\n\n## Depends on\n\n- Issue #205 (admin catalog API) — ships the `metadata.openrails_*_id` Stripe markers + the `reconcile` endpoint that operators use to resolve discovered drift.\n\n## Extended scope: NMI reconciler (added 2026-05-20)\n\nThe loop now covers **both Stripe and NMI**, not Stripe alone. NMI's Query API can list all recurring plans on the account (`GetRecurringPlanData()` already exists; `GetRecurringPlanByID()` was added in issue #207), so an NMI reconciler mirrors the Stripe one:\n\n- **Pull** all NMI recurring plans via `GetRecurringPlanData()`.\n- **Match** each against OpenRails prices by stored `provider_links.mobius.plan_id`.\n- **`orphan_in_nmi`**: an NMI plan with no matching OpenRails price.\n- **`missing_in_nmi`**: an OpenRails price referencing a `plan_id` that no longer exists in NMI.\n- **`field_drift`** (provider=nmi): plan_name or plan_amount differs from the OpenRails row.\n\nClean ownership signal: OpenRails-created NMI plans use the deterministic `openrails-<price_uuid>` plan_id prefix (set by issue #207's mobius adapter), the NMI analog of Stripe's `openrails_*_id` metadata. The reconciler uses this to distinguish OpenRails-owned plans from operator-hand-made ones.\n\nNMI's plan model is flatter than Stripe's (no separate product object — plan_name + plan_amount + frequency is all there is), so the NMI drift surface is just name + amount. Frequency is immutable and not a drift dimension.\n\n**CCBill is structurally excluded.** CCBill's API has no way to enumerate subscription forms — FlexForms are write-only redirect URLs, webhooks are inbound, and DataLink only exports members/subscriptions (not catalog forms). There is no catalog-list endpoint, so CCBill reconciliation is impossible. CCBill stays manual-link-only forever. Do not attempt a CCBill reconciler.\n\nThe `catalog_drift_events` table and admin endpoints generalize across providers via a `provider` column. The drift `kind` values become provider-scoped: `orphan_in_stripe`/`orphan_in_nmi`, `missing_in_stripe`/`missing_in_nmi`, and a shared `field_drift` (disambiguated by the `provider` column).",
-      "tasks": [
-        "STRIPE CLIENT EXTENSIONS:",
-        "[ ] Add `ListProducts(ctx, cursor) ([]StripeProduct, nextCursor, err)` and `ListPrices(ctx, cursor)` to `internal/modules/catalog/stripe_catalog.go` (Stripe List API with pagination via `starting_after`)",
-        "[ ] Tests for the new list methods with mocked Stripe pagination",
-        "",
-        "RECONCILIATION JOB:",
-        "[ ] New River job: `catalog_reconciliation_pull`",
-        "[ ] Configurable schedule via existing job-scheduling pattern (default: every 1h, set interval=0 to disable)",
-        "[ ] For each Stripe Product: look up OpenRails row by `metadata['openrails_product_id']`; if missing → log as `orphan`; if present → diff fields, log mismatches as `drift`",
-        "[ ] For each Stripe Price: same, keyed on `metadata['openrails_price_id']`",
-        "[ ] For each OpenRails row with a stored stripe_*_id: verify presence in the pulled Stripe list; if absent → log as `missing_in_stripe`",
-        "[ ] Idempotent: rerunning produces the same drift_event rows (dedupe by (resource_id, kind, field))",
-        "",
-        "DATA MODEL:",
-        "[ ] Migration: `billing.catalog_drift_events` table — `(id, kind, openrails_resource_type, openrails_resource_id, stripe_resource_id, field, openrails_value, stripe_value, detected_at, resolved_at)`",
-        "[ ] kind ∈ `orphan_in_stripe`, `missing_in_stripe`, `field_drift`",
-        "[ ] Index on `(resolved_at NULL)` for the active-drift list view",
-        "",
-        "ADMIN SURFACE:",
-        "[ ] `GET /admin/catalog/drift` — list open (unresolved) drift events with pagination + filters (kind, resource_type)",
-        "[ ] `GET /admin/catalog/stripe/orphans` — alias for `GET /admin/catalog/drift?kind=orphan_in_stripe` (operator-friendly URL)",
-        "[ ] `POST /admin/catalog/drift/reconcile-all` (idempotent on-demand trigger) — runs the pull job synchronously and returns the new drift set",
-        "[ ] Existing `POST .../reconcile` endpoint on individual resources continues to be the way to resolve drift; resolving auto-closes matching drift_event rows",
-        "",
-        "ALERTING + OBSERVABILITY:",
-        "[ ] Emit structured log per drift event with stable fields for downstream alerting",
-        "[ ] Optional: webhook callout to a configurable URL when new drift events appear (deferred; cron + admin endpoint sufficient for v1)",
-        "[ ] Metric: `openrails_catalog_drift_open_count{kind}` for Prometheus-style scraping",
-        "",
-        "DOCS:",
-        "[ ] README admin catalog section: document the loop, default schedule, how to disable, how drift events appear, how to resolve them",
-        "[ ] Operator runbook: \"there's drift in production, what do I do?\" — short walkthrough using `GET /admin/catalog/drift` + per-resource `reconcile`",
-        "[ ] Document that this loop never auto-mutates either side",
-        "",
-        "TESTS:",
-        "[ ] Unit tests for the pull-and-diff logic with fixture Stripe responses",
-        "[ ] Idempotency test: run twice, second run produces no new drift_event rows",
-        "[ ] Drift kind coverage: orphan, missing-in-stripe, field-drift",
-        "",
-        "EXIT CRITERIA:",
-        "[ ] Loop runs on the configured schedule and populates `catalog_drift_events`",
-        "[ ] `GET /admin/catalog/drift` and `/admin/catalog/stripe/orphans` return the populated table",
-        "[ ] Resolving a drift event via the per-resource reconcile endpoint clears it from the active list",
-        "[ ] Disabling the loop (interval=0) is supported and tested",
-        "",
-        "NMI RECONCILER (extended scope):",
-        "[ ] Add a `provider` column to the `catalog_drift_events` model + DDL (values: 'stripe', 'nmi')",
-        "[ ] NMI pull: enumerate plans via the existing nmi client `GetRecurringPlanData()` (do NOT add new nmi client methods — #207 already added what's needed; if a list helper is missing, note it as a deferral rather than editing internal/integrations/nmi/)",
-        "[ ] Match NMI plans to OpenRails prices by `provider_links.mobius.plan_id`",
-        "[ ] Record `orphan_in_nmi` (plan on account, no matching price — distinguish openrails-<uuid> prefixed from operator-made), `missing_in_nmi` (price references absent plan), `field_drift` provider=nmi (plan_name / plan_amount mismatch)",
-        "[ ] The pull job runs BOTH the Stripe and NMI passes in one scheduled run; each provider independently skippable if that processor is unconfigured",
-        "[ ] `GET /admin/catalog/drift` filterable by `provider` and `kind`",
-        "[ ] `GET /admin/catalog/orphans` (renamed from stripe-specific) filterable by provider; keep `GET /admin/catalog/stripe/orphans` as a convenience alias",
-        "[ ] CCBill: explicitly NOT reconciled — add a code comment + README note explaining why (no catalog-list API)",
-        "[ ] Unit tests for the NMI pull-and-diff with fixture plan data (orphan, missing, drift, openrails-prefix discrimination)"
-      ],
-      "completed": false,
-      "status": "MOSTLY COMPLETE (2026-06-02): pull-based reconciliation live+scheduled; Stripe + NMI catalog drift/orphan detection; admin /admin/catalog/{drift,orphans,drift/refresh}; alert-only; catalog_drift_events table. NEW: Solana on-chain plan drift added — computeSolanaCatalogDrift reuses the solana provider adapter's Verify (GetAccountData + DecodePlanAccount) to diff immutable terms (amount/period/mint/created_at) per Solana-backed price; new kinds missing_in_solana + field_drift(provider=solana); ScannedSolanaPlans in the report; gated on SolanaRPC. go build/test green. DROPPED as low-value (per 'drop unimportant tasks'): NMI plan_name drift (Price has no such column) + the openrails_catalog_drift_open_count metric. PENDING: devnet certification of the solana drift path."
     },
     {
       "id": 219,
@@ -615,22 +291,6 @@
       "completed": false
     },
     {
-      "id": 268,
-      "name": "universal-model-b-upgrade-proration",
-      "completed": false,
-      "description": "OR-H (DECIDED): ALL subscription UPGRADES use Model B (reset period) across NMI, Stripe, and Solana. Replaces the current Model A (keep original renewal date, charge only the difference) for NMI/Stripe.\n\nWHY: Model B is more merchant-favorable AND simpler/uniform. Upgrade $20->$50, 2 days in: old_unused = 28/30*$20 = $18.67; charge new_full - old_unused = $31.33 NOW for a FRESH full period; next rebill $50 at now+cycle. Downgrades UNCHANGED (deferred to period end via ScheduledPriceID).\n\nCODE TO CHANGE (currently Model A): internal/modules/checkout/service.go CalculateProration (~L1790) -> first_charge = new_full - old_unused; processUpgrade (~L1394, NMI) -> reset CurrentPeriodStartsAt=now / EndsAt=now+cycle; processTierChangeStripe upgrade branch -> billing_cycle_anchor=now so Stripe collects new_full - old_unused now + renews fresh. CAUTION: changes LIVE card billing; well-tested; keep idempotency replay intact.\n\nDepends on: none (independent; pairs with #267).",
-      "tasks": [
-        "[x] shared Model-B helper: first_charge = new_full - old_unused; old_unused = (1 - elapsed/cycle)*old_full; clamp >=0 (CalculateModelBUpgradeCharge)",
-        "[x] NMI processUpgrade: charge new_full - old_unused + RESET period (start=now, end=now+cycle)",
-        "[x] Stripe upgrade: proration_behavior=always_invoice + billing_cycle_anchor=now so Stripe collects new_full - old_unused + renews fresh (see TODO comment re: Stripe sub-cent proration semantics)",
-        "[ ] Solana upgrade (OR-G/#267) uses the SAME helper -- helper is exported & reusable; wiring is #267's job",
-        "[x] downgrades remain deferred (ScheduledPriceID) -- processDowngrade + Stripe downgrade branch unchanged",
-        "[x] tests: Model-B helper unit-tested hard (boundaries + issue example); Stripe upgrade request construction tested. NMI full-flow needs DB (integration suite)",
-        "[x] document the universal Model-B upgrade policy in one place (doc comment on CalculateModelBUpgradeCharge + CalculateProration)",
-        "[x] REVIEW GATE VERIFIED (real Stripe TEST mode, via OpenRails StripeService.UpdateSubscriptionPrice with proration_behavior=always_invoice + billing_cycle_anchor=now): subscribed $20.00/mo -> upgraded to $50.00/mo; upgrade invoice collected NOW = $30.00 PAID = new_full($50.00) - old_unused($20.00) (invoice lines: -$20.00 unused time credit + $50.00 new full period). current_period_end RESET to ~30 days (+719h59m) out from the upgrade instant (cycle reset confirmed). Model-B confirmed CORRECT. Test: internal/modules/subscriptions/stripe_model_b_integration_test.go (build tag stripe_integration; run with STRIPE_SECRET_KEY)."
-      ]
-    },
-    {
       "id": 277,
       "name": "solana-moonpay-usdc-onramp",
       "description": "Let a card-only user (no USDC, no funded wallet) buy USDC on Solana via MoonPay and then start / keep funded an OpenRails recurring Solana subscription. MoonPay is a fiat->crypto on-ramp (iframe widget / @moonpay/moonpay-js / @moonpay/moonpay-react).\n\n## Key findings (research 2026-06-03)\n- USDC on Solana IS supported, currencyCode=`usdc_sol` (NOT bare `usdc`, which defaults to Ethereum), delivered to a user-supplied Solana address. Classic SPL mint = matches our engine.\n- The user STILL needs a self-custody wallet (Phantom/Backpack): MoonPay only delivers tokens, it cannot SIGN the OpenRails SPL-delegation/subscribe tx. MoonPay's hosted wallet can't sign delegation -> require an external wallet.\n- URL signing is REQUIRED whenever the widget URL carries walletAddress: HMAC-SHA256 over the query string keyed by the secret key (sk_), base64. So even minimal integration needs ONE backend route to sign URLs (frontend generateUrlForSigning -> backend HMAC -> updateSignature). pk_ is frontend, sk_ is backend-only.\n- Webhooks (transaction_created/updated/failed, verify Moonpay-Signature-V2, de-dupe) are OPTIONAL for basic UX -- we can instead POLL the wallet's USDC ATA balance since the deliverable is an on-chain transfer to a known address.\n- KYC always required; card fee ~up to 4.5% with a $3.99 minimum; min purchase ~$20-30; brutal on small amounts (a $10 buy can pay ~40% fee). Geo: 150+ countries, excludes LA/USVI + sanctioned; NY now OK (BitLicense).\n- RECURRING-FUNDING GAP (central tension): MoonPay is a ONE-TIME buy; it does NOT auto-refill each period. Our engine pulls USDC every period via SPL delegation, so the ATA must STAY funded. Either pre-buy many periods up front (amortizes the fee/minimum) or re-onramp each period (bad). There is no MoonPay recurring on-ramp.\n- STRATEGIC POSITION: a pure card user who wants recurring should usually just use OpenRails' existing Stripe/NMI card rails. Position MoonPay as a 'fund/top-up your Solana wallet' convenience for self-custody/crypto-native users + one-time top-ups to keep a Solana sub funded + hard-to-card regions + larger prepayments -- NOT as the recurring payment method. The recurring engine stays pure Solana; MoonPay is the bootstrap/top-up step.\n\nSources: dev.moonpay.com/docs (quickstart, signed-urls, web-sdk, buy params), npm @moonpay/moonpay-js + moonpay-react, support.moonpay.com simplified-buy-for-solana, moonpay.com/newsroom/usdc-solana-moonpay, docs.solanaappkit.com moonpay (usdc_sol), dev.moonpay.com webhooks + sandbox, moonpay.com/legal/pricing_disclosure.",
@@ -646,36 +306,18 @@
       "completed": false
     },
     {
-      "id": 278,
-      "name": "solana-pay-v2-cancel-and-tier-change-plus-frontend-qr",
-      "description": "Support BOTH Solana flows for the full subscription lifecycle: (A) browser-extension wallet (wallet-adapter, sign in-page) AND (B) Solana Pay v2 transaction-request (mobile: QR on desktop / deep-link on phone -> wallet app fetches the tx + signs). Flow B uses the SECOND Solana Pay spec (arbitrary transactions, not transfer-only) -- required for the on-chain rebilling-authorization txs.\n\n## What already exists\n- OpenRails ALREADY implements Solana Pay v2 transaction-request for CHECKOUT/subscribe: public GET/POST /v1/.../checkout/:id/solana-pay (session id = capability; GET->{label,icon}, POST {account}->{transaction}) + reference-based completion via internal/modules/solana/poller.go. So SUBSCRIBE flow B is backend-ready; only the FRONTEND QR/deeplink is missing.\n- Browser flow (A) for subscribe is built in both apps; cancel+tier-change (A) is built canonically in doujins (3ebe3ddf), pending hentai0 port.\n\n## Backend gap (this issue)\nExtend the checkout-session Solana Pay machinery to CANCEL + TIER-CHANGE by adding them as new session MODES (reusing the public endpoint + poller + reference completion):\n- Add CheckoutSessionMode solana_cancel (carries subscription_id) and solana_tier_change (carries subscription_id + new_price_id).\n- CreateCheckoutSession (AUTH-gated) accepts these modes (owner-only).\n- BuildSolanaPayTransaction branches on mode -> build cancel tx (PrepareCancelService) / tier-change tx (PrepareTierChangeService, cranker pre-signs the co-signed upgrade), INJECT the Solana Pay reference key so the poller can detect it.\n- Poller processConfirmedPayment branches on mode -> mirror via ConfirmCancelService / ConfirmTierChangeService (instead of enroll).\n\n## Frontend gap (this issue)\nCanonical (doujins, copy to hentai0): a Solana Pay path ALONGSIDE the browser-extension path, for subscribe + cancel + tier-change. Generate solana:<baseUrl>/.../solana-pay URL + QR (desktop) / deep-link button (mobile) via @solana/pay; poll the session status until the poller mirrors completion. Method order unchanged (card NMI/Mobius default, CCBill backup, Solana third); within Solana, offer 'browser wallet' (extension) and 'mobile wallet' (Solana Pay QR).",
-      "tasks": [
-        "[x] Backend: CheckoutSessionMode solana_cancel + solana_tier_change; CreateCheckoutSession accepts them (owner-gated, carries subscription_id / new_price_id).",
-        "[x] Backend: BuildSolanaPayTransaction branches on mode -> PrepareCancelService / PrepareTierChangeService; inject the Solana Pay reference account into the tx for poller detection.",
-        "[x] Backend: poller branches on mode -> ConfirmCancelService / ConfirmTierChangeService on confirmation.",
-        "[x] Backend: tests (session create per mode; build tx per mode; poller mirrors per mode). go build/vet/test green.",
-        "[ ] Frontend (doujins canonical): @solana/pay QR/deeplink component + session-status poll; offer browser-wallet vs mobile-wallet (Solana Pay) within the Solana option for subscribe/cancel/tier-change.",
-        "[ ] Frontend (hentai0): port the canonical Solana Pay component.",
-        "[ ] Devnet validation: subscribe + cancel + tier-change each via the Solana Pay transaction-request path (POST {account} -> tx -> sign+send -> poller mirrors).",
-        "[x] BACKEND DONE (a17bbdb): solana_cancel/solana_tier_change session modes; subscription_id/new_price_id carried on ProcessorState (no migration); BuildSolanaPayTransaction branches via PrepareCancel/PrepareTierChange; reference pubkey injected as read-only non-signer on the cancel ix (poller getSignaturesForAddress); poller routes confirmation to ConfirmSolanaLifecycleSession -> ConfirmCancel/ConfirmTierChange. build/vet/tests green.",
-        "[ ] NO FALLBACK (user directive 2026-06-03): the Solana Pay transaction_request flow MUST branch on the PRICE recurring flag, NOT a hardcoded mode. Recurring price -> build a RECURRING subscribe tx (co-signed atomic [subscribe+transfer], #286); one-off price -> build a one-off transfer tx. Today the transaction_request/solana_pay_url path was wired for one-off ONLY; recurring-via-transaction_request was never built -> BUILD IT. Frontend must NOT pass mode:one_off for recurring prices; let the price drive it. Populate solana_pay_url for ALL session modes (subscribe recurring + one-off + solana_cancel + solana_tier_change).",
-        "[x] BACKEND COMPLETE (67126c2 + c1ffff3): subscribe Solana Pay is price-driven (priceHasSolanaRecurring -> mode=subscription via initializeSolanaSubscriptionPayRequest, flow=transaction_request, solana_pay_url) reusing PrepareSubscribeService (atomic [subscribe+transfer], step-tracked for first-timer init); solana_pay_url for ALL modes; poller ConfirmSolanaSubscribeSession (step-aware, crank-free ConfirmEnrollment). FIXED the pending-set gap: RegisterPendingReference SAdds lifecycle/subscribe refs so the poller actually iterates them (was binding to DB only)."
-      ],
-      "completed": false
-    },
-    {
       "id": 279,
       "name": "embed-neutral-auth-boundary",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic — pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler — zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: the framework-neutral AUTH boundary. Host validates the request (any scheme) and yields identity; OpenRails attaches it to the request context. Mirror authkit's net/http middleware shape, NOT gin. AuthKit becomes ONE optional implementation, not a dependency. PACKAGING: the neutral pieces (Authenticator/AuthenticatorFunc/UserContext/SetUserContext/FromContext + net/http Required/Optional) MUST live in a gin-free, authkit-free package (stdlib + net/http only). The gin Provider + ProviderFromAuthenticator bridge + UserContextFromGin move to an app-side gin adapter subpackage that ONLY the standalone/gin path imports. See #285.",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: the framework-neutral AUTH boundary. Host validates the request (any scheme) and yields identity; OpenRails attaches it to the request context. Mirror authkit's net/http middleware shape, NOT gin. AuthKit becomes ONE optional implementation, not a dependency. PACKAGING: the neutral pieces (Authenticator/AuthenticatorFunc/UserContext/SetUserContext/FromContext + net/http Required/Optional) MUST live in a gin-free, authkit-free package (stdlib + net/http only). The gin Provider + ProviderFromAuthenticator bridge + UserContextFromGin move to an app-side gin adapter subpackage that ONLY the standalone/gin path imports. See #285.",
       "tasks": [
-        "[x] billingauth.Authenticator: Authenticate(ctx, *http.Request) (UserContext, error) — gin-free, authkit-free core package pkg/billingauth.",
+        "[x] billingauth.Authenticator: Authenticate(ctx, *http.Request) (UserContext, error) \u2014 gin-free, authkit-free core package pkg/billingauth.",
         "[x] billingauth.AuthenticatorFunc closure adapter.",
         "[x] net/http Required/Optional middleware (mirror authkit http.Required/Optional); store UserContext in request context; neutral JSON 401 via WriteJSONError. Unit-tested.",
         "[x] Gin bridge authprovider.ProviderFromAuthenticator(billingauth.Authenticator) Provider (transitional, for today's gin routes).",
         "[x] pkg/authprovider now aliases billingauth (UserContext/SetUserContext/FromContext/ErrUnauthenticated) so existing importers keep building; authprovider is the gin adapter.",
         "[x] ACCEPTANCE met: `go list -deps ./pkg/billingauth` has 0 gin + 0 authkit. authprovider tests + internal/auth build green.",
-        "[ ] Wire embedded.Options.Authenticator (billingauth.Authenticator) — pending: pkg/embedded currently blocked by unrelated solana-recurring WIP; trivial additive change once the tree builds.",
-        "[ ] Handlers read identity via billingauth.FromContext(r.Context()) on the net/http path — done as part of #282.",
+        "[ ] Wire embedded.Options.Authenticator (billingauth.Authenticator) \u2014 pending: pkg/embedded currently blocked by unrelated solana-recurring WIP; trivial additive change once the tree builds.",
+        "[ ] Handlers read identity via billingauth.FromContext(r.Context()) on the net/http path \u2014 done as part of #282.",
         "[ ] Final UserContext shape pending #280."
       ],
       "completed": false
@@ -683,7 +325,7 @@
     {
       "id": 280,
       "name": "embed-identity-authz-contract",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic — pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler — zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE (DESIGN): decide the MINIMAL, flexible host<->library identity/authorization contract billing needs, so UserContext isn't over-fit to AuthKit. Output feeds #279/#281/#282.",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE (DESIGN): decide the MINIMAL, flexible host<->library identity/authorization contract billing needs, so UserContext isn't over-fit to AuthKit. Output feeds #279/#281/#282.",
       "tasks": [
         "[ ] Enumerate exactly what billing handlers read from identity today (UserID/payer, Org/tenant, OrgRoles, Roles, Entitlements) and every admin-authority gate.",
         "[ ] Decide minimal shape: Subject/principal (required, the payer), Tenant/Org (optional), + an authorization signal. RECOMMENDATION: admin gating via an OpenRails-DEFINED capability the host populates (e.g. CanAdministerBilling / per-tenant) rather than OpenRails interpreting host role NAMES.",
@@ -696,12 +338,12 @@
     {
       "id": 281,
       "name": "embed-route-manifest",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic — pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler — zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: expose billing routes as a framework-agnostic MANIFEST the host mounts anywhere, mirroring authkit Routes()/APIRoutes(). Pairs with #282 (the handlers must be net/http first).",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: expose billing routes as a framework-agnostic MANIFEST the host mounts anywhere, mirroring authkit Routes()/APIRoutes(). Pairs with #282 (the handlers must be net/http first).",
       "tasks": [
         "[ ] Add billing RouteSpec{ Method string, Path string (net/http ServeMux syntax e.g. /v1/me/subscriptions/{id}), Group RouteGroup, Handler http.Handler }.",
-        "[ ] Expose Routes() / APIRoutes(groups ...RouteGroup) []RouteSpec on the embedded surface (groups: user, admin, webhooks) — mirrors HTTPHandlerOptions Include* as group selection.",
+        "[ ] Expose Routes() / APIRoutes(groups ...RouteGroup) []RouteSpec on the embedded surface (groups: user, admin, webhooks) \u2014 mirrors HTTPHandlerOptions Include* as group selection.",
         "[ ] Keep a convenience Handler()/NewHTTPHandler() that assembles the manifest into an http.NewServeMux at a base prefix (drop-in for today's single-handler mount).",
-        "[ ] Document mounting into net/http ServeMux, gin (gin.WrapH), and chi — host chooses framework + base path; OpenRails owns the stable sub-paths.",
+        "[ ] Document mounting into net/http ServeMux, gin (gin.WrapH), and chi \u2014 host chooses framework + base path; OpenRails owns the stable sub-paths.",
         "[ ] Depends on #282 (handlers are http.Handler) + #279 (auth middleware wraps groups)."
       ],
       "completed": false
@@ -709,7 +351,7 @@
     {
       "id": 282,
       "name": "embed-degin-handlers",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic — pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler — zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE (LARGE, phased): migrate billing HTTP handlers off gin to pure net/http http.HandlerFunc so the exposed surface pulls in ZERO gin. This is the bulk of the work; do it per route group and gate on appetite.",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE (LARGE, phased): migrate billing HTTP handlers off gin to pure net/http http.HandlerFunc so the exposed surface pulls in ZERO gin. This is the bulk of the work; do it per route group and gate on appetite.",
       "tasks": [
         "[x] DONE+pushed (e524733): embedded route layer converted to net/http (neutral Router + ServeMux adapters in internal/http/router; gin adapter isolated in router/ginrouter; Register{User,Admin,Webhook}Routes on router.Router; neutral auth/tenant-conn/operator middleware; server assembles embedded surface as http.ServeMux via request.NewHTTP; standalone keeps gin). 78 routes. Build+test green.",
         "[x] DONE+pushed (72fad9a): handler layer gin-free (removed Request.Inner()).",
@@ -724,7 +366,7 @@
     {
       "id": 283,
       "name": "embed-neutral-responses",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic — pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler — zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: framework-neutral JSON response/error writing to a plain http.ResponseWriter (today billing uses gin + doujins-org/ginapi/response). Supports #282 and #279's 401.",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: framework-neutral JSON response/error writing to a plain http.ResponseWriter (today billing uses gin + doujins-org/ginapi/response). Supports #282 and #279's 401.",
       "tasks": [
         "[ ] Neutral response writing already seeded: billingauth.WriteJSONError writes the {object:error, error:{type,message}} envelope to http.ResponseWriter. Extend to full parity with api.SimpleErrorResponse / message.Json list envelope used by request.go (SuccessJSON/SuccessJSONPaginated/AbortJSON/ErrorJSON/APIError).",
         "[ ] httpTransport's response methods write via these neutral writers (no gin). Keep error type/code constants stable.",
@@ -735,11 +377,11 @@
     {
       "id": 284,
       "name": "embed-authkit-optional",
-      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic — pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler — zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: ensure embedded OpenRails makes NO AuthKit assumption — runs with only a host Authenticator, and does not require AuthKit's profiles.* user store. Standalone OpenRails keeps AuthKit for its own tenant management (own DB), unchanged.",
+      "description": "EPIC embed-as-library (mirror AuthKit's http package): make embedded OpenRails framework-agnostic \u2014 pure net/http handlers the host mounts anywhere, a neutral auth boundary, and no AuthKit assumption. Reference: authkit/http exposes RouteSpec{Method,Path(ServeMux syntax),Group,Handler http.Handler} via Routes()/APIRoutes(), net/http middleware func(http.Handler)http.Handler (Required/Optional/RequireAdmin), and a convenience APIHandler() http.Handler \u2014 zero gin. OpenRails should do the same for /billing. Siblings: #279 auth-boundary, #280 identity-contract, #281 route-manifest, #282 handler-degin, #283 neutral-responses, #284 authkit-optional. THIS ISSUE: ensure embedded OpenRails makes NO AuthKit assumption \u2014 runs with only a host Authenticator, and does not require AuthKit's profiles.* user store. Standalone OpenRails keeps AuthKit for its own tenant management (own DB), unchanged.",
       "tasks": [
         "[ ] PACKAGE-GRAPH (authkit out of pkg/embedded graph): authkit enters via internal/auth (wired by internal/app) and internal/controlplane (imported directly by pkg/embedded + internal/app + internal/http + routes + middleware). Make the embedded construction NOT wire the AuthKit provider or the control plane: embedded uses a host billingauth.Authenticator (already supported via authprovider.AsAuthenticator); the AuthKit provider (internal/auth) + control plane (internal/controlplane) become standalone-only. Gate: go list -deps ./pkg/embedded | grep open-rails/authkit is EMPTY.",
         "[ ] Make internal/controlplane optional on the embedded path: trace each pkg/embedded->controlplane import (app, http, routes, middleware, direct) and gate it behind standalone-only assembly so embedded NewHTTPHandler + billing services do not need it.",
-        "[ ] SCHEMA COUPLING (profiles.* AuthKit user store): billing reads profiles.* in internal/db/repo/profile.go, internal/modules/subscriptions/email_service.go, internal/modules/checkout/service.go, internal/modules/reconcile/reconcile.go, pkg/service/reconcile.go. For a non-AuthKit host these tables do not exist. Decouple: treat the principal as an OPAQUE id from the Authenticator; make profiles.* reads (user existence/enrichment for reconcile/email) host-provided hooks or optional/no-op when absent. DESIGN DECISION needed — flag options, do not silently break reconcile/email.",
+        "[ ] SCHEMA COUPLING (profiles.* AuthKit user store): billing reads profiles.* in internal/db/repo/profile.go, internal/modules/subscriptions/email_service.go, internal/modules/checkout/service.go, internal/modules/reconcile/reconcile.go, pkg/service/reconcile.go. For a non-AuthKit host these tables do not exist. Decouple: treat the principal as an OPAQUE id from the Authenticator; make profiles.* reads (user existence/enrichment for reconcile/email) host-provided hooks or optional/no-op when absent. DESIGN DECISION needed \u2014 flag options, do not silently break reconcile/email.",
         "[ ] After both: go list -deps ./pkg/embedded has 0 gin (#285) AND 0 authkit (#284). Build + test green. Standalone keeps authkit + control plane + profiles."
       ],
       "completed": false
@@ -747,26 +389,11 @@
     {
       "id": 285,
       "name": "split-library-vs-standalone",
-      "description": "EPIC embed-as-library (#279-284 siblings). THIS ISSUE (structural backbone): physically split OpenRails into (a) an IMPORTABLE library in pkg/ — the embeddable billing domain/service + framework-neutral HTTP surface (net/http handlers, route manifest, Authenticator boundary, neutral responses) with NO gin/AuthKit assumption — and (b) the STANDALONE app, which imports the library and adds AuthKit (as the Authenticator impl), the gin router, the control-plane/tenant management, and its own DB bootstrap. Standalone keeps gin + AuthKit; only the library must be neutral.",
+      "description": "EPIC embed-as-library (#279-284 siblings). THIS ISSUE (structural backbone): physically split OpenRails into (a) an IMPORTABLE library in pkg/ \u2014 the embeddable billing domain/service + framework-neutral HTTP surface (net/http handlers, route manifest, Authenticator boundary, neutral responses) with NO gin/AuthKit assumption \u2014 and (b) the STANDALONE app, which imports the library and adds AuthKit (as the Authenticator impl), the gin router, the control-plane/tenant management, and its own DB bootstrap. Standalone keeps gin + AuthKit; only the library must be neutral.",
       "tasks": [
         "[x] DONE+pushed (c25fb00): migrated 19 handlers off r.GinCtx (the keystone + a real embedded nil-panic fix). Handlers fully framework-agnostic.",
         "[ ] CORRECTED SCOPE (per dep analysis): pkg/embedded pulls gin via ~11 pkgs, not 5. Remaining splits (dep-ordered): (1) pkg/query: delete dead ParseQueryOptions (0 callers) -> drops gin. (2) pkg/authprovider: move gin Provider+bridge+UserContextFromGin into a gin subpackage; keep gin-free alias core. (3) internal/auth: move authKitProvider gin Required/Optional to a gin subpkg (keep the gin-free Authenticate). (4) internal/auth/policy: split admin.go gin middleware -> ginmw, keep gin-free helpers. (5) internal/controlplane: move MountAuthRoutes/adaptHandler gin to a ginroutes subpkg. (6) internal/http/request: move ginTransport+New into request/ginreq, export Transport, REMOVE the GinCtx field (now that handlers are migrated; the ~128 route/middleware GinCtx uses on the gin path move to ginreq access). (7) internal/http/{middleware,routes,server}: split gin (standalone) from gin-free (embedded). (8) pkg/embedded: move RegisterXxxRoutes(*gin.RouterGroup) + ginrouter import into pkg/embedded/gin.",
         "[ ] GATE: go list -deps ./pkg/embedded | grep gin-gonic/gin EMPTY. Build+test green; standalone keeps gin."
-      ],
-      "completed": false
-    },
-    {
-      "id": 286,
-      "name": "solana-atomic-cosigned-subscribe-plus-preflight-balance",
-      "description": "Two complementary improvements to the Solana subscribe path so an underfunded user never gets a useless transaction and the success/failure boundary is crisp.\n\n## A. Pre-flight balance check\nBefore offering/sending a subscribe, compare the wallet's USDC balance to the first-period amount.\n- Client (doujins/hentai0): the balance UI already reads wallet token balances; if USDC < first-period amount, block subscribe and show 'need $X, have $Y -> buy USDC' (MoonPay #277).\n- Server (defense in depth): at CreateCheckoutSession / BuildSolanaPayTransaction, read the account's USDC balance (read-lag-safe via *AtSlot/ReadUntilConsistent) and reject early with a clear code (important for Solana Pay where the account arrives in the POST).\n- Caveats (document): point-in-time (race between check and pull); validates only the FIRST period (future periods = the low-balance top-up CTA).\n\n## B. Atomic co-signed subscribe (bundle subscribe + first pull)\nMake a NEW subscribe atomic like upgrade: one tx = [subscribe(new) + transfer_subscription(first period, cranker pre-signed)]. Reuse the existing partial-sign/co-sign machinery (BuildPartiallySignedTx) and the Solana Pay co-signed-tx path.\n- Benefits: ONE confirmation (vs subscribe-then-separate-crank), no 'subscribed-but-not-charged' window, fewer txs (returning user 1 vs 2; first-timer 2 vs 3), single clean failure boundary (both land or both revert -> say 'subscribed' / 'failed, top up' with certainty).\n- Constraint: init_authority STILL can't be in the same tx as subscribe (subscribe echoes the runtime init_id), so first-timers stay [init] then [subscribe+transfer]; returning users get a single tx.\n- Confirm path simplifies: verify the atomic tx landed (subscribe + first pull both succeeded) -> create membership; no separate crank in confirm. Poller (Solana Pay) detects via reference -> create membership.\n- Keep upgrade atomic (already), downgrade simple (no immediate charge).\n\nDECISION (user, 2026-06-03): adopt the atomic co-signed subscribe; the single-failure-boundary + lower latency + fewer txs outweigh the slightly more complex tx build. Pair with pre-flight so most failures are caught before any signing.",
-      "tasks": [
-        "[x] PrepareSubscribeService: for the subscribe step, return a co-signed [subscribe + transfer_subscription(first period)] tx (cranker pre-signs the transfer slot via BuildPartiallySignedTx), instead of a plain user-only subscribe. First-timer init step unchanged.",
-        "[x] Confirm/Enroll path: verify the atomic tx (subscribe+pull) landed, then CreateMembership; drop the separate first-crank. Solana Pay poller: same (reference -> membership).",
-        "[x] Pre-flight balance check: server-side at session create/build (read USDC ATA balance vs first-period amount, read-lag-safe, reject early with a typed 'insufficient_usdc' error).",
-        "[ ] Frontend pre-flight (doujins canonical + hentai0): block subscribe + show 'buy USDC' (MoonPay) when wallet USDC < first-period amount, using the existing balance UI.",
-        "[ ] Devnet validation: atomic subscribe+pull lands in ONE tx (returning user) and [init]+[subscribe+pull] (first-timer); underfunded wallet -> pre-flight blocks AND the atomic tx (if forced) reverts cleanly with no membership.",
-        "[ ] Keep upgrade atomic + downgrade simple; method order unchanged (card default, CCBill backup, Solana third).",
-        "[x] STAGE 1 DONE (1a883ac): atomic co-signed [subscribe+transfer] in PrepareSubscribeService (cranker pre-signs via BuildPartiallySignedTx); EnrollService.ConfirmEnrollment crank-free (funded-PDA proves the atomic pull); server pre-flight ErrInsufficientUSDC/InsufficientUSDCError -> 402 insufficient_funds (have/need). Browser-extension flow. NOTE: Solana Pay subscribe path made price-driven separately (Stage 2)."
       ],
       "completed": false
     }
