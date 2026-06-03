@@ -34,7 +34,7 @@ func (m *muxRouter) Handle(method, path string, h Handler, mw ...Middleware) {
 	all := make([]Middleware, 0, len(m.mw)+len(mw))
 	all = append(all, m.mw...)
 	all = append(all, mw...)
-	final := chain(h, all)
+	final := Chain(h, all)
 
 	pattern := method + " " + toMuxPath(m.prefix+path)
 	rt := m.rt

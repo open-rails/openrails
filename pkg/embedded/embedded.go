@@ -15,8 +15,8 @@ import (
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/controlplane"
 	server "github.com/open-rails/openrails/internal/http"
+	"github.com/open-rails/openrails/internal/http/router/ginrouter"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -144,7 +144,7 @@ func (e *Embedded) RegisterUserRoutes(group *gin.RouterGroup, opts RouteOptions)
 	if auth == nil {
 		auth = e.app.AuthProvider
 	}
-	httproutes.RegisterUserRoutes(router.NewGin(group, e.app.Runtime), e.app.Runtime, httproutes.Options{
+	httproutes.RegisterUserRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime, httproutes.Options{
 		AuthProvider:  auth,
 		Authenticator: authenticatorOf(auth),
 	})
@@ -167,7 +167,7 @@ func (e *Embedded) RegisterAdminRoutes(group *gin.RouterGroup, opts RouteOptions
 	if auth == nil {
 		auth = e.app.AuthProvider
 	}
-	httproutes.RegisterAdminRoutes(router.NewGin(group, e.app.Runtime), e.app.Runtime, httproutes.Options{
+	httproutes.RegisterAdminRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime, httproutes.Options{
 		AuthProvider:  auth,
 		Authenticator: authenticatorOf(auth),
 	})
@@ -185,7 +185,7 @@ func (e *Embedded) RegisterWebhookRoutes(group *gin.RouterGroup) {
 	if e == nil || e.app == nil {
 		panic("embedded billing: not initialized")
 	}
-	httproutes.RegisterWebhookRoutes(router.NewGin(group, e.app.Runtime), e.app.Runtime)
+	httproutes.RegisterWebhookRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime)
 }
 
 // authenticatorOf recovers a framework-neutral Authenticator from a Provider for

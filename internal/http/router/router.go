@@ -38,8 +38,9 @@ type Router interface {
 	Group(prefix string, mw ...Middleware) Router
 }
 
-// chain composes mw around h so that mw[0] runs first (outermost).
-func chain(h Handler, mw []Middleware) Handler {
+// Chain composes mw around h so that mw[0] runs first (outermost). It is exported
+// for adapter packages (e.g. ginrouter) that build their own framework wrapper.
+func Chain(h Handler, mw []Middleware) Handler {
 	for i := len(mw) - 1; i >= 0; i-- {
 		h = mw[i](h)
 	}

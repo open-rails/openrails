@@ -3,8 +3,8 @@ package server
 import (
 	"github.com/gin-gonic/gin"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/internal/http/router/ginrouter"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/http/router"
 )
 
 func (s *Server) registerAdminRoutesAt(e *gin.Engine, apiPrefix string) {
@@ -19,7 +19,7 @@ func (s *Server) registerAdminRoutesAt(e *gin.Engine, apiPrefix string) {
 	if s.controlPlane != nil {
 		opts.OperatorPermissionChecker = authpolicy.OperatorPermissionChecker(s.controlPlane)
 	}
-	httproutes.RegisterAdminRoutes(router.NewGin(admin, s.runtime), s.runtime, opts)
+	httproutes.RegisterAdminRoutes(ginrouter.New(admin, s.runtime), s.runtime, opts)
 }
 
 func (s *Server) registerAdminRoutesOn(e *gin.Engine) {

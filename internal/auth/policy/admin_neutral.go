@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/uptrace/bun"
 	log "github.com/sirupsen/logrus"
+	"github.com/uptrace/bun"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/http/request"
