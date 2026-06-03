@@ -936,13 +936,15 @@
       "completed": false,
       "description": "Replace the #267-agent's checkout-handoff + cancel-after-enroll approach with the ATOMIC single co-signed transaction the user signs (devnet-VALIDATED, commit 11a17dd). UPGRADE = ONE tx [cancel(old) + subscribe(new) + transfer_subscription(new, prorated)], co-signed by the subscriber (cancel+subscribe+fee payer) AND the merchant/cranker (the transfer_subscription caller). OpenRails partial-signs (cranker co-signs its slot) and returns the partially-signed tx; the wallet completes + submits. DOWNGRADE = ONE subscriber-signed tx [cancel(old) + subscribe(new)] with NO immediate charge; the first pull is deferred to the old period end (offset next_pull_at; the program has no future-start, so we charge on the non-first day via our cranker). Reuse CalculateModelBUpgradeCharge (#268) + FiatCentsToStablecoinBaseUnits for the prorated amount. Depends: #267 #268; the atomic bundle + partial-pull are devnet-proven.",
       "tasks": [
-        "[ ] partial-sign helper (integrations/solana): build tx, cranker signs ONLY its signer slot (find the cranker index in the message header), return partially-signed base64 for the wallet to add its signature + submit",
-        "[ ] BuildUpgradeBundle / BuildDowngradeBundle (recurring) using the validated instruction sequence",
-        "[ ] UPGRADE: prorated first amount (new_full - old_unused) -> USDC base units; cranker co-signs the transfer; reset period",
-        "[ ] DOWNGRADE: subscriber-only [cancel+subscribe]; defer first pull to old-period-end (offset next_pull_at)",
+        "[x] partial-sign helper (integrations/solana): build tx, cranker signs ONLY its signer slot (find the cranker index in the message header), return partially-signed base64 for the wallet to add its signature + submit",
+        "[x] BuildUpgradeBundle / BuildDowngradeBundle (recurring) using the validated instruction sequence",
+        "[x] UPGRADE: prorated first amount (new_full - old_unused) -> USDC base units; cranker co-signs the transfer; reset period",
+        "[x] DOWNGRADE: subscriber-only [cancel+subscribe]; defer first pull to old-period-end (offset next_pull_at)",
         "[ ] TierChange Solana branch returns the partially-signed bundle (next_action solana_sign_transactions); confirm observes the landed tx -> mirror DB (cancel old membership, create new)",
         "[ ] REMOVE the #267-agent checkout-handoff + soft-cancel-after code",
-        "[ ] tests + devnet (real USDC): upgrade pulls the prorated amount atomically; downgrade defers the first charge"
+        "[ ] tests + devnet (real USDC): upgrade pulls the prorated amount atomically; downgrade defers the first charge",
+        "[x] ATOMIC CORE DONE (commits: partial-sign helper + PrepareTierChangeService). BuildPartiallySignedTx (cranker co-signs, wallet completes) + recurring.PrepareTierChangeService: UPGRADE = co-signed [cancel+subscribe+transfer(prorated)] 3-instr/2-signer bundle; DOWNGRADE = unsigned [cancel+subscribe]. Unit-tested. Validated round-trip: cranker pre-sign -> wallet completes -> VerifySignatures passes.",
+        "[ ] REMAINING INTEGRATION: (a) build PrepareTierChangeService at the composition root (server.go: cranker Signer + RPC + network); (b) a prepare endpoint that loads the old solana_subscriptions row + new price plan config + computes Model-B prorated amount -> returns the atomic tx (next_action solana_sign_transactions); (c) a confirm endpoint that observes the landed tx -> DB mirror (cancel old membership + create new membership/row for the new plan; downgrade sets next_pull_at = old period end); (d) REMOVE the #267-agent checkout-handoff + soft-cancel-after in session_service.go (UpgradeFromSubscriptionID, prepareSolanaUpgradeFirstCharge, solanaUpgradeCanceller)."
       ]
     },
     {
@@ -951,7 +953,7 @@
       "completed": true,
       "description": "Ensure the tenant's merchant/cranker USDC RECEIVING ATA exists before the first crank. transfer_subscription pulls INTO the merchant's token account; a missing ATA makes the pull fail. Devnet-confirmed: the live test had to create it manually. Production needs an idempotent CreateIdempotent ATA at plan-publish (or enroll/first-crank), paid by the cranker. Handle the cold-wallet case too (when a separate destination wallet is configured, ensure THAT wallet's ATA).",
       "tasks": [
-        "[x] ensure-ATA helper (associated-token CreateIdempotent) for (receiver, mint) — subscriptions.BuildCreateIdempotentATA",
+        "[x] ensure-ATA helper (associated-token CreateIdempotent) for (receiver, mint) \u2014 subscriptions.BuildCreateIdempotentATA",
         "[x] call it at PublishPlan (PlanService.ensureReceivingATA), paid by the cranker; idempotent + safe to repeat",
         "[x] cold-wallet plans: ensure the configured destination wallet's ATA",
         "[ ] devnet test: fresh tenant -> publish -> first crank succeeds with NO manual ATA setup (unit-tested via fake Submitter; live devnet rerun is a follow-up)"
@@ -964,9 +966,9 @@
       "description": "Fix the Custom:519 / read-after-write race in the two-step subscribe. PrepareSubscribe reads the SubscriptionAuthority initId right after init_subscription_authority confirms; under RPC lag the read can race or the repeated-subscribe-by-same-wallet hits Custom:519 (accumulated authority state). Add a confirm-settle + bounded retry so the init -> read-authority -> subscribe handoff is robust. Confirm the real meaning of Custom:519 (likely the authority must pass a CURRENT counter, not the original init_id).\n\nDONE: added readAuthorityInitID(ctx, rpc, saPDA) (initId, exists, err) in prepare_subscribe.go with bounded read-after-write retry (10 attempts, ~1s apart, context-aware): keeps retrying empty/short reads, returns exists=false (init tx) only when it stays empty across the whole bound, and errors with a clear never-settled message if a present account never reaches initId length. Prepare() now uses it. Unit tests in prepare_subscribe_test.go (fakePrepareRPC) cover settle-after-empties, present-immediately, never-present-is-first-time, short-account-errors, RPC-error, context-cancel.\n\nFOLLOW-UP (still open, needs devnet): the repeated-subscribe-by-same-wallet Custom:519 root cause is NOT confirmed. Leading hypothesis (documented as a TODO(#274) in prepare_subscribe.go) is that subscribe must echo the authority's CURRENT counter rather than the original init_id at offset 98. Do NOT change the offset/semantics until a devnet root-cause check (current authority counter vs original init_id) proves what value subscribe must pass. This change only makes the read robust against RPC lag.",
       "tasks": [
         "[x] after init confirms, retry the SubscriptionAuthority GetAccountData until the initId/counter is stable (bounded backoff)",
-        "[ ] confirm the Custom:519 root cause on devnet (authority counter vs init_id); pass the correct expected value in subscribe — TODO(#274) documented in code; needs devnet confirmation, do NOT guess counter semantics",
+        "[ ] confirm the Custom:519 root cause on devnet (authority counter vs init_id); pass the correct expected value in subscribe \u2014 TODO(#274) documented in code; needs devnet confirmation, do NOT guess counter semantics",
         "[x] PrepareSubscribe re-prepare tolerates a transiently-missing authority",
-        "[ ] devnet: first-time + repeat subscribe succeed reliably — repeat-subscribe still pending the Custom:519 devnet root-cause above"
+        "[ ] devnet: first-time + repeat subscribe succeed reliably \u2014 repeat-subscribe still pending the Custom:519 devnet root-cause above"
       ]
     },
     {
@@ -975,8 +977,8 @@
       "completed": true,
       "description": "Comprehensive rebill/dunning/cancel STATE-MACHINE validation. The dunning/rebill cadence is clock-driven (cranker uses an injectable clockwork.Clock + next_pull_at), so most of it is testable FAST without waiting; the on-chain per-period cap only resets on wall-clock (period_hours min = 1 HOUR; sub-hour is impossible), so a real second on-chain rebill needs ~1 real hour.",
       "tasks": [
-        "[x] FAST clock-driven test: fake clock advances; assert multi-rebill (RenewMembership advances next_pull_at one period), dunning escalation past_due->retries->cancel at MaxDunningFailures (next_pull_at by DunningInterval), AlreadyPaid/Operational(no-dun, no-reschedule)/Terminal(cancel, no-dun) classifier branches + ghost-plan expiry (stub only the pull) — internal/river/jobs_solana_crank_statemachine_test.go (refactored crankOne onto solanaSubStore + resolvePlanFn seams)",
-        "[x] SLOW on-chain devnet test: period_hours=1 -> subscribe -> crank -> immediate re-pull rejected (Custom:400) -> wait for the period to roll (~1h, polled) -> crank again (cap reset, real 2nd rebill, distinct sig) -> cancel; build-tag devnet, 3h timeout, run manually/scheduled — internal/modules/solana/recurring/service_devnet_multirebill_test.go (NOT run: multi-hour + scarce devnet USDC)",
+        "[x] FAST clock-driven test: fake clock advances; assert multi-rebill (RenewMembership advances next_pull_at one period), dunning escalation past_due->retries->cancel at MaxDunningFailures (next_pull_at by DunningInterval), AlreadyPaid/Operational(no-dun, no-reschedule)/Terminal(cancel, no-dun) classifier branches + ghost-plan expiry (stub only the pull) \u2014 internal/river/jobs_solana_crank_statemachine_test.go (refactored crankOne onto solanaSubStore + resolvePlanFn seams)",
+        "[x] SLOW on-chain devnet test: period_hours=1 -> subscribe -> crank -> immediate re-pull rejected (Custom:400) -> wait for the period to roll (~1h, polled) -> crank again (cap reset, real 2nd rebill, distinct sig) -> cancel; build-tag devnet, 3h timeout, run manually/scheduled \u2014 internal/modules/solana/recurring/service_devnet_multirebill_test.go (NOT run: multi-hour + scarce devnet USDC)",
         "[ ] full-stack/browser e2e in the docker stack (local image + devnet USDC) per docs/solana-recurring-e2e-runbook.md",
         "[ ] CI: schedule the devnet integration test with a funded-wallet secret so the real flow is continuously verified"
       ]
