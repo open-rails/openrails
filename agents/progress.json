@@ -964,8 +964,8 @@
         "[x] self endpoint (or cancel-with-onchain option) returns an unsigned cancel/revoke tx (subscriber = signer + fee payer) -- POST /v1/self/subscriptions/:id/solana-cancel-tx (PrepareCancelService)",
         "[ ] confirm path observes the on-chain cancel and records it on the solana_subscriptions row (cancelled_onchain + signature) -- deferred (optional per scope; soft cancel already stops billing)",
         "[x] keep soft cancel (#264) as the guaranteed billing-stop; on-chain cancel is additive",
-        "[ ] devnet test: cancel tx lands -> subsequent crank rejected by program -- to be devnet-confirmed under #263",
-        "[ ] DESIGN CORRECTION (#263 devnet): the program's revoke_delegation FAILED on-chain in testing; the real trustless stop is the SPL token Revoke on the subscriber's ATA (removes the SubscriptionAuthority delegate so transfer_subscription can't move funds). #266's prepare-cancel tx should build token.Revoke (+ optionally cancel_subscription for record), NOT the program revoke_delegation."
+        "[x] devnet test: cancel tx lands -> subsequent crank rejected by program -- devnet-confirmed under #263 (token Revoke -> transfer_subscription fails OwnerMismatch Custom:4)",
+        "[x] DESIGN CORRECTION (#263 devnet) DONE: PrepareCancelService now builds the SPL token Revoke on the subscriber's ATA (token.NewRevokeInstruction(subscriberATA, subscriber, nil), ATA via subscriptions.DeriveATA(subscriber, mint, TokenProgramID)) -- the trustless stop -- NOT cancel_subscription/revoke_delegation (proven on devnet to NOT halt pulls). Revoke alone (subscriber = signer + fee payer); cancel_subscription omitted as it's a no-op for stopping billing. Unit test asserts the tx carries exactly one token.Revoke targeting the subscriber ATA with subscriber as owner + fee payer."
       ]
     },
     {
