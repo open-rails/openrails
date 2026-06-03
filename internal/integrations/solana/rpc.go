@@ -167,6 +167,13 @@ func (c *RPCClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataS
 	return c.fallback.GetMinimumBalanceForRentExemption(ctx, dataSize)
 }
 
+// GetAccountData returns an account's raw data bytes, or (nil, nil) when the
+// account does not exist (used to read on-chain PDA state, e.g. the
+// SubscriptionAuthority initId for building a subscribe instruction).
+func (c *RPCClient) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
+	return c.fallback.GetAccountData(ctx, address)
+}
+
 // GetEndpoint returns the current RPC endpoint
 func (c *RPCClient) GetEndpoint() string {
 	return c.fallback.GetEndpoint()

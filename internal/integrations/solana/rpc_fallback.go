@@ -276,6 +276,30 @@ func (c *RPCFallbackClient) GetBalance(ctx context.Context, address solanago.Pub
 	return balance, err
 }
 
+// GetAccountData returns an account's raw data bytes, or (nil, nil) when the
+// account does not exist. Uses Confirmed commitment so freshly-written state
+// (e.g. a just-initialized PDA) is visible without waiting for finalization.
+func (c *RPCFallbackClient) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
+	var data []byte
+	err := c.withFallback(ctx, "GetAccountData", func(client *rpc.Client) error {
+		ai, err := client.GetAccountInfoWithOpts(ctx, address, &rpc.GetAccountInfoOpts{Commitment: rpc.CommitmentConfirmed})
+		if err != nil {
+			if errors.Is(err, rpc.ErrNotFound) {
+				data = nil
+				return nil
+			}
+			return err
+		}
+		if ai == nil || ai.Value == nil {
+			data = nil
+			return nil
+		}
+		data = ai.Value.Data.GetBinary()
+		return nil
+	})
+	return data, err
+}
+
 // GetLatestBlockhash gets the latest blockhash with automatic failover.
 func (c *RPCFallbackClient) GetLatestBlockhash(ctx context.Context) (solanago.Hash, error) {
 	var blockhash solanago.Hash
