@@ -12,17 +12,15 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/crypto"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/request/ginreq"
-	"github.com/open-rails/openrails/internal/http/router"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -421,51 +419,23 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	return e
 }
 
-// newHTTPHandlerMux assembles the embedded billing surface as a gin-free
-// *http.ServeMux (issue #282). Route groups are registered via router.NewMux
-// (request.NewHTTP backend), and the captcha routes are plain net/http handlers.
-// The mux is wrapped with the net/http base middleware stack (security headers,
-// CORS, body limit, tenant resolution) — the gin-free analogue of the global
-// engine middleware. The returned handler imports zero gin on the request path.
-//
-// NOTE: rate-limiting + the captcha challenge flow are NOT applied here (they are
-// gin/captcha-flow-coupled; the standalone gin surface keeps them, and embedded
-// hosts front billing with their own gateway). See middleware/http_base.go.
+// newHTTPHandlerMux delegates to the gin-free embedhttp assembler (issue
+// #282/#285), which builds the embedded billing surface as a net/http handler
+// with zero gin on the request path. The gin Server holds the standalone surface
+// (newPublicEngine); embedded hosts use this gin-free handler via pkg/embedded.
 func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
-	opts = opts.withDefaults()
-	mux := http.NewServeMux()
-
-	if opts.IncludeUser {
-		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.
-		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandlerHTTP)
-		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandlerHTTP)
-		httproutes.RegisterUserRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.runtime), s.runtime, httproutes.Options{
-			Authenticator: s.embeddedAuthenticator(),
-		})
+	asm := &embedhttp.Assembler{
+		Cfg:           s.cfg,
+		Runtime:       s.runtime,
+		ControlPlane:  s.controlPlane,
+		CaptchaStore:  s.captchaStore,
+		Authenticator: s.embeddedAuthenticator(),
 	}
-	if opts.IncludeAdmin {
-		adminOpts := httproutes.Options{
-			Authenticator: s.embeddedAuthenticator(),
-		}
-		if s.controlPlane != nil {
-			adminOpts.OperatorPermissionChecker = authpolicy.OperatorPermissionChecker(s.controlPlane)
-		}
-		httproutes.RegisterAdminRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/admin", s.runtime), s.runtime, adminOpts)
-	}
-	if opts.IncludeWebhooks {
-		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.runtime), s.runtime)
-	}
-
-	var origins []string
-	if s.cfg != nil {
-		origins = s.cfg.AllowedCORSOrigins()
-	}
-	return middleware.ChainHTTP(mux,
-		middleware.SecurityHeadersHTTP(),
-		middleware.CORSHTTP(origins),
-		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveTenantHTTP(),
-	)
+	return asm.NewHTTPHandler(embedhttp.Options{
+		IncludeUser:     opts.IncludeUser,
+		IncludeAdmin:    opts.IncludeAdmin,
+		IncludeWebhooks: opts.IncludeWebhooks,
+	})
 }
 
 // NewHTTPHandler returns a single mountable `http.Handler` for the selected route groups.

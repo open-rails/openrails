@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -14,10 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/controlplane"
-	server "github.com/open-rails/openrails/internal/http"
-	"github.com/open-rails/openrails/internal/http/router/ginrouter"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
+	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/service"
@@ -37,8 +33,7 @@ type Options struct {
 }
 
 type Embedded struct {
-	app    *app.App
-	server *server.Server
+	app *app.App
 }
 
 func New(opts Options) (*Embedded, error) {
@@ -46,7 +41,11 @@ func New(opts Options) (*Embedded, error) {
 		return nil, fmt.Errorf("config is required")
 	}
 
-	assembled, err := bootstrap.NewServer(opts.Config, &bootstrap.Options{
+	// Build the gin-free application graph only. The standalone gin HTTP surface
+	// (Handler / Register*Routes) lives in the pkg/embedded/gin subpackage, which
+	// constructs the gin server from this App on demand (#285). Keeping the gin
+	// server out of this core type is what makes pkg/embedded gin-free.
+	application, err := bootstrap.NewApp(opts.Config, &bootstrap.Options{
 		DB:            opts.DB,
 		PGXPool:       opts.PGXPool,
 		Redis:         opts.Redis,
@@ -57,17 +56,16 @@ func New(opts Options) (*Embedded, error) {
 		return nil, err
 	}
 
-	return &Embedded{
-		app:    assembled.App,
-		server: assembled.Server,
-	}, nil
+	return &Embedded{app: application}, nil
 }
 
-func (e *Embedded) Handler() http.Handler {
-	if e == nil || e.server == nil {
+// App returns the gin-free application graph. It is the bridge the
+// pkg/embedded/gin subpackage uses to build the gin HTTP surface (#285).
+func (e *Embedded) App() *app.App {
+	if e == nil {
 		return nil
 	}
-	return e.server.Handler()
+	return e.app
 }
 
 // HTTPHandlerOptions controls which billing HTTP route groups are included in the returned handler.
@@ -86,10 +84,10 @@ type HTTPHandlerOptions struct {
 //
 // Embedded routes live under `/billing/v1/*`.
 func (e *Embedded) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
-	if e == nil || e.server == nil {
+	if e == nil || e.app == nil {
 		return nil
 	}
-	return e.server.NewHTTPHandler(server.HTTPHandlerOptions{
+	return embedhttp.FromApp(e.app).NewHTTPHandler(embedhttp.Options{
 		IncludeUser:     opts.IncludeUser,
 		IncludeAdmin:    opts.IncludeAdmin,
 		IncludeWebhooks: opts.IncludeWebhooks,
@@ -125,78 +123,6 @@ func (e *Embedded) ControlPlane() *controlplane.ControlPlane {
 	return e.app.ControlPlane
 }
 
-// RouteOptions configures route registration behavior.
-type RouteOptions struct {
-	// AuthProvider is required for routes that need authentication.
-	// If not provided, uses the auth provider from Embedded initialization.
-	AuthProvider ginauth.Provider
-}
-
-// RegisterUserRoutes registers user-facing billing routes on the provided Gin router group.
-// These routes include products, prices, checkout, subscriptions, payments, etc.
-//
-// Example:
-//
-//	router := gin.Default()
-//	api := router.Group("/billing/v1")
-//	billing.RegisterUserRoutes(api, embedded.RouteOptions{})
-func (e *Embedded) RegisterUserRoutes(group *gin.RouterGroup, opts RouteOptions) {
-	if e == nil || e.app == nil {
-		panic("embedded billing: not initialized")
-	}
-	httproutes.RegisterUserRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime, httproutes.Options{
-		Authenticator: e.routeAuthenticator(opts),
-	})
-}
-
-// RegisterAdminRoutes registers admin billing routes on the provided Gin router group.
-// These routes include subscription management, payment management, user management, and metrics.
-// All routes require admin authorization.
-//
-// Example:
-//
-//	router := gin.Default()
-//	admin := router.Group("/billing/v1/admin")
-//	billing.RegisterAdminRoutes(admin, embedded.RouteOptions{})
-func (e *Embedded) RegisterAdminRoutes(group *gin.RouterGroup, opts RouteOptions) {
-	if e == nil || e.app == nil {
-		panic("embedded billing: not initialized")
-	}
-	httproutes.RegisterAdminRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime, httproutes.Options{
-		Authenticator: e.routeAuthenticator(opts),
-	})
-}
-
-// RegisterWebhookRoutes registers webhook routes on the provided Gin router group.
-// These routes handle incoming webhooks from payment processors (Stripe, CCBill, NMI, etc.).
-//
-// Example:
-//
-//	router := gin.Default()
-//	webhooks := router.Group("/billing/v1/webhooks")
-//	billing.RegisterWebhookRoutes(webhooks)
-func (e *Embedded) RegisterWebhookRoutes(group *gin.RouterGroup) {
-	if e == nil || e.app == nil {
-		panic("embedded billing: not initialized")
-	}
-	httproutes.RegisterWebhookRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime)
-}
-
-// routeAuthenticator resolves the framework-neutral Authenticator for a gin
-// route registration: the per-call RouteOptions.AuthProvider (a gin Provider)
-// wins when it exposes one, else the app's configured authenticator (#282/#285).
-func (e *Embedded) routeAuthenticator(opts RouteOptions) billingauth.Authenticator {
-	if opts.AuthProvider != nil {
-		if a, ok := ginauth.AsAuthenticator(opts.AuthProvider); ok {
-			return a
-		}
-	}
-	if e != nil && e.app != nil {
-		return e.app.Authenticator
-	}
-	return nil
-}
-
 func (e *Embedded) RunWorkers(ctx context.Context) error {
 	if e == nil || e.app == nil || e.app.Runtime == nil {
 		return fmt.Errorf("runtime is not initialized")
@@ -205,16 +131,10 @@ func (e *Embedded) RunWorkers(ctx context.Context) error {
 }
 
 func (e *Embedded) Close(ctx context.Context) error {
-	if e == nil {
+	if e == nil || e.app == nil {
 		return nil
 	}
-	if e.server != nil {
-		_ = e.server.Close(ctx)
-	}
-	if e.app != nil {
-		return e.app.Close(ctx)
-	}
-	return nil
+	return e.app.Close(ctx)
 }
 
 func (e *Embedded) Config() *config.Config {
