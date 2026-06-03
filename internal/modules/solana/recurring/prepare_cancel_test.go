@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	solanago "github.com/doujins-org/solana-go"
-	"github.com/doujins-org/solana-go/programs/token"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -62,8 +61,9 @@ func TestPrepareCancel_BuildsUnsignedTx(t *testing.T) {
 	}
 
 	// The deserialized tx must carry the subscriber as fee payer + signer and a
-	// single SPL token Revoke instruction targeting the subscriber's ATA — the
-	// trustless billing stop (#266). cancel_subscription is NOT what stops pulls.
+	// single program `cancel_subscription` instruction for this subscription's PDA
+	// — the per-subscription on-chain cancel the user signs (#266). NOT an SPL
+	// token Revoke (that would nuke all the user's subs for the mint).
 	tx, err := solanago.TransactionFromBytes(raw)
 	if err != nil {
 		t.Fatalf("unmarshal tx: %v", err)
@@ -75,41 +75,17 @@ func TestPrepareCancel_BuildsUnsignedTx(t *testing.T) {
 		t.Fatalf("want 1 instruction, got %d", len(tx.Message.Instructions))
 	}
 
-	// The lone instruction must be an SPL token Revoke on the SPL token program.
-	subscriber := solanago.MustPublicKeyFromBase58(row.SubscriberWallet)
-	mint := solanago.MustPublicKeyFromBase58(row.Mint)
-	wantATA, _, err := subscriptions.DeriveATA(subscriber, mint, solanago.TokenProgramID)
-	if err != nil {
-		t.Fatalf("derive ata: %v", err)
-	}
-
 	cix := tx.Message.Instructions[0]
 	progKey, err := tx.Message.Program(cix.ProgramIDIndex)
 	if err != nil {
 		t.Fatalf("resolve program id: %v", err)
 	}
-	if !progKey.Equals(solanago.TokenProgramID) {
-		t.Errorf("instruction program = %q, want SPL token program %q", progKey, solanago.TokenProgramID)
+	if !progKey.Equals(subscriptions.ProgramID) {
+		t.Errorf("instruction program = %q, want Subscriptions program %q", progKey, subscriptions.ProgramID)
 	}
-
-	// Resolve the instruction's account metas and decode it as a token Revoke.
-	accs, err := cix.ResolveInstructionAccounts(&tx.Message)
-	if err != nil {
-		t.Fatalf("resolve instruction accounts: %v", err)
-	}
-	decoded, err := token.DecodeInstruction(accs, cix.Data)
-	if err != nil {
-		t.Fatalf("decode token instruction: %v", err)
-	}
-	revoke, ok := decoded.Impl.(*token.Revoke)
-	if !ok {
-		t.Fatalf("instruction is %T, want *token.Revoke", decoded.Impl)
-	}
-	if got := revoke.GetSourceAccount().PublicKey; !got.Equals(wantATA) {
-		t.Errorf("revoke source = %q, want subscriber ATA %q", got, wantATA)
-	}
-	if got := revoke.GetOwnerAccount().PublicKey; !got.Equals(subscriber) {
-		t.Errorf("revoke owner = %q, want subscriber %q", got, subscriber)
+	// discriminator 12 == cancel_subscription
+	if len(cix.Data) == 0 || cix.Data[0] != 12 {
+		t.Errorf("instruction discriminator = %v, want 12 (cancel_subscription)", cix.Data)
 	}
 }
 
