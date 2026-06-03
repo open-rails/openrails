@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/doujins-org/ginapi/response"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -66,7 +65,7 @@ func GetProducts(r *httprequest.Request) {
 		productObjects[i] = ProductToAPI(p.Product, p.Prices)
 	}
 
-	r.SuccessJSON(response.NewList(productObjects, result.TotalItems, req.Limit, req.Offset))
+	r.SuccessJSON(api.NewList(productObjects, result.TotalItems, req.Limit, req.Offset))
 }
 
 func GetPrices(r *httprequest.Request) {
@@ -125,5 +124,5 @@ func GetPrices(r *httprequest.Request) {
 		priceObjects[i] = PriceToAPI(p)
 	}
 
-	r.SuccessJSON(response.NewList(priceObjects, totalItems, req.Limit, req.Offset))
+	r.SuccessJSON(api.NewList(priceObjects, totalItems, req.Limit, req.Offset))
 }
