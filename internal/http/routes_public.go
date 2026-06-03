@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
 	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/http/router/ginrouter"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
@@ -45,7 +46,7 @@ func (s *Server) captchaStatusHandler(c *gin.Context) {
 	}
 
 	required := false
-	for _, subjectKey := range middleware.RateLimitSubjectKeys(c) {
+	for _, subjectKey := range ginmw.RateLimitSubjectKeys(c) {
 		challenged, err := s.captchaStore.IsChallenged(c.Request.Context(), subjectKey)
 		if err != nil {
 			continue

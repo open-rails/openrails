@@ -17,7 +17,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -101,7 +101,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// is the same surface registered on the public handler at /v1/service/*.
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(middleware.ResolveTenant())
+	router.Use(ginmw.ResolveTenant())
 	group := router.Group("/v1/service")
 	resolver := stubOATResolver{permissions: []string{
 		controlplane.PermCreditsRead,
@@ -109,7 +109,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		controlplane.PermCreditsSpend,
 		controlplane.PermEntitlementsRead,
 	}}
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, middleware.OATRequired(resolver), nil, nil)
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.OATRequired(resolver), nil, nil)
 
 	withOAT := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer openrails_oat_testkeyid_testsecret")

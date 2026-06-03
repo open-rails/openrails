@@ -1,4 +1,4 @@
-package middleware
+package ginmw
 
 import (
 	"net"
@@ -10,9 +10,13 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/open-rails/openrails/internal/http/middleware"
 )
 
-const DefaultMaxBodyBytes int64 = 1 << 20
+// DefaultMaxBodyBytes is re-exported from the gin-free middleware package so the
+// standalone gin server can keep referencing ginmw.DefaultMaxBodyBytes.
+const DefaultMaxBodyBytes = middleware.DefaultMaxBodyBytes
 
 // BodyLimit caps request bodies before handlers bind JSON or read forms.
 func BodyLimit(maxBytes int64) gin.HandlerFunc {

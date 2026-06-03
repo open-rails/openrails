@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/request/ginreq"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -272,7 +273,7 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // canonical colon-form OpenRails permission catalog, and the acting tenant is the
 // OAT's owning tenant (pinned by OATRequired before any tenant-owned DB access).
 //
-// oatMW must authenticate the OAT (typically middleware.OATRequired); it pins the
+// oatMW must authenticate the OAT (typically ginmw.OATRequired); it pins the
 // resolved tenant + permissions onto the context that the per-route
 // RequireOATPermission gates and the handlers read.
 func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc, minter DelegatedMinter, issuerAdmin DelegatedIssuerAdmin) {
@@ -284,7 +285,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// Pin a tenant-scoped DB connection AFTER the OAT resolves the tenant, so RLS
 	// constrains every tenant-owned query (issue #227).
 	if rt != nil && rt.DB != nil {
-		group.Use(middleware.TenantDBConn(rt.DB))
+		group.Use(ginmw.TenantDBConn(rt.DB))
 	}
 
 	// Browser-tier delegated-token MINT (issue #222). A host backend authenticated
@@ -299,7 +300,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// retired once all tenants self-sign (see the issuer-management routes below).
 	if minter != nil {
 		group.POST("/delegated-tokens",
-			middleware.RequireOATPermission(controlplane.PermSelfMint),
+			ginmw.RequireOATPermission(controlplane.PermSelfMint),
 			mintDelegatedTokenHandler(minter),
 		)
 	}
@@ -311,15 +312,15 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// OAT (never the body), so a caller can only manage its OWN tenant's issuers.
 	if issuerAdmin != nil {
 		issuers := group.Group("/tenant/issuers")
-		issuers.POST("", middleware.RequireOATPermission(controlplane.PermAdmin), registerDelegatedIssuerHandler(issuerAdmin))
-		issuers.GET("", middleware.RequireOATPermission(controlplane.PermAdmin), listDelegatedIssuersHandler(issuerAdmin))
-		issuers.POST("/disable", middleware.RequireOATPermission(controlplane.PermAdmin), disableDelegatedIssuerHandler(issuerAdmin))
+		issuers.POST("", ginmw.RequireOATPermission(controlplane.PermAdmin), registerDelegatedIssuerHandler(issuerAdmin))
+		issuers.GET("", ginmw.RequireOATPermission(controlplane.PermAdmin), listDelegatedIssuersHandler(issuerAdmin))
+		issuers.POST("/disable", ginmw.RequireOATPermission(controlplane.PermAdmin), disableDelegatedIssuerHandler(issuerAdmin))
 	}
 
 	users := group.Group("/users/:user_id")
-	users.GET("/entitlements", middleware.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
-	users.GET("/credits", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
-	users.GET("/product-access", middleware.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
+	users.GET("/entitlements", ginmw.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
+	users.GET("/credits", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
+	users.GET("/product-access", ginmw.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
 
 	credits := group.Group("/credits")
 	// SPEND (hot-path billing) operations — authorize/hold/capture draw down a
@@ -328,13 +329,13 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// payer" gate (issue #246). The two are checked in sequence; PermAdmin
 	// satisfies either. Release returns a remainder (un-bills), so it needs write
 	// but not spend.
-	creditsSpend := middleware.RequireOATPermission(controlplane.PermCreditsSpend)
-	creditsWrite := middleware.RequireOATPermission(controlplane.PermCreditsWrite)
+	creditsSpend := ginmw.RequireOATPermission(controlplane.PermCreditsSpend)
+	creditsWrite := ginmw.RequireOATPermission(controlplane.PermCreditsWrite)
 
 	// Unified authorize: policy decision + ATOMIC hold placement (issue #235/#247).
 	credits.POST("/authorize", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAuthorizeCredits))
 	// Payer balance snapshot (issue #235/#247): available = balance - held.
-	credits.GET("/balance", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditsBalance))
+	credits.GET("/balance", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditsBalance))
 
 	credits.POST("/deposit", creditsWrite, wrap(httphandlers.ServiceDepositCredits))
 	credits.POST("/withdraw", creditsWrite, wrap(httphandlers.ServiceWithdrawCredits))
@@ -343,13 +344,13 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	credits.POST("/holds/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
 	credits.POST("/hold/:id/capture", creditsWrite, creditsSpend, wrap(httphandlers.ServiceCaptureHold))
 	credits.POST("/hold/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
-	credits.GET("/transactions/lookup", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
-	credits.GET("/users/:user_id", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
+	credits.GET("/transactions/lookup", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
+	credits.GET("/users/:user_id", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
 
 	// Org billing-account admin surface (issue #242): configure prepaid|arrears
 	// mode + spend caps + auto-top-up, read settings, and list usage. Tensorhub's
 	// billing-admin proxies to these with its service OAT; OpenRails owns the model.
-	creditsRead := middleware.RequireOATPermission(controlplane.PermCreditsRead)
+	creditsRead := ginmw.RequireOATPermission(controlplane.PermCreditsRead)
 	credits.PUT("/account-settings", creditsWrite, wrap(httphandlers.ServiceSetCreditAccountSettings))
 	credits.GET("/account-settings", creditsRead, wrap(httphandlers.ServiceGetCreditAccountSettings))
 	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListOwnerCreditTransactions))
@@ -359,11 +360,11 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// writes available to OATs only under an explicit permission). Reads use the
 	// coarse credits:read capability.
 	creditTypes := group.Group("/credit-types")
-	creditTypes.POST("", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceCreateCreditType))
-	creditTypes.GET("", middleware.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceListCreditTypes))
-	creditTypes.PATCH("/:name", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceUpdateCreditType))
-	creditTypes.POST("/:name/deactivate", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceDeactivateCreditType))
-	creditTypes.POST("/:name/activate", middleware.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceActivateCreditType))
+	creditTypes.POST("", ginmw.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceCreateCreditType))
+	creditTypes.GET("", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceListCreditTypes))
+	creditTypes.PATCH("/:name", ginmw.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceUpdateCreditType))
+	creditTypes.POST("/:name/deactivate", ginmw.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceDeactivateCreditType))
+	creditTypes.POST("/:name/activate", ginmw.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceActivateCreditType))
 }
 
 // RegisterSelfServiceRoutes mounts the browser-direct SELF-SERVICE billing
@@ -376,7 +377,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 // its own subject.
 //
 // delegatedMW must authenticate the delegated token (typically
-// middleware.DelegatedSelfRequired); it pins the resolved tenant + acting user +
+// ginmw.DelegatedSelfRequired); it pins the resolved tenant + acting user +
 // self-permissions onto the context that the per-route RequireDelegatedPermission
 // gates and the handlers read.
 func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
@@ -388,10 +389,10 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	// Pin a tenant-scoped DB connection AFTER the delegated token resolves the
 	// tenant, so RLS constrains every tenant-owned query (issue #227).
 	if rt != nil && rt.DB != nil {
-		group.Use(middleware.TenantDBConn(rt.DB))
+		group.Use(ginmw.TenantDBConn(rt.DB))
 	}
 
-	read := middleware.RequireDelegatedPermission(controlplane.PermSelfBillingRead)
+	read := ginmw.RequireDelegatedPermission(controlplane.PermSelfBillingRead)
 
 	// Account + balance/credits read.
 	group.GET("/status", read, wrap(httphandlers.GetMyBillingStatus))
@@ -413,8 +414,8 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	// the token's delegated_sub (bound by DelegatedSelfRequired), so every op is
 	// scoped to that user's own subscription. payment-method update is a
 	// payment-method mutation -> the payment-methods:manage scope.
-	subscriptionManage := middleware.RequireDelegatedPermission(controlplane.PermSelfSubscriptionCancel)
-	manage := middleware.RequireDelegatedPermission(controlplane.PermSelfPaymentMethods)
+	subscriptionManage := ginmw.RequireDelegatedPermission(controlplane.PermSelfSubscriptionCancel)
+	manage := ginmw.RequireDelegatedPermission(controlplane.PermSelfPaymentMethods)
 	subs := group.Group("/subscriptions")
 	subs.GET("", read, wrap(httphandlers.GetMySubscriptions))
 	subs.GET("/:id", read, wrap(httphandlers.GetSubscription))
@@ -446,7 +447,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	pm.DELETE("/:id", manage, wrap(httphandlers.DeletePaymentMethod))
 
 	// Checkout: create a session and read/confirm it (browser self-checkout).
-	checkoutCreate := middleware.RequireDelegatedPermission(controlplane.PermSelfCheckoutCreate)
+	checkoutCreate := ginmw.RequireDelegatedPermission(controlplane.PermSelfCheckoutCreate)
 	checkout := group.Group("/checkout")
 	checkout.POST("", checkoutCreate, wrap(httphandlers.CreateCheckoutSession))
 	checkout.GET("/:id", read, wrap(httphandlers.GetCheckoutSession))
@@ -470,7 +471,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 //     tenant (RLS-enforced, #227). A `:user_id` belonging to another tenant is
 //     therefore unreachable — fail closed, no cross-tenant access.
 //
-// delegatedMW must authenticate the delegated token (middleware.DelegatedSelfRequired);
+// delegatedMW must authenticate the delegated token (ginmw.DelegatedSelfRequired);
 // it pins the resolved tenant + acting admin + tenant-permissions onto the
 // context that the per-route RequireDelegatedPermission gates and handlers read.
 func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegatedMW gin.HandlerFunc) {
@@ -482,15 +483,15 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	// Pin a tenant-scoped DB connection AFTER the delegated token resolves the
 	// tenant, so RLS constrains every tenant-owned query (issue #227).
 	if rt != nil && rt.DB != nil {
-		group.Use(middleware.TenantDBConn(rt.DB))
+		group.Use(ginmw.TenantDBConn(rt.DB))
 	}
 
-	read := middleware.RequireDelegatedPermission(controlplane.PermTenantBillingRead)
-	subRead := middleware.RequireDelegatedPermission(controlplane.PermTenantBillingRead)
-	entWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantEntitlementsWrite)
-	payWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantPaymentsWrite)
-	subWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantSubscriptionsWrite)
-	metricsRead := middleware.RequireDelegatedPermission(controlplane.PermTenantMetricsRead)
+	read := ginmw.RequireDelegatedPermission(controlplane.PermTenantBillingRead)
+	subRead := ginmw.RequireDelegatedPermission(controlplane.PermTenantBillingRead)
+	entWrite := ginmw.RequireDelegatedPermission(controlplane.PermTenantEntitlementsWrite)
+	payWrite := ginmw.RequireDelegatedPermission(controlplane.PermTenantPaymentsWrite)
+	subWrite := ginmw.RequireDelegatedPermission(controlplane.PermTenantSubscriptionsWrite)
+	metricsRead := ginmw.RequireDelegatedPermission(controlplane.PermTenantMetricsRead)
 
 	// Tenant metrics (issue #259 + #232): a tenant admin reads THEIR OWN tenant's
 	// analytics. The metrics queries are tenant-scoped to the request's tenant

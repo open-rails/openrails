@@ -4,7 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
@@ -24,7 +24,7 @@ func (s *Server) registerServiceRoutes(e *gin.Engine) {
 	}
 
 	group := e.Group(StandaloneV1Prefix + httproutes.ServiceRoutePrefix)
-	httproutes.RegisterServiceRoutes(group, s.runtime, middleware.OATRequired(s.controlPlane), s.controlPlane, s.controlPlane)
+	httproutes.RegisterServiceRoutes(group, s.runtime, ginmw.OATRequired(s.controlPlane), s.controlPlane, s.controlPlane)
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.ServiceRoutePrefix).
 		Info("OAT-authenticated service API routes registered on public handler")

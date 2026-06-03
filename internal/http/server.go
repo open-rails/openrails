@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/crypto"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/request/ginreq"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -403,20 +404,20 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	e.Use(gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: []string{"/health/live", "/health/ready", "/healthz", "/readyz", "/health"},
 	}))
-	e.Use(middleware.SecurityHeaders())
+	e.Use(ginmw.SecurityHeaders())
 	// Allow-list = global CorsOrigins UNION every tenant's browser-direct
 	// allowed origins (issue #222 browser tier). Preflight from a configured
 	// tenant origin succeeds; unlisted origins are denied (never a wildcard
 	// outside development).
-	e.Use(middleware.CORS(s.cfg.AllowedCORSOrigins()))
-	e.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
+	e.Use(ginmw.CORS(s.cfg.AllowedCORSOrigins()))
+	e.Use(ginmw.BodyLimit(middleware.DefaultMaxBodyBytes))
 	// Resolve the tenant / billing namespace before authorization and before any
 	// tenant-owned DB access (issue #223). Defaults to the single default tenant.
-	e.Use(middleware.ResolveTenant())
+	e.Use(ginmw.ResolveTenant())
 	if s.authProvider != nil {
 		e.Use(s.authProvider.Optional())
 	}
-	e.Use(middleware.RateLimitWithChallengeStore(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore))
+	e.Use(ginmw.RateLimitWithChallengeStore(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore))
 	return e
 }
 

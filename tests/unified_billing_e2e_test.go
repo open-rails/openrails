@@ -53,7 +53,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
@@ -88,7 +88,7 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(middleware.ResolveTenant())
+	router.Use(ginmw.ResolveTenant())
 	group := router.Group("/v1/service")
 	resolver := stubOATResolver{permissions: []string{
 		controlplane.PermCreditsRead,
@@ -97,7 +97,7 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	}}
 	// nil minter + issuer-admin: the delegated-token mint/issuer routes are
 	// irrelevant to the money path.
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, middleware.OATRequired(resolver), nil, nil)
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.OATRequired(resolver), nil, nil)
 
 	return &billingE2EHarness{
 		t:          t,

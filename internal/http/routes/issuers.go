@@ -10,7 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -50,7 +50,7 @@ type issuerView struct {
 // uniqueness is enforced in the registry.
 func registerDelegatedIssuerHandler(admin DelegatedIssuerAdmin) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		oat, ok := middleware.OATFromGin(c)
+		oat, ok := ginmw.OATFromGin(c)
 		if !ok || oat == nil {
 			response.UnauthorizedWithMessage(c, "oat required")
 			c.Abort()
@@ -80,7 +80,7 @@ func registerDelegatedIssuerHandler(admin DelegatedIssuerAdmin) gin.HandlerFunc 
 // tenant without affecting the tenant's other issuers.
 func disableDelegatedIssuerHandler(admin DelegatedIssuerAdmin) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		oat, ok := middleware.OATFromGin(c)
+		oat, ok := ginmw.OATFromGin(c)
 		if !ok || oat == nil {
 			response.UnauthorizedWithMessage(c, "oat required")
 			c.Abort()
@@ -104,7 +104,7 @@ func disableDelegatedIssuerHandler(admin DelegatedIssuerAdmin) gin.HandlerFunc {
 // caller tenant's registered issuers (enabled + disabled).
 func listDelegatedIssuersHandler(admin DelegatedIssuerAdmin) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		oat, ok := middleware.OATFromGin(c)
+		oat, ok := ginmw.OATFromGin(c)
 		if !ok || oat == nil {
 			response.UnauthorizedWithMessage(c, "oat required")
 			c.Abort()
