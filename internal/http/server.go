@@ -229,6 +229,15 @@ func New(deps Dependencies) (*Server, error) {
 					network,
 				)
 				deps.Runtime.SetSolanaRecurringServices(planSvc, enrollSvc)
+
+				// Subscribe-via-checkout (#261/#262): the prepare service builds the
+				// unsigned init/subscribe txns; enroll confirms. Wire both into the
+				// checkout session service so /v1/self/checkout(+confirm) drives the
+				// recurring Solana subscription flow.
+				if deps.Runtime.CheckoutSessionService != nil {
+					prepareSvc := recurring.NewPrepareSubscribeService(submitter, deps.Runtime.SolanaRPC, network)
+					deps.Runtime.CheckoutSessionService.SetSolanaRecurring(prepareSvc, enrollSvc)
+				}
 			}
 		}
 

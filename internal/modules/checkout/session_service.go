@@ -1037,6 +1037,17 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 		resp.NextAction = action
 	}
 
+	// Recurring Solana subscribe (#261): surface the unsigned transaction(s) to
+	// sign. Takes precedence over other next_actions for a subscription session.
+	if resp.Status == string(models.CheckoutSessionStatusRequiresAction) {
+		if txns := getStringSliceField(session.ProcessorState, "sign_transactions"); len(txns) > 0 {
+			resp.NextAction = &CheckoutSessionNextAction{
+				Type:         "solana_sign_transactions",
+				Transactions: txns,
+			}
+		}
+	}
+
 	return resp
 }
 
