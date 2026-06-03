@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/embedded"
+	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
 // mintOperatorJWT mints a real, JWKS-verifiable, ORG-SCOPED user access token
@@ -38,7 +39,10 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = embeddedApp.Close(ctx) }()
 
-	cp := embeddedApp.ControlPlane()
+	if err := embcp.Attach(ctx, embeddedApp.App(), cfg, nil); err != nil {
+		return fmt.Errorf("attach control plane: %w", err)
+	}
+	cp := embcp.Get(embeddedApp.App())
 	if cp == nil || cp.Core() == nil {
 		return fmt.Errorf("control plane is not enabled (set auth.control_plane.enabled + issuer)")
 	}
@@ -70,7 +74,7 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	}
 
 	// 1. Ensure operator org + role exist (idempotent bootstrap).
-	if _, berr := embeddedApp.RunControlPlaneBootstrap(ctx, controlplane.BootstrapOptions{
+	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
 		OperatorOrgSlug: org,
 		MintInitialOAT:  false,
 	}); berr != nil {
