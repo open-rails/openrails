@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/message"
 )
@@ -343,7 +344,7 @@ func (g ginTransport) formFile(key string) (multipart.File, *multipart.FileHeade
 	return g.c.Request.FormFile(key)
 }
 func (g ginTransport) userContext() (authprovider.UserContext, bool) {
-	return authprovider.UserContextFromGin(g.c)
+	return ginauth.UserContextFromGin(g.c)
 }
 
 // --- net/http backend (embedded, gin-free) ---

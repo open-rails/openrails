@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 )
@@ -42,7 +43,7 @@ type PlatformSuperadminChecker interface {
 // and a different permission than the one this gate checks.
 func PlatformSuperadminRequired(checker PlatformSuperadminChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		uc, ok := authprovider.UserContextFromGin(c)
+		uc, ok := ginauth.UserContextFromGin(c)
 		if !ok || uc.UserID == "" {
 			response.UnauthorizedWithMessage(c, "authentication required")
 			c.Abort()
@@ -84,7 +85,7 @@ func PlatformSuperadminRequired(checker PlatformSuperadminChecker) gin.HandlerFu
 // configuration error and fails closed with 500.
 func OperatorPermissionRequired(checker OperatorPermissionChecker, perm string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		uc, ok := authprovider.UserContextFromGin(c)
+		uc, ok := ginauth.UserContextFromGin(c)
 		if !ok || uc.UserID == "" {
 			response.UnauthorizedWithMessage(c, "authentication required")
 			c.Abort()
@@ -158,7 +159,7 @@ func IsOperatorAdmin(ctx context.Context, cfg *config.Config, db bun.IDB, uc aut
 // and retained only for call-site compatibility; pass nil.
 func OperatorAdminRequired(cfg *config.Config, db bun.IDB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		uc, ok := authprovider.UserContextFromGin(c)
+		uc, ok := ginauth.UserContextFromGin(c)
 		if !ok || uc.UserID == "" {
 			response.UnauthorizedWithMessage(c, "authentication required")
 			c.Abort()

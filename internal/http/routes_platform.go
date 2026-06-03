@@ -12,7 +12,7 @@ import (
 
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/platform"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -167,7 +167,7 @@ func (s *Server) platformBreakGlassGrantHandler() gin.HandlerFunc {
 			}
 			target = &id
 		}
-		uc, _ := authprovider.UserContextFromGin(c)
+		uc, _ := ginauth.UserContextFromGin(c)
 		grant, err := s.platformBreakGlass.Grant(c.Request.Context(), platform.GrantRequest{
 			ActorUserID:   uc.UserID,
 			ActorOrg:      uc.Org,
@@ -208,7 +208,7 @@ func (s *Server) platformBreakGlassRevokeHandler() gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "break-glass unavailable"})
 			return
 		}
-		uc, _ := authprovider.UserContextFromGin(c)
+		uc, _ := ginauth.UserContextFromGin(c)
 		err := s.platformBreakGlass.Revoke(c.Request.Context(), c.Param("id"), uc.UserID, uc.Org)
 		if err != nil {
 			if errors.Is(err, platform.ErrBreakGlassNotFound) {

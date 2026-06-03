@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	server "github.com/open-rails/openrails/internal/http"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/cache"
 )
 
@@ -21,7 +21,7 @@ type Options struct {
 	DB           *sql.DB
 	PGXPool      *pgxpool.Pool
 	Redis        *redis.Client
-	AuthProvider authprovider.Provider
+	AuthProvider ginauth.Provider
 	Cache        cache.Cache
 	Clock        clockwork.Clock
 }
@@ -38,7 +38,7 @@ func NewApp(cfg *config.Config, opts *Options) (*app.App, error) {
 		DB:           optsValue(opts, func(o *Options) *sql.DB { return o.DB }),
 		PGXPool:      optsValue(opts, func(o *Options) *pgxpool.Pool { return o.PGXPool }),
 		Redis:        optsValue(opts, func(o *Options) *redis.Client { return o.Redis }),
-		AuthProvider: optsValue(opts, func(o *Options) authprovider.Provider { return o.AuthProvider }),
+		AuthProvider: optsValue(opts, func(o *Options) ginauth.Provider { return o.AuthProvider }),
 		Cache:        optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),
 		Clock:        optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
 	})

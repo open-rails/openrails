@@ -10,6 +10,7 @@ import (
 	authhttp "github.com/open-rails/authkit/http"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	log "github.com/sirupsen/logrus"
 )
@@ -18,7 +19,7 @@ type authKitProvider struct {
 	verifier Verifier
 }
 
-func NewProvider(cfg *config.AuthConfig) (authprovider.Provider, error) {
+func NewProvider(cfg *config.AuthConfig) (ginauth.Provider, error) {
 	v, err := NewVerifier(cfg)
 	if err != nil {
 		return nil, err

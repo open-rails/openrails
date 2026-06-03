@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -43,7 +43,7 @@ const SelfRoutePrefix = "/self"
 const TenantAdminRoutePrefix = "/tenant-admin"
 
 type Options struct {
-	AuthProvider authprovider.Provider
+	AuthProvider ginauth.Provider
 
 	// Authenticator is the framework-neutral auth boundary used when the routes
 	// are mounted on the gin-free net/http surface (issue #282). When set, the

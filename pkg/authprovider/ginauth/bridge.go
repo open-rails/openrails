@@ -1,4 +1,4 @@
-package authprovider
+package ginauth
 
 import (
 	"context"

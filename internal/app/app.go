@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/cache"
 )
 
@@ -25,7 +25,7 @@ type App struct {
 	Runtime      *Runtime
 	Cache        cache.Cache
 	RedisClient  *redis.Client
-	AuthProvider authprovider.Provider
+	AuthProvider ginauth.Provider
 
 	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224).
 	// nil when auth.control_plane is disabled (pure verifier mode).
@@ -42,7 +42,7 @@ type BootstrapOptions struct {
 	DB           *sql.DB
 	PGXPool      *pgxpool.Pool
 	Redis        *redis.Client
-	AuthProvider authprovider.Provider
+	AuthProvider ginauth.Provider
 	Cache        cache.Cache
 	Clock        clockwork.Clock
 }
@@ -72,7 +72,7 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 		}
 	}
 
-	authProvider := authprovider.Provider(nil)
+	authProvider := ginauth.Provider(nil)
 	if opts != nil && opts.AuthProvider != nil {
 		authProvider = opts.AuthProvider
 	} else {

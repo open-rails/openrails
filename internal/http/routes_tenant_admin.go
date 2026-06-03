@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -65,7 +65,7 @@ func (s *Server) auditTenantMutation(c *gin.Context, action string, target *tena
 	if s.platformAudit == nil {
 		return
 	}
-	uc, _ := authprovider.UserContextFromGin(c)
+	uc, _ := ginauth.UserContextFromGin(c)
 	if _, err := s.platformAudit.Record(c.Request.Context(), platform.AuditEntry{
 		ActorUserID:    uc.UserID,
 		ActorOrg:       uc.Org,

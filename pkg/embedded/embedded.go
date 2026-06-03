@@ -17,7 +17,7 @@ import (
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/router/ginrouter"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/service"
@@ -28,7 +28,7 @@ type Options struct {
 	DB           *sql.DB
 	PGXPool      *pgxpool.Pool
 	Redis        *redis.Client
-	AuthProvider authprovider.Provider
+	AuthProvider ginauth.Provider
 	Cache        cache.Cache
 }
 
@@ -125,7 +125,7 @@ func (e *Embedded) ControlPlane() *controlplane.ControlPlane {
 type RouteOptions struct {
 	// AuthProvider is required for routes that need authentication.
 	// If not provided, uses the auth provider from Embedded initialization.
-	AuthProvider authprovider.Provider
+	AuthProvider ginauth.Provider
 }
 
 // RegisterUserRoutes registers user-facing billing routes on the provided Gin router group.
@@ -191,11 +191,11 @@ func (e *Embedded) RegisterWebhookRoutes(group *gin.RouterGroup) {
 // authenticatorOf recovers a framework-neutral Authenticator from a Provider for
 // the neutral route registration path (issue #282), or nil when the provider
 // only exposes gin middleware.
-func authenticatorOf(p authprovider.Provider) billingauth.Authenticator {
+func authenticatorOf(p ginauth.Provider) billingauth.Authenticator {
 	if p == nil {
 		return nil
 	}
-	if a, ok := authprovider.AsAuthenticator(p); ok {
+	if a, ok := ginauth.AsAuthenticator(p); ok {
 		return a
 	}
 	return nil

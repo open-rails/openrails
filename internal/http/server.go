@@ -26,7 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 )
@@ -36,7 +36,7 @@ type Dependencies struct {
 	Cache        cache.Cache
 	Runtime      *app.Runtime
 	Redis        *redis.Client
-	AuthProvider authprovider.Provider
+	AuthProvider ginauth.Provider
 	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224).
 	// nil in verifier-only mode. When present, the server selectively mounts the
 	// intentional AuthKit route groups (never DefaultAPI in locked-down mode).
@@ -48,7 +48,7 @@ type Server struct {
 	cache        cache.Cache
 	runtime      *app.Runtime
 	rdb          *redis.Client
-	authProvider authprovider.Provider
+	authProvider ginauth.Provider
 	// authenticator is the framework-neutral auth boundary used by the gin-free
 	// embedded surface (issue #282). It is derived from authProvider when that
 	// provider exposes one (AuthKit-backed + ProviderFromAuthenticator do); a host
@@ -149,7 +149,7 @@ func New(deps Dependencies) (*Server, error) {
 	// one; a custom gin-only provider does not, in which case the embedded
 	// auth-gated routes fail closed (the standalone gin surface is unaffected).
 	if deps.AuthProvider != nil {
-		if a, ok := authprovider.AsAuthenticator(deps.AuthProvider); ok {
+		if a, ok := ginauth.AsAuthenticator(deps.AuthProvider); ok {
 			s.authenticator = a
 		}
 	}
