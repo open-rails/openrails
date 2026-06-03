@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/http/request/ginreq"
 	"github.com/open-rails/openrails/internal/http/router"
 )
 
@@ -34,7 +34,7 @@ func (g *ginRouter) Handle(method, path string, h router.Handler, mw ...router.M
 	all = append(all, mw...)
 	final := router.Chain(h, all)
 	g.group.Handle(method, path, func(c *gin.Context) {
-		final(request.New(c, g.rt))
+		final(ginreq.New(c, g.rt))
 	})
 }
 

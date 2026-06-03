@@ -15,17 +15,21 @@ import (
 	"github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 )
 
 // App encapsulates the long-lived dependencies shared across transports.
 type App struct {
-	Config       *config.Config
-	Runtime      *Runtime
-	Cache        cache.Cache
-	RedisClient  *redis.Client
-	AuthProvider authprovider.Provider
+	Config      *config.Config
+	Runtime     *Runtime
+	Cache       cache.Cache
+	RedisClient *redis.Client
+	// Authenticator is the framework-neutral auth boundary (gin-free). The gin
+	// Required()/Optional() middleware is reconstructed from it on the standalone
+	// HTTP path (internal/http), so this core type carries no gin dependency
+	// (#285).
+	Authenticator billingauth.Authenticator
 
 	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224).
 	// nil when auth.control_plane is disabled (pure verifier mode).
@@ -39,12 +43,14 @@ type App struct {
 
 // BootstrapOptions controls optional overrides for embedded use.
 type BootstrapOptions struct {
-	DB           *sql.DB
-	PGXPool      *pgxpool.Pool
-	Redis        *redis.Client
-	AuthProvider authprovider.Provider
-	Cache        cache.Cache
-	Clock        clockwork.Clock
+	DB      *sql.DB
+	PGXPool *pgxpool.Pool
+	Redis   *redis.Client
+	// Authenticator is the framework-neutral auth boundary (gin-free). When nil,
+	// the default AuthKit-backed authenticator is built from cfg.Auth.
+	Authenticator billingauth.Authenticator
+	Cache         cache.Cache
+	Clock         clockwork.Clock
 }
 
 // Bootstrap initialises core services, caches, and auth verifier.
@@ -72,15 +78,15 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 		}
 	}
 
-	authProvider := authprovider.Provider(nil)
-	if opts != nil && opts.AuthProvider != nil {
-		authProvider = opts.AuthProvider
+	var authenticator billingauth.Authenticator
+	if opts != nil && opts.Authenticator != nil {
+		authenticator = opts.Authenticator
 	} else {
-		ap, err := auth.NewProvider(cfg.Auth)
+		a, err := auth.NewAuthenticator(cfg.Auth)
 		if err != nil {
-			return nil, fmt.Errorf("build auth provider: %w", err)
+			return nil, fmt.Errorf("build authenticator: %w", err)
 		}
-		authProvider = ap
+		authenticator = a
 	}
 
 	var dbOverride *db.DB
@@ -140,7 +146,7 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 		Runtime:          runtime,
 		Cache:            appCache,
 		RedisClient:      runtime.RedisClient,
-		AuthProvider:     authProvider,
+		Authenticator:    authenticator,
 		stopRedisMonitor: stop,
 	}
 

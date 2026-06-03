@@ -1,4 +1,10 @@
-package authprovider
+// Package ginauth holds the gin-typed slice of the auth boundary: the gin
+// Provider middleware interface, the Authenticator→Provider bridge, and the
+// gin-context UserContext helpers. It is imported only by the gin (standalone)
+// HTTP path. The gin-free embedded surface depends on pkg/billingauth (and the
+// gin-free re-exports in pkg/authprovider) instead, so that pkg/embedded does
+// not transitively pull in github.com/gin-gonic/gin (#285).
+package ginauth
 
 import (
 	"github.com/gin-gonic/gin"
@@ -9,14 +15,14 @@ import (
 //
 // The middleware must set the user context in the Gin context using:
 //
-//	c.Set("billing.user_context", authprovider.UserContext{...})
-//	c.Request = c.Request.WithContext(authprovider.SetUserContext(ctx, uc))
+//	c.Set("billing.user_context", billingauth.UserContext{...})
+//	c.Request = c.Request.WithContext(billingauth.SetUserContext(ctx, uc))
 //
-// Handlers then retrieve user context via authprovider.UserContextFromGin(c).
+// Handlers then retrieve user context via ginauth.UserContextFromGin(c).
 //
 // Implementations:
-//   - AuthKitProvider (internal/auth/provider.go) - wraps JWT verifier for standalone mode
-//   - Custom providers - implement this interface to use your own auth system in embedded mode
+//   - AuthKit-backed provider (internal/auth) - wraps JWT verifier for standalone mode
+//   - Custom providers - implement this interface to use your own auth system
 //
 // Example custom implementation:
 //
@@ -24,9 +30,9 @@ import (
 //	func (p *MyAuthProvider) Required() gin.HandlerFunc {
 //	    return func(c *gin.Context) {
 //	        // Validate auth, extract user info
-//	        uc := authprovider.UserContext{UserID: "...", Email: "..."}
+//	        uc := billingauth.UserContext{UserID: "...", Email: "..."}
 //	        c.Set("billing.user_context", uc)
-//	        c.Request = c.Request.WithContext(authprovider.SetUserContext(c.Request.Context(), uc))
+//	        c.Request = c.Request.WithContext(billingauth.SetUserContext(c.Request.Context(), uc))
 //	        c.Next()
 //	    }
 //	}

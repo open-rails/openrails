@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/sirupsen/logrus"
 
@@ -24,28 +23,30 @@ import (
 	"github.com/open-rails/openrails/pkg/message"
 )
 
-// transport is the framework backend behind a Request. The handler-facing
+// Transport is the framework backend behind a Request. The handler-facing
 // Request API is identical regardless of backend; only construction differs:
-// New(ginCtx) for the standalone gin server, NewHTTP(w, r) for the embedded
-// net/http surface. This is what lets the same handlers serve both without
-// importing gin in the net/http path (#282).
-type transport interface {
-	writeJSON(code int, body any)
-	abortJSON(code int, body any)
-	bind(data any) error
-	bindJSON(data any) error
-	bindQuery(data any) error
-	bindURI(data any) error
-	param(key string) string
-	query(key string) string
-	get(key string) (any, bool)
-	set(key string, value any)
-	next()
-	header(key string) string
-	redirect(code int, location string)
-	postForm(key string) string
-	formFile(key string) (multipart.File, *multipart.FileHeader, error)
-	userContext() (authprovider.UserContext, bool)
+// ginreq.New(ginCtx) for the standalone gin server, NewHTTP(w, r) for the
+// embedded net/http surface. This is what lets the same handlers serve both
+// without importing gin in the net/http path (#282/#285). It is exported so the
+// gin backend can live in the separate internal/http/request/ginreq package,
+// keeping this package gin-free.
+type Transport interface {
+	WriteJSON(code int, body any)
+	AbortJSON(code int, body any)
+	Bind(data any) error
+	BindJSON(data any) error
+	BindQuery(data any) error
+	BindURI(data any) error
+	Param(key string) string
+	Query(key string) string
+	Get(key string) (any, bool)
+	Set(key string, value any)
+	Next()
+	Header(key string) string
+	Redirect(code int, location string)
+	PostForm(key string) string
+	FormFile(key string) (multipart.File, *multipart.FileHeader, error)
+	UserContext() (authprovider.UserContext, bool)
 }
 
 type Request struct {
@@ -53,27 +54,14 @@ type Request struct {
 	Request *http.Request
 	Clock   clockwork.Clock
 
-	// GinCtx is set only on the gin backend (standalone). Embedded net/http
-	// requests leave it nil. Route/middleware code that still reaches into it
-	// is being migrated to Request methods (#282); handlers never touch it.
-	GinCtx *gin.Context
-
-	t transport
+	t Transport
 }
 
-// New builds a gin-backed Request (standalone server).
-func New(ctx *gin.Context, runtime *app.Runtime) *Request {
-	return &Request{
-		State:   runtime,
-		Request: ctx.Request,
-		Clock:   runtime.Clock,
-		GinCtx:  ctx,
-		t:       ginTransport{c: ctx},
-	}
-}
-
-// NewHTTP builds a net/http-backed Request (embedded surface) — no gin.
-func NewHTTP(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request {
+// NewWithTransport builds a Request over an arbitrary Transport. The gin backend
+// uses it from internal/http/request/ginreq; the net/http backend uses NewHTTP.
+// Keeping construction transport-agnostic is what lets this package stay
+// gin-free (#285).
+func NewWithTransport(runtime *app.Runtime, r *http.Request, t Transport) *Request {
 	var clock clockwork.Clock
 	if runtime != nil {
 		clock = runtime.Clock
@@ -82,18 +70,23 @@ func NewHTTP(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Requ
 		State:   runtime,
 		Request: r,
 		Clock:   clock,
-		t:       newHTTPTransport(w, r),
+		t:       t,
 	}
+}
+
+// NewHTTP builds a net/http-backed Request (embedded surface) — no gin.
+func NewHTTP(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request {
+	return NewWithTransport(runtime, r, newHTTPTransport(w, r))
 }
 
 func (r *Request) AbortJSON(code int, msg string) {
 	logrus.Error(msg)
-	r.t.abortJSON(code, api.SimpleErrorResponse(code, msg))
+	r.t.AbortJSON(code, api.SimpleErrorResponse(code, msg))
 }
 
 func (r *Request) ErrorJSON(code int, msg string) {
 	logrus.Error(msg)
-	r.t.writeJSON(code, api.SimpleErrorResponse(code, msg))
+	r.t.WriteJSON(code, api.SimpleErrorResponse(code, msg))
 }
 
 func (r *Request) APIError(err *api.APIError) {
@@ -103,15 +96,15 @@ func (r *Request) APIError(err *api.APIError) {
 		"param":  err.Param,
 		"status": err.HTTPStatus,
 	}).Error(err.Message)
-	r.t.writeJSON(err.HTTPStatus, err.ToResponse())
+	r.t.WriteJSON(err.HTTPStatus, err.ToResponse())
 }
 
 func (r *Request) SuccessJSON(data any) {
-	r.t.writeJSON(http.StatusOK, data)
+	r.t.WriteJSON(http.StatusOK, data)
 }
 
 func (r *Request) SuccessJSONMessage(msg string) {
-	r.t.writeJSON(http.StatusOK, message.Json{
+	r.t.WriteJSON(http.StatusOK, message.Json{
 		"message": msg,
 	})
 }
@@ -132,7 +125,7 @@ func (r *Request) SuccessJSONPaginated(data any, total int64, limit, offset int)
 	if r.Request != nil {
 		urlPath = r.Request.URL.Path
 	}
-	r.t.writeJSON(http.StatusOK, message.Json{
+	r.t.WriteJSON(http.StatusOK, message.Json{
 		"object":   "list",
 		"data":     data,
 		"total":    total,
@@ -144,11 +137,11 @@ func (r *Request) SuccessJSONPaginated(data any, total int64, limit, offset int)
 }
 
 func (r *Request) Bind(data any) error {
-	return r.t.bind(data)
+	return r.t.Bind(data)
 }
 
 func (r *Request) BindJSON(data any) bool {
-	if err := r.t.bindJSON(data); err != nil {
+	if err := r.t.BindJSON(data); err != nil {
 		if isRequestBodyTooLarge(err) {
 			r.ErrorJSON(http.StatusRequestEntityTooLarge, "request body too large")
 			return false
@@ -160,7 +153,7 @@ func (r *Request) BindJSON(data any) bool {
 }
 
 func (r *Request) BindQuery(data any) bool {
-	if err := r.t.bindQuery(data); err != nil {
+	if err := r.t.BindQuery(data); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, normaliseBindError(err))
 		return false
 	}
@@ -168,7 +161,7 @@ func (r *Request) BindQuery(data any) bool {
 }
 
 func (r *Request) BindURI(data any) bool {
-	if err := r.t.bindURI(data); err != nil {
+	if err := r.t.BindURI(data); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, normaliseBindError(err))
 		return false
 	}
@@ -177,52 +170,52 @@ func (r *Request) BindURI(data any) bool {
 
 // JSON writes a JSON response with the given status code.
 func (r *Request) JSON(code int, body any) {
-	r.t.writeJSON(code, body)
+	r.t.WriteJSON(code, body)
 }
 
 // ShouldBindURI binds path parameters into data and returns the error WITHOUT
 // writing a response.
 func (r *Request) ShouldBindURI(data any) error {
-	return r.t.bindURI(data)
+	return r.t.BindURI(data)
 }
 
 // ShouldBindQuery binds query parameters into data and returns the error
 // WITHOUT writing a response.
 func (r *Request) ShouldBindQuery(data any) error {
-	return r.t.bindQuery(data)
+	return r.t.BindQuery(data)
 }
 
 func (r *Request) Param(key string) string {
-	return r.t.param(key)
+	return r.t.Param(key)
 }
 
 func (r *Request) Query(key string) string {
-	return r.t.query(key)
+	return r.t.Query(key)
 }
 
 // Header returns a request header value, framework-neutral counterpart of the
 // former r.GinCtx.GetHeader(...).
 func (r *Request) Header(key string) string {
-	return r.t.header(key)
+	return r.t.Header(key)
 }
 
 // UserContext returns the authenticated principal, framework-neutral counterpart
 // of the former authprovider.UserContextFromGin(r.GinCtx). Works on both the gin
 // and net/http backends.
 func (r *Request) UserContext() (authprovider.UserContext, bool) {
-	return r.t.userContext()
+	return r.t.UserContext()
 }
 
 func (r *Request) Next() {
-	r.t.next()
+	r.t.Next()
 }
 
 func (r *Request) Get(key string) (any, bool) {
-	return r.t.get(key)
+	return r.t.Get(key)
 }
 
 func (r *Request) MustGet(key string) any {
-	v, ok := r.t.get(key)
+	v, ok := r.t.Get(key)
 	if !ok {
 		panic("request: key " + key + " does not exist")
 	}
@@ -230,11 +223,11 @@ func (r *Request) MustGet(key string) any {
 }
 
 func (r *Request) Set(key string, value any) {
-	r.t.set(key, value)
+	r.t.Set(key, value)
 }
 
 func (r *Request) GetUser() *checkout.UserIdentity {
-	if uc, ok := r.t.userContext(); ok && uc.UserID != "" {
+	if uc, ok := r.t.UserContext(); ok && uc.UserID != "" {
 		user := &checkout.UserIdentity{
 			ID:       uc.UserID,
 			Username: uc.Username,
@@ -260,14 +253,14 @@ func (r *Request) GetUser() *checkout.UserIdentity {
 }
 
 func (r *Request) GetClientIP() string {
-	if forwarded := r.t.header("X-Forwarded-For"); forwarded != "" {
+	if forwarded := r.t.Header("X-Forwarded-For"); forwarded != "" {
 		ips := strings.Split(forwarded, ",")
 		if len(ips) > 0 {
 			return strings.TrimSpace(ips[0])
 		}
 	}
 
-	if realIP := r.t.header("X-Real-IP"); realIP != "" {
+	if realIP := r.t.Header("X-Real-IP"); realIP != "" {
 		return strings.TrimSpace(realIP)
 	}
 
@@ -286,15 +279,15 @@ func (r *Request) GetRemoteIP() string {
 }
 
 func (r *Request) Redirect(code int, location string) {
-	r.t.redirect(code, location)
+	r.t.Redirect(code, location)
 }
 
 func (r *Request) FormValue(key string) string {
-	return r.t.postForm(key)
+	return r.t.PostForm(key)
 }
 
 func (r *Request) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
-	return r.t.formFile(key)
+	return r.t.FormFile(key)
 }
 
 func (r *Request) GetState() *app.Runtime {
@@ -319,34 +312,10 @@ func isRequestBodyTooLarge(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "request body too large")
 }
 
-// --- gin backend (standalone) ---
-
-type ginTransport struct{ c *gin.Context }
-
-func (g ginTransport) writeJSON(code int, body any) { g.c.JSON(code, body) }
-func (g ginTransport) abortJSON(code int, body any) { g.c.AbortWithStatusJSON(code, body) }
-func (g ginTransport) bind(data any) error          { return g.c.Bind(data) }
-func (g ginTransport) bindJSON(data any) error      { return g.c.ShouldBindJSON(data) }
-func (g ginTransport) bindQuery(data any) error     { return g.c.ShouldBindQuery(data) }
-func (g ginTransport) bindURI(data any) error       { return g.c.ShouldBindUri(data) }
-func (g ginTransport) param(key string) string      { return g.c.Param(key) }
-func (g ginTransport) query(key string) string      { return g.c.Query(key) }
-func (g ginTransport) get(key string) (any, bool)   { return g.c.Get(key) }
-func (g ginTransport) set(key string, value any)    { g.c.Set(key, value) }
-func (g ginTransport) next()                        { g.c.Next() }
-func (g ginTransport) header(key string) string     { return g.c.GetHeader(key) }
-func (g ginTransport) redirect(code int, location string) {
-	g.c.Redirect(code, location)
-}
-func (g ginTransport) postForm(key string) string { return g.c.PostForm(key) }
-func (g ginTransport) formFile(key string) (multipart.File, *multipart.FileHeader, error) {
-	return g.c.Request.FormFile(key)
-}
-func (g ginTransport) userContext() (authprovider.UserContext, bool) {
-	return authprovider.UserContextFromGin(g.c)
-}
-
 // --- net/http backend (embedded, gin-free) ---
+//
+// The gin backend (standalone) lives in internal/http/request/ginreq (#285), so
+// this package imports no gin.
 
 type httpTransport struct {
 	w     http.ResponseWriter
@@ -359,7 +328,7 @@ func newHTTPTransport(w http.ResponseWriter, r *http.Request) *httpTransport {
 	return &httpTransport{w: w, r: r, kv: map[string]any{}}
 }
 
-func (h *httpTransport) writeJSON(code int, body any) {
+func (h *httpTransport) WriteJSON(code int, body any) {
 	if h.wrote {
 		return
 	}
@@ -369,45 +338,45 @@ func (h *httpTransport) writeJSON(code int, body any) {
 	_ = json.NewEncoder(h.w).Encode(body)
 }
 
-func (h *httpTransport) abortJSON(code int, body any) { h.writeJSON(code, body) }
+func (h *httpTransport) AbortJSON(code int, body any) { h.WriteJSON(code, body) }
 
-func (h *httpTransport) bind(data any) error { return h.bindJSON(data) }
+func (h *httpTransport) Bind(data any) error { return h.BindJSON(data) }
 
-func (h *httpTransport) bindJSON(data any) error {
+func (h *httpTransport) BindJSON(data any) error {
 	if err := json.NewDecoder(h.r.Body).Decode(data); err != nil {
 		return err
 	}
 	return validateBinding(data)
 }
 
-func (h *httpTransport) bindQuery(data any) error {
+func (h *httpTransport) BindQuery(data any) error {
 	if err := decodeTaggedValues(data, "form", func(k string) string { return h.r.URL.Query().Get(k) }); err != nil {
 		return err
 	}
 	return validateBinding(data)
 }
 
-func (h *httpTransport) bindURI(data any) error {
+func (h *httpTransport) BindURI(data any) error {
 	if err := decodeTaggedValues(data, "uri", func(k string) string { return h.r.PathValue(k) }); err != nil {
 		return err
 	}
 	return validateBinding(data)
 }
 
-func (h *httpTransport) param(key string) string    { return h.r.PathValue(key) }
-func (h *httpTransport) query(key string) string     { return h.r.URL.Query().Get(key) }
-func (h *httpTransport) get(key string) (any, bool)  { v, ok := h.kv[key]; return v, ok }
-func (h *httpTransport) set(key string, value any)   { h.kv[key] = value }
-func (h *httpTransport) next()                        {}
-func (h *httpTransport) header(key string) string     { return h.r.Header.Get(key) }
-func (h *httpTransport) redirect(code int, location string) {
+func (h *httpTransport) Param(key string) string    { return h.r.PathValue(key) }
+func (h *httpTransport) Query(key string) string    { return h.r.URL.Query().Get(key) }
+func (h *httpTransport) Get(key string) (any, bool) { v, ok := h.kv[key]; return v, ok }
+func (h *httpTransport) Set(key string, value any)  { h.kv[key] = value }
+func (h *httpTransport) Next()                      {}
+func (h *httpTransport) Header(key string) string   { return h.r.Header.Get(key) }
+func (h *httpTransport) Redirect(code int, location string) {
 	http.Redirect(h.w, h.r, location, code)
 }
-func (h *httpTransport) postForm(key string) string { return h.r.PostFormValue(key) }
-func (h *httpTransport) formFile(key string) (multipart.File, *multipart.FileHeader, error) {
+func (h *httpTransport) PostForm(key string) string { return h.r.PostFormValue(key) }
+func (h *httpTransport) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
 	return h.r.FormFile(key)
 }
-func (h *httpTransport) userContext() (authprovider.UserContext, bool) {
+func (h *httpTransport) UserContext() (authprovider.UserContext, bool) {
 	if h.r == nil {
 		return authprovider.UserContext{}, false
 	}

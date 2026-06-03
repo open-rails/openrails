@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 )
 
 const maxInMemoryRateLimitCounters = 10_000
@@ -225,7 +226,7 @@ func rateLimitSubjects(c *gin.Context) []rateLimitSubject {
 	if clientIP != "" {
 		subjects = append(subjects, rateLimitSubject{Scope: rateLimitScopeIP, Value: clientIP, Key: rateLimitScopeIP + ":" + clientIP})
 	}
-	if uc, ok := authprovider.UserContextFromGin(c); ok {
+	if uc, ok := ginauth.UserContextFromGin(c); ok {
 		userID := strings.TrimSpace(uc.UserID)
 		if userID != "" {
 			subjects = append(subjects, rateLimitSubject{Scope: rateLimitScopeUser, Value: userID, Key: rateLimitScopeUser + ":" + userID})

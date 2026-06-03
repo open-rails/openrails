@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -32,7 +32,7 @@ func newDelegatedTestRouter(resolver DelegatedResolver, perm string) *gin.Engine
 	r.GET("/self", DelegatedSelfRequired(resolver), RequireDelegatedPermission(perm), func(c *gin.Context) {
 		resolved, _ := DelegatedFromGin(c)
 		tid, _ := tenant.FromContext(c.Request.Context())
-		uc, _ := authprovider.UserContextFromGin(c)
+		uc, _ := ginauth.UserContextFromGin(c)
 		c.JSON(http.StatusOK, gin.H{
 			"tenant":  tid.String(),
 			"subject": resolved.DelegatedSubject,

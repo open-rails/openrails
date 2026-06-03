@@ -3,8 +3,6 @@ package query
 import (
 	"math"
 	"net/url"
-
-	"github.com/gin-gonic/gin"
 )
 
 type Response struct {
@@ -39,33 +37,6 @@ const (
 	defaultPageSize = 10
 	maxPageSize     = 100
 )
-
-func ParseQueryOptions[T any](c *gin.Context) QueryOptions[T] {
-	var opts QueryOptions[T]
-	if err := c.ShouldBindQuery(&opts); err != nil {
-		opts.Page = defaultPage
-		opts.PageSize = defaultPageSize
-	}
-
-	// If "all" is requested, skip pagination validation
-	if opts.All {
-		opts.PageSize = 0 // Set to 0 to indicate no pagination
-		opts.Page = 1
-		return opts
-	}
-
-	if opts.Page < 1 {
-		opts.Page = defaultPage
-	}
-	if opts.PageSize < 1 {
-		opts.PageSize = defaultPageSize
-	}
-	if opts.PageSize > maxPageSize {
-		opts.PageSize = maxPageSize
-	}
-
-	return opts
-}
 
 func (q QueryOptions[T]) Any() QueryOptions[any] {
 	return QueryOptions[any]{

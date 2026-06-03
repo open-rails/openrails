@@ -19,6 +19,7 @@ import (
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/http/request/ginreq"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
@@ -26,17 +27,20 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 )
 
 type Dependencies struct {
-	Config       *config.Config
-	Cache        cache.Cache
-	Runtime      *app.Runtime
-	Redis        *redis.Client
-	AuthProvider authprovider.Provider
+	Config  *config.Config
+	Cache   cache.Cache
+	Runtime *app.Runtime
+	Redis   *redis.Client
+	// Authenticator is the framework-neutral auth boundary (gin-free). The gin
+	// Optional()/Required() middleware used by the standalone surface is
+	// reconstructed from it via ginauth.ProviderFromAuthenticator (#285).
+	Authenticator billingauth.Authenticator
 	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224).
 	// nil in verifier-only mode. When present, the server selectively mounts the
 	// intentional AuthKit route groups (never DefaultAPI in locked-down mode).
@@ -48,7 +52,7 @@ type Server struct {
 	cache        cache.Cache
 	runtime      *app.Runtime
 	rdb          *redis.Client
-	authProvider authprovider.Provider
+	authProvider ginauth.Provider
 	// authenticator is the framework-neutral auth boundary used by the gin-free
 	// embedded surface (issue #282). It is derived from authProvider when that
 	// provider exposes one (AuthKit-backed + ProviderFromAuthenticator do); a host
@@ -131,27 +135,22 @@ func New(deps Dependencies) (*Server, error) {
 	if deps.Cache == nil {
 		return nil, fmt.Errorf("server cache is required")
 	}
-	if deps.AuthProvider == nil {
-		return nil, fmt.Errorf("auth provider is required")
+	if deps.Authenticator == nil {
+		return nil, fmt.Errorf("authenticator is required")
 	}
 
 	s := &Server{
-		cfg:          deps.Config,
-		cache:        deps.Cache,
-		runtime:      deps.Runtime,
-		rdb:          deps.Redis,
-		authProvider: deps.AuthProvider,
-		controlPlane: deps.ControlPlane,
-		captchaStore: captcha.NewChallengeStore(deps.Redis),
-	}
-	// Derive the gin-free authenticator from the provider when possible (issue
-	// #282). The AuthKit-backed provider and ProviderFromAuthenticator both expose
-	// one; a custom gin-only provider does not, in which case the embedded
-	// auth-gated routes fail closed (the standalone gin surface is unaffected).
-	if deps.AuthProvider != nil {
-		if a, ok := authprovider.AsAuthenticator(deps.AuthProvider); ok {
-			s.authenticator = a
-		}
+		cfg:     deps.Config,
+		cache:   deps.Cache,
+		runtime: deps.Runtime,
+		rdb:     deps.Redis,
+		// The gin standalone surface needs Optional()/Required() middleware: build
+		// the gin provider from the framework-neutral authenticator (#285). The
+		// embedded net/http surface uses the authenticator directly.
+		authProvider:  ginauth.ProviderFromAuthenticator(deps.Authenticator),
+		authenticator: deps.Authenticator,
+		controlPlane:  deps.ControlPlane,
+		captchaStore:  captcha.NewChallengeStore(deps.Redis),
 	}
 
 	// Build the tenant provisioning/lifecycle/secret service when the control
@@ -440,13 +439,11 @@ func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandlerHTTP)
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandlerHTTP)
 		httproutes.RegisterUserRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.runtime), s.runtime, httproutes.Options{
-			AuthProvider:  s.authProvider,
 			Authenticator: s.embeddedAuthenticator(),
 		})
 	}
 	if opts.IncludeAdmin {
 		adminOpts := httproutes.Options{
-			AuthProvider:  s.authProvider,
 			Authenticator: s.embeddedAuthenticator(),
 		}
 		if s.controlPlane != nil {
@@ -487,7 +484,7 @@ func (s *Server) embeddedAuthenticator() billingauth.Authenticator {
 
 func (s *Server) wrap(fn func(r *httprequest.Request)) func(c *gin.Context) {
 	return func(c *gin.Context) {
-		fn(httprequest.New(c, s.runtime))
+		fn(ginreq.New(c, s.runtime))
 	}
 }
 

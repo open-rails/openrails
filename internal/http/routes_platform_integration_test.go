@@ -22,6 +22,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/authprovider"
@@ -140,7 +141,7 @@ func doReq(t *testing.T, s *Server, checker authpolicy.PlatformSuperadminChecker
 	e := gin.New()
 	e.Use(func(c *gin.Context) { c.Set("billing.user_context", uc); c.Next() })
 	g := e.Group(StandaloneV1Prefix + PlatformPrefix)
-	g.Use(authpolicy.PlatformSuperadminRequired(checker))
+	g.Use(policyginmw.PlatformSuperadminRequired(checker))
 	g.GET("/tenants", s.platformListTenantsHandler())
 	g.GET("/search", s.platformSearchHandler())
 	g.GET("/metrics", s.platformMetricsHandler())

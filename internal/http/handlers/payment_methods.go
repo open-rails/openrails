@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/doujins-org/ginapi/response"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
@@ -314,7 +313,7 @@ func ListPaymentMethods(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(response.NewList(paymentMethodsToAPI(methods), totalItems, req.Limit, req.Offset))
+	r.SuccessJSON(api.NewList(paymentMethodsToAPI(methods), totalItems, req.Limit, req.Offset))
 }
 
 func DeletePaymentMethod(r *httprequest.Request) {

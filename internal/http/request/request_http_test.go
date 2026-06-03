@@ -23,7 +23,7 @@ func TestHTTPBindJSON(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"name":"ada","age":36}`))
 		req := NewHTTP(httptest.NewRecorder(), r, nil)
 		var b body
-		if err := req.t.bindJSON(&b); err != nil {
+		if err := req.t.BindJSON(&b); err != nil {
 			t.Fatalf("bindJSON err: %v", err)
 		}
 		if b.Name != "ada" || b.Age != 36 {
@@ -35,7 +35,7 @@ func TestHTTPBindJSON(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"age":1}`))
 		req := NewHTTP(httptest.NewRecorder(), r, nil)
 		var b body
-		if err := req.t.bindJSON(&b); err == nil {
+		if err := req.t.BindJSON(&b); err == nil {
 			t.Fatal("expected validation error for missing required name")
 		}
 	})
@@ -55,12 +55,12 @@ func TestHTTPBindURIAndQuery(t *testing.T) {
 	req := NewHTTP(httptest.NewRecorder(), r, nil)
 
 	var u uriP
-	if err := req.t.bindURI(&u); err != nil || u.ID != "abc-123" {
+	if err := req.t.BindURI(&u); err != nil || u.ID != "abc-123" {
 		t.Fatalf("bindURI got %+v err %v", u, err)
 	}
 
 	var q queryP
-	if err := req.t.bindQuery(&q); err != nil || q.Limit != 25 || q.Cursor != "xyz" {
+	if err := req.t.BindQuery(&q); err != nil || q.Limit != 25 || q.Cursor != "xyz" {
 		t.Fatalf("bindQuery got %+v err %v", q, err)
 	}
 

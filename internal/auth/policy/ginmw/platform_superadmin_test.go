@@ -1,4 +1,4 @@
-package policy
+package ginmw
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
@@ -27,7 +28,7 @@ func (f fakePlatformChecker) HasPlatformSuperadmin(_ context.Context, userID str
 	return f.allow[userID], nil
 }
 
-func runPlatformGate(t *testing.T, checker PlatformSuperadminChecker, uc authprovider.UserContext) *httptest.ResponseRecorder {
+func runPlatformGate(t *testing.T, checker policy.PlatformSuperadminChecker, uc authprovider.UserContext) *httptest.ResponseRecorder {
 	t.Helper()
 	rr := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rr)

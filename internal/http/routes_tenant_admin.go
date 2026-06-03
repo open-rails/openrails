@@ -8,10 +8,11 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
-	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -29,9 +30,9 @@ func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
 	}
 	group := e.Group(StandaloneV1Prefix + TenantAdminPrefix)
 	group.Use(s.authProvider.Required())
-	group.Use(authpolicy.OperatorAdminRequired(s.cfg, s.runtime.DB.GetDB()))
+	group.Use(policyginmw.OperatorAdminRequired(s.cfg, s.runtime.DB.GetDB()))
 	if s.controlPlane != nil {
-		group.Use(authpolicy.OperatorPermissionRequired(
+		group.Use(policyginmw.OperatorPermissionRequired(
 			authpolicy.OperatorPermissionChecker(s.controlPlane), controlplane.PermAdmin))
 	}
 
@@ -65,7 +66,7 @@ func (s *Server) auditTenantMutation(c *gin.Context, action string, target *tena
 	if s.platformAudit == nil {
 		return
 	}
-	uc, _ := authprovider.UserContextFromGin(c)
+	uc, _ := ginauth.UserContextFromGin(c)
 	if _, err := s.platformAudit.Record(c.Request.Context(), platform.AuditEntry{
 		ActorUserID:    uc.UserID,
 		ActorOrg:       uc.Org,
