@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/tenancy"
@@ -29,9 +30,9 @@ func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
 	}
 	group := e.Group(StandaloneV1Prefix + TenantAdminPrefix)
 	group.Use(s.authProvider.Required())
-	group.Use(authpolicy.OperatorAdminRequired(s.cfg, s.runtime.DB.GetDB()))
+	group.Use(policyginmw.OperatorAdminRequired(s.cfg, s.runtime.DB.GetDB()))
 	if s.controlPlane != nil {
-		group.Use(authpolicy.OperatorPermissionRequired(
+		group.Use(policyginmw.OperatorPermissionRequired(
 			authpolicy.OperatorPermissionChecker(s.controlPlane), controlplane.PermAdmin))
 	}
 

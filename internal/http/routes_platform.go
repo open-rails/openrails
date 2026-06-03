@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
 	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -38,7 +38,7 @@ func (s *Server) registerPlatformRoutes(e *gin.Engine) {
 
 	group := e.Group(StandaloneV1Prefix + PlatformPrefix)
 	group.Use(s.authProvider.Required())
-	group.Use(authpolicy.PlatformSuperadminRequired(s.controlPlane))
+	group.Use(policyginmw.PlatformSuperadminRequired(s.controlPlane))
 
 	// Cross-tenant directory + inspect.
 	group.GET("/tenants", s.platformListTenantsHandler())
