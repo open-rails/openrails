@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/modules/reconcile"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -25,7 +26,17 @@ type StripeReconcileOptions struct {
 	// user is skipped (no billing rows written) and reported. OpenRails owns no
 	// users table, so the host injects this; cozy-art always wires it, making the
 	// skip unconditional. Nil = no identity source (legacy behavior).
+	//
+	// Takes precedence over Users below when both are set.
 	UserExists func(ctx context.Context, userID string) (bool, error)
+
+	// Users is an optional host-provided UserDirectory. When UserExists is nil
+	// and Users is non-nil, Users.Exists supplies the unknown-user check. This is
+	// the first-class injection point for hosts that already have a UserDirectory
+	// (e.g. the profiles-backed default). When both are nil there is no identity
+	// source and the reconcile treats every user as existing (legacy behavior) -
+	// it never panics or hard-fails.
+	Users identity.UserDirectory
 }
 
 // StripeReconcileReport summarizes what a Stripe backfill observed and wrote.
@@ -67,11 +78,22 @@ func (s *Service) ReconcileStripe(ctx context.Context, opts StripeReconcileOptio
 		chargeLister = cl
 	}
 
+	// Resolve the unknown-user check: an explicit UserExists func wins; otherwise
+	// fall back to a host-provided UserDirectory; otherwise nil (legacy: treat
+	// every user as existing). Never panics on a nil directory.
+	userExists := opts.UserExists
+	if userExists == nil && opts.Users != nil {
+		dir := opts.Users
+		userExists = func(ctx context.Context, userID string) (bool, error) {
+			return dir.Exists(ctx, userID)
+		}
+	}
+
 	return reconcile.Run(ctx, rt, subLister, chargeLister, reconcile.Options{
 		Apply:        opts.Apply,
 		MaxPages:     opts.MaxPages,
 		PageSize:     opts.PageSize,
 		SkipPayments: opts.SkipPayments,
-		UserExists:   opts.UserExists,
+		UserExists:   userExists,
 	})
 }

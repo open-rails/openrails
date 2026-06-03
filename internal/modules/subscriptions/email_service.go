@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	log "github.com/sirupsen/logrus"
@@ -16,7 +15,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
-	repo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -36,7 +35,7 @@ type EmailService struct {
 	subscriptionService *SubscriptionService
 	productService      *catalog.ProductService
 	priceService        *catalog.PriceService
-	profiles            *repo.ProfileRepo
+	users               identity.UserDirectory
 }
 
 // OneOffPurchaseEmailData contains data for one-off purchase receipts
@@ -89,12 +88,12 @@ func (s *EmailService) SetDomainServices(
 	subscriptionService *SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
-	profiles *repo.ProfileRepo,
+	users identity.UserDirectory,
 ) {
 	s.subscriptionService = subscriptionService
 	s.productService = productService
 	s.priceService = priceService
-	s.profiles = profiles
+	s.users = users
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -507,20 +506,24 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 	}, nil
 }
 
-// getUserEmail gets user profile and validates email exists
+// getUserEmail resolves the user's username + email via the injected
+// UserDirectory. When no directory is wired (e.g. a non-AuthKit embedded host
+// that provided none) or the user has no usable email, it returns
+// errUserEmailUnavailable so callers gracefully skip the email instead of
+// failing. A directory lookup error is surfaced as errUserEmailUnavailable too,
+// matching the previous behavior (emails are best-effort, never load-bearing).
 func (s *EmailService) getUserEmail(ctx context.Context, userID string) (username string, email string, err error) {
-	if s.profiles == nil {
+	if s.users == nil {
 		return "", "", errUserEmailUnavailable
 	}
-	uid, perr := uuid.Parse(userID)
-	if perr != nil {
+	uname, mail, ok, qerr := s.users.EmailIdentity(ctx, userID)
+	if qerr != nil {
+		log.WithContext(ctx).WithError(qerr).Warn("user directory email lookup failed; skipping email")
 		return "", "", errUserEmailUnavailable
 	}
-	uname, mail, verified, active, qerr := s.profiles.GetUserEmail(ctx, uid)
-	if qerr != nil || mail == "" || !active {
+	if !ok || mail == "" {
 		return "", "", errUserEmailUnavailable
 	}
-	_ = verified
 	return uname, mail, nil
 }
 
