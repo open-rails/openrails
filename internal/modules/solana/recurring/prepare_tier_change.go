@@ -59,10 +59,10 @@ type PrepareTierChangeInput struct {
 	OldSubscriptionPDA string
 
 	// New plan terms.
-	NewPlanID         uint64
+	NewPlanID          uint64
 	NewAmountBaseUnits uint64
-	NewPeriodHours    uint64
-	NewPlanCreatedAt  int64
+	NewPeriodHours     uint64
+	NewPlanCreatedAt   int64
 
 	// IsUpgrade selects the bundle: true -> charge the prorated first pull now
 	// (atomic, co-signed); false (downgrade) -> no charge, deferred.

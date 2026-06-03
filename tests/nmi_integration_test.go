@@ -386,11 +386,14 @@ func TestNMIRuntimeClientConfigured(t *testing.T) {
 	client := suite.App.Runtime.NMIClients["mobius"]
 	require.NotNil(t, client)
 
-	// Verify it's pointing to the real NMI endpoint (not mock)
+	assert.True(t, client.TestMode, "NMI runtime client should be in test mode for integration tests")
+	assert.NotEmpty(t, client.DirectPostURL, "NMI direct post URL should be configured")
 	assert.True(t,
-		strings.Contains(client.DirectPostURL, "networkmerchants.com") ||
-			strings.Contains(client.DirectPostURL, "nmi.com"),
-		"Should use real NMI endpoint, got: %s", client.DirectPostURL)
+		strings.HasPrefix(client.DirectPostURL, "http://") ||
+			strings.HasPrefix(client.DirectPostURL, "https://"),
+		"NMI direct post URL should be absolute, got: %s", client.DirectPostURL)
+	assert.Equal(t, nmi.SandboxDirectPostURL, client.DirectPostURL)
+	assert.Equal(t, nmi.SandboxQueryAPIURL, client.QueryURL)
 
 	t.Logf("NMI client configured with DirectPostURL: %s", client.DirectPostURL)
 }

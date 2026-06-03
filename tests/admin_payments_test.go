@@ -104,7 +104,7 @@ func TestAdminListPayments(t *testing.T) {
 		// Verify Stripe-like payment format
 		payment := data[0].(map[string]interface{})
 		assert.True(t, strings.HasPrefix(payment["id"].(string), "pay_"), "ID should have pay_ prefix")
-		assert.Equal(t, "payment", payment["object"], "Object should be 'payment'")
+		assert.Equal(t, "charge", payment["object"], "Object should be 'charge'")
 		assert.NotNil(t, payment["amount"], "Should have amount")
 		assert.NotNil(t, payment["currency"], "Should have currency")
 		assert.True(t, strings.HasPrefix(payment["user"].(string), "usr_"), "User should have usr_ prefix")
@@ -124,6 +124,7 @@ func TestAdminListPayments(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/payments?user_id=%s", userID), nil)
 		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("X-Idempotency-Key", "refund-missing-"+uuid.NewString())
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -329,7 +330,7 @@ func TestAdminGetPayment(t *testing.T) {
 
 		// Verify Stripe-like format
 		assert.Equal(t, api.FormatPaymentID(payment.ID), response["id"], "Payment ID should have pay_ prefix")
-		assert.Equal(t, "payment", response["object"], "Object should be 'payment'")
+		assert.Equal(t, "charge", response["object"], "Object should be 'charge'")
 		assert.Equal(t, float64(999), response["amount"], "Amount should match")
 		assert.Equal(t, "usd", response["currency"], "Currency should match")
 		assert.Equal(t, api.FormatUserID(userID), response["user"], "User should have usr_ prefix")
@@ -525,6 +526,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", nonExistentID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("X-Idempotency-Key", "refund-missing-payment-"+uuid.NewString())
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -556,6 +558,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("X-Idempotency-Key", "refund-missing-amount-"+uuid.NewString())
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -575,6 +578,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("X-Idempotency-Key", "refund-zero-amount-"+uuid.NewString())
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -586,7 +590,7 @@ func TestAdminRefundPayment(t *testing.T) {
 			UserID:        userID,
 			PriceID:       priceID,
 			Processor:     models.ProcessorStripe,
-			TransactionID: "cs_test_old_checkout",
+			TransactionID: "cs_test_old_checkout_" + uuid.NewString()[:8],
 			Amount:        1000,
 		})
 
@@ -595,6 +599,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("X-Idempotency-Key", "refund-stripe-old-"+uuid.NewString())
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -622,6 +627,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("X-Idempotency-Key", "refund-ccbill-"+uuid.NewString())
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -671,6 +677,7 @@ func TestAdminRefundPaymentAuthBoundaries(t *testing.T) {
 			req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()), strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer "+adminToken)
+			req.Header.Set("X-Idempotency-Key", "refund-boundary-"+uuid.NewString())
 
 			suite.Server.Handler().ServeHTTP(w, req)
 

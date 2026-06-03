@@ -127,6 +127,20 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		require.NoError(t, err)
 		return n
 	}
+	latestGraceEnd := func() time.Time {
+		var ent models.Entitlement
+		err := suite.BunDB.NewSelect().
+			Model(&ent).
+			Where("user_id = ? AND entitlement = ?", userID, "premium").
+			Where("source_type = ?", models.EntitlementSourceGrace).
+			Where("source_id = ?", subID).
+			OrderExpr("end_at DESC").
+			Limit(1).
+			Scan(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, ent.EndAt)
+		return ent.EndAt.UTC()
+	}
 
 	callRenewalFailure := func(nextRetryDate string) {
 		body, err := json.Marshal(webhooks.CCBillRenewalFailureEvent{
@@ -154,18 +168,24 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	}
 
 	// Fail #1: grace until +3d (end-of-day).
-	callRenewalFailure(paidEnd.Add(3 * 24 * time.Hour).Format("2006-01-02"))
+	grace1 := paidEnd.Add(3 * 24 * time.Hour)
+	callRenewalFailure(grace1.Format("2006-01-02"))
 	require.Equal(t, 1, countGrace())
+	require.WithinDuration(t, grace1.UTC(), latestGraceEnd(), time.Second)
 
-	// Fail #2 (during grace): grace until +5d (append).
+	// Fail #2 (during grace): keep the original grace entitlement window.
 	clock.Advance(24 * time.Hour)
-	callRenewalFailure(paidEnd.Add(5 * 24 * time.Hour).Format("2006-01-02"))
-	require.Equal(t, 2, countGrace())
+	grace2 := paidEnd.Add(5 * 24 * time.Hour)
+	callRenewalFailure(grace2.Format("2006-01-02"))
+	require.Equal(t, 1, countGrace())
+	require.WithinDuration(t, grace1.UTC(), latestGraceEnd(), time.Second)
 
-	// Fail #3 (during grace): grace until +7d (append; future window exists).
+	// Fail #3 (during grace): still keep the original grace entitlement window.
 	clock.Advance(12 * time.Hour)
-	callRenewalFailure(paidEnd.Add(7 * 24 * time.Hour).Format("2006-01-02"))
-	require.Equal(t, 3, countGrace())
+	grace3 := paidEnd.Add(7 * 24 * time.Hour)
+	callRenewalFailure(grace3.Format("2006-01-02"))
+	require.Equal(t, 1, countGrace())
+	require.WithinDuration(t, grace1.UTC(), latestGraceEnd(), time.Second)
 
 	// Sanity: paid window is unchanged.
 	var gotPaid models.Entitlement
@@ -180,7 +200,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.True(t, ok)
 
 	// Renewal success occurs mid-way through the grace timeline.
-	successAt := paidEnd.Add(4*24*time.Hour + 12*time.Hour)
+	successAt := paidEnd.Add(2 * 24 * time.Hour)
 	clock.Advance(successAt.Sub(clock.Now().UTC()))
 
 	successBody, err := json.Marshal(webhooks.CCBillRenewalSuccessEvent{
@@ -209,7 +229,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	}
 	require.NoError(t, webhook.HandleCCBillWebhook(ctx))
 
-	// Grace windows should be cleared: any active grace revoked; any future grace deleted.
+	// The single active grace window should be revoked by renewal success.
 	var graceRows []models.Entitlement
 	require.NoError(t, suite.BunDB.NewSelect().
 		Model(&graceRows).
@@ -219,19 +239,9 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		Where("source_id = ?", subID).
 		OrderExpr("start_at ASC").
 		Scan(ctx))
-	require.Len(t, graceRows, 3)
-
-	for _, gr := range graceRows {
-		if gr.StartAt.After(successAt) {
-			require.NotNil(t, gr.DeletedAt, "future grace windows should be deleted")
-			require.Nil(t, gr.RevokedAt, "future grace windows should not be revoked")
-			continue
-		}
-		// Only the grace window that is active at successAt should be revoked.
-		if gr.EndAt != nil && gr.EndAt.After(successAt) {
-			require.NotNil(t, gr.RevokedAt, "active grace windows should be revoked")
-		}
-	}
+	require.Len(t, graceRows, 1)
+	require.NotNil(t, graceRows[0].RevokedAt, "active grace window should be revoked")
+	require.Nil(t, graceRows[0].DeletedAt, "historical grace window should not be deleted")
 
 	expectedPaidEnd := time.Date(
 		paidEnd.Add(30*24*time.Hour).Year(),

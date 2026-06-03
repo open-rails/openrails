@@ -72,8 +72,9 @@ func TestEntitlementFeatureRepo_TenantIsolation(t *testing.T) {
 	tB := tenant.ID(uuid.New())
 	productA := uuid.New()
 	productB := uuid.New()
-	seedTenantAndProduct(t, ctx, appDB, tA, productA, "prod-a")
-	seedTenantAndProduct(t, ctx, appDB, tB, productB, "prod-b")
+	suffix := uuid.NewString()[:8]
+	seedTenantAndProduct(t, ctx, appDB, tA, productA, "prod-a-"+suffix)
+	seedTenantAndProduct(t, ctx, appDB, tB, productB, "prod-b-"+suffix)
 
 	ctxA := tenant.WithID(ctx, tA)
 	ctxB := tenant.WithID(ctx, tB)

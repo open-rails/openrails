@@ -29,9 +29,6 @@ import (
 //	OPENRAILS_TEST_DB_DSN=postgresql://test:test@127.0.0.1:5599/openrails?sslmode=disable \
 //	  go test -tags integration -run TestRLSRealTable ./internal/db/repo/
 
-const tenantA = "00000000-0000-0000-0000-0000000000a1"
-const tenantB = "00000000-0000-0000-0000-0000000000b2"
-
 func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	ctx := context.Background()
 
@@ -44,6 +41,10 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	// fixtures never collide with sibling tests sharing the DB on the global
 	// products.slug / tenants.slug UNIQUE constraints.
 	suffix := uuid.NewString()[:8]
+	tenantA := uuid.NewString()
+	tenantB := uuid.NewString()
+	productA := uuid.NewString()
+	productB := uuid.NewString()
 	slugA := "prod-a-" + suffix
 	slugB := "prod-b-" + suffix
 	super, err := db.NewDB(&config.DBConfig{URL: superDSN})
@@ -54,8 +55,8 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 		   ('` + tenantA + `','tenant-` + suffix + `-a','A'), ('` + tenantB + `','tenant-` + suffix + `-b','B')
 		 ON CONFLICT (id) DO NOTHING`,
 		`INSERT INTO billing.products (id, tenant_id, slug, display_name) VALUES
-		   ('` + tenantA + `','` + tenantA + `','` + slugA + `','Product A'),
-		   ('` + tenantB + `','` + tenantB + `','` + slugB + `','Product B')
+		   ('` + productA + `','` + tenantA + `','` + slugA + `','Product A'),
+		   ('` + productB + `','` + tenantB + `','` + slugB + `','Product B')
 		 ON CONFLICT (id) DO NOTHING`,
 	} {
 		_, e := super.GetDB().ExecContext(ctx, stmt)

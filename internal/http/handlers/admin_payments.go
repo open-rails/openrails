@@ -196,7 +196,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 	case payment.Processor == models.ProcessorStripe:
 		refundTargetID, err := subscriptions.ResolveStripeRefundTarget(payment)
 		if err != nil {
-			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded")
+			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded: "+err.Error())
 		}
 		stripeRefundTargetID = refundTargetID
 	case processors.IsNMIBackedProcessor(payment.Processor):

@@ -106,6 +106,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	resolver := stubOATResolver{permissions: []string{
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
+		controlplane.PermCreditsSpend,
 		controlplane.PermEntitlementsRead,
 	}}
 	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, middleware.OATRequired(resolver), nil, nil)

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/api"
 )
 
 // TestPaymentMethodsRequiresAuth tests that payment methods endpoints require authentication
@@ -144,13 +145,13 @@ func TestListPaymentMethods(t *testing.T) {
 			method := item.(map[string]interface{})
 			ids[i] = method["id"].(string)
 		}
-		assert.Contains(t, ids, pm1.ID.String())
-		assert.Contains(t, ids, pm2.ID.String())
+		assert.Contains(t, ids, api.FormatPaymentMethodID(pm1.ID))
+		assert.Contains(t, ids, api.FormatPaymentMethodID(pm2.ID))
 	})
 
 	t.Run("supports pagination parameters", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/me/payment-methods?page=1", nil)
+		req, _ := http.NewRequest("GET", "/v1/me/payment-methods?offset=0&limit=20", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -161,12 +162,10 @@ func TestListPaymentMethods(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
-		// Verify pagination fields are present
-		assert.Contains(t, response, "total_items", "Response should contain total_items")
-		assert.Contains(t, response, "page", "Response should contain page")
-		assert.Contains(t, response, "page_size", "Response should contain page_size")
-		assert.Contains(t, response, "total_pages", "Response should contain total_pages")
-		assert.Equal(t, float64(1), response["page"], "Page should be 1")
+		assert.Equal(t, float64(2), response["total"], "Total should include both seeded methods")
+		assert.Equal(t, float64(20), response["limit"], "Limit should match request")
+		assert.Equal(t, float64(0), response["offset"], "Offset should match request")
+		assert.Equal(t, false, response["has_more"], "Should not have another page")
 	})
 }
 
@@ -340,7 +339,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
-		assert.Equal(t, pm.ID.String(), response["id"], "Should return same payment method ID")
+		assert.Equal(t, api.FormatPaymentMethodID(pm.ID), response["id"], "Should return same payment method ID")
 	})
 
 	t.Run("returns error without payment_token", func(t *testing.T) {

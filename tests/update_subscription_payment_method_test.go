@@ -22,14 +22,14 @@ func TestUpdateSubscriptionPaymentMethodRequiresAuth(t *testing.T) {
 	suite := setupTestSuite(t)
 
 	t.Run("returns 401 without auth token", func(t *testing.T) {
+		subscriptionID := uuid.New().String()
 		body := map[string]string{
-			"subscription_id":   uuid.New().String(),
 			"payment_method_id": uuid.New().String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(subscriptionID), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -55,17 +55,18 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 	oldPM := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 		UserID:    userID,
 		Processor: models.ProcessorMobius,
-		VaultID:   "old-vault-123",
+		VaultID:   "old-vault-" + uuid.New().String(),
 		LastFour:  "4242",
 		CardType:  "Visa",
 	})
 
+	processorSubID := "sub-to-update-" + uuid.New().String()
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:          userID,
 		PriceID:         priceID,
 		Status:          models.StatusActive,
 		Processor:       models.ProcessorMobius,
-		ProcessorSubID:  "sub-to-update-123",
+		ProcessorSubID:  processorSubID,
 		PaymentMethodID: &oldPM.ID,
 	})
 
@@ -73,7 +74,7 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 	newPM := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 		UserID:    userID,
 		Processor: models.ProcessorMobius,
-		VaultID:   "new-vault-456",
+		VaultID:   "new-vault-" + uuid.New().String(),
 		LastFour:  "1234",
 		CardType:  "Mastercard",
 	})
@@ -82,13 +83,12 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 		mock.Reset()
 
 		body := map[string]string{
-			"subscription_id":   sub.ID.String(),
 			"payment_method_id": newPM.ID.String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(sub.ID.String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -105,8 +105,8 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 
 		// Verify NMI was called with update_subscription
 		assert.Contains(t, mock.LastRequest["recurring"], "update_subscription", "Should call NMI with update_subscription")
-		assert.Contains(t, mock.LastRequest["subscription_id"], "sub-to-update-123", "Should send subscription ID")
-		assert.Contains(t, mock.LastRequest["customer_vault_id"], "new-vault-456", "Should send new vault ID")
+		assert.Contains(t, mock.LastRequest["subscription_id"], processorSubID, "Should send subscription ID")
+		assert.Contains(t, mock.LastRequest["customer_vault_id"], newPM.VaultID, "Should send new vault ID")
 
 		// Verify subscription was updated in database
 		updatedSub := suite.GetSubscription(sub.ID)
@@ -118,13 +118,12 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 		mock.Reset()
 
 		body := map[string]string{
-			"subscription_id":   api.FormatSubscriptionID(sub.ID),
 			"payment_method_id": api.FormatPaymentMethodID(newPM.ID),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(api.FormatSubscriptionID(sub.ID)), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -159,13 +158,12 @@ func TestUpdateSubscriptionPaymentMethodNotOwned(t *testing.T) {
 
 	t.Run("returns 403 for subscription owned by another user", func(t *testing.T) {
 		body := map[string]string{
-			"subscription_id":   otherSub.ID.String(),
 			"payment_method_id": pm.ID.String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(otherSub.ID.String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -200,13 +198,12 @@ func TestUpdateSubscriptionPaymentMethodNotOwnedPM(t *testing.T) {
 
 	t.Run("returns 403 for payment method owned by another user", func(t *testing.T) {
 		body := map[string]string{
-			"subscription_id":   sub.ID.String(),
 			"payment_method_id": otherPM.ID.String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(sub.ID.String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -245,13 +242,12 @@ func TestUpdateSubscriptionPaymentMethodCancelledSub(t *testing.T) {
 
 	t.Run("returns error for cancelled subscription", func(t *testing.T) {
 		body := map[string]string{
-			"subscription_id":   cancelledSub.ID.String(),
 			"payment_method_id": pm.ID.String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(cancelledSub.ID.String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -290,13 +286,12 @@ func TestUpdateSubscriptionPaymentMethodCCBillNotSupported(t *testing.T) {
 
 	t.Run("returns error for CCBill subscription", func(t *testing.T) {
 		body := map[string]string{
-			"subscription_id":   ccbillSub.ID.String(),
 			"payment_method_id": pm.ID.String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(ccbillSub.ID.String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -330,13 +325,12 @@ func TestUpdateSubscriptionPaymentMethodNotFound(t *testing.T) {
 
 	t.Run("returns 404 for non-existent subscription", func(t *testing.T) {
 		body := map[string]string{
-			"subscription_id":   uuid.New().String(),
 			"payment_method_id": pm.ID.String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(uuid.New().String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -347,13 +341,12 @@ func TestUpdateSubscriptionPaymentMethodNotFound(t *testing.T) {
 
 	t.Run("returns 404 for non-existent payment method", func(t *testing.T) {
 		body := map[string]string{
-			"subscription_id":   sub.ID.String(),
 			"payment_method_id": uuid.New().String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(sub.ID.String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -372,30 +365,28 @@ func TestUpdateSubscriptionPaymentMethodInvalidRequest(t *testing.T) {
 	email := "update-pm-invalid-" + t.Name() + "@test.example.com"
 	token := getTestIssuer().CreateToken(userID, email)
 
-	t.Run("returns error for missing subscription_id", func(t *testing.T) {
+	t.Run("returns error for invalid subscription ID", func(t *testing.T) {
 		body := map[string]string{
 			"payment_method_id": uuid.New().String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath("not-a-uuid"), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 Bad Request for missing subscription_id")
+		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 Bad Request for invalid subscription ID")
 	})
 
 	t.Run("returns error for missing payment_method_id", func(t *testing.T) {
-		body := map[string]string{
-			"subscription_id": uuid.New().String(),
-		}
+		body := map[string]string{}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(uuid.New().String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -404,21 +395,20 @@ func TestUpdateSubscriptionPaymentMethodInvalidRequest(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 Bad Request for missing payment_method_id")
 	})
 
-	t.Run("returns error for invalid UUID format", func(t *testing.T) {
+	t.Run("returns error for invalid payment method UUID format", func(t *testing.T) {
 		body := map[string]string{
-			"subscription_id":   "not-a-uuid",
-			"payment_method_id": uuid.New().String(),
+			"payment_method_id": "not-a-uuid",
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(uuid.New().String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 Bad Request for invalid UUID format")
+		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 Bad Request for invalid payment method UUID format")
 	})
 }
 
@@ -447,20 +437,19 @@ func TestUpdateSubscriptionPaymentMethodPastDue(t *testing.T) {
 	newPM := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
 		UserID:    userID,
 		Processor: models.ProcessorMobius,
-		VaultID:   "new-vault-pastdue",
+		VaultID:   "new-vault-pastdue-" + uuid.New().String(),
 	})
 
 	t.Run("allows updating payment method for past_due subscription", func(t *testing.T) {
 		mock.Reset()
 
 		body := map[string]string{
-			"subscription_id":   pastDueSub.ID.String(),
 			"payment_method_id": newPM.ID.String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(pastDueSub.ID.String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -504,13 +493,12 @@ func TestUpdateSubscriptionPaymentMethodNMIFailure(t *testing.T) {
 		mock.FailReason = "Subscription not found"
 
 		body := map[string]string{
-			"subscription_id":   sub.ID.String(),
 			"payment_method_id": pm.ID.String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/subscriptions/payment-method", bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(sub.ID.String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -518,4 +506,8 @@ func TestUpdateSubscriptionPaymentMethodNMIFailure(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadGateway, w.Code, "Should return 502 Bad Gateway when NMI fails")
 	})
+}
+
+func updateSubscriptionPaymentMethodPath(subscriptionID string) string {
+	return "/v1/me/subscriptions/" + subscriptionID + "/payment-method"
 }

@@ -5,7 +5,9 @@ package controlplane
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +46,12 @@ ON CONFLICT (id) DO NOTHING;
 func newBootstrapTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
+	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")); dsn != "" {
+		pool := newExternalPostgresTestPool(t, dsn, "openrails_bootstrap")
+		applyBootstrapTestSchema(t, ctx, pool)
+		return pool
+	}
+
 	container, err := postgres.Run(ctx,
 		"postgres:18-alpine",
 		postgres.WithDatabase("openrails"),
@@ -63,6 +71,12 @@ func newBootstrapTestPool(t *testing.T) *pgxpool.Pool {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
+	applyBootstrapTestSchema(t, ctx, pool)
+	return pool
+}
+
+func applyBootstrapTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
 	// Apply AuthKit profiles.* schema in filename order, then billing.tenants.
 	entries, err := authpgmigrations.FS.ReadDir(".")
 	require.NoError(t, err)
@@ -79,7 +93,6 @@ func newBootstrapTestPool(t *testing.T) *pgxpool.Pool {
 	}
 	_, err = pool.Exec(ctx, minimalTenantsDDL)
 	require.NoError(t, err)
-	return pool
 }
 
 func newEnabledControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {

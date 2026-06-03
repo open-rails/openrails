@@ -92,8 +92,8 @@ func (c *ControlPlane) DelegatedVerifier() *authhttp.Verifier {
 // control plane signs as, the canonical `openrails` audience, the local signing
 // public keys, and a permission-catalog validator that rejects any permission
 // outside the {self-service, tenant-admin} catalog (issue #259).
-// VerifyDelegatedAccess additionally enforces `typ=at+jwt` + the
-// no-`sub`/`delegated_sub`-present invariant.
+// VerifyDelegatedAccess additionally enforces AuthKit's delegated access token
+// profile + the no-`sub`/`delegated_sub`-present invariant.
 //
 // FEDERATED tenant issuers (issue #259) are added on top of this seed by
 // reloadDelegatedIssuers (AddIssuer with JWKS-URL fetching), so at runtime the
@@ -141,8 +141,8 @@ func newDelegatedVerifier(coreSvc *authcore.Service, expectedAudiences []string,
 // ResolveDelegated validates a presented delegated access token end-to-end for
 // the browser-direct self-service surface:
 //
-//   - verifies signature/issuer/audience/expiry and requires it to be a
-//     delegated access token (`typ=at+jwt`, `delegated_sub` present, NO `sub`),
+//   - verifies signature/issuer/audience/expiry and requires it to be an
+//     AuthKit delegated access token (`delegated_sub` present, NO `sub`),
 //   - enforces that every `permissions` entry is in the {self, tenant-admin}
 //     catalog (#259), never a service/operator grant,
 //   - resolves the OpenRails tenant: for a FEDERATED tenant-signed token (#259)

@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -34,6 +35,10 @@ type HoldExpiryWorker struct {
 func (HoldExpiryWorker) Kind() string { return KindHoldExpiry }
 
 func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArgs]) error {
+	if w.DB == nil {
+		return fmt.Errorf("hold expiry worker: db is required")
+	}
+
 	// Check if entitlement expiration is disabled via feature flags
 	if w.Config != nil && w.Config.IsEntitlementExpirationDisabled() {
 		log.WithContext(ctx).WithField("worker", KindHoldExpiry).

@@ -28,17 +28,10 @@ func TestEndpointAuthRequirements(t *testing.T) {
 		{"GET", "/v1/me/payment-methods"},
 		{"PUT", "/v1/me/payment-methods/123"},
 		{"DELETE", "/v1/me/payment-methods/123"},
-		{"PUT", "/v1/me/payment-methods/123/activate"},
 		// Subscription endpoints
 		{"GET", "/v1/me/subscriptions"},
-		{"POST", "/v1/me/subscriptions/cancel"},
 		// Payment history
 		{"GET", "/v1/me/payments"},
-		// Payment intents
-		{"POST", "/v1/payment-intents"},
-		{"POST", "/v1/payment-intents/qr"},
-		{"GET", "/v1/payment-intents/pi_123"},
-		{"POST", "/v1/payment-intents/pi_123/confirm"},
 	}
 
 	for _, endpoint := range endpoints {

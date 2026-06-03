@@ -73,7 +73,7 @@ func TestCancelSubscriptionCCBill(t *testing.T) {
 		PriceID:        priceID,
 		Status:         models.StatusActive,
 		Processor:      models.ProcessorCCBill,
-		ProcessorSubID: "test-ccbill-sub-" + t.Name(),
+		ProcessorSubID: "test-ccbill-sub-" + uuid.NewString(),
 	})
 
 	body := map[string]string{"feedback": "I want to cancel"}
@@ -105,7 +105,7 @@ func TestCancelSubscriptionAlreadyCancelled(t *testing.T) {
 		PriceID:        priceID,
 		Status:         models.StatusCancelled,
 		Processor:      models.ProcessorMobius,
-		ProcessorSubID: "test-nmi-cancelled-" + t.Name(),
+		ProcessorSubID: "test-nmi-cancelled-" + uuid.NewString(),
 	})
 
 	body := map[string]string{"feedback": "test"}
@@ -135,7 +135,7 @@ func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
 		PriceID:        priceID,
 		Status:         models.StatusActive,
 		Processor:      models.ProcessorMobius,
-		ProcessorSubID: "test-mobius-sub-" + t.Name(),
+		ProcessorSubID: "test-mobius-sub-" + uuid.NewString(),
 	})
 
 	body := map[string]string{"feedback": "not yours"}

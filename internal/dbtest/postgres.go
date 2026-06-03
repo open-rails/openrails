@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/lib/pq" // database/sql driver used for schema bootstrap
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -37,10 +39,42 @@ import (
 )
 
 var (
-	sharedOnce sync.Once
-	sharedDSN  string
-	sharedErr  error
+	sharedOnce      sync.Once
+	sharedDSN       string
+	sharedErr       error
+	sharedContainer *postgres.PostgresContainer
 )
+
+// RunMain is the TestMain entry point for any package that uses
+// SharedPostgresDSN. It runs the package's tests and then ALWAYS terminates the
+// shared Postgres container, so the container is closed after use even when the
+// testcontainers Ryuk reaper is unavailable (e.g. offline/sandboxed local runs
+// where Ryuk's image can't be pulled or RYUK is disabled). Without this, the
+// sync.Once container would leak for the lifetime of the Docker daemon.
+//
+// Usage, in each consuming package (behind the integration build tag):
+//
+//	func TestMain(m *testing.M) { dbtest.RunMain(m) }
+func RunMain(m *testing.M) {
+	code := m.Run()
+	TerminateShared()
+	os.Exit(code)
+}
+
+// TerminateShared terminates the shared Postgres container if this process
+// started one. It is safe to call when no container was started (e.g. an
+// external OPENRAILS_TEST_DB_URL was used) and idempotent on repeat calls.
+func TerminateShared() {
+	if sharedContainer == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := sharedContainer.Terminate(ctx); err != nil {
+		fmt.Printf("dbtest: failed to terminate shared postgres container: %v\n", err)
+	}
+	sharedContainer = nil
+}
 
 // SharedPostgresDSN returns a DSN to a migrated Postgres shared across all
 // integration tests in the calling package process. It fails the test if the
@@ -59,7 +93,13 @@ func provision(ctx context.Context) (string, error) {
 	if dsn == "" {
 		dsn = strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN"))
 	}
-	if dsn == "" {
+	if dsn != "" {
+		isolatedDSN, err := createExternalTestDatabase(ctx, dsn)
+		if err != nil {
+			return "", err
+		}
+		dsn = isolatedDSN
+	} else {
 		container, err := postgres.Run(ctx,
 			"postgres:18-alpine",
 			postgres.WithDatabase("test_db"),
@@ -74,9 +114,12 @@ func provision(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("start postgres container: %w", err)
 		}
-		// The container is intentionally not terminated here: it must outlive
-		// every test in the package. testcontainers' Ryuk reaper removes it when
-		// the test session ends.
+		// The container must outlive every test in the package, so it is NOT
+		// terminated here. It is retained and torn down by TerminateShared, which
+		// RunMain invokes from the package's TestMain after m.Run(). (testcontainers'
+		// Ryuk reaper is a secondary safety net but cannot be relied upon in
+		// offline/sandboxed runs where its image is unavailable.)
+		sharedContainer = container
 		dsn, err = container.ConnectionString(ctx, "sslmode=disable")
 		if err != nil {
 			return "", fmt.Errorf("postgres connection string: %w", err)
@@ -87,6 +130,31 @@ func provision(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return dsn, nil
+}
+
+func createExternalTestDatabase(ctx context.Context, adminDSN string) (string, error) {
+	adminCfg, err := pgxpool.ParseConfig(adminDSN)
+	if err != nil {
+		return "", fmt.Errorf("parse external postgres dsn: %w", err)
+	}
+	adminCfg.ConnConfig.Config.Database = "postgres"
+	adminPool, err := pgxpool.NewWithConfig(ctx, adminCfg)
+	if err != nil {
+		return "", fmt.Errorf("connect external postgres admin database: %w", err)
+	}
+	defer adminPool.Close()
+
+	dbName := fmt.Sprintf("openrails_it_%d_%d", os.Getpid(), time.Now().UnixNano())
+	if _, err := adminPool.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()); err != nil {
+		return "", fmt.Errorf("create external test database %s: %w", dbName, err)
+	}
+
+	testCfg, err := pgxpool.ParseConfig(adminDSN)
+	if err != nil {
+		return "", fmt.Errorf("parse external postgres dsn for test database: %w", err)
+	}
+	testCfg.ConnConfig.Config.Database = dbName
+	return testCfg.ConnString(), nil
 }
 
 func bootstrapAndMigrate(ctx context.Context, dsn string) error {

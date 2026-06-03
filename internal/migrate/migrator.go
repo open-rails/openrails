@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	authkitpostgres "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/open-rails/migratekit"
@@ -232,13 +233,13 @@ func runClickHouseMigrations(ctx context.Context, sqlDB *sql.DB, cfg *config.Cli
 	}
 
 	chCluster := cfg.Cluster
-	if chCluster == "" {
-		chCluster = "billing"
-	}
 
 	chMigrations, err := migratekit.LoadFromFS(clickhousemigrations.FS)
 	if err != nil {
 		return fmt.Errorf("clickhouse: load migrations: %w", err)
+	}
+	if chCluster == "" {
+		chMigrations = useSingleNodeClickHouseEngines(chMigrations)
 	}
 
 	m := migratekit.NewClickHouse(&migratekit.ClickHouseConfig{
@@ -257,4 +258,27 @@ func runClickHouseMigrations(ctx context.Context, sqlDB *sql.DB, cfg *config.Cli
 
 	log.Info("✓ ClickHouse migrations completed successfully")
 	return nil
+}
+
+func useSingleNodeClickHouseEngines(migrations []migratekit.Migration) []migratekit.Migration {
+	out := make([]migratekit.Migration, len(migrations))
+	for i, migration := range migrations {
+		migration.Content = strings.ReplaceAll(
+			migration.Content,
+			"ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', version)",
+			"ReplacingMergeTree(version)",
+		)
+		migration.Content = strings.ReplaceAll(
+			migration.Content,
+			"ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', last_updated)",
+			"ReplacingMergeTree(last_updated)",
+		)
+		migration.Content = strings.ReplaceAll(
+			migration.Content,
+			"ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}')",
+			"ReplacingMergeTree()",
+		)
+		out[i] = migration
+	}
+	return out
 }

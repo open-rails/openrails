@@ -151,11 +151,11 @@ func TestStripeModelBUpgrade_Integration(t *testing.T) {
 			} `json:"data"`
 		} `json:"items"`
 		LatestInvoice struct {
-			ID             string `json:"id"`
-			AmountPaid     int64  `json:"amount_paid"`
-			Total          int64  `json:"total"`
-			Status         string `json:"status"`
-			PaymentIntent  string `json:"payment_intent"`
+			ID            string `json:"id"`
+			AmountPaid    int64  `json:"amount_paid"`
+			Total         int64  `json:"total"`
+			Status        string `json:"status"`
+			PaymentIntent string `json:"payment_intent"`
 		} `json:"latest_invoice"`
 	}
 	stripeForm(t, key, http.MethodPost, "/v1/subscriptions", url.Values{

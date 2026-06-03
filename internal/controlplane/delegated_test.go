@@ -16,7 +16,8 @@ import (
 
 // These tests exercise the SECURITY-CRITICAL delegated-access-token verification
 // decisions the browser-direct self-service surface depends on (issue #222
-// browser tier): canonical audience enforcement, typ=at+jwt + no-`sub`
+// browser tier): canonical audience enforcement, AuthKit delegated profile +
+// no-`sub`
 // requirement, and the openrails:self:* permission-catalog gate. They build the
 // exact verifier configuration newDelegatedVerifier uses, so they pin the real
 // behavior without needing a database (the org->tenant mapping in

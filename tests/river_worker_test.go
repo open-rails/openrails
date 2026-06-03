@@ -194,8 +194,11 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 
 		// Verify notification was deleted
 		var count int
-		err = suite.BunDB.QueryRowContext(ctx,
-			"SELECT COUNT(*) FROM billing.notification_queue WHERE id = $1", notification.ID).Scan(&count)
+		err = suite.BunDB.NewSelect().
+			Model((*models.NotificationQueue)(nil)).
+			Where("id = ?", notification.ID).
+			ColumnExpr("COUNT(*)").
+			Scan(ctx, &count)
 		require.NoError(t, err)
 		assert.Equal(t, 0, count, "Old seen notification should be deleted")
 	})
@@ -226,8 +229,11 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 
 		// Verify recent notification was preserved
 		var notifCount int
-		err = suite.BunDB.QueryRowContext(ctx,
-			"SELECT COUNT(*) FROM billing.notification_queue WHERE id = $1", notification.ID).Scan(&notifCount)
+		err = suite.BunDB.NewSelect().
+			Model((*models.NotificationQueue)(nil)).
+			Where("id = ?", notification.ID).
+			ColumnExpr("COUNT(*)").
+			Scan(ctx, &notifCount)
 		require.NoError(t, err)
 		assert.Equal(t, 1, notifCount, "Recent notification should be preserved")
 

@@ -13,9 +13,9 @@ import (
 // browser's DELEGATED ACCESS TOKEN (issue #222 browser-tier foundation, the
 // backend prerequisite for doujins #253 / hentai0 #142 / cozy-art #46).
 //
-// A tenant's host frontend mints a short-lived delegated access token
-// (aud=openrails, typ=at+jwt, tenant, delegated_sub, openrails:self:* perms) for
-// the logged-in end-user; the browser calls OpenRails directly with it. Every
+// A tenant's host frontend mints a short-lived AuthKit delegated access token
+// (aud=openrails, tenant, delegated_sub, openrails:self:* perms) for the
+// logged-in end-user; the browser calls OpenRails directly with it. Every
 // operation is scoped to the token's delegated_sub + resolved tenant.
 //
 // Mounted only when the OpenRails-owned AuthKit control plane is configured (it

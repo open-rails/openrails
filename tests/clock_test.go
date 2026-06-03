@@ -20,7 +20,7 @@ import (
 
 // TestClockInTestSuite tests the clock integration with TestContainerSuite
 func TestClockInTestSuite(t *testing.T) {
-	suite := setupTestSuite(t)
+	suite := setupTestSuite(t, WithSuiteClock(clockwork.NewRealClock()))
 
 	t.Run("default clock is real clock", func(t *testing.T) {
 		clk := suite.GetClock()
@@ -91,7 +91,11 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	_, err = rt.SubscriptionService.GetActiveSubscription(ctx, userID)
 	require.Error(t, err, "subscription should not be active after fake time passes the period end")
 
+	cancelledAt := mockClock.Now()
+	cancelType := models.CancelTypeUser
 	sub.Status = models.StatusCancelled
+	sub.CancelledAt = &cancelledAt
+	sub.CancelType = &cancelType
 	require.NoError(t, rt.SubscriptionService.Update(ctx, sub))
 	updated := suite.GetSubscription(sub.ID)
 	assert.WithinDuration(t, mockClock.Now(), updated.UpdatedAt, time.Millisecond)
@@ -118,6 +122,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		err := suite.BunDB.NewSelect().
 			Model((*models.Subscription)(nil)).
 			Where("sub.processor = ?", models.ProcessorMobius).
+			Where("sub.user_id = ?", retryUserID).
 			Where("sub.status = ?", models.StatusPastDue).
 			Where("sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= ?", mockClock.Now()).
 			ColumnExpr("COUNT(*)").
@@ -145,7 +150,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		UserID:      cancelUserID,
 		Entitlement: "premium",
 		StartAt:     cancelStart,
-		EndAt:       nil,
+		EndAt:       &cancelPeriodEnd,
 		SourceType:  models.EntitlementSourceSubscription,
 		SourceID:    &cancelSub.ID,
 		CreatedAt:   cancelStart,

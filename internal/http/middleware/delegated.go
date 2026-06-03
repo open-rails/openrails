@@ -27,9 +27,9 @@ const (
 // it; tests can inject a fake. nil resolver => the deployment is not delegated-
 // token-capable (verifier-only mode), and the self-service surface is not mounted.
 type DelegatedResolver interface {
-	// ResolveDelegated verifies the delegated access token (aud=openrails,
-	// typ=at+jwt, no sub, self-permissions) and resolves its tenant + acting
-	// user (delegated_sub).
+	// ResolveDelegated verifies the delegated access token (aud=openrails, no
+	// sub, self-permissions) and resolves its tenant + acting user
+	// (delegated_sub).
 	ResolveDelegated(ctx context.Context, token string) (*controlplane.ResolvedDelegated, error)
 }
 
@@ -38,7 +38,7 @@ type DelegatedResolver interface {
 // backend prerequisite for doujins #253 / hentai0 #142 / cozy-art #46).
 //
 // A tenant's host frontend mints a short-lived delegated access token for the
-// logged-in end-user (canonical claims: `typ=at+jwt`, `aud` includes
+// logged-in end-user (canonical claims minted by AuthKit: `aud` includes
 // `openrails`, `tenant`, `delegated_sub`, `permissions: ["openrails:self:*"]`)
 // and the browser presents it as `Authorization: Bearer <jwt>` directly to
 // OpenRails. This lets a browser self-serve its OWN billing without routing

@@ -16,7 +16,15 @@ func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T
 	suite, userID, processorSubID, subscriptionID, now := seedCCBillActiveSubscriptionWithEntitlement(t)
 	ctx := context.Background()
 
-	postCCBillTerminalEvent(t, suite, "Expiration", "testdata/webhooks/ccbill/expiration.json", processorSubID, now)
+	expiredAt := now
+	expiredPeriodEnd := now.Add(-time.Hour)
+	_, err := suite.BunDB.NewUpdate().
+		Model((*models.Subscription)(nil)).
+		Set("current_period_ends_at = ?", expiredPeriodEnd).
+		Where("id = ?", subscriptionID).
+		Exec(ctx)
+	require.NoError(t, err)
+	postCCBillTerminalEvent(t, suite, "Expiration", "testdata/webhooks/ccbill/expiration.json", processorSubID, expiredAt)
 
 	require.Eventually(t, func() bool {
 		sub := suite.GetSubscriptionByProcessorID(processorSubID)
@@ -28,7 +36,7 @@ func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T
 	require.False(t, entitled)
 
 	reactivationPayload := mustLoadJSONMap(t, "testdata/webhooks/ccbill/userreactivation.json")
-	nextRenewalDate := now.Add(14 * 24 * time.Hour)
+	nextRenewalDate := expiredAt.Add(14 * 24 * time.Hour)
 	transactionID := "ccbill_reactivate_txn_" + uuid.New().String()
 	reactivationPayload["subscriptionId"] = processorSubID
 	reactivationPayload["transactionId"] = transactionID

@@ -46,6 +46,7 @@ func authzEnv(t *testing.T) (*billingservice.Service, *credits.CreditsService, i
 	dbi, err := db.NewWithBun(bunDB)
 	require.NoError(t, err)
 	rt := &app.Runtime{
+		DB:                 dbi,
 		CreditsService:     credits.NewCreditsService(dbi),
 		EntitlementService: entitlements.NewEntitlementService(dbi),
 		Clock:              clockwork.NewRealClock(),

@@ -3,11 +3,13 @@
 package tests
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -117,8 +119,30 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 	t.Run("returns entitlements in user profile", func(t *testing.T) {
 		userID := uuid.New().String()
 
-		// Create entitlements
-		suite.CreateTestEntitlement(userID, "premium", nil, models.EntitlementSourceAdmin)
+		now := time.Now().UTC()
+		endAt := now.Add(30 * 24 * time.Hour)
+		adminGrant := &models.AdminGrant{
+			ID:           uuid.New(),
+			UserID:       userID,
+			GrantedBy:    "test-admin",
+			Reason:       "test_admin_entitlement",
+			DurationDays: nil,
+			CreatedAt:    now,
+		}
+		_, err := suite.BunDB.NewInsert().Model(adminGrant).Exec(context.Background())
+		require.NoError(t, err)
+		_, err = suite.BunDB.NewInsert().Model(&models.Entitlement{
+			ID:          uuid.New(),
+			UserID:      userID,
+			Entitlement: "premium",
+			StartAt:     now.Add(-time.Second),
+			EndAt:       &endAt,
+			SourceID:    &adminGrant.ID,
+			SourceType:  models.EntitlementSourceAdmin,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}).Exec(context.Background())
+		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/users/%s", userID), nil)
@@ -129,7 +153,7 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK")
 
 		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
+		err = json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
 		assert.Equal(t, userID, response["user_id"], "User ID should match")

@@ -19,8 +19,10 @@ import (
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/migrate"
 
+	chgo "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	_ "github.com/lib/pq" // PostgreSQL driver for schema creation
 	"github.com/redis/go-redis/v9"
@@ -28,7 +30,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/clickhouse"
+	clickhousecontainer "github.com/testcontainers/testcontainers-go/modules/clickhouse"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	redismodule "github.com/testcontainers/testcontainers-go/modules/redis"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -40,9 +42,12 @@ type TestContainerSuite struct {
 	t *testing.T
 
 	// Containers
-	postgresContainer   *postgres.PostgresContainer
-	redisContainer      *redismodule.RedisContainer
-	clickhouseContainer *clickhouse.ClickHouseContainer
+	postgresContainer    *postgres.PostgresContainer
+	redisContainer       *redismodule.RedisContainer
+	clickhouseContainer  *clickhousecontainer.ClickHouseContainer
+	externalPostgresDSN  string
+	externalPostgresDB   string
+	externalClickHouseDB string
 
 	// Application and database connections
 	App         *app.App
@@ -176,11 +181,11 @@ func (suite *TestContainerSuite) startClickHouseContainer() {
 		return
 	}
 
-	container, err := clickhouse.Run(suite.ctx,
-		"clickhouse/clickhouse-server:23.8-alpine",
-		clickhouse.WithUsername("test_user"),
-		clickhouse.WithPassword("test_password"),
-		clickhouse.WithDatabase("test_analytics"),
+	container, err := clickhousecontainer.Run(suite.ctx,
+		"clickhouse/clickhouse-server:25.8-alpine",
+		clickhousecontainer.WithUsername("test_user"),
+		clickhousecontainer.WithPassword("test_password"),
+		clickhousecontainer.WithDatabase("test_analytics"),
 		testcontainers.WithWaitStrategy(
 			wait.ForHTTP("/ping").
 				WithPort("8123/tcp").
@@ -207,6 +212,8 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	// Get ClickHouse connection details
 	clickhouseHTTPAddr, clickhouseClientAddr, err := suite.clickhouseAddresses()
 	require.NoError(suite.t, err)
+	clickhouseDatabase, err := suite.clickhouseDatabase(clickhouseClientAddr)
+	require.NoError(suite.t, err)
 
 	// Create configuration
 	// Use "dev" to skip NMI/CCBill validation in config.Validate()
@@ -227,7 +234,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 		ClickHouse: &config.ClickHouseConfig{
 			HTTPAddr:   clickhouseHTTPAddr,
 			ClientAddr: clickhouseClientAddr,
-			Database:   envOrDefault("OPENRAILS_TEST_CH_DATABASE", "test_analytics"),
+			Database:   clickhouseDatabase,
 			Username:   envOrDefault("OPENRAILS_TEST_CH_USERNAME", "test_user"),
 			Password:   envOrDefault("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
 		},
@@ -255,14 +262,17 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 				Tokens:          config.DefaultDevnetTokens(),
 				// RPCEndpoint and Network are derived from test_mode
 			},
-			// NMI demo account for real API integration tests
-			// Uses the public NMI demo security key (test mode)
-			// See: https://docs.nmi.com/
+			// NMI/Mobius config for integration tests. Prefer real sandbox
+			// credentials from .env; fall back to NMI's public demo key when
+			// running offline/local tests without external credentials.
 			"mobius": {
-				Type:          config.ProcessorTypeNMI,
-				SecurityKey:   "6457Thfj624V5r7WUwc5v6a68Zsd6YEm", // NMI demo key
-				DirectPostURL: "https://secure.networkmerchants.com/api/transact.php",
-				QueryURL:      "https://secure.networkmerchants.com/api/query.php",
+				Type:            config.ProcessorTypeNMI,
+				SecurityKey:     envOrDefault("PROCESSORS_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
+				TokenizationKey: envOrDefault("PROCESSORS_MOBIUS_TOKENIZATION_KEY", ""),
+				TokenizationURL: envOrDefault("PROCESSORS_MOBIUS_TOKENIZATION_URL", ""),
+				WebhookSecret:   envOrDefault("PROCESSORS_MOBIUS_WEBHOOK_SECRET", ""),
+				DirectPostURL:   envOrDefault("PROCESSORS_MOBIUS_DIRECT_POST_URL", ""),
+				QueryURL:        envOrDefault("PROCESSORS_MOBIUS_QUERY_URL", ""),
 			},
 		},
 		// Pyth price-feed config is required whenever a Solana processor is
@@ -323,6 +333,9 @@ func (suite *TestContainerSuite) runDatabaseMigrations() {
 	// Run all migrations using the migrate package
 	err = migrate.RunPostgres(suite.ctx, suite.Config)
 	require.NoError(suite.t, err)
+
+	err = migrate.RunClickHouse(suite.ctx, suite.Config)
+	require.NoError(suite.t, err)
 }
 
 func envOrDefault(key, fallback string) string {
@@ -333,16 +346,46 @@ func envOrDefault(key, fallback string) string {
 }
 
 func (suite *TestContainerSuite) postgresConnectionString() (string, error) {
+	if suite.externalPostgresDSN != "" {
+		return suite.externalPostgresDSN, nil
+	}
 	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL")); dsn != "" {
-		return dsn, nil
+		return suite.createExternalPostgresDatabase(dsn)
 	}
 	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")); dsn != "" {
-		return dsn, nil
+		return suite.createExternalPostgresDatabase(dsn)
 	}
 	if suite.postgresContainer == nil {
 		return "", fmt.Errorf("postgres test container is not initialized")
 	}
 	return suite.postgresContainer.ConnectionString(suite.ctx, "sslmode=disable")
+}
+
+func (suite *TestContainerSuite) createExternalPostgresDatabase(adminDSN string) (string, error) {
+	adminCfg, err := pgxpool.ParseConfig(adminDSN)
+	if err != nil {
+		return "", fmt.Errorf("parse external postgres dsn: %w", err)
+	}
+	adminCfg.ConnConfig.Config.Database = "postgres"
+	adminPool, err := pgxpool.NewWithConfig(suite.ctx, adminCfg)
+	if err != nil {
+		return "", fmt.Errorf("connect external postgres admin database: %w", err)
+	}
+	defer adminPool.Close()
+
+	dbName := fmt.Sprintf("openrails_tests_%d_%d", os.Getpid(), time.Now().UnixNano())
+	if _, err := adminPool.Exec(suite.ctx, "CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()); err != nil {
+		return "", fmt.Errorf("create external test database %s: %w", dbName, err)
+	}
+
+	testCfg, err := pgxpool.ParseConfig(adminDSN)
+	if err != nil {
+		return "", fmt.Errorf("parse external postgres dsn for test database: %w", err)
+	}
+	testCfg.ConnConfig.Config.Database = dbName
+	suite.externalPostgresDSN = testCfg.ConnString()
+	suite.externalPostgresDB = dbName
+	return suite.externalPostgresDSN, nil
 }
 
 func (suite *TestContainerSuite) redisAddress() (string, error) {
@@ -383,6 +426,37 @@ func (suite *TestContainerSuite) clickhouseAddresses() (string, string, error) {
 		return "", "", err
 	}
 	return fmt.Sprintf("http://%s:%s", host, httpPort.Port()), fmt.Sprintf("%s:%s", host, nativePort.Port()), nil
+}
+
+func (suite *TestContainerSuite) clickhouseDatabase(clientAddr string) (string, error) {
+	baseDB := envOrDefault("OPENRAILS_TEST_CH_DATABASE", "test_analytics")
+	if strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_HTTP_ADDR")) == "" {
+		return baseDB, nil
+	}
+
+	dbName := fmt.Sprintf("openrails_tests_%d_%d", os.Getpid(), time.Now().UnixNano())
+	conn, err := chgo.Open(&chgo.Options{
+		Addr: []string{clientAddr},
+		Auth: chgo.Auth{
+			Database: baseDB,
+			Username: envOrDefault("OPENRAILS_TEST_CH_USERNAME", "test_user"),
+			Password: envOrDefault("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("open external clickhouse admin connection: %w", err)
+	}
+	defer conn.Close()
+
+	if err := conn.Exec(suite.ctx, "CREATE DATABASE IF NOT EXISTS "+clickHouseIdent(dbName)); err != nil {
+		return "", fmt.Errorf("create external clickhouse database %s: %w", dbName, err)
+	}
+	suite.externalClickHouseDB = dbName
+	return dbName, nil
+}
+
+func clickHouseIdent(identifier string) string {
+	return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
 }
 
 // initializeServer starts the billing server for testing
@@ -487,6 +561,30 @@ func (suite *TestContainerSuite) Cleanup() {
 			suite.t.Logf("Failed to terminate postgres container: %v", err)
 		}
 	}
+	if suite.externalPostgresDB != "" {
+		adminDSN := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL"))
+		if adminDSN == "" {
+			adminDSN = strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN"))
+		}
+		if adminDSN != "" {
+			adminCfg, err := pgxpool.ParseConfig(adminDSN)
+			if err != nil {
+				suite.t.Logf("Failed to parse external postgres admin DSN: %v", err)
+			} else {
+				adminCfg.ConnConfig.Config.Database = "postgres"
+				adminPool, err := pgxpool.NewWithConfig(context.Background(), adminCfg)
+				if err != nil {
+					suite.t.Logf("Failed to connect external postgres admin database: %v", err)
+				} else {
+					_, _ = adminPool.Exec(context.Background(), "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", suite.externalPostgresDB)
+					if _, err := adminPool.Exec(context.Background(), "DROP DATABASE IF EXISTS "+pgx.Identifier{suite.externalPostgresDB}.Sanitize()); err != nil {
+						suite.t.Logf("Failed to drop external postgres database %s: %v", suite.externalPostgresDB, err)
+					}
+					adminPool.Close()
+				}
+			}
+		}
+	}
 
 	if suite.redisContainer != nil {
 		if err := suite.redisContainer.Terminate(suite.ctx); err != nil {
@@ -497,6 +595,28 @@ func (suite *TestContainerSuite) Cleanup() {
 	if suite.clickhouseContainer != nil {
 		if err := suite.clickhouseContainer.Terminate(suite.ctx); err != nil {
 			suite.t.Logf("Failed to terminate clickhouse container: %v", err)
+		}
+	}
+	if suite.externalClickHouseDB != "" {
+		clientAddr := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_ADDR"))
+		if clientAddr == "" {
+			clientAddr = "localhost:9000"
+		}
+		conn, err := chgo.Open(&chgo.Options{
+			Addr: []string{clientAddr},
+			Auth: chgo.Auth{
+				Database: envOrDefault("OPENRAILS_TEST_CH_DATABASE", "test_analytics"),
+				Username: envOrDefault("OPENRAILS_TEST_CH_USERNAME", "test_user"),
+				Password: envOrDefault("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
+			},
+		})
+		if err != nil {
+			suite.t.Logf("Failed to connect external ClickHouse for cleanup: %v", err)
+		} else {
+			if err := conn.Exec(context.Background(), "DROP DATABASE IF EXISTS "+clickHouseIdent(suite.externalClickHouseDB)); err != nil {
+				suite.t.Logf("Failed to drop external ClickHouse database %s: %v", suite.externalClickHouseDB, err)
+			}
+			conn.Close()
 		}
 	}
 }
@@ -537,74 +657,79 @@ func (suite *TestContainerSuite) ResetDatabase() {
 // runtime construction and seed data.
 func (suite *TestContainerSuite) SetMockClock(t ...time.Time) *clockwork.FakeClock {
 	suite.t.Helper()
-	var mockClock *clockwork.FakeClock
+	var clock *clockwork.FakeClock
 	if len(t) > 0 {
-		mockClock = clockwork.NewFakeClockAt(t[0])
+		clock = clockwork.NewFakeClockAt(t[0])
 	} else {
 		// Default to a fixed time for reproducible tests
-		mockClock = clockwork.NewFakeClockAt(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
+		clock = clockwork.NewFakeClockAt(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
 	}
-	suite.App.Runtime.Clock = mockClock
+	suite.setClock(clock)
+	return clock
+}
 
+func (suite *TestContainerSuite) setClock(clock clockwork.Clock) {
+	if suite == nil || suite.App == nil || suite.App.Runtime == nil || clock == nil {
+		return
+	}
+	suite.App.Runtime.Clock = clock
 	// Set the clock on all services that use time-dependent logic
 	rt := suite.App.Runtime
 
 	// High priority services (core billing logic)
 	if rt.SubscriptionLifecycleService != nil {
-		rt.SubscriptionLifecycleService.SetClock(mockClock)
+		rt.SubscriptionLifecycleService.SetClock(clock)
 	}
 	if rt.SubscriptionService != nil {
-		rt.SubscriptionService.SetClock(mockClock)
+		rt.SubscriptionService.SetClock(clock)
 	}
 	if rt.EntitlementService != nil {
-		rt.EntitlementService.SetClock(mockClock)
+		rt.EntitlementService.SetClock(clock)
 	}
 	if rt.PaymentService != nil {
-		rt.PaymentService.SetClock(mockClock)
+		rt.PaymentService.SetClock(clock)
 	}
 	if rt.CreditsService != nil {
-		rt.CreditsService.SetClock(mockClock)
+		rt.CreditsService.SetClock(clock)
 	}
 
 	// Vault and payment method services
 	if rt.VaultService != nil {
-		rt.VaultService.SetClock(mockClock)
+		rt.VaultService.SetClock(clock)
 	}
 	if rt.UserSubscriptionService != nil {
-		rt.UserSubscriptionService.SetClock(mockClock)
+		rt.UserSubscriptionService.SetClock(clock)
 	}
 	if rt.AdminSubscriptionService != nil {
-		rt.AdminSubscriptionService.SetClock(mockClock)
+		rt.AdminSubscriptionService.SetClock(clock)
 	}
 	if rt.CheckoutService != nil {
-		rt.CheckoutService.SetClock(mockClock)
+		rt.CheckoutService.SetClock(clock)
 	}
 	if rt.CheckoutSessionService != nil {
-		rt.CheckoutSessionService.SetClock(mockClock)
+		rt.CheckoutSessionService.SetClock(clock)
 	}
 	if rt.SolanaPayService != nil {
-		rt.SolanaPayService.SetClock(mockClock)
+		rt.SolanaPayService.SetClock(clock)
 	}
 	if rt.SolanaTransactionService != nil {
-		rt.SolanaTransactionService.SetClock(mockClock)
+		rt.SolanaTransactionService.SetClock(clock)
 	}
 
 	// Webhook services
 	if rt.WebhookDispatcher != nil {
-		rt.WebhookDispatcher.Clock = mockClock
+		rt.WebhookDispatcher.Clock = clock
 	}
 
 	// Email service (if it has a clock)
 	if rt.EmailService != nil {
-		rt.EmailService.SetClock(mockClock)
+		rt.EmailService.SetClock(clock)
 	}
 
 	// Event log service (ClickHouse audit logging)
 	if rt.EventLogService != nil {
-		rt.EventLogService.SetClock(mockClock)
+		rt.EventLogService.SetClock(clock)
 	}
-
-	return mockClock
 }
 
 // GetClock returns the current clock from the runtime (real or mock).

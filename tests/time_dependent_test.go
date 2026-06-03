@@ -35,6 +35,7 @@ func TestEntitlementExpiry(t *testing.T) {
 	// Grant a 15-day entitlement
 	entitlementName := "premium"
 	endAt := startTime.Add(15 * 24 * time.Hour)
+	sourceID := uuid.New()
 
 	ent := &models.Entitlement{
 		ID:          uuid.New(),
@@ -43,6 +44,7 @@ func TestEntitlementExpiry(t *testing.T) {
 		StartAt:     startTime,
 		EndAt:       &endAt,
 		SourceType:  models.EntitlementSourceOneOff,
+		SourceID:    &sourceID,
 		CreatedAt:   startTime,
 		UpdatedAt:   startTime,
 	}
@@ -99,6 +101,7 @@ func TestEntitlementStacking(t *testing.T) {
 
 	// Grant first 15-day entitlement
 	firstEnd := startTime.Add(15 * 24 * time.Hour)
+	firstSourceID := uuid.New()
 	ent1 := &models.Entitlement{
 		ID:          uuid.New(),
 		UserID:      userID,
@@ -106,6 +109,7 @@ func TestEntitlementStacking(t *testing.T) {
 		StartAt:     startTime,
 		EndAt:       &firstEnd,
 		SourceType:  models.EntitlementSourceOneOff,
+		SourceID:    &firstSourceID,
 		CreatedAt:   startTime,
 		UpdatedAt:   startTime,
 	}
@@ -115,6 +119,7 @@ func TestEntitlementStacking(t *testing.T) {
 	// Grant second 15-day entitlement that stacks (starts where first ends)
 	secondStart := firstEnd
 	secondEnd := secondStart.Add(15 * 24 * time.Hour) // 30 days from original start
+	secondSourceID := uuid.New()
 	ent2 := &models.Entitlement{
 		ID:          uuid.New(),
 		UserID:      userID,
@@ -122,6 +127,7 @@ func TestEntitlementStacking(t *testing.T) {
 		StartAt:     secondStart,
 		EndAt:       &secondEnd,
 		SourceType:  models.EntitlementSourceOneOff,
+		SourceID:    &secondSourceID,
 		CreatedAt:   startTime,
 		UpdatedAt:   startTime,
 	}
@@ -166,6 +172,7 @@ func TestIndefiniteEntitlement(t *testing.T) {
 
 	userID := uuid.New().String()
 	entitlementName := "premium"
+	sourceID := uuid.New()
 
 	// Grant an indefinite entitlement (EndAt is nil)
 	ent := &models.Entitlement{
@@ -175,6 +182,7 @@ func TestIndefiniteEntitlement(t *testing.T) {
 		StartAt:     startTime,
 		EndAt:       nil, // Indefinite
 		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    &sourceID,
 		CreatedAt:   startTime,
 		UpdatedAt:   startTime,
 	}
@@ -239,13 +247,13 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 		PeriodEnd:   periodEnd,
 	})
 
-	// Create an indefinite entitlement linked to the subscription
+	// Create a paid-term entitlement linked to the subscription
 	ent := &models.Entitlement{
 		ID:          uuid.New(),
 		UserID:      userID,
 		Entitlement: "premium",
 		StartAt:     startTime,
-		EndAt:       nil, // Indefinite while subscription is active
+		EndAt:       &periodEnd,
 		SourceType:  models.EntitlementSourceSubscription,
 		SourceID:    &sub.ID,
 		CreatedAt:   startTime,
@@ -281,17 +289,16 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 		assert.NotNil(t, updatedSub.CancelledAt, "CancelledAt should be set")
 	})
 
-	t.Run("entitlement EndAt is now set to period end", func(t *testing.T) {
-		// After cancel with RevokeAccess: false, entitlement EndAt should be set to period end
+	t.Run("entitlement EndAt remains at period end", func(t *testing.T) {
 		var dbEnt models.Entitlement
 		err := suite.BunDB.NewSelect().
 			Model(&dbEnt).
 			Where("id = ?", ent.ID).
 			Scan(ctx)
 		require.NoError(t, err)
-		require.NotNil(t, dbEnt.EndAt, "Entitlement EndAt should be set after cancellation")
+		require.NotNil(t, dbEnt.EndAt, "Entitlement EndAt should be set")
 		assert.WithinDuration(t, periodEnd, *dbEnt.EndAt, time.Second,
-			"Entitlement EndAt should be set to period end")
+			"Entitlement EndAt should remain at period end")
 	})
 
 	t.Run("user still has entitlement immediately after cancel", func(t *testing.T) {
@@ -592,8 +599,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 		assert.Equal(t, models.StatusCancelled, updatedSub.Status,
 			"Subscription should be cancelled after max retries")
 		assert.NotNil(t, updatedSub.EndedAt, "EndedAt should be set")
-		assert.Equal(t, subscriptions.MaxDunningFailures, *updatedSub.RetryAttempts,
-			"RetryAttempts should equal MaxDunningFailures")
+		assert.Nil(t, updatedSub.RetryAttempts, "RetryAttempts should be cleared after cancellation")
 	})
 
 	t.Run("user does NOT have entitlement immediately after max retries (day 1)", func(t *testing.T) {
@@ -612,19 +618,18 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 		assert.False(t, isEntitled, "User should still NOT have entitlement 30 days after failure")
 	})
 
-	t.Run("entitlement EndAt was set to failure time", func(t *testing.T) {
-		// Verify the entitlement was properly ended
+	t.Run("entitlement was revoked at failure time", func(t *testing.T) {
+		// Verify the entitlement was properly revoked
 		var dbEnt models.Entitlement
 		err := suite.BunDB.NewSelect().
 			Model(&dbEnt).
 			Where("id = ?", ent.ID).
 			Scan(ctx)
 		require.NoError(t, err)
-		require.NotNil(t, dbEnt.EndAt, "Entitlement EndAt should be set after failure")
-		// EndAt should be around day 1 (when failure occurred)
-		expectedEndAt := startTime.Add(1 * 24 * time.Hour)
-		assert.WithinDuration(t, expectedEndAt, *dbEnt.EndAt, time.Minute,
-			"Entitlement EndAt should be set to failure time")
+		require.NotNil(t, dbEnt.RevokedAt, "Entitlement RevokedAt should be set after failure")
+		expectedRevokedAt := startTime.Add(1 * 24 * time.Hour)
+		assert.WithinDuration(t, expectedRevokedAt, *dbEnt.RevokedAt, time.Minute,
+			"Entitlement RevokedAt should be set to failure time")
 	})
 }
 

@@ -102,6 +102,12 @@ processors:
 }
 
 func TestLoad_MobiusProcessorRequiresExplicitType(t *testing.T) {
+	t.Setenv("PROCESSORS_MOBIUS_TYPE", "")
+	t.Setenv("PROCESSORS_MOBIUS_TOKENIZATION_KEY", "")
+	t.Setenv("PROCESSORS_MOBIUS_TOKENIZATION_URL", "")
+	t.Setenv("PROCESSORS_MOBIUS_WEBHOOK_SECRET", "")
+	t.Setenv("PROCESSORS_MOBIUS_DIRECT_POST_URL", "")
+	t.Setenv("PROCESSORS_MOBIUS_QUERY_URL", "")
 	t.Setenv("PROCESSORS_MOBIUS_SECURITY_KEY", "test-key")
 
 	_, err := Load("nonexistent-config.yaml")

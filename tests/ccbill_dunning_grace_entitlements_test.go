@@ -38,7 +38,7 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 
 	startTS := time.Now().UTC().Add(2 * time.Minute).Truncate(time.Second)
 	paidTermEnd := startTS.Add(30 * 24 * time.Hour)
-	paidTermEndTS := time.Date(paidTermEnd.Year(), paidTermEnd.Month(), paidTermEnd.Day(), startTS.Hour(), startTS.Minute(), startTS.Second(), 0, time.UTC)
+	paidTermEndTS := time.Date(paidTermEnd.Year(), paidTermEnd.Month(), paidTermEnd.Day(), 23, 59, 59, 0, time.UTC)
 
 	// 1) NewSaleSuccess creates subscription + finite entitlement window ending at nextRenewalDate.
 	newSale := mustLoadJSONMap(t, "testdata/webhooks/ccbill/newsalesuccess.json")
@@ -87,11 +87,12 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 	require.True(t, sub.NextRetryAt.Equal(nextRetryAt))
 	require.Nil(t, sub.RetryAttempts, "CCBill should not use NMI-style retry_attempts")
 	require.Nil(t, sub.LastRetryAt, "CCBill should not use NMI-style last_retry_at")
-	require.Nil(t, sub.GraceEndsAt)
+	require.NotNil(t, sub.GraceEndsAt)
+	require.True(t, sub.GraceEndsAt.Equal(nextRetryAt))
 
 	ent = mustGetSubscriptionEntitlement(t, suite, ctx, userID, sub.ID, "premium")
 	require.NotNil(t, ent.EndAt)
-	require.True(t, ent.EndAt.Equal(paidTermEndTS), "entitlement end_at should remain at paid term end without grace")
+	require.True(t, ent.EndAt.Equal(paidTermEndTS), "paid entitlement end_at should remain at paid term end")
 
 	// 3) RenewalSuccess clears dunning/grace and extends the paid term + entitlement window.
 	renewalSuccess := mustLoadJSONMap(t, "testdata/webhooks/ccbill/renewalsuccess.json")
@@ -136,7 +137,7 @@ func TestCCBillCancellationKeepsAccessUntilPaidTermEnd(t *testing.T) {
 
 	startTS := time.Now().UTC().Add(2 * time.Minute).Truncate(time.Second)
 	paidTermEnd := startTS.Add(30 * 24 * time.Hour)
-	paidTermEndTS := time.Date(paidTermEnd.Year(), paidTermEnd.Month(), paidTermEnd.Day(), startTS.Hour(), startTS.Minute(), startTS.Second(), 0, time.UTC)
+	paidTermEndTS := time.Date(paidTermEnd.Year(), paidTermEnd.Month(), paidTermEnd.Day(), 23, 59, 59, 0, time.UTC)
 
 	newSale := mustLoadJSONMap(t, "testdata/webhooks/ccbill/newsalesuccess.json")
 	newSale["username"] = username
@@ -160,7 +161,8 @@ func TestCCBillCancellationKeepsAccessUntilPaidTermEnd(t *testing.T) {
 	cancel := mustLoadJSONMap(t, "testdata/webhooks/ccbill/cancellation.json")
 	cancel["subscriptionId"] = subID
 	cancel["timestamp"] = startTS.Add(10 * 24 * time.Hour).Format("2006-01-02 15:04:05")
-	cancel["source"] = "failedRB"
+	cancel["source"] = "merchant"
+	cancel["reason"] = "Customer requested cancellation"
 	postCCBillWebhook(t, suite.ServerURL, "Cancellation", cancel)
 
 	require.Eventually(t, func() bool {

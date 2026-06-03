@@ -324,11 +324,15 @@ func (suite *TestContainerSuite) SeedProducts() []TestProduct {
 		tp := &testProducts[i]
 		tp.Product.CreatedAt = now
 		tp.Product.UpdatedAt = now
+		if tp.Product.Status == "" {
+			tp.Product.Status = models.CatalogStatusActive
+		}
 
 		// Use ON CONFLICT to make this idempotent
 		_, err := suite.BunDB.NewInsert().Model(tp.Product).
 			On("CONFLICT (id) DO UPDATE").
 			Set("display_name = EXCLUDED.display_name").
+			Set("status = EXCLUDED.status").
 			Set("updated_at = EXCLUDED.updated_at").
 			Exec(ctx)
 		require.NoError(suite.t, err, "Failed to seed product %s", tp.Product.Slug)
@@ -337,6 +341,9 @@ func (suite *TestContainerSuite) SeedProducts() []TestProduct {
 			price.ProductID = tp.Product.ID
 			price.CreatedAt = now
 			price.UpdatedAt = now
+			if price.Status == "" {
+				price.Status = models.CatalogStatusActive
+			}
 
 			// Prices are immutable - use DO NOTHING to preserve existing records
 			_, err := suite.BunDB.NewInsert().Model(price).
@@ -608,6 +615,10 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 		cancelledAt := now
 		sub.CancelledAt = &cancelledAt
 		sub.EndedAt = &cancelledAt
+		if sub.CancelType == nil {
+			cancelType := models.CancelTypeUser
+			sub.CancelType = &cancelType
+		}
 	}
 
 	_, err := suite.BunDB.NewInsert().Model(sub).Exec(ctx)

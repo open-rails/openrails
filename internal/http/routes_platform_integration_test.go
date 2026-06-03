@@ -5,13 +5,16 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -58,6 +61,13 @@ INSERT INTO billing.tenants (slug, name, status, billing_tier) VALUES ('acme','A
 func newPlatformTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
+	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")); dsn != "" {
+		pool := newPlatformExternalPostgresPool(t, ctx, dsn)
+		_, err := pool.Exec(ctx, platformSchemaDDL)
+		require.NoError(t, err)
+		return pool
+	}
+
 	c, err := postgres.Run(ctx, "postgres:18-alpine",
 		postgres.WithDatabase("openrails"), postgres.WithUsername("test"), postgres.WithPassword("test"),
 		testcontainers.WithWaitStrategy(wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(60*time.Second)))
@@ -70,6 +80,33 @@ func newPlatformTestPool(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 	_, err = pool.Exec(ctx, platformSchemaDDL)
 	require.NoError(t, err)
+	return pool
+}
+
+func newPlatformExternalPostgresPool(t *testing.T, ctx context.Context, adminDSN string) *pgxpool.Pool {
+	t.Helper()
+	adminCfg, err := pgxpool.ParseConfig(adminDSN)
+	require.NoError(t, err)
+	adminCfg.ConnConfig.Config.Database = "postgres"
+	adminPool, err := pgxpool.NewWithConfig(ctx, adminCfg)
+	require.NoError(t, err)
+
+	dbName := fmt.Sprintf("openrails_platform_%d", time.Now().UnixNano())
+	_, err = adminPool.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize())
+	require.NoError(t, err)
+
+	testCfg, err := pgxpool.ParseConfig(adminDSN)
+	require.NoError(t, err)
+	testCfg.ConnConfig.Config.Database = dbName
+	pool, err := pgxpool.NewWithConfig(ctx, testCfg)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		pool.Close()
+		_, _ = adminPool.Exec(context.Background(), "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", dbName)
+		_, _ = adminPool.Exec(context.Background(), "DROP DATABASE IF EXISTS "+pgx.Identifier{dbName}.Sanitize())
+		adminPool.Close()
+	})
 	return pool
 }
 

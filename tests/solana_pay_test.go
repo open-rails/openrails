@@ -60,19 +60,17 @@ func TestSolanaPayTransactionRequestFlow(t *testing.T) {
 		payment, ok := resp["payment"].(map[string]any)
 		require.True(t, ok, "payment should be an object")
 		assert.Equal(t, "solana", payment["processor"])
-		assert.NotEmpty(t, payment["solana_pay_url"], "Should include solana_pay_url")
 
 		// Verify URL format: solana:https://...
-		solanaPayURL, ok := payment["solana_pay_url"].(string)
-		require.True(t, ok)
-		assert.True(t, strings.HasPrefix(solanaPayURL, "solana:https://"), "URL should start with solana:https://")
-		assert.Contains(t, solanaPayURL, "/v1/checkout/", "URL should contain checkout path")
-		assert.Contains(t, solanaPayURL, "/solana-pay", "URL should contain solana-pay suffix")
-
-		// Verify next_action
 		nextAction, ok := resp["next_action"].(map[string]any)
 		require.True(t, ok, "next_action should be present")
 		assert.Equal(t, "solana_pay", nextAction["type"], "next_action type should be solana_pay")
+		solanaPayURL, ok := nextAction["solana_pay_url"].(string)
+		require.True(t, ok)
+		assert.NotEmpty(t, solanaPayURL, "Should include solana_pay_url")
+		assert.True(t, strings.HasPrefix(solanaPayURL, "solana:https://"), "URL should start with solana:https://")
+		assert.Contains(t, solanaPayURL, "/v1/checkout/", "URL should contain checkout path")
+		assert.Contains(t, solanaPayURL, "/solana-pay", "URL should contain solana-pay suffix")
 	})
 }
 

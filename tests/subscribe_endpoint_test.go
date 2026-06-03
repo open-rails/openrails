@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -23,13 +25,14 @@ type MockNMIServer struct {
 	ResponseOverride  string
 	ShouldFail        bool
 	FailReason        string
+	IDPrefix          string
 	VaultIDCounter    int32
 	SubscriptionIDGen int32
 }
 
 // NewMockNMIServer creates a new mock NMI server
 func NewMockNMIServer() *MockNMIServer {
-	mock := &MockNMIServer{}
+	mock := &MockNMIServer{IDPrefix: uuid.NewString()[:8]}
 	mock.Server = httptest.NewServer(http.HandlerFunc(mock.handleRequest))
 	return mock
 }
@@ -59,7 +62,7 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		response = fmt.Sprintf("response=2&responsetext=%s&response_code=300", failReason)
 	} else if customerVault == "add_customer" {
 		// Create customer vault response
-		vaultID := fmt.Sprintf("vault_%d", atomic.AddInt32(&m.VaultIDCounter, 1))
+		vaultID := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
 		response = fmt.Sprintf("response=1&responsetext=SUCCESS&customer_vault_id=%s", vaultID)
 	} else if customerVault == "update_customer" {
 		response = "response=1&responsetext=SUCCESS"
@@ -67,8 +70,8 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		response = "response=1&responsetext=SUCCESS"
 	} else if recurring == "add_subscription" {
 		// Add subscription response
-		subID := fmt.Sprintf("sub_%d", atomic.AddInt32(&m.SubscriptionIDGen, 1))
-		txnID := fmt.Sprintf("txn_%d", atomic.AddInt32(&m.SubscriptionIDGen, 1))
+		subID := fmt.Sprintf("sub_%s_%d", m.IDPrefix, atomic.AddInt32(&m.SubscriptionIDGen, 1))
+		txnID := fmt.Sprintf("txn_%s_%d", m.IDPrefix, atomic.AddInt32(&m.SubscriptionIDGen, 1))
 		response = fmt.Sprintf("response=1&responsetext=SUCCESS&subscription_id=%s&transactionid=%s&authcode=123456&type=sale", subID, txnID)
 	} else if recurring == "delete_subscription" {
 		response = "response=1&responsetext=SUCCESS"
@@ -76,11 +79,11 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		// Update subscription response (used for payment method changes)
 		response = "response=1&responsetext=SUCCESS"
 	} else if recurring == "rebill_subscription" {
-		txnID := fmt.Sprintf("txn_%d", atomic.AddInt32(&m.SubscriptionIDGen, 1))
+		txnID := fmt.Sprintf("txn_%s_%d", m.IDPrefix, atomic.AddInt32(&m.SubscriptionIDGen, 1))
 		response = fmt.Sprintf("response=1&responsetext=SUCCESS&transactionid=%s", txnID)
 	} else {
 		// Default sale response
-		txnID := fmt.Sprintf("txn_%d", atomic.AddInt32(&m.SubscriptionIDGen, 1))
+		txnID := fmt.Sprintf("txn_%s_%d", m.IDPrefix, atomic.AddInt32(&m.SubscriptionIDGen, 1))
 		response = fmt.Sprintf("response=1&responsetext=SUCCESS&transactionid=%s&authcode=123456&type=sale", txnID)
 	}
 
@@ -107,7 +110,7 @@ func (m *MockNMIServer) Reset() {
 
 // SetupSuiteWithMockNMI creates a test suite with mock NMI client configured
 func SetupSuiteWithMockNMI(t *testing.T) (*TestContainerSuite, *MockNMIServer) {
-	suite := setupTestSuite(t)
+	suite := setupTestSuite(t, WithSuiteClock(clockwork.NewRealClock()))
 	mock := NewMockNMIServer()
 
 	// Create NMI client with mock server URL
@@ -134,6 +137,12 @@ func SetupSuiteWithMockNMI(t *testing.T) (*TestContainerSuite, *MockNMIServer) {
 	}
 	if suite.App.Runtime.VaultService != nil {
 		suite.App.Runtime.VaultService.NMIClients = suite.App.Runtime.NMIClients
+	}
+	if suite.App.Runtime.CheckoutService != nil {
+		suite.App.Runtime.CheckoutService.NMIClients = suite.App.Runtime.NMIClients
+		if suite.App.Runtime.CheckoutService.NMISaleService != nil {
+			suite.App.Runtime.CheckoutService.NMISaleService.NMIClients = suite.App.Runtime.NMIClients
+		}
 	}
 
 	t.Cleanup(func() {

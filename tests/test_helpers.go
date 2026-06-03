@@ -5,6 +5,7 @@ package tests
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http/httptest"
@@ -80,6 +81,9 @@ func getSharedTestSuite(t *testing.T) *TestContainerSuite {
 	sharedSuiteOnce.Do(func() {
 		sharedSuite = NewTestContainerSuite(t)
 	})
+	if sharedSuite == nil {
+		t.Fatalf("shared integration suite failed to initialize in an earlier test; inspect the first setup failure")
+	}
 	// The suite is shared across tests; keep its t handle fresh to avoid panics
 	// when helpers call require/assert via suite.t.
 	sharedSuite.t = t
@@ -113,21 +117,24 @@ func setupTestServer(t *testing.T) *server.Server {
 // setupTestSuite returns the shared test suite for tests that need direct database access.
 // Use this when you need to seed data or query the database directly.
 func setupTestSuite(t *testing.T, opts ...TestSuiteOption) *TestContainerSuite {
-	if len(opts) > 0 {
-		opts = append([]TestSuiteOption{WithSuitePort(freeTestPort(t))}, opts...)
-		suite := NewTestContainerSuite(t, opts...)
-		t.Cleanup(suite.Cleanup)
-		return suite
-	}
-	return getSharedTestSuite(t)
+	opts = append([]TestSuiteOption{WithSuitePort(freeTestPort(t))}, opts...)
+	suite := NewTestContainerSuite(t, opts...)
+	t.Cleanup(suite.Cleanup)
+	return suite
 }
 
 func freeTestPort(t *testing.T) int {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port
+	for port := 20000; port <= 32767; port++ {
+		listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", port)))
+		if err != nil {
+			continue
+		}
+		require.NoError(t, listener.Close())
+		return port
+	}
+	t.Fatal("failed to allocate a test port compatible with FlexiblePort")
+	return 0
 }
 
 // setupTestServerWithAuth creates a test server with a valid JWT token.

@@ -13,7 +13,6 @@ import (
 
 	"github.com/doujins-org/ginapi/response"
 	"github.com/open-rails/openrails/internal/db/models"
-	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -23,11 +22,11 @@ func TestGetProductsEndpoint(t *testing.T) {
 
 	// Seed products
 	testProducts := suite.SeedProducts()
-	require.Len(t, testProducts, 2, "Should have seeded 2 test products")
+	require.Len(t, testProducts, 4, "Should have seeded 4 test products")
 
 	t.Run("returns seeded products", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/products", nil)
+		req, _ := http.NewRequest("GET", "/v1/products?limit=100", nil)
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -43,30 +42,30 @@ func TestGetProductsEndpoint(t *testing.T) {
 		assert.GreaterOrEqual(t, resp.Total, int64(2), "Should have at least 2 total items")
 
 		// Verify products returned (at least the seeded ones)
-		require.GreaterOrEqual(t, len(resp.Data), 2, "Should return at least 2 products")
+		require.GreaterOrEqual(t, len(resp.Data), 4, "Should return at least 4 products")
 
-		// Find premium-monthly product by name (Stripe uses name instead of slug)
-		var monthlyProduct *api.ProductObject
+		// Find Premium product and verify the monthly USD price.
+		var premiumProduct *api.ProductObject
 		for i, p := range resp.Data {
-			if p.Name == "Premium Monthly" {
-				monthlyProduct = &resp.Data[i]
+			if p.Slug == "premium" {
+				premiumProduct = &resp.Data[i]
 				break
 			}
 		}
 
-		require.NotNil(t, monthlyProduct, "Should find Premium Monthly product")
-		assert.Equal(t, "product", monthlyProduct.Object)
-		assert.NotEmpty(t, monthlyProduct.Slug)
-		assert.True(t, monthlyProduct.Active)
-		require.Len(t, monthlyProduct.Prices, 1, "Should have 1 price")
-		assert.Equal(t, int64(999), monthlyProduct.Prices[0].UnitAmount, "UnitAmount should be 999 cents")
-		assert.Equal(t, "usd", monthlyProduct.Prices[0].Currency)
-		assert.Equal(t, "price", monthlyProduct.Prices[0].Object)
+		require.NotNil(t, premiumProduct, "Should find Premium product; got products: %v", productNames(resp.Data))
+		assert.Equal(t, "product", premiumProduct.Object)
+		assert.NotEmpty(t, premiumProduct.Slug)
+		assert.True(t, premiumProduct.Active)
+		require.GreaterOrEqual(t, len(premiumProduct.Prices), 2, "Should have monthly and yearly USD prices")
+		monthlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 999, "usd", "month")
+		require.NotNil(t, monthlyPrice, "Should find Premium 999 cents/month USD price")
+		assert.Equal(t, "price", monthlyPrice.Object)
 	})
 
 	t.Run("returns products with correct price details", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/products", nil)
+		req, _ := http.NewRequest("GET", "/v1/products?limit=100", nil)
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -76,22 +75,41 @@ func TestGetProductsEndpoint(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 
-		// Find yearly product and verify pricing
-		var yearlyProduct *api.ProductObject
+		// Find Premium product and verify yearly USD pricing.
+		var premiumProduct *api.ProductObject
 		for i, p := range resp.Data {
-			if p.Name == "Premium Yearly" {
-				yearlyProduct = &resp.Data[i]
+			if p.Slug == "premium" {
+				premiumProduct = &resp.Data[i]
 				break
 			}
 		}
 
-		require.NotNil(t, yearlyProduct, "Should find Premium Yearly product")
-		require.Len(t, yearlyProduct.Prices, 1, "Should have 1 price")
-		assert.Equal(t, int64(9999), yearlyProduct.Prices[0].UnitAmount, "UnitAmount should be 9999 cents")
-		assert.NotNil(t, yearlyProduct.Prices[0].Recurring, "Should have recurring info")
-		assert.Equal(t, "year", yearlyProduct.Prices[0].Recurring.Interval)
-		assert.Equal(t, 1, yearlyProduct.Prices[0].Recurring.IntervalCount)
+		require.NotNil(t, premiumProduct, "Should find Premium product; got products: %v", productNames(resp.Data))
+		yearlyPrice := findPriceByAmountCurrencyInterval(premiumProduct.Prices, 7999, "usd", "year")
+		require.NotNil(t, yearlyPrice, "Should find Premium 7999 cents/year USD price")
+		assert.Equal(t, 1, yearlyPrice.Recurring.IntervalCount)
 	})
+}
+
+func findPriceByAmountCurrencyInterval(prices []api.PriceObject, amount int64, currency, interval string) *api.PriceObject {
+	for i := range prices {
+		price := &prices[i]
+		if price.UnitAmount != amount || price.Currency != currency || price.Recurring == nil {
+			continue
+		}
+		if price.Recurring.Interval == interval {
+			return price
+		}
+	}
+	return nil
+}
+
+func productNames(products []api.ProductObject) []string {
+	names := make([]string, 0, len(products))
+	for _, p := range products {
+		names = append(names, p.Name)
+	}
+	return names
 }
 
 // TestGetActiveSubscriptionEndpoint tests retrieving the current user's subscription
@@ -291,8 +309,8 @@ func TestGetUserPaymentsEndpoint(t *testing.T) {
 			assert.Equal(t, float64(999), p["amount"], "Amount should be 999 cents")
 			assert.Equal(t, "usd", p["currency"])
 		}
-		assert.True(t, paymentIDs[payment1.ID.String()], "Should include payment 1")
-		assert.True(t, paymentIDs[payment2.ID.String()], "Should include payment 2")
+		assert.True(t, paymentIDs[api.FormatPaymentID(payment1.ID)], "Should include payment 1")
+		assert.True(t, paymentIDs[api.FormatPaymentID(payment2.ID)], "Should include payment 2")
 	})
 }
 
@@ -313,14 +331,14 @@ func TestGetMyBillingStatusEndpoint(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var response httphandlers.BillingStatusResponse
+		var response map[string]any
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
-		assert.Nil(t, response.Subscription, "Should have no subscription")
-		assert.Nil(t, response.NextRenewalAt, "Should have no renewal date")
+		assert.Nil(t, response["subscription"], "Should have no subscription")
+		assert.Nil(t, response["next_renewal_at"], "Should have no renewal date")
 
-		assert.Empty(t, response.Entitlements, "Should have no entitlements")
+		assert.Empty(t, response["entitlements"], "Should have no entitlements")
 	})
 
 	t.Run("returns premium status for user with active subscription", func(t *testing.T) {
@@ -338,13 +356,13 @@ func TestGetMyBillingStatusEndpoint(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 
-		var response httphandlers.BillingStatusResponse
+		var response map[string]any
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
-		assert.NotNil(t, response.Subscription, "Should have active subscription")
-		assert.NotNil(t, response.NextRenewalAt, "Should have renewal date")
-		assert.NotNil(t, response.Entitlements, "Should have entitlements")
+		assert.NotNil(t, response["subscription"], "Should have active subscription")
+		assert.NotNil(t, response["next_renewal_at"], "Should have renewal date")
+		assert.NotNil(t, response["entitlements"], "Should have entitlements")
 	})
 
 	t.Run("requires authentication", func(t *testing.T) {

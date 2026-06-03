@@ -161,7 +161,16 @@ func requireCCBillCurrency(currencyCode Stringish, fieldName string) (string, er
 		)
 	}
 
-	return normalized, nil
+	switch normalized {
+	case "840":
+		return "usd", nil
+	case "978":
+		return "eur", nil
+	case "392":
+		return "jpy", nil
+	default:
+		return normalized, nil
+	}
 }
 
 func validateCCBillCurrencyMatches(actualCurrency, expectedCurrency string, contextFields map[string]interface{}) error {

@@ -3,16 +3,19 @@
 package credits_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 )
 
 func TestReconcile_Clean(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
+	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	resetCreditLedger(t, bunDB, ctx)
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 	_, err = svc.Hold(ctx, &owner, "user:a", ct, 200, "usage", "h1", time.Now().Add(time.Hour).UTC())
@@ -26,7 +29,8 @@ func TestReconcile_Clean(t *testing.T) {
 }
 
 func TestReconcile_OrphanedExpiredHold(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
+	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	resetCreditLedger(t, bunDB, ctx)
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 	// Active hold already past expiry (HoldExpiryWorker hasn't run).
@@ -45,6 +49,7 @@ func TestReconcile_OrphanedExpiredHold(t *testing.T) {
 
 func TestReconcile_HeldBalanceDriftAndRepair(t *testing.T) {
 	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	resetCreditLedger(t, bunDB, ctx)
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 	_, err = svc.Hold(ctx, &owner, "user:a", ct, 200, "usage", "h1", time.Now().Add(time.Hour).UTC())
@@ -73,6 +78,7 @@ func TestReconcile_HeldBalanceDriftAndRepair(t *testing.T) {
 
 func TestReconcile_BalanceAnomaly(t *testing.T) {
 	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	resetCreditLedger(t, bunDB, ctx)
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 100, Source: "seed"})
 	require.NoError(t, err)
 	// held > balance.
@@ -85,4 +91,18 @@ func TestReconcile_BalanceAnomaly(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, anomalies, 1)
 	require.Equal(t, "held_exceeds_balance", anomalies[0].Reason)
+}
+
+func resetCreditLedger(t *testing.T, bunDB *bun.DB, ctx context.Context) {
+	t.Helper()
+	for _, table := range []string{
+		"billing.credit_spend_limits",
+		"billing.credit_account_settings",
+		"billing.credit_blocks",
+		"billing.credit_transactions",
+		"billing.user_credit_balances",
+	} {
+		_, err := bunDB.NewRaw("DELETE FROM " + table).Exec(ctx)
+		require.NoError(t, err, "reset %s", table)
+	}
 }

@@ -244,7 +244,7 @@ func federatedMultiIssuer(t *testing.T, pool *pgxpool.Pool) {
 		issuer string
 		signer *jwtkit.RSASigner
 	}{{issA1, sgA1}, {issA2, sgA2}} {
-		tok := mintFed(t, iss.signer, iss.issuer, "shared-user-1", []string{PermSelfBillingRead}, "")
+		tok := mintFed(t, iss.signer, iss.issuer, "shared-user-1", []string{PermSelfBillingRead}, "org-a")
 		res, err := cp.ResolveDelegated(ctx, tok)
 		require.NoError(t, err, "issuer %s", iss.issuer)
 		require.Equal(t, fedTenantA, res.TenantID)
@@ -253,7 +253,7 @@ func federatedMultiIssuer(t *testing.T, pool *pgxpool.Pool) {
 	}
 
 	// Tenant B's issuer resolves to B (distinct).
-	tokB := mintFed(t, sgB, issB, "b-user", []string{PermSelfBillingRead}, "")
+	tokB := mintFed(t, sgB, issB, "b-user", []string{PermSelfBillingRead}, "org-b")
 	resB, err := cp.ResolveDelegated(ctx, tokB)
 	require.NoError(t, err)
 	require.Equal(t, fedTenantB, resB.TenantID)
@@ -277,8 +277,8 @@ func federatedKillSwitch(t *testing.T, pool *pgxpool.Pool) {
 	registerIssuerRow(t, pool, fedTenantA, issA2, jwksServer(t, sgA2).URL, true)
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
 
-	tokA1 := mintFed(t, sgA1, issA1, "u", []string{PermSelfBillingRead}, "")
-	tokA2 := mintFed(t, sgA2, issA2, "u", []string{PermSelfBillingRead}, "")
+	tokA1 := mintFed(t, sgA1, issA1, "u", []string{PermSelfBillingRead}, "org-a")
+	tokA2 := mintFed(t, sgA2, issA2, "u", []string{PermSelfBillingRead}, "org-a")
 	_, err := cp.ResolveDelegated(ctx, tokA1)
 	require.NoError(t, err)
 
@@ -302,7 +302,7 @@ func federatedTenantAdmin(t *testing.T, pool *pgxpool.Pool) {
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
 
 	// The acting admin is the delegated_sub; the token carries a tenant-admin perm.
-	tok := mintFed(t, sg, iss, "admin-user", []string{PermTenantBillingRead, PermTenantEntitlementsWrite}, "")
+	tok := mintFed(t, sg, iss, "admin-user", []string{PermTenantBillingRead, PermTenantEntitlementsWrite}, "org-a")
 	res, err := cp.ResolveDelegated(ctx, tok)
 	require.NoError(t, err)
 	require.Equal(t, fedTenantA, res.TenantID)
@@ -317,7 +317,7 @@ func federatedUnregistered(t *testing.T, pool *pgxpool.Pool) {
 	// A perfectly-valid signer whose issuer was never registered. Its key is not
 	// in the verifier, so it fails closed.
 	sg, _ := jwtkit.NewRSASigner(2048, "ghost-kid")
-	tok := mintFed(t, sg, "https://ghost.test", "u", []string{PermSelfBillingRead}, "")
+	tok := mintFed(t, sg, "https://ghost.test", "u", []string{PermSelfBillingRead}, "org-a")
 	_, err := cp.ResolveDelegated(ctx, tok)
 	require.Error(t, err)
 }

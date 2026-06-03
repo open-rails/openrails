@@ -45,7 +45,7 @@ func TestAdminMetricsCrossTenantIsolation(t *testing.T) {
 		clientAddr = env
 	} else {
 		container, err := chmod.Run(ctx,
-			"clickhouse/clickhouse-server:23.8-alpine",
+			"clickhouse/clickhouse-server:25.8-alpine",
 			chmod.WithUsername(dbUser),
 			chmod.WithPassword(dbPass),
 			chmod.WithDatabase(dbName),
@@ -210,6 +210,9 @@ func TestAdminMetricsCrossTenantIsolation(t *testing.T) {
 // standalone container; production uses the Replicated engine from migration 005.
 func createMinimalDailyMetrics(t *testing.T, ctx context.Context, conn driver.Conn) {
 	t.Helper()
+	if err := conn.Exec(ctx, `DROP TABLE IF EXISTS daily_metrics`); err != nil {
+		t.Fatalf("drop daily_metrics: %v", err)
+	}
 	ddl := `
 CREATE TABLE daily_metrics (
     snapshot_date Date,

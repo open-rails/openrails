@@ -142,9 +142,10 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	})
 
 	// Stub NMI direct post endpoint for AttemptManualRebill.
+	processorTxnID := "txn_test_" + uuid.New().String()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
-		_, _ = w.Write([]byte("response=1&transactionid=txn_test_123"))
+		_, _ = w.Write([]byte("response=1&transactionid=" + processorTxnID))
 	}))
 	t.Cleanup(srv.Close)
 

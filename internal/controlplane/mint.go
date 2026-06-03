@@ -83,11 +83,11 @@ type MintedDelegatedToken struct {
 // `openrails:self:mint` OAT permission are retired once all tenants self-sign.
 //
 // It signs with the control plane's OWN active signing key — the SAME key the
-// `/v1/self` delegated verifier trusts — stamping the canonical claims the
-// verifier requires (`typ=at+jwt`, `iss`, `aud`=control-plane audiences,
-// `tenant`, `delegated_sub`, `permissions`; NEVER `sub`). The result is therefore
-// accepted by the existing DelegatedSelfRequired middleware for the same tenant +
-// delegated_sub.
+// `/v1/self` delegated verifier trusts — using AuthKit's delegated access token
+// mint helper to stamp the canonical JOSE/profile header and claims (`iss`,
+// `aud`=control-plane audiences, `tenant`, `delegated_sub`, `permissions`;
+// NEVER `sub`). The result is therefore accepted by the existing
+// DelegatedSelfRequired middleware for the same tenant + delegated_sub.
 //
 // Authorization to CALL this is the caller's responsibility: it must be gated by
 // an OAT holding PermSelfMint, and the caller MUST pass the OAT's resolved tenant

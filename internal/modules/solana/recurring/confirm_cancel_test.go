@@ -9,8 +9,8 @@ import (
 	solanago "github.com/doujins-org/solana-go"
 	"github.com/doujins-org/solana-go/rpc"
 	"github.com/google/uuid"
-	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/db/models"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 

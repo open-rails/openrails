@@ -26,16 +26,16 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 	suite, mock := SetupSuiteWithMockNMI(t)
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
-	configureSecondaryNMIProvider(t, suite, mock, "acme", priceID)
+	configureSecondaryNMIProvider(t, suite, mock, "nmi", priceID)
 
 	userID := uuid.New().String()
-	email := "checkout-acme-" + t.Name() + "@test.example.com"
+	email := "checkout-nmi-" + uuid.NewString() + "@test.example.com"
 	token := getTestIssuer().CreateToken(userID, email)
 
 	body := map[string]any{
 		"price_id": priceID.String(),
 		"payment": map[string]any{
-			"processor":     "acme",
+			"processor":     "nmi",
 			"payment_token": "tok_test_123",
 			"email":         email,
 			"first_name":    "Test",
@@ -63,20 +63,21 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 	subs := suite.GetAllSubscriptionsByUserID(userID)
 	require.NotEmpty(t, subs, "expected subscription records")
 	sub := subs[0]
-	assert.Equal(t, models.Processor("acme"), sub.Processor)
+	assert.Equal(t, models.Processor("nmi"), sub.Processor)
 
 	pms := suite.GetPaymentMethodsByUserID(userID)
 	require.NotEmpty(t, pms)
-	assert.Equal(t, models.Processor("acme"), pms[0].Processor)
+	assert.Equal(t, models.Processor("nmi"), pms[0].Processor)
 	assert.GreaterOrEqual(t, int(mock.RequestCount), 1, "should have used the configured NMI client")
 }
 
 func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	suite := setupTestSuite(t)
 	products := suite.SeedProducts()
-	priceID := products[0].Prices[0].ID
+	price := products[0].Prices[0]
+	priceID := price.ID
 
-	userID := "renewal-acme-" + uuid.New().String()[:8]
+	userID := "renewal-nmi-" + uuid.New().String()[:8]
 	now := suite.GetClock().Now().UTC()
 	periodEnd := now.Add(30 * 24 * time.Hour)
 
@@ -84,19 +85,19 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 		UserID:              userID,
 		PriceID:             priceID,
 		Status:              models.StatusActive,
-		Processor:           models.Processor("acme"),
-		ProcessorSubID:      "acme-sub-" + uuid.New().String()[:8],
+		Processor:           models.Processor("nmi"),
+		ProcessorSubID:      "nmi-sub-" + uuid.New().String()[:8],
 		CurrentPeriodEndsAt: &periodEnd,
 	})
 	defer suite.CleanupSubscriptionsForUser(userID)
 
-	txnID := "acme-renew-" + uuid.New().String()[:8]
+	txnID := "nmi-renew-" + uuid.New().String()[:8]
 	err := suite.App.Runtime.SubscriptionLifecycleService.RenewMembership(context.Background(), &subscriptions.RenewMembershipParams{
-		Processor:               models.Processor("acme"),
+		Processor:               models.Processor("nmi"),
 		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
 		TransactionID:           txnID,
-		Amount:                  sub.Price.Amount,
-		Currency:                sub.Price.Currency,
+		Amount:                  price.Amount,
+		Currency:                price.Currency,
 	})
 	require.NoError(t, err)
 
@@ -105,11 +106,11 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	firstPeriodEnd := *afterFirst.CurrentPeriodEndsAt
 
 	err = suite.App.Runtime.SubscriptionLifecycleService.RenewMembership(context.Background(), &subscriptions.RenewMembershipParams{
-		Processor:               models.Processor("acme"),
+		Processor:               models.Processor("nmi"),
 		ProcessorSubscriptionID: sub.ProcessorSubscriptionID,
 		TransactionID:           txnID,
-		Amount:                  sub.Price.Amount,
-		Currency:                sub.Price.Currency,
+		Amount:                  price.Amount,
+		Currency:                price.Currency,
 	})
 	require.NoError(t, err)
 
@@ -122,7 +123,7 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	for _, payment := range payments {
 		if payment.TransactionID == txnID {
 			matched++
-			assert.Equal(t, models.Processor("acme"), payment.Processor)
+			assert.Equal(t, models.Processor("nmi"), payment.Processor)
 		}
 	}
 	assert.Equal(t, 1, matched, "expected exactly one payment record for the renewal transaction")

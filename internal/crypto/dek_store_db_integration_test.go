@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"io"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,21 +28,29 @@ import (
 func startCryptoPostgres(t *testing.T) (*pgxpool.Pool, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	container, err := postgres.Run(ctx,
-		"postgres:18-alpine",
-		postgres.WithDatabase("test_db"),
-		postgres.WithUsername("test_user"),
-		postgres.WithPassword("test_password"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).WithStartupTimeout(60*time.Second),
-		),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = container.Terminate(ctx) })
+	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN"))
+	if dsn == "" {
+		dsn = strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL"))
+	}
+	var err error
+	if dsn == "" {
+		var container *postgres.PostgresContainer
+		container, err = postgres.Run(ctx,
+			"postgres:18-alpine",
+			postgres.WithDatabase("test_db"),
+			postgres.WithUsername("test_user"),
+			postgres.WithPassword("test_password"),
+			testcontainers.WithWaitStrategy(
+				wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).WithStartupTimeout(60*time.Second),
+			),
+		)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = container.Terminate(ctx) })
 
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+		dsn, err = container.ConnectionString(ctx, "sslmode=disable")
+		require.NoError(t, err)
+	}
 
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 	t.Cleanup(func() { _ = sqlDB.Close() })

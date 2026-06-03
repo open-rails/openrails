@@ -81,14 +81,15 @@ CREATE POLICY tenant_isolation ON billing.rls_probe
     USING      (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 -- Unprivileged application role (migration-050 form) WITH LOGIN for the test.
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
-        CREATE ROLE openrails_app LOGIN PASSWORD 'app_pw' NOBYPASSRLS;
-    END IF;
-END $$;
-GRANT USAGE ON SCHEMA billing TO openrails_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON billing.rls_probe TO openrails_app;
-`
+	DO $$ BEGIN
+	    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
+	        CREATE ROLE openrails_app NOBYPASSRLS;
+	    END IF;
+	END $$;
+	ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw';
+	GRANT USAGE ON SCHEMA billing TO openrails_app;
+	GRANT SELECT, INSERT, UPDATE, DELETE ON billing.rls_probe TO openrails_app;
+	`
 
 func startRLSContainer(t *testing.T) (superDSN string, appDSN string) {
 	t.Helper()
@@ -137,6 +138,11 @@ func TestRLSEnforcement_Under_OpenRailsAppRole(t *testing.T) {
 	super := newDBRetry(t, superDSN)
 	defer super.Close()
 	_, err := super.GetDB().ExecContext(ctx, rlsSetupDDL)
+	require.NoError(t, err)
+	_, err = super.GetDB().ExecContext(ctx, `DELETE FROM billing.rls_probe WHERE id IN (?::uuid, ?::uuid)`,
+		"00000000-0000-0000-0000-00000000000a",
+		"00000000-0000-0000-0000-00000000000b",
+	)
 	require.NoError(t, err)
 	seed := []rlsProbe{
 		{ID: "00000000-0000-0000-0000-00000000000a", TenantID: rlsTenantA.String(), Val: "a-row"},

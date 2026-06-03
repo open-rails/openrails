@@ -279,7 +279,7 @@ type revenueBucketRow struct {
 	Chargebacks         int64     `ch:"chargebacks_cents"`
 	GrossRevenue        int64     `ch:"total_revenue_cents"`
 	NetRevenue          int64     `ch:"total_revenue_net_cents"`
-	PaymentsSuccessful  uint64    `ch:"payments_successful"`
+	PaymentsSuccessful  int64     `ch:"payments_successful"`
 }
 
 type subscriptionBucketRow struct {

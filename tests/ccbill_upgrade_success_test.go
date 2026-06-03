@@ -80,7 +80,7 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	require.Equal(t, newPrice.ID, payment.PriceID)
 	require.Equal(t, newPrice.Amount, payment.Amount)
 	require.Equal(t, newPrice.Amount, payment.ListAmount)
-	require.Equal(t, "840", payment.Currency)
+	require.Equal(t, "usd", payment.Currency)
 
 	oldLookup := suite.GetSubscriptionByProcessorID(originalProcessorSubID)
 	require.Nil(t, oldLookup)
