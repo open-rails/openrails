@@ -129,7 +129,7 @@ func main() {
 	mintOperatorOATCmd.Flags().String("org", "", "Operator org slug (defaults to config/operator)")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, mintOperatorOATCmd)
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, mintOperatorOATCmd, newCatalogCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		log.WithError(err).Fatal("Failed to execute command")

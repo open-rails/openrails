@@ -132,6 +132,7 @@ func (s *Service) providerAdapters() map[string]providerAdapter {
 		"stripe": &stripeAdapter{svc: s},
 		"ccbill": &ccbillAdapter{},
 		"mobius": &mobiusAdapter{svc: s},
+		"solana": &solanaAdapter{svc: s},
 	}
 }
 

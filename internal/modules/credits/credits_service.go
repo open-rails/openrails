@@ -212,6 +212,59 @@ func (s *CreditsService) GetTransactions(ctx context.Context, userID string, cre
 	return items, total, nil
 }
 
+// GetTransactionsByOwner lists credit transactions for an EXPLICIT owner org
+// (the payer), newest first, paginated. Unlike GetTransactions it does not derive
+// the owner from a user id — it filters owner_id directly, which is what the
+// org-level billing-account usage view (issue #242) needs. RLS-scoped to the
+// request tenant via Q(ctx).
+func (s *CreditsService) GetTransactionsByOwner(ctx context.Context, owner identity.OwnerOrgID, creditType string, limit, offset int) ([]models.CreditTransaction, int, error) {
+	if s == nil || s.db == nil {
+		return nil, 0, fmt.Errorf("credits service not initialized")
+	}
+	if owner.IsZero() {
+		return nil, 0, fmt.Errorf("owner required")
+	}
+	ct, err := s.GetCreditTypeByName(ctx, creditType)
+	if err != nil {
+		return nil, 0, err
+	}
+	var items []models.CreditTransaction
+	q := s.db.Q(ctx).NewSelect().Model(&items).
+		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
+		Where("owner_id = ? AND credit_type_id = ?", owner.UUID(), ct.ID)
+	total, err := q.Count(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if err := q.OrderExpr("created_at DESC").Limit(limit).Offset(offset).Scan(ctx); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+// GetAccountSettingsForOwner returns the stored credit-account settings for an
+// owner+credit_type (billing mode, spend caps, auto-top-up, expiry default),
+// RLS-scoped to the request tenant (issue #242). Never nil — missing rows return
+// the defaults.
+func (s *CreditsService) GetAccountSettingsForOwner(ctx context.Context, owner identity.OwnerOrgID, creditType string) (*models.CreditAccountSettings, error) {
+	var out *models.CreditAccountSettings
+	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		st, e := s.GetAccountSettings(ctx, owner, creditType)
+		if e != nil {
+			return e
+		}
+		out = st
+		return nil
+	})
+	return out, err
+}
+
 // GetTransactionBySource looks up a single credit transaction by its idempotency key.
 // For API-credit usage tracking, this is commonly used with transactionType="hold" and
 // (source, sourceID) = (metering_source, request_id).

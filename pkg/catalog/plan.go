@@ -1,0 +1,426 @@
+package catalog
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/models"
+	billingservice "github.com/open-rails/openrails/pkg/service"
+)
+
+// ProductAction is the per-product change a plan records.
+type ProductAction string
+
+const (
+	ProductCreate    ProductAction = "create"
+	ProductUpdate    ProductAction = "update"
+	ProductUnchanged ProductAction = "unchanged"
+	ProductArchive   ProductAction = "archive" // active in OpenRails, removed from manifest
+)
+
+// PriceAction is the per-price change a plan records.
+type PriceAction string
+
+const (
+	PriceCreate    PriceAction = "create"
+	PriceActivate  PriceAction = "activate"
+	PriceArchive   PriceAction = "archive"
+	PriceUnchanged PriceAction = "unchanged"
+)
+
+// ApplyPlan is the full terraform-style diff between the manifest (desired) and
+// OpenRails (current). It is computed without mutating anything, printed, and
+// then converged by Apply.
+type ApplyPlan struct {
+	Groups []GroupPlan
+}
+
+// GroupPlan is the diff for one tier group.
+type GroupPlan struct {
+	Slug     string
+	Products []ProductPlan
+	// RemovedProducts are active OpenRails products in this tier group not
+	// declared in the manifest; they are archived (deactivated) on apply.
+	RemovedProducts []billingservice.CatalogProduct
+}
+
+// ProductPlan is the diff for one product plus its price set.
+type ProductPlan struct {
+	Slug   string
+	Action ProductAction
+
+	// CreateReq / UpdateReq / UpdateID are prepared for apply.
+	CreateReq billingservice.CreateProductRequest
+	UpdateReq billingservice.UpdateProductRequest
+	UpdateID  uuid.UUID
+
+	Prices []PricePlan
+}
+
+// PricePlan is the diff for one price (identity = financial substance).
+type PricePlan struct {
+	Label  string
+	Action PriceAction
+
+	// ExistingID is the matched OpenRails price (uuid.Nil when creating).
+	ExistingID uuid.UUID
+	CreateReq  billingservice.CreatePriceRequest
+}
+
+// Plan computes the convergence diff for a manifest against the catalog exposed
+// by applier. It performs only reads (GetProductBySlug, ListProducts,
+// ListPricesByProduct).
+func Plan(ctx context.Context, applier Applier, m *Manifest) (*ApplyPlan, error) {
+	plan := &ApplyPlan{}
+	for _, group := range m.TierGroups {
+		gp := GroupPlan{Slug: group.Slug}
+
+		declared := make(map[string]struct{}, len(group.Products))
+		for _, product := range group.Products {
+			declared[product.Slug] = struct{}{}
+			pp, err := planProduct(ctx, applier, m, group, product)
+			if err != nil {
+				return nil, err
+			}
+			gp.Products = append(gp.Products, *pp)
+		}
+
+		// Products dropped from the manifest -> archive. Scope to active products
+		// in this tier group.
+		existing, _, err := applier.ListProducts(ctx, billingservice.ListProductsOptions{
+			ActiveOnly: true,
+			TierGroup:  group.Slug,
+			Limit:      1000,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list active products for tier group %s: %w", group.Slug, err)
+		}
+		for i := range existing {
+			if _, ok := declared[existing[i].Slug]; ok {
+				continue
+			}
+			gp.RemovedProducts = append(gp.RemovedProducts, existing[i])
+		}
+
+		plan.Groups = append(plan.Groups, gp)
+	}
+	return plan, nil
+}
+
+func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGroup, product Product) (*ProductPlan, error) {
+	entitlements := entitlementsSpec(product.Entitlements)
+	tierGroup := group.Slug
+	desiredStatus := product.Status
+	if desiredStatus == "" {
+		desiredStatus = StatusActive
+	}
+
+	pp := &ProductPlan{Slug: product.Slug}
+
+	existing, err := applier.GetProductBySlug(ctx, product.Slug)
+	if err != nil || existing == nil {
+		// Not found -> create. (The facade returns an error for "not found"; we
+		// treat any lookup failure as create-intent — apply will surface a real
+		// create error if the slug actually exists.)
+		pp.Action = ProductCreate
+		pp.CreateReq = billingservice.CreateProductRequest{
+			Slug:             product.Slug,
+			DisplayName:      product.DisplayName,
+			Description:      strings.TrimSpace(product.Description),
+			EntitlementsSpec: entitlements,
+			TierGroup:        &tierGroup,
+			TierRank:         product.TierRank,
+			Status:           toModelStatus(desiredStatus),
+		}
+		if err := planPrices(ctx, applier, m, product, nil, pp); err != nil {
+			return nil, err
+		}
+		return pp, nil
+	}
+
+	pp.UpdateID = existing.ID
+	name := product.DisplayName
+	desc := strings.TrimSpace(product.Description)
+	rank := product.TierRank
+	st := toModelStatus(desiredStatus)
+	pp.UpdateReq = billingservice.UpdateProductRequest{
+		DisplayName:      &name,
+		Description:      &desc,
+		EntitlementsSpec: entitlements,
+		SetEntitlements:  true,
+		TierGroup:        &tierGroup,
+		SetTierGroup:     true,
+		TierRank:         &rank,
+		Status:           &st,
+	}
+	if productUnchanged(existing, product, entitlements, tierGroup, desiredStatus) {
+		pp.Action = ProductUnchanged
+	} else {
+		pp.Action = ProductUpdate
+	}
+
+	if err := planPrices(ctx, applier, m, product, existing, pp); err != nil {
+		return nil, err
+	}
+	return pp, nil
+}
+
+func productUnchanged(existing *billingservice.CatalogProduct, product Product, entitlements map[string]*int, tierGroup, desiredStatus string) bool {
+	if existing == nil {
+		return false
+	}
+	if existing.DisplayName != product.DisplayName {
+		return false
+	}
+	if strings.TrimSpace(existing.Description) != strings.TrimSpace(product.Description) {
+		return false
+	}
+	if existing.TierRank != product.TierRank {
+		return false
+	}
+	if existing.TierGroup == nil || !strings.EqualFold(strings.TrimSpace(*existing.TierGroup), tierGroup) {
+		return false
+	}
+	if string(existing.Status) != desiredStatus {
+		return false
+	}
+	if len(existing.EntitlementsSpec) != len(entitlements) {
+		return false
+	}
+	for k := range entitlements {
+		if _, ok := existing.EntitlementsSpec[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// planPrices reconciles the declared prices for a product as a SET. Each
+// declared price -> create (if no financial match) or ensure-status (if
+// matched). Any ACTIVE OpenRails price whose financial identity is not declared
+// -> archive. existing is the matched OpenRails product (nil when the product
+// is being created, in which case no OpenRails prices can exist yet).
+func planPrices(ctx context.Context, applier Applier, m *Manifest, product Product, existing *billingservice.CatalogProduct, pp *ProductPlan) error {
+	var current []billingservice.CatalogPrice
+	if existing != nil && existing.ID != uuid.Nil {
+		var err error
+		current, err = applier.ListPricesByProduct(ctx, existing.ID, false)
+		if err != nil {
+			return fmt.Errorf("list prices for product %s: %w", product.Slug, err)
+		}
+	}
+
+	claimed := map[uuid.UUID]struct{}{}
+
+	for _, price := range product.Prices {
+		desiredStatus := price.Status
+		if desiredStatus == "" {
+			desiredStatus = StatusActive
+		}
+		cycleDays := intervalDays(price.Interval, price.IntervalCount)
+		label := PriceLabel(product.Slug, price)
+
+		match := matchPrice(current, price, cycleDays, claimed)
+		if match != nil {
+			claimed[match.ID] = struct{}{}
+			plp := PricePlan{Label: label, ExistingID: match.ID}
+			switch {
+			case string(match.Status) == desiredStatus:
+				plp.Action = PriceUnchanged
+			case desiredStatus == StatusActive:
+				plp.Action = PriceActivate
+			default: // archived/draft desired but currently different
+				plp.Action = PriceArchive
+			}
+			pp.Prices = append(pp.Prices, plp)
+			continue
+		}
+
+		// No financial match -> create.
+		providers := m.providersFor(product, price)
+		createReq := billingservice.CreatePriceRequest{
+			// ProductID is filled at apply time once the product exists.
+			ProductID:        productID(existing),
+			UnitAmount:       price.UnitAmount,
+			Currency:         price.Currency,
+			BillingCycleDays: &cycleDays,
+			Providers:        providers,
+			ProviderLinks:    price.ProviderLinks,
+			Status:           toModelStatus(desiredStatus),
+		}
+		pp.Prices = append(pp.Prices, PricePlan{
+			Label:     label,
+			Action:    PriceCreate,
+			CreateReq: createReq,
+		})
+	}
+
+	// Archive any ACTIVE OpenRails price not claimed by a declared price.
+	for i := range current {
+		c := &current[i]
+		if _, ok := claimed[c.ID]; ok {
+			continue
+		}
+		if string(c.Status) != StatusActive {
+			continue
+		}
+		pp.Prices = append(pp.Prices, PricePlan{
+			Label:      PriceLabel(product.Slug, Price{Currency: c.Currency, UnitAmount: c.UnitAmount}),
+			Action:     PriceArchive,
+			ExistingID: c.ID,
+		})
+	}
+	return nil
+}
+
+// matchPrice finds an existing OpenRails price with the same financial substance
+// as the declared price, preferring an unclaimed active match over an archived
+// one. Identity is (currency, unit_amount, billing_cycle_days).
+func matchPrice(current []billingservice.CatalogPrice, price Price, cycleDays int, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
+	var best *billingservice.CatalogPrice
+	for i := range current {
+		c := &current[i]
+		if _, ok := claimed[c.ID]; ok {
+			continue
+		}
+		if c.UnitAmount != price.UnitAmount || !strings.EqualFold(c.Currency, price.Currency) {
+			continue
+		}
+		if c.BillingCycleDays == nil || *c.BillingCycleDays != cycleDays {
+			continue
+		}
+		if best == nil || (string(best.Status) != StatusActive && string(c.Status) == StatusActive) {
+			best = c
+		}
+	}
+	return best
+}
+
+func productID(p *billingservice.CatalogProduct) uuid.UUID {
+	if p == nil {
+		return uuid.Nil
+	}
+	return p.ID
+}
+
+func entitlementsSpec(entitlements []string) map[string]*int {
+	out := map[string]*int{}
+	for _, e := range entitlements {
+		e = strings.TrimSpace(e)
+		if e != "" {
+			out[e] = nil
+		}
+	}
+	return out
+}
+
+// toModelStatus casts a manifest status string to the OpenRails CatalogStatus
+// enum exposed on the service request structs. An empty string is left empty so
+// the facade applies its own default (active).
+func toModelStatus(s string) models.CatalogStatus {
+	return models.CatalogStatus(s)
+}
+
+// HasChanges reports whether the plan would mutate anything.
+func (plan *ApplyPlan) HasChanges() bool {
+	for gi := range plan.Groups {
+		gp := &plan.Groups[gi]
+		if len(gp.RemovedProducts) > 0 {
+			return true
+		}
+		for pi := range gp.Products {
+			pp := &gp.Products[pi]
+			if pp.Action != ProductUnchanged {
+				return true
+			}
+			for _, price := range pp.Prices {
+				if price.Action != PriceUnchanged {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// String renders the plan as a terraform-style change log.
+func (plan *ApplyPlan) String() string {
+	var b strings.Builder
+	for gi := range plan.Groups {
+		gp := &plan.Groups[gi]
+		fmt.Fprintf(&b, "tier_group %s\n", gp.Slug)
+		for pi := range gp.Products {
+			pp := &gp.Products[pi]
+			fmt.Fprintf(&b, "  %s product %s\n", symbol(string(pp.Action)), pp.Slug)
+			var changes []string
+			for i := range pp.Prices {
+				plp := &pp.Prices[i]
+				changes = append(changes, fmt.Sprintf("%s %s", plp.Action, plp.Label))
+			}
+			sort.Strings(changes)
+			for _, c := range changes {
+				fmt.Fprintf(&b, "      %s\n", c)
+			}
+		}
+		for i := range gp.RemovedProducts {
+			fmt.Fprintf(&b, "  - product %s (archived: removed from manifest)\n", gp.RemovedProducts[i].Slug)
+		}
+	}
+	return b.String()
+}
+
+// Print writes the plan to out, with an optional dry-run banner.
+func (plan *ApplyPlan) Print(out io.Writer, dryRun bool) {
+	if dryRun {
+		fmt.Fprintln(out, "catalog plan (dry run; no changes applied):")
+	} else {
+		fmt.Fprintln(out, "catalog plan:")
+	}
+	fmt.Fprint(out, plan.String())
+}
+
+func symbol(action string) string {
+	switch action {
+	case string(ProductCreate):
+		return "+"
+	case string(ProductUpdate):
+		return "~"
+	case string(ProductArchive):
+		return "-"
+	default:
+		return " "
+	}
+}
+
+// PriceLabel derives a readable label for a price from its financial terms,
+// e.g. "starter $13.00/month". There is no price slug to lean on.
+func PriceLabel(productSlug string, price Price) string {
+	interval := price.Interval
+	if interval == "" {
+		interval = "month"
+	}
+	if price.IntervalCount > 1 {
+		interval = fmt.Sprintf("%d %ss", price.IntervalCount, interval)
+	}
+	return fmt.Sprintf("%s %s/%s", productSlug, formatMoney(price.UnitAmount, price.Currency), interval)
+}
+
+// formatMoney renders a minor-unit amount as a human currency string,
+// e.g. (1300, "usd") -> "$13.00", (1300, "eur") -> "EUR 13.00".
+func formatMoney(unitAmount int64, currency string) string {
+	whole := unitAmount / 100
+	cents := unitAmount % 100
+	if cents < 0 {
+		cents = -cents
+	}
+	amount := fmt.Sprintf("%d.%02d", whole, cents)
+	if currency == "" || strings.EqualFold(currency, "usd") {
+		return "$" + amount
+	}
+	return strings.ToUpper(currency) + " " + amount
+}

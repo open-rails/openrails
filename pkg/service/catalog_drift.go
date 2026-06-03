@@ -461,6 +461,9 @@ type CatalogDriftReport struct {
 	ScannedPrices   int `json:"scanned_prices"`
 	// ScannedNMIPlans is the number of NMI recurring plans examined.
 	ScannedNMIPlans int `json:"scanned_nmi_plans"`
+	// ScannedSolanaPlans is the number of OpenRails prices with an on-chain Solana
+	// plan handle that were read back from chain and checked for drift.
+	ScannedSolanaPlans int `json:"scanned_solana_plans"`
 	// OpenEvents is the full set of currently-open drift events after the pass.
 	OpenEvents []CatalogDriftEventView `json:"open_events"`
 	// NewEvents is how many events this pass inserted (idempotency signal).
@@ -629,8 +632,9 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftRe
 		}
 	}
 
-	if stripeLister == nil && nmiLister == nil {
-		return nil, fmt.Errorf("neither stripe nor nmi is configured")
+	solanaConfigured := s.rt != nil && s.rt.SolanaRPC != nil
+	if stripeLister == nil && nmiLister == nil && !solanaConfigured {
+		return nil, fmt.Errorf("no catalog provider (stripe/nmi/solana) is configured")
 	}
 	return s.runCatalogReconciliationWith(ctx, stripeLister, nmiLister)
 }
@@ -646,10 +650,11 @@ func (s *Service) runCatalogReconciliationWith(ctx context.Context, stripeLister
 	now := s.now().UTC()
 
 	var (
-		desired         []models.CatalogDriftEvent
-		scannedProducts int
-		scannedPrices   int
-		scannedNMIPlans int
+		desired            []models.CatalogDriftEvent
+		scannedProducts    int
+		scannedPrices      int
+		scannedNMIPlans    int
+		scannedSolanaPlans int
 	)
 
 	if stripeLister != nil {
@@ -669,6 +674,15 @@ func (s *Service) runCatalogReconciliationWith(ctx context.Context, stripeLister
 		}
 		scannedNMIPlans = len(plans)
 		desired = append(desired, computeNMICatalogDrift(plans, snap, now)...)
+	}
+
+	// Solana has no "list all plans" API, so its pass is a per-stored-price
+	// read-back (gated on a configured RPC). Reuses the solana provider adapter's
+	// Verify so the decode+diff logic lives in one place.
+	if s.rt != nil && s.rt.SolanaRPC != nil {
+		solEvents, solScanned := s.computeSolanaCatalogDrift(ctx, snap, now)
+		scannedSolanaPlans = solScanned
+		desired = append(desired, solEvents...)
 	}
 
 	for i := range desired {
@@ -693,14 +707,76 @@ func (s *Service) runCatalogReconciliationWith(ctx context.Context, stripeLister
 		return nil, err
 	}
 	report := &CatalogDriftReport{
-		ScannedProducts: scannedProducts,
-		ScannedPrices:   scannedPrices,
-		ScannedNMIPlans: scannedNMIPlans,
-		OpenEvents:      open,
-		NewEvents:       newCount,
-		ResolvedEvents:  resolvedCount,
+		ScannedProducts:    scannedProducts,
+		ScannedPrices:      scannedPrices,
+		ScannedNMIPlans:    scannedNMIPlans,
+		ScannedSolanaPlans: scannedSolanaPlans,
+		OpenEvents:         open,
+		NewEvents:          newCount,
+		ResolvedEvents:     resolvedCount,
 	}
 	return report, nil
+}
+
+// computeSolanaCatalogDrift checks every OpenRails price that carries an on-chain
+// Solana plan handle (processors["solana"]), reading the Plan account back from
+// chain and recording drift. Unlike Stripe/NMI there is no remote catalog to
+// enumerate (the Subscriptions program has no list API), so this is a
+// per-stored-price verification, and there is no orphan kind. It reuses the solana
+// provider adapter's Verify (decode + diff) so the drift logic lives in one place.
+// Returns the drift events plus the number of Solana-backed prices scanned.
+func (s *Service) computeSolanaCatalogDrift(ctx context.Context, snap localCatalogSnapshot, now time.Time) ([]models.CatalogDriftEvent, int) {
+	adapter := &solanaAdapter{svc: s}
+	var events []models.CatalogDriftEvent
+	scanned := 0
+	for _, pr := range snap.priceByID {
+		cfg := pr.Processors[string(models.ProcessorSolana)]
+		if len(cfg) == 0 {
+			continue
+		}
+		scanned++
+		local := &priceVerifyContext{
+			IsActive:         pr.Status == models.CatalogStatusActive,
+			UnitAmount:       pr.Amount,
+			Currency:         pr.Currency,
+			BillingCycleDays: pr.BillingCycleDays,
+		}
+		drift, missing, err := adapter.Verify(ctx, cfg, local)
+		if err != nil {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"event":    "catalog_drift",
+				"provider": "solana",
+				"price_id": pr.ID.String(),
+			}).WithError(err).Warn("solana catalog drift check failed")
+			continue
+		}
+		planPDA := strings.TrimSpace(cfg[solanaKeyPlanPDA])
+		if missing {
+			events = append(events, models.CatalogDriftEvent{
+				Provider:              models.CatalogDriftProviderSolana,
+				Kind:                  models.CatalogDriftMissingInSolana,
+				OpenRailsResourceType: models.CatalogDriftResourcePrice,
+				OpenRailsResourceID:   pr.ID.String(),
+				ExternalResourceID:    planPDA,
+				DetectedAt:            now,
+			})
+			continue
+		}
+		for _, d := range drift {
+			events = append(events, models.CatalogDriftEvent{
+				Provider:              models.CatalogDriftProviderSolana,
+				Kind:                  models.CatalogDriftFieldDrift,
+				OpenRailsResourceType: models.CatalogDriftResourcePrice,
+				OpenRailsResourceID:   pr.ID.String(),
+				ExternalResourceID:    planPDA,
+				Field:                 d.Field,
+				OpenRailsValue:        d.OpenRailsValue,
+				ExternalValue:         d.RemoteValue,
+				DetectedAt:            now,
+			})
+		}
+	}
+	return events, scanned
 }
 
 // persistCatalogDrift reconciles the desired open-event set against the DB:

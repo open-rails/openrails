@@ -18,6 +18,7 @@ type CatalogDriftProvider string
 const (
 	CatalogDriftProviderStripe CatalogDriftProvider = "stripe"
 	CatalogDriftProviderNMI    CatalogDriftProvider = "nmi"
+	CatalogDriftProviderSolana CatalogDriftProvider = "solana"
 )
 
 // CatalogDriftKind classifies a row in billing.catalog_drift_events. The
@@ -42,6 +43,11 @@ const (
 	CatalogDriftMissingInStripe CatalogDriftKind = "missing_in_stripe"
 	CatalogDriftOrphanInNMI     CatalogDriftKind = "orphan_in_nmi"
 	CatalogDriftMissingInNMI    CatalogDriftKind = "missing_in_nmi"
+	// CatalogDriftMissingInSolana: an OpenRails price stores an on-chain plan PDA
+	// whose Plan account is no longer present on chain (deleted / wrong PDA). There
+	// is no orphan_in_solana kind: the Subscriptions program has no "list all plans"
+	// API, so Solana drift is detected per-stored-price, not by enumerating chain.
+	CatalogDriftMissingInSolana CatalogDriftKind = "missing_in_solana"
 	CatalogDriftFieldDrift      CatalogDriftKind = "field_drift"
 )
 

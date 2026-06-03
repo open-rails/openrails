@@ -3,6 +3,7 @@ package solana
 import (
 	"context"
 	"fmt"
+	"time"
 
 	solanago "github.com/doujins-org/solana-go"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -68,6 +69,7 @@ type Signer interface {
 type blockhashProvider interface {
 	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
 	SendTransaction(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error)
+	SubmitAndConfirm(ctx context.Context, tx *solanago.Transaction, timeout time.Duration) (*TransactionOutcome, error)
 }
 
 // BuildSignSubmit assembles a single-signer transaction (the tenant merchant is
@@ -121,5 +123,16 @@ func BuildSignSubmit(
 	}
 	tx.Signatures = []solanago.Signature{sig}
 
-	return rpc.SendTransaction(ctx, tx)
+	// Submit AND confirm: a billing pull must not be treated as success until the
+	// transaction has actually landed. SubmitAndConfirm surfaces a reverted tx via
+	// the outcome's on-chain error (with the program's Custom code) so the cranker
+	// can classify it (#270) instead of silently "succeeding" on a failed pull.
+	outcome, err := rpc.SubmitAndConfirm(ctx, tx, 0)
+	if err != nil {
+		return solanago.Signature{}, fmt.Errorf("solana: submit/confirm transaction: %w", err)
+	}
+	if oerr := outcome.OnChainError(); oerr != nil {
+		return solanago.Signature{}, oerr
+	}
+	return outcome.Signature, nil
 }

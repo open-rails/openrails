@@ -1,0 +1,135 @@
+package catalog
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	"github.com/google/uuid"
+
+	billingservice "github.com/open-rails/openrails/pkg/service"
+)
+
+// ApplyResult summarizes what an Apply run did, including any per-provider
+// manual actions surfaced by CreatePrice (e.g. CCBill, an unconfigured Solana
+// plan) that the operator must complete out-of-band.
+type ApplyResult struct {
+	ProductsCreated  int
+	ProductsUpdated  int
+	ProductsArchived int
+	PricesCreated    int
+	PricesActivated  int
+	PricesArchived   int
+	PendingActions   []PendingActionFor
+}
+
+// PendingActionFor pairs a returned service.PendingAction with the price it
+// belongs to, so the apply output can tell the operator which price needs a
+// manual link.
+type PendingActionFor struct {
+	ProductSlug string
+	PriceLabel  string
+	Action      billingservice.PendingAction
+}
+
+// Apply converges OpenRails onto the plan, driving the Applier. It is
+// idempotent: re-running a converged plan is a no-op. Manual provider actions
+// surfaced on price creation are collected into the result rather than failing.
+func Apply(ctx context.Context, applier Applier, plan *ApplyPlan) (*ApplyResult, error) {
+	res := &ApplyResult{}
+	for gi := range plan.Groups {
+		gp := &plan.Groups[gi]
+		for pi := range gp.Products {
+			pp := &gp.Products[pi]
+			productID, err := applyProduct(ctx, applier, pp, res)
+			if err != nil {
+				return res, err
+			}
+			if err := applyPrices(ctx, applier, pp, productID, res); err != nil {
+				return res, err
+			}
+		}
+		for i := range gp.RemovedProducts {
+			rp := &gp.RemovedProducts[i]
+			if _, err := applier.DeactivateProduct(ctx, rp.ID); err != nil {
+				return res, fmt.Errorf("archive removed product %s: %w", rp.Slug, err)
+			}
+			res.ProductsArchived++
+		}
+	}
+	return res, nil
+}
+
+func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *ApplyResult) (uuid.UUID, error) {
+	switch pp.Action {
+	case ProductCreate:
+		created, err := applier.CreateProduct(ctx, pp.CreateReq)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("create product %s: %w", pp.Slug, err)
+		}
+		res.ProductsCreated++
+		return created.ID, nil
+	case ProductUpdate:
+		updated, err := applier.UpdateProduct(ctx, pp.UpdateID, pp.UpdateReq)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("update product %s: %w", pp.Slug, err)
+		}
+		res.ProductsUpdated++
+		return updated.ID, nil
+	default: // ProductUnchanged: nothing to push, but we still need the id for prices.
+		return pp.UpdateID, nil
+	}
+}
+
+func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productID uuid.UUID, res *ApplyResult) error {
+	for i := range pp.Prices {
+		plp := &pp.Prices[i]
+		switch plp.Action {
+		case PriceCreate:
+			req := plp.CreateReq
+			req.ProductID = productID
+			out, err := applier.CreatePrice(ctx, req)
+			if err != nil {
+				return fmt.Errorf("create price %s: %w", plp.Label, err)
+			}
+			res.PricesCreated++
+			for _, pa := range out.PendingManualActions {
+				res.PendingActions = append(res.PendingActions, PendingActionFor{
+					ProductSlug: pp.Slug,
+					PriceLabel:  plp.Label,
+					Action:      pa,
+				})
+			}
+		case PriceActivate:
+			if _, err := applier.ActivatePrice(ctx, plp.ExistingID); err != nil {
+				return fmt.Errorf("activate price %s: %w", plp.Label, err)
+			}
+			res.PricesActivated++
+		case PriceArchive:
+			if _, err := applier.DeactivatePrice(ctx, plp.ExistingID); err != nil {
+				return fmt.Errorf("archive price %s: %w", plp.Label, err)
+			}
+			res.PricesArchived++
+		case PriceUnchanged:
+			// nothing to do
+		}
+	}
+	return nil
+}
+
+// Print writes a human summary of the apply result, including any pending
+// manual actions, to out.
+func (r *ApplyResult) Print(out io.Writer) {
+	fmt.Fprintf(out, "applied: products +%d ~%d -%d | prices +%d activated %d archived %d\n",
+		r.ProductsCreated, r.ProductsUpdated, r.ProductsArchived,
+		r.PricesCreated, r.PricesActivated, r.PricesArchived)
+	if len(r.PendingActions) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "\npending manual actions (%d) — these providers need an out-of-band step:\n", len(r.PendingActions))
+	for i := range r.PendingActions {
+		pa := &r.PendingActions[i]
+		fmt.Fprintf(out, "  [%s] %s on price %s: %s\n",
+			pa.Action.Provider, pa.Action.Action, pa.PriceLabel, pa.Action.Hint)
+	}
+}

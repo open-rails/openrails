@@ -5,6 +5,8 @@ package analytics
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,34 +37,38 @@ func TestAdminMetricsCrossTenantIsolation(t *testing.T) {
 		dbPass = "test_password"
 	)
 
-	container, err := chmod.Run(ctx,
-		"clickhouse/clickhouse-server:23.8-alpine",
-		chmod.WithUsername(dbUser),
-		chmod.WithPassword(dbPass),
-		chmod.WithDatabase(dbName),
-		// Wait on the native protocol port (9000) rather than HTTP: this test
-		// talks to ClickHouse over the native client (ClientAddr), and the HTTP
-		// readiness probe is flaky in some CI/sandbox network setups.
-		testcontainers.WithWaitStrategy(
-			wait.ForListeningPort(nat.Port("9000/tcp")).
-				WithStartupTimeout(180*time.Second).
-				WithPollInterval(time.Second),
-		),
-	)
-	if err != nil {
-		t.Fatalf("start clickhouse container: %v", err)
+	var clientAddr string
+	if env := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_ADDR")); env != "" {
+		// Escape hatch for flaky-testcontainers hosts: point at a ClickHouse on a
+		// stable address (e.g. a --network host container at 127.0.0.1:9000) with
+		// the same user/db/pass below.
+		clientAddr = env
+	} else {
+		container, err := chmod.Run(ctx,
+			"clickhouse/clickhouse-server:23.8-alpine",
+			chmod.WithUsername(dbUser),
+			chmod.WithPassword(dbPass),
+			chmod.WithDatabase(dbName),
+			testcontainers.WithWaitStrategy(
+				wait.ForListeningPort(nat.Port("9000/tcp")).
+					WithStartupTimeout(180*time.Second).
+					WithPollInterval(time.Second),
+			),
+		)
+		if err != nil {
+			t.Fatalf("start clickhouse container: %v", err)
+		}
+		t.Cleanup(func() { _ = container.Terminate(ctx) })
+		host, err := container.Host(ctx)
+		if err != nil {
+			t.Fatalf("container host: %v", err)
+		}
+		nativePort, err := container.MappedPort(ctx, "9000")
+		if err != nil {
+			t.Fatalf("mapped native port: %v", err)
+		}
+		clientAddr = fmt.Sprintf("%s:%s", host, nativePort.Port())
 	}
-	t.Cleanup(func() { _ = container.Terminate(ctx) })
-
-	host, err := container.Host(ctx)
-	if err != nil {
-		t.Fatalf("container host: %v", err)
-	}
-	nativePort, err := container.MappedPort(ctx, "9000")
-	if err != nil {
-		t.Fatalf("mapped native port: %v", err)
-	}
-	clientAddr := fmt.Sprintf("%s:%s", host, nativePort.Port())
 
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{clientAddr},

@@ -115,4 +115,21 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(600), final.BalanceCents, "1000 - 400 captured = 600")
 	require.Equal(t, int64(0), final.HeldCents, "hold fully resolved")
+
+	// #242 billing-account admin surface under openrails_app: configure arrears
+	// mode + an outstanding cap, read it back, and list the org's usage.
+	arrears := "arrears"
+	var cap int64 = 5000
+	require.NoError(t, svc.SetCreditAccountSettings(tctx, owner, ctName, credits.AccountSettingsInput{
+		BillingMode: &arrears, MaxOutstandingOwedCents: &cap,
+	}), "SetCreditAccountSettings must work under openrails_app")
+
+	settings, err := svc.GetCreditAccountSettings(tctx, owner, ctName)
+	require.NoError(t, err)
+	require.Equal(t, "arrears", settings.BillingMode, "settings read back the configured mode")
+
+	txns, total, err := svc.GetOwnerCreditTransactions(tctx, owner, ctName, 50, 0)
+	require.NoError(t, err)
+	require.Greater(t, total, 0, "org has credit transactions (deposit/hold/capture)")
+	require.NotEmpty(t, txns)
 }

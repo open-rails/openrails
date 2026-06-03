@@ -1,0 +1,108 @@
+// Package catalog implements a terraform-style declarative "catalog-as-code"
+// apply for the OpenRails billing catalog (issue #162).
+//
+// A manifest is a YAML file describing the desired catalog: a tree of
+// tier_groups > products > prices. Applying it converges OpenRails (and, via
+// the existing declarative-provider dispatch in issue #208, every configured
+// payment processor) onto that desired state. The pipeline is the proven
+// cozy-art shape — load → validate → plan → print → apply — with two
+// identity rules:
+//
+//   - A product's identity is its slug.
+//   - A price's identity is its FINANCIAL SUBSTANCE (currency, unit_amount,
+//     interval, interval_count). There is no price slug. Prices are a SET:
+//     declared prices are ensured active; an active OpenRails price whose
+//     financial identity is not declared is archived.
+//
+// The schema is kept drop-in compatible with cozy-art's billing_catalog.yaml,
+// extended with a per-product / per-price `providers:` list (issue #208) and
+// optional `provider_links` so a single apply fans out across Stripe, NMI,
+// CCBill and Solana.
+package catalog
+
+// Manifest is the root of a catalog-as-code document.
+//
+// Backward-compatible with cozy-art's billing_catalog.yaml: the `version`,
+// `default_currency` and `tier_groups` keys are unchanged. The new
+// `default_providers` key lets a manifest set a catalog-wide provider list that
+// individual products/prices inherit when they don't specify their own.
+type Manifest struct {
+	Version          int         `yaml:"version"`
+	DefaultCurrency  string      `yaml:"default_currency"`
+	DefaultProviders []string    `yaml:"default_providers,omitempty"`
+	TierGroups       []TierGroup `yaml:"tier_groups"`
+}
+
+// TierGroup is a named grouping of products (e.g. a subscription plan family).
+// Mirrors cozy-art's tier_groups nesting for drop-in compatibility.
+type TierGroup struct {
+	Slug        string    `yaml:"slug"`
+	DisplayName string    `yaml:"display_name"`
+	Products    []Product `yaml:"products"`
+}
+
+// Product is a declared product. Identity is its slug.
+type Product struct {
+	Slug        string `yaml:"slug"`
+	DisplayName string `yaml:"display_name"`
+	Description string `yaml:"description,omitempty"`
+	TierRank    int    `yaml:"tier_rank"`
+	// Status maps to the OpenRails CatalogStatus enum (draft|active|archived,
+	// issue #210). Empty defaults to active.
+	Status       string   `yaml:"status,omitempty"`
+	Entitlements []string `yaml:"entitlements,omitempty"`
+
+	// Providers is the per-product default provider list inherited by this
+	// product's prices when a price does not declare its own (issue #208).
+	// Empty falls back to the manifest's default_providers.
+	Providers []string `yaml:"providers,omitempty"`
+
+	Prices []Price `yaml:"prices"`
+}
+
+// Price is a declared price. It has NO slug: a price's identity is its
+// financial substance (currency, unit_amount, interval, interval_count).
+type Price struct {
+	Currency      string `yaml:"currency,omitempty"`
+	UnitAmount    int64  `yaml:"unit_amount"`
+	Interval      string `yaml:"interval,omitempty"`
+	IntervalCount int    `yaml:"interval_count,omitempty"`
+
+	// Status maps to the OpenRails CatalogStatus enum. Empty defaults to active.
+	Status string `yaml:"status,omitempty"`
+
+	// Providers overrides the product/manifest provider list for this price.
+	// nil means "inherit"; an explicit empty list ([]) means "DB-only, no
+	// external providers".
+	Providers []string `yaml:"providers,omitempty"`
+
+	// ProviderLinks pre-supplies provider-specific link ids, mapping
+	// provider name -> key/value pairs. Maps straight onto
+	// service.CreatePriceRequest.ProviderLinks. Example:
+	//   provider_links:
+	//     stripe: {price_id: price_xxx}
+	ProviderLinks map[string]map[string]string `yaml:"provider_links,omitempty"`
+
+	// StripePriceID is a cozy-art-compatible shorthand for
+	// provider_links.stripe.price_id. When set it is folded into ProviderLinks
+	// during load. This keeps cozy-art's billing_catalog.yaml loadable as-is.
+	StripePriceID string `yaml:"stripe_price_id,omitempty"`
+
+	// LegacyImport, when true, declares a historical price that already has
+	// subscribers but is no longer purchasable: it is created/converged to
+	// status=archived rather than active (no purchasable gap, no double-charge).
+	LegacyImport bool `yaml:"legacy_import,omitempty"`
+}
+
+// providersFor returns the effective provider list for a price, applying the
+// inheritance chain price -> product -> manifest. A nil price-level Providers
+// inherits; an explicit empty slice means "no providers".
+func (m *Manifest) providersFor(product Product, price Price) []string {
+	if price.Providers != nil {
+		return price.Providers
+	}
+	if product.Providers != nil {
+		return product.Providers
+	}
+	return m.DefaultProviders
+}

@@ -4,11 +4,14 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/pkg/identity"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -233,6 +236,162 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		AvailableCents:       snap.AvailableCents,
 		OutstandingOwedCents: snap.OutstandingOwedCents,
 	})
+}
+
+// serviceQueryPayer extracts the payer/owner org from the query string,
+// accepting payer | owner_id | owner_org_id. Returns nil when absent.
+func serviceQueryPayer(r *httprequest.Request) (*identity.OwnerOrgID, error) {
+	raw := r.Request.URL.Query().Get("payer")
+	if strings.TrimSpace(raw) == "" {
+		raw = r.Request.URL.Query().Get("owner_id")
+	}
+	if strings.TrimSpace(raw) == "" {
+		raw = r.Request.URL.Query().Get("owner_org_id")
+	}
+	return parseServiceOwnerOrgID(raw, "")
+}
+
+// serviceAccountSettingsRequest is the PUT body for configuring an org's credit
+// billing account (issue #242). All settings are optional pointers (only the
+// supplied fields are changed); payer + credit_type identify the account.
+type serviceAccountSettingsRequest struct {
+	Payer                   string  `json:"payer"`
+	CreditType              string  `json:"credit_type"`
+	BillingMode             *string `json:"billing_mode"` // "prepaid" | "arrears"
+	MaxSpendPerDayCents     *int64  `json:"max_spend_per_day_cents"`
+	MaxSpendPerMonthCents   *int64  `json:"max_spend_per_month_cents"`
+	MaxOutstandingOwedCents *int64  `json:"max_outstanding_owed_cents"`
+	LowBalanceThreshold     *int64  `json:"low_balance_threshold_cents"`
+	AutoTopupEnabled        *bool   `json:"auto_topup_enabled"`
+	AutoTopupAmountCents    *int64  `json:"auto_topup_amount_cents"`
+	AutoTopupPaymentMethod  *string `json:"auto_topup_payment_method_id"`
+	DefaultCreditExpiryDays *int    `json:"default_credit_expiry_days"`
+	HardStopOnBreach        *bool   `json:"hard_stop_on_breach"`
+	AlertThresholdPct       *int    `json:"alert_threshold_pct"`
+}
+
+// ServiceSetCreditAccountSettings (PUT /v1/service/credits/account-settings)
+// configures an org's billing account: prepaid vs arrears mode, spend caps,
+// auto-top-up, and expiry default (issue #242). Tensorhub's billing-admin surface
+// proxies to this with its service OAT; OpenRails owns the settings.
+func ServiceSetCreditAccountSettings(r *httprequest.Request) {
+	var req serviceAccountSettingsRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	payer, err := parseServiceOwnerOrgID(req.Payer, "")
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "payer required")
+		return
+	}
+	creditType := strings.TrimSpace(req.CreditType)
+	if creditType == "" {
+		creditType = "api_credits"
+	}
+	in := credits.AccountSettingsInput{
+		BillingMode:             req.BillingMode,
+		MaxSpendPerDayCents:     req.MaxSpendPerDayCents,
+		MaxSpendPerMonthCents:   req.MaxSpendPerMonthCents,
+		MaxOutstandingOwedCents: req.MaxOutstandingOwedCents,
+		LowBalanceThreshold:     req.LowBalanceThreshold,
+		AutoTopupEnabled:        req.AutoTopupEnabled,
+		AutoTopupAmountCents:    req.AutoTopupAmountCents,
+		DefaultCreditExpiryDays: req.DefaultCreditExpiryDays,
+		HardStopOnBreach:        req.HardStopOnBreach,
+		AlertThresholdPct:       req.AlertThresholdPct,
+	}
+	if req.AutoTopupPaymentMethod != nil {
+		if pm, perr := uuid.Parse(strings.TrimSpace(*req.AutoTopupPaymentMethod)); perr == nil {
+			in.AutoTopupPaymentMethod = &pm
+		}
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	if err := svc.SetCreditAccountSettings(r.Request.Context(), *payer, creditType, in); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), *payer, creditType)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	r.SuccessJSON(settings)
+}
+
+// ServiceGetCreditAccountSettings (GET /v1/service/credits/account-settings)
+// reads an org's current billing-account settings (issue #242).
+func ServiceGetCreditAccountSettings(r *httprequest.Request) {
+	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
+	if creditType == "" {
+		creditType = "api_credits"
+	}
+	payer, err := serviceQueryPayer(r)
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "payer required")
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), *payer, creditType)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	r.SuccessJSON(settings)
+}
+
+// ServiceListOwnerCreditTransactions (GET /v1/service/credits/transactions)
+// lists an org's credit transactions (usage history) for the billing-account
+// admin surface (issue #242). Query: payer, credit_type, limit, offset.
+func ServiceListOwnerCreditTransactions(r *httprequest.Request) {
+	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
+	if creditType == "" {
+		creditType = "api_credits"
+	}
+	payer, err := serviceQueryPayer(r)
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "payer required")
+		return
+	}
+	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.Request.URL.Query().Get("offset"))
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	items, total, err := svc.GetOwnerCreditTransactions(r.Request.Context(), *payer, creditType, limit, offset)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	out := make([]serviceTxnResponse, 0, len(items))
+	for _, t := range items {
+		out = append(out, serviceTxnResponse{
+			ID: t.ID, OwnerID: t.OwnerID, UserID: t.UserID, Amount: t.Amount,
+			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
+			CreatedAt: t.CreatedAt,
+		})
+	}
+	r.SuccessJSON(map[string]any{"transactions": out, "total": total})
+}
+
+type serviceTxnResponse struct {
+	ID              uuid.UUID `json:"id"`
+	OwnerID         uuid.UUID `json:"owner_id"`
+	UserID          string    `json:"user_id"`
+	Amount          int64     `json:"amount"`
+	TransactionType string    `json:"transaction_type"`
+	Status          string    `json:"status"`
+	Source          string    `json:"source"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func ServiceDepositCredits(r *httprequest.Request) {

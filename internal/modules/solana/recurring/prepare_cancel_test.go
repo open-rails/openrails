@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/google/uuid"
 	solanago "github.com/doujins-org/solana-go"
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 

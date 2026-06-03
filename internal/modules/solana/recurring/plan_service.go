@@ -60,6 +60,13 @@ func NewPlanService(submitter Submitter, network string) *PlanService {
 	return &PlanService{submitter: submitter, network: network, now: time.Now}
 }
 
+// MerchantAddress returns the tenant's on-chain merchant (cranker) address — the
+// owner half of a plan PDA. The catalog provider adapter uses it to derive a
+// price's plan PDA for an idempotent find-or-attach read-back before publishing.
+func (s *PlanService) MerchantAddress(ctx context.Context, tenantID tenant.ID) (solanago.PublicKey, error) {
+	return s.submitter.MerchantAddress(ctx, tenantID)
+}
+
 // PublishPlanInput describes a recurring plan to publish on-chain.
 type PublishPlanInput struct {
 	TenantID        tenant.ID

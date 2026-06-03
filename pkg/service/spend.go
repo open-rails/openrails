@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/pkg/identity"
 )
@@ -259,8 +260,37 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, owner identity.O
 	if owner.IsZero() {
 		return fmt.Errorf("owner required")
 	}
-	_, err := s.creditsService().UpsertAccountSettings(ctx, owner, strings.TrimSpace(creditType), in)
-	return err
+	// Pin a tenant connection so the upsert sets the RLS GUC under openrails_app (#227).
+	return s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+		_, err := s.creditsService().UpsertAccountSettings(ctx, owner, strings.TrimSpace(creditType), in)
+		return err
+	})
+}
+
+// GetCreditAccountSettings returns an owner's stored credit-account settings
+// (billing mode prepaid|arrears, spend caps, auto-top-up, expiry default) for the
+// org billing-account admin surface (issue #242). RLS-scoped.
+func (s *Service) GetCreditAccountSettings(ctx context.Context, owner identity.OwnerOrgID, creditType string) (*models.CreditAccountSettings, error) {
+	if owner.IsZero() {
+		return nil, fmt.Errorf("owner required")
+	}
+	return s.creditsService().GetAccountSettingsForOwner(ctx, owner, strings.TrimSpace(creditType))
+}
+
+// GetOwnerCreditTransactions lists an owner org's credit transactions (usage) for
+// the billing-account admin surface (issue #242). RLS-scoped.
+func (s *Service) GetOwnerCreditTransactions(ctx context.Context, owner identity.OwnerOrgID, creditType string, limit, offset int) ([]models.CreditTransaction, int, error) {
+	if owner.IsZero() {
+		return nil, 0, fmt.Errorf("owner required")
+	}
+	var items []models.CreditTransaction
+	var total int
+	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+		var e error
+		items, total, e = s.creditsService().GetTransactionsByOwner(ctx, owner, strings.TrimSpace(creditType), limit, offset)
+		return e
+	})
+	return items, total, err
 }
 
 // SetSpendLimit upserts a per-invoker spend cap under an owner (issue #237).
