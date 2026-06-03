@@ -95,6 +95,9 @@ func AdminPublishSolanaPlan(r *httprequest.Request) {
 type confirmSolanaEnrollmentRequest struct {
 	PriceID          string `json:"price_id" binding:"required"`
 	SubscriberWallet string `json:"subscriber_wallet" binding:"required"`
+	// Signature is the confirmed atomic subscribe-bundle tx signature the wallet
+	// submitted (#286). Optional; recorded on the membership/row when present.
+	Signature string `json:"signature,omitempty"`
 }
 
 // ConfirmSolanaEnrollment verifies the on-chain subscription, charges the first
@@ -163,6 +166,7 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 		PlanCreatedAt:    createdAt,
 		FiatAmount:       price.Amount,
 		Currency:         price.Currency,
+		Signature:        strings.TrimSpace(req.Signature),
 	})
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())

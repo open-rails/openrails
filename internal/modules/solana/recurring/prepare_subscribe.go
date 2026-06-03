@@ -4,13 +4,41 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	solanago "github.com/doujins-org/solana-go"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/pkg/tenant"
+	log "github.com/sirupsen/logrus"
 )
+
+// ErrInsufficientUSDC is the typed, sentinel error returned by the pre-flight
+// balance check (#286 part A) when the subscriber's USDC ATA holds less than the
+// first-period amount. HTTP/checkout callers map this to a clear client-facing
+// "buy USDC" code (it is NOT an internal/RPC failure — it is an actionable user
+// state). Use errors.Is(err, ErrInsufficientUSDC) to detect it. The concrete
+// amounts (have/need) are attached via InsufficientUSDCError for the frontend.
+var ErrInsufficientUSDC = errors.New("recurring: insufficient USDC balance for first period")
+
+// InsufficientUSDCError carries the concrete have/need base-unit amounts so the
+// HTTP layer can render "need $X, have $Y -> buy USDC". It wraps
+// ErrInsufficientUSDC so errors.Is(err, ErrInsufficientUSDC) is true.
+type InsufficientUSDCError struct {
+	// HaveBaseUnits is the wallet's current USDC ATA balance (token base units).
+	HaveBaseUnits uint64
+	// NeedBaseUnits is the first-period amount required (token base units).
+	NeedBaseUnits uint64
+}
+
+func (e *InsufficientUSDCError) Error() string {
+	return fmt.Sprintf("recurring: insufficient USDC: have %d base units, need %d", e.HaveBaseUnits, e.NeedBaseUnits)
+}
+
+func (e *InsufficientUSDCError) Unwrap() error { return ErrInsufficientUSDC }
 
 // subscriptionAuthorityInitIDOffset is the byte offset of the SubscriptionAuthority
 // account's initId field (an i64 LE). The subscribe instruction must echo this
@@ -33,10 +61,21 @@ var authorityReadBackoff = time.Second
 
 // prepareRPC is the minimal RPC surface PrepareSubscribe needs (satisfied by
 // *solanaint.RPCClient): read on-chain account state + a recent blockhash to
-// build unsigned transactions.
+// build unsigned transactions, and read the subscriber's USDC ATA balance for
+// the pre-flight check (#286).
 type prepareRPC interface {
 	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
 	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
+	// GetTokenBalanceForMint returns the SPL token balance (base units) for the
+	// owner's ATA of mint; 0 when the ATA does not exist.
+	GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error)
+}
+
+// accountDataReader is the narrow read surface readAuthorityInitID needs (shared
+// by both the subscribe + tier-change prepare paths). Kept separate from
+// prepareRPC so the tier-change RPC (which has no balance read) still satisfies it.
+type accountDataReader interface {
+	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
 }
 
 // PrepareSubscribeService builds the UNSIGNED Subscriptions-Delegation-Program
@@ -51,13 +90,21 @@ type prepareRPC interface {
 // RETURNING subscriber (authority already exists) gets the subscribe tx directly.
 type PrepareSubscribeService struct {
 	submitter Submitter // resolves the tenant's merchant (plan owner / cranker) address
-	rpc       prepareRPC
-	network   string
+	// signer is the cranker key. The subscribe step (#286) is now an ATOMIC
+	// co-signed bundle [subscribe + transfer_subscription(first period)]; the
+	// transfer requires the cranker as the caller-signer, so this signer pre-signs
+	// that slot via BuildPartiallySignedTx while the wallet completes the
+	// subscribe/fee-payer slot. It MUST be the same key as the cranker/merchant.
+	signer  solanaint.Signer
+	rpc     prepareRPC
+	network string
 }
 
-// NewPrepareSubscribeService builds a PrepareSubscribeService.
-func NewPrepareSubscribeService(submitter Submitter, rpc prepareRPC, network string) *PrepareSubscribeService {
-	return &PrepareSubscribeService{submitter: submitter, rpc: rpc, network: network}
+// NewPrepareSubscribeService builds a PrepareSubscribeService. signer is the
+// cranker key used to pre-sign the atomic subscribe bundle's transfer slot (#286)
+// and MUST be the same key the Submitter resolves as the merchant address.
+func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rpc prepareRPC, network string) *PrepareSubscribeService {
+	return &PrepareSubscribeService{submitter: submitter, signer: signer, rpc: rpc, network: network}
 }
 
 // PrepareSubscribeInput describes the plan + subscriber to enroll. Plan terms are
@@ -80,7 +127,10 @@ type PrepareSubscribeResult struct {
 	Transactions []string
 	// Step is "init" when the returned tx is init_subscription_authority and the
 	// caller must re-prepare afterwards for the subscribe tx; "subscribe" when the
-	// returned tx is the subscribe (the final on-chain step before confirm).
+	// returned tx is the ATOMIC co-signed bundle [subscribe + transfer(first
+	// period)] (the cranker pre-signed the transfer slot; the wallet completes the
+	// fee-payer slot). The subscribe step is the final on-chain step before confirm
+	// and pulls the first period IN THE SAME TX (#286).
 	Step string
 	// AuthorityExists reports whether the SubscriptionAuthority already existed
 	// (returning subscriber → single subscribe tx, no init step).
@@ -185,6 +235,16 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	// devnet; do NOT change the offset/semantics until a devnet root-cause check
 	// (current authority counter vs original init_id) proves what value subscribe
 	// must echo back. This change only makes the read robust against RPC lag.
+	// Pre-flight USDC balance check (#286 part A). The atomic subscribe bundle
+	// pulls the FULL first period in the same tx, so an underfunded wallet would
+	// produce a tx that reverts. Catch it server-side BEFORE signing anything and
+	// return a typed insufficient-USDC error the caller maps to a "buy USDC" code.
+	// Best-effort: an RPC blip must not hard-fail the flow (the atomic tx is the
+	// real guarantee — it reverts on chain if the balance is short).
+	if err := s.preflightBalance(ctx, subscriber, mint, in.AmountBaseUnits); err != nil {
+		return nil, err
+	}
+
 	eventAuth, _, err := subscriptions.DeriveEventAuthority()
 	if err != nil {
 		return nil, fmt.Errorf("recurring: derive event authority: %w", err)
@@ -204,7 +264,41 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		ExpectedCreatedAt:              in.PlanCreatedAt,
 		ExpectedSubscriptionAuthInitID: initID,
 	})
-	tx, err := s.buildUnsignedTxBase64(ctx, subscriber, []solanago.Instruction{subscribeIx})
+
+	// ATOMIC co-signed subscribe (#286 part B). Bundle the first pull
+	// (transfer_subscription, full first-period amount) into the SAME tx as
+	// subscribe — exactly like the upgrade bundle (prepare_tier_change.go). The
+	// transfer requires the merchant/cranker as the caller-signer, so the cranker
+	// pre-signs that slot via BuildPartiallySignedTx and the wallet completes the
+	// subscribe/fee-payer slot. Both land or both revert -> no
+	// "subscribed-but-not-charged" window; confirm just verifies the bundle landed.
+	delegatorATA, _, err := subscriptions.DeriveATA(subscriber, mint, solanago.TokenProgramID)
+	if err != nil {
+		return nil, fmt.Errorf("recurring: derive delegator ata: %w", err)
+	}
+	receiverATA, _, err := subscriptions.DeriveATA(merchant, mint, solanago.TokenProgramID)
+	if err != nil {
+		return nil, fmt.Errorf("recurring: derive receiver ata: %w", err)
+	}
+	transferIx := subscriptions.BuildTransferSubscription(subscriptions.TransferSubscriptionParams{
+		SubscriptionPDA:       subPDA,
+		PlanPDA:               planPDA,
+		SubscriptionAuthority: saPDA,
+		DelegatorATA:          delegatorATA,
+		ReceiverATA:           receiverATA,
+		Caller:                merchant,
+		Mint:                  mint,
+		TokenProgram:          solanago.TokenProgramID,
+		EventAuthority:        eventAuth,
+		Amount:                in.AmountBaseUnits, // first period = full plan amount
+		Delegator:             subscriber,
+	})
+
+	if s.signer == nil {
+		return nil, fmt.Errorf("recurring: atomic subscribe requires a cranker signer")
+	}
+	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.TenantID, s.signer, s.rpc, subscriber,
+		[]solanago.Instruction{subscribeIx, transferIx})
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +306,51 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	result.Step = "subscribe"
 	result.AuthorityExists = true
 	return result, nil
+}
+
+// preflightBalance reads the subscriber's USDC ATA balance for mint and returns a
+// typed *InsufficientUSDCError (wrapping ErrInsufficientUSDC) when it is below
+// needBaseUnits. It is read-lag tolerant + fail-open: a transient RPC read error
+// is logged and the flow PROCEEDS (the atomic tx reverts on chain if the balance
+// is truly short, so the on-chain tx — not this check — is the real guarantee).
+func (s *PrepareSubscribeService) preflightBalance(ctx context.Context, subscriber, mint solanago.PublicKey, needBaseUnits uint64) error {
+	if needBaseUnits == 0 {
+		return nil
+	}
+	have, err := solanaint.ReadUntilConsistent(ctx, solanaint.ReadUntilConsistentOpts{Attempts: 2},
+		func(ctx context.Context) (uint64, error) { return s.rpc.GetTokenBalanceForMint(ctx, subscriber, mint) },
+		func(b uint64) bool { return b >= needBaseUnits },
+	)
+	if err != nil {
+		// Either the balance is genuinely short (predicate never satisfied) or the
+		// read failed transiently. Distinguish: if we got a value < need, it is the
+		// insufficient case; otherwise an RPC blip -> log + proceed (fail-open).
+		if have < needBaseUnits && have > 0 {
+			return &InsufficientUSDCError{HaveBaseUnits: have, NeedBaseUnits: needBaseUnits}
+		}
+		if have == 0 {
+			// Zero is ambiguous (no ATA OR lagging read). Treat as insufficient when
+			// the read SUCCEEDED with 0 (no ATA), but proceed on a read failure.
+			if isReadFailure(err) {
+				log.WithError(err).Warn("recurring: USDC pre-flight balance read failed; proceeding (atomic tx is the guarantee)")
+				return nil
+			}
+			return &InsufficientUSDCError{HaveBaseUnits: 0, NeedBaseUnits: needBaseUnits}
+		}
+		return nil
+	}
+	return nil
+}
+
+// isReadFailure reports whether a ReadUntilConsistent error was an underlying RPC
+// read failure (every attempt errored) rather than a satisfied-vs-short predicate
+// outcome. ReadUntilConsistent prefixes the former with "never succeeded" and
+// surfaces a cancelled context distinctly.
+func isReadFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "never succeeded")
 }
 
 // buildUnsignedTxBase64 assembles an unsigned transaction (payer = subscriber,
@@ -256,7 +395,7 @@ func readInitID(data []byte) (int64, error) {
 // bound. If it is still empty after the bound, we treat the subscriber as first-time
 // and return the init tx — re-preparing again will retry the read. A present-but-short
 // account is always an error (it should never happen once the account exists).
-func readAuthorityInitID(ctx context.Context, rpc prepareRPC, saPDA solanago.PublicKey) (int64, bool, error) {
+func readAuthorityInitID(ctx context.Context, rpc accountDataReader, saPDA solanago.PublicKey) (int64, bool, error) {
 	var lastShort int
 	sawShort := false
 	for attempt := 0; attempt < authorityReadMaxAttempts; attempt++ {

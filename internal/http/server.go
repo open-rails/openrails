@@ -249,7 +249,6 @@ func New(deps Dependencies) (*Server, error) {
 			if deps.Runtime.SubscriptionLifecycleService != nil && deps.Runtime.DB != nil {
 				planSvc := recurring.NewPlanServiceWithReader(submitter, deps.Runtime.SolanaRPC, network)
 				enrollSvc := recurring.NewEnrollService(
-					cranker,
 					deps.Runtime.SubscriptionLifecycleService,
 					dbrepo.NewSolanaSubscriptionRepo(deps.Runtime.DB),
 					deps.Runtime.SolanaRPC,
@@ -282,7 +281,11 @@ func New(deps Dependencies) (*Server, error) {
 				// checkout session service so /v1/self/checkout(+confirm) drives the
 				// recurring Solana subscription flow.
 				if deps.Runtime.CheckoutSessionService != nil {
-					prepareSvc := recurring.NewPrepareSubscribeService(submitter, deps.Runtime.SolanaRPC, network)
+					// The subscribe step is now an ATOMIC co-signed bundle (#286):
+					// [subscribe + transfer(first period)]. The cranker pre-signs the
+					// transfer slot, so the prepare service takes the SAME signer + RPC +
+					// network as the cranker (the slot it pre-signs is the merchant's key).
+					prepareSvc := recurring.NewPrepareSubscribeService(submitter, solanaSigner, deps.Runtime.SolanaRPC, network)
 					deps.Runtime.CheckoutSessionService.SetSolanaRecurring(prepareSvc, enrollSvc)
 
 					// Cancel + tier-change as Solana Pay checkout modes: reuse the same

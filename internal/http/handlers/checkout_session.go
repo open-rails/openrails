@@ -8,6 +8,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
@@ -164,6 +165,17 @@ func writeCheckoutSessionError(r *httprequest.Request, err error) {
 			code = vaultErr.LocalizationID
 		}
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, code, vaultErr.Error()))
+		return
+	}
+	// Pre-flight insufficient-USDC (#286): a typed, actionable user state (NOT an
+	// internal failure). Surface a clear payment-error code + the have/need amounts
+	// so the frontend can show "need $X, have $Y -> buy USDC" (MoonPay).
+	var insufficientUSDC *recurring.InsufficientUSDCError
+	if errors.As(err, &insufficientUSDC) {
+		param := "usdc_balance"
+		apiErr := api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, api.CodeInsufficientFunds, insufficientUSDC.Error())
+		apiErr.Param = &param
+		r.APIError(apiErr)
 		return
 	}
 	switch {

@@ -950,6 +950,7 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 		email = *user.Email
 	}
 
+	sig := strings.TrimSpace(req.Payment.Signature)
 	sub, err := s.solanaEnroll.ConfirmEnrollment(ctx, recurring.EnrollInput{
 		TenantID:         tenantID,
 		UserID:           session.UserID,
@@ -963,12 +964,14 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 		PlanCreatedAt:    terms.createdAt,
 		FiatAmount:       session.Amount,
 		Currency:         session.Currency,
+		// The first pull happened inside the atomic subscribe tx the wallet just
+		// submitted; record its signature on the membership/row (#286).
+		Signature: sig,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	sig := strings.TrimSpace(req.Payment.Signature)
 	if err := s.MarkSucceededWithSubscription(ctx, session.ID, uuid.Nil, sig, sub.ID); err != nil {
 		return nil, err
 	}

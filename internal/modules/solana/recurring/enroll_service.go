@@ -3,6 +3,7 @@ package recurring
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	solanago "github.com/doujins-org/solana-go"
@@ -33,11 +34,13 @@ type subscriptionStore interface {
 }
 
 // EnrollService activates a recurring Solana subscription after the user has
-// signed init_subscription_authority + subscribe in their wallet (#255). It
-// confirms the on-chain subscription exists, charges the first cycle (crank),
-// creates the lifecycle membership, and persists the on-chain state row.
+// signed the ATOMIC subscribe bundle in their wallet (#255, #286). As of #286
+// the first pull happens INSIDE the atomic subscribe tx ([subscribe +
+// transfer_subscription(first period)]), so there is NO separate first crank
+// here: the service confirms the on-chain subscription PDA exists — which (the
+// bundle being atomic: both land or both revert) proves the first period was
+// pulled — then creates the lifecycle membership and persists the on-chain row.
 type EnrollService struct {
-	cranker   *CrankService
 	lifecycle membershipCreator
 	repo      subscriptionStore
 	rpc       balanceChecker
@@ -46,9 +49,12 @@ type EnrollService struct {
 	now       func() time.Time
 }
 
-// NewEnrollService builds an EnrollService.
-func NewEnrollService(cranker *CrankService, lifecycle membershipCreator, repo subscriptionStore, rpc balanceChecker, submitter Submitter, network string) *EnrollService {
-	return &EnrollService{cranker: cranker, lifecycle: lifecycle, repo: repo, rpc: rpc, submitter: submitter, network: network, now: time.Now}
+// NewEnrollService builds an EnrollService. The cranker is no longer a dependency
+// of confirm (#286): the first pull is bundled into the atomic subscribe tx, so
+// confirm only verifies + creates the membership. Recurring rebills still use
+// CrankService elsewhere.
+func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, rpc balanceChecker, submitter Submitter, network string) *EnrollService {
+	return &EnrollService{lifecycle: lifecycle, repo: repo, rpc: rpc, submitter: submitter, network: network, now: time.Now}
 }
 
 // EnrollInput describes a confirmed wallet enrollment to activate.
@@ -68,17 +74,20 @@ type EnrollInput struct {
 	FiatAmount      int64 // price.Amount (cents) recorded on the payment
 	Currency        string
 
-	// FirstChargeBaseUnits, when non-zero, overrides the amount pulled on the
-	// FIRST crank only (token base units). Used by the Model-B upgrade flow (#267)
-	// to charge a reduced first pull (new_full - old_unused) while the persisted
-	// row keeps the normal full AmountBaseUnits so every subsequent cranker pull is
-	// the full per-cycle amount. Zero => use AmountBaseUnits for the first pull.
-	FirstChargeBaseUnits uint64
+	// Signature, when set, is the confirmed atomic subscribe-bundle signature the
+	// wallet submitted (#286). It is recorded as the membership TransactionID + the
+	// row's LastSignature. Empty => the on-chain subscription PDA is used as a
+	// stable fallback identifier (the bundle is what proves the first pull).
+	Signature string
 }
 
-// ConfirmEnrollment derives the on-chain PDAs, verifies the subscription exists
-// (proving the user ran subscribe), charges the first cycle, creates the
-// membership, and persists the billing.solana_subscriptions row.
+// ConfirmEnrollment derives the on-chain PDAs, verifies the subscription PDA
+// exists on-chain — which, because the subscribe bundle is ATOMIC ([subscribe +
+// transfer(first period)] both land or both revert), proves the first period was
+// already pulled in that same tx (#286) — then creates the membership and
+// persists the billing.solana_subscriptions row. There is NO separate first
+// crank: the first pull happened inside the atomic subscribe tx. Idempotent (the
+// lifecycle CreateMembership upserts on the processor subscription id).
 func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (*models.Subscription, error) {
 	if in.UserID == "" || in.SubscriberWallet == "" {
 		return nil, fmt.Errorf("recurring: user id and subscriber wallet are required")
@@ -117,23 +126,25 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 		return nil, err
 	}
 
-	// Confirm the subscription exists on-chain (subscribe funds the PDA atomically).
+	// Confirm the atomic subscribe bundle landed by checking the subscription PDA
+	// exists on-chain. The bundle is atomic ([subscribe + transfer(first period)]),
+	// so a funded PDA means BOTH instructions succeeded — i.e. the first period was
+	// already pulled in that same tx. There is no separate crank to run here (#286).
 	//
-	// READ-AFTER-CONFIRM LAG: the wallet signed + sent the subscribe and confirmed
-	// it client-side, so the server never saw that tx's slot to gate this read on.
-	// A single GetBalance right after can hit a lagging RPC node that does not yet
-	// see the just-created PDA (balance 0), spuriously rejecting a valid enrollment.
-	// Poll until the PDA is funded (eventual consistency) — the production analogue
-	// of the test-side awaitTokenCredit poller.
+	// READ-AFTER-CONFIRM LAG: the wallet signed + sent the bundle and confirmed it
+	// client-side, so the server never saw that tx's slot to gate this read on. A
+	// single GetBalance right after can hit a lagging RPC node that does not yet see
+	// the just-created PDA (balance 0), spuriously rejecting a valid enrollment.
+	// Poll until the PDA is funded (eventual consistency).
 	bal, berr := solanaint.ReadUntilConsistent(ctx, solanaint.ReadUntilConsistentOpts{},
 		func(ctx context.Context) (uint64, error) { return s.rpc.GetBalance(ctx, subPDA) },
 		func(b uint64) bool { return b > 0 },
 	)
 	if berr != nil {
-		return nil, fmt.Errorf("recurring: subscription %s not found on-chain — did the wallet run subscribe? (%w)", subPDA, berr)
+		return nil, fmt.Errorf("recurring: subscription %s not found on-chain — did the wallet run the atomic subscribe? (%w)", subPDA, berr)
 	}
 	if bal == 0 {
-		return nil, fmt.Errorf("recurring: subscription %s not found on-chain — did the wallet run subscribe?", subPDA)
+		return nil, fmt.Errorf("recurring: subscription %s not found on-chain — did the wallet run the atomic subscribe?", subPDA)
 	}
 
 	row := &models.SolanaSubscription{
@@ -146,18 +157,12 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 		PlanCreatedAtFingerprint: in.PlanCreatedAt,
 	}
 
-	// First charge = the first crank. It must succeed to activate (no membership
-	// without a paid first cycle — same as a card first charge). For a Model-B
-	// upgrade (#267) the first pull is REDUCED (FirstChargeBaseUnits =
-	// new_full - old_unused); every subsequent cranker pull uses the persisted
-	// full AmountBaseUnits, so only this first cycle differs.
-	firstPull := in.AmountBaseUnits
-	if in.FirstChargeBaseUnits != 0 {
-		firstPull = in.FirstChargeBaseUnits
-	}
-	sig, err := s.cranker.Crank(ctx, in.TenantID, row, firstPull)
-	if err != nil {
-		return nil, fmt.Errorf("recurring: first crank failed: %w", err)
+	// The first pull already happened inside the atomic subscribe tx; record that
+	// tx's signature (when the caller supplied it) as the membership/row reference,
+	// falling back to the on-chain subscription PDA as a stable identifier.
+	sig := strings.TrimSpace(in.Signature)
+	if sig == "" {
+		sig = subPDA.String()
 	}
 
 	now := s.now().UTC()
