@@ -349,20 +349,33 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	group.GET("/payments", read, wrap(httphandlers.GetUserPayments))
 	group.GET("/entitlements/active", read, wrap(httphandlers.SelfGetActiveEntitlements))
 
-	// Subscriptions: read for the whole group; cancel gated by the cancel scope.
+	// Subscriptions: read for the whole group; mutations gated by scope.
+	//
+	// cancel and resume are two halves of the same reversible-cancellation
+	// lifecycle (#215/#216), so resume is gated by the SAME cancel scope — a
+	// browser that may cancel its own subscription may also undo that cancel.
+	// change-tier is a subscription mutation; it also rides the cancel scope as
+	// the subscription-management capability for self tokens. The acting user is
+	// the token's delegated_sub (bound by DelegatedSelfRequired), so every op is
+	// scoped to that user's own subscription. payment-method update is a
+	// payment-method mutation -> the payment-methods:manage scope.
+	subscriptionManage := middleware.RequireDelegatedPermission(controlplane.PermSelfSubscriptionCancel)
+	manage := middleware.RequireDelegatedPermission(controlplane.PermSelfPaymentMethods)
 	subs := group.Group("/subscriptions")
 	subs.GET("", read, wrap(httphandlers.GetMySubscriptions))
 	subs.GET("/:id", read, wrap(httphandlers.GetSubscription))
-	subs.POST("/:id/cancel", middleware.RequireDelegatedPermission(controlplane.PermSelfSubscriptionCancel), wrap(httphandlers.CancelSubscription))
+	subs.POST("/:id/cancel", subscriptionManage, wrap(httphandlers.CancelSubscription))
+	subs.POST("/:id/resume", subscriptionManage, wrap(httphandlers.ResumeSubscription))
+	subs.POST("/:id/change-tier", subscriptionManage, wrap(httphandlers.ChangeTier))
+	subs.PUT("/:id/payment-method", manage, wrap(httphandlers.UpdateSubscriptionPaymentMethod))
 	// App-driven on-chain cancel/revoke (#266): build the unsigned cancel tx the
 	// wallet signs to trustlessly stop OpenRails from ever pulling again. Gated by
 	// the same cancel scope as the soft cancel (it is the on-chain form of cancel).
-	subs.POST("/:id/solana-cancel-tx", middleware.RequireDelegatedPermission(controlplane.PermSelfSubscriptionCancel), wrap(httphandlers.PrepareSolanaCancelTx))
+	subs.POST("/:id/solana-cancel-tx", subscriptionManage, wrap(httphandlers.PrepareSolanaCancelTx))
 
 	// Payment methods: list is a read; mutations require the manage scope.
 	pm := group.Group("/payment-methods")
 	pm.GET("", read, wrap(httphandlers.ListPaymentMethods))
-	manage := middleware.RequireDelegatedPermission(controlplane.PermSelfPaymentMethods)
 	pm.POST("", manage, wrap(httphandlers.CreatePaymentMethod))
 	pm.PUT("/:id", manage, wrap(httphandlers.UpdatePaymentMethod))
 	pm.DELETE("/:id", manage, wrap(httphandlers.DeletePaymentMethod))
