@@ -25,6 +25,7 @@ import (
 
 	solanago "github.com/doujins-org/solana-go"
 	"github.com/doujins-org/solana-go/programs/system"
+	"github.com/doujins-org/solana-go/programs/token"
 	"github.com/doujins-org/solana-go/rpc"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -81,20 +82,34 @@ func TestDevnetServiceLayerUSDC(t *testing.T) {
 
 	merchant, err := solanago.PrivateKeyFromBase58(devnetEnv(t, "SOLANA_DEVNET_PAYER_KEY"))
 	require.NoError(t, err)
-	subscriber, err := solanago.PrivateKeyFromBase58(devnetEnv(t, "SOLANA_DEVNET_SUBSCRIBER_KEY"))
+	// The env wallet holds the faucet USDC; it FUNDS a FRESH subscriber each run so
+	// the SubscriptionAuthority state never accumulates (mirrors the mechanics tests
+	// and avoids the repeat-subscribe Custom:519).
+	funder, err := solanago.PrivateKeyFromBase58(devnetEnv(t, "SOLANA_DEVNET_SUBSCRIBER_KEY"))
 	require.NoError(t, err)
 
 	// USDC devnet mint (must match config DefaultDevnetTokens).
 	usdc := solanago.MustPublicKeyFromBase58("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU")
-	subUSDC, err := rc.GetTokenBalanceForMint(ctx, subscriber.PublicKey(), usdc)
-	if err != nil || subUSDC < 2_000_000 {
-		t.Skipf("subscriber %s has %d USDC base units (<2 USDC) — fund via https://faucet.circle.com (Solana devnet, USDC) then re-run",
-			subscriber.PublicKey(), subUSDC)
+	funderUSDC, err := rc.GetTokenBalanceForMint(ctx, funder.PublicKey(), usdc)
+	if err != nil || funderUSDC < 3_000_000 {
+		t.Skipf("funder %s has %d USDC base units (<3 USDC) — fund via https://faucet.circle.com (Solana devnet, USDC) then re-run",
+			funder.PublicKey(), funderUSDC)
 	}
-	t.Logf("subscriber USDC balance: %d base units", subUSDC)
+	t.Logf("funder USDC balance: %d base units", funderUSDC)
 
-	// Fund the subscriber's SOL gas from the merchant.
-	fundSOL(ctx, t, rc, raw, merchant, subscriber.PublicKey(), 20_000_000)
+	// Fresh subscriber each run.
+	subscriber, err := solanago.NewRandomPrivateKey()
+	require.NoError(t, err)
+	t.Logf("fresh subscriber: %s", subscriber.PublicKey())
+	fundSOL(ctx, t, rc, raw, merchant, subscriber.PublicKey(), 30_000_000)
+	ensureATA(ctx, t, rc, raw, merchant, subscriber.PublicKey(), usdc) // subscriber USDC ATA
+	transferUSDC(ctx, t, rc, raw, funder, subscriber.PublicKey(), usdc, 2_000_000)
+	t.Log("funded fresh subscriber with 3 USDC + SOL gas")
+
+	// The cranker pulls USDC INTO the merchant's USDC ATA — ensure it exists
+	// (idempotent). In production this is a tenant-setup step (the receiving ATA
+	// for the cranker/merchant wallet must exist before the first pull).
+	ensureATA(ctx, t, rc, raw, merchant, merchant.PublicKey(), usdc)
 
 	// Production Submitter + services backed by the merchant (cranker) key.
 	signer := solanaint.NewKeypairSigner(memSecretGetter{key: merchant.String()}, 0)
@@ -144,6 +159,67 @@ func TestDevnetServiceLayerUSDC(t *testing.T) {
 	t.Logf("4) Cancel OK: cancel_subscription submitted for %s", cres.SubscriptionPDA)
 
 	t.Log("✅ SERVICE LAYER VALIDATED ON DEVNET WITH REAL USDC: publish -> subscribe -> crank -> cancel")
+}
+
+// ensureATA creates the canonical associated token account for (owner, mint) if
+// missing (CreateIdempotent), paid + signed by `payer`.
+func ensureATA(ctx context.Context, t *testing.T, rc *solanaint.RPCClient, raw *rpc.Client, payer solanago.PrivateKey, owner, mint solanago.PublicKey) {
+	t.Helper()
+	ata, _, err := subscriptions.DeriveATA(owner, mint, solanago.TokenProgramID)
+	require.NoError(t, err)
+	ix := solanago.NewInstruction(
+		subscriptions.AssociatedTokenProgramID,
+		solanago.AccountMetaSlice{
+			solanago.NewAccountMeta(payer.PublicKey(), true, true),
+			solanago.NewAccountMeta(ata, true, false),
+			solanago.NewAccountMeta(owner, false, false),
+			solanago.NewAccountMeta(mint, false, false),
+			solanago.NewAccountMeta(solanago.SystemProgramID, false, false),
+			solanago.NewAccountMeta(solanago.TokenProgramID, false, false),
+		},
+		[]byte{1}, // CreateIdempotent
+	)
+	bh, err := rc.GetLatestBlockhash(ctx)
+	require.NoError(t, err)
+	tx, err := solanago.NewTransaction([]solanago.Instruction{ix}, bh, solanago.TransactionPayer(payer.PublicKey()))
+	require.NoError(t, err)
+	_, err = tx.Sign(func(pk solanago.PublicKey) *solanago.PrivateKey {
+		if payer.PublicKey().Equals(pk) {
+			return &payer
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	sig, err := raw.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{SkipPreflight: true})
+	require.NoError(t, err)
+	_, _ = rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, 60*time.Second)
+}
+
+// transferUSDC moves `amount` of `mint` from the funder's ATA to the recipient's
+// ATA (both canonical), signed by the funder.
+func transferUSDC(ctx context.Context, t *testing.T, rc *solanaint.RPCClient, raw *rpc.Client, funder solanago.PrivateKey, to solanago.PublicKey, mint solanago.PublicKey, amount uint64) {
+	t.Helper()
+	src, _, err := subscriptions.DeriveATA(funder.PublicKey(), mint, solanago.TokenProgramID)
+	require.NoError(t, err)
+	dst, _, err := subscriptions.DeriveATA(to, mint, solanago.TokenProgramID)
+	require.NoError(t, err)
+	ix := token.NewTransferInstruction(amount, src, dst, funder.PublicKey(), nil).Build()
+	bh, err := rc.GetLatestBlockhash(ctx)
+	require.NoError(t, err)
+	tx, err := solanago.NewTransaction([]solanago.Instruction{ix}, bh, solanago.TransactionPayer(funder.PublicKey()))
+	require.NoError(t, err)
+	_, err = tx.Sign(func(pk solanago.PublicKey) *solanago.PrivateKey {
+		if funder.PublicKey().Equals(pk) {
+			return &funder
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	sig, err := raw.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{SkipPreflight: true})
+	require.NoError(t, err)
+	out, werr := rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, 60*time.Second)
+	require.NoError(t, werr)
+	require.Nil(t, out.OnChainError(), "USDC funding transfer failed")
 }
 
 func fundSOL(ctx context.Context, t *testing.T, rc *solanaint.RPCClient, raw *rpc.Client, from solanago.PrivateKey, to solanago.PublicKey, lamports uint64) {

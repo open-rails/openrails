@@ -113,7 +113,12 @@ func (c *RPCClient) WatchTransaction(ctx context.Context, sig solanago.Signature
 // a transaction that lands but reverts is reported via Outcome.Err (use
 // Outcome.OnChainError() to surface it). timeout <= 0 uses the default.
 func (c *RPCClient) SubmitAndConfirm(ctx context.Context, tx *solanago.Transaction, timeout time.Duration) (*TransactionOutcome, error) {
-	sig, err := c.SendTransaction(ctx, tx)
+	// Skip preflight: the node's preflight simulation runs against a bank that
+	// lags just-confirmed writes, so a pull submitted right after subscribe (or any
+	// tx touching very recent accounts) spuriously fails simulation with
+	// InvalidAccountOwner even though it executes fine. We confirm via
+	// WatchTransaction below, which authoritatively reports a real on-chain failure.
+	sig, err := c.fallback.SendTransactionSkipPreflight(ctx, tx)
 	if err != nil {
 		return nil, err
 	}

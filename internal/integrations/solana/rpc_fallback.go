@@ -276,6 +276,28 @@ func (c *RPCFallbackClient) GetBalance(ctx context.Context, address solanago.Pub
 	return balance, err
 }
 
+// SendTransactionSkipPreflight submits WITHOUT the RPC preflight simulation. For
+// a transaction that depends on very recently created/modified accounts (e.g. a
+// subscription pull right after subscribe), the node's preflight simulates
+// against a lagging bank and spuriously fails (InvalidAccountOwner / not-found)
+// even though the transaction executes fine. Callers MUST confirm the signature
+// afterward (WatchTransaction) since a skipped-preflight failure still lands.
+func (c *RPCFallbackClient) SendTransactionSkipPreflight(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {
+	var sig solanago.Signature
+	err := c.withFallback(ctx, "SendTransactionSkipPreflight", func(client *rpc.Client) error {
+		resp, err := client.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{
+			SkipPreflight:       true,
+			PreflightCommitment: rpc.CommitmentConfirmed,
+		})
+		if err != nil {
+			return err
+		}
+		sig = resp
+		return nil
+	})
+	return sig, err
+}
+
 // GetAccountData returns an account's raw data bytes, or (nil, nil) when the
 // account does not exist. Uses Confirmed commitment so freshly-written state
 // (e.g. a just-initialized PDA) is visible without waiting for finalization.

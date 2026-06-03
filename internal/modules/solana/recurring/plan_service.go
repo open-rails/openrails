@@ -137,15 +137,24 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		return nil, fmt.Errorf("recurring: derive plan pda: %w", err)
 	}
 
-	// pullers[0] = the merchant (cranker). destinations[0] = the cold receiving
-	// wallet when supplied, so a compromised cranker key can only pull into it.
+	// Pullers/destinations are an OPTIONAL hardening whitelist and must be left
+	// EMPTY in the default case: an empty puller list implicitly authorizes the
+	// plan owner (the merchant/cranker) to collect, and an empty destination list
+	// allows the merchant to receive into its own ATA. Setting pullers WITHOUT a
+	// paired destination (or vice-versa) makes the program reject the pull with
+	// InvalidAccountOwner — confirmed on devnet. Only when a separate cold
+	// receiving wallet is configured do we pin both (puller[0]=merchant pulls,
+	// destination[0]=cold wallet), so a compromised cranker key can only pull into
+	// the cold wallet. NOTE: when a cold wallet is set, the cranker must also pull
+	// into the COLD wallet's ATA (tracked separately) — the crank currently targets
+	// the merchant ATA, so a cold-wallet plan needs that wiring before use.
 	var destinations, pullers [4]solanago.PublicKey
-	pullers[0] = merchant
 	if in.ReceivingWallet != "" {
 		recv, err := solanago.PublicKeyFromBase58(in.ReceivingWallet)
 		if err != nil {
 			return nil, fmt.Errorf("recurring: invalid receiving wallet %q: %w", in.ReceivingWallet, err)
 		}
+		pullers[0] = merchant
 		destinations[0] = recv
 	}
 
