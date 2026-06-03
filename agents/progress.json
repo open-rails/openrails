@@ -980,18 +980,6 @@
         "[ ] full-stack/browser e2e in the docker stack (local image + devnet USDC) per docs/solana-recurring-e2e-runbook.md",
         "[ ] CI: schedule the devnet integration test with a funded-wallet secret so the real flow is continuously verified"
       ]
-    },
-    {
-      "id": 276,
-      "name": "solana-recurring-analytics",
-      "completed": false,
-      "description": "Analytics surfaces for recurring Solana (the remaining #258 analytics tasks): active recurring subs, MRR (USDC/USD1 at $1 peg), failed pulls, recovered-vs-churned, cranker gas spend. Admin endpoints + dashboard wiring, consistent with the existing Stripe/NMI metrics. Depends: #258.",
-      "tasks": [
-        "[ ] active recurring Solana subs + MRR per tenant (sum plan amounts at $1 peg)",
-        "[ ] failed-pull / dunning metrics; recovered vs churned",
-        "[ ] cranker gas spend per tenant (surface alongside the gas-alert #258)",
-        "[ ] admin endpoints / dashboard wiring matching the card-processor metrics shape"
-      ]
     }
   ]
 }
