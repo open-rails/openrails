@@ -22,6 +22,33 @@ import (
 type checkoutSubscriptionAccess interface {
 	GetActiveOrPendingByUserIDAndTierGroup(ctx context.Context, userID, tierGroup string) (*models.Subscription, error)
 	GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error)
+	GetByUserIDAndPriceID(ctx context.Context, userID string, priceID uuid.UUID) (*models.Subscription, error)
+}
+
+// nonTerminalSubscriptionStatuses is the single source of truth for which
+// subscription statuses still bill or grant access (issue #269). A user must
+// never hold two of these concurrently in the same product/tier-group — that is
+// double-billing; the correct operation is change-tier, not a second subscribe.
+//
+// Terminal statuses (cancelled — which the model also uses for expired/failed/
+// max-retries per its own docs) are excluded: a user with only a terminal
+// subscription is free to subscribe again.
+var nonTerminalSubscriptionStatuses = []models.SubscriptionStatus{
+	models.StatusPending, // created, awaiting first payment confirmation
+	models.StatusActive,  // good standing, rebill scheduled
+	models.StatusPastDue, // payment failed but still in dunning/grace (will retry)
+}
+
+// IsNonTerminalSubscriptionStatus reports whether a subscription in this status
+// still bills or grants access and therefore blocks a second subscribe in the
+// same product/tier-group (issue #269).
+func IsNonTerminalSubscriptionStatus(status models.SubscriptionStatus) bool {
+	for _, s := range nonTerminalSubscriptionStatuses {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 type CheckoutPurchaseService struct {
@@ -145,6 +172,95 @@ func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, 
 	}
 
 	return &EligibilityResult{Status: EligibilityAllowed, Reason: "Purchase allowed", Coverage: coverage}, nil
+}
+
+// SubscriptionConflict describes an existing non-terminal subscription that
+// blocks a new subscribe for the same product/tier-group (issue #269).
+type SubscriptionConflict struct {
+	// Blocked is true when a second subscribe must be rejected and the caller
+	// directed to change-tier instead.
+	Blocked bool
+	// SamePrice is true when the user already holds a non-terminal subscription
+	// to this exact price (idempotent re-subscribe — no second charge).
+	SamePrice bool
+	// Existing is the conflicting subscription, when one was found.
+	Existing *models.Subscription
+	// Message is a clear, user-facing explanation of the conflict.
+	Message string
+}
+
+// CheckSubscriptionConflict is the shared duplicate-billing guard (issue #269).
+// It must run at subscribe time for every processor BEFORE any charge or
+// on-chain action. It blocks when the user already holds a NON-terminal
+// subscription (active/pending/past_due) that either:
+//   - is to this exact price (idempotent re-subscribe; no second sub/charge), or
+//   - shares the target product's tier-group (any tier — stacking a $20 and a
+//     $50 sub for the same product is double-billing; the correct operation is
+//     upgrade/downgrade via change-tier).
+//
+// It returns Blocked=false (no conflict) when the user has no such subscription,
+// so a first-time subscribe and a DIFFERENT tier-group are both allowed.
+func (s *CheckoutPurchaseService) CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error) {
+	if s.SubscriptionService == nil {
+		return &SubscriptionConflict{}, nil
+	}
+	if price == nil || product == nil {
+		return nil, errors.New("price and product are required for conflict check")
+	}
+
+	// Exact-same-price re-subscribe: idempotent, never charge twice (issue #269).
+	existingSamePrice, err := s.SubscriptionService.GetByUserIDAndPriceID(ctx, userID, price.ID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("failed to check existing price subscription: %w", err)
+	}
+	if existingSamePrice != nil && IsNonTerminalSubscriptionStatus(existingSamePrice.Status) {
+		return &SubscriptionConflict{
+			Blocked:   true,
+			SamePrice: true,
+			Existing:  existingSamePrice,
+			Message:   "You already have an active subscription to this plan",
+		}, nil
+	}
+
+	// Tier-group conflict: any non-terminal sub in the same group (the repo query
+	// already filters to the non-terminal status set) blocks a second subscribe.
+	if product.TierGroup != nil && strings.TrimSpace(*product.TierGroup) != "" {
+		existing, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndTierGroup(ctx, userID, *product.TierGroup)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("failed to check tier group: %w", err)
+		}
+		if existing != nil {
+			existingProduct := existing.Price.Product
+			switch {
+			case existingProduct != nil && existingProduct.ID == product.ID:
+				return &SubscriptionConflict{
+					Blocked:  true,
+					Existing: existing,
+					Message:  "You already have an active subscription to this plan",
+				}, nil
+			case existingProduct != nil && existingProduct.TierRank < product.TierRank:
+				return &SubscriptionConflict{
+					Blocked:  true,
+					Existing: existing,
+					Message:  "Use POST /v1/me/subscriptions/change-tier for tier upgrades",
+				}, nil
+			case existingProduct != nil && existingProduct.TierRank > product.TierRank:
+				return &SubscriptionConflict{
+					Blocked:  true,
+					Existing: existing,
+					Message:  "Use POST /v1/me/subscriptions/change-tier for tier downgrades",
+				}, nil
+			default:
+				return &SubscriptionConflict{
+					Blocked:  true,
+					Existing: existing,
+					Message:  "You already have an active subscription in this tier group. Use POST /v1/me/subscriptions/change-tier to change tiers.",
+				}, nil
+			}
+		}
+	}
+
+	return &SubscriptionConflict{}, nil
 }
 
 func (s *CheckoutPurchaseService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*CoverageInfo, error) {

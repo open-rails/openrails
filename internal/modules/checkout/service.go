@@ -180,6 +180,18 @@ func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID s
 	return s.PurchaseService.CheckPurchaseEligibility(ctx, userID, priceID)
 }
 
+// CheckSubscriptionConflict is the shared duplicate-billing guard (issue #269):
+// it reports whether the user already holds a non-terminal subscription that
+// blocks a new subscribe for this price/product (same exact price, or same
+// tier-group at any tier). Callers must run it BEFORE charging or preparing any
+// on-chain action and reject when Blocked.
+func (s *CheckoutService) CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error) {
+	if s.PurchaseService == nil {
+		return nil, errors.New("purchase service unavailable")
+	}
+	return s.PurchaseService.CheckSubscriptionConflict(ctx, userID, price, product)
+}
+
 // Checkout processes a unified checkout request
 func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error) {
 	// Parse and validate price

@@ -26,11 +26,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 const (
@@ -68,6 +68,11 @@ type sessionIdempotencyStore interface {
 type checkoutSessionExecutor interface {
 	Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error)
 	RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error)
+	// CheckSubscriptionConflict is the shared duplicate-billing guard (issue
+	// #269): blocks a second non-terminal subscription in the same exact price or
+	// tier-group. The Solana subscribe path runs it before preparing any
+	// transaction.
+	CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error)
 }
 
 type solanaPaymentService interface {
@@ -709,6 +714,26 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 	if err != nil || price == nil {
 		return fmt.Errorf("%w: price not found", ErrCheckoutSessionValidation)
 	}
+
+	// Duplicate-billing guard (issue #269): a user must never hold two concurrent
+	// non-terminal subscriptions in the same product/tier-group (even at different
+	// tiers — that is double-billing; the correct operation is change-tier). Run
+	// this BEFORE preparing any on-chain transaction so we neither create the
+	// session nor ask the wallet to sign anything for a duplicate.
+	if s.checkoutService != nil {
+		product, err := s.productService.GetByID(ctx, price.ProductID)
+		if err != nil || product == nil {
+			return fmt.Errorf("%w: product not found", ErrCheckoutSessionValidation)
+		}
+		conflict, err := s.checkoutService.CheckSubscriptionConflict(ctx, session.UserID, price, product)
+		if err != nil {
+			return fmt.Errorf("%w: failed to check existing subscriptions: %v", ErrCheckoutSessionValidation, err)
+		}
+		if conflict != nil && conflict.Blocked {
+			return fmt.Errorf("%w: %s", ErrCheckoutSessionConflict, conflict.Message)
+		}
+	}
+
 	terms, err := parseSolanaPlanTerms(price.GetProcessorConfig(models.ProcessorSolana))
 	if err != nil {
 		return err

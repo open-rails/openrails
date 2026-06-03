@@ -329,3 +329,7 @@ func (s *stubCheckoutExecutor) Checkout(ctx context.Context, req *CheckoutReques
 func (s *stubCheckoutExecutor) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
 	return nil, nil
 }
+
+func (s *stubCheckoutExecutor) CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error) {
+	return &SubscriptionConflict{}, nil
+}
