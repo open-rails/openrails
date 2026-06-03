@@ -21,7 +21,6 @@ func (s *Server) registerUserRoutesAt(e *gin.Engine, apiPrefix string) {
 	api.GET("/captcha/status", s.captchaStatusHandler)
 	api.GET("/captcha/client.js", s.captchaClientScriptHandler)
 	httproutes.RegisterUserRoutes(ginrouter.New(api, s.runtime), s.runtime, httproutes.Options{
-		AuthProvider:  s.authProvider,
 		Authenticator: s.embeddedAuthenticator(),
 	})
 }

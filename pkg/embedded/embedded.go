@@ -24,12 +24,16 @@ import (
 )
 
 type Options struct {
-	Config       *config.Config
-	DB           *sql.DB
-	PGXPool      *pgxpool.Pool
-	Redis        *redis.Client
-	AuthProvider ginauth.Provider
-	Cache        cache.Cache
+	Config  *config.Config
+	DB      *sql.DB
+	PGXPool *pgxpool.Pool
+	Redis   *redis.Client
+	// Authenticator is the framework-neutral auth boundary (gin-free). A host
+	// brings its own auth by implementing billingauth.Authenticator. When nil, the
+	// default AuthKit-backed authenticator is built from Config. Hosts that have a
+	// gin Provider can adapt it with ginauth.AsAuthenticator (#285).
+	Authenticator billingauth.Authenticator
+	Cache         cache.Cache
 }
 
 type Embedded struct {
@@ -43,11 +47,11 @@ func New(opts Options) (*Embedded, error) {
 	}
 
 	assembled, err := bootstrap.NewServer(opts.Config, &bootstrap.Options{
-		DB:           opts.DB,
-		PGXPool:      opts.PGXPool,
-		Redis:        opts.Redis,
-		AuthProvider: opts.AuthProvider,
-		Cache:        opts.Cache,
+		DB:            opts.DB,
+		PGXPool:       opts.PGXPool,
+		Redis:         opts.Redis,
+		Authenticator: opts.Authenticator,
+		Cache:         opts.Cache,
 	})
 	if err != nil {
 		return nil, err
@@ -140,13 +144,8 @@ func (e *Embedded) RegisterUserRoutes(group *gin.RouterGroup, opts RouteOptions)
 	if e == nil || e.app == nil {
 		panic("embedded billing: not initialized")
 	}
-	auth := opts.AuthProvider
-	if auth == nil {
-		auth = e.app.AuthProvider
-	}
 	httproutes.RegisterUserRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime, httproutes.Options{
-		AuthProvider:  auth,
-		Authenticator: authenticatorOf(auth),
+		Authenticator: e.routeAuthenticator(opts),
 	})
 }
 
@@ -163,13 +162,8 @@ func (e *Embedded) RegisterAdminRoutes(group *gin.RouterGroup, opts RouteOptions
 	if e == nil || e.app == nil {
 		panic("embedded billing: not initialized")
 	}
-	auth := opts.AuthProvider
-	if auth == nil {
-		auth = e.app.AuthProvider
-	}
 	httproutes.RegisterAdminRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime, httproutes.Options{
-		AuthProvider:  auth,
-		Authenticator: authenticatorOf(auth),
+		Authenticator: e.routeAuthenticator(opts),
 	})
 }
 
@@ -188,15 +182,17 @@ func (e *Embedded) RegisterWebhookRoutes(group *gin.RouterGroup) {
 	httproutes.RegisterWebhookRoutes(ginrouter.New(group, e.app.Runtime), e.app.Runtime)
 }
 
-// authenticatorOf recovers a framework-neutral Authenticator from a Provider for
-// the neutral route registration path (issue #282), or nil when the provider
-// only exposes gin middleware.
-func authenticatorOf(p ginauth.Provider) billingauth.Authenticator {
-	if p == nil {
-		return nil
+// routeAuthenticator resolves the framework-neutral Authenticator for a gin
+// route registration: the per-call RouteOptions.AuthProvider (a gin Provider)
+// wins when it exposes one, else the app's configured authenticator (#282/#285).
+func (e *Embedded) routeAuthenticator(opts RouteOptions) billingauth.Authenticator {
+	if opts.AuthProvider != nil {
+		if a, ok := ginauth.AsAuthenticator(opts.AuthProvider); ok {
+			return a
+		}
 	}
-	if a, ok := ginauth.AsAuthenticator(p); ok {
-		return a
+	if e != nil && e.app != nil {
+		return e.app.Authenticator
 	}
 	return nil
 }

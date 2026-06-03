@@ -5,33 +5,36 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/doujins-org/ginapi/response"
-	"github.com/gin-gonic/gin"
 	authhttp "github.com/open-rails/authkit/http"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/pkg/authprovider"
-	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	log "github.com/sirupsen/logrus"
 )
 
-type authKitProvider struct {
+// Authenticator is the gin-free auth boundary backed by an AuthKit JWT verifier.
+// It implements billingauth.Authenticator. The gin Required()/Optional()
+// middleware that wraps it lives in internal/auth/ginauth so that this gin-free
+// core (and its transitive importers, ultimately pkg/embedded) does not pull in
+// github.com/gin-gonic/gin (#285).
+type Authenticator struct {
 	verifier Verifier
 }
 
-func NewProvider(cfg *config.AuthConfig) (ginauth.Provider, error) {
+// NewAuthenticator builds the gin-free AuthKit-backed Authenticator.
+func NewAuthenticator(cfg *config.AuthConfig) (*Authenticator, error) {
 	v, err := NewVerifier(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &authKitProvider{verifier: v}, nil
+	return &Authenticator{verifier: v}, nil
 }
 
 // Authenticate implements billingauth.Authenticator so the AuthKit-backed
 // provider can drive the gin-free embedded surface (issue #282). It verifies the
 // bearer token and returns the resulting UserContext, returning
 // billingauth.ErrUnauthenticated when no/invalid credential is present.
-func (p *authKitProvider) Authenticate(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
+func (p *Authenticator) Authenticate(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
 	if p == nil || p.verifier == nil {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}
@@ -45,64 +48,6 @@ func (p *authKitProvider) Authenticate(_ context.Context, r *http.Request) (bill
 		return billingauth.UserContext{}, err
 	}
 	return userContextFromClaims(raw), nil
-}
-
-func (p *authKitProvider) Required() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if p == nil || p.verifier == nil {
-			log.Warn("auth middleware misconfigured: no verifier provided")
-			response.InternalError(c, "authentication disabled")
-			c.Abort()
-			return
-		}
-
-		token := bearerToken(c.GetHeader("Authorization"))
-		if token == "" {
-			response.UnauthorizedWithMessage(c, "authorization header required")
-			c.Abort()
-			return
-		}
-
-		raw, err := p.verifier.Verify(token)
-		if err != nil {
-			log.WithError(err).Warn("jwt verification failed")
-			response.UnauthorizedWithMessage(c, FormatVerifierError(err))
-			c.Abort()
-			return
-		}
-
-		uc := userContextFromClaims(raw)
-		c.Set("billing.user_context", uc)
-		c.Request = c.Request.WithContext(authprovider.SetUserContext(c.Request.Context(), uc))
-		c.Next()
-	}
-}
-
-func (p *authKitProvider) Optional() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if p == nil || p.verifier == nil {
-			c.Next()
-			return
-		}
-
-		token := bearerToken(c.GetHeader("Authorization"))
-		if token == "" {
-			c.Next()
-			return
-		}
-
-		raw, err := p.verifier.Verify(token)
-		if err != nil {
-			log.WithError(err).Debug("optional jwt verification failed")
-			c.Next()
-			return
-		}
-
-		uc := userContextFromClaims(raw)
-		c.Set("billing.user_context", uc)
-		c.Request = c.Request.WithContext(authprovider.SetUserContext(c.Request.Context(), uc))
-		c.Next()
-	}
 }
 
 func bearerToken(header string) string {

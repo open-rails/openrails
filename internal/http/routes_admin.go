@@ -10,7 +10,6 @@ import (
 func (s *Server) registerAdminRoutesAt(e *gin.Engine, apiPrefix string) {
 	admin := e.Group(apiPrefix + "/admin")
 	opts := httproutes.Options{
-		AuthProvider:  s.authProvider,
 		Authenticator: s.embeddedAuthenticator(),
 	}
 	// #224: when the control plane is enabled, make the operator org the live

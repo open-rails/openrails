@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
-	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -43,13 +42,8 @@ const SelfRoutePrefix = "/self"
 const TenantAdminRoutePrefix = "/tenant-admin"
 
 type Options struct {
-	AuthProvider ginauth.Provider
-
-	// Authenticator is the framework-neutral auth boundary used when the routes
-	// are mounted on the gin-free net/http surface (issue #282). When set, the
-	// neutral Required/Optional middleware is built from it. On the gin standalone
-	// surface it is nil and AuthProvider.Required()/Optional() are used via an
-	// adapter. Exactly one of the two paths is exercised per mount.
+	// Authenticator is the framework-neutral auth boundary used to build the
+	// neutral Required/Optional middleware for these routes (issue #282/#285).
 	Authenticator billingauth.Authenticator
 
 	// OperatorPermissionChecker, when set, makes the operator org the LIVE
