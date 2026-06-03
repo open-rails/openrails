@@ -71,7 +71,7 @@ type adminOffChannelPaymentRequest struct {
 
 func AdminRefundPayment(r *httprequest.Request) {
 	var path paymentPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -106,7 +106,7 @@ func AdminRefundPayment(r *httprequest.Request) {
 		r.ErrorJSON(status, message)
 		return
 	}
-	r.Inner().JSON(http.StatusCreated, PaymentToAPI(refund, nil))
+	r.JSON(http.StatusCreated, PaymentToAPI(refund, nil))
 }
 
 func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*models.Payment, string, error) {
@@ -320,7 +320,7 @@ func adminRefundMetadata(idempotencyKey string, req refundRequest, status string
 
 func GetAdminPayments(r *httprequest.Request) {
 	queryOpts := query.QueryOptions[payments.GetPaymentsFilters]{Limit: 50, Offset: 0}
-	if err := r.Inner().ShouldBindQuery(&queryOpts); err != nil {
+	if err := r.ShouldBindQuery(&queryOpts); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -338,7 +338,7 @@ func GetAdminPayments(r *httprequest.Request) {
 
 func GetAdminPayment(r *httprequest.Request) {
 	var path paymentPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -357,7 +357,7 @@ func GetAdminPayment(r *httprequest.Request) {
 
 func GetAdminUserPayments(r *httprequest.Request) {
 	var path adminUserPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -389,7 +389,7 @@ func GetAdminUserPayments(r *httprequest.Request) {
 
 func AdminCreateOffChannelPayment(r *httprequest.Request) {
 	var path adminOffChannelPaymentPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -422,7 +422,7 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 		purchasedAt = &tm
 	}
 	if existing, err := r.State.PaymentService.GetByTransactionID(r.Request.Context(), models.ProcessorManual, transactionID); err == nil {
-		r.Inner().JSON(http.StatusOK, map[string]any{"payment_id": existing.ID.String(), "status": "exists"})
+		r.JSON(http.StatusOK, map[string]any{"payment_id": existing.ID.String(), "status": "exists"})
 		return
 	}
 	amount := int64(0)
@@ -434,5 +434,5 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.Inner().JSON(http.StatusCreated, map[string]any{"payment_id": result.PaymentID.String(), "entitlements": result.Entitlements, "delayed_start": result.DelayedStart, "eligibility": result.Eligibility})
+	r.JSON(http.StatusCreated, map[string]any{"payment_id": result.PaymentID.String(), "entitlements": result.Entitlements, "delayed_start": result.DelayedStart, "eligibility": result.Eligibility})
 }

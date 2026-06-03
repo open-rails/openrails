@@ -137,7 +137,7 @@ func GetMyProductAccess(r *httprequest.Request) {
 		return
 	}
 	var path productAccessPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -214,7 +214,7 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 // support/audit views.
 func GetAdminUserProductAccess(r *httprequest.Request) {
 	var path adminUserProductAccessPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -236,7 +236,7 @@ func GetAdminUserProductAccess(r *httprequest.Request) {
 // layer per (user, product, source).
 func GrantAdminProductAccess(r *httprequest.Request) {
 	var path adminUserProductAccessPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -287,7 +287,7 @@ func GrantAdminProductAccess(r *httprequest.Request) {
 // RevokeAdminProductAccess revokes a single grant by id for a user.
 func RevokeAdminProductAccess(r *httprequest.Request) {
 	var path adminProductAccessGrantPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}

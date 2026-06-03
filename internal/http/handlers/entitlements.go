@@ -81,7 +81,7 @@ func ServiceGetUserEntitlements(r *httprequest.Request) {
 
 func GetAdminUserEntitlements(r *httprequest.Request) {
 	var path adminUserEntitlementsPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -113,7 +113,7 @@ func GetAdminUserEntitlements(r *httprequest.Request) {
 
 func GrantAdminEntitlement(r *httprequest.Request) {
 	var path adminUserEntitlementsPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -156,12 +156,12 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	r.Inner().JSON(http.StatusCreated, ent)
+	r.JSON(http.StatusCreated, ent)
 }
 
 func RevokeAdminEntitlement(r *httprequest.Request) {
 	var path adminEntitlementPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}

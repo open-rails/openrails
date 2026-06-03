@@ -65,7 +65,7 @@ type adminCancelSubscriptionRequest struct {
 
 func GetAdminUserBillingProfile(r *httprequest.Request) {
 	var path adminUserPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -95,12 +95,12 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 
 func GetAdminSubscriptions(r *httprequest.Request) {
 	queryOpts := query.QueryOptions[subscriptions.GetSubscriptionsFilters]{Limit: 50, Offset: 0}
-	if err := r.Inner().ShouldBindQuery(&queryOpts); err != nil {
+	if err := r.ShouldBindQuery(&queryOpts); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	var filters subscriptions.GetSubscriptionsFilters
-	if err := r.Inner().ShouldBindQuery(&filters); err != nil {
+	if err := r.ShouldBindQuery(&filters); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -120,7 +120,7 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 
 func GetAdminSubscription(r *httprequest.Request) {
 	var path adminSubscriptionPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -144,7 +144,7 @@ func GetAdminSubscription(r *httprequest.Request) {
 
 func GetAdminUserNMI(r *httprequest.Request) {
 	var path adminUserPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -183,7 +183,7 @@ func GetAdminUserNMI(r *httprequest.Request) {
 
 func GetAdminUserNMIMetrics(r *httprequest.Request) {
 	var path adminUserPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -210,7 +210,7 @@ func GetAdminUserNMIMetrics(r *httprequest.Request) {
 
 func GetAdminUserCCBill(r *httprequest.Request) {
 	var path adminUserPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -243,7 +243,7 @@ func GetAdminUserCCBill(r *httprequest.Request) {
 
 func GetAdminUserCCBillMetrics(r *httprequest.Request) {
 	var path adminUserPath
-	if err := r.Inner().ShouldBindUri(&path); err != nil {
+	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}

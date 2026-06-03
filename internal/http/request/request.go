@@ -129,8 +129,23 @@ func (r *Request) Query(key string) string {
 	return r.GinCtx.Query(key)
 }
 
-func (r *Request) Inner() *gin.Context {
-	return r.GinCtx
+// JSON writes a JSON response with the given status code. Framework-neutral
+// counterpart of the former r.Inner().JSON(...).
+func (r *Request) JSON(code int, body any) {
+	r.GinCtx.JSON(code, body)
+}
+
+// ShouldBindURI binds path parameters into data and returns the error WITHOUT
+// writing a response, so the caller can choose how to handle it. Use BindURI
+// for the auto-400 behavior.
+func (r *Request) ShouldBindURI(data any) error {
+	return r.GinCtx.ShouldBindUri(data)
+}
+
+// ShouldBindQuery binds query parameters into data and returns the error
+// WITHOUT writing a response.
+func (r *Request) ShouldBindQuery(data any) error {
+	return r.GinCtx.ShouldBindQuery(data)
 }
 
 func (r *Request) Next() {
