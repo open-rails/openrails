@@ -4,8 +4,8 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/internal/http/middleware"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
+	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 )
 
 // registerSelfServiceRoutes mounts the browser-direct self-service billing
@@ -28,7 +28,7 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 	}
 
 	group := e.Group(StandaloneV1Prefix + httproutes.SelfRoutePrefix)
-	httproutes.RegisterSelfServiceRoutes(group, s.runtime, middleware.DelegatedSelfRequired(s.controlPlane))
+	httproutes.RegisterSelfServiceRoutes(group, s.runtime, ginmw.DelegatedSelfRequired(s.controlPlane))
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")
@@ -38,7 +38,7 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 	// permissions and the handlers act on a `:user_id` WITHIN the token's pinned
 	// tenant. Mounted on the same public engine alongside /v1/self/*.
 	adminGroup := e.Group(StandaloneV1Prefix + httproutes.TenantAdminRoutePrefix)
-	httproutes.RegisterTenantAdminRoutes(adminGroup, s.runtime, middleware.DelegatedSelfRequired(s.controlPlane))
+	httproutes.RegisterTenantAdminRoutes(adminGroup, s.runtime, ginmw.DelegatedSelfRequired(s.controlPlane))
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.TenantAdminRoutePrefix).
 		Info("delegated tenant-admin API routes registered on public handler")

@@ -12,16 +12,15 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/crypto"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/request/ginreq"
-	"github.com/open-rails/openrails/internal/http/router"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -403,68 +402,40 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	e.Use(gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: []string{"/health/live", "/health/ready", "/healthz", "/readyz", "/health"},
 	}))
-	e.Use(middleware.SecurityHeaders())
+	e.Use(ginmw.SecurityHeaders())
 	// Allow-list = global CorsOrigins UNION every tenant's browser-direct
 	// allowed origins (issue #222 browser tier). Preflight from a configured
 	// tenant origin succeeds; unlisted origins are denied (never a wildcard
 	// outside development).
-	e.Use(middleware.CORS(s.cfg.AllowedCORSOrigins()))
-	e.Use(middleware.BodyLimit(middleware.DefaultMaxBodyBytes))
+	e.Use(ginmw.CORS(s.cfg.AllowedCORSOrigins()))
+	e.Use(ginmw.BodyLimit(middleware.DefaultMaxBodyBytes))
 	// Resolve the tenant / billing namespace before authorization and before any
 	// tenant-owned DB access (issue #223). Defaults to the single default tenant.
-	e.Use(middleware.ResolveTenant())
+	e.Use(ginmw.ResolveTenant())
 	if s.authProvider != nil {
 		e.Use(s.authProvider.Optional())
 	}
-	e.Use(middleware.RateLimitWithChallengeStore(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore))
+	e.Use(ginmw.RateLimitWithChallengeStore(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore))
 	return e
 }
 
-// newHTTPHandlerMux assembles the embedded billing surface as a gin-free
-// *http.ServeMux (issue #282). Route groups are registered via router.NewMux
-// (request.NewHTTP backend), and the captcha routes are plain net/http handlers.
-// The mux is wrapped with the net/http base middleware stack (security headers,
-// CORS, body limit, tenant resolution) — the gin-free analogue of the global
-// engine middleware. The returned handler imports zero gin on the request path.
-//
-// NOTE: rate-limiting + the captcha challenge flow are NOT applied here (they are
-// gin/captcha-flow-coupled; the standalone gin surface keeps them, and embedded
-// hosts front billing with their own gateway). See middleware/http_base.go.
+// newHTTPHandlerMux delegates to the gin-free embedhttp assembler (issue
+// #282/#285), which builds the embedded billing surface as a net/http handler
+// with zero gin on the request path. The gin Server holds the standalone surface
+// (newPublicEngine); embedded hosts use this gin-free handler via pkg/embedded.
 func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
-	opts = opts.withDefaults()
-	mux := http.NewServeMux()
-
-	if opts.IncludeUser {
-		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.
-		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandlerHTTP)
-		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandlerHTTP)
-		httproutes.RegisterUserRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.runtime), s.runtime, httproutes.Options{
-			Authenticator: s.embeddedAuthenticator(),
-		})
+	asm := &embedhttp.Assembler{
+		Cfg:           s.cfg,
+		Runtime:       s.runtime,
+		ControlPlane:  s.controlPlane,
+		CaptchaStore:  s.captchaStore,
+		Authenticator: s.embeddedAuthenticator(),
 	}
-	if opts.IncludeAdmin {
-		adminOpts := httproutes.Options{
-			Authenticator: s.embeddedAuthenticator(),
-		}
-		if s.controlPlane != nil {
-			adminOpts.OperatorPermissionChecker = authpolicy.OperatorPermissionChecker(s.controlPlane)
-		}
-		httproutes.RegisterAdminRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/admin", s.runtime), s.runtime, adminOpts)
-	}
-	if opts.IncludeWebhooks {
-		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.runtime), s.runtime)
-	}
-
-	var origins []string
-	if s.cfg != nil {
-		origins = s.cfg.AllowedCORSOrigins()
-	}
-	return middleware.ChainHTTP(mux,
-		middleware.SecurityHeadersHTTP(),
-		middleware.CORSHTTP(origins),
-		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveTenantHTTP(),
-	)
+	return asm.NewHTTPHandler(embedhttp.Options{
+		IncludeUser:     opts.IncludeUser,
+		IncludeAdmin:    opts.IncludeAdmin,
+		IncludeWebhooks: opts.IncludeWebhooks,
+	})
 }
 
 // NewHTTPHandler returns a single mountable `http.Handler` for the selected route groups.

@@ -1,4 +1,4 @@
-package routes
+package ginroutes
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 )
 
 // These tests exercise the HTTP MINT route (POST /v1/service/delegated-tokens)
@@ -22,7 +22,7 @@ import (
 // a recording fake minter to assert the load-bearing security invariant: the
 // minted token's tenant is bound to the CALLING OAT, never the request body.
 
-// fakeOATResolver implements middleware.OATResolver for the mint route tests.
+// fakeOATResolver implements ginmw.OATResolver for the mint route tests.
 type fakeOATResolver struct {
 	looksLikeOAT bool
 	resolved     *controlplane.ResolvedOAT
@@ -53,12 +53,12 @@ func (m *recordingMinter) MintDelegatedAccessToken(_ context.Context, p controlp
 	}, nil
 }
 
-func newMintRouter(t *testing.T, resolver middleware.OATResolver, minter DelegatedMinter) *gin.Engine {
+func newMintRouter(t *testing.T, resolver ginmw.OATResolver, minter DelegatedMinter) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	group := e.Group("/v1/service")
-	RegisterServiceRoutes(group, nil, middleware.OATRequired(resolver), minter, nil)
+	RegisterServiceRoutes(group, nil, ginmw.OATRequired(resolver), minter, nil)
 	return e
 }
 

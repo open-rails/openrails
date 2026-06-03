@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
+	"github.com/open-rails/openrails/internal/bootstrap/ginboot"
 	"github.com/open-rails/openrails/internal/db/models"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/migrate"
@@ -404,7 +405,7 @@ func (suite *TestContainerSuite) initializeServer() {
 	suite.t.Helper()
 
 	// Bootstrap the application (creates runtime, cache, auth verifier, etc.)
-	assembled, err := bootstrap.NewServer(suite.Config, &bootstrap.Options{
+	assembled, err := ginboot.NewServer(suite.Config, &bootstrap.Options{
 		Clock: suite.clock,
 	})
 	require.NoError(suite.t, err)

@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
+	embgin "github.com/open-rails/openrails/pkg/embedded/gin"
 )
 
 func main() {
@@ -180,9 +181,14 @@ func runServer(cmd *cobra.Command, args []string) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Public API server (user/admin JWT auth)
+	// Public API server (user/admin JWT auth). The full standalone gin surface
+	// lives in the pkg/embedded/gin subpackage now (#285).
+	publicHandler, err := embgin.Handler(embeddedApp)
+	if err != nil {
+		return fmt.Errorf("build billing http handler: %w", err)
+	}
 	publicSrv := &http.Server{
-		Handler:           embeddedApp.Handler(),
+		Handler:           publicHandler,
 		Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,

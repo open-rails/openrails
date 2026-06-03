@@ -1,4 +1,4 @@
-package middleware
+package ginmw
 
 import (
 	"net/http"

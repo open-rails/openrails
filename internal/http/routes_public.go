@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
 	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
-	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/http/router/ginrouter"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
@@ -45,7 +45,7 @@ func (s *Server) captchaStatusHandler(c *gin.Context) {
 	}
 
 	required := false
-	for _, subjectKey := range middleware.RateLimitSubjectKeys(c) {
+	for _, subjectKey := range ginmw.RateLimitSubjectKeys(c) {
 		challenged, err := s.captchaStore.IsChallenged(c.Request.Context(), subjectKey)
 		if err != nil {
 			continue
@@ -58,68 +58,6 @@ func (s *Server) captchaStatusHandler(c *gin.Context) {
 
 	resp["required"] = required
 	c.JSON(http.StatusOK, resp)
-}
-
-// captchaStatusHandlerHTTP is the gin-free analogue of captchaStatusHandler for
-// the embedded net/http surface (issue #282).
-func (s *Server) captchaStatusHandlerHTTP(w http.ResponseWriter, r *http.Request) {
-	var cfg *config.CaptchaConfig
-	if s != nil && s.cfg != nil {
-		cfg = s.cfg.Captcha
-	}
-	resp := map[string]any{
-		"enabled":           cfg != nil && cfg.Enabled,
-		"required":          false,
-		"token_header":      captcha.TokenHeader,
-		"client_script_url": captchaClientScriptURLHTTP(r),
-	}
-	if cfg != nil {
-		resp["provider"] = cfg.EffectiveProvider()
-	}
-	if cfg != nil && cfg.Enabled && s.captchaStore != nil {
-		for _, subjectKey := range middleware.RateLimitSubjectKeysHTTP(r) {
-			challenged, err := s.captchaStore.IsChallenged(r.Context(), subjectKey)
-			if err != nil {
-				continue
-			}
-			if challenged {
-				resp["required"] = true
-				break
-			}
-		}
-	}
-	writeJSONHTTP(w, http.StatusOK, resp)
-}
-
-// captchaClientScriptHandlerHTTP is the gin-free analogue of
-// captchaClientScriptHandler for the embedded net/http surface (issue #282).
-func (s *Server) captchaClientScriptHandlerHTTP(w http.ResponseWriter, r *http.Request) {
-	var cfg *config.CaptchaConfig
-	if s != nil && s.cfg != nil {
-		cfg = s.cfg.Captcha
-	}
-	script := buildCaptchaClientScript(cfg)
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(script))
-}
-
-func captchaClientScriptURLHTTP(r *http.Request) string {
-	if r == nil || r.URL == nil {
-		return "/v1/captcha/client.js"
-	}
-	path := r.URL.Path
-	if strings.HasSuffix(path, "/status") {
-		return strings.TrimSuffix(path, "/status") + "/client.js"
-	}
-	return "/v1/captcha/client.js"
-}
-
-func writeJSONHTTP(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }
 
 func (s *Server) captchaClientScriptHandler(c *gin.Context) {

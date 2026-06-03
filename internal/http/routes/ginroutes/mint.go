@@ -1,4 +1,4 @@
-package routes
+package ginroutes
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 )
 
 // DelegatedMinter mints short-lived, user-scoped delegated access tokens for the
@@ -64,7 +64,7 @@ func mintDelegatedTokenHandler(minter DelegatedMinter) gin.HandlerFunc {
 		}
 
 		// Resolve the tenant from the authenticated OAT — never the body.
-		oat, ok := middleware.OATFromGin(c)
+		oat, ok := ginmw.OATFromGin(c)
 		if !ok || oat == nil {
 			response.UnauthorizedWithMessage(c, "oat required")
 			c.Abort()

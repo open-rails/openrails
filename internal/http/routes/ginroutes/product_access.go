@@ -1,4 +1,4 @@
-package routes
+package ginroutes
 
 import (
 	"github.com/gin-gonic/gin"
@@ -6,7 +6,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
-	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
@@ -20,7 +20,7 @@ import (
 //     routes). Handlers read r.GetUser().
 //   - OAT SERVICE: GET /service/users/:user_id/product-access (optional
 //     ?product_id=... narrows to a has-access check). The OAT auth middleware is
-//     applied at the central /service group mount (middleware.OATRequired); this
+//     applied at the central /service group mount (ginmw.OATRequired); this
 //     function adds the per-route OAT permission gate.
 //   - ADMIN: GET/POST/DELETE under /admin/users/:user_id/product-access. The
 //     caller's /admin group must already apply the operator-admin gate (mirroring
@@ -43,7 +43,7 @@ func RegisterProductAccessRoutes(group *gin.RouterGroup, rt *app.Runtime) {
 	// OAT SERVICE surface (OATRequired applied at the central /service mount).
 	service := group.Group("/service")
 	service.GET("/users/:user_id/product-access",
-		middleware.RequireOATPermission(controlplane.PermEntitlementsRead),
+		ginmw.RequireOATPermission(controlplane.PermEntitlementsRead),
 		wrap(httphandlers.ServiceGetUserProductAccess),
 	)
 

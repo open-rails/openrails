@@ -1,4 +1,4 @@
-package routes
+package ginroutes
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/http/middleware"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 )
 
 // These tests pin the SELF-SERVICE route table (RegisterSelfServiceRoutes) for
@@ -26,7 +26,7 @@ import (
 // an unauthenticated one (401) never reaches the handler body. A route that was
 // NOT mounted would 404 instead, which is exactly the regression we guard.
 
-// fakeDelegatedResolver implements middleware.DelegatedResolver: it returns a
+// fakeDelegatedResolver implements ginmw.DelegatedResolver: it returns a
 // fixed ResolvedDelegated carrying the supplied permission set.
 type fakeDelegatedResolver struct {
 	permissions []string
@@ -51,7 +51,7 @@ func newSelfRouter(t *testing.T, perms []string) *gin.Engine {
 	group := e.Group("/v1/self")
 	// rt==nil: TenantDBConn is skipped, and the wrapped handlers are never
 	// reached on the 401/403 paths these tests assert.
-	RegisterSelfServiceRoutes(group, nil, middleware.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
+	RegisterSelfServiceRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
 	return e
 }
 
@@ -60,7 +60,7 @@ func newTenantAdminRouter(t *testing.T, perms []string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	group := e.Group("/v1/tenant-admin")
-	RegisterTenantAdminRoutes(group, nil, middleware.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
+	RegisterTenantAdminRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
 	return e
 }
 

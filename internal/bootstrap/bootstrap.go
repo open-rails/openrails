@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 )
@@ -28,12 +26,6 @@ type Options struct {
 	Clock         clockwork.Clock
 }
 
-// Result holds the application graph created by the composition root.
-type Result struct {
-	App    *app.App
-	Server *server.Server
-}
-
 // NewApp constructs the long-lived application runtime.
 func NewApp(cfg *config.Config, opts *Options) (*app.App, error) {
 	application, err := app.BootstrapWithOptions(cfg, &app.BootstrapOptions{
@@ -48,36 +40,6 @@ func NewApp(cfg *config.Config, opts *Options) (*app.App, error) {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
 	return application, nil
-}
-
-// NewServer constructs the application runtime and the HTTP server graph together.
-func NewServer(cfg *config.Config, opts *Options) (*Result, error) {
-	application, err := NewApp(cfg, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	cleanupOnError := true
-	defer func() {
-		if cleanupOnError {
-			_ = application.Close(context.Background())
-		}
-	}()
-
-	billingServer, err := server.New(server.Dependencies{
-		Config:        application.Config,
-		Cache:         application.Cache,
-		Runtime:       application.Runtime,
-		Redis:         application.RedisClient,
-		Authenticator: application.Authenticator,
-		ControlPlane:  application.ControlPlane,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create billing server: %w", err)
-	}
-
-	cleanupOnError = false
-	return &Result{App: application, Server: billingServer}, nil
 }
 
 func optsValue[T any](opts *Options, pick func(*Options) T) T {
