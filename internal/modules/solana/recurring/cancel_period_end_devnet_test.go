@@ -105,7 +105,10 @@ func TestDevnetCancelStopsAtPeriodEnd(t *testing.T) {
 	planPDA := solanago.MustPublicKeyFromBase58(h.PlanPDA)
 	subPDA := solanago.MustPublicKeyFromBase58(row.SubscriptionPDA)
 
-	// 1) Pull period 1.
+	// 1) Pull period 1. Track the SUBSCRIBER's balance (fresh, EXCLUSIVE wallet) for
+	// the final invariant — the merchant ATA is shared across concurrent devnet
+	// tests, so unrelated deposits would pollute a merchant-balance assertion.
+	subBefore, _ := rc.GetTokenBalanceForMint(ctx, sub.PublicKey(), usdc)
 	base, _ := rc.GetTokenBalanceForMint(ctx, merchant.PublicKey(), usdc)
 	_, cerr := crankSvc.Crank(ctx, tenant.DefaultID, row, amount)
 	require.NoError(t, cerr, "period-1 pull should succeed")
@@ -162,9 +165,12 @@ func TestDevnetCancelStopsAtPeriodEnd(t *testing.T) {
 		}
 	}
 
-	// 5) Final invariant: the merchant only ever received ONE period's USDC.
-	final, _ := rc.GetTokenBalanceForMint(ctx, merchant.PublicKey(), usdc)
-	require.Equal(t, base+amount, final, "merchant must have received exactly ONE period after cancel (no period-2 charge)")
+	// 5) Final invariant: the SUBSCRIBER paid for exactly ONE period and nothing
+	// more — the cancelled period-2 pull was rejected (508 above). Asserted on the
+	// subscriber's exclusive wallet so concurrent tests touching the shared merchant
+	// ATA cannot cause a false failure.
+	subFinal, _ := rc.GetTokenBalanceForMint(ctx, sub.PublicKey(), usdc)
+	require.Equal(t, subBefore-amount, subFinal, "subscriber must have paid exactly ONE period after cancel (no period-2 charge)")
 
 	// Surface the classifier's handling of 508 for follow-up (it may not map it yet).
 	_, post := crankSvc.Crank(ctx, tenant.DefaultID, row, amount)
