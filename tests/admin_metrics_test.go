@@ -5,7 +5,6 @@ package tests
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -120,11 +119,8 @@ func TestAdminMetricsRevenue(t *testing.T) {
 	suite, adminToken := setupAdminTestSuite(t)
 	products := suite.SeedProducts()
 	seedMetricsData(t, suite, products[0].Prices[0].ID)
-	now := time.Now().UTC()
-	start := now.AddDate(0, 0, -7).Format("2006-01-02")
-	end := now.Format("2006-01-02")
 
-	req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/metrics/revenue?start=%s&end=%s&granularity=day", start, end), nil)
+	req, _ := http.NewRequest("GET", "/v1/admin/metrics/revenue?granularity=day", nil)
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	w := httptest.NewRecorder()
 	suite.Server.Handler().ServeHTTP(w, req)
@@ -132,7 +128,9 @@ func TestAdminMetricsRevenue(t *testing.T) {
 
 	var resp map[string]interface{}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Contains(t, resp, "buckets")
+	buckets, ok := resp["buckets"].([]interface{})
+	require.True(t, ok, "response should include buckets array: %s", w.Body.String())
+	assert.NotEmpty(t, buckets)
 }
 
 func TestAdminMetricsSubscriptions(t *testing.T) {
@@ -149,7 +147,9 @@ func TestAdminMetricsSubscriptions(t *testing.T) {
 
 	var resp map[string]interface{}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Contains(t, resp, "buckets")
+	buckets, ok := resp["buckets"].([]interface{})
+	require.True(t, ok, "response should include buckets array: %s", w.Body.String())
+	assert.NotEmpty(t, buckets)
 }
 
 func TestAdminMetricsProcessors(t *testing.T) {
@@ -166,7 +166,9 @@ func TestAdminMetricsProcessors(t *testing.T) {
 
 	var resp map[string]interface{}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Contains(t, resp, "processors")
+	processors, ok := resp["processors"].([]interface{})
+	require.True(t, ok, "response should include processors array: %s", w.Body.String())
+	assert.NotEmpty(t, processors)
 }
 
 func TestAdminMetricsChurn(t *testing.T) {

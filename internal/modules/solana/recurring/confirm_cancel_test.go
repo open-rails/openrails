@@ -47,7 +47,7 @@ func (f *fakeCanceller) CancelMembership(_ context.Context, params *subscription
 // validSig is a syntactically valid base58 signature (64 zero bytes) for tests.
 var validSig = solanago.Signature{}.String()
 
-func TestConfirmCancel_Success_MirrorsAndCancels(t *testing.T) {
+func TestConfirmCancel_Success_MirrorsScheduledCancel(t *testing.T) {
 	rpcStub := &fakeConfirmRPC{outcome: &solanaint.TransactionOutcome{Err: nil}} // Err nil -> Succeeded
 	canceller := &fakeCanceller{}
 	svc := NewConfirmCancelService(rpcStub, canceller)
@@ -69,8 +69,8 @@ func TestConfirmCancel_Success_MirrorsAndCancels(t *testing.T) {
 	if canceller.params == nil || canceller.params.SubscriptionID == nil || *canceller.params.SubscriptionID != subID {
 		t.Fatalf("expected cancel for subscription %s, got %+v", subID, canceller.params)
 	}
-	if !canceller.params.RevokeAccess {
-		t.Fatal("Solana cancel must be IMMEDIATE (RevokeAccess=true), not period-end deferred")
+	if canceller.params.RevokeAccess {
+		t.Fatal("Solana cancel must be SCHEDULED at period end (RevokeAccess=false), mirroring the card cancel_at_period_end — not an immediate access revoke")
 	}
 	if canceller.params.CancelType != models.CancelTypeUser {
 		t.Fatalf("expected CancelTypeUser, got %v", canceller.params.CancelType)

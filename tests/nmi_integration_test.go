@@ -4,9 +4,11 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +33,7 @@ const (
 	// Test card numbers
 	// See: https://docs.nmi.com/docs/testing-sandbox
 	TestCardVisa     = "4111111111111111"
-	TestCardExpiry   = "1025" // MM/YY format: October 2025
+	TestCardExpiry   = "1028" // MM/YY format: October 2028
 	TestCardCVV      = "999"  // AVS/CVV test value
 	TestCardZip      = "77777"
 	TestCardAddress1 = "888" // AVS test value
@@ -101,6 +103,48 @@ func TestNMIDemoDeclinedPayment(t *testing.T) {
 	// Should be declined (response = 2)
 	assert.Equal(t, "2", output.Get("response"), "Should receive decline response (2), got: %s - %s", output.Get("response"), output.Get("responsetext"))
 	t.Logf("NMI Demo decline response: %s", string(body))
+}
+
+func TestNMIMobiusConfiguredAccountSale(t *testing.T) {
+	securityKey := strings.TrimSpace(os.Getenv("PROCESSORS_MOBIUS_SECURITY_KEY"))
+	if securityKey == "" || securityKey == NMIDemoSecurityKey {
+		t.Skip("PROCESSORS_MOBIUS_SECURITY_KEY with a real Mobius/NMI test account key is required")
+	}
+
+	directPostURL := strings.TrimSpace(os.Getenv("PROCESSORS_MOBIUS_DIRECT_POST_URL"))
+	if directPostURL == "" {
+		directPostURL = nmi.SandboxDirectPostURL
+	}
+
+	amount := fmt.Sprintf("1.%02d", time.Now().UnixNano()%90+10)
+	values := url.Values{
+		"type":         {"sale"},
+		"security_key": {securityKey},
+		"ccnumber":     {TestCardVisa},
+		"ccexp":        {TestCardExpiry},
+		"cvv":          {TestCardCVV},
+		"amount":       {amount},
+		"orderid":      {"openrails-mobius-" + uuid.NewString()},
+		"first_name":   {"OpenRails"},
+		"last_name":    {"Mobius"},
+		"address1":     {TestCardAddress1},
+		"zip":          {TestCardZip},
+		"test_mode":    {"enabled"},
+	}
+
+	resp, err := http.PostForm(directPostURL, values)
+	require.NoError(t, err, "Should be able to connect to configured Mobius/NMI endpoint")
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	output, err := url.ParseQuery(string(body))
+	require.NoError(t, err)
+
+	assert.Equal(t, "1", output.Get("response"), "Configured Mobius/NMI account should approve test-mode sale, got: %s - %s", output.Get("response"), output.Get("responsetext"))
+	assert.NotEmpty(t, output.Get("transactionid"), "Should receive transaction ID")
+	t.Logf("Configured Mobius/NMI sale approved with response_code=%s", output.Get("response_code"))
 }
 
 // TestNMIDemoClientCreateVault tests creating a customer vault entry with real NMI API
@@ -392,8 +436,16 @@ func TestNMIRuntimeClientConfigured(t *testing.T) {
 		strings.HasPrefix(client.DirectPostURL, "http://") ||
 			strings.HasPrefix(client.DirectPostURL, "https://"),
 		"NMI direct post URL should be absolute, got: %s", client.DirectPostURL)
-	assert.Equal(t, nmi.SandboxDirectPostURL, client.DirectPostURL)
-	assert.Equal(t, nmi.SandboxQueryAPIURL, client.QueryURL)
+	expectedDirectPostURL := strings.TrimSpace(os.Getenv("PROCESSORS_MOBIUS_DIRECT_POST_URL"))
+	if expectedDirectPostURL == "" {
+		expectedDirectPostURL = nmi.SandboxDirectPostURL
+	}
+	expectedQueryURL := strings.TrimSpace(os.Getenv("PROCESSORS_MOBIUS_QUERY_URL"))
+	if expectedQueryURL == "" {
+		expectedQueryURL = nmi.SandboxQueryAPIURL
+	}
+	assert.Equal(t, expectedDirectPostURL, client.DirectPostURL)
+	assert.Equal(t, expectedQueryURL, client.QueryURL)
 
 	t.Logf("NMI client configured with DirectPostURL: %s", client.DirectPostURL)
 }

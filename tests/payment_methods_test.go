@@ -62,9 +62,15 @@ func TestPaymentMethodsRequiresAuth(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 Unauthorized")
 	})
 
-	t.Run("ACTIVATE returns 401 without auth token", func(t *testing.T) {
+	t.Run("UPDATE returns 401 without auth token", func(t *testing.T) {
+		body := map[string]string{
+			"payment_token": "test-token",
+		}
+		jsonBody, _ := json.Marshal(body)
+
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/payment-methods/"+uuid.New().String()+"/activate", nil)
+		req, _ := http.NewRequest("PUT", "/v1/me/payment-methods/"+uuid.New().String(), bytes.NewReader(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -191,6 +197,7 @@ func TestCreatePaymentMethod(t *testing.T) {
 			"zip":           "90210",
 			"country":       "US",
 			"email":         email,
+			"provider":      "mobius",
 		}
 		jsonBody, _ := json.Marshal(body)
 

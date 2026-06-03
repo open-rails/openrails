@@ -392,6 +392,8 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 				Username:   cfg.ClickHouse.Username,
 				Password:   cfg.ClickHouse.Password,
 				App:        "billing",
+				Cluster:    cfg.ClickHouse.Cluster,
+				PostgresDB: sqlDB,
 			},
 			clickhousemigrations.FS,
 		); err != nil {

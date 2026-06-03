@@ -682,7 +682,9 @@ func TestDunningSuccessReactivates(t *testing.T) {
 		// Simulate successful rebill via RenewMembership
 		// RenewMembership uses the mock clock for period calculations
 		err := lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-			Processor: models.ProcessorMobius,
+			Processor:               models.ProcessorMobius,
+			ProcessorSubscriptionID: processorSubID,
+			TransactionID:           "rebill-" + uuid.NewString(),
 		})
 		require.NoError(t, err)
 
@@ -781,7 +783,9 @@ func TestSubscriptionRenewalWithMockClock(t *testing.T) {
 	t.Run("renewal extends period by billing cycle days", func(t *testing.T) {
 		// Simulate renewal webhook
 		err := lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-			Processor: models.ProcessorMobius,
+			Processor:               models.ProcessorMobius,
+			ProcessorSubscriptionID: processorSubID,
+			TransactionID:           "renewal-" + uuid.NewString(),
 		})
 		require.NoError(t, err)
 

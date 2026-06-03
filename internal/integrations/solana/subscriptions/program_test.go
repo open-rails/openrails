@@ -172,6 +172,33 @@ func TestInstructionAccountLayouts(t *testing.T) {
 		}
 	})
 
+	t.Run("revoke_delegation", func(t *testing.T) {
+		authority, delegation, plan := k(), k(), k()
+		ix := BuildRevokeDelegation(authority, delegation, plan)
+		accs := ix.Accounts()
+		// Must carry the trailing plan_pda — without it the program returns
+		// Custom:113 (NotEnoughAccountKeys) on-chain.
+		if len(accs) != 3 {
+			t.Fatalf("revoke_delegation accounts = %d, want 3 (authority, delegation, plan)", len(accs))
+		}
+		if !accs[0].PublicKey.Equals(authority) || !accs[0].IsSigner || !accs[0].IsWritable {
+			t.Fatal("account 0 must be the authority, signer+writable")
+		}
+		if !accs[1].PublicKey.Equals(delegation) || !accs[1].IsWritable || accs[1].IsSigner {
+			t.Fatal("account 1 must be the delegation account, writable non-signer")
+		}
+		if !accs[2].PublicKey.Equals(plan) {
+			t.Fatal("account 2 must be the trailing plan_pda")
+		}
+		if accs[2].IsSigner || accs[2].IsWritable {
+			t.Fatal("plan_pda must be read-only non-signer")
+		}
+		d, _ := ix.Data()
+		if len(d) != 1 || d[0] != discRevokeDelegation {
+			t.Fatalf("revoke data = %v, want [%d]", d, discRevokeDelegation)
+		}
+	})
+
 	t.Run("cancel", func(t *testing.T) {
 		ix := BuildCancelSubscription(CancelOrResumeParams{Subscriber: k(), PlanPDA: k(), SubscriptionPDA: k(), EventAuthority: k()})
 		accs := ix.Accounts()

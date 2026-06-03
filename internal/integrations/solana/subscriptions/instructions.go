@@ -235,12 +235,16 @@ func BuildCreateIdempotentATA(p CreateIdempotentATAParams) solanago.Instruction 
 }
 
 // BuildRevokeDelegation builds revoke_delegation (3) — closes a delegation /
-// subscription account after expiry, reclaiming rent. Accounts:
-// authority(s,w), delegationAccount(w).
-func BuildRevokeDelegation(authority, delegationAccount solanago.PublicKey) solanago.Instruction {
+// subscription account after expiry, reclaiming rent. The program's subscription
+// branch REQUIRES a trailing plan_pda account; omitting it is rejected on-chain
+// with Custom:113 (NotEnoughAccountKeys). Accounts (program order):
+// authority(s,w), delegationAccount(w), planPda. An optional trailing receiver
+// is accepted by the program but is not required to close, so we omit it.
+func BuildRevokeDelegation(authority, delegationAccount, planPDA solanago.PublicKey) solanago.Instruction {
 	accounts := solanago.AccountMetaSlice{
 		solanago.NewAccountMeta(authority, true, true),
 		solanago.NewAccountMeta(delegationAccount, true, false),
+		solanago.NewAccountMeta(planPDA, false, false),
 	}
 	return solanago.NewInstruction(ProgramID, accounts, []byte{discRevokeDelegation})
 }

@@ -24,8 +24,8 @@ func TestSolanaPayTransactionRequestFlow(t *testing.T) {
 		Name:    "Test Store",
 		LogoURL: config.DefaultLogoURL,
 	}
-	// Set a proper host for solana_pay_url generation
-	suite.Config.Host = "https://api.test.com"
+	// Set the public API base URL for solana_pay_url generation.
+	suite.Config.APIURL = "https://api.test.com"
 
 	products := suite.SeedProducts()
 	// Use a one-time purchase product (products[2] is Solana-only)
@@ -65,7 +65,8 @@ func TestSolanaPayTransactionRequestFlow(t *testing.T) {
 		nextAction, ok := resp["next_action"].(map[string]any)
 		require.True(t, ok, "next_action should be present")
 		assert.Equal(t, "solana_pay", nextAction["type"], "next_action type should be solana_pay")
-		solanaPayURL, ok := nextAction["solana_pay_url"].(string)
+
+		solanaPayURL, ok := payment["solana_pay_url"].(string)
 		require.True(t, ok)
 		assert.NotEmpty(t, solanaPayURL, "Should include solana_pay_url")
 		assert.True(t, strings.HasPrefix(solanaPayURL, "solana:https://"), "URL should start with solana:https://")
@@ -81,7 +82,7 @@ func TestSolanaPayGetEndpoint(t *testing.T) {
 		Name:    "Test Store",
 		LogoURL: config.DefaultLogoURL,
 	}
-	suite.Config.Host = "https://api.test.com"
+	suite.Config.APIURL = "https://api.test.com"
 
 	products := suite.SeedProducts()
 	priceID := products[2].Prices[0].ID
@@ -155,7 +156,7 @@ func TestSolanaPayPostEndpoint(t *testing.T) {
 		Name:    "Test Store",
 		LogoURL: config.DefaultLogoURL,
 	}
-	suite.Config.Host = "https://api.test.com"
+	suite.Config.APIURL = "https://api.test.com"
 
 	products := suite.SeedProducts()
 	priceID := products[2].Prices[0].ID
@@ -294,6 +295,6 @@ func setupTestSuiteWithSolanaPayConfig(t *testing.T) (*TestContainerSuite, strin
 		Name:    "Test Store",
 		LogoURL: config.DefaultLogoURL,
 	}
-	suite.Config.Host = "https://api.test.com"
+	suite.Config.APIURL = "https://api.test.com"
 	return suite, token, userID
 }

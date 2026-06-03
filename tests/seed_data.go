@@ -1075,6 +1075,11 @@ func (suite *TestContainerSuite) CleanupSubscriptionsForUser(userID string) {
 		Where("user_id = ?", userID).
 		Exec(ctx)
 
+	_, _ = suite.BunDB.NewDelete().
+		Model((*models.CheckoutSession)(nil)).
+		Where("user_id = ?", userID).
+		Exec(ctx)
+
 	// Delete subscriptions
 	_, err := suite.BunDB.NewDelete().
 		Model((*models.Subscription)(nil)).

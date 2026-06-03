@@ -175,9 +175,8 @@ func TestScheduledDowngrade(t *testing.T) {
 	premiumProduct := tieredProducts[0].Product
 	premiumPlusProduct := tieredProducts[1].Product
 
-	userID := "test-user-" + uuid.New().String()[:8]
-
 	t.Run("downgrade is scheduled for end of period", func(t *testing.T) {
+		userID := "test-user-" + uuid.New().String()[:8]
 		now := suite.GetClock().Now()
 		periodEnd := now.Add(15 * 24 * time.Hour) // 15 days remaining
 
@@ -218,6 +217,7 @@ func TestScheduledDowngrade(t *testing.T) {
 	})
 
 	t.Run("downgrade is applied on renewal", func(t *testing.T) {
+		userID := "test-user-" + uuid.New().String()[:8]
 		now := suite.GetClock().Now()
 		periodEnd := now // Period ends now
 
@@ -605,14 +605,8 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusOK, w.Code, "Should return 200 with blocked status")
-
-		var resp map[string]any
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		require.NoError(t, err)
-
-		assert.Equal(t, "blocked", resp["status"], "Status should be blocked")
-		assert.Contains(t, resp["message"].(string), "change-tier", "Message should direct to change-tier endpoint")
+		require.Equal(t, http.StatusConflict, w.Code, "Should return 409 Conflict")
+		assert.Contains(t, w.Body.String(), "change-tier", "Message should direct to change-tier endpoint")
 	})
 
 	t.Run("checkout blocks downgrade attempts", func(t *testing.T) {
@@ -656,14 +650,8 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusOK, w.Code, "Should return 200 with blocked status")
-
-		var resp map[string]any
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		require.NoError(t, err)
-
-		assert.Equal(t, "blocked", resp["status"], "Status should be blocked")
-		assert.Contains(t, resp["message"].(string), "change-tier", "Message should direct to change-tier endpoint")
+		require.Equal(t, http.StatusConflict, w.Code, "Should return 409 Conflict")
+		assert.Contains(t, w.Body.String(), "change-tier", "Message should direct to change-tier endpoint")
 	})
 
 	t.Run("checkout still works for new subscriptions", func(t *testing.T) {

@@ -19,10 +19,8 @@ import (
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/migrate"
 
-	chgo "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	_ "github.com/lib/pq" // PostgreSQL driver for schema creation
 	"github.com/redis/go-redis/v9"
@@ -42,12 +40,9 @@ type TestContainerSuite struct {
 	t *testing.T
 
 	// Containers
-	postgresContainer    *postgres.PostgresContainer
-	redisContainer       *redismodule.RedisContainer
-	clickhouseContainer  *clickhousecontainer.ClickHouseContainer
-	externalPostgresDSN  string
-	externalPostgresDB   string
-	externalClickHouseDB string
+	postgresContainer   *postgres.PostgresContainer
+	redisContainer      *redismodule.RedisContainer
+	clickhouseContainer *clickhousecontainer.ClickHouseContainer
 
 	// Application and database connections
 	App         *app.App
@@ -212,8 +207,6 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	// Get ClickHouse connection details
 	clickhouseHTTPAddr, clickhouseClientAddr, err := suite.clickhouseAddresses()
 	require.NoError(suite.t, err)
-	clickhouseDatabase, err := suite.clickhouseDatabase(clickhouseClientAddr)
-	require.NoError(suite.t, err)
 
 	// Create configuration
 	// Use "dev" to skip NMI/CCBill validation in config.Validate()
@@ -234,7 +227,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 		ClickHouse: &config.ClickHouseConfig{
 			HTTPAddr:   clickhouseHTTPAddr,
 			ClientAddr: clickhouseClientAddr,
-			Database:   clickhouseDatabase,
+			Database:   envOrDefault("OPENRAILS_TEST_CH_DATABASE", "test_analytics"),
 			Username:   envOrDefault("OPENRAILS_TEST_CH_USERNAME", "test_user"),
 			Password:   envOrDefault("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
 		},
@@ -346,46 +339,16 @@ func envOrDefault(key, fallback string) string {
 }
 
 func (suite *TestContainerSuite) postgresConnectionString() (string, error) {
-	if suite.externalPostgresDSN != "" {
-		return suite.externalPostgresDSN, nil
-	}
 	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL")); dsn != "" {
-		return suite.createExternalPostgresDatabase(dsn)
+		return dsn, nil
 	}
 	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")); dsn != "" {
-		return suite.createExternalPostgresDatabase(dsn)
+		return dsn, nil
 	}
 	if suite.postgresContainer == nil {
 		return "", fmt.Errorf("postgres test container is not initialized")
 	}
 	return suite.postgresContainer.ConnectionString(suite.ctx, "sslmode=disable")
-}
-
-func (suite *TestContainerSuite) createExternalPostgresDatabase(adminDSN string) (string, error) {
-	adminCfg, err := pgxpool.ParseConfig(adminDSN)
-	if err != nil {
-		return "", fmt.Errorf("parse external postgres dsn: %w", err)
-	}
-	adminCfg.ConnConfig.Config.Database = "postgres"
-	adminPool, err := pgxpool.NewWithConfig(suite.ctx, adminCfg)
-	if err != nil {
-		return "", fmt.Errorf("connect external postgres admin database: %w", err)
-	}
-	defer adminPool.Close()
-
-	dbName := fmt.Sprintf("openrails_tests_%d_%d", os.Getpid(), time.Now().UnixNano())
-	if _, err := adminPool.Exec(suite.ctx, "CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()); err != nil {
-		return "", fmt.Errorf("create external test database %s: %w", dbName, err)
-	}
-
-	testCfg, err := pgxpool.ParseConfig(adminDSN)
-	if err != nil {
-		return "", fmt.Errorf("parse external postgres dsn for test database: %w", err)
-	}
-	testCfg.ConnConfig.Config.Database = dbName
-	suite.externalPostgresDSN = testCfg.ConnString()
-	suite.externalPostgresDB = dbName
-	return suite.externalPostgresDSN, nil
 }
 
 func (suite *TestContainerSuite) redisAddress() (string, error) {
@@ -426,37 +389,6 @@ func (suite *TestContainerSuite) clickhouseAddresses() (string, string, error) {
 		return "", "", err
 	}
 	return fmt.Sprintf("http://%s:%s", host, httpPort.Port()), fmt.Sprintf("%s:%s", host, nativePort.Port()), nil
-}
-
-func (suite *TestContainerSuite) clickhouseDatabase(clientAddr string) (string, error) {
-	baseDB := envOrDefault("OPENRAILS_TEST_CH_DATABASE", "test_analytics")
-	if strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_HTTP_ADDR")) == "" {
-		return baseDB, nil
-	}
-
-	dbName := fmt.Sprintf("openrails_tests_%d_%d", os.Getpid(), time.Now().UnixNano())
-	conn, err := chgo.Open(&chgo.Options{
-		Addr: []string{clientAddr},
-		Auth: chgo.Auth{
-			Database: baseDB,
-			Username: envOrDefault("OPENRAILS_TEST_CH_USERNAME", "test_user"),
-			Password: envOrDefault("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("open external clickhouse admin connection: %w", err)
-	}
-	defer conn.Close()
-
-	if err := conn.Exec(suite.ctx, "CREATE DATABASE IF NOT EXISTS "+clickHouseIdent(dbName)); err != nil {
-		return "", fmt.Errorf("create external clickhouse database %s: %w", dbName, err)
-	}
-	suite.externalClickHouseDB = dbName
-	return dbName, nil
-}
-
-func clickHouseIdent(identifier string) string {
-	return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
 }
 
 // initializeServer starts the billing server for testing
@@ -561,30 +493,6 @@ func (suite *TestContainerSuite) Cleanup() {
 			suite.t.Logf("Failed to terminate postgres container: %v", err)
 		}
 	}
-	if suite.externalPostgresDB != "" {
-		adminDSN := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_URL"))
-		if adminDSN == "" {
-			adminDSN = strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN"))
-		}
-		if adminDSN != "" {
-			adminCfg, err := pgxpool.ParseConfig(adminDSN)
-			if err != nil {
-				suite.t.Logf("Failed to parse external postgres admin DSN: %v", err)
-			} else {
-				adminCfg.ConnConfig.Config.Database = "postgres"
-				adminPool, err := pgxpool.NewWithConfig(context.Background(), adminCfg)
-				if err != nil {
-					suite.t.Logf("Failed to connect external postgres admin database: %v", err)
-				} else {
-					_, _ = adminPool.Exec(context.Background(), "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", suite.externalPostgresDB)
-					if _, err := adminPool.Exec(context.Background(), "DROP DATABASE IF EXISTS "+pgx.Identifier{suite.externalPostgresDB}.Sanitize()); err != nil {
-						suite.t.Logf("Failed to drop external postgres database %s: %v", suite.externalPostgresDB, err)
-					}
-					adminPool.Close()
-				}
-			}
-		}
-	}
 
 	if suite.redisContainer != nil {
 		if err := suite.redisContainer.Terminate(suite.ctx); err != nil {
@@ -595,28 +503,6 @@ func (suite *TestContainerSuite) Cleanup() {
 	if suite.clickhouseContainer != nil {
 		if err := suite.clickhouseContainer.Terminate(suite.ctx); err != nil {
 			suite.t.Logf("Failed to terminate clickhouse container: %v", err)
-		}
-	}
-	if suite.externalClickHouseDB != "" {
-		clientAddr := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_CH_ADDR"))
-		if clientAddr == "" {
-			clientAddr = "localhost:9000"
-		}
-		conn, err := chgo.Open(&chgo.Options{
-			Addr: []string{clientAddr},
-			Auth: chgo.Auth{
-				Database: envOrDefault("OPENRAILS_TEST_CH_DATABASE", "test_analytics"),
-				Username: envOrDefault("OPENRAILS_TEST_CH_USERNAME", "test_user"),
-				Password: envOrDefault("OPENRAILS_TEST_CH_PASSWORD", "test_password"),
-			},
-		})
-		if err != nil {
-			suite.t.Logf("Failed to connect external ClickHouse for cleanup: %v", err)
-		} else {
-			if err := conn.Exec(context.Background(), "DROP DATABASE IF EXISTS "+clickHouseIdent(suite.externalClickHouseDB)); err != nil {
-				suite.t.Logf("Failed to drop external ClickHouse database %s: %v", suite.externalClickHouseDB, err)
-			}
-			conn.Close()
 		}
 	}
 }

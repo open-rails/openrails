@@ -305,6 +305,35 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		}
 	}
 
+	// IMPORTANT (issue #254 / the Custom:519 root cause): create_plan OVERWRITES
+	// terms.created_at with the on-chain cluster clock, so our client-side
+	// `createdAt` (s.now()) is NOT what the program stored — it differs from the
+	// cluster clock by the confirmation delay + skew. subscribe later echoes
+	// created_at as a consent field and the program rejects a mismatch with
+	// PlanTermsMismatch (519). So read the REAL on-chain created_at back from the
+	// just-created plan and return THAT in the handle. The read is a
+	// read-after-our-own-write, so poll until the plan is visible + decodable
+	// (ReadUntilConsistent absorbs RPC read-lag). Fall back to the client value only
+	// if no reader is wired.
+	onchainCreatedAt := createdAt
+	if s.reader != nil {
+		data, rerr := solanaint.ReadUntilConsistent(ctx, solanaint.ReadUntilConsistentOpts{},
+			func(ctx context.Context) ([]byte, error) { return s.reader.GetAccountData(ctx, planPDA) },
+			func(d []byte) bool {
+				if len(d) == 0 {
+					return false
+				}
+				pa, e := subscriptions.DecodePlanAccount(d)
+				return e == nil && pa.CreatedAt != 0
+			},
+		)
+		if rerr == nil {
+			if pa, e := subscriptions.DecodePlanAccount(data); e == nil && pa.CreatedAt != 0 {
+				onchainCreatedAt = pa.CreatedAt
+			}
+		}
+	}
+
 	return &PlanHandle{
 		PlanPDA:         planPDA.String(),
 		PlanID:          in.PlanID,
@@ -312,7 +341,7 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		MintSymbol:      symbol,
 		AmountBaseUnits: in.AmountBaseUnits,
 		PeriodHours:     in.PeriodHours,
-		CreatedAt:       createdAt,
+		CreatedAt:       onchainCreatedAt,
 		MerchantAddress: merchant.String(),
 		Signature:       sig.String(),
 	}, nil

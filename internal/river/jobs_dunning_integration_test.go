@@ -16,7 +16,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/riverqueue/river"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -68,7 +72,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	}).Exec(ctx)
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Product{
+	product := &models.Product{
 		ID:          productID,
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
@@ -79,10 +83,11 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		Status:    models.CatalogStatusActive,
 		CreatedAt: now,
 		UpdatedAt: now,
-	}).Exec(ctx)
+	}
+	_, err = bunDB.NewInsert().Model(product).Exec(ctx)
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Price{
+	price := &models.Price{
 		ID:               priceID,
 		ProductID:        productID,
 		Status:           models.CatalogStatusActive,
@@ -91,11 +96,12 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		BillingCycleDays: &billingDays,
 		CreatedAt:        now,
 		UpdatedAt:        now,
-	}).Exec(ctx)
+	}
+	_, err = bunDB.NewInsert().Model(price).Exec(ctx)
 	require.NoError(t, err)
 
 	billingID := "bill_" + uuid.New().String()
-	_, err = bunDB.NewInsert().Model(&models.PaymentMethod{
+	paymentMethod := &models.PaymentMethod{
 		ID:                   paymentMethodID,
 		UserID:               userID,
 		Processor:            models.ProcessorMobius,
@@ -104,14 +110,15 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now,
 		UpdatedAt:            now,
-	}).Exec(ctx)
+	}
+	_, err = bunDB.NewInsert().Model(paymentMethod).Exec(ctx)
 	require.NoError(t, err)
 
 	periodEnd := now.Add(-1 * time.Minute)
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-30 * time.Second)
 
-	_, err = bunDB.NewInsert().Model(&models.Subscription{
+	sub := &models.Subscription{
 		ID:                      subID,
 		UserID:                  userID,
 		ProductID:               productID,
@@ -126,7 +133,10 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		NextRetryAt:             &nextRetry,
 		CreatedAt:               now,
 		UpdatedAt:               now,
-	}).Exec(ctx)
+		Price:                   price,
+		PaymentMethod:           paymentMethod,
+	}
+	_, err = bunDB.NewInsert().Model(sub).Exec(ctx)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -162,7 +172,15 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		NMIClients: map[string]*nmi.NMIClient{"mobius": client},
 	}
 
-	require.NoError(t, worker.Work(ctx, &river.Job[DunningArgs]{}))
+	priceSvc := catalog.NewPriceService(dbi)
+	productSvc := catalog.NewProductService(dbi)
+	entitlementSvc := entitlements.NewEntitlementService(dbi, nil)
+	notifSvc := subscriptions.NewNotificationService(dbi, nil)
+	paymentSvc := payments.NewPaymentService(dbi, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
+	creditsSvc := credits.NewCreditsService(dbi, nil)
+
+	require.True(t, worker.processSubscription(ctx, sub, lifecycle, priceSvc, creditsSvc))
 
 	depositCount, err := bunDB.NewSelect().
 		Model((*models.CreditTransaction)(nil)).

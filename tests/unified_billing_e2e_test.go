@@ -93,6 +93,7 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	resolver := stubOATResolver{permissions: []string{
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
+		controlplane.PermCreditsSpend,
 	}}
 	// nil minter + issuer-admin: the delegated-token mint/issuer routes are
 	// irrelevant to the money path.

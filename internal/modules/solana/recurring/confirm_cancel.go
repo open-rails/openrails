@@ -25,7 +25,8 @@ type cancelConfirmRPC interface {
 // MIRROR the confirmed on-chain cancel into the DB (satisfied by
 // *subscriptions.SubscriptionLifecycleService). The cascade inside
 // CancelMembership flips the linked solana_subscriptions row to cancelled so the
-// cranker stops — that cascade IS the mirror step.
+// cranker stops — that cascade IS the mirror step. We call it with
+// RevokeAccess=false so the local state matches the card "cancel-at-period-end".
 type membershipCanceller interface {
 	CancelMembership(ctx context.Context, params *subscriptions.CancelMembershipParams) error
 }
@@ -38,8 +39,16 @@ type membershipCanceller interface {
 // then MIRRORS it into the DB by cancelling the membership (whose cascade flips
 // the solana_subscriptions row to cancelled, stopping the cranker). There is NO
 // DB-only "soft cancel": we never mark a Solana subscription cancelled in the DB
-// unless we have observed the on-chain cancel succeed. Solana cancels are
-// IMMEDIATE (RevokeAccess = true) — never the card "cancel-at-period-end".
+// unless we have observed the on-chain cancel succeed.
+//
+// The on-chain cancel_subscription sets the subscription's expires_at_ts to the
+// END of the current billing period (NOT immediate). So the mirror is option A —
+// "cancel at period end": the user keeps the access they already paid for until
+// the current period ends, then it stops. This matches the card processors'
+// scheduled-cancel state (Stripe cancel_at_period_end; NMI deferred delete). We
+// therefore mirror with RevokeAccess=false, which makes CancelMembership set
+// EndedAt = CurrentPeriodEndsAt and preserve entitlements until then — exactly
+// the same local-state mapping the card paths use.
 type ConfirmCancelService struct {
 	rpc        cancelConfirmRPC
 	canceller  membershipCanceller
@@ -60,8 +69,8 @@ func NewConfirmCancelService(rpcClient cancelConfirmRPC, canceller membershipCan
 }
 
 // Confirm verifies the wallet's cancel transaction landed AND executed
-// successfully on-chain, then mirrors it by cancelling the membership
-// immediately. Returns an error (and does NOT cancel) if the signature never
+// successfully on-chain, then mirrors it as a SCHEDULED (period-end) membership
+// cancellation. Returns an error (and does NOT cancel) if the signature never
 // confirms or confirmed with an on-chain failure — the source of truth is the
 // chain, so a cancel that did not actually land must not touch the DB.
 func (s *ConfirmCancelService) Confirm(ctx context.Context, subscriptionID uuid.UUID, signature string) error {
@@ -87,15 +96,24 @@ func (s *ConfirmCancelService) Confirm(ctx context.Context, subscriptionID uuid.
 		return fmt.Errorf("recurring: cancel transaction did not succeed on-chain: %w", outcome.OnChainError())
 	}
 
-	// Mirror: cancel the membership immediately. The cascade inside
-	// CancelMembership flips the linked solana_subscriptions row to cancelled so
-	// the cranker stops pulling. RevokeAccess = true makes it IMMEDIATE (Solana
-	// cancels are never deferred to period end).
+	// Mirror: scheduled (period-end) cancel. RevokeAccess=false makes
+	// CancelMembership keep the membership's tracked CurrentPeriodEndsAt as the
+	// access-until boundary (EndedAt = CurrentPeriodEndsAt) and preserve
+	// entitlements until then — the same local state Stripe/NMI use for a
+	// cancel-at-period-end. We rely on the membership record's own period end
+	// (no on-chain subscription-account decode); it mirrors the chain's
+	// expires_at_ts = end-of-current-period.
+	//
+	// The cascade inside CancelMembership flips the linked solana_subscriptions
+	// row to cancelled, stopping the cranker. Independently, once expires_at_ts
+	// passes on-chain the next pull would return Custom:508 (SubscriptionCancelled)
+	// which ClassifyCrankError maps to Terminal — so this mirror plus the 508
+	// classification together give the complete period-end cancel.
 	cancelType := models.CancelTypeUser
 	if err := s.canceller.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 		SubscriptionID: &subscriptionID,
 		CancelType:     cancelType,
-		RevokeAccess:   true,
+		RevokeAccess:   false,
 	}); err != nil {
 		return fmt.Errorf("recurring: mirror on-chain cancel to membership: %w", err)
 	}

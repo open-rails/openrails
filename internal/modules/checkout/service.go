@@ -2277,6 +2277,9 @@ func (s *CheckoutService) processTierChangeNMI(
 		Processor:      string(existingSub.Processor),
 		IdempotencyKey: req.IdempotencyKey,
 	}
+	if existingSub.PaymentMethodID != nil {
+		checkoutReq.PaymentMethodID = api.FormatPaymentMethodID(*existingSub.PaymentMethodID)
+	}
 
 	// Route to existing methods which handle the heavy lifting
 	var checkoutResp *CheckoutResponse
