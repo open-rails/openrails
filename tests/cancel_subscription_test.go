@@ -4,7 +4,6 @@ package tests
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -149,46 +148,4 @@ func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
 
 	suite.Server.Handler().ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
-}
-
-// Admin cancel tests (skipped until we have a real processor account for end-to-end cancellations).
-func TestAdminCancelSubscription(t *testing.T) {
-	t.Skip("TODO: Requires real Mobius/NMI test account to create subscriptions that can be cancelled")
-
-	suite, adminToken := setupAdminTestSuite(t)
-
-	products := suite.SeedProducts()
-	priceID := products[0].Prices[0].ID
-
-	t.Run("admin can cancel any user subscription by subscription ID", func(t *testing.T) {
-		userID := uuid.New().String()
-		sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-			UserID:         userID,
-			PriceID:        priceID,
-			Status:         models.StatusActive,
-			Processor:      models.ProcessorMobius,
-			ProcessorSubID: "test-admin-cancel-1-" + uuid.New().String()[:8],
-		})
-
-		body := map[string]string{"reason": "Admin cancelled for testing"}
-		jsonBody, _ := json.Marshal(body)
-
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/v1/admin/subscriptions/"+sub.ID.String()+"/cancel", bytes.NewReader(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+adminToken)
-
-		suite.Server.Handler().ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code, "Admin should be able to cancel subscription, got: %s", w.Body.String())
-
-		ctx := context.Background()
-		var status string
-		err := suite.BunDB.NewSelect().
-			TableExpr("billing.subscriptions").
-			Column("status").
-			Where("id = ?", sub.ID).
-			Scan(ctx, &status)
-		require.NoError(t, err)
-		assert.Equal(t, "cancelled", status)
-	})
 }

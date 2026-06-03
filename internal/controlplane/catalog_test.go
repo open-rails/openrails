@@ -14,6 +14,8 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		"openrails:admin",
 		"openrails:credits:read",
 		"openrails:credits:write",
+		// billing:spend (payer) hot-path capability (#246).
+		"openrails:credits:spend",
 		"openrails:entitlements:read",
 		"openrails:catalog:write",
 		"openrails:payments:refund",
@@ -130,4 +132,81 @@ func TestAnyLiveOAT(t *testing.T) {
 	if !anyLiveOAT([]authcore.OrgAccessToken{{RevokedAt: revoked}, {RevokedAt: nil}}) {
 		t.Error("a mix with one live OAT should count as live")
 	}
+}
+
+// TestOperatorRoleExcludesPlatformSuperadmin proves the #226 separation: a
+// tenant operator role is granted the full catalog EXCEPT the cross-tenant
+// platform-superadmin permission, so a tenant operator admin can never reach the
+// platform surface via their operator org.
+func TestOperatorRoleExcludesPlatformSuperadmin(t *testing.T) {
+	for _, p := range OperatorRolePermissions() {
+		if p == PermPlatformSuperadmin {
+			t.Fatalf("operator role must NOT include %q", PermPlatformSuperadmin)
+		}
+	}
+	// Operator role still has the broad per-tenant admin permission.
+	if !contains(OperatorRolePermissions(), PermAdmin) {
+		t.Fatalf("operator role must include %q", PermAdmin)
+	}
+}
+
+// TestCreditsSpendPermission_GateSemantics proves the billing:spend (#246) gate:
+// the operator role holds credits:spend by default (member role default-grant),
+// an OAT WITHOUT it fails the spend gate while still passing credits:write, and
+// PermAdmin satisfies it.
+func TestCreditsSpendPermission_GateSemantics(t *testing.T) {
+	// Default-grant: the operator role includes billing:spend.
+	if !contains(OperatorRolePermissions(), PermCreditsSpend) {
+		t.Fatalf("operator role must include %q (default member grant, #246)", PermCreditsSpend)
+	}
+
+	// A cost-governed OAT with write but NOT spend fails the spend gate.
+	writeOnly := &ResolvedOAT{Permissions: []string{PermCreditsWrite}}
+	if writeOnly.HasPermission(PermCreditsSpend) {
+		t.Fatalf("credits:write must NOT imply credits:spend (#246: separate gates)")
+	}
+	if !writeOnly.HasPermission(PermCreditsWrite) {
+		t.Fatalf("write-only OAT must still pass the write gate")
+	}
+
+	// An OAT holding billing:spend passes the spend gate.
+	spender := &ResolvedOAT{Permissions: []string{PermCreditsWrite, PermCreditsSpend}}
+	if !spender.HasPermission(PermCreditsSpend) {
+		t.Fatalf("OAT holding %q must pass the spend gate", PermCreditsSpend)
+	}
+
+	// PermAdmin satisfies the spend gate (broad operator authority).
+	admin := &ResolvedOAT{Permissions: []string{PermAdmin}}
+	if !admin.HasPermission(PermCreditsSpend) {
+		t.Fatalf("PermAdmin must satisfy the spend gate")
+	}
+}
+
+// TestPlatformRoleHoldsOnlySuperadmin proves the platform role is narrow: it
+// holds ONLY the platform-superadmin permission.
+func TestPlatformRoleHoldsOnlySuperadmin(t *testing.T) {
+	perms := PlatformRolePermissions()
+	if len(perms) != 1 || perms[0] != PermPlatformSuperadmin {
+		t.Fatalf("platform role must hold only %q, got %v", PermPlatformSuperadmin, perms)
+	}
+}
+
+// TestSuperadminPermInCatalog proves the permission is a real catalog entry (so
+// AuthKit accepts grants of it) and is NOT a self/browser permission.
+func TestSuperadminPermInCatalog(t *testing.T) {
+	if !contains(CatalogNames(), PermPlatformSuperadmin) {
+		t.Fatalf("catalog must include %q", PermPlatformSuperadmin)
+	}
+	if IsSelfPermission(PermPlatformSuperadmin) {
+		t.Fatalf("%q must never be a self/browser permission", PermPlatformSuperadmin)
+	}
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if h == needle {
+			return true
+		}
+	}
+	return false
 }

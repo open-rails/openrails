@@ -61,7 +61,7 @@ type moneyInAccount struct {
 func (s *CreditsService) belowThresholdAccounts(ctx context.Context) ([]moneyInAccount, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	var rows []moneyInAccount
-	err := s.db.GetDB().NewSelect().
+	err := s.db.Q(ctx).NewSelect().
 		ColumnExpr("s.tenant_id, s.owner_id, s.credit_type_id, ct.name AS credit_type_name").
 		ColumnExpr("(COALESCE(b.balance,0) - COALESCE(b.held_balance,0)) AS available").
 		ColumnExpr("s.low_balance_threshold_cents, s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at").
@@ -197,7 +197,7 @@ func (s *CreditsService) topUpAccount(ctx context.Context, charger Charger, r mo
 
 // stampMoneyInTimestamp sets a single timestamp column on the settings row.
 func (s *CreditsService) stampMoneyInTimestamp(ctx context.Context, r moneyInAccount, column string, now time.Time) error {
-	_, err := s.db.GetDB().NewUpdate().
+	_, err := s.db.Q(ctx).NewUpdate().
 		Model((*models.CreditAccountSettings)(nil)).
 		Set("? = ?", bun.Ident(column), now).
 		Set("updated_at = ?", now).

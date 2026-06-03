@@ -24,7 +24,7 @@ func (r *EntitlementRepo) SetEndAtTx(ctx context.Context, tx bun.Tx, id uuid.UUI
 }
 
 func (r *EntitlementRepo) IsEntitled(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	q := r.db.GetDB().NewSelect().
+	q := r.db.Q(ctx).NewSelect().
 		Model((*models.Entitlement)(nil)).
 		// Tenant scoping (issue #223): defaults to the default tenant when the
 		// request has not resolved one, so single-tenant runs unchanged.
@@ -40,7 +40,7 @@ func (r *EntitlementRepo) IsEntitled(ctx context.Context, userID, entitlement st
 }
 
 func (r *EntitlementRepo) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	q := r.db.GetDB().NewSelect().
+	q := r.db.Q(ctx).NewSelect().
 		Model((*models.Entitlement)(nil)).
 		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("ent.user_id = ?", userID).
@@ -53,7 +53,7 @@ func (r *EntitlementRepo) HasActiveIndefinite(ctx context.Context, userID, entit
 
 func (r *EntitlementRepo) GetLatestActive(ctx context.Context, userID, entitlement string) (*models.Entitlement, error) {
 	var ent models.Entitlement
-	err := r.db.GetDB().NewSelect().
+	err := r.db.Q(ctx).NewSelect().
 		Model(&ent).
 		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("ent.user_id = ? AND ent.entitlement = ?", userID, entitlement).
@@ -70,7 +70,7 @@ func (r *EntitlementRepo) GetLatestActive(ctx context.Context, userID, entitleme
 
 func (r *EntitlementRepo) GetLatestFiniteActive(ctx context.Context, userID, entitlement string, at time.Time) (*models.Entitlement, error) {
 	var ent models.Entitlement
-	err := r.db.GetDB().NewSelect().
+	err := r.db.Q(ctx).NewSelect().
 		Model(&ent).
 		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("ent.user_id = ? AND ent.entitlement = ?", userID, entitlement).
@@ -101,7 +101,7 @@ func (r *EntitlementRepo) Insert(ctx context.Context, entitlement *models.Entitl
 		entitlement.TenantID = tenant.FromContextOrDefault(ctx).UUID()
 	}
 
-	res, err := r.db.GetDB().NewInsert().Model(entitlement).Exec(ctx)
+	res, err := r.db.Q(ctx).NewInsert().Model(entitlement).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (r *EntitlementRepo) Insert(ctx context.Context, entitlement *models.Entitl
 
 func (r *EntitlementRepo) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {
 	var out []string
-	if err := r.db.GetDB().NewSelect().
+	if err := r.db.Q(ctx).NewSelect().
 		Model((*models.Entitlement)(nil)).
 		ColumnExpr("DISTINCT ent.entitlement").
 		Where("ent.user_id = ?", userID).
@@ -133,7 +133,7 @@ func (r *EntitlementRepo) ListActiveEntitlements(ctx context.Context, userID str
 
 func (r *EntitlementRepo) ListActiveRecords(ctx context.Context, userID string, at time.Time) ([]models.Entitlement, error) {
 	ents := []models.Entitlement{}
-	if err := r.db.GetDB().NewSelect().
+	if err := r.db.Q(ctx).NewSelect().
 		Model(&ents).
 		Where("ent.user_id = ?", userID).
 		Where("ent.revoked_at IS NULL").
@@ -149,7 +149,7 @@ func (r *EntitlementRepo) ListActiveRecords(ctx context.Context, userID string, 
 
 func (r *EntitlementRepo) ListDistinctEntitlementNamesBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID) ([]string, error) {
 	var names []string
-	if err := r.db.GetDB().NewSelect().
+	if err := r.db.Q(ctx).NewSelect().
 		Model((*models.Entitlement)(nil)).
 		ColumnExpr("DISTINCT ent.entitlement").
 		Where("ent.source_type = ?", sourceType).
@@ -170,7 +170,7 @@ func (r *EntitlementRepo) ListDistinctEntitlementNamesBySource(ctx context.Conte
 func (r *EntitlementRepo) EndActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time, now time.Time, reason *models.EntitlementRevokeReason) error {
 	// First, check if any entitlements would violate the start_at < end_at constraint
 	var invalidCount int
-	err := r.db.GetDB().NewSelect().
+	err := r.db.Q(ctx).NewSelect().
 		Model((*models.Entitlement)(nil)).
 		ColumnExpr("COUNT(*)").
 		Where("ent.source_type = ?", models.EntitlementSourceSubscription).
@@ -187,7 +187,7 @@ func (r *EntitlementRepo) EndActiveBySubscription(ctx context.Context, subscript
 		return fmt.Errorf("cannot set end_at to %v: %d entitlement(s) have start_at >= end_at (zero or negative duration)", endAt, invalidCount)
 	}
 
-	q := r.db.GetDB().NewUpdate().
+	q := r.db.Q(ctx).NewUpdate().
 		Model((*models.Entitlement)(nil)).
 		Set("end_at = ?", endAt).
 		Set("updated_at = ?", now).
@@ -210,7 +210,7 @@ func (r *EntitlementRepo) EndActiveBySubscription(ctx context.Context, subscript
 // ExtendActiveBySubscription extends active entitlements for a subscription to endAt.
 // It only updates rows whose end_at is NULL or before endAt, and will never shorten a window.
 func (r *EntitlementRepo) ExtendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time, now time.Time) error {
-	return r.db.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	return r.db.Q(ctx).RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		// Fetch all subscription entitlements that would be extended, then shift any following
 		// scheduled windows forward by the same delta (per user+entitlement) to avoid overlaps.
 		//
@@ -251,6 +251,16 @@ func (r *EntitlementRepo) ExtendActiveBySubscription(ctx context.Context, subscr
 				return err
 			}
 
+			// Shift the following windows forward FIRST to open the gap. Extending
+			// the subscription row to newEnd before shifting would transiently
+			// overlap the next (not-yet-shifted) window, and entitlements_no_overlap
+			// is an IMMEDIATE (non-deferrable) exclusion constraint checked per
+			// statement — so it must never be violated mid-transaction.
+			delta := newEnd.Sub(oldEnd)
+			if err := ShiftEntitlementTimeline(ctx, tx, ent.UserID, ent.Entitlement, oldEnd, delta, now, []uuid.UUID{ent.ID}); err != nil {
+				return err
+			}
+
 			// Extend the subscription's entitlement row.
 			if _, err := tx.NewUpdate().
 				Model((*models.Entitlement)(nil)).
@@ -263,11 +273,6 @@ func (r *EntitlementRepo) ExtendActiveBySubscription(ctx context.Context, subscr
 				Exec(ctx); err != nil {
 				return err
 			}
-
-			delta := newEnd.Sub(oldEnd)
-			if err := ShiftEntitlementTimeline(ctx, tx, ent.UserID, ent.Entitlement, oldEnd, delta, now, []uuid.UUID{ent.ID}); err != nil {
-				return err
-			}
 		}
 		return nil
 	})
@@ -276,7 +281,7 @@ func (r *EntitlementRepo) ExtendActiveBySubscription(ctx context.Context, subscr
 // ResumeBySubscription clears end_at for active entitlements that were scheduled to end.
 // This is used when a user resumes a cancellation before the current period ends.
 func (r *EntitlementRepo) ResumeBySubscription(ctx context.Context, subscriptionID uuid.UUID, now time.Time) error {
-	_, err := r.db.GetDB().NewUpdate().
+	_, err := r.db.Q(ctx).NewUpdate().
 		Model((*models.Entitlement)(nil)).
 		Set("end_at = NULL").
 		Set("updated_at = ?", now).
@@ -334,7 +339,7 @@ func (r *EntitlementRepo) EndActiveByPayment(ctx context.Context, paymentID uuid
 }
 
 func (r *EntitlementRepo) ExistsBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID, entitlement string) (bool, error) {
-	return r.db.GetDB().NewSelect().
+	return r.db.Q(ctx).NewSelect().
 		Model((*models.Entitlement)(nil)).
 		Where("ent.source_type = ?", sourceType).
 		Where("ent.source_id = ?", sourceID).
@@ -346,7 +351,7 @@ func (r *EntitlementRepo) ExistsBySource(ctx context.Context, sourceType models.
 
 func (r *EntitlementRepo) ListByUser(ctx context.Context, userID string) ([]models.Entitlement, error) {
 	ents := []models.Entitlement{}
-	if err := r.db.GetDB().NewSelect().
+	if err := r.db.Q(ctx).NewSelect().
 		Model(&ents).
 		Where("ent.user_id = ?", userID).
 		OrderExpr("ent.start_at DESC").
@@ -359,7 +364,7 @@ func (r *EntitlementRepo) ListByUser(ctx context.Context, userID string) ([]mode
 // GetByID retrieves an entitlement by its ID
 func (r *EntitlementRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Entitlement, error) {
 	var ent models.Entitlement
-	err := r.db.GetDB().NewSelect().
+	err := r.db.Q(ctx).NewSelect().
 		Model(&ent).
 		Where("ent.id = ?", id).
 		Scan(ctx)
@@ -372,7 +377,7 @@ func (r *EntitlementRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.En
 // RevokeByID immediately revokes an entitlement by setting revoked_at and revoke_reason
 // The now parameter is used for revoked_at and updated_at timestamps to support mock clocks in tests.
 func (r *EntitlementRepo) RevokeByID(ctx context.Context, id uuid.UUID, now time.Time, reason models.EntitlementRevokeReason) error {
-	res, err := r.db.GetDB().NewUpdate().
+	res, err := r.db.Q(ctx).NewUpdate().
 		Model((*models.Entitlement)(nil)).
 		Set("revoked_at = ?", now).
 		Set("revoke_reason = ?", reason).
@@ -397,7 +402,7 @@ func (r *EntitlementRepo) RevokeByID(ctx context.Context, id uuid.UUID, now time
 // RevokeBySubscriptionAndName revokes a specific entitlement by subscription ID and entitlement name.
 // Used during downgrades to revoke entitlements that the new tier doesn't include.
 func (r *EntitlementRepo) RevokeBySubscriptionAndName(ctx context.Context, subscriptionID uuid.UUID, entitlement string, revokeAt time.Time, reason models.EntitlementRevokeReason) error {
-	res, err := r.db.GetDB().NewUpdate().
+	res, err := r.db.Q(ctx).NewUpdate().
 		Model((*models.Entitlement)(nil)).
 		Set("revoked_at = ?", revokeAt).
 		Set("revoke_reason = ?", reason).

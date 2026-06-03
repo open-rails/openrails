@@ -35,7 +35,7 @@ func GetMyCredits(r *httprequest.Request) {
 		HeldBalance   *int64    `bun:"held_balance"`
 	}
 
-	err := r.State.DB.GetDB().NewSelect().
+	err := r.State.DB.Q(r.Request.Context()).NewSelect().
 		TableExpr("billing.credit_types ct").
 		ColumnExpr("ct.id as credit_type_id").
 		ColumnExpr("ct.name").

@@ -24,7 +24,7 @@ func (r *ProfileRepo) GetUserEmail(ctx context.Context, id uuid.UUID) (username 
 		IsActive      bool    `bun:"is_active"`
 	}
 	var out row
-	q := r.db.GetDB().NewSelect().
+	q := r.db.Q(ctx).NewSelect().
 		TableExpr("profiles.users").
 		ColumnExpr("username, email, email_verified, is_active").
 		Where("id = ?", id)
@@ -41,7 +41,7 @@ func (r *ProfileRepo) GetUserEmail(ctx context.Context, id uuid.UUID) (username 
 // Used by CCBill webhooks to resolve usernames back to user IDs.
 func (r *ProfileRepo) GetUserIDByUsername(ctx context.Context, username string) (string, error) {
 	var userID string
-	q := r.db.GetDB().NewSelect().
+	q := r.db.Q(ctx).NewSelect().
 		TableExpr("profiles.users").
 		ColumnExpr("id").
 		Where("username = ?", username)

@@ -35,7 +35,7 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 	// Without this every insert ships id=000…0 and the second distinct
 	// (tenant_id, user_id, processor) row collides on the pk (the ON CONFLICT below
 	// covers the tenant-scoped (tenant_id, user_id, processor) unique).
-	_, err := s.DB.GetDB().NewInsert().Model(&models.ProcessorCustomer{
+	_, err := s.DB.Q(ctx).NewInsert().Model(&models.ProcessorCustomer{
 		ID:         uuidutil.NewV7(),
 		UserID:     userID,
 		Processor:  processor,
@@ -59,7 +59,7 @@ func (s *ProcessorCustomerService) GetCustomerID(ctx context.Context, userID, pr
 		return "", fmt.Errorf("invalid processor customer args")
 	}
 	var customerID string
-	err := s.DB.GetDB().NewSelect().Model((*models.ProcessorCustomer)(nil)).
+	err := s.DB.Q(ctx).NewSelect().Model((*models.ProcessorCustomer)(nil)).
 		Column("customer_id").
 		Where("user_id = ? AND processor = ?", userID, processor).
 		Scan(ctx, &customerID)
@@ -82,7 +82,7 @@ func (s *ProcessorCustomerService) GetUserIDByCustomerID(ctx context.Context, pr
 		return "", fmt.Errorf("invalid processor customer args")
 	}
 	var userID string
-	err := s.DB.GetDB().NewSelect().Model((*models.ProcessorCustomer)(nil)).
+	err := s.DB.Q(ctx).NewSelect().Model((*models.ProcessorCustomer)(nil)).
 		Column("user_id").
 		Where("customer_id = ? AND processor = ?", customerID, processor).
 		Order("updated_at DESC").

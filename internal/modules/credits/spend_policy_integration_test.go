@@ -1,15 +1,17 @@
+//go:build integration
+
 package credits_test
 
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
@@ -23,10 +25,7 @@ import (
 // credit-type name, and a cleanup-registered context.
 func spendTestEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.OwnerOrgID, string, context.Context) {
 	t.Helper()
-	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
-	if dsn == "" {
-		t.Skip("set OPENRAILS_TEST_DB_URL to run integration tests")
-	}
+	dsn := dbtest.SharedPostgresDSN(t)
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	bunDB := bun.NewDB(sqlDB, pgdialect.New())

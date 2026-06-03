@@ -24,7 +24,7 @@ type NotificationQueueRepo struct {
 func NewNotificationQueueRepo(d *db.DB) *NotificationQueueRepo { return &NotificationQueueRepo{db: d} }
 
 func (r *NotificationQueueRepo) Create(ctx context.Context, notification *models.NotificationQueue) error {
-	res, err := r.db.GetDB().NewInsert().Model(notification).Exec(ctx)
+	res, err := r.db.Q(ctx).NewInsert().Model(notification).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func (r *NotificationQueueRepo) Create(ctx context.Context, notification *models
 
 func (r *NotificationQueueRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.NotificationQueue, error) {
 	notification := new(models.NotificationQueue)
-	if err := r.db.GetDB().NewSelect().Model(notification).Where("nq.id = ?", id).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(notification).Where("nq.id = ?", id).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return notification, nil
@@ -48,7 +48,7 @@ func (r *NotificationQueueRepo) GetByID(ctx context.Context, id uuid.UUID) (*mod
 
 func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
 	notifications := []*models.NotificationQueue{}
-	if err := r.db.GetDB().NewSelect().Model(&notifications).Where("nq.user_id = ?", userID).OrderExpr("nq.created_at DESC").Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(&notifications).Where("nq.user_id = ?", userID).OrderExpr("nq.created_at DESC").Scan(ctx); err != nil {
 		return nil, err
 	}
 	return notifications, nil
@@ -56,7 +56,7 @@ func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) 
 
 func (r *NotificationQueueRepo) GetUnseenByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
 	notifications := []*models.NotificationQueue{}
-	if err := r.db.GetDB().NewSelect().Model(&notifications).Where("nq.user_id = ?", userID).Where("nq.seen = ?", false).OrderExpr("nq.created_at DESC").Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(&notifications).Where("nq.user_id = ?", userID).Where("nq.seen = ?", false).OrderExpr("nq.created_at DESC").Scan(ctx); err != nil {
 		return nil, err
 	}
 	return notifications, nil
@@ -64,7 +64,7 @@ func (r *NotificationQueueRepo) GetUnseenByUserID(ctx context.Context, userID st
 
 func (r *NotificationQueueRepo) GetByEventType(ctx context.Context, eventType models.NotificationEventType) ([]*models.NotificationQueue, error) {
 	notifications := []*models.NotificationQueue{}
-	if err := r.db.GetDB().NewSelect().Model(&notifications).Where("nq.event_type = ?", eventType).OrderExpr("nq.created_at DESC").Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(&notifications).Where("nq.event_type = ?", eventType).OrderExpr("nq.created_at DESC").Scan(ctx); err != nil {
 		return nil, err
 	}
 	return notifications, nil
@@ -72,7 +72,7 @@ func (r *NotificationQueueRepo) GetByEventType(ctx context.Context, eventType mo
 
 func (r *NotificationQueueRepo) CountByUserAndEventSince(ctx context.Context, userID string, eventType models.NotificationEventType, since time.Time) (int, error) {
 	var count int
-	err := r.db.GetDB().NewSelect().
+	err := r.db.Q(ctx).NewSelect().
 		Model((*models.NotificationQueue)(nil)).
 		ColumnExpr("COUNT(*)").
 		Where("nq.user_id = ?", userID).
@@ -84,7 +84,7 @@ func (r *NotificationQueueRepo) CountByUserAndEventSince(ctx context.Context, us
 
 func (r *NotificationQueueRepo) GetUsersWithPendingDigest(ctx context.Context, since time.Time) ([]string, error) {
 	userIDs := []string{}
-	err := r.db.GetDB().NewSelect().
+	err := r.db.Q(ctx).NewSelect().
 		Model((*models.NotificationQueue)(nil)).
 		ColumnExpr("DISTINCT nq.user_id").
 		Where("nq.event_type = ?", models.NotificationTranslationCompletedPendingDigest).
@@ -98,7 +98,7 @@ func (r *NotificationQueueRepo) GetUsersWithPendingDigest(ctx context.Context, s
 
 func (r *NotificationQueueRepo) GetPendingDigestForUser(ctx context.Context, userID string, since time.Time, limit int) ([]*models.NotificationQueue, error) {
 	items := []*models.NotificationQueue{}
-	q := r.db.GetDB().NewSelect().Model(&items).
+	q := r.db.Q(ctx).NewSelect().Model(&items).
 		Where("nq.user_id = ?", userID).
 		Where("nq.event_type = ?", models.NotificationTranslationCompletedPendingDigest).
 		Where("nq.created_at >= ?", since).
@@ -113,7 +113,7 @@ func (r *NotificationQueueRepo) GetPendingDigestForUser(ctx context.Context, use
 }
 
 func (r *NotificationQueueRepo) MarkAsSeen(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.GetDB().NewUpdate().Model((*models.NotificationQueue)(nil)).Set("seen = ?", true).Where("nq.id = ?", id).Exec(ctx)
+	res, err := r.db.Q(ctx).NewUpdate().Model((*models.NotificationQueue)(nil)).Set("seen = ?", true).Where("nq.id = ?", id).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func (r *NotificationQueueRepo) MarkAsSeen(ctx context.Context, id uuid.UUID) er
 }
 
 func (r *NotificationQueueRepo) Update(ctx context.Context, notification *models.NotificationQueue) error {
-	res, err := r.db.GetDB().NewUpdate().Model(notification).WherePK().Exec(ctx)
+	res, err := r.db.Q(ctx).NewUpdate().Model(notification).WherePK().Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func (r *NotificationQueueRepo) Update(ctx context.Context, notification *models
 }
 
 func (r *NotificationQueueRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.GetDB().NewDelete().Model((*models.NotificationQueue)(nil)).Where("nq.id = ?", id).Exec(ctx)
+	res, err := r.db.Q(ctx).NewDelete().Model((*models.NotificationQueue)(nil)).Where("nq.id = ?", id).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func (r *NotificationQueueRepo) Delete(ctx context.Context, id uuid.UUID) error 
 
 func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query.QueryOptions[NotificationFilters]) ([]*models.NotificationQueue, int64, error) {
 	notifications := []*models.NotificationQueue{}
-	q := r.db.GetDB().NewSelect().Model(&notifications)
+	q := r.db.Q(ctx).NewSelect().Model(&notifications)
 
 	if opts.Filters.UserID != "" {
 		q = q.Where("nq.user_id = ?", opts.Filters.UserID)

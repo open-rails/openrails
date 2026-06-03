@@ -66,7 +66,7 @@ func SnapshotPaymentCard(ctx context.Context, database *db.DB, txnIDs []string, 
 	if database == nil || card == nil || len(txnIDs) == 0 {
 		return nil
 	}
-	_, err := database.GetDB().NewUpdate().
+	_, err := database.Q(ctx).NewUpdate().
 		Model((*models.Payment)(nil)).
 		Set("card_brand = ?", card.Brand).
 		Set("card_last4 = ?", card.Last4).
@@ -105,7 +105,7 @@ func LinkStripeInvoicePayment(ctx context.Context, database *db.DB, invoiceID, c
 		return fmt.Errorf("marshal stripe invoice payment metadata: %w", err)
 	}
 
-	if _, err := database.GetDB().NewUpdate().
+	if _, err := database.Q(ctx).NewUpdate().
 		Model((*models.Payment)(nil)).
 		Set("metadata = COALESCE(metadata, '{}'::jsonb) || ?::jsonb", string(encoded)).
 		Where("processor = ?", models.ProcessorStripe).
@@ -120,7 +120,7 @@ func LinkStripeInvoicePayment(ctx context.Context, database *db.DB, invoiceID, c
 	}
 
 	var source models.Payment
-	err = database.GetDB().NewSelect().Model(&source).
+	err = database.Q(ctx).NewSelect().Model(&source).
 		Column("card_brand", "card_last4").
 		Where("processor = ?", models.ProcessorStripe).
 		Where("transaction_id IN (?)", bun.In(aliases)).
@@ -206,7 +206,7 @@ func UpsertStripeCardForCustomer(
 		now = clock.Now()
 	}
 
-	bdb := database.GetDB()
+	bdb := database.Q(ctx)
 	pm := new(models.PaymentMethod)
 	err = bdb.NewSelect().Model(pm).
 		Where("processor = ?", models.ProcessorStripe).

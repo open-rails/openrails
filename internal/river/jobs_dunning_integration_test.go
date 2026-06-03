@@ -1,3 +1,5 @@
+//go:build integration
+
 package riverjobs
 
 import (
@@ -5,7 +7,6 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -22,10 +24,7 @@ import (
 )
 
 func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
-	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
-	if dsn == "" {
-		t.Skip("set OPENRAILS_TEST_DB_URL to run integration tests")
-	}
+	dsn := dbtest.SharedPostgresDSN(t)
 
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 	t.Cleanup(func() { _ = sqlDB.Close() })

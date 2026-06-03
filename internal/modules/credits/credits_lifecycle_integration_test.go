@@ -1,15 +1,17 @@
+//go:build integration
+
 package credits_test
 
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
@@ -20,10 +22,7 @@ import (
 )
 
 func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
-	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
-	if dsn == "" {
-		t.Skip("set OPENRAILS_TEST_DB_URL to run integration tests")
-	}
+	dsn := dbtest.SharedPostgresDSN(t)
 
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 	t.Cleanup(func() { _ = sqlDB.Close() })

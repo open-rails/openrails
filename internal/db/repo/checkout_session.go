@@ -22,7 +22,7 @@ func NewCheckoutSessionRepo(d *db.DB) *CheckoutSessionRepo {
 }
 
 func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.CheckoutSession) error {
-	res, err := r.db.GetDB().NewInsert().Model(session).Exec(ctx)
+	res, err := r.db.Q(ctx).NewInsert().Model(session).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -38,14 +38,14 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 
 func (r *CheckoutSessionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.CheckoutSession, error) {
 	session := new(models.CheckoutSession)
-	if err := r.db.GetDB().NewSelect().Model(session).Where("cs.id = ?", id).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(session).Where("cs.id = ?", id).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return session, nil
 }
 
 func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.CheckoutSession) error {
-	res, err := r.db.GetDB().NewUpdate().Model(session).WherePK().Exec(ctx)
+	res, err := r.db.Q(ctx).NewUpdate().Model(session).WherePK().Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, 
 		now = time.Now()
 	}
 	session.UpdatedAt = now
-	res, err := r.db.GetDB().NewUpdate().
+	res, err := r.db.Q(ctx).NewUpdate().
 		Model((*models.CheckoutSession)(nil)).
 		Set("reference = ?", ref).
 		Set("processor_state = ?", session.ProcessorState).
@@ -104,7 +104,7 @@ func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, 
 
 func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference string) (*models.CheckoutSession, error) {
 	session := new(models.CheckoutSession)
-	if err := r.db.GetDB().NewSelect().
+	if err := r.db.Q(ctx).NewSelect().
 		Model(session).
 		Where("cs.reference = ?", strings.TrimSpace(reference)).
 		Limit(1).
@@ -120,7 +120,7 @@ func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceProcessor(ctx context.Cont
 		models.CheckoutSessionStatusCreated,
 		models.CheckoutSessionStatusRequiresAction,
 	}
-	if err := r.db.GetDB().NewSelect().
+	if err := r.db.Q(ctx).NewSelect().
 		Model(session).
 		Where("cs.user_id = ?", userID).
 		Where("cs.price_id = ?", priceID).

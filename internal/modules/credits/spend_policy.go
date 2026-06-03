@@ -165,7 +165,7 @@ func (s *CreditsService) GetAccountSettings(ctx context.Context, owner identity.
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	out := new(models.CreditAccountSettings)
-	err = s.db.GetDB().NewSelect().Model(out).
+	err = s.db.Q(ctx).NewSelect().Model(out).
 		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, owner.UUID(), ct.ID).
 		Limit(1).Scan(ctx)
 	if err == nil {
@@ -266,7 +266,7 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, owner identi
 		cur.CreatedAt = now
 	}
 
-	_, err = s.db.GetDB().NewInsert().Model(cur).
+	_, err = s.db.Q(ctx).NewInsert().Model(cur).
 		On("CONFLICT (tenant_id, owner_id, credit_type_id) DO UPDATE").
 		Set("billing_mode = EXCLUDED.billing_mode").
 		Set("max_spend_per_day_cents = EXCLUDED.max_spend_per_day_cents").
@@ -322,7 +322,7 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, owner identity.Owner
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
-	_, err = s.db.GetDB().NewInsert().Model(row).
+	_, err = s.db.Q(ctx).NewInsert().Model(row).
 		On("CONFLICT (tenant_id, owner_id, credit_type_id, invoker) DO UPDATE").
 		Set("max_spend_per_day_cents = EXCLUDED.max_spend_per_day_cents").
 		Set("max_spend_per_month_cents = EXCLUDED.max_spend_per_month_cents").
@@ -336,7 +336,7 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, owner identity.Owner
 
 func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, invoker string) (*models.CreditSpendLimit, error) {
 	row := new(models.CreditSpendLimit)
-	err := s.db.GetDB().NewSelect().Model(row).
+	err := s.db.Q(ctx).NewSelect().Model(row).
 		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ? AND invoker = ?", tenantID, ownerID, creditTypeID, invoker).
 		Limit(1).Scan(ctx)
 	if err == nil {
@@ -353,7 +353,7 @@ func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, ownerID, c
 // created in the window (so concurrent in-flight holds can't overshoot a cap).
 // When actor is non-empty the sum is scoped to that invoker/actor.
 func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, since time.Time, actor string) (int64, error) {
-	q := s.db.GetDB().NewSelect().
+	q := s.db.Q(ctx).NewSelect().
 		Model((*models.CreditTransaction)(nil)).
 		ColumnExpr("COALESCE(SUM("+
 			"CASE "+
@@ -377,7 +377,7 @@ func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, c
 // (current reservation exposure, regardless of window).
 func (s *CreditsService) activeHoldsTotal(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID) (int64, error) {
 	var total int64
-	err := s.db.GetDB().NewSelect().
+	err := s.db.Q(ctx).NewSelect().
 		Model((*models.CreditTransaction)(nil)).
 		ColumnExpr("COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)").
 		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).

@@ -416,3 +416,29 @@ feature_flags:
   #   4. All accumulated expirations will process at once
   #
   disable_entitlement_expiration: false
+
+# =============================================================================
+# BILLING HOT-PATH DEGRADED-MODE POLICY (issue #248)
+# =============================================================================
+# The per-invocation authorize/hold call to OpenRails is a NETWORK dependency on
+# every generation. This knob makes the degraded-mode behavior EXPLICIT — never a
+# silent default — for when OpenRails is unreachable or slow.
+#
+# CONTRACT: this is the documented SOURCE OF TRUTH the gen-orchestrator CLIENT
+# reads. The actual ENFORCEMENT (short timeout + circuit breaker + bounded
+# fail-open cap + deferred-hold replay) lives in that client (Wave 3); OpenRails
+# only declares + validates the policy here.
+#
+# fail_policy values:
+#   "fail_closed" (DEFAULT): authorize unreachable/slow => DENY the run (no hold,
+#                            no run). Required for arrears / untrusted payers.
+#   "fail_open":             authorize unreachable => PERMIT the run, but ONLY for
+#                            TRUSTED PREPAID payers, bounded per payer per outage
+#                            window, with deferred holds queued + replayed
+#                            idempotently on recovery (reconciliation #243 is the
+#                            backstop). NEVER silently grants unbounded free usage.
+#
+# Environment variable: BILLING_HOT_PATH_FAIL_POLICY=fail_closed|fail_open
+#
+# billing_hot_path:
+#   fail_policy: "fail_closed"

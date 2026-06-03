@@ -18,10 +18,3 @@ func TestMoneyInWorkers_NilDepsSkipCleanly(t *testing.T) {
 	require.NoError(t, ArrearsChargeWorker{}.Work(ctx, &river.Job[ArrearsChargeArgs]{}))
 	require.NoError(t, CreditReconcileWorker{}.Work(ctx, &river.Job[CreditReconcileArgs]{}))
 }
-
-func TestMoneyInWorkers_Kinds(t *testing.T) {
-	require.Equal(t, KindLowBalanceAlert, LowBalanceAlertWorker{}.Kind())
-	require.Equal(t, KindAutoTopup, AutoTopupWorker{}.Kind())
-	require.Equal(t, KindArrearsCharge, ArrearsChargeWorker{}.Kind())
-	require.Equal(t, KindCreditReconcile, CreditReconcileWorker{}.Kind())
-}

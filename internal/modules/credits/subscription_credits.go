@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	log "github.com/sirupsen/logrus"
-	"github.com/uptrace/bun"
 )
 
 type GrantSubscriptionCreditsParams struct {
@@ -61,7 +60,7 @@ func (s *CreditsService) GrantSubscriptionCredits(ctx context.Context, params Gr
 		return fmt.Errorf("source required")
 	}
 
-	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
+	tx, err := s.db.BeginTenantTx(ctx)
 	if err != nil {
 		return err
 	}

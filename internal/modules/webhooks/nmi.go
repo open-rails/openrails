@@ -1523,7 +1523,7 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, pro
 	meta := map[string]interface{}{
 		"reconciliation_status": "unmatched",
 	}
-	if s == nil || s.DB == nil || s.DB.GetDB() == nil {
+	if s == nil || s.DB == nil || s.DB.Q(ctx) == nil {
 		meta["reconciliation_error"] = "database unavailable"
 		return nil, meta, nil
 	}
@@ -1554,7 +1554,7 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, pro
 		return nil, meta, nil
 	}
 
-	query := s.DB.GetDB().
+	query := s.DB.Q(ctx).
 		NewSelect().
 		TableExpr("billing.payments AS p").
 		ColumnExpr("p.id AS payment_id").

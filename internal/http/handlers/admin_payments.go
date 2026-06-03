@@ -118,7 +118,7 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 		return issuePreparedAdminRefund(ctx, r, r.State.PaymentService, prepared, req, idempotencyKey)
 	}
 	var prepared *adminRefundPrepared
-	err := r.State.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	err := r.State.DB.Q(r.Request.Context()).RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(?)", adminRefundLockKey(paymentID.String())); err != nil {
 			return fmt.Errorf("lock refund: %w", err)
 		}

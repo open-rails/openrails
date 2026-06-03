@@ -399,6 +399,19 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	entWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantEntitlementsWrite)
 	payWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantPaymentsWrite)
 	subWrite := middleware.RequireDelegatedPermission(controlplane.PermTenantSubscriptionsWrite)
+	metricsRead := middleware.RequireDelegatedPermission(controlplane.PermTenantMetricsRead)
+
+	// Tenant metrics (issue #259 + #232): a tenant admin reads THEIR OWN tenant's
+	// analytics. The metrics queries are tenant-scoped to the request's tenant
+	// (resolved from the delegated token's issuer + pinned above), so these never
+	// expose another tenant's numbers — cross-tenant aggregation is the separate
+	// platform-superadmin path, not reachable here.
+	metrics := group.Group("/metrics")
+	metrics.GET("/summary", metricsRead, wrap(httphandlers.GetAdminMetricsSummary))
+	metrics.GET("/revenue", metricsRead, wrap(httphandlers.GetAdminMetricsRevenue))
+	metrics.GET("/subscriptions", metricsRead, wrap(httphandlers.GetAdminMetricsSubscriptions))
+	metrics.GET("/processors", metricsRead, wrap(httphandlers.GetAdminMetricsProcessors))
+	metrics.GET("/churn", metricsRead, wrap(httphandlers.GetAdminMetricsChurn))
 
 	users := group.Group("/users/:user_id")
 

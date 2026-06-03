@@ -90,7 +90,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// Use w.now() instead of SQL NOW() to support time mocking in tests
 	nmiProcessors := processors.GetNMIBackedProcessorsList()
 	var dueSubscriptions []models.Subscription
-	if err := w.DB.GetDB().NewSelect().
+	if err := w.DB.Q(ctx).NewSelect().
 		Model(&dueSubscriptions).
 		Where("sub.processor IN (?)", bun.In(nmiProcessors)).
 		Where("sub.status = ?", models.StatusPastDue).
@@ -297,7 +297,7 @@ func (w *DunningWorker) applySuccessfulRebill(
 
 	if creditsSvc != nil {
 		var updated models.Subscription
-		if err := w.DB.GetDB().NewSelect().
+		if err := w.DB.Q(ctx).NewSelect().
 			Model(&updated).
 			Column("id", "current_period_ends_at").
 			Where("id = ?", sub.ID).
@@ -328,7 +328,7 @@ func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscripti
 	var attempt *models.ManualRebillAttempt
 	claimed := false
 
-	err := w.DB.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	err := w.DB.Q(ctx).RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		attempt = new(models.ManualRebillAttempt)
 		err := tx.NewSelect().
 			Model(attempt).
@@ -422,7 +422,7 @@ func (w *DunningWorker) updateManualRebillAttempt(ctx context.Context, attemptID
 		return errors.New("dunning worker database is required")
 	}
 	now := w.now().UTC()
-	_, err := w.DB.GetDB().NewUpdate().
+	_, err := w.DB.Q(ctx).NewUpdate().
 		Model((*models.ManualRebillAttempt)(nil)).
 		Set("status = ?", status).
 		Set("transaction_id = ?", transactionID).
@@ -444,7 +444,7 @@ func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Sub
 
 	claimedAt := now.UTC()
 	leaseUntil := claimedAt.Add(dunningAttemptLease)
-	res, err := w.DB.GetDB().NewUpdate().
+	res, err := w.DB.Q(ctx).NewUpdate().
 		Model((*models.Subscription)(nil)).
 		Set("next_retry_at = ?", leaseUntil).
 		Set("last_retry_at = ?", claimedAt).
@@ -503,6 +503,13 @@ func normalizeProcessor(value interface{}) string {
 		return normalizeProcessor(*v)
 	case string:
 		return normalize.Lower(v)
+	case models.Processor:
+		// Subscription.Processor and PaymentMethod.Processor are the named type
+		// models.Processor (type Processor string), which does NOT match `case
+		// string` in a Go type switch. Without this case resolveSubscriptionProcessor
+		// returns "" for every subscription, so NMIClients[""] is nil and NMI/Mobius
+		// dunning rebills are silently skipped (caught by the dunning integration test).
+		return normalize.Lower(string(v))
 	default:
 		return ""
 	}

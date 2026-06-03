@@ -94,8 +94,9 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
 	}}
-	// nil minter: the delegated-token mint route is irrelevant to the money path.
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, middleware.OATRequired(resolver), nil)
+	// nil minter + issuer-admin: the delegated-token mint/issuer routes are
+	// irrelevant to the money path.
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, middleware.OATRequired(resolver), nil, nil)
 
 	return &billingE2EHarness{
 		t:          t,

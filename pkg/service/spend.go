@@ -33,23 +33,32 @@ func (s *Service) GetCreditAccount(ctx context.Context, owner identity.OwnerOrgI
 	if owner.IsZero() {
 		return nil, fmt.Errorf("owner required")
 	}
-	bal, err := s.creditsService().GetBalanceForOwner(ctx, owner, creditType)
-	if err != nil {
-		return nil, err
-	}
-	settings, err := s.creditsService().GetAccountSettings(ctx, owner, creditType)
-	if err != nil {
-		return nil, err
-	}
-	return &CreditAccountSnapshot{
-		OwnerID:              owner.UUID(),
-		CreditType:           creditType,
-		BillingMode:          settings.BillingMode,
-		BalanceCents:         bal.Balance,
-		HeldCents:            bal.HeldBalance,
-		AvailableCents:       bal.Balance - bal.HeldBalance,
-		OutstandingOwedCents: settings.OutstandingOwedCents,
-	}, nil
+	// Pin a tenant-scoped connection so the balance/settings reads set the RLS GUC
+	// and are tenant-scoped under the openrails_app role (#227). RunInTenantConn
+	// reuses the request's already-pinned connection when the HTTP middleware set
+	// one, so this is safe whether called from a request or directly.
+	var snap *CreditAccountSnapshot
+	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+		bal, err := s.creditsService().GetBalanceForOwner(ctx, owner, creditType)
+		if err != nil {
+			return err
+		}
+		settings, err := s.creditsService().GetAccountSettings(ctx, owner, creditType)
+		if err != nil {
+			return err
+		}
+		snap = &CreditAccountSnapshot{
+			OwnerID:              owner.UUID(),
+			CreditType:           creditType,
+			BillingMode:          settings.BillingMode,
+			BalanceCents:         bal.Balance,
+			HeldCents:            bal.HeldBalance,
+			AvailableCents:       bal.Balance - bal.HeldBalance,
+			OutstandingOwedCents: settings.OutstandingOwedCents,
+		}
+		return nil
+	})
+	return snap, err
 }
 
 // AuthorizeSpendRequest is the input to AuthorizeSpend — the read+decision side
@@ -130,6 +139,118 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 		}
 	}
 	return res, nil
+}
+
+// AuthorizeAndHoldRequest is the input to AuthorizeAndHold — the atomic
+// policy-decision + hold placement that backs POST /v1/service/credits/authorize
+// (issue #235/#247). Payer is the owner org billed; Invoker is the canonical
+// actor for per-invoker sub-budgets; RequestID is the idempotency key for the
+// placed hold.
+type AuthorizeAndHoldRequest struct {
+	Payer         identity.OwnerOrgID
+	Invoker       string
+	CreditType    string
+	EstimateCents int64
+	RequestID     string
+	// ExpiresAt bounds the placed hold; when zero a default TTL is applied.
+	ExpiresAt time.Time
+}
+
+// AuthorizeAndHoldResult is the combined decision + reservation returned by
+// AuthorizeAndHold. ReservationID is the placed hold's id when Allowed, else nil.
+type AuthorizeAndHoldResult struct {
+	Allowed              bool                `json:"allowed"`
+	DenyCode             string              `json:"deny_code,omitempty"`
+	BillingMode          string              `json:"billing_mode"`
+	AvailableCents       int64               `json:"available_cents"`
+	OutstandingOwedCents int64               `json:"outstanding_owed_cents"`
+	RemainingTodayCents  *int64              `json:"remaining_today_cents,omitempty"`
+	RetryAfterSeconds    int64               `json:"retry_after_seconds,omitempty"`
+	ReservationID        *uuid.UUID          `json:"reservation_id,omitempty"`
+	Caps                 []credits.CapResult `json:"caps,omitempty"`
+}
+
+// authorizeHoldSource is the source label recorded on holds placed by the
+// authorize route, so they are attributable + idempotency-keyed by request_id.
+const authorizeHoldSource = "authorize"
+
+// defaultAuthorizeHoldTTL bounds a placed hold when the caller does not supply an
+// explicit expiry. A hold is a short-lived reservation against an in-flight
+// invocation; the reconcile/orphan-hold sweeper (#243) is the backstop.
+const defaultAuthorizeHoldTTL = 15 * time.Minute
+
+// AuthorizeAndHold runs the spend-policy decision + prepaid available-balance
+// gate AND, when allowed, places the hold — ATOMICALLY, in one transaction
+// (issue #235/#247). Unlike AuthorizeSpend (a read-only decision) followed by a
+// separate HoldCredits, this cannot let two concurrent authorizes both pass on
+// the same available balance: the balance row is locked for the duration of the
+// decision + hold. Idempotent on RequestID.
+func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequest) (*AuthorizeAndHoldResult, error) {
+	req.CreditType = strings.TrimSpace(req.CreditType)
+	if req.CreditType == "" {
+		return nil, fmt.Errorf("credit_type required")
+	}
+	if req.Payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	if req.EstimateCents < 0 {
+		return nil, fmt.Errorf("estimate must be >= 0")
+	}
+	req.RequestID = strings.TrimSpace(req.RequestID)
+	if req.RequestID == "" {
+		return nil, fmt.Errorf("request_id required")
+	}
+	expires := req.ExpiresAt
+	if expires.IsZero() {
+		expires = s.now().Add(defaultAuthorizeHoldTTL).UTC()
+	}
+
+	out, err := s.creditsService().AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
+		Owner:         req.Payer,
+		Invoker:       strings.TrimSpace(req.Invoker),
+		CreditType:    req.CreditType,
+		EstimateCents: req.EstimateCents,
+		Source:        authorizeHoldSource,
+		SourceID:      req.RequestID,
+		ExpiresAt:     expires,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	res := &AuthorizeAndHoldResult{
+		Allowed:              out.Decision.Allowed,
+		DenyCode:             out.Decision.DenyCode,
+		BillingMode:          out.BillingMode,
+		AvailableCents:       out.AvailableCents,
+		OutstandingOwedCents: out.OutstandingOwedCents,
+		RetryAfterSeconds:    out.Decision.RetryAfterSeconds,
+		Caps:                 out.Decision.Caps,
+	}
+	if r := remainingTodayCents(out.Decision.Caps); r != nil {
+		res.RemainingTodayCents = r
+	}
+	if out.Hold != nil {
+		id := out.Hold.ID
+		res.ReservationID = &id
+	}
+	return res, nil
+}
+
+// remainingTodayCents extracts the remaining headroom under a daily cap (org or
+// per-invoker) from the evaluated caps, for the authorize response's
+// remaining_today_cents field. Returns nil when no daily cap applies.
+func remainingTodayCents(caps []credits.CapResult) *int64 {
+	for _, c := range caps {
+		if c.Code == credits.DenyDailyCap || c.Code == credits.DenyInvokerDailyCap {
+			r := c.Remaining
+			if r < 0 {
+				r = 0
+			}
+			return &r
+		}
+	}
+	return nil
 }
 
 // SetCreditAccountSettings upserts an owner's spend policy (issue #237/#235

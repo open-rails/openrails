@@ -137,6 +137,58 @@ type Config struct {
 	FeatureFlags *FeatureFlags                `koanf:"feature_flags,omitempty"`
 	Encryption   *EncryptionConfig            `koanf:"encryption,omitempty"`
 	Vault        *VaultConfig                 `koanf:"vault,omitempty"`
+	// BillingHotPath configures the degraded-mode behavior of the per-invocation
+	// billing authorize call (issue #248). EXPLICIT, never a silent default.
+	BillingHotPath *BillingHotPathConfig `koanf:"billing_hot_path,omitempty"`
+}
+
+// Billing hot-path fail policies (issue #248). The per-invocation authorize/hold
+// call is a NETWORK dependency on every generation; when OpenRails is unreachable
+// or slow, the client (gen-orchestrator) must apply an EXPLICIT, documented
+// policy — never an accidental default.
+const (
+	// BillingFailClosed denies the invocation when authorize cannot be reached
+	// (no hold => no run). The safe default for arrears/untrusted payers.
+	BillingFailClosed = "fail_closed"
+	// BillingFailOpen permits the invocation when authorize cannot be reached,
+	// with deferred settlement reconciled on recovery. ONLY for TRUSTED prepaid
+	// payers, bounded/capped per payer per outage window (the cap + replay live in
+	// the gen-orchestrator client, Wave 3).
+	BillingFailOpen = "fail_open"
+)
+
+// BillingHotPathConfig is the OpenRails-side declaration of the billing hot-path
+// degraded-mode contract (issue #248). The per-invocation hold call is a network
+// dependency on every generation; this knob makes the fail policy EXPLICIT.
+//
+// CONTRACT: the ENFORCEMENT (short timeout + circuit breaker + bounded fail-open
+// cap + deferred-hold replay) lives in the gen-orchestrator CLIENT (Wave 3). This
+// config is the documented source of truth the client reads so the policy is
+// never an accidental default:
+//
+//   - fail_closed (DEFAULT): authorize unreachable/slow => DENY the run. No hold,
+//     no run. Required for arrears/untrusted payers.
+//   - fail_open: authorize unreachable => PERMIT the run for TRUSTED prepaid
+//     payers only, bounded per payer per outage window, with deferred holds
+//     queued and replayed idempotently on recovery (reconciliation, #243, is the
+//     backstop). NEVER silently grant unbounded free usage.
+type BillingHotPathConfig struct {
+	// FailPolicy selects the degraded-mode behavior: "fail_closed" (default) or
+	// "fail_open". Validated at config load (config.Validate).
+	FailPolicy string `koanf:"fail_policy,omitempty"`
+}
+
+// EffectiveFailPolicy returns the configured fail policy, defaulting to
+// fail_closed (the safe default) when unset.
+func (c *BillingHotPathConfig) EffectiveFailPolicy() string {
+	if c == nil {
+		return BillingFailClosed
+	}
+	p := strings.ToLower(strings.TrimSpace(c.FailPolicy))
+	if p == "" {
+		return BillingFailClosed
+	}
+	return p
 }
 
 // EncryptionConfig configures per-tenant encryption-at-rest (issue #227). The
@@ -913,7 +965,27 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
 
+	// Billing hot-path fail policy must be an explicit, known value (issue #248).
+	if err := validateBillingHotPath(cfg.BillingHotPath); err != nil {
+		return fmt.Errorf("billing_hot_path config validation failed: %w", err)
+	}
+
 	return nil
+}
+
+// validateBillingHotPath rejects an unknown fail policy (issue #248): only
+// fail_closed / fail_open are permitted. An empty value is allowed and resolves
+// to the fail_closed default (see BillingHotPathConfig.EffectiveFailPolicy).
+func validateBillingHotPath(cfg *BillingHotPathConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	switch p := strings.ToLower(strings.TrimSpace(cfg.FailPolicy)); p {
+	case "", BillingFailClosed, BillingFailOpen:
+		return nil
+	default:
+		return fmt.Errorf("fail_policy must be %q or %q, got %q", BillingFailClosed, BillingFailOpen, cfg.FailPolicy)
+	}
 }
 
 func validateCaptcha(cfg *CaptchaConfig) error {

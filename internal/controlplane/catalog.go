@@ -51,6 +51,18 @@ const (
 	PermCreditsRead  = "openrails:credits:read"
 	PermCreditsWrite = "openrails:credits:write"
 
+	// PermCreditsSpend is the billing:spend (payer) capability (issue #246): the
+	// authority to DRAW DOWN a payer org's balance on the hot path
+	// (authorize/hold/capture). It is PARALLEL to, and checked separately from,
+	// the coarse PermCreditsWrite operator capability: a service principal billing
+	// a payer on every invocation must hold credits:spend, scoped to a tenant whose
+	// payers it is allowed to bill. Per #246 this is the "may you bill this payer"
+	// gate (verified against the credential's tenant), distinct from "may you run
+	// this endpoint" (endpoint:invoke against the endpoint-owner org, enforced in
+	// gen-orchestrator). A restricted role can omit credits:spend for cost
+	// governance even when it can otherwise write credits (refunds/deposits).
+	PermCreditsSpend = "openrails:credits:spend"
+
 	// Entitlement reads (enrichment, server-to-server).
 	PermEntitlementsRead = "openrails:entitlements:read"
 
@@ -109,6 +121,12 @@ const (
 	PermTenantCreditsWrite       = "openrails:tenant:credits:write"
 	PermTenantPaymentsWrite      = "openrails:tenant:payments:write"
 	PermTenantSubscriptionsWrite = "openrails:tenant:subscriptions:write"
+	// PermTenantMetricsRead lets a tenant admin read THEIR OWN tenant's analytics
+	// metrics (revenue/subscriptions/processors/churn) via the browser-direct
+	// tenant-admin surface. The metrics are tenant-scoped at the query layer
+	// (issue #232), so this only ever exposes the token's own tenant — never
+	// cross-tenant (that is the separate platform-superadmin path).
+	PermTenantMetricsRead = "openrails:tenant:metrics:read"
 
 	// PermPlatformSuperadmin is the PLATFORM-level cross-tenant administrative
 	// capability (issue #226), DISTINCT from PermAdmin. PermAdmin is per-tenant
@@ -130,6 +148,7 @@ var catalogEntries = []Permission{
 	{Name: PermAdmin, Description: "Full OpenRails operator/admin authority for the deployment."},
 	{Name: PermCreditsRead, Description: "Read credit balances and transactions."},
 	{Name: PermCreditsWrite, Description: "Deposit, withdraw, hold, capture, and release credits."},
+	{Name: PermCreditsSpend, Description: "Bill (draw down) a payer org's balance on the hot path: authorize, hold, and capture against the payer's account (issue #246)."},
 	{Name: PermEntitlementsRead, Description: "Read/enrich entitlements."},
 	{Name: PermCatalogWrite, Description: "Create and update products and prices."},
 	{Name: PermPaymentsRefund, Description: "Refund payments."},
@@ -180,6 +199,7 @@ var tenantCatalog = map[string]struct{}{
 	PermTenantCreditsWrite:       {},
 	PermTenantPaymentsWrite:      {},
 	PermTenantSubscriptionsWrite: {},
+	PermTenantMetricsRead:        {},
 }
 
 // TenantCatalogNames returns the tenant-admin permission names in catalog order.
@@ -190,6 +210,7 @@ func TenantCatalogNames() []string {
 		PermTenantCreditsWrite,
 		PermTenantPaymentsWrite,
 		PermTenantSubscriptionsWrite,
+		PermTenantMetricsRead,
 	}
 }
 

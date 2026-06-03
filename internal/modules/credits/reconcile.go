@@ -84,7 +84,7 @@ func (s *CreditsService) FindOrphanedExpiredHolds(ctx context.Context) ([]Orphan
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	now := s.now()
 	var holds []models.CreditTransaction
-	err := s.db.GetDB().NewSelect().Model(&holds).
+	err := s.db.Q(ctx).NewSelect().Model(&holds).
 		Where("tenant_id = ?", tenantID).
 		Where("transaction_type = 'hold' AND status = 'active'").
 		Where("expires_at IS NOT NULL AND expires_at <= ?", now).
@@ -114,7 +114,7 @@ const activeHoldSumSubquery = `COALESCE((SELECT SUM(COALESCE(t.authorized_amount
 func (s *CreditsService) FindHeldBalanceDrift(ctx context.Context) ([]HeldBalanceDrift, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	var rows []HeldBalanceDrift
-	err := s.db.GetDB().NewSelect().
+	err := s.db.Q(ctx).NewSelect().
 		ColumnExpr("b.tenant_id, b.owner_id, b.credit_type_id, b.held_balance AS stored").
 		ColumnExpr(activeHoldSumSubquery+" AS computed").
 		TableExpr("billing.user_credit_balances AS b").
@@ -129,7 +129,7 @@ func (s *CreditsService) FindHeldBalanceDrift(ctx context.Context) ([]HeldBalanc
 func (s *CreditsService) FindBalanceAnomalies(ctx context.Context) ([]BalanceAnomaly, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	var rows []BalanceAnomaly
-	err := s.db.GetDB().NewSelect().
+	err := s.db.Q(ctx).NewSelect().
 		ColumnExpr("b.tenant_id, b.owner_id, b.credit_type_id, b.balance, b.held_balance").
 		TableExpr("billing.user_credit_balances AS b").
 		Where("b.tenant_id = ?", tenantID).
@@ -168,7 +168,7 @@ func (s *CreditsService) RepairHeldBalance(ctx context.Context, owner identity.O
 	if err != nil {
 		return 0, err
 	}
-	_, err = s.db.GetDB().NewUpdate().Model((*models.UserCreditBalance)(nil)).
+	_, err = s.db.Q(ctx).NewUpdate().Model((*models.UserCreditBalance)(nil)).
 		Set("held_balance = ?", computed).
 		Set("updated_at = ?", s.now()).
 		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).

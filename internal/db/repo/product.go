@@ -16,7 +16,7 @@ type ProductRepo struct {
 func NewProductRepo(d *db.DB) *ProductRepo { return &ProductRepo{db: d} }
 
 func (r *ProductRepo) Create(ctx context.Context, product *models.Product) error {
-	res, err := r.db.GetDB().NewInsert().Model(product).Exec(ctx)
+	res, err := r.db.Q(ctx).NewInsert().Model(product).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -32,7 +32,7 @@ func (r *ProductRepo) Create(ctx context.Context, product *models.Product) error
 
 func (r *ProductRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
 	product := new(models.Product)
-	if err := r.db.GetDB().NewSelect().Model(product).Where("prod.id = ?", id).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(product).Where("prod.id = ?", id).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return product, nil
@@ -40,7 +40,7 @@ func (r *ProductRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Produc
 
 func (r *ProductRepo) GetActive(ctx context.Context) ([]*models.Product, error) {
 	products := []*models.Product{}
-	if err := r.db.GetDB().NewSelect().Model(&products).Where("prod.status = ?", models.CatalogStatusActive).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(&products).Where("prod.status = ?", models.CatalogStatusActive).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return products, nil
@@ -48,7 +48,7 @@ func (r *ProductRepo) GetActive(ctx context.Context) ([]*models.Product, error) 
 
 func (r *ProductRepo) GetAll(ctx context.Context) ([]*models.Product, error) {
 	products := []*models.Product{}
-	if err := r.db.GetDB().NewSelect().Model(&products).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(&products).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return products, nil
@@ -57,7 +57,7 @@ func (r *ProductRepo) GetAll(ctx context.Context) ([]*models.Product, error) {
 // GetActivePaginated returns active products with pagination
 func (r *ProductRepo) GetActivePaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
 	products := []*models.Product{}
-	count, err := r.db.GetDB().NewSelect().
+	count, err := r.db.Q(ctx).NewSelect().
 		Model(&products).
 		Where("prod.status = ?", models.CatalogStatusActive).
 		Order("prod.created_at DESC").
@@ -73,7 +73,7 @@ func (r *ProductRepo) GetActivePaginated(ctx context.Context, limit, offset int)
 // GetAllPaginated returns all products with pagination
 func (r *ProductRepo) GetAllPaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
 	products := []*models.Product{}
-	count, err := r.db.GetDB().NewSelect().
+	count, err := r.db.Q(ctx).NewSelect().
 		Model(&products).
 		Order("prod.created_at DESC").
 		Limit(limit).
@@ -86,7 +86,7 @@ func (r *ProductRepo) GetAllPaginated(ctx context.Context, limit, offset int) ([
 }
 
 func (r *ProductRepo) Update(ctx context.Context, product *models.Product) error {
-	res, err := r.db.GetDB().NewUpdate().Model(product).WherePK().Exec(ctx)
+	res, err := r.db.Q(ctx).NewUpdate().Model(product).WherePK().Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,7 @@ func (r *ProductRepo) Update(ctx context.Context, product *models.Product) error
 }
 
 func (r *ProductRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.GetDB().NewDelete().Model((*models.Product)(nil)).Where("prod.id = ?", id).Exec(ctx)
+	res, err := r.db.Q(ctx).NewDelete().Model((*models.Product)(nil)).Where("prod.id = ?", id).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (r *ProductRepo) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (r *ProductRepo) GetBySlug(ctx context.Context, slug string) (*models.Product, error) {
 	product := new(models.Product)
-	if err := r.db.GetDB().NewSelect().Model(product).Where("prod.slug = ?", slug).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(product).Where("prod.slug = ?", slug).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return product, nil

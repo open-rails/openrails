@@ -1,16 +1,18 @@
+//go:build integration
+
 package webhooks
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -22,10 +24,7 @@ import (
 )
 
 func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
-	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
-	if dsn == "" {
-		t.Skip("set OPENRAILS_TEST_DB_URL to run integration tests")
-	}
+	dsn := dbtest.SharedPostgresDSN(t)
 
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 	t.Cleanup(func() { _ = sqlDB.Close() })
@@ -159,15 +158,18 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 		Scan(ctx))
 	require.Equal(t, paidEnd.UTC(), grace.StartAt.UTC())
 	require.NotNil(t, grace.EndAt)
+	// Grace end mirrors capCCBillRetryAt: the parsed end-of-day retry date,
+	// clamped to paidTermEnd + DunningInterval (the 72h grace cap). For these
+	// fixture dates the 72h cap wins.
 	expectedGraceEnd := time.Date(nextRetryAt.Year(), nextRetryAt.Month(), nextRetryAt.Day(), 23, 59, 59, 0, time.UTC)
+	if maxGraceEnd := paidEnd.UTC().Add(subscriptions.DunningInterval); expectedGraceEnd.After(maxGraceEnd) {
+		expectedGraceEnd = maxGraceEnd
+	}
 	require.Equal(t, expectedGraceEnd.UTC(), grace.EndAt.UTC())
 }
 
 func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
-	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
-	if dsn == "" {
-		t.Skip("set OPENRAILS_TEST_DB_URL to run integration tests")
-	}
+	dsn := dbtest.SharedPostgresDSN(t)
 
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 	t.Cleanup(func() { _ = sqlDB.Close() })
@@ -321,7 +323,9 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NotNil(t, got.RevokedAt)
 	require.Nil(t, got.DeletedAt)
 
+	// The future grace window is soft-deleted; Entitlement.DeletedAt is a bun
+	// soft_delete field, so the select must opt in to deleted rows to see it.
 	var gotFuture models.Entitlement
-	require.NoError(t, bunDB.NewSelect().Model(&gotFuture).Where("id = ?", graceFuture.ID).Scan(ctx))
+	require.NoError(t, bunDB.NewSelect().Model(&gotFuture).Where("id = ?", graceFuture.ID).WhereAllWithDeleted().Scan(ctx))
 	require.NotNil(t, gotFuture.DeletedAt)
 }

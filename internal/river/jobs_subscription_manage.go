@@ -180,7 +180,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 	} else {
 		// Fallback to active subscription lookup
 		sub = new(models.Subscription)
-		err = w.DB.GetDB().NewSelect().
+		err = w.DB.Q(ctx).NewSelect().
 			Model(sub).
 			Where("sub.user_id = ?", userID).
 			Where("sub.status = ?", models.StatusCancelled).

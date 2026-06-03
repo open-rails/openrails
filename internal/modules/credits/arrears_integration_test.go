@@ -1,3 +1,5 @@
+//go:build integration
+
 package credits_test
 
 import (

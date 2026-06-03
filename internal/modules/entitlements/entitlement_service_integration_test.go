@@ -1,9 +1,10 @@
+//go:build integration
+
 package entitlements
 
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -18,10 +20,7 @@ import (
 )
 
 func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T) {
-	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
-	if dsn == "" {
-		t.Skip("set OPENRAILS_TEST_DB_URL to run integration tests")
-	}
+	dsn := dbtest.SharedPostgresDSN(t)
 
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 	t.Cleanup(func() { _ = sqlDB.Close() })

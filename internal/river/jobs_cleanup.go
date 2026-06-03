@@ -106,7 +106,7 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 }
 
 func (w CleanupExpiredDataWorker) expireCheckoutSessions(ctx context.Context, now time.Time) (int64, error) {
-	res, err := w.DB.GetDB().NewUpdate().
+	res, err := w.DB.Q(ctx).NewUpdate().
 		TableExpr("billing.checkout_sessions").
 		Set("status = ?", models.CheckoutSessionStatusExpired).
 		Set("updated_at = ?", now).
@@ -125,7 +125,7 @@ func (w CleanupExpiredDataWorker) expireCheckoutSessions(ctx context.Context, no
 func (w CleanupExpiredDataWorker) cleanupSeenNotifications(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
 	cutoff := now.Add(-retention)
 
-	res, err := w.DB.GetDB().NewDelete().
+	res, err := w.DB.Q(ctx).NewDelete().
 		TableExpr("billing.notification_queue").
 		Where("seen = ? AND created_at < ?", true, cutoff).
 		Exec(ctx)
@@ -141,7 +141,7 @@ func (w CleanupExpiredDataWorker) cleanupSeenNotifications(ctx context.Context, 
 func (w CleanupExpiredDataWorker) cleanupOldNotifications(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
 	cutoff := now.Add(-retention)
 
-	res, err := w.DB.GetDB().NewDelete().
+	res, err := w.DB.Q(ctx).NewDelete().
 		TableExpr("billing.notification_queue").
 		Where("created_at < ?", cutoff).
 		Exec(ctx)

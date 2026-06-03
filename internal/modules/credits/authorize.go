@@ -1,0 +1,238 @@
+package credits
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/tenant"
+	"github.com/uptrace/bun"
+)
+
+// AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (owner org), the
+// invoker (canonical actor for per-invoker caps), the credit type, the estimated
+// charge, and the idempotency-keyed source coordinates of the hold.
+type AuthorizeHoldInput struct {
+	Owner         identity.OwnerOrgID
+	Invoker       string // canonical: 'oat:<key_id>', 'user:<id>', '<issuer>:<sub>'
+	CreditType    string
+	EstimateCents int64
+	// Source + SourceID form the idempotency key for the placed hold (typically
+	// the request_id). A retry with the same coordinates returns the same hold.
+	Source   string
+	SourceID string
+	// ExpiresAt bounds the hold's lifetime.
+	ExpiresAt time.Time
+}
+
+// AuthorizeHoldResult is the combined decision + (when allowed) placed hold,
+// returned atomically by AuthorizeAndHold.
+type AuthorizeHoldResult struct {
+	Decision    SpendDecision
+	BillingMode string
+	// AvailableCents/OutstandingOwedCents are the snapshot AS EVALUATED inside the
+	// transaction (post-lock, pre-hold), so they reflect the balance the decision
+	// was made against.
+	AvailableCents       int64
+	OutstandingOwedCents int64
+	// Hold is the placed reservation when Decision.Allowed; nil when denied.
+	Hold *models.CreditTransaction
+}
+
+// AuthorizeAndHold evaluates the spend policy + prepaid available-balance gate
+// AND, when allowed, places the hold — ALL IN ONE TRANSACTION (issue #235/#247).
+//
+// Atomicity is what makes this distinct from calling CheckSpendAllowed then Hold
+// separately: the balance row is locked FOR UPDATE at the top of the tx, and the
+// policy evaluation (which counts active holds + windowed spend) and the hold
+// insert both run while that lock is held. Two concurrent authorizes on the same
+// (tenant, owner, credit_type) therefore serialize on the row lock — the second
+// sees the first's held_balance and active-hold exposure, so they cannot both
+// pass on the same available balance.
+func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInput) (*AuthorizeHoldResult, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("credits service not initialized")
+	}
+	in.CreditType = strings.TrimSpace(in.CreditType)
+	if in.CreditType == "" {
+		return nil, fmt.Errorf("credit_type required")
+	}
+	if in.Owner.IsZero() {
+		return nil, fmt.Errorf("owner required")
+	}
+	if in.EstimateCents < 0 {
+		return nil, fmt.Errorf("estimate must be >= 0")
+	}
+	in.Source = strings.TrimSpace(in.Source)
+	in.SourceID = strings.TrimSpace(in.SourceID)
+	if in.Source == "" || in.SourceID == "" {
+		return nil, fmt.Errorf("source and source_id (request_id) required")
+	}
+	if in.ExpiresAt.IsZero() {
+		return nil, fmt.Errorf("expires_at required")
+	}
+
+	var result *AuthorizeHoldResult
+	err := s.db.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		// A tx-scoped service so the policy reads (CheckSpendAllowed via Q(ctx))
+		// and the hold placement run on THIS transaction — one atomic unit.
+		txSvc := &CreditsService{db: db.NewWithTx(tx), clock: s.clock}
+
+		// Resolve the credit type INSIDE the tenant tx: the GUC is set here, so the
+		// lookup is RLS-scoped to the request tenant (under the openrails_app role a
+		// lookup outside the tx would be fail-closed -> no rows). #227.
+		ct, cterr := txSvc.GetCreditTypeByName(ctx, in.CreditType)
+		if cterr != nil {
+			return cterr
+		}
+		if !ct.IsActive {
+			return ErrCreditTypeInactive
+		}
+
+		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		ownerID := in.Owner.UUID()
+		now := s.now()
+
+		// Idempotency: an existing hold for these coordinates short-circuits — return
+		// it as an allowed decision without re-evaluating (the original authorize
+		// already passed). Mirrors Hold's idempotency key.
+		existing := new(models.CreditTransaction)
+		ierr := tx.NewSelect().Model(existing).
+			Where("transaction_type = 'hold'").
+			Where("tenant_id = ? AND owner_id = ?", tenantID, ownerID).
+			Where("credit_type_id = ?", ct.ID).
+			Where("source = ? AND source_id = ?", in.Source, in.SourceID).
+			Limit(1).Scan(ctx)
+		if ierr == nil {
+			snap, serr := txSvc.snapshotTx(ctx, in.Owner, in.CreditType)
+			if serr != nil {
+				return serr
+			}
+			result = &AuthorizeHoldResult{
+				Decision:             SpendDecision{Allowed: true},
+				BillingMode:          snap.billingMode,
+				AvailableCents:       snap.available,
+				OutstandingOwedCents: snap.outstanding,
+				Hold:                 existing,
+			}
+			return nil
+		}
+		if !errors.Is(ierr, sql.ErrNoRows) {
+			return ierr
+		}
+
+		// Lock the balance row FOR UPDATE up front: every subsequent read/decision in
+		// this tx is serialized behind it for the same (tenant, owner, credit_type).
+		bal, lerr := txSvc.lockBalance(ctx, tx, in.Owner, in.Owner.UUID().String(), ct.ID)
+		if lerr != nil {
+			return lerr
+		}
+		available := bal.Balance - bal.HeldBalance
+
+		settings, serr := txSvc.GetAccountSettings(ctx, in.Owner, in.CreditType)
+		if serr != nil {
+			return serr
+		}
+
+		// Spend policy (per-invoker + org caps + outstanding ceiling).
+		dec, derr := txSvc.CheckSpendAllowed(ctx, in.Owner, in.CreditType, strings.TrimSpace(in.Invoker), in.EstimateCents)
+		if derr != nil {
+			return derr
+		}
+
+		// Prepaid accounts additionally gate on available balance; arrears accounts
+		// are gated by the outstanding ceiling inside CheckSpendAllowed.
+		if settings.BillingMode != BillingModeArrears && in.EstimateCents > available {
+			dec.Allowed = false
+			if dec.DenyCode == "" {
+				dec.DenyCode = DenyInsufficientBalance
+			}
+		}
+
+		res := &AuthorizeHoldResult{
+			Decision:             dec,
+			BillingMode:          settings.BillingMode,
+			AvailableCents:       available,
+			OutstandingOwedCents: settings.OutstandingOwedCents,
+		}
+
+		if !dec.Allowed {
+			result = res
+			return nil
+		}
+
+		// Place the hold within the SAME tx + held lock.
+		amount := in.EstimateCents
+		if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
+			Set("held_balance = ?", bal.HeldBalance+amount).
+			Set("updated_at = ?", now).
+			Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+			Exec(ctx); err != nil {
+			return err
+		}
+
+		exp := in.ExpiresAt.UTC()
+		auth := amount
+		srcID := in.SourceID
+		hold := &models.CreditTransaction{
+			ID:              uuidutil.NewV7(),
+			TenantID:        tenantID,
+			OwnerID:         ownerID,
+			UserID:          strings.TrimSpace(in.Invoker),
+			CreditTypeID:    ct.ID,
+			Amount:          0,
+			Source:          in.Source,
+			SourceID:        &srcID,
+			Status:          "active",
+			Authorized:      &auth,
+			ExpiresAt:       &exp,
+			TransactionType: "hold",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		if _, err := tx.NewInsert().Model(hold).Exec(ctx); err != nil {
+			return err
+		}
+		res.Hold = hold
+		result = res
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// DenyInsufficientBalance is the deny code when a prepaid account lacks the
+// available balance to cover the estimate. Mirrored by the pkg/service facade.
+const DenyInsufficientBalance = "insufficient_balance"
+
+type accountSnapshot struct {
+	billingMode string
+	available   int64
+	outstanding int64
+}
+
+// snapshotTx reads the balance + settings snapshot using the (tx-scoped) service.
+func (s *CreditsService) snapshotTx(ctx context.Context, owner identity.OwnerOrgID, creditType string) (accountSnapshot, error) {
+	bal, err := s.GetBalanceForOwner(ctx, owner, creditType)
+	if err != nil {
+		return accountSnapshot{}, err
+	}
+	settings, err := s.GetAccountSettings(ctx, owner, creditType)
+	if err != nil {
+		return accountSnapshot{}, err
+	}
+	return accountSnapshot{
+		billingMode: settings.BillingMode,
+		available:   bal.Balance - bal.HeldBalance,
+		outstanding: settings.OutstandingOwedCents,
+	}, nil
+}

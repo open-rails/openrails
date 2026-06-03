@@ -24,7 +24,7 @@ var (
 )
 
 func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod) error {
-	res, err := r.db.GetDB().NewInsert().Model(m).Exec(ctx)
+	res, err := r.db.Q(ctx).NewInsert().Model(m).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -43,7 +43,7 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 
 func (r *PaymentMethodRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
 	pm := new(models.PaymentMethod)
-	err := r.db.GetDB().NewSelect().Model(pm).
+	err := r.db.Q(ctx).NewSelect().Model(pm).
 		Where("pm.id = ?", id).
 		Relation("Subscriptions").
 		Relation("Subscriptions.Product").
@@ -58,7 +58,7 @@ func (r *PaymentMethodRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.
 }
 
 func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.GetDB().NewDelete().Model((*models.PaymentMethod)(nil)).Where("pm.id = ?", id).Exec(ctx)
+	res, err := r.db.Q(ctx).NewDelete().Model((*models.PaymentMethod)(nil)).Where("pm.id = ?", id).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -77,7 +77,7 @@ func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
 	methods := []*models.PaymentMethod{}
-	err := r.db.GetDB().NewSelect().Model(&methods).
+	err := r.db.Q(ctx).NewSelect().Model(&methods).
 		Where("pm.user_id = ?", userID).
 		OrderExpr("pm.created_at DESC").
 		Scan(ctx)
@@ -88,7 +88,7 @@ func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*
 }
 
 func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*models.PaymentMethod, int64, error) {
-	countQuery := r.db.GetDB().NewSelect().Model((*models.PaymentMethod)(nil)).
+	countQuery := r.db.Q(ctx).NewSelect().Model((*models.PaymentMethod)(nil)).
 		Where("pm.user_id = ?", userID)
 
 	total, err := countQuery.Count(ctx)
@@ -97,7 +97,7 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 	}
 
 	methods := []*models.PaymentMethod{}
-	dataQuery := r.db.GetDB().NewSelect().Model(&methods).
+	dataQuery := r.db.Q(ctx).NewSelect().Model(&methods).
 		Where("pm.user_id = ?", userID).
 		Relation("Subscriptions").
 		Relation("Subscriptions.Product").
@@ -120,7 +120,7 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 func (r *PaymentMethodRepo) GetByVaultID(ctx context.Context, processor, vaultID string) (*models.PaymentMethod, error) {
 	pm := new(models.PaymentMethod)
 
-	query := r.db.GetDB().NewSelect().Model(pm).
+	query := r.db.Q(ctx).NewSelect().Model(pm).
 		Where("pm.processor = ?", processor).
 		Where("pm.vault_id = ?", vaultID)
 
@@ -137,7 +137,7 @@ func (r *PaymentMethodRepo) GetByVaultID(ctx context.Context, processor, vaultID
 func (r *PaymentMethodRepo) GetByInitialTransactionID(ctx context.Context, processor, initialTransactionID string) (*models.PaymentMethod, error) {
 	pm := new(models.PaymentMethod)
 
-	query := r.db.GetDB().NewSelect().Model(pm).
+	query := r.db.Q(ctx).NewSelect().Model(pm).
 		Where("pm.processor = ?", processor).
 		Where("pm.initial_transaction_id = ?", initialTransactionID)
 
@@ -152,7 +152,7 @@ func (r *PaymentMethodRepo) GetByInitialTransactionID(ctx context.Context, proce
 }
 
 func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMethod) error {
-	res, err := r.db.GetDB().NewUpdate().Model(method).WherePK().Exec(ctx)
+	res, err := r.db.Q(ctx).NewUpdate().Model(method).WherePK().Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -173,7 +173,7 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.PaymentMethod, error) {
 	nmiProcessors := processors.GetNMIBackedProcessorsList()
 	methods := []*models.PaymentMethod{}
-	err := r.db.GetDB().NewSelect().Model(&methods).
+	err := r.db.Q(ctx).NewSelect().Model(&methods).
 		Where("pm.processor IN (?)", bun.In(nmiProcessors)).
 		OrderExpr("pm.created_at DESC").
 		Scan(ctx)
@@ -187,7 +187,7 @@ func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.Paym
 func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
 	nmiProcessors := processors.GetNMIBackedProcessorsList()
 	methods := []*models.PaymentMethod{}
-	if err := r.db.GetDB().NewSelect().Model(&methods).
+	if err := r.db.Q(ctx).NewSelect().Model(&methods).
 		Where("pm.user_id = ?", userID).
 		Where("pm.processor IN (?)", bun.In(nmiProcessors)).
 		OrderExpr("pm.created_at DESC").
@@ -198,7 +198,7 @@ func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID str
 }
 
 func (r *PaymentMethodRepo) ExistsForUser(ctx context.Context, id uuid.UUID, userID string) (bool, error) {
-	count, err := r.db.GetDB().NewSelect().
+	count, err := r.db.Q(ctx).NewSelect().
 		Model((*models.PaymentMethod)(nil)).
 		Where("pm.id = ?", id).
 		Where("pm.user_id = ?", userID).
@@ -215,7 +215,7 @@ func (r *PaymentMethodRepo) WithTx(txdb *db.DB) *PaymentMethodRepo {
 
 func (r *PaymentMethodRepo) GetByProcessor(ctx context.Context, processor models.Processor) ([]*models.PaymentMethod, error) {
 	methods := []*models.PaymentMethod{}
-	err := r.db.GetDB().NewSelect().Model(&methods).
+	err := r.db.Q(ctx).NewSelect().Model(&methods).
 		Where("pm.processor = ?", processor).
 		OrderExpr("pm.created_at DESC").
 		Scan(ctx)

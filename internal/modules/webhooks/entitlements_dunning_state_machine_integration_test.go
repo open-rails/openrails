@@ -1,10 +1,11 @@
+//go:build integration
+
 package webhooks
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -23,10 +25,7 @@ import (
 )
 
 func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
-	dsn := os.Getenv("OPENRAILS_TEST_DB_URL")
-	if dsn == "" {
-		t.Skip("set OPENRAILS_TEST_DB_URL to run integration tests")
-	}
+	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := context.Background()
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
@@ -159,16 +158,21 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 		require.NoError(t, svc.handleRenewalFailure(ctx))
 	}
 
-	// Fail #1: retry on 2026-02-03 (grace until end-of-day).
-	failure("2026-02-03")
+	// Grace windows are capped at paidTermEnd + DunningInterval (72h) =
+	// 2026-02-03 00:00Z (see capCCBillRetryAt). Retry dates must stay distinct
+	// *within* that cap so each failure appends a new window rather than being
+	// collapsed to the same capped instant and deduplicated.
+	//
+	// Fail #1: retry on 2026-02-01 → grace until 2026-02-01 23:59:59.
+	failure("2026-02-01")
 
-	// Fail #2 (during grace): retry on 2026-02-05 (append).
-	clock.Advance(24 * time.Hour)
-	failure("2026-02-05")
-
-	// Fail #3 (during grace): retry on 2026-02-07 (append; future window exists).
+	// Fail #2 (during grace): retry on 2026-02-02 (append) → until 2026-02-02 23:59:59.
 	clock.Advance(12 * time.Hour)
-	failure("2026-02-07")
+	failure("2026-02-02")
+
+	// Fail #3 (during grace): retry on 2026-02-03 (append; capped to 2026-02-03 00:00Z).
+	clock.Advance(6 * time.Hour)
+	failure("2026-02-03")
 
 	// Sanity: paid window is unchanged.
 	var gotPaid models.Entitlement
@@ -182,8 +186,10 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	// Renewal success on 2026-02-04; next renewal date is 2026-03-05.
-	successAt := time.Date(2026, 2, 4, 12, 0, 0, 0, time.UTC)
+	// Renewal success on 2026-02-02 06:00 (inside grace window #2, before window
+	// #3 starts, so #1/#2 are revoked-as-active and #3 is deleted-as-future);
+	// next renewal date is 2026-03-05.
+	successAt := time.Date(2026, 2, 2, 6, 0, 0, 0, time.UTC)
 	clock.Advance(successAt.Sub(clock.Now().UTC()))
 
 	successBody, err := json.Marshal(CCBillRenewalSuccessEvent{
@@ -209,24 +215,34 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	}
 	require.NoError(t, webhook.handleRenewalSuccess(ctx))
 
-	// Grace windows should be cleared: any active grace revoked; any future grace deleted.
+	// Grace windows should be cleared: any active grace revoked; any future grace
+	// deleted. WhereAllWithDeleted is required to see the soft-deleted future
+	// window (Entitlement.DeletedAt is a bun soft_delete field).
 	var graceRows []models.Entitlement
 	require.NoError(t, bunDB.NewSelect().
 		Model(&graceRows).
 		Where("user_id = ? AND entitlement = ?", userID, "premium").
 		Where("source_type = ?", models.EntitlementSourceGrace).
 		Where("source_id = ?", subID).
+		WhereAllWithDeleted().
 		OrderExpr("start_at ASC").
 		Scan(ctx))
 	require.Len(t, graceRows, 3)
 
 	for _, gr := range graceRows {
-		if gr.StartAt.After(successAt) {
+		switch {
+		case gr.StartAt.After(successAt):
+			// Future grace window (starts after renewal): deleted, not revoked.
 			require.NotNil(t, gr.DeletedAt, "future grace windows should be deleted")
 			require.Nil(t, gr.RevokedAt, "future grace windows should not be revoked")
-			continue
+		case gr.EndAt != nil && !gr.EndAt.After(successAt):
+			// Past grace window (already expired before renewal): left as a
+			// historical record — neither revoked nor deleted.
+			require.Nil(t, gr.DeletedAt, "expired grace windows should not be deleted")
+		default:
+			// The grace window active at renewal time is revoked.
+			require.NotNil(t, gr.RevokedAt, "the active grace window should be revoked")
 		}
-		require.NotNil(t, gr.RevokedAt, "active grace windows should be revoked")
 	}
 
 	// Renewal should append a new paid window that starts now and ends at the processor-provided paid term end.

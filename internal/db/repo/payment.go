@@ -39,7 +39,7 @@ const internalNMISubscriptionAttemptMetadataKey = "nmi_subscription_order_id"
 func NewPaymentRepo(d *db.DB) *PaymentRepo { return &PaymentRepo{db: d} }
 
 func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error {
-	res, err := r.db.GetDB().NewInsert().Model(payment).Exec(ctx)
+	res, err := r.db.Q(ctx).NewInsert().Model(payment).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 }
 
 func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
-	res, err := r.db.GetDB().
+	res, err := r.db.Q(ctx).
 		NewInsert().
 		Model(payment).
 		On("CONFLICT (tenant_id, processor, transaction_id) DO NOTHING").
@@ -73,7 +73,7 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 
 func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Payment, error) {
 	payment := new(models.Payment)
-	if err := r.db.GetDB().NewSelect().Model(payment).Where("purch.id = ?", id).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(payment).Where("purch.id = ?", id).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return payment, nil
@@ -83,7 +83,7 @@ func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Paymen
 // and also loads any refund entries linked to this payment
 func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*models.Payment, []*models.Payment, error) {
 	payment := new(models.Payment)
-	err := r.db.GetDB().NewSelect().
+	err := r.db.Q(ctx).NewSelect().
 		Model(payment).
 		Relation("Price").
 		Relation("Price.Product").
@@ -96,7 +96,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 
 	// Load any refund entries linked to this payment
 	refunds := []*models.Payment{}
-	err = r.db.GetDB().NewSelect().
+	err = r.db.Q(ctx).NewSelect().
 		Model(&refunds).
 		Where("refunded_payment_id = ?", id).
 		OrderExpr("created_at DESC").
@@ -110,7 +110,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 
 func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
 	payments := []*models.Payment{}
-	q := r.db.GetDB().NewSelect().Model(&payments).Where("purch.user_id = ?", userID)
+	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.user_id = ?", userID)
 	q = excludeInternalPaymentAttempts(q)
 	if err := q.OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
 		return nil, err
@@ -120,7 +120,7 @@ func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models
 
 func (r *PaymentRepo) GetByTransactionID(ctx context.Context, processor models.Processor, transactionID string) (*models.Payment, error) {
 	payment := new(models.Payment)
-	if err := r.db.GetDB().NewSelect().Model(payment).Where("purch.processor = ?", processor).Where("purch.transaction_id = ?", transactionID).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(payment).Where("purch.processor = ?", processor).Where("purch.transaction_id = ?", transactionID).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return payment, nil
@@ -128,7 +128,7 @@ func (r *PaymentRepo) GetByTransactionID(ctx context.Context, processor models.P
 
 func (r *PaymentRepo) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Payment, error) {
 	payments := []*models.Payment{}
-	q := r.db.GetDB().NewSelect().Model(&payments).Where("purch.price_id = ?", priceID)
+	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.price_id = ?", priceID)
 	q = excludeInternalPaymentAttempts(q)
 	if err := q.OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
 		return nil, err
@@ -138,7 +138,7 @@ func (r *PaymentRepo) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*m
 
 func (r *PaymentRepo) GetByProcessor(ctx context.Context, processor models.Processor) ([]*models.Payment, error) {
 	payments := []*models.Payment{}
-	q := r.db.GetDB().NewSelect().Model(&payments).Where("purch.processor = ?", processor)
+	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.processor = ?", processor)
 	q = excludeInternalPaymentAttempts(q)
 	if err := q.OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
 		return nil, err
@@ -147,7 +147,7 @@ func (r *PaymentRepo) GetByProcessor(ctx context.Context, processor models.Proce
 }
 
 func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.GetDB().NewDelete().Model((*models.Payment)(nil)).Where("purch.id = ?", id).Exec(ctx)
+	res, err := r.db.Q(ctx).NewDelete().Model((*models.Payment)(nil)).Where("purch.id = ?", id).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
 	var refunds []refundTotalRow
-	if err := r.db.GetDB().NewSelect().
+	if err := r.db.Q(ctx).NewSelect().
 		Model((*models.Payment)(nil)).
 		Column("amount", "status").
 		Where("purch.refunded_payment_id = ?", paymentID).
@@ -174,7 +174,7 @@ func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID u
 }
 
 func (r *PaymentRepo) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
-	res, err := r.db.GetDB().
+	res, err := r.db.Q(ctx).
 		NewUpdate().
 		Model((*models.Payment)(nil)).
 		Set("refunded_payment_id = ?", originalPaymentID).
@@ -224,7 +224,7 @@ func RefundStatusCountsTowardTotal(status string) bool {
 
 func (r *PaymentRepo) GetRefundByAdminIdempotencyKey(ctx context.Context, originalPaymentID uuid.UUID, key string) (*models.Payment, error) {
 	payment := new(models.Payment)
-	if err := r.db.GetDB().NewSelect().
+	if err := r.db.Q(ctx).NewSelect().
 		Model(payment).
 		Where("purch.refunded_payment_id = ?", originalPaymentID).
 		Where("purch.metadata ->> 'admin_refund_idempotency_key' = ?", strings.TrimSpace(key)).
@@ -236,7 +236,7 @@ func (r *PaymentRepo) GetRefundByAdminIdempotencyKey(ctx context.Context, origin
 }
 
 func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservationID uuid.UUID, refundTransactionID string, metadata map[string]any) error {
-	res, err := r.db.GetDB().NewUpdate().
+	res, err := r.db.Q(ctx).NewUpdate().
 		Model((*models.Payment)(nil)).
 		Set("transaction_id = ?", refundTransactionID).
 		Set("status = ?", "completed").
@@ -261,7 +261,7 @@ func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservation
 
 func (r *PaymentRepo) GetByMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
 	payment := new(models.Payment)
-	if err := r.db.GetDB().NewSelect().
+	if err := r.db.Q(ctx).NewSelect().
 		Model(payment).
 		Where("purch.metadata ->> ? = ?", strings.TrimSpace(key), strings.TrimSpace(value)).
 		Limit(1).
@@ -272,7 +272,7 @@ func (r *PaymentRepo) GetByMetadataValue(ctx context.Context, key, value string)
 }
 
 func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) error {
-	res, err := r.db.GetDB().NewUpdate().
+	res, err := r.db.Q(ctx).NewUpdate().
 		Model((*models.Payment)(nil)).
 		Set("transaction_id = ?", strings.TrimSpace(providerTransactionID)).
 		Set("status = ?", "completed").
@@ -295,7 +295,7 @@ func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uui
 }
 
 func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) error {
-	res, err := r.db.GetDB().NewUpdate().
+	res, err := r.db.Q(ctx).NewUpdate().
 		Model((*models.Payment)(nil)).
 		Set("metadata = ?", metadata).
 		Where("purch.id = ?", attemptID).
@@ -319,14 +319,14 @@ func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, p
 	payments := []*models.Payment{}
 	offset := (page - 1) * pageSize
 
-	countQ := r.db.GetDB().NewSelect().Model((*models.Payment)(nil)).Where("purch.user_id = ?", userID)
+	countQ := r.db.Q(ctx).NewSelect().Model((*models.Payment)(nil)).Where("purch.user_id = ?", userID)
 	countQ = excludeInternalPaymentAttempts(countQ)
 	count, err := countQ.Count(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	q := r.db.GetDB().NewSelect().Model(&payments).Where("purch.user_id = ?", userID)
+	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.user_id = ?", userID)
 	q = excludeInternalPaymentAttempts(q)
 	if err := q.OrderExpr("purch.purchased_at DESC").Limit(pageSize).Offset(offset).Scan(ctx); err != nil {
 		return nil, 0, err
@@ -337,7 +337,7 @@ func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, p
 
 func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[PaymentFilters]) ([]*models.Payment, int64, error) {
 	payments := []*models.Payment{}
-	q := r.db.GetDB().NewSelect().Model(&payments)
+	q := r.db.Q(ctx).NewSelect().Model(&payments)
 	q = excludeInternalPaymentAttempts(q)
 
 	q = q.Relation("Price").Relation("Price.Product").Relation("Subscription")
@@ -398,7 +398,7 @@ func excludeInternalPaymentAttempts(q *bun.SelectQuery) *bun.SelectQuery {
 
 func (r *PaymentRepo) GetLatestByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (*models.Payment, error) {
 	payment := new(models.Payment)
-	q := r.db.GetDB().
+	q := r.db.Q(ctx).
 		NewSelect().
 		Model(payment).
 		Where("purch.user_id = ?", userID).
@@ -415,7 +415,7 @@ func (r *PaymentRepo) GetLatestByUserAndProcessor(ctx context.Context, userID st
 
 func (r *PaymentRepo) GetLatestBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
 	payment := new(models.Payment)
-	err := r.db.GetDB().
+	err := r.db.Q(ctx).
 		NewSelect().
 		Model(payment).
 		Where("purch.subscription_id = ?", subscriptionID).
@@ -430,7 +430,7 @@ func (r *PaymentRepo) GetLatestBySubscriptionID(ctx context.Context, subscriptio
 
 func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
 	payment := new(models.Payment)
-	err := r.db.GetDB().
+	err := r.db.Q(ctx).
 		NewSelect().
 		Model(payment).
 		Where("purch.subscription_id = ?", subscriptionID).
@@ -451,7 +451,7 @@ func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string
 	}
 
 	// Successful payments (positive amount)
-	successQ := r.db.GetDB().
+	successQ := r.db.Q(ctx).
 		NewSelect().
 		Model((*models.Payment)(nil)).
 		Where("purch.user_id = ?", userID).
@@ -465,7 +465,7 @@ func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string
 	}
 
 	// Failed/negative/zero payments
-	failedQ := r.db.GetDB().
+	failedQ := r.db.Q(ctx).
 		NewSelect().
 		Model((*models.Payment)(nil)).
 		Where("purch.user_id = ?", userID).
@@ -481,7 +481,7 @@ func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string
 }
 
 func (r *PaymentRepo) MarkFailed(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.GetDB().
+	_, err := r.db.Q(ctx).
 		NewUpdate().
 		Model((*models.Payment)(nil)).
 		Set("status = ?", "failed").

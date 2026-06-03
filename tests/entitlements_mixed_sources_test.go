@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/stretchr/testify/require"
 )
@@ -181,6 +182,95 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 	ok, err = rt.EntitlementService.IsEntitled(ctx, userID, "extra", clock.Now().UTC())
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
+	suite := setupTestSuite(t)
+	ctx := context.Background()
+
+	userID := uuid.New().String()
+	entName := "soft_delete_test_entitlement"
+	now := time.Now().UTC()
+
+	// Insert an entitlement window that is currently active.
+	ent := &models.Entitlement{
+		ID:          uuid.New(),
+		UserID:      userID,
+		Entitlement: entName,
+		StartAt:     now.Add(-1 * time.Hour),
+		EndAt:       nil, // active indefinitely
+		SourceType:  models.EntitlementSourceAdmin,
+		SourceID:    ptrUUID(uuid.New()),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
+	require.NoError(t, err)
+
+	require.NotNil(t, suite.App)
+	require.NotNil(t, suite.App.Runtime)
+	require.NotNil(t, suite.App.Runtime.DB)
+	r := repo.NewEntitlementRepo(suite.App.Runtime.DB)
+
+	ok, err := r.IsEntitled(ctx, userID, entName, now)
+	require.NoError(t, err)
+	require.True(t, ok, "entitlement should be active before soft delete")
+
+	// Soft-delete the row. The Entitlement model uses bun's soft_delete tag, so this should set deleted_at.
+	_, err = suite.BunDB.NewDelete().Model(ent).WherePK().Exec(ctx)
+	require.NoError(t, err)
+
+	ok, err = r.IsEntitled(ctx, userID, entName, now)
+	require.NoError(t, err)
+	require.False(t, ok, "soft-deleted entitlement should not be considered active")
+}
+
+func ptrUUID(v uuid.UUID) *uuid.UUID { return &v }
+
+func TestEntitlements_RevokeExistingEntitlement_DropsAccessImmediately(t *testing.T) {
+	suite := setupTestSuite(t)
+	rt := suite.App.Runtime
+	require.NotNil(t, rt)
+	require.NotNil(t, rt.EntitlementService)
+
+	ctx := context.Background()
+	baseNow := time.Now().UTC().Truncate(time.Second)
+	t0 := baseNow.Add(-30 * 24 * time.Hour)
+	clock := suite.SetMockClock(t0)
+	require.IsType(t, &clockwork.FakeClock{}, clock)
+
+	userID := uuid.New().String()
+	subID := uuid.New()
+	notBefore := clock.Now().UTC()
+	endAt := clock.Now().UTC().Add(30 * 24 * time.Hour)
+
+	_, err := rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
+		UserID:      userID,
+		Entitlement: "premium",
+		NotBefore:   &notBefore,
+		EndAt:       &endAt,
+		SourceType:  models.EntitlementSourceSubscription,
+		SourceID:    subID,
+	})
+	require.NoError(t, err)
+
+	ok, err := rt.EntitlementService.IsEntitled(ctx, userID, "premium", clock.Now().UTC().Add(time.Second))
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	st := models.EntitlementSourceSubscription
+	sid := subID
+	require.NoError(t, rt.EntitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+		UserID:      userID,
+		Entitlement: "premium",
+		SourceType:  &st,
+		SourceID:    &sid,
+		Reason:      models.EntitlementRevokeChargeback,
+	}))
+
+	ok, err = rt.EntitlementService.IsEntitled(ctx, userID, "premium", clock.Now().UTC().Add(time.Second))
 	require.NoError(t, err)
 	require.False(t, ok)
 }

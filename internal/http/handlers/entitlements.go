@@ -140,7 +140,7 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		now = r.State.Clock.Now()
 	}
 	adminGrant := &models.AdminGrant{ID: uuidutil.NewV7(), UserID: path.UserID, GrantedBy: adminUser.ID, Reason: "admin_entitlement", DurationDays: req.Days, CreatedAt: now}
-	if _, err := r.State.DB.GetDB().NewInsert().Model(adminGrant).Exec(r.Request.Context()); err != nil {
+	if _, err := r.State.DB.Q(r.Request.Context()).NewInsert().Model(adminGrant).Exec(r.Request.Context()); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to create admin grant source record")
 		return
 	}

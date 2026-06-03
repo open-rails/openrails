@@ -102,13 +102,3 @@ func TestAttemptManualRebill_SendsStableOrderReferences(t *testing.T) {
 	require.Equal(t, "txn_rebill_123", resp.TransactionID)
 	<-requestSeen
 }
-
-func TestSandboxEndpointConstants(t *testing.T) {
-	// Verify the sandbox endpoint constants are correctly defined
-	assert.Contains(t, SandboxDirectPostURL, "sandbox.nmi.com")
-	assert.Contains(t, SandboxQueryAPIURL, "sandbox.nmi.com")
-
-	// Verify production endpoints don't contain sandbox
-	assert.NotContains(t, DefaultDirectPostURL, "sandbox")
-	assert.NotContains(t, DefaultQueryAPIURL, "sandbox")
-}

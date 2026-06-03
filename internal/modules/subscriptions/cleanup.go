@@ -28,7 +28,7 @@ func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, 
 		supersededBy = excludeID.String()
 	}
 
-	query := dbb.GetDB().NewUpdate().
+	query := dbb.Q(ctx).NewUpdate().
 		TableExpr("billing.subscriptions").
 		Set("gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object' THEN gateway_response || jsonb_build_object('superseded_at', current_timestamp, 'superseded_by_subscription_id', ?) ELSE jsonb_build_object('previous_gateway_response', gateway_response, 'superseded_at', current_timestamp, 'superseded_by_subscription_id', ?) END", supersededBy, supersededBy).
 		Set("updated_at = current_timestamp").

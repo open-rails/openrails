@@ -17,7 +17,7 @@ import (
 // This is used when a renewal succeeds so the paid subscription window can cover access without
 // leaving trailing grace windows.
 func (r *EntitlementRepo) SoftDeleteGraceBySubscription(ctx context.Context, subscriptionID uuid.UUID, now time.Time) error {
-	_, err := r.db.GetDB().NewUpdate().
+	_, err := r.db.Q(ctx).NewUpdate().
 		Model((*models.Entitlement)(nil)).
 		Set("deleted_at = ?", now).
 		Set("updated_at = ?", now).
@@ -49,7 +49,7 @@ func (r *EntitlementRepo) SoftDeleteGraceBySubscriptionTx(ctx context.Context, t
 // This operation intentionally affects only grace windows (source_type='grace') and does not revoke
 // paid subscription windows.
 func (r *EntitlementRepo) EndGraceNowBySubscription(ctx context.Context, subscriptionID uuid.UUID, now time.Time) error {
-	return r.db.GetDB().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	return r.db.Q(ctx).RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		txdb := db.NewWithTx(tx)
 		timelineRepo := NewEntitlementRepo(txdb)
 

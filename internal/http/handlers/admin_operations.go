@@ -26,7 +26,7 @@ func adminOperationsPagination(r *httprequest.Request) (int, int) {
 func GetAdminRepairAlerts(r *httprequest.Request) {
 	limit, offset := adminOperationsPagination(r)
 	items := []*models.NotificationQueue{}
-	q := r.State.DB.GetDB().NewSelect().Model(&items).
+	q := r.State.DB.Q(r.Request.Context()).NewSelect().Model(&items).
 		Where("nq.user_id = ?", "system").
 		Where("nq.event_type = ?", models.NotificationSystemAlert).
 		Where("nq.data ->> 'kind' = ?", "billing_ledger_repair_required")
@@ -51,7 +51,7 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 func GetAdminManualRebillAttempts(r *httprequest.Request) {
 	limit, offset := adminOperationsPagination(r)
 	items := []*models.ManualRebillAttempt{}
-	q := r.State.DB.GetDB().NewSelect().Model(&items)
+	q := r.State.DB.Q(r.Request.Context()).NewSelect().Model(&items)
 
 	status := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("status")))
 	if status == "" {

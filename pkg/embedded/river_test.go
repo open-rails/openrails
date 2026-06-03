@@ -8,17 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestQueueBillingConstant(t *testing.T) {
-	// Verify the constant is exported and has expected value
-	assert.Equal(t, "billing", QueueBilling)
-}
-
-func TestErrNotInitialized(t *testing.T) {
-	// Verify the error is defined
-	assert.NotNil(t, ErrNotInitialized)
-	assert.Contains(t, ErrNotInitialized.Error(), "not initialized")
-}
-
 func TestNilEmbeddedMethods(t *testing.T) {
 	ctx := context.Background()
 

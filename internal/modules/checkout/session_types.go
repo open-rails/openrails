@@ -62,6 +62,12 @@ type CheckoutSessionRedirectToURL struct {
 type CheckoutSessionNextAction struct {
 	Type          string                        `json:"type"`
 	RedirectToURL *CheckoutSessionRedirectToURL `json:"redirect_to_url,omitempty"`
+	// Transactions carries base64-encoded UNSIGNED Solana transactions the
+	// subscriber's wallet must sign + send, in order, for type
+	// "solana_sign_transactions" (recurring subscribe, #261). After sending, the
+	// frontend calls confirm with the resulting signature; if the session is still
+	// requires_action it signs the next returned transaction and confirms again.
+	Transactions []string `json:"transactions,omitempty"`
 }
 
 type CheckoutSessionPaymentResponse struct {

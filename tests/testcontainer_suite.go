@@ -300,44 +300,14 @@ func (suite *TestContainerSuite) runDatabaseMigrations() {
 	`)
 	require.NoError(suite.t, err)
 
-	// Minimal profiles schema for integration tests (admin roles + webhook username resolution).
-	_, err = sqlDB.ExecContext(suite.ctx, `
-		CREATE TABLE IF NOT EXISTS profiles.users (
-			id uuid PRIMARY KEY,
-			username text NULL,
-			email text NULL,
-			email_verified boolean NOT NULL DEFAULT false,
-			is_active boolean NOT NULL DEFAULT true,
-			deleted_at timestamptz NULL,
-			banned_at timestamptz NULL,
-			discord_username text NULL,
-			created_at timestamptz NOT NULL DEFAULT now(),
-			updated_at timestamptz NOT NULL DEFAULT now()
-		);
-		CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON profiles.users (username) WHERE username IS NOT NULL;
-
-		CREATE TABLE IF NOT EXISTS profiles.roles (
-			id bigserial PRIMARY KEY,
-			slug text NOT NULL UNIQUE,
-			name text NOT NULL,
-			deleted_at timestamptz NULL
-		);
-
-		CREATE TABLE IF NOT EXISTS profiles.user_roles (
-			user_id uuid NOT NULL REFERENCES profiles.users(id) ON DELETE CASCADE,
-			role_id bigint NOT NULL REFERENCES profiles.roles(id) ON DELETE CASCADE,
-			PRIMARY KEY (user_id, role_id)
-		);
-
-		CREATE OR REPLACE FUNCTION profiles.role_id(p_slug text)
-		RETURNS bigint
-		LANGUAGE sql
-		STABLE
-		AS $$
-			SELECT id FROM profiles.roles WHERE slug = p_slug
-		$$;
-	`)
-	require.NoError(suite.t, err)
+	// NOTE: the profiles schema (users, *_roles, the role_id() function, etc.) is
+	// owned entirely by the authkit migrations that migrate.RunPostgres applies
+	// below. Do NOT pre-create profiles tables here — a stale hand-rolled
+	// profiles.users (missing columns authkit later expects, e.g. phone_number)
+	// or a role_id() with a different return type shadows authkit's own
+	// migration-managed definitions and breaks the migration run. Admin authority
+	// in the integration suite comes from operator-org JWT claims, not DB roles
+	// (see test_helpers.go), so no profiles.roles seeding is needed either.
 
 	// Run all migrations using the migrate package
 	err = migrate.RunPostgres(suite.ctx, suite.Config)

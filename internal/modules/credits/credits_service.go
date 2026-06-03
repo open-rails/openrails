@@ -87,8 +87,15 @@ func (s *CreditsService) GetCreditTypeByName(ctx context.Context, name string) (
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
+	// Self-contained RLS scoping (#227): pin a tenant connection so the lookup sets
+	// app.tenant_id and is tenant-scoped under the openrails_app role, whether
+	// called standalone or before opening a separate balance tx. RunInTenantConn is
+	// a no-op (reuses the tx) when s.db is already a tx-scoped service, so it is
+	// safe in both call shapes.
 	ct := new(models.CreditType)
-	err := s.db.GetDB().NewSelect().Model(ct).Where("name = ?", name).Limit(1).Scan(ctx)
+	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		return s.db.Q(ctx).NewSelect().Model(ct).Where("name = ?", name).Limit(1).Scan(ctx)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +121,7 @@ func (s *CreditsService) GetBalance(ctx context.Context, userID string, creditTy
 	}
 	ownerID := owner.UUID()
 	bal := new(models.UserCreditBalance)
-	err = s.db.GetDB().NewSelect().
+	err = s.db.Q(ctx).NewSelect().
 		Model(bal).
 		Where("tenant_id = ?", tenantID).
 		Where("owner_id = ? AND credit_type_id = ?", ownerID, ct.ID).
@@ -150,7 +157,7 @@ func (s *CreditsService) GetBalanceForOwner(ctx context.Context, owner identity.
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	ownerID := owner.UUID()
 	bal := new(models.UserCreditBalance)
-	err = s.db.GetDB().NewSelect().
+	err = s.db.Q(ctx).NewSelect().
 		Model(bal).
 		Where("tenant_id = ?", tenantID).
 		Where("owner_id = ? AND credit_type_id = ?", ownerID, ct.ID).
@@ -185,7 +192,7 @@ func (s *CreditsService) GetTransactions(ctx context.Context, userID string, cre
 	}
 	ownerID := owner.UUID()
 	var items []models.CreditTransaction
-	q := s.db.GetDB().NewSelect().Model(&items).
+	q := s.db.Q(ctx).NewSelect().Model(&items).
 		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("owner_id = ? AND credit_type_id = ?", ownerID, ct.ID)
 	total, err := q.Count(ctx)
@@ -244,7 +251,7 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, userID stri
 	}
 	ownerID := owner.UUID()
 	trx := new(models.CreditTransaction)
-	if err := s.db.GetDB().NewSelect().
+	if err := s.db.Q(ctx).NewSelect().
 		Model(trx).
 		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("owner_id = ? AND credit_type_id = ?", ownerID, ct.ID).
@@ -305,7 +312,7 @@ func (s *CreditsService) Deposit(ctx context.Context, params CreditDepositParams
 		}
 	}
 
-	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
+	tx, err := s.db.BeginTenantTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +450,7 @@ func (s *CreditsService) Withdraw(ctx context.Context, params CreditWithdrawPara
 		return nil, ErrCreditTypeInactive
 	}
 
-	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
+	tx, err := s.db.BeginTenantTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +487,7 @@ func (s *CreditsService) Hold(ctx context.Context, owner *identity.OwnerOrgID, u
 		return nil, ErrCreditTypeInactive
 	}
 
-	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
+	tx, err := s.db.BeginTenantTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -562,7 +569,7 @@ func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actu
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
-	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
+	tx, err := s.db.BeginTenantTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +638,7 @@ func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) erro
 	if s == nil || s.db == nil {
 		return fmt.Errorf("credits service not initialized")
 	}
-	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
+	tx, err := s.db.BeginTenantTx(ctx)
 	if err != nil {
 		return err
 	}

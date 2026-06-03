@@ -16,7 +16,7 @@ type CreditTypeRepo struct {
 func NewCreditTypeRepo(d *db.DB) *CreditTypeRepo { return &CreditTypeRepo{db: d} }
 
 func (r *CreditTypeRepo) Create(ctx context.Context, ct *models.CreditType) error {
-	res, err := r.db.GetDB().NewInsert().Model(ct).Exec(ctx)
+	res, err := r.db.Q(ctx).NewInsert().Model(ct).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -32,7 +32,7 @@ func (r *CreditTypeRepo) Create(ctx context.Context, ct *models.CreditType) erro
 
 func (r *CreditTypeRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.CreditType, error) {
 	ct := new(models.CreditType)
-	if err := r.db.GetDB().NewSelect().Model(ct).Where("ct.id = ?", id).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(ct).Where("ct.id = ?", id).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return ct, nil
@@ -40,7 +40,7 @@ func (r *CreditTypeRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Cre
 
 func (r *CreditTypeRepo) GetByName(ctx context.Context, name string) (*models.CreditType, error) {
 	ct := new(models.CreditType)
-	if err := r.db.GetDB().NewSelect().Model(ct).Where("ct.name = ?", name).Limit(1).Scan(ctx); err != nil {
+	if err := r.db.Q(ctx).NewSelect().Model(ct).Where("ct.name = ?", name).Limit(1).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return ct, nil
@@ -48,7 +48,7 @@ func (r *CreditTypeRepo) GetByName(ctx context.Context, name string) (*models.Cr
 
 func (r *CreditTypeRepo) List(ctx context.Context, activeOnly bool) ([]*models.CreditType, error) {
 	items := []*models.CreditType{}
-	q := r.db.GetDB().NewSelect().Model(&items).OrderExpr("ct.created_at ASC")
+	q := r.db.Q(ctx).NewSelect().Model(&items).OrderExpr("ct.created_at ASC")
 	if activeOnly {
 		q = q.Where("ct.is_active = true")
 	}
@@ -59,7 +59,7 @@ func (r *CreditTypeRepo) List(ctx context.Context, activeOnly bool) ([]*models.C
 }
 
 func (r *CreditTypeRepo) Update(ctx context.Context, ct *models.CreditType) error {
-	res, err := r.db.GetDB().NewUpdate().Model(ct).WherePK().Exec(ctx)
+	res, err := r.db.Q(ctx).NewUpdate().Model(ct).WherePK().Exec(ctx)
 	if err != nil {
 		return err
 	}

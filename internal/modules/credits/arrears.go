@@ -137,7 +137,7 @@ func (s *CreditsService) ChargeOutstanding(ctx context.Context, charger Charger,
 		return 0, fmt.Errorf("charger required")
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	q := s.db.GetDB().NewSelect().
+	q := s.db.Q(ctx).NewSelect().
 		ColumnExpr("s.tenant_id, s.owner_id, s.credit_type_id, ct.name AS credit_type_name, s.outstanding_owed_cents, s.auto_topup_payment_method_id").
 		TableExpr("billing.credit_account_settings AS s").
 		Join("JOIN billing.credit_types AS ct ON ct.id = s.credit_type_id").

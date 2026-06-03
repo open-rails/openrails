@@ -1007,10 +1007,11 @@ func (suite *TestContainerSuite) CreateProfileUser(userID string, username strin
 	ctx := context.Background()
 	now := time.Now()
 
-	// Insert into profiles.users table (profiles schema, not billing schema)
+	// Insert into profiles.users table (profiles schema, not billing schema).
+	// Columns must match authkit's migration-managed schema (no is_active column).
 	_, err := suite.BunDB.NewRaw(`
-		INSERT INTO profiles.users (id, username, email, email_verified, is_active, created_at, updated_at)
-		VALUES (?, ?, ?, true, true, ?, ?)
+		INSERT INTO profiles.users (id, username, email, email_verified, created_at, updated_at)
+		VALUES (?, ?, ?, true, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, updated_at = EXCLUDED.updated_at
 	`, userID, username, username+"@test.example.com", now, now).Exec(ctx)
 	require.NoError(suite.t, err, "Failed to create profile user")

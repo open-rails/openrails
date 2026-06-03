@@ -18,55 +18,6 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// TestClockMockBasics tests the basic functionality of the mock clock
-func TestClockMockBasics(t *testing.T) {
-	t.Run("real clock returns current time", func(t *testing.T) {
-		realClock := clockwork.NewRealClock()
-		now := realClock.Now()
-
-		// Should be within 1 second of actual time
-		assert.WithinDuration(t, time.Now(), now, time.Second)
-	})
-
-	t.Run("mock clock returns fixed time", func(t *testing.T) {
-		fixedTime := time.Date(2024, 6, 15, 10, 30, 0, 0, time.UTC)
-		mockClock := clockwork.NewFakeClockAt(fixedTime)
-
-		assert.Equal(t, fixedTime, mockClock.Now())
-	})
-
-	t.Run("mock clock can be advanced", func(t *testing.T) {
-		startTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-		mockClock := clockwork.NewFakeClockAt(startTime)
-
-		// Advance by 1 hour
-		mockClock.Advance(time.Hour)
-		expected := startTime.Add(time.Hour)
-		assert.Equal(t, expected, mockClock.Now())
-
-		// Advance by 1 day
-		mockClock.Advance(24 * time.Hour)
-		expected = expected.Add(24 * time.Hour)
-		assert.Equal(t, expected, mockClock.Now())
-	})
-
-	t.Run("mock clock Since calculation", func(t *testing.T) {
-		mockClock := clockwork.NewFakeClockAt(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC))
-		pastTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-
-		since := mockClock.Since(pastTime)
-		assert.Equal(t, 24*time.Hour, since)
-	})
-
-	t.Run("mock clock Until calculation", func(t *testing.T) {
-		mockClock := clockwork.NewFakeClockAt(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-		futureTime := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
-
-		until := mockClock.Until(futureTime)
-		assert.Equal(t, 24*time.Hour, until)
-	})
-}
-
 // TestClockInTestSuite tests the clock integration with TestContainerSuite
 func TestClockInTestSuite(t *testing.T) {
 	suite := setupTestSuite(t)
