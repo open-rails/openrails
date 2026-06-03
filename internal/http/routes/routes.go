@@ -6,7 +6,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
-	"github.com/open-rails/openrails/internal/controlplane"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -140,7 +139,7 @@ func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	// evaluated against the operator org at request time. This is the forward
 	// path away from the global-admin fallback.
 	if opts.OperatorPermissionChecker != nil {
-		mw = append(mw, authpolicy.OperatorPermissionRequiredMW(opts.OperatorPermissionChecker, controlplane.PermAdmin))
+		mw = append(mw, authpolicy.OperatorPermissionRequiredMW(opts.OperatorPermissionChecker, authpolicy.PermOperatorAdmin))
 	}
 	// Pin a tenant-scoped DB connection for the request so RLS constrains
 	// tenant-owned admin queries (issue #227).

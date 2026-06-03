@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
+	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	embgin "github.com/open-rails/openrails/pkg/embedded/gin"
 )
 
@@ -172,10 +173,18 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	// Opt into the OpenRails-owned AuthKit control plane (#284): the embedded core
+	// no longer builds it, so the standalone attaches it here (no-op in
+	// verifier-only mode) before bootstrapping.
+	if err := embcp.Attach(context.Background(), embeddedApp.App(), cfg, nil); err != nil {
+		cleanupOnError = true
+		return fmt.Errorf("attach control plane: %w", err)
+	}
+
 	// Bootstrap the OpenRails-owned AuthKit control plane (#224) when enabled.
 	// Idempotent + a no-op in verifier-only mode. Runs after migrations have been
 	// applied (migrations are a separate `billing migrate` step) and at startup.
-	if res, err := embeddedApp.RunControlPlaneBootstrap(context.Background(), controlplane.BootstrapOptions{MintInitialOAT: true}); err != nil {
+	if res, err := embcp.RunBootstrap(context.Background(), embeddedApp.App(), controlplane.BootstrapOptions{MintInitialOAT: true}); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("control plane bootstrap: %w", err)
 	} else if res != nil && res.OATMinted {

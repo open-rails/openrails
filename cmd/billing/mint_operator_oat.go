@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/embedded"
+	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
 func mintOperatorOAT(cmd *cobra.Command, _ []string) error {
@@ -24,7 +25,10 @@ func mintOperatorOAT(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = embeddedApp.Close(ctx) }()
 
-	cp := embeddedApp.ControlPlane()
+	if err := embcp.Attach(ctx, embeddedApp.App(), cfg, nil); err != nil {
+		return fmt.Errorf("attach control plane: %w", err)
+	}
+	cp := embcp.Get(embeddedApp.App())
 	if cp == nil || cp.Core() == nil {
 		return fmt.Errorf("control plane is not enabled")
 	}

@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -102,26 +101,10 @@ func (e *Embedded) Service() (*service.Service, error) {
 	return service.New(e.app.Runtime)
 }
 
-// RunControlPlaneBootstrap idempotently bootstraps the OpenRails-owned AuthKit
-// control plane (#224): operator org, OpenRails roles, the openrails.*
-// permission catalog, and an initial operator OAT for the default tenant. It is
-// a no-op when the control plane is disabled (verifier-only mode). Run it after
-// migrations and at startup; safe to re-run.
-func (e *Embedded) RunControlPlaneBootstrap(ctx context.Context, opts controlplane.BootstrapOptions) (*controlplane.BootstrapResult, error) {
-	if e == nil || e.app == nil {
-		return nil, fmt.Errorf("embedded billing: app not initialized")
-	}
-	return e.app.RunControlPlaneBootstrap(ctx, opts)
-}
-
-// ControlPlane returns the OpenRails-owned AuthKit control plane, or nil when it
-// is disabled (verifier-only mode). Used for selective AuthKit route mounting.
-func (e *Embedded) ControlPlane() *controlplane.ControlPlane {
-	if e == nil || e.app == nil {
-		return nil
-	}
-	return e.app.ControlPlane
-}
+// Control-plane bootstrap + accessor moved to the OPT-IN pkg/embedded/controlplane
+// helper (#284): the embedded CORE no longer imports internal/controlplane (or,
+// through it, AuthKit). Standalone/AuthKit hosts call
+// controlplane.RunBootstrap(ctx, e.App(), opts) and controlplane.Get(e.App()).
 
 func (e *Embedded) RunWorkers(ctx context.Context) error {
 	if e == nil || e.app == nil || e.app.Runtime == nil {
