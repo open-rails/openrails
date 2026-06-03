@@ -1,5 +1,5 @@
 {
-  "next_id": 278,
+  "next_id": 279,
   "issues": [
     {
       "id": 103,
@@ -642,6 +642,21 @@
         "[ ] Surface pre-pull BALANCE HEALTH from the recurring engine so the UI can trigger a top-up before a pull would fail (engine likely already knows; just expose it). No change to delegation/pull logic; MoonPay is non-custodial and never holds OpenRails funds.",
         "[ ] Geo-gate the CTA for unsupported locales (LA, USVI, sanctioned) using user-locale signals.",
         "[ ] OPEN DECISIONS (user): (1) primary use = bootstrap-from-zero vs top-up existing sub? (2) prefund horizon (3/6/12 months)? (3) webhooks in phase 1 or defer? (4) where sk_ lives (OpenRails route vs edge fn)? (5) confirm external-wallet-required. (6) lock the USDC amount = needed+buffer? (7) honest framing: position as 'fund your wallet', keep steering pure-card users to Stripe/NMI."
+      ],
+      "completed": false
+    },
+    {
+      "id": 278,
+      "name": "solana-pay-v2-cancel-and-tier-change-plus-frontend-qr",
+      "description": "Support BOTH Solana flows for the full subscription lifecycle: (A) browser-extension wallet (wallet-adapter, sign in-page) AND (B) Solana Pay v2 transaction-request (mobile: QR on desktop / deep-link on phone -> wallet app fetches the tx + signs). Flow B uses the SECOND Solana Pay spec (arbitrary transactions, not transfer-only) -- required for the on-chain rebilling-authorization txs.\n\n## What already exists\n- OpenRails ALREADY implements Solana Pay v2 transaction-request for CHECKOUT/subscribe: public GET/POST /v1/.../checkout/:id/solana-pay (session id = capability; GET->{label,icon}, POST {account}->{transaction}) + reference-based completion via internal/modules/solana/poller.go. So SUBSCRIBE flow B is backend-ready; only the FRONTEND QR/deeplink is missing.\n- Browser flow (A) for subscribe is built in both apps; cancel+tier-change (A) is built canonically in doujins (3ebe3ddf), pending hentai0 port.\n\n## Backend gap (this issue)\nExtend the checkout-session Solana Pay machinery to CANCEL + TIER-CHANGE by adding them as new session MODES (reusing the public endpoint + poller + reference completion):\n- Add CheckoutSessionMode solana_cancel (carries subscription_id) and solana_tier_change (carries subscription_id + new_price_id).\n- CreateCheckoutSession (AUTH-gated) accepts these modes (owner-only).\n- BuildSolanaPayTransaction branches on mode -> build cancel tx (PrepareCancelService) / tier-change tx (PrepareTierChangeService, cranker pre-signs the co-signed upgrade), INJECT the Solana Pay reference key so the poller can detect it.\n- Poller processConfirmedPayment branches on mode -> mirror via ConfirmCancelService / ConfirmTierChangeService (instead of enroll).\n\n## Frontend gap (this issue)\nCanonical (doujins, copy to hentai0): a Solana Pay path ALONGSIDE the browser-extension path, for subscribe + cancel + tier-change. Generate solana:<baseUrl>/.../solana-pay URL + QR (desktop) / deep-link button (mobile) via @solana/pay; poll the session status until the poller mirrors completion. Method order unchanged (card NMI/Mobius default, CCBill backup, Solana third); within Solana, offer 'browser wallet' (extension) and 'mobile wallet' (Solana Pay QR).",
+      "tasks": [
+        "[ ] Backend: CheckoutSessionMode solana_cancel + solana_tier_change; CreateCheckoutSession accepts them (owner-gated, carries subscription_id / new_price_id).",
+        "[ ] Backend: BuildSolanaPayTransaction branches on mode -> PrepareCancelService / PrepareTierChangeService; inject the Solana Pay reference account into the tx for poller detection.",
+        "[ ] Backend: poller branches on mode -> ConfirmCancelService / ConfirmTierChangeService on confirmation.",
+        "[ ] Backend: tests (session create per mode; build tx per mode; poller mirrors per mode). go build/vet/test green.",
+        "[ ] Frontend (doujins canonical): @solana/pay QR/deeplink component + session-status poll; offer browser-wallet vs mobile-wallet (Solana Pay) within the Solana option for subscribe/cancel/tier-change.",
+        "[ ] Frontend (hentai0): port the canonical Solana Pay component.",
+        "[ ] Devnet validation: subscribe + cancel + tier-change each via the Solana Pay transaction-request path (POST {account} -> tx -> sign+send -> poller mirrors)."
       ],
       "completed": false
     }
