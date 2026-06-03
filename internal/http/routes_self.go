@@ -5,7 +5,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 )
 
 // registerSelfServiceRoutes mounts the browser-direct self-service billing

@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/open-rails/openrails/pkg/tenant"
 )

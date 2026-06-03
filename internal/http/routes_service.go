@@ -5,7 +5,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 )
 
 // registerServiceRoutes mounts the server-to-server billing surface on the PUBLIC

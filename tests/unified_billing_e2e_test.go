@@ -54,7 +54,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 )
 
 // billingE2EHarness is a small reusable driver over the OAT-authed public

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 )
 
 // Issue #222: the private/mTLS service trust surface is removed. The
