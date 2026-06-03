@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/billing/declinecode"
@@ -50,6 +51,27 @@ type membershipManager interface {
 	CancelMembership(ctx context.Context, params *subscriptions.CancelMembershipParams) error
 }
 
+// solanaSubStore is the persistence surface crankOne mutates (satisfied by
+// *dbrepo.SolanaSubscriptionRepo). Extracted as an interface so the
+// state-machine/scheduling logic can be exercised by a fake in fast, network-
+// free unit tests (#275) while production keeps using the real repo.
+type solanaSubStore interface {
+	SetStatus(ctx context.Context, id uuid.UUID, status string) error
+	SetNextPullAt(ctx context.Context, id uuid.UUID, nextPullAt time.Time) error
+	AdvanceAfterPull(ctx context.Context, id uuid.UUID, periodStart time.Time, signature string, nextPullAt time.Time) error
+}
+
+// resolvedPlan is the per-subscription billing terms crankOne acts on: the
+// on-chain pull amount + period + ghost-plan fingerprint, plus the fiat
+// amount/currency recorded on renewal.
+type resolvedPlan struct {
+	amountBaseUnits uint64
+	periodHours     uint64
+	fingerprint     int64
+	fiatAmount      int64
+	currency        string
+}
+
 // SolanaCrankWorker queries due Solana subscriptions and cranks each: pull the
 // plan amount on-chain, then RenewMembership (extends the paid period + records
 // the payment, idempotent on the tx signature) and advance next_pull_at. A failed
@@ -62,6 +84,11 @@ type SolanaCrankWorker struct {
 	Cranker   solanaCranker
 	Lifecycle membershipManager
 	BatchSize int
+
+	// resolvePlanFn loads the billing terms for a row. nil in production (the
+	// DB-backed w.resolvePlan is used); tests inject a fake to drive crankOne
+	// without a database (#275).
+	resolvePlanFn func(ctx context.Context, row *models.SolanaSubscription) (resolvedPlan, error)
 }
 
 func (SolanaCrankWorker) Kind() string { return KindSolanaCrank }
@@ -107,15 +134,24 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 	return nil
 }
 
-func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo *dbrepo.SolanaSubscriptionRepo, row *models.SolanaSubscription) error {
+func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription) error {
 	tenantID := tenant.ID(row.TenantID)
 
 	// Resolve the plan amount (token base units) + period + ghost-plan fingerprint
 	// from the linked price's Solana processor config.
-	amountBaseUnits, periodHours, fingerprint, fiatAmount, currency, err := w.resolvePlan(ctx, row)
+	resolve := w.resolvePlanFn
+	if resolve == nil {
+		resolve = w.resolvePlan
+	}
+	plan, err := resolve(ctx, row)
 	if err != nil {
 		return err
 	}
+	amountBaseUnits := plan.amountBaseUnits
+	periodHours := plan.periodHours
+	fingerprint := plan.fingerprint
+	fiatAmount := plan.fiatAmount
+	currency := plan.currency
 
 	// Ghost-plan guard: the plan was deleted + recreated at the same PDA. The
 	// on-chain pull would fail PlanTermsMismatch; terminate this record.
@@ -218,28 +254,34 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo *dbrepo.SolanaSub
 
 // resolvePlan loads the on-chain pull amount + period + fingerprint and the fiat
 // amount/currency for the subscription's price.
-func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaSubscription) (amountBaseUnits uint64, periodHours uint64, fingerprint int64, fiatAmount int64, currency string, err error) {
+func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaSubscription) (resolvedPlan, error) {
 	subRepo := dbrepo.NewSubscriptionRepo(w.DB)
 	sub, err := subRepo.GetByID(ctx, row.SubscriptionID)
 	if err != nil {
-		return 0, 0, 0, 0, "", fmt.Errorf("solana crank: load subscription: %w", err)
+		return resolvedPlan{}, fmt.Errorf("solana crank: load subscription: %w", err)
 	}
 	price, err := catalog.NewPriceService(w.DB).GetByID(ctx, sub.PriceID)
 	if err != nil {
-		return 0, 0, 0, 0, "", fmt.Errorf("solana crank: load price: %w", err)
+		return resolvedPlan{}, fmt.Errorf("solana crank: load price: %w", err)
 	}
 	cfg := price.GetProcessorConfig(models.ProcessorSolana)
 	if cfg == nil {
-		return 0, 0, 0, 0, "", fmt.Errorf("solana crank: price %s has no solana processor config", price.ID)
+		return resolvedPlan{}, fmt.Errorf("solana crank: price %s has no solana processor config", price.ID)
 	}
-	amountBaseUnits, err = strconv.ParseUint(cfg["amount_base_units"], 10, 64)
+	amountBaseUnits, err := strconv.ParseUint(cfg["amount_base_units"], 10, 64)
 	if err != nil || amountBaseUnits == 0 {
-		return 0, 0, 0, 0, "", fmt.Errorf("solana crank: invalid amount_base_units for price %s", price.ID)
+		return resolvedPlan{}, fmt.Errorf("solana crank: invalid amount_base_units for price %s", price.ID)
 	}
-	periodHours, err = strconv.ParseUint(cfg["period_hours"], 10, 64)
+	periodHours, err := strconv.ParseUint(cfg["period_hours"], 10, 64)
 	if err != nil || periodHours == 0 {
-		return 0, 0, 0, 0, "", fmt.Errorf("solana crank: invalid period_hours for price %s", price.ID)
+		return resolvedPlan{}, fmt.Errorf("solana crank: invalid period_hours for price %s", price.ID)
 	}
-	fingerprint, _ = strconv.ParseInt(cfg["created_at"], 10, 64)
-	return amountBaseUnits, periodHours, fingerprint, price.Amount, price.Currency, nil
+	fingerprint, _ := strconv.ParseInt(cfg["created_at"], 10, 64)
+	return resolvedPlan{
+		amountBaseUnits: amountBaseUnits,
+		periodHours:     periodHours,
+		fingerprint:     fingerprint,
+		fiatAmount:      price.Amount,
+		currency:        price.Currency,
+	}, nil
 }

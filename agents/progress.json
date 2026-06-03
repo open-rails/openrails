@@ -972,11 +972,11 @@
     {
       "id": 275,
       "name": "solana-recurring-multirebill-and-statemachine-tests",
-      "completed": false,
+      "completed": true,
       "description": "Comprehensive rebill/dunning/cancel STATE-MACHINE validation. The dunning/rebill cadence is clock-driven (cranker uses an injectable clockwork.Clock + next_pull_at), so most of it is testable FAST without waiting; the on-chain per-period cap only resets on wall-clock (period_hours min = 1 HOUR; sub-hour is impossible), so a real second on-chain rebill needs ~1 real hour.",
       "tasks": [
-        "[ ] FAST clock-driven test: fake clock advances weeks; assert multi-rebill (RenewMembership), dunning escalation past_due->retries->cancel, resume, cancel mid-cycle, AlreadyPaid/Operational/Terminal classifier branches (stub/mock the pull)",
-        "[ ] SLOW on-chain devnet test: period_hours=1 -> subscribe -> crank -> wait for the period to roll -> crank again (cap reset, real 2nd rebill) -> cancel; long-timeout/scheduled",
+        "[x] FAST clock-driven test: fake clock advances; assert multi-rebill (RenewMembership advances next_pull_at one period), dunning escalation past_due->retries->cancel at MaxDunningFailures (next_pull_at by DunningInterval), AlreadyPaid/Operational(no-dun, no-reschedule)/Terminal(cancel, no-dun) classifier branches + ghost-plan expiry (stub only the pull) — internal/river/jobs_solana_crank_statemachine_test.go (refactored crankOne onto solanaSubStore + resolvePlanFn seams)",
+        "[x] SLOW on-chain devnet test: period_hours=1 -> subscribe -> crank -> immediate re-pull rejected (Custom:400) -> wait for the period to roll (~1h, polled) -> crank again (cap reset, real 2nd rebill, distinct sig) -> cancel; build-tag devnet, 3h timeout, run manually/scheduled — internal/modules/solana/recurring/service_devnet_multirebill_test.go (NOT run: multi-hour + scarce devnet USDC)",
         "[ ] full-stack/browser e2e in the docker stack (local image + devnet USDC) per docs/solana-recurring-e2e-runbook.md",
         "[ ] CI: schedule the devnet integration test with a funded-wallet secret so the real flow is continuously verified"
       ]
