@@ -1,0 +1,218 @@
+package recurring
+
+import (
+	"context"
+	"encoding/binary"
+	"strings"
+	"testing"
+
+	solanago "github.com/doujins-org/solana-go"
+	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/pkg/tenant"
+)
+
+// fakePlanReader returns a fixed (data, err) for GetAccountData regardless of the
+// address — the re-publish guard reads exactly the derived plan PDA, so a single
+// canned response is enough to drive each branch.
+type fakePlanReader struct {
+	data []byte
+	err  error
+}
+
+func (r fakePlanReader) GetAccountData(_ context.Context, _ solanago.PublicKey) ([]byte, error) {
+	return r.data, r.err
+}
+
+// buildPlanBlob assembles a synthetic on-chain Plan account in the exact byte
+// order DecodePlanAccount expects, for the given immutable terms. Only the fields
+// the re-publish guard inspects (mint/amount/periodHours) need to be meaningful.
+func buildPlanBlob(owner, mint solanago.PublicKey, amount, periodHours uint64, createdAt int64) []byte {
+	blob := make([]byte, 0, subscriptions.PlanAccountSize)
+	u64 := func(v uint64) { b := make([]byte, 8); binary.LittleEndian.PutUint64(b, v); blob = append(blob, b...) }
+	blob = append(blob, 1) // discriminator (planAccountDiscriminator)
+	blob = append(blob, owner.Bytes()...)
+	blob = append(blob, 254) // bump
+	blob = append(blob, 0)   // status
+	u64(7)                   // planId
+	blob = append(blob, mint.Bytes()...)
+	u64(amount)
+	u64(periodHours)
+	u64(uint64(createdAt)) // createdAt (i64 LE)
+	u64(0)                 // endTs
+	var zero solanago.PublicKey
+	for i := 0; i < 4; i++ { // destinations
+		blob = append(blob, zero.Bytes()...)
+	}
+	for i := 0; i < 4; i++ { // pullers
+		blob = append(blob, zero.Bytes()...)
+	}
+	blob = append(blob, make([]byte, 128)...) // metadataUri
+	return blob
+}
+
+func devnetUSDCMint(t *testing.T) solanago.PublicKey {
+	t.Helper()
+	mintStr, _, err := ResolveRecurringMint("USDC", "devnet")
+	if err != nil {
+		t.Fatalf("resolve devnet USDC mint: %v", err)
+	}
+	mint, err := solanago.PublicKeyFromBase58(mintStr)
+	if err != nil {
+		t.Fatalf("parse mint: %v", err)
+	}
+	return mint
+}
+
+// TestPublishPlanIdempotentRepublish: when the plan PDA already holds a plan with
+// MATCHING terms, PublishPlan returns the existing handle WITHOUT a second submit.
+func TestPublishPlanIdempotentRepublish(t *testing.T) {
+	merchantKey, _ := solanago.NewRandomPrivateKey()
+	merchant := merchantKey.PublicKey()
+	mint := devnetUSDCMint(t)
+
+	const amount = uint64(10_000_000)
+	const periodHours = uint64(720)
+	const createdAt = int64(1_717_200_000)
+
+	planPDA, _, err := subscriptions.DerivePlanPDA(merchant, 7)
+	if err != nil {
+		t.Fatalf("derive pda: %v", err)
+	}
+
+	sub := &fakeSubmitter{merchant: merchant}
+	reader := fakePlanReader{data: buildPlanBlob(merchant, mint, amount, periodHours, createdAt)}
+	svc := NewPlanServiceWithReader(sub, reader, "devnet")
+
+	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
+		TenantID:        tenant.ID{},
+		PlanID:          7,
+		TokenSymbol:     "USDC",
+		AmountBaseUnits: amount,
+		PeriodHours:     periodHours,
+	})
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if len(sub.submits) != 0 {
+		t.Fatalf("expected NO submit on idempotent re-publish, got %d submit sets", len(sub.submits))
+	}
+	if h.PlanPDA != planPDA.String() {
+		t.Fatalf("handle PDA = %s, want %s", h.PlanPDA, planPDA.String())
+	}
+	if h.CreatedAt != createdAt || h.AmountBaseUnits != amount || h.PeriodHours != periodHours {
+		t.Fatalf("handle did not echo existing on-chain terms: %+v", h)
+	}
+	if h.Signature != "" {
+		t.Fatalf("idempotent no-op should carry no fresh signature, got %q", h.Signature)
+	}
+}
+
+// TestPublishPlanRepublishDifferingTermsRejected: an existing plan with different
+// IMMUTABLE terms must be rejected (publish a new plan_id instead of mutating).
+func TestPublishPlanRepublishDifferingTermsRejected(t *testing.T) {
+	merchantKey, _ := solanago.NewRandomPrivateKey()
+	merchant := merchantKey.PublicKey()
+	mint := devnetUSDCMint(t)
+
+	// On-chain plan has amount 5_000_000; the re-publish requests 10_000_000.
+	reader := fakePlanReader{data: buildPlanBlob(merchant, mint, 5_000_000, 720, 1_717_200_000)}
+	sub := &fakeSubmitter{merchant: merchant}
+	svc := NewPlanServiceWithReader(sub, reader, "devnet")
+
+	_, err := svc.PublishPlan(context.Background(), PublishPlanInput{
+		TenantID:        tenant.ID{},
+		PlanID:          7,
+		TokenSymbol:     "USDC",
+		AmountBaseUnits: 10_000_000,
+		PeriodHours:     720,
+	})
+	if err == nil {
+		t.Fatal("expected immutability rejection for differing terms, got nil")
+	}
+	if !strings.Contains(err.Error(), "immutable") && !strings.Contains(err.Error(), "IMMUTABLE") {
+		t.Fatalf("error should explain plans are immutable, got: %v", err)
+	}
+	if len(sub.submits) != 0 {
+		t.Fatalf("must not submit create_plan when rejecting differing terms, got %d", len(sub.submits))
+	}
+}
+
+// TestPublishPlanAbsentPDAProceeds: when the reader reports the PDA empty, the
+// normal create_plan path runs (a submit happens and a fresh handle is returned).
+func TestPublishPlanAbsentPDAProceeds(t *testing.T) {
+	merchantKey, _ := solanago.NewRandomPrivateKey()
+	merchant := merchantKey.PublicKey()
+
+	reader := fakePlanReader{data: nil} // PDA does not exist
+	sub := &fakeSubmitter{merchant: merchant}
+	svc := NewPlanServiceWithReader(sub, reader, "devnet")
+
+	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
+		TenantID:        tenant.ID{},
+		PlanID:          7,
+		TokenSymbol:     "USDC",
+		AmountBaseUnits: 10_000_000,
+		PeriodHours:     720,
+	})
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if len(sub.submits) == 0 {
+		t.Fatal("expected create_plan submit when PDA is absent")
+	}
+	if h.Signature == "" {
+		t.Fatal("a fresh publish must carry a submit signature")
+	}
+}
+
+// TestPublishPlanPeriodBoundValidation: period_hours must be in (0, 8760].
+func TestPublishPlanPeriodBoundValidation(t *testing.T) {
+	merchantKey, _ := solanago.NewRandomPrivateKey()
+	merchant := merchantKey.PublicKey()
+	sub := &fakeSubmitter{merchant: merchant}
+	svc := NewPlanService(sub, "devnet")
+
+	for _, period := range []uint64{0, maxPeriodHours + 1} {
+		_, err := svc.PublishPlan(context.Background(), PublishPlanInput{
+			PlanID:          7,
+			TokenSymbol:     "USDC",
+			AmountBaseUnits: 10_000_000,
+			PeriodHours:     period,
+		})
+		if err == nil {
+			t.Fatalf("period_hours %d should be rejected", period)
+		}
+		if !strings.Contains(err.Error(), "period_hours") {
+			t.Fatalf("period %d: error should mention period_hours, got: %v", period, err)
+		}
+	}
+	if len(sub.submits) != 0 {
+		t.Fatalf("no submit on validation failure, got %d", len(sub.submits))
+	}
+}
+
+// TestPublishPlanBillingCycleConsistency: when BillingCycleDays is threaded in,
+// period_hours must equal days*24.
+func TestPublishPlanBillingCycleConsistency(t *testing.T) {
+	merchantKey, _ := solanago.NewRandomPrivateKey()
+	merchant := merchantKey.PublicKey()
+	sub := &fakeSubmitter{merchant: merchant}
+	svc := NewPlanService(sub, "devnet")
+
+	_, err := svc.PublishPlan(context.Background(), PublishPlanInput{
+		PlanID:           7,
+		TokenSymbol:      "USDC",
+		AmountBaseUnits:  10_000_000,
+		PeriodHours:      720, // 30 days
+		BillingCycleDays: 31,  // disagrees: 31*24 = 744
+	})
+	if err == nil {
+		t.Fatal("mismatched period_hours vs billing_cycle_days should be rejected")
+	}
+	if !strings.Contains(err.Error(), "billing_cycle_days") {
+		t.Fatalf("error should mention billing_cycle_days, got: %v", err)
+	}
+	if len(sub.submits) != 0 {
+		t.Fatalf("no submit on consistency failure, got %d", len(sub.submits))
+	}
+}

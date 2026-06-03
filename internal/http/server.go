@@ -203,6 +203,17 @@ func New(deps Dependencies) (*Server, error) {
 		}
 		secretStore = tenancy.NewCachedSecretStore(secretStore, secretCacheTTL)
 
+		// Single-tenant bridge (#253): a global-config Solana private key is seeded
+		// into the default tenant's secret store as solana/private_key so recurring
+		// Solana can sign without a manual secret write. Idempotent; never overwrites
+		// an existing secret. No-op when Solana is unconfigured or uses Vault Transit
+		// (non-extractable key, so no global private key is set).
+		if pc := deps.Config.GetSolanaProcessor(); pc != nil {
+			if err := recurring.SeedDefaultTenantSolanaSecret(context.Background(), secretStore, pc.PrivateKey); err != nil {
+				return nil, fmt.Errorf("seed default-tenant solana secret: %w", err)
+			}
+		}
+
 		tsvc, terr := tenancy.NewService(deps.ControlPlane.Pool(), deps.ControlPlane, secretStore)
 		if terr != nil {
 			return nil, fmt.Errorf("build tenancy service: %w", terr)
@@ -236,7 +247,7 @@ func New(deps Dependencies) (*Server, error) {
 			// Plan-publish (#254) + enroll-confirm (#255) HTTP surfaces. Enroll needs
 			// the lifecycle (membership) + the on-chain subscription store.
 			if deps.Runtime.SubscriptionLifecycleService != nil && deps.Runtime.DB != nil {
-				planSvc := recurring.NewPlanService(submitter, network)
+				planSvc := recurring.NewPlanServiceWithReader(submitter, deps.Runtime.SolanaRPC, network)
 				enrollSvc := recurring.NewEnrollService(
 					cranker,
 					deps.Runtime.SubscriptionLifecycleService,

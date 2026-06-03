@@ -47,17 +47,38 @@ func (s *signerSubmitter) Submit(ctx context.Context, tenantID tenant.ID, instru
 	return solanaint.BuildSignSubmit(ctx, tenantID, s.signer, s.rpc, instructions)
 }
 
+// planReader is the minimal RPC read surface PublishPlan needs for its idempotent
+// re-publish guard: read the (possibly-already-created) Plan PDA back before
+// submitting create_plan. Satisfied by *solanaint.RPCClient. Optional — a nil
+// reader skips the guard and submits create_plan directly (the program then
+// rejects a duplicate PDA on-chain, so correctness is preserved either way).
+type planReader interface {
+	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
+}
+
 // PlanService publishes recurring Solana plans on-chain (issue #254). The
 // create_plan path it drives is verified live on devnet.
 type PlanService struct {
 	submitter Submitter
-	network   string // "mainnet" | "devnet"
+	reader    planReader // optional; enables the idempotent re-publish guard
+	network   string     // "mainnet" | "devnet"
 	now       func() time.Time
 }
 
-// NewPlanService builds a PlanService for the given network.
+// NewPlanService builds a PlanService for the given network. The idempotent
+// re-publish guard is disabled (no plan reader); prefer NewPlanServiceWithReader
+// in production so a re-publish of an already-created plan is a no-op rather than
+// a loud on-chain create_plan failure.
 func NewPlanService(submitter Submitter, network string) *PlanService {
 	return &PlanService{submitter: submitter, network: network, now: time.Now}
+}
+
+// NewPlanServiceWithReader builds a PlanService that reads the Plan PDA back
+// before submitting create_plan, so a re-publish with MATCHING terms is an
+// idempotent no-op and a re-publish with DIFFERING terms is rejected (plans are
+// immutable on-chain — see PublishPlan).
+func NewPlanServiceWithReader(submitter Submitter, reader planReader, network string) *PlanService {
+	return &PlanService{submitter: submitter, reader: reader, network: network, now: time.Now}
 }
 
 // MerchantAddress returns the tenant's on-chain merchant (cranker) address — the
@@ -77,6 +98,12 @@ type PublishPlanInput struct {
 	ReceivingWallet string // optional cold wallet; sets the plan's destination whitelist
 	MetadataURI     string // optional (<=128 bytes)
 	EndTs           int64  // 0 = perpetual
+
+	// BillingCycleDays, when > 0, is the source price's billing cycle. PublishPlan
+	// then enforces period_hours == BillingCycleDays*24 so the on-chain period can
+	// never silently disagree with the price the plan backs. 0 = not provided
+	// (consistency check skipped).
+	BillingCycleDays int
 }
 
 // PlanHandle is the durable record of a published plan, suitable for storing in
@@ -111,12 +138,45 @@ func (h *PlanHandle) ToProcessorConfig() map[string]string {
 // from the tenant's merchant key, returning the durable plan handle. It fails
 // closed: a non-allowlisted token, an out-of-range period, or a zero amount are
 // rejected before any on-chain action.
+//
+// Immutability reality (issue #254). The deployed solana-program/subscriptions
+// program publishes IMMUTABLE plans: it exposes ONLY create_plan — there is no
+// update_plan/delete_plan instruction (confirmed: subscriptions.BuildCreatePlan
+// exists, but no update/delete builder). So PublishPlan never mutates an existing
+// plan. Instead, when a reader is wired, it is idempotent-or-reject:
+//
+//   - Plan PDA absent            -> submit create_plan (the normal path).
+//   - Plan PDA present, terms MATCH (mint/amount/period) -> idempotent no-op
+//     success: return the existing PlanHandle WITHOUT a second create_plan (a
+//     duplicate would fail on-chain anyway).
+//   - Plan PDA present, terms DIFFER -> reject: plans are immutable, so an
+//     amount/period/mint change must be published under a NEW plan_id (and
+//     subscribers migrated), not mutated in place.
+//
+// Token-2022 rejected-extension validation is N/A here: the recurring mint
+// allowlist (ResolveRecurringMint) admits ONLY classic-SPL USDC/USD1, so no
+// Token-2022 mint (transfer-fee / transfer-hook / etc.) can ever reach this path.
+// The allowlist is the validation — there is nothing further to reject.
 func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*PlanHandle, error) {
 	if in.AmountBaseUnits == 0 {
 		return nil, fmt.Errorf("recurring: plan amount must be > 0")
 	}
 	if in.PeriodHours == 0 || in.PeriodHours > maxPeriodHours {
 		return nil, fmt.Errorf("recurring: period_hours must be in (0, %d]", maxPeriodHours)
+	}
+	// period_hours <-> billing-cycle consistency: the on-chain period is derived
+	// from a price's BillingCycleDays as days*24 (see catalog_provider_solana.go).
+	// When a caller threads that cycle through (PublishPlanInput.BillingCycleDays
+	// > 0), enforce period_hours == BillingCycleDays*24 so an admin call can't
+	// publish a plan whose on-chain period silently disagrees with the price.
+	// TODO(#254): the admin HTTP surface does not yet carry the price's cycle; once
+	// it does, thread BillingCycleDays from there so the check applies to every
+	// publish path, not only callers that already have the cycle in hand.
+	if in.BillingCycleDays > 0 {
+		want := uint64(in.BillingCycleDays) * 24
+		if in.PeriodHours != want {
+			return nil, fmt.Errorf("recurring: period_hours %d disagrees with billing_cycle_days %d (expected %d = days*24)", in.PeriodHours, in.BillingCycleDays, want)
+		}
 	}
 	symbol := normalizeSymbol(in.TokenSymbol)
 	mintStr, _, err := ResolveRecurringMint(symbol, s.network)
@@ -135,6 +195,49 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 	planPDA, _, err := subscriptions.DerivePlanPDA(merchant, in.PlanID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: derive plan pda: %w", err)
+	}
+
+	// Idempotent re-publish guard (issue #254). Plans are IMMUTABLE on-chain, so a
+	// second create_plan on an occupied PDA always fails. When a reader is wired,
+	// read the PDA back FIRST: if it already holds a plan with MATCHING terms,
+	// return the existing handle as a no-op success; if the terms DIFFER, reject
+	// (the operator must publish a NEW plan_id, not mutate this one). A single read
+	// is fine here — this is a pre-submit read of (at most) already-confirmed state,
+	// not a read-after-our-own-write, so there is no slot to gate on.
+	if s.reader != nil {
+		data, rerr := s.reader.GetAccountData(ctx, planPDA)
+		if rerr != nil {
+			return nil, fmt.Errorf("recurring: read plan pda for re-publish guard: %w", rerr)
+		}
+		if len(data) > 0 {
+			existing, derr := subscriptions.DecodePlanAccount(data)
+			if derr != nil {
+				return nil, fmt.Errorf("recurring: plan pda %s already occupied but undecodable: %w", planPDA, derr)
+			}
+			if existing.Mint.Equals(mint) &&
+				existing.Amount == in.AmountBaseUnits &&
+				existing.PeriodHours == in.PeriodHours {
+				// Terms match: idempotent no-op, return the existing on-chain handle
+				// WITHOUT submitting a duplicate create_plan.
+				return &PlanHandle{
+					PlanPDA:         planPDA.String(),
+					PlanID:          in.PlanID,
+					Mint:            mintStr,
+					MintSymbol:      symbol,
+					AmountBaseUnits: existing.Amount,
+					PeriodHours:     existing.PeriodHours,
+					CreatedAt:       existing.CreatedAt,
+					MerchantAddress: merchant.String(),
+				}, nil
+			}
+			return nil, fmt.Errorf(
+				"recurring: plan %s already published with different IMMUTABLE terms "+
+					"(on-chain mint=%s amount=%d period_hours=%d; requested mint=%s amount=%d period_hours=%d) — "+
+					"plans cannot be mutated; publish a NEW plan_id and migrate subscribers",
+				planPDA, existing.Mint, existing.Amount, existing.PeriodHours,
+				mint, in.AmountBaseUnits, in.PeriodHours,
+			)
+		}
 	}
 
 	// Pullers/destinations are an OPTIONAL hardening whitelist and must be left

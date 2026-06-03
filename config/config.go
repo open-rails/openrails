@@ -441,6 +441,14 @@ type ProcessorConfig struct {
 	Network         string                 `koanf:"network"`
 	RecipientWallet string                 `koanf:"recipient_wallet"`
 	Tokens          map[string]TokenConfig `koanf:"tokens"`
+
+	// PrivateKey is the merchant/cranker Solana signing keypair (base58) for a
+	// SINGLE-TENANT install that configures Solana via global config rather than
+	// the per-tenant secret store. At boot it is seeded into the default tenant's
+	// secret store as solana/private_key (idempotently, never overwriting an
+	// existing secret) so recurring Solana can sign (issue #253). Leave empty in
+	// multi-tenant / Vault deployments, where each tenant supplies its own key.
+	PrivateKey string `koanf:"private_key"`
 }
 
 // GetEffectiveType returns the processor type, inferring from reserved names if needed.

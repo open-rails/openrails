@@ -100,12 +100,13 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 
 	handle, err := plan.PublishPlan(ctx, recurring.PublishPlanInput{
-		TenantID:        tid,
-		PlanID:          planID,
-		TokenSymbol:     symbol, // PublishPlan rejects non-allowlisted (non-stablecoin) tokens
-		AmountBaseUnits: uint64(in.UnitAmount),
-		PeriodHours:     periodHours,
-		EndTs:           0, // perpetual; OpenRails models open-ended subscriptions
+		TenantID:         tid,
+		PlanID:           planID,
+		TokenSymbol:      symbol, // PublishPlan rejects non-allowlisted (non-stablecoin) tokens
+		AmountBaseUnits:  uint64(in.UnitAmount),
+		PeriodHours:      periodHours,
+		BillingCycleDays: *in.BillingCycleDays, // enforce period_hours == days*24
+		EndTs:            0,                    // perpetual; OpenRails models open-ended subscriptions
 	})
 	if err != nil {
 		return nil, fmt.Errorf("solana publish plan: %w", err)
