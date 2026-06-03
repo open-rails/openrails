@@ -168,11 +168,12 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 
 // PrepareSolanaCancelTx builds the UNSIGNED on-chain cancel_subscription
 // transaction the subscriber's wallet signs to TRUSTLESSLY revoke a recurring
-// Solana subscription (#266). The soft cancel (#264) already stops billing; this
-// is additive — once signed + sent, the program itself refuses further pulls so
-// OpenRails physically cannot charge again. The caller must own the
-// subscription; the response is `{ "transaction": "<base64>", "subscription_pda":
-// "<pda>" }` for the wallet to deserialize, sign, and send.
+// Solana subscription (#266/#271). This is the PREPARE step of the on-chain
+// cancel loop: prepare -> wallet signs+sends -> confirm (ConfirmSolanaCancel) ->
+// mirror. Solana is the source of truth; OpenRails never DB-only "soft cancels" —
+// it only mirrors after observing the confirmed on-chain cancel. The caller must
+// own the subscription; the response is `{ "transaction": "<base64>",
+// "subscription_pda": "<pda>" }` for the wallet to deserialize, sign, and send.
 func PrepareSolanaCancelTx(r *httprequest.Request) {
 	svc := r.State.SolanaPrepareCancelService
 	if svc == nil {
@@ -226,5 +227,84 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{
 		"transaction":      res.Transaction,
 		"subscription_pda": res.SubscriptionPDA,
+	})
+}
+
+// confirmSolanaCancelRequest carries the signature of the cancel_subscription
+// transaction the wallet signed + sent (#271). OpenRails confirms it landed
+// on-chain before mirroring the cancel into the DB.
+type confirmSolanaCancelRequest struct {
+	Signature string `json:"signature" binding:"required"`
+}
+
+// ConfirmSolanaCancel is the CONFIRM step of the on-chain cancel loop (#271):
+// after the wallet signs + sends the unsigned tx from PrepareSolanaCancelTx, it
+// posts the resulting signature here. OpenRails verifies the cancel LANDED and
+// SUCCEEDED on-chain (Solana is the source of truth) and only then MIRRORS it by
+// cancelling the membership immediately — the lifecycle cascade flips the linked
+// solana_subscriptions row to cancelled so the cranker stops. There is no DB-only
+// "soft cancel": a signature that never confirms or reverted does NOT cancel. The
+// acting user must own the subscription.
+func ConfirmSolanaCancel(r *httprequest.Request) {
+	if r.State.SolanaRPC == nil {
+		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
+		return
+	}
+	if r.State.SubscriptionLifecycleService == nil {
+		r.ErrorJSON(http.StatusServiceUnavailable, "subscriptions are not configured")
+		return
+	}
+
+	uc, ok := authprovider.UserContextFromGin(r.GinCtx)
+	if !ok || uc.UserID == "" {
+		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		return
+	}
+
+	subscriptionIDStr := r.GinCtx.Param("id")
+	if subscriptionIDStr == "" {
+		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
+		return
+	}
+	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
+		return
+	}
+
+	var req confirmSolanaCancelRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+
+	// Authorize: the acting user must own the lifecycle subscription before we
+	// confirm + mirror a cancel against it.
+	if r.State.SubscriptionService == nil {
+		r.ErrorJSON(http.StatusServiceUnavailable, "subscriptions are not configured")
+		return
+	}
+	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			r.ErrorJSON(http.StatusNotFound, "subscription not found")
+			return
+		}
+		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
+		return
+	}
+	if sub.UserID != uc.UserID {
+		r.ErrorJSON(http.StatusNotFound, "subscription not found")
+		return
+	}
+
+	svc := recurring.NewConfirmCancelService(r.State.SolanaRPC, r.State.SubscriptionLifecycleService)
+	if err := svc.Confirm(r.Request.Context(), subscriptionID, req.Signature); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	r.SuccessJSON(map[string]any{
+		"subscription_id": subscriptionID.String(),
+		"status":          "cancelled",
 	})
 }

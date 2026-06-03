@@ -919,14 +919,14 @@
       "id": 271,
       "name": "solana-cancel-flow-onchain-mirror",
       "completed": false,
-      "description": "Wire the END-TO-END on-chain cancel for Solana subscriptions. Solana is the source of truth: the user signs an on-chain cancel_subscription (PrepareCancelService + the /v1/self/subscriptions/:id/solana-cancel-tx endpoint already build it, #266); OpenRails CONFIRMS it landed, then MIRRORS to the DB (set the solana_subscriptions row cancelled -> the hourly cranker's ListDue (status=active) stops pulling). There is NO DB-only 'soft cancel'. Solana cancels are IMMEDIATE (never the card scheduled-cancel/cancel-at-period-end). Replace/repurpose the bare CancelMembership DB cascade (#264) as the MIRROR step driven by the confirmed on-chain cancel for USER cancels; keep a mirror-only stop-cranking for admin/dunning-initiated cancels (no wallet to sign). Depends: #264 #266.",
+      "description": "Wire the END-TO-END on-chain cancel for Solana subscriptions. Solana is the source of truth: the user signs an on-chain cancel_subscription (PrepareCancelService + the /v1/self/subscriptions/:id/solana-cancel-tx endpoint already build it, #266); OpenRails CONFIRMS it landed, then MIRRORS to the DB (set the solana_subscriptions row cancelled -> the hourly cranker's ListDue (status=active) stops pulling). There is NO DB-only 'soft cancel'. Solana cancels are IMMEDIATE (never the card scheduled-cancel/cancel-at-period-end). Replace/repurpose the bare CancelMembership DB cascade (#264) as the MIRROR step driven by the confirmed on-chain cancel for USER cancels; keep a mirror-only stop-cranking for admin/dunning-initiated cancels (no wallet to sign). Depends: #264 #266.\n\nDONE: added ConfirmCancelService (internal/modules/solana/recurring/confirm_cancel.go) = the CONFIRM step: it WatchTransaction-confirms the wallet's cancel signature landed AND succeeded on-chain, then MIRRORS by calling CancelMembership(RevokeAccess=true -> IMMEDIATE; the existing solana cascade flips solana_subscriptions to cancelled so the cranker stops). A never-confirmed/reverted signature does NOT cancel. New POST /v1/self/subscriptions/:id/solana-cancel handler (ConfirmSolanaCancel) authorizes ownership then runs Confirm; registered in RegisterSelfServiceRoutes alongside the existing solana-cancel-tx (prepare). Admin/dunning path unchanged: CancelMembership without a wallet still mirror-only stops the cranker. Updated 'soft cancel' comments to on-chain cancel + mirror. Unit tests: confirm_cancel_test.go (success mirrors+cancels with RevokeAccess; on-chain-failure and not-confirmed do NOT cancel; invalid sig); self_service_test.go pins both solana routes mounted+gated.",
       "tasks": [
-        "[ ] user cancel flow: return the cancel_subscription tx to sign -> wallet signs+sends -> confirm endpoint verifies the on-chain cancel landed (WatchTransaction)",
-        "[ ] on confirmed on-chain cancel -> mirror: SetStatus(cancelled) on the solana_subscriptions row + CancelMembership; cranker stops",
-        "[ ] distinguish USER cancel (on-chain, signed) from ADMIN/DUNNING cancel (no wallet -> mirror-only stop-cranking); document both paths",
-        "[ ] remove the DB-only 'soft cancel' framing/behavior; the cascade is the mirror of the on-chain truth",
-        "[ ] entitlement: immediate access cut for Solana (no scheduled-cancel)",
-        "[ ] tests: cancel returns tx; confirm mirrors + cranker stops; admin/dunning cancel still stops cranking",
+        "[x] user cancel flow: return the cancel_subscription tx to sign -> wallet signs+sends -> confirm endpoint verifies the on-chain cancel landed (WatchTransaction)",
+        "[x] on confirmed on-chain cancel -> mirror: SetStatus(cancelled) on the solana_subscriptions row + CancelMembership; cranker stops",
+        "[x] distinguish USER cancel (on-chain, signed) from ADMIN/DUNNING cancel (no wallet -> mirror-only stop-cranking); document both paths",
+        "[x] remove the DB-only 'soft cancel' framing/behavior; the cascade is the mirror of the on-chain truth",
+        "[x] entitlement: immediate access cut for Solana (no scheduled-cancel)",
+        "[x] tests: cancel returns tx; confirm mirrors + cranker stops; admin/dunning cancel still stops cranking",
         "[ ] devnet (real USDC): cancel tx lands -> cranker no longer pulls"
       ]
     },

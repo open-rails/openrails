@@ -368,10 +368,13 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	subs.POST("/:id/resume", subscriptionManage, wrap(httphandlers.ResumeSubscription))
 	subs.POST("/:id/change-tier", subscriptionManage, wrap(httphandlers.ChangeTier))
 	subs.PUT("/:id/payment-method", manage, wrap(httphandlers.UpdateSubscriptionPaymentMethod))
-	// App-driven on-chain cancel/revoke (#266): build the unsigned cancel tx the
-	// wallet signs to trustlessly stop OpenRails from ever pulling again. Gated by
-	// the same cancel scope as the soft cancel (it is the on-chain form of cancel).
+	// App-driven on-chain cancel/revoke (#266/#271): the full prepare -> sign ->
+	// confirm -> mirror loop. solana-cancel-tx builds the unsigned cancel tx the
+	// wallet signs+sends; solana-cancel confirms the signature landed on-chain and
+	// then mirrors the cancel into the DB (stops the cranker). Solana is the source
+	// of truth — there is no DB-only "soft cancel". Both gated by the cancel scope.
 	subs.POST("/:id/solana-cancel-tx", subscriptionManage, wrap(httphandlers.PrepareSolanaCancelTx))
+	subs.POST("/:id/solana-cancel", subscriptionManage, wrap(httphandlers.ConfirmSolanaCancel))
 
 	// Payment methods: list is a read; mutations require the manage scope.
 	pm := group.Group("/payment-methods")
