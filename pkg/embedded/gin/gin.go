@@ -9,6 +9,7 @@
 package gin
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -20,6 +21,8 @@ import (
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
+	embauthkit "github.com/open-rails/openrails/pkg/embedded/authkit"
+	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
 // RouteOptions configures route registration behavior.
@@ -112,10 +115,29 @@ func routeAuthenticator(e *embedded.Embedded, opts RouteOptions) billingauth.Aut
 }
 
 // newServer constructs the gin billing server graph from the embedded app.
+//
+// This is the standalone/opt-in surface, so it opts into the AuthKit verifier and
+// the OpenRails-owned control plane (#284) that the embedded core no longer wires
+// implicitly: it builds the verifier from config when none was injected and
+// attaches the control plane when enabled. Both are no-ops if already present /
+// disabled.
 func newServer(e *embedded.Embedded) (*server.Server, error) {
 	a := e.App()
 	if a == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
+	}
+	cfg := a.Config
+	if a.Authenticator == nil && cfg != nil && cfg.Auth != nil && len(cfg.Auth.Issuers) > 0 {
+		authn, err := embauthkit.NewVerifierAuthenticatorFromConfig(cfg.Auth)
+		if err != nil {
+			return nil, fmt.Errorf("build authkit verifier: %w", err)
+		}
+		a.Authenticator = authn
+	}
+	if embcp.Get(a) == nil {
+		if err := embcp.Attach(context.Background(), a, cfg, nil); err != nil {
+			return nil, fmt.Errorf("attach control plane: %w", err)
+		}
 	}
 	return server.New(server.Dependencies{
 		Config:        a.Config,
@@ -123,6 +145,6 @@ func newServer(e *embedded.Embedded) (*server.Server, error) {
 		Runtime:       a.Runtime,
 		Redis:         a.RedisClient,
 		Authenticator: a.Authenticator,
-		ControlPlane:  a.ControlPlane,
+		ControlPlane:  embcp.Get(a),
 	})
 }

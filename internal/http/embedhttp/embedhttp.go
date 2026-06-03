@@ -17,10 +17,9 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/captcha"
 	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
-	"github.com/open-rails/openrails/internal/controlplane"
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -57,25 +56,36 @@ func (o Options) withDefaults() Options {
 // application graph. Every field is gin-free, so importing this package pulls no
 // gin onto the embedded request path.
 type Assembler struct {
-	Cfg           *config.Config
-	Runtime       *app.Runtime
-	ControlPlane  *controlplane.ControlPlane
-	CaptchaStore  *captcha.ChallengeStore
-	Authenticator billingauth.Authenticator
+	Cfg     *config.Config
+	Runtime *app.Runtime
+	// OperatorChecker is the live operator-org permission checker (#224), held as
+	// the neutral authpolicy.OperatorPermissionChecker interface so this core
+	// package imports neither internal/controlplane nor AuthKit (#284). nil in
+	// verifier-only mode. The concrete *controlplane.ControlPlane satisfies it.
+	OperatorChecker authpolicy.OperatorPermissionChecker
+	CaptchaStore    *captcha.ChallengeStore
+	Authenticator   billingauth.Authenticator
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
-// inputs the gin Server derives its embedded surface from).
+// inputs the gin Server derives its embedded surface from). The control plane,
+// when present, is read off app.App.ControlPlane (held as `any`) via an interface
+// type assertion to the neutral OperatorPermissionChecker — no controlplane
+// import on the embedded request path (#284).
 func FromApp(a *app.App) *Assembler {
 	if a == nil {
 		return nil
 	}
+	var checker authpolicy.OperatorPermissionChecker
+	if c, ok := a.ControlPlane.(authpolicy.OperatorPermissionChecker); ok {
+		checker = c
+	}
 	return &Assembler{
-		Cfg:           a.Config,
-		Runtime:       a.Runtime,
-		ControlPlane:  a.ControlPlane,
-		CaptchaStore:  captcha.NewChallengeStore(a.RedisClient),
-		Authenticator: a.Authenticator,
+		Cfg:             a.Config,
+		Runtime:         a.Runtime,
+		OperatorChecker: checker,
+		CaptchaStore:    captcha.NewChallengeStore(a.RedisClient),
+		Authenticator:   a.Authenticator,
 	}
 }
 
@@ -105,8 +115,8 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		adminOpts := httproutes.Options{
 			Authenticator: s.Authenticator,
 		}
-		if s.ControlPlane != nil {
-			adminOpts.OperatorPermissionChecker = authpolicy.OperatorPermissionChecker(s.ControlPlane)
+		if s.OperatorChecker != nil {
+			adminOpts.OperatorPermissionChecker = s.OperatorChecker
 		}
 		httproutes.RegisterAdminRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/admin", s.Runtime), s.Runtime, adminOpts)
 	}

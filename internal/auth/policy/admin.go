@@ -9,6 +9,14 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// PermOperatorAdmin is the broad OpenRails operator/admin capability evaluated
+// live against the operator org for admin routes (#224). It mirrors
+// controlplane.PermAdmin ("openrails:admin") but lives here so the gin-free route
+// registrars (internal/http/routes) and the embedded core need not import
+// internal/controlplane — and through it AuthKit (#284). The control-plane
+// catalog references this same value (see internal/controlplane/catalog.go).
+const PermOperatorAdmin = "openrails:admin"
+
 // OperatorPermissionChecker is the live AuthKit effective-permission check the
 // control plane provides (#224). It evaluates whether a user holds a permission
 // in the operator org at request time (not from stale JWT claims). The

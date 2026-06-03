@@ -8,10 +8,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	server "github.com/open-rails/openrails/internal/http"
+	embauthkit "github.com/open-rails/openrails/pkg/embedded/authkit"
+	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
 // Result holds the application graph plus the gin HTTP server created by the
@@ -36,13 +40,37 @@ func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
 		}
 	}()
 
+	// Standalone opts in to the AuthKit verifier (#284): the embedded core no
+	// longer builds a default verifier, so when no Authenticator was injected we
+	// construct the AuthKit-backed one from config here.
+	if application.Authenticator == nil && cfg.Auth != nil && len(cfg.Auth.Issuers) > 0 {
+		authn, aerr := embauthkit.NewVerifierAuthenticatorFromConfig(cfg.Auth)
+		if aerr != nil {
+			return nil, fmt.Errorf("build authkit verifier: %w", aerr)
+		}
+		application.Authenticator = authn
+	}
+
+	// Standalone opts in to the OpenRails-owned AuthKit control plane (#284):
+	// build it (when enabled in config) and attach to the app, reusing an injected
+	// pool when present. No-op in verifier-only mode.
+	var injectedPool = func() *pgxpool.Pool {
+		if opts != nil {
+			return opts.PGXPool
+		}
+		return nil
+	}()
+	if cperr := embcp.Attach(context.Background(), application, cfg, injectedPool); cperr != nil {
+		return nil, fmt.Errorf("attach control plane: %w", cperr)
+	}
+
 	billingServer, err := server.New(server.Dependencies{
 		Config:        application.Config,
 		Cache:         application.Cache,
 		Runtime:       application.Runtime,
 		Redis:         application.RedisClient,
 		Authenticator: application.Authenticator,
-		ControlPlane:  application.ControlPlane,
+		ControlPlane:  embcp.Get(application),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create billing server: %w", err)

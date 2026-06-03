@@ -427,9 +427,14 @@ func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
 	asm := &embedhttp.Assembler{
 		Cfg:           s.cfg,
 		Runtime:       s.runtime,
-		ControlPlane:  s.controlPlane,
 		CaptchaStore:  s.captchaStore,
 		Authenticator: s.embeddedAuthenticator(),
+	}
+	// Only set the live operator-permission checker when the control plane is
+	// actually present (#284): a nil *controlplane.ControlPlane boxed into the
+	// OperatorPermissionChecker interface would be non-nil and misfire.
+	if s.controlPlane != nil {
+		asm.OperatorChecker = s.controlPlane
 	}
 	return asm.NewHTTPHandler(embedhttp.Options{
 		IncludeUser:     opts.IncludeUser,
