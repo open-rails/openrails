@@ -43,7 +43,7 @@ type grantEntitlementRequest struct {
 }
 
 func ServiceGetUserEntitlements(r *httprequest.Request) {
-	userID := strings.TrimSpace(r.GinCtx.Param("user_id"))
+	userID := strings.TrimSpace(r.Param("user_id"))
 	if userID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "user_id is required")
 		return
@@ -52,7 +52,7 @@ func ServiceGetUserEntitlements(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid user_id format")
 		return
 	}
-	atStr := strings.TrimSpace(r.GinCtx.Query("at"))
+	atStr := strings.TrimSpace(r.Query("at"))
 	var at *time.Time
 	if atStr != "" {
 		parsed, err := timeutil.ParseRFC3339UTC(atStr)
@@ -76,7 +76,7 @@ func ServiceGetUserEntitlements(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements))
+	r.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements))
 }
 
 func GetAdminUserEntitlements(r *httprequest.Request) {
@@ -90,7 +90,7 @@ func GetAdminUserEntitlements(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "entitlement service unavailable")
 		return
 	}
-	atStr := r.GinCtx.Query("at")
+	atStr := r.Query("at")
 	queryTime := time.Now()
 	if r.State.Clock != nil {
 		queryTime = r.State.Clock.Now()
@@ -108,7 +108,7 @@ func GetAdminUserEntitlements(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, serviceEntitlementRecordsFromModels(entitlements))
+	r.JSON(http.StatusOK, serviceEntitlementRecordsFromModels(entitlements))
 }
 
 func GrantAdminEntitlement(r *httprequest.Request) {

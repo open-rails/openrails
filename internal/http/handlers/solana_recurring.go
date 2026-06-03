@@ -17,7 +17,6 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -190,13 +189,13 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 		return
 	}
 
-	uc, ok := authprovider.UserContextFromGin(r.GinCtx)
+	uc, ok := r.UserContext()
 	if !ok || uc.UserID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
 
-	subscriptionIDStr := r.GinCtx.Param("id")
+	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return
@@ -264,13 +263,13 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 		return
 	}
 
-	uc, ok := authprovider.UserContextFromGin(r.GinCtx)
+	uc, ok := r.UserContext()
 	if !ok || uc.UserID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
 
-	subscriptionIDStr := r.GinCtx.Param("id")
+	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return
@@ -362,7 +361,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	if r.State.SubscriptionService == nil || r.State.PriceService == nil || r.State.ProductService == nil {
 		return nil, http.StatusServiceUnavailable, "subscriptions are not configured"
 	}
-	uc, ok := authprovider.UserContextFromGin(r.GinCtx)
+	uc, ok := r.UserContext()
 	if !ok || uc.UserID == "" {
 		return nil, http.StatusUnauthorized, "User authentication required"
 	}
@@ -665,7 +664,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 // parseSubscriptionIDParam reads + validates the :id path param, writing the
 // error response on failure.
 func parseSubscriptionIDParam(r *httprequest.Request) (uuid.UUID, bool) {
-	idStr := r.GinCtx.Param("id")
+	idStr := r.Param("id")
 	if idStr == "" {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return uuid.Nil, false

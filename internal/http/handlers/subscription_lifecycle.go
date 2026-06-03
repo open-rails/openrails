@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/authprovider"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -60,13 +59,13 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	uc, ok := authprovider.UserContextFromGin(r.GinCtx)
+	uc, ok := r.UserContext()
 	if !ok || uc.UserID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
 
-	subscriptionIDStr := r.GinCtx.Param("id")
+	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return
@@ -94,7 +93,7 @@ func CancelSubscription(r *httprequest.Request) {
 	}
 
 	if sub.Processor == subscriptions.ProcessorCCBill {
-		r.GinCtx.JSON(http.StatusUnprocessableEntity, map[string]any{
+		r.JSON(http.StatusUnprocessableEntity, map[string]any{
 			"error":       "CCBill subscriptions cannot be cancelled through our system. Please visit the CCBill consumer support portal to manage your subscription. You will need the email address you used when subscribing.",
 			"support_url": "https://support.ccbill.com",
 			"code":        "ccbill_cancel_required",
@@ -115,17 +114,17 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	r.GinCtx.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
+	r.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
 }
 
 func ResumeSubscription(r *httprequest.Request) {
-	uc, ok := authprovider.UserContextFromGin(r.GinCtx)
+	uc, ok := r.UserContext()
 	if !ok || uc.UserID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
 
-	subscriptionIDStr := r.GinCtx.Param("id")
+	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return
@@ -181,5 +180,5 @@ func ResumeSubscription(r *httprequest.Request) {
 		return
 	}
 
-	r.GinCtx.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
+	r.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
 }

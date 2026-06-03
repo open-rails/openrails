@@ -57,7 +57,7 @@ func CreateEntitlementFeature(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.GinCtx.JSON(http.StatusCreated, f)
+	r.JSON(http.StatusCreated, f)
 }
 
 // ListEntitlementFeatures handles GET /v1/admin/entitlements/features.
@@ -72,7 +72,7 @@ func ListEntitlementFeatures(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to list features")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, gin_h_list("entitlements.feature", features))
+	r.JSON(http.StatusOK, gin_h_list("entitlements.feature", features))
 }
 
 // ListProductFeatures handles GET /v1/admin/products/:id/features.
@@ -91,7 +91,7 @@ func ListProductFeatures(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to list product features")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, gin_h_list("product_feature", features))
+	r.JSON(http.StatusOK, gin_h_list("product_feature", features))
 }
 
 // AttachProductFeature handles POST /v1/admin/products/:id/features.
@@ -124,7 +124,7 @@ func AttachProductFeature(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.GinCtx.JSON(http.StatusCreated, pef)
+	r.JSON(http.StatusCreated, pef)
 }
 
 // DetachProductFeature handles DELETE /v1/admin/products/:id/features/:product_feature_id.
@@ -155,7 +155,7 @@ func ServiceGetActiveEntitlements(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "feature service unavailable")
 		return
 	}
-	userID := strings.TrimSpace(r.GinCtx.Query("user_id"))
+	userID := strings.TrimSpace(r.Query("user_id"))
 	if userID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "user_id is required")
 		return
@@ -199,7 +199,7 @@ func writeActiveEntitlements(r *httprequest.Request, svc *entitlements.FeatureSe
 		return
 	}
 	// Stripe-shaped list envelope: object=list, has_more, data[].
-	r.GinCtx.JSON(http.StatusOK, map[string]any{
+	r.JSON(http.StatusOK, map[string]any{
 		"object":   "list",
 		"has_more": false,
 		"data":     items,
@@ -209,7 +209,7 @@ func writeActiveEntitlements(r *httprequest.Request, svc *entitlements.FeatureSe
 // parseAtQuery reads an optional RFC3339 `at` query param. When absent, returns a
 // zero time (the service defaults it to now).
 func parseAtQuery(r *httprequest.Request) (time.Time, bool) {
-	atStr := strings.TrimSpace(r.GinCtx.Query("at"))
+	atStr := strings.TrimSpace(r.Query("at"))
 	if atStr == "" {
 		return time.Time{}, true
 	}
@@ -222,7 +222,7 @@ func parseAtQuery(r *httprequest.Request) (time.Time, bool) {
 }
 
 func parseUUIDParam(r *httprequest.Request, name, msg string) (uuid.UUID, bool) {
-	raw := strings.TrimSpace(r.GinCtx.Param(name))
+	raw := strings.TrimSpace(r.Param(name))
 	id, err := uuid.Parse(raw)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, msg)

@@ -24,7 +24,7 @@ type SolanaPayPostResponse struct {
 }
 
 func GetSolanaPay(r *httprequest.Request) {
-	sessionID := strings.TrimSpace(r.GinCtx.Param("id"))
+	sessionID := strings.TrimSpace(r.Param("id"))
 	if sessionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
 		return
@@ -58,7 +58,7 @@ func GetSolanaPay(r *httprequest.Request) {
 }
 
 func PostSolanaPay(r *httprequest.Request) {
-	sessionID := strings.TrimSpace(r.GinCtx.Param("id"))
+	sessionID := strings.TrimSpace(r.Param("id"))
 	if sessionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
 		return

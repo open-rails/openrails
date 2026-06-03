@@ -84,7 +84,7 @@ func AdminRefundPayment(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	idempotencyKey := strings.TrimSpace(r.GinCtx.GetHeader(adminRefundIdempotencyHeader))
+	idempotencyKey := strings.TrimSpace(r.Header(adminRefundIdempotencyHeader))
 	if idempotencyKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, adminRefundIdempotencyHeader+" is required")
 		return
@@ -363,12 +363,12 @@ func GetAdminUserPayments(r *httprequest.Request) {
 	}
 	page := 1
 	pageSize := 50
-	if p := r.GinCtx.Query("page"); p != "" {
+	if p := r.Query("page"); p != "" {
 		if v, err := strconv.Atoi(p); err == nil && v > 0 {
 			page = v
 		}
 	}
-	if ps := r.GinCtx.Query("page_size"); ps != "" {
+	if ps := r.Query("page_size"); ps != "" {
 		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 200 {
 			pageSize = v
 		}
@@ -384,7 +384,7 @@ func GetAdminUserPayments(r *httprequest.Request) {
 	}
 	offset := (page - 1) * pageSize
 	hasMore := offset+len(data) < total
-	r.GinCtx.JSON(http.StatusOK, map[string]interface{}{"object": "list", "data": data, "total": total, "limit": pageSize, "offset": offset, "has_more": hasMore})
+	r.JSON(http.StatusOK, map[string]interface{}{"object": "list", "data": data, "total": total, "limit": pageSize, "offset": offset, "has_more": hasMore})
 }
 
 func AdminCreateOffChannelPayment(r *httprequest.Request) {

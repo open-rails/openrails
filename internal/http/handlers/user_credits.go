@@ -73,7 +73,7 @@ func GetMyCreditsType(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	creditType := strings.TrimSpace(r.GinCtx.Param("type"))
+	creditType := strings.TrimSpace(r.Param("type"))
 	if creditType == "" {
 		r.ErrorJSON(http.StatusBadRequest, "credit type required")
 		return
@@ -106,7 +106,7 @@ func GetMyCreditTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	creditType := strings.TrimSpace(r.GinCtx.Param("type"))
+	creditType := strings.TrimSpace(r.Param("type"))
 	if creditType == "" {
 		r.ErrorJSON(http.StatusBadRequest, "credit type required")
 		return

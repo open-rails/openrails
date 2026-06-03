@@ -64,7 +64,7 @@ func AdminCreateProduct(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	r.GinCtx.JSON(http.StatusCreated, out)
+	r.JSON(http.StatusCreated, out)
 }
 
 func AdminListProducts(r *httprequest.Request) {
@@ -73,11 +73,11 @@ func AdminListProducts(r *httprequest.Request) {
 		return
 	}
 	opts := billingservice.ListProductsOptions{
-		TierGroup: strings.TrimSpace(r.GinCtx.Query("tier_group")),
-		Limit:     parseIntDefault(r.GinCtx.Query("limit"), 100),
-		Offset:    parseIntDefault(r.GinCtx.Query("offset"), 0),
+		TierGroup: strings.TrimSpace(r.Query("tier_group")),
+		Limit:     parseIntDefault(r.Query("limit"), 100),
+		Offset:    parseIntDefault(r.Query("offset"), 0),
 	}
-	if v := strings.TrimSpace(r.GinCtx.Query("active_only")); v != "" {
+	if v := strings.TrimSpace(r.Query("active_only")); v != "" {
 		opts.ActiveOnly = parseBool(v)
 	}
 	items, total, err := svc.ListProducts(r.Request.Context(), opts)
@@ -85,7 +85,7 @@ func AdminListProducts(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogProduct]{
+	r.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogProduct]{
 		Items:  items,
 		Total:  total,
 		Limit:  opts.Limit,
@@ -94,7 +94,7 @@ func AdminListProducts(r *httprequest.Request) {
 }
 
 func AdminGetProduct(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
 		return
@@ -108,11 +108,11 @@ func AdminGetProduct(r *httprequest.Request) {
 		writeCatalogError(r, productLookupErr(err))
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 func AdminGetProductBySlug(r *httprequest.Request) {
-	slug := strings.TrimSpace(r.GinCtx.Param("slug"))
+	slug := strings.TrimSpace(r.Param("slug"))
 	if slug == "" {
 		r.ErrorJSON(http.StatusBadRequest, "slug required")
 		return
@@ -126,11 +126,11 @@ func AdminGetProductBySlug(r *httprequest.Request) {
 		writeCatalogError(r, productLookupErr(err))
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 func AdminUpdateProduct(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
 		return
@@ -148,11 +148,11 @@ func AdminUpdateProduct(r *httprequest.Request) {
 		writeCatalogError(r, productLookupErr(err))
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 func AdminActivateProduct(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
 		return
@@ -166,11 +166,11 @@ func AdminActivateProduct(r *httprequest.Request) {
 		writeCatalogError(r, productLookupErr(err))
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 func AdminDeactivateProduct(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
 		return
@@ -184,7 +184,7 @@ func AdminDeactivateProduct(r *httprequest.Request) {
 		writeCatalogError(r, productLookupErr(err))
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 // AdminReconcileProduct diffs the OpenRails product against its Stripe Product
@@ -192,7 +192,7 @@ func AdminDeactivateProduct(r *httprequest.Request) {
 // (display_name, description, active) to Stripe. ?dry_run=true returns the diff
 // without mutating. This is the product-level analog of AdminReconcilePrice.
 func AdminReconcileProduct(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
 		return
@@ -202,14 +202,14 @@ func AdminReconcileProduct(r *httprequest.Request) {
 		return
 	}
 	opts := billingservice.ReconcileOptions{
-		DryRun: parseBool(r.GinCtx.Query("dry_run")),
+		DryRun: parseBool(r.Query("dry_run")),
 	}
 	out, err := svc.ReconcileProduct(r.Request.Context(), id, opts)
 	if err != nil {
 		writeCatalogError(r, productLookupErr(err))
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 // -- Prices ------------------------------------------------------------------
@@ -228,7 +228,7 @@ func AdminCreatePrice(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	r.GinCtx.JSON(http.StatusCreated, out)
+	r.JSON(http.StatusCreated, out)
 }
 
 func AdminListPrices(r *httprequest.Request) {
@@ -237,19 +237,19 @@ func AdminListPrices(r *httprequest.Request) {
 		return
 	}
 	// If product_id query param is set, scope to that product's prices.
-	if pidRaw := strings.TrimSpace(r.GinCtx.Query("product_id")); pidRaw != "" {
+	if pidRaw := strings.TrimSpace(r.Query("product_id")); pidRaw != "" {
 		pid, err := uuid.Parse(pidRaw)
 		if err != nil || pid == uuid.Nil {
 			r.ErrorJSON(http.StatusBadRequest, "invalid product_id")
 			return
 		}
-		activeOnly := parseBool(r.GinCtx.Query("active_only"))
+		activeOnly := parseBool(r.Query("active_only"))
 		items, err := svc.ListPricesByProduct(r.Request.Context(), pid, activeOnly)
 		if err != nil {
 			writeCatalogError(r, err)
 			return
 		}
-		r.GinCtx.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogPrice]{
+		r.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogPrice]{
 			Items:  items,
 			Total:  int64(len(items)),
 			Limit:  len(items),
@@ -260,21 +260,21 @@ func AdminListPrices(r *httprequest.Request) {
 
 	// Otherwise paginate across all prices with filters.
 	filter := repo.PriceFilter{
-		Currency: strings.ToLower(strings.TrimSpace(r.GinCtx.Query("currency"))),
-		Type:     strings.TrimSpace(r.GinCtx.Query("type")),
+		Currency: strings.ToLower(strings.TrimSpace(r.Query("currency"))),
+		Type:     strings.TrimSpace(r.Query("type")),
 	}
-	if v := strings.TrimSpace(r.GinCtx.Query("active_only")); v != "" {
+	if v := strings.TrimSpace(r.Query("active_only")); v != "" {
 		active := parseBool(v)
 		filter.Active = &active
 	}
-	limit := parseIntDefault(r.GinCtx.Query("limit"), 100)
-	offset := parseIntDefault(r.GinCtx.Query("offset"), 0)
+	limit := parseIntDefault(r.Query("limit"), 100)
+	offset := parseIntDefault(r.Query("offset"), 0)
 	items, total, err := svc.ListPrices(r.Request.Context(), filter, limit, offset)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogPrice]{
+	r.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogPrice]{
 		Items:  items,
 		Total:  total,
 		Limit:  limit,
@@ -283,7 +283,7 @@ func AdminListPrices(r *httprequest.Request) {
 }
 
 func AdminGetPrice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
@@ -297,16 +297,16 @@ func AdminGetPrice(r *httprequest.Request) {
 		writeCatalogError(r, priceLookupErr(err))
 		return
 	}
-	if parseBool(r.GinCtx.Query("verify")) {
+	if parseBool(r.Query("verify")) {
 		if states, vErr := svc.VerifyPriceSync(r.Request.Context(), id); vErr == nil && len(states) > 0 {
 			out.Providers = states
 		}
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 func AdminUpdatePrice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
@@ -324,11 +324,11 @@ func AdminUpdatePrice(r *httprequest.Request) {
 		writeCatalogError(r, priceLookupErr(err))
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 func AdminActivatePrice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
@@ -342,14 +342,14 @@ func AdminActivatePrice(r *httprequest.Request) {
 		writeCatalogError(r, priceLookupErr(err))
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 // AdminReconcilePrice diffs the OpenRails price against Stripe and re-applies
 // OpenRails values to Stripe. ?dry_run=true returns the diff without mutating.
 // ?recreate=true is required when the stored Stripe Price 404s.
 func AdminReconcilePrice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
@@ -359,19 +359,19 @@ func AdminReconcilePrice(r *httprequest.Request) {
 		return
 	}
 	opts := billingservice.ReconcileOptions{
-		DryRun:   parseBool(r.GinCtx.Query("dry_run")),
-		Recreate: parseBool(r.GinCtx.Query("recreate")),
+		DryRun:   parseBool(r.Query("dry_run")),
+		Recreate: parseBool(r.Query("recreate")),
 	}
 	out, err := svc.ReconcilePrice(r.Request.Context(), id, opts)
 	if err != nil {
 		writeCatalogError(r, priceLookupErr(err))
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 func AdminDeactivatePrice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.GinCtx.Param("id")))
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil || id == uuid.Nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
@@ -385,7 +385,7 @@ func AdminDeactivatePrice(r *httprequest.Request) {
 		writeCatalogError(r, priceLookupErr(err))
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 // -- Helpers -----------------------------------------------------------------

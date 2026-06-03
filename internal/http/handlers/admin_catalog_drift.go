@@ -24,18 +24,18 @@ func AdminListCatalogDrift(r *httprequest.Request) {
 		return
 	}
 	filter := billingservice.CatalogDriftFilter{
-		Provider:     strings.TrimSpace(r.GinCtx.Query("provider")),
-		Kind:         strings.TrimSpace(r.GinCtx.Query("kind")),
-		ResourceType: strings.TrimSpace(r.GinCtx.Query("resource_type")),
-		Limit:        parseIntDefault(r.GinCtx.Query("limit"), 100),
-		Offset:       parseIntDefault(r.GinCtx.Query("offset"), 0),
+		Provider:     strings.TrimSpace(r.Query("provider")),
+		Kind:         strings.TrimSpace(r.Query("kind")),
+		ResourceType: strings.TrimSpace(r.Query("resource_type")),
+		Limit:        parseIntDefault(r.Query("limit"), 100),
+		Offset:       parseIntDefault(r.Query("offset"), 0),
 	}
 	items, total, err := svc.ListCatalogDrift(r.Request.Context(), filter)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogDriftEventView]{
+	r.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogDriftEventView]{
 		Items:  items,
 		Total:  total,
 		Limit:  filter.Limit,
@@ -51,7 +51,7 @@ func AdminListCatalogDrift(r *httprequest.Request) {
 //
 //	GET /admin/catalog/orphans?provider=nmi&resource_type=price
 func AdminListCatalogOrphans(r *httprequest.Request) {
-	provider := strings.TrimSpace(r.GinCtx.Query("provider"))
+	provider := strings.TrimSpace(r.Query("provider"))
 	listOrphans(r, provider)
 }
 
@@ -83,9 +83,9 @@ func listOrphans(r *httprequest.Request, provider string) {
 	filter := billingservice.CatalogDriftFilter{
 		Provider:     provider,
 		Kind:         kind,
-		ResourceType: strings.TrimSpace(r.GinCtx.Query("resource_type")),
-		Limit:        parseIntDefault(r.GinCtx.Query("limit"), 100),
-		Offset:       parseIntDefault(r.GinCtx.Query("offset"), 0),
+		ResourceType: strings.TrimSpace(r.Query("resource_type")),
+		Limit:        parseIntDefault(r.Query("limit"), 100),
+		Offset:       parseIntDefault(r.Query("offset"), 0),
 	}
 	items, total, err := svc.ListCatalogDrift(r.Request.Context(), filter)
 	if err != nil {
@@ -104,7 +104,7 @@ func listOrphans(r *httprequest.Request, provider string) {
 		items = filtered
 		total = int64(len(filtered))
 	}
-	r.GinCtx.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogDriftEventView]{
+	r.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogDriftEventView]{
 		Items:  items,
 		Total:  total,
 		Limit:  filter.Limit,
@@ -126,5 +126,5 @@ func AdminRefreshCatalogDrift(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, report)
+	r.JSON(http.StatusOK, report)
 }

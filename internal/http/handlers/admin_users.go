@@ -260,7 +260,7 @@ func GetAdminUserCCBillMetrics(r *httprequest.Request) {
 }
 
 func AdminCancelSubscription(r *httprequest.Request) {
-	subscriptionID, err := api.ParseSubscriptionID(r.GinCtx.Param("id"))
+	subscriptionID, err := api.ParseSubscriptionID(r.Param("id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
 		return

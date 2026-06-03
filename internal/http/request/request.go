@@ -200,6 +200,19 @@ func (r *Request) Query(key string) string {
 	return r.t.query(key)
 }
 
+// Header returns a request header value, framework-neutral counterpart of the
+// former r.GinCtx.GetHeader(...).
+func (r *Request) Header(key string) string {
+	return r.t.header(key)
+}
+
+// UserContext returns the authenticated principal, framework-neutral counterpart
+// of the former authprovider.UserContextFromGin(r.GinCtx). Works on both the gin
+// and net/http backends.
+func (r *Request) UserContext() (authprovider.UserContext, bool) {
+	return r.t.userContext()
+}
+
 func (r *Request) Next() {
 	r.t.next()
 }

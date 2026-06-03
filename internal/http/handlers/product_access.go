@@ -125,7 +125,7 @@ func GetMyProducts(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to list accessible products")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, productAccessResponses(r, grants))
+	r.JSON(http.StatusOK, productAccessResponses(r, grants))
 }
 
 // GetMyProductAccess reports whether the authenticated user has access to a
@@ -156,7 +156,7 @@ func GetMyProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, newProductAccessCheck(productID, user.ID, has))
+	r.JSON(http.StatusOK, newProductAccessCheck(productID, user.ID, has))
 }
 
 // productAccessCheckResponse is the typed payload for has-access checks.
@@ -176,7 +176,7 @@ func newProductAccessCheck(productID uuid.UUID, userID string, has bool) product
 // server-to-server (OAT) caller. Optional ?product_id=... narrows to a single
 // has-access check.
 func ServiceGetUserProductAccess(r *httprequest.Request) {
-	userID := strings.TrimSpace(r.GinCtx.Param("user_id"))
+	userID := strings.TrimSpace(r.Param("user_id"))
 	if userID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "user_id is required")
 		return
@@ -186,7 +186,7 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
 		return
 	}
-	if productIDStr := strings.TrimSpace(r.GinCtx.Query("product_id")); productIDStr != "" {
+	if productIDStr := strings.TrimSpace(r.Query("product_id")); productIDStr != "" {
 		productID, err := uuid.Parse(productIDStr)
 		if err != nil {
 			r.ErrorJSON(http.StatusBadRequest, "invalid product_id format")
@@ -197,7 +197,7 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
 			return
 		}
-		r.GinCtx.JSON(http.StatusOK, newProductAccessCheck(productID, userID, has))
+		r.JSON(http.StatusOK, newProductAccessCheck(productID, userID, has))
 		return
 	}
 	grants, err := svc.ListAccessibleProducts(r.Request.Context(), userID)
@@ -205,7 +205,7 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to list accessible products")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, productAccessResponses(r, grants))
+	r.JSON(http.StatusOK, productAccessResponses(r, grants))
 }
 
 // --- Admin (grant/revoke/list under /v1/admin/users/:user_id/product-access) ---
@@ -228,7 +228,7 @@ func GetAdminUserProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to list product access grants")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, productAccessResponses(r, grants))
+	r.JSON(http.StatusOK, productAccessResponses(r, grants))
 }
 
 // GrantAdminProductAccess creates a durable product access grant for a user
@@ -281,7 +281,7 @@ func GrantAdminProductAccess(r *httprequest.Request) {
 		return
 	}
 	resp := productAccessResponses(r, []models.ProductAccessGrant{*grant})
-	r.GinCtx.JSON(http.StatusCreated, resp[0])
+	r.JSON(http.StatusCreated, resp[0])
 }
 
 // RevokeAdminProductAccess revokes a single grant by id for a user.

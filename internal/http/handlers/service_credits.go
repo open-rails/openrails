@@ -516,7 +516,7 @@ func ServiceHoldCredits(r *httprequest.Request) {
 }
 
 func ServiceCaptureHold(r *httprequest.Request) {
-	holdID, err := uuid.Parse(r.GinCtx.Param("id"))
+	holdID, err := uuid.Parse(r.Param("id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid hold id")
 		return
@@ -543,7 +543,7 @@ func ServiceCaptureHold(r *httprequest.Request) {
 }
 
 func ServiceReleaseHold(r *httprequest.Request) {
-	holdID, err := uuid.Parse(r.GinCtx.Param("id"))
+	holdID, err := uuid.Parse(r.Param("id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid hold id")
 		return
@@ -561,7 +561,7 @@ func ServiceReleaseHold(r *httprequest.Request) {
 }
 
 func ServiceGetUserCredits(r *httprequest.Request) {
-	userID := strings.TrimSpace(r.GinCtx.Param("user_id"))
+	userID := strings.TrimSpace(r.Param("user_id"))
 	if userID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "user_id required")
 		return

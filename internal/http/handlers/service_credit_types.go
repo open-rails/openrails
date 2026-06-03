@@ -42,12 +42,12 @@ func ServiceCreateCreditType(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid credit type definition")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 func ServiceListCreditTypes(r *httprequest.Request) {
 	activeOnly := true
-	if v := strings.TrimSpace(r.GinCtx.Query("active_only")); v != "" {
+	if v := strings.TrimSpace(r.Query("active_only")); v != "" {
 		switch strings.ToLower(v) {
 		case "1", "true", "yes":
 			activeOnly = true
@@ -69,11 +69,11 @@ func ServiceListCreditTypes(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to list credit types")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, items)
+	r.JSON(http.StatusOK, items)
 }
 
 func ServiceUpdateCreditType(r *httprequest.Request) {
-	name := strings.TrimSpace(r.GinCtx.Param("name"))
+	name := strings.TrimSpace(r.Param("name"))
 	if name == "" {
 		r.ErrorJSON(http.StatusBadRequest, "name is required")
 		return
@@ -96,11 +96,11 @@ func ServiceUpdateCreditType(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid credit type update")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, out)
 }
 
 func ServiceDeactivateCreditType(r *httprequest.Request) {
-	name := strings.TrimSpace(r.GinCtx.Param("name"))
+	name := strings.TrimSpace(r.Param("name"))
 	if name == "" {
 		r.ErrorJSON(http.StatusBadRequest, "name is required")
 		return
@@ -114,11 +114,11 @@ func ServiceDeactivateCreditType(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "failed to deactivate credit type")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, map[string]any{"ok": true})
+	r.JSON(http.StatusOK, map[string]any{"ok": true})
 }
 
 func ServiceActivateCreditType(r *httprequest.Request) {
-	name := strings.TrimSpace(r.GinCtx.Param("name"))
+	name := strings.TrimSpace(r.Param("name"))
 	if name == "" {
 		r.ErrorJSON(http.StatusBadRequest, "name is required")
 		return
@@ -132,5 +132,5 @@ func ServiceActivateCreditType(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "failed to activate credit type")
 		return
 	}
-	r.GinCtx.JSON(http.StatusOK, map[string]any{"ok": true})
+	r.JSON(http.StatusOK, map[string]any{"ok": true})
 }

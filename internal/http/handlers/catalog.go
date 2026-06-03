@@ -9,7 +9,6 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
 type catalogPaginationParams struct {
@@ -44,7 +43,7 @@ func GetProducts(r *httprequest.Request) {
 
 	includeInactive := false
 	if req.Active != nil && !*req.Active {
-		if uc, ok := authprovider.UserContextFromGin(r.GinCtx); ok {
+		if uc, ok := r.UserContext(); ok {
 			if isAdmin, err := authpolicy.IsOperatorAdmin(r.Request.Context(), r.State.Config, r.State.DB.Q(r.Request.Context()), uc); err == nil && isAdmin {
 				includeInactive = true
 			}
@@ -88,7 +87,7 @@ func GetPrices(r *httprequest.Request) {
 	} else if *req.Active {
 		filter.Active = req.Active
 	} else {
-		if uc, ok := authprovider.UserContextFromGin(r.GinCtx); ok {
+		if uc, ok := r.UserContext(); ok {
 			if isAdmin, err := authpolicy.IsOperatorAdmin(r.Request.Context(), r.State.Config, r.State.DB.Q(r.Request.Context()), uc); err == nil && isAdmin {
 				filter.Active = req.Active
 			} else {

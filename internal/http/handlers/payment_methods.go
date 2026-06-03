@@ -152,7 +152,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		CardType:     req.CardType,
 		ExpiryDate:   req.ExpiryDate,
 	}
-	if e2eRunID := strings.TrimSpace(r.GinCtx.GetHeader("X-E2E-Run-ID")); e2eRunID != "" {
+	if e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID")); e2eRunID != "" {
 		createReq.Metadata = map[string]any{"e2e_run_id": e2eRunID}
 	}
 

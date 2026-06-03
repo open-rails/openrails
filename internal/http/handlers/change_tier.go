@@ -27,7 +27,7 @@ func ChangeTier(r *httprequest.Request) {
 		return
 	}
 
-	subscriptionIDStr := r.GinCtx.Param("id")
+	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return
@@ -44,7 +44,7 @@ func ChangeTier(r *httprequest.Request) {
 		return
 	}
 
-	idempotencyKey := r.GinCtx.GetHeader("X-Idempotency-Key")
+	idempotencyKey := r.Header("X-Idempotency-Key")
 
 	svcReq := &checkout.TierChangeRequest{
 		PriceID:        req.PriceID,

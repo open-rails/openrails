@@ -26,7 +26,7 @@ func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	subscriptionIDStr := r.GinCtx.Param("id")
+	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return

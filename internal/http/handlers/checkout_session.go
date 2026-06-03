@@ -77,8 +77,8 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "unsupported processor")
 		return
 	}
-	req.IdempotencyKey = r.GinCtx.GetHeader("X-Idempotency-Key")
-	e2eRunID := strings.TrimSpace(r.GinCtx.GetHeader("X-E2E-Run-ID"))
+	req.IdempotencyKey = r.Header("X-Idempotency-Key")
+	e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID"))
 	if e2eRunID != "" {
 		if req.Metadata == nil {
 			req.Metadata = map[string]string{}
@@ -97,7 +97,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	r.SuccessJSON(resp)
 }
 func GetCheckoutSession(r *httprequest.Request) {
-	sessionID := strings.TrimSpace(r.GinCtx.Param("id"))
+	sessionID := strings.TrimSpace(r.Param("id"))
 	if sessionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
 		return
@@ -125,7 +125,7 @@ func GetCheckoutSession(r *httprequest.Request) {
 }
 
 func ConfirmCheckoutSession(r *httprequest.Request) {
-	sessionID := strings.TrimSpace(r.GinCtx.Param("id"))
+	sessionID := strings.TrimSpace(r.Param("id"))
 	if sessionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
 		return
