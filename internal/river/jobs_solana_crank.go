@@ -8,6 +8,7 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/billing/declinecode"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
@@ -126,29 +127,43 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo *dbrepo.SolanaSub
 
 	sig, crankErr := w.Cranker.Crank(ctx, tenantID, row, amountBaseUnits)
 	if crankErr != nil {
-		// Operational failure (RPC/network, or the cranker wallet out of SOL gas):
-		// retry on the next run, NEVER dun the subscriber (#257). A SOL-gas outage
-		// hits a tenant's whole book at once, so dunning on it would wrongly
-		// past-due every subscriber. Leave next_pull_at unchanged so it stays due.
-		if recurring.IsOperationalFailure(crankErr) {
-			log.WithContext(ctx).WithError(crankErr).WithField("subscription_pda", row.SubscriptionPDA).
-				Warn("Solana cranker: operational pull failure; will retry next run (no dunning)")
+		// One classifier maps the on-chain error onto the shared billing
+		// decline-code vocabulary + the action to take (#270). Codes confirmed on
+		// devnet (#263): Custom:400 = period already paid (idempotent); token
+		// OwnerMismatch (Custom:4) = subscriber revoked the SPL delegate (terminal);
+		// token InsufficientFunds (Custom:1) = recoverable; RPC/gas = operational.
+		cf := recurring.ClassifyCrankError(crankErr)
+		llog := log.WithContext(ctx).WithError(crankErr).WithFields(log.Fields{
+			"subscription_pda": row.SubscriptionPDA,
+			"decline_code":     string(cf.Code),
+			"onchain_code":     cf.OnChainCode,
+		})
+		switch cf.Category {
+		case declinecode.Operational:
+			// RPC/network or the cranker wallet out of SOL gas: retry next run, NEVER
+			// dun — a shared outage would wrongly past-due a tenant's whole book.
+			// Leave next_pull_at unchanged so it stays due.
+			llog.Warn("Solana cranker: operational pull failure; retry next run (no dunning)")
 			return crankErr
-		}
-		// Terminal failure (#265): the subscriber cancelled or revoked the
-		// delegation directly on-chain (via a wallet/explorer, bypassing the app),
-		// so the subscription is gone/inactive. Cancel immediately and STOP — never
-		// dun, since dunning would burn ~15 days of pointless retries against a
-		// subscription the user already killed.
-		if recurring.IsTerminalFailure(crankErr) {
-			log.WithContext(ctx).WithError(crankErr).WithField("subscription_pda", row.SubscriptionPDA).
-				Warn("Solana cranker: terminal pull failure (out-of-band cancel/revoke); cancelling subscription (no dunning)")
+		case declinecode.AlreadyPaid:
+			// The period was already pulled on-chain but our DB did not record it
+			// (the partial-failure window). Advance past this period so we neither
+			// re-attempt nor dun; the reconcile worker (#258) repairs the ledger.
+			llog.Warn("Solana cranker: period already paid on-chain (idempotent); advancing, ledger repair via reconcile (#258)")
+			next := w.now().Add(time.Duration(periodHours) * time.Hour)
+			return repo.SetNextPullAt(ctx, row.ID, next)
+		case declinecode.Terminal:
+			// The subscriber revoked the SPL token delegate on-chain (the trustless
+			// cancel) — transfer_subscription can no longer move funds. Cancel + stop,
+			// never dun. NOTE: a plain cancel_subscription does NOT reach here (it
+			// produces no crank error, #263), so our soft cancel is the real stop.
+			llog.Warn("Solana cranker: terminal pull failure (delegate revoked); cancelling subscription (no dunning)")
 			if err := repo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCancelled); err != nil {
 				return fmt.Errorf("solana crank: set cancelled status: %w", err)
 			}
 			subID := row.SubscriptionID
 			proc := models.ProcessorSolana
-			reason := crankErr.Error()
+			reason := fmt.Sprintf("%s (%s)", crankErr.Error(), cf.Code)
 			if err := w.Lifecycle.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 				Processor:      &proc,
 				SubscriptionID: &subID,
@@ -159,22 +174,25 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo *dbrepo.SolanaSub
 				return fmt.Errorf("solana crank: cancel membership: %w", err)
 			}
 			return nil
+		default:
+			// Recoverable subscriber decline (insufficient USDC, etc.) -> dunning.
+			// Advance next_pull_at by the dunning interval so we align with the
+			// dunning cadence instead of re-failing every hourly run.
+			llog.Warn("Solana cranker: recoverable pull failure; routing to dunning")
+			reason := crankErr.Error()
+			code := string(cf.Code)
+			subID := row.SubscriptionID
+			if err := w.Lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
+				Processor:      models.ProcessorSolana,
+				SubscriptionID: &subID,
+				FailureReason:  &reason,
+				FailureCode:    &code,
+			}); err != nil {
+				return fmt.Errorf("solana crank: fail membership: %w", err)
+			}
+			nextRetry := w.now().Add(subscriptions.DunningInterval)
+			return repo.SetNextPullAt(ctx, row.ID, nextRetry)
 		}
-		// Subscriber fault (insufficient USDC, revoked delegation, etc.) -> dunning.
-		// Advance next_pull_at by the dunning interval so the next attempt aligns
-		// with the dunning cadence instead of re-failing every hourly run (which
-		// would collapse the multi-day dunning window to a few hours).
-		reason := crankErr.Error()
-		subID := row.SubscriptionID
-		if err := w.Lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      models.ProcessorSolana,
-			SubscriptionID: &subID,
-			FailureReason:  &reason,
-		}); err != nil {
-			return fmt.Errorf("solana crank: fail membership: %w", err)
-		}
-		nextRetry := w.now().Add(subscriptions.DunningInterval)
-		return repo.SetNextPullAt(ctx, row.ID, nextRetry)
 	}
 
 	now := w.now()
