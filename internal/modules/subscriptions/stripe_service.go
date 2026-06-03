@@ -338,7 +338,7 @@ func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptio
 		values.Set("billing_cycle_anchor", billingAnchor)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/subscriptions/"+subscriptionID, strings.NewReader(values.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.stripeBaseURL()+"/v1/subscriptions/"+subscriptionID, strings.NewReader(values.Encode()))
 	if err != nil {
 		return err
 	}

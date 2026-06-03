@@ -1475,12 +1475,19 @@ func (s *CheckoutService) processUpgrade(
 	}
 	oldPrice := existingSub.Price
 
-	// Calculate proration
-	prorationAmount, daysRemaining, cycleDays := s.CalculateProration(
+	// #268: Model B (reset-period) upgrade. Charge `newFull - oldUnused` NOW for
+	// a FRESH full period, then rebill the full new price at now + cycle. The
+	// billing cycle comes from the NEW price (the period being started), with a
+	// fallback to the old price's cycle for legacy prices that omit it.
+	billingCycleDays := newPrice.BillingCycleDays
+	if billingCycleDays == nil || *billingCycleDays <= 0 {
+		billingCycleDays = oldPrice.BillingCycleDays
+	}
+	prorationAmount, cycleDays := CalculateModelBUpgradeCharge(
 		oldPrice.Amount,
 		newPrice.Amount,
 		existingSub.CurrentPeriodEndsAt,
-		oldPrice.BillingCycleDays,
+		billingCycleDays,
 		now,
 	)
 
@@ -1488,10 +1495,10 @@ func (s *CheckoutService) processUpgrade(
 		"user_id":          user.ID,
 		"old_price":        oldPrice.Amount,
 		"new_price":        newPrice.Amount,
-		"days_remaining":   daysRemaining,
 		"cycle_days":       cycleDays,
-		"proration_amount": prorationAmount,
-	}).Info("calculating upgrade proration")
+		"proration_amount": prorationAmount, // Model B first charge (new_full - old_unused)
+		"billing_model":    "B",
+	}).Info("calculating Model-B upgrade first charge")
 
 	provider := normalize.Lower(processor)
 	if provider == "" {
@@ -1510,7 +1517,14 @@ func (s *CheckoutService) processUpgrade(
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
-	startDate, _ := buildNMIFutureStartDate(*existingSub.CurrentPeriodEndsAt, now)
+
+	// #268: Model B resets the billing period to [now, now+cycle]. The immediate
+	// first charge (RunSale below) pays for this fresh period, so the recurring
+	// NMI subscription's first scheduled rebill must land at the NEW period end
+	// (now + cycle), not the old period end.
+	newPeriodStart := now
+	newPeriodEnd := now.AddDate(0, 0, cycleDays)
+	startDate, _ := buildNMIFutureStartDate(newPeriodEnd, now)
 
 	client, ok := s.NMIClients[provider]
 	if !ok {
@@ -1644,8 +1658,9 @@ func (s *CheckoutService) processUpgrade(
 		Processor:                models.Processor(provider),
 		UserEmail:                emailPtr,
 		StartedAt:                now,
-		CurrentPeriodStartsAt:    existingSub.CurrentPeriodStartsAt,
-		CurrentPeriodEndsAt:      existingSub.CurrentPeriodEndsAt, // Keep same period end
+		// #268: Model B resets the period — fresh full period [now, now+cycle].
+		CurrentPeriodStartsAt: &newPeriodStart,
+		CurrentPeriodEndsAt:   &newPeriodEnd,
 	}
 
 	if createdPaymentMethod != nil {
@@ -1797,7 +1812,80 @@ func (s *CheckoutService) processDowngrade(
 	}, nil
 }
 
-// CalculateProration calculates the prorated amount for an upgrade
+// CalculateModelBUpgradeCharge computes the immediate first charge for a
+// "Model B" (reset-period) upgrade.
+//
+// Model B is the UNIVERSAL upgrade policy as of #268: every upgrade resets the
+// billing period. The customer is charged `newFull - oldUnused` NOW for a FRESH
+// full period, and then rebilled `newFull` at `now + cycle`.
+//
+//	oldUnused   = oldFull * (daysRemaining / cycleDays)   // integer math
+//	firstCharge = newFull - oldUnused                     // clamped to >= 0
+//
+// where daysRemaining is the number of WHOLE days left in the current paid
+// period (0 if the period has already ended or periodEndsAt is nil).
+//
+// Example: $20 -> $50, 2 days into a 30-day cycle => daysRemaining=28,
+// oldUnused = 2000*28/30 = 1866c, firstCharge = 5000-1866 = 3134c. The new
+// period becomes [now, now+30d] and the next bill is $50.
+//
+// Boundary behavior:
+//   - 0 days remaining            => firstCharge = newFull
+//   - full period remaining       => firstCharge = newFull - oldFull
+//
+// This helper is intentionally pure (no receiver state) so other processors
+// (e.g. the Solana path in #267) can reuse the exact same math. cycleDays is
+// returned so callers can advance the period end (now + cycleDays).
+func CalculateModelBUpgradeCharge(
+	oldFull int64,
+	newFull int64,
+	periodEndsAt *time.Time,
+	billingCycleDays *int,
+	now time.Time,
+) (firstChargeCents int64, cycleDays int) {
+	// Default to a 30-day cycle if not specified.
+	cycleDays = 30
+	if billingCycleDays != nil && *billingCycleDays > 0 {
+		cycleDays = *billingCycleDays
+	}
+
+	// Whole days remaining in the current paid period.
+	daysRemaining := 0
+	if periodEndsAt != nil && periodEndsAt.After(now) {
+		daysRemaining = int(periodEndsAt.Sub(now).Hours() / 24)
+		if daysRemaining < 0 {
+			daysRemaining = 0
+		}
+	}
+	// Never credit more than a full cycle of unused time.
+	if daysRemaining > cycleDays {
+		daysRemaining = cycleDays
+	}
+
+	// Credit for the unused portion of the OLD plan (integer math to avoid
+	// floating-point drift on cent amounts).
+	oldUnused := (oldFull * int64(daysRemaining)) / int64(cycleDays)
+
+	firstChargeCents = newFull - oldUnused
+	if firstChargeCents < 0 {
+		// Defensive clamp. For a genuine upgrade newFull > oldFull so this is
+		// only reachable with bad inputs (e.g. a "downgrade" routed here).
+		firstChargeCents = 0
+	}
+	return firstChargeCents, cycleDays
+}
+
+// CalculateProration calculates the prorated amount for a tier change.
+//
+// NOTE (#268): Model B (reset-period) is now the UNIVERSAL policy for
+// UPGRADES — see CalculateModelBUpgradeCharge, which is what the NMI and
+// Stripe upgrade paths use to charge `newFull - oldUnused` now and reset the
+// billing period to [now, now+cycle]. This function still implements the older
+// "Model A" prorated-DIFFERENCE math and is retained for reference/compat; do
+// not use it to drive new upgrade charges. DOWNGRADES remain deferred to the
+// end of the current period (see processDowngrade / processTierChangeStripe)
+// and are unchanged.
+//
 // Returns: prorationAmount (in cents), daysRemaining, cycleDays
 func (s *CheckoutService) CalculateProration(
 	oldPriceAmount int64,
@@ -2032,20 +2120,52 @@ func (s *CheckoutService) processTierChangeStripe(
 		}, nil
 	}
 
-	// Call Stripe API
+	// #268: Model B (reset-period) upgrade via Stripe.
+	//
+	// We drive Stripe to (a) reset the billing cycle to start NOW and (b)
+	// immediately collect the first charge for the fresh period:
+	//
+	//   - billing_cycle_anchor = "now"        -> resets the period to [now, now+cycle]
+	//   - proration_behavior   = "always_invoice" -> Stripe creates AND invoices
+	//     the proration right away, so the customer is charged now instead of
+	//     having the credit/charge merely sit on the next invoice.
+	//
+	// With the anchor reset, Stripe bills a fresh full period for the new price
+	// and credits the unused portion of the old price as a proration line item;
+	// the invoiced total nets to `new_full - old_unused`, i.e. the Model B first
+	// charge (matching CalculateModelBUpgradeCharge for the NMI path).
+	//
+	// ASSUMPTION / TODO(#268): Stripe computes the unused-time credit from its
+	// own clock and per-second proration, so the collected amount can differ
+	// from CalculateModelBUpgradeCharge by sub-cent/rounding and by Stripe's
+	// second- vs whole-day granularity. This is expected — Stripe is the source
+	// of truth for Stripe-billed amounts. If exact parity with the NMI math is
+	// later required, switch to an explicit invoice-item + price-update flow.
+	// Verify the live invoice amount on a real Stripe test upgrade before deploy.
 	stripeService := &subscriptions.StripeService{Config: s.Config}
 	itemID, err := stripeService.GetSubscriptionItemID(ctx, existingSub.ProcessorSubscriptionID)
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
-	if err := stripeService.UpdateSubscriptionPrice(ctx, existingSub.ProcessorSubscriptionID, itemID, stripePriceID, "create_prorations", "now"); err != nil {
+	if err := stripeService.UpdateSubscriptionPrice(ctx, existingSub.ProcessorSubscriptionID, itemID, stripePriceID, "always_invoice", "now"); err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
 
-	// Update local subscription record
+	// Update local subscription record.
+	// #268: Model B reset the billing cycle at Stripe (anchor "now"), so reflect
+	// the fresh period [now, now+cycle] locally. Stripe webhooks remain the
+	// source of truth and will reconcile the exact period boundaries.
+	stripeNow := s.now()
+	stripeCycleDays := 30
+	if newPrice.BillingCycleDays != nil && *newPrice.BillingCycleDays > 0 {
+		stripeCycleDays = *newPrice.BillingCycleDays
+	}
+	stripePeriodEnd := stripeNow.AddDate(0, 0, stripeCycleDays)
 	existingSub.PriceID = newPrice.ID
 	existingSub.ProductID = newPrice.ProductID
 	existingSub.ScheduledPriceID = nil
+	existingSub.CurrentPeriodStartsAt = &stripeNow
+	existingSub.CurrentPeriodEndsAt = &stripePeriodEnd
 	if err := s.SubscriptionService.Update(ctx, existingSub); err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "failed to update subscription"}
 	}

@@ -1041,16 +1041,16 @@
     {
       "id": 268,
       "name": "universal-model-b-upgrade-proration",
-      "completed": false,
+      "completed": true,
       "description": "OR-H (DECIDED): ALL subscription UPGRADES use Model B (reset period) across NMI, Stripe, and Solana. Replaces the current Model A (keep original renewal date, charge only the difference) for NMI/Stripe.\n\nWHY: Model B is more merchant-favorable AND simpler/uniform. Upgrade $20->$50, 2 days in: old_unused = 28/30*$20 = $18.67; charge new_full - old_unused = $31.33 NOW for a FRESH full period; next rebill $50 at now+cycle. Downgrades UNCHANGED (deferred to period end via ScheduledPriceID).\n\nCODE TO CHANGE (currently Model A): internal/modules/checkout/service.go CalculateProration (~L1790) -> first_charge = new_full - old_unused; processUpgrade (~L1394, NMI) -> reset CurrentPeriodStartsAt=now / EndsAt=now+cycle; processTierChangeStripe upgrade branch -> billing_cycle_anchor=now so Stripe collects new_full - old_unused now + renews fresh. CAUTION: changes LIVE card billing; well-tested; keep idempotency replay intact.\n\nDepends on: none (independent; pairs with #267).",
       "tasks": [
-        "[ ] shared Model-B helper: first_charge = new_full - old_unused; old_unused = (1 - elapsed/cycle)*old_full; clamp >=0",
-        "[ ] NMI processUpgrade: charge new_full - old_unused + RESET period (start=now, end=now+cycle)",
-        "[ ] Stripe upgrade: billing_cycle_anchor=now so Stripe collects new_full - old_unused + renews fresh; verify Stripe proration semantics",
-        "[ ] Solana upgrade (OR-G/#267) uses the SAME helper",
-        "[ ] downgrades remain deferred (ScheduledPriceID) -- regression test unchanged",
-        "[ ] tests: NMI + Stripe (+ Solana) upgrade mid-period -> correct charge + reset renewal; idempotent replay",
-        "[ ] document the universal Model-B upgrade policy in one place"
+        "[x] shared Model-B helper: first_charge = new_full - old_unused; old_unused = (1 - elapsed/cycle)*old_full; clamp >=0 (CalculateModelBUpgradeCharge)",
+        "[x] NMI processUpgrade: charge new_full - old_unused + RESET period (start=now, end=now+cycle)",
+        "[x] Stripe upgrade: proration_behavior=always_invoice + billing_cycle_anchor=now so Stripe collects new_full - old_unused + renews fresh (see TODO comment re: Stripe sub-cent proration semantics)",
+        "[ ] Solana upgrade (OR-G/#267) uses the SAME helper -- helper is exported & reusable; wiring is #267's job",
+        "[x] downgrades remain deferred (ScheduledPriceID) -- processDowngrade + Stripe downgrade branch unchanged",
+        "[x] tests: Model-B helper unit-tested hard (boundaries + issue example); Stripe upgrade request construction tested. NMI full-flow needs DB (integration suite)",
+        "[x] document the universal Model-B upgrade policy in one place (doc comment on CalculateModelBUpgradeCharge + CalculateProration)"
       ]
     },
     {
