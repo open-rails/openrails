@@ -39,6 +39,33 @@ func stablecoinPriceUSD(ctx context.Context, symbol string, priceProvider TokenP
 	return p
 }
 
+// USDCDecimals is the SPL decimal precision for USDC (and the other $1-pegged
+// stablecoins OpenRails recurring-bills in): 6. One USD cent therefore equals
+// 10^6 / 100 = 10_000 base units at the $1 peg.
+const USDCDecimals = 6
+
+// FiatCentsToStablecoinBaseUnits converts a fiat-cent amount into stablecoin
+// base units for a $1-pegged token (#267). At the peg, 1 cent = 10_000 base
+// units (10^6 / 100). The same depeg failsafe used for quotes applies: if a
+// live feed shows the stablecoin has diverged beyond stablecoinPegTolerance, the
+// charge is scaled up by 1/price so the merchant still nets the USD amount.
+//
+// Negative cents clamp to 0. The result rounds UP (ceil) so a partial base unit
+// never under-charges the merchant.
+func FiatCentsToStablecoinBaseUnits(ctx context.Context, cents int64, symbol string, priceProvider TokenPriceProvider) uint64 {
+	if cents <= 0 {
+		return 0
+	}
+	priceUSD := stablecoinPriceUSD(ctx, symbol, priceProvider)
+	if priceUSD <= 0 {
+		priceUSD = 1.0
+	}
+	// USD value of the charge / price-per-token => token amount, then to base units.
+	usd := float64(cents) / 100.0
+	scale := math.Pow10(USDCDecimals)
+	return uint64(math.Ceil((usd / priceUSD) * scale))
+}
+
 func RequireSolanaProcessorConfig(cfg *config.Config) (*config.ProcessorConfig, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("solana not configured")

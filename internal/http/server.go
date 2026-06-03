@@ -245,6 +245,9 @@ func New(deps Dependencies) (*Server, error) {
 				if deps.Runtime.CheckoutSessionService != nil {
 					prepareSvc := recurring.NewPrepareSubscribeService(submitter, deps.Runtime.SolanaRPC, network)
 					deps.Runtime.CheckoutSessionService.SetSolanaRecurring(prepareSvc, enrollSvc)
+					// Model-B upgrade (#267): the lifecycle cancel surface used to
+					// soft-cancel the OLD subscription after the new upgrade enrolls.
+					deps.Runtime.CheckoutSessionService.SetSolanaUpgradeCanceller(deps.Runtime.SubscriptionLifecycleService)
 				}
 			}
 		}

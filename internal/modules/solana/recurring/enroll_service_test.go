@@ -2,6 +2,7 @@ package recurring
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 
 	solanago "github.com/doujins-org/solana-go"
@@ -89,6 +90,85 @@ func TestConfirmEnrollmentRejectsMissingOnChainSubscription(t *testing.T) {
 	}
 	if lc.created != nil || store.upserted != nil {
 		t.Error("must not create membership or persist when subscription is absent")
+	}
+}
+
+// crankAmountFromSubmitter decodes the u64 little-endian amount from the
+// transfer_subscription instruction the cranker submitted (data bytes [1:9]).
+func crankAmountFromSubmitter(t *testing.T, fs *fakeSubmitter) uint64 {
+	t.Helper()
+	if len(fs.lastInstrs) != 1 {
+		t.Fatalf("expected exactly one submitted instruction, got %d", len(fs.lastInstrs))
+	}
+	data, derr := fs.lastInstrs[0].Data()
+	if derr != nil {
+		t.Fatalf("instruction data: %v", derr)
+	}
+	if len(data) < 9 {
+		t.Fatalf("instruction data too short: %d", len(data))
+	}
+	return binary.LittleEndian.Uint64(data[1:9])
+}
+
+// TestConfirmEnrollmentFirstChargeOverride pins the #267 Model-B behavior: when
+// FirstChargeBaseUnits is non-zero the FIRST crank pulls THAT amount (the reduced
+// upgrade pull), while the persisted row keeps the full per-cycle AmountBaseUnits
+// so every subsequent cranker pull is the full amount.
+func TestConfirmEnrollmentFirstChargeOverride(t *testing.T) {
+	fs := &fakeSubmitter{merchant: newMerchant(t)}
+	subID := uuid.New()
+	lc := &fakeLifecycle{sub: &models.Subscription{ID: subID}}
+	store := &fakeStore{}
+	svc := NewEnrollService(NewCrankService(fs), lc, store, fakeBalance{lamports: 2_000_000}, fs, "mainnet")
+
+	const fullAmount = uint64(10_000_000) // 10 USDC full cycle
+	const reducedFirst = uint64(3_134_000) // reduced Model-B first pull
+
+	sub, err := svc.ConfirmEnrollment(context.Background(), EnrollInput{
+		TenantID: tenant.DefaultID, UserID: "user-1", PriceID: uuid.New(),
+		SubscriberWallet: newMerchant(t).String(), PlanID: 7, MintSymbol: "USDC",
+		AmountBaseUnits: fullAmount, PeriodHours: 720, PlanCreatedAt: 1_700_000_000,
+		FiatAmount: 5000, Currency: "usd",
+		FirstChargeBaseUnits: reducedFirst,
+	})
+	if err != nil {
+		t.Fatalf("ConfirmEnrollment: %v", err)
+	}
+	if sub == nil {
+		t.Fatal("expected a subscription")
+	}
+	// First crank pulled the REDUCED amount, not the full per-cycle amount.
+	if got := crankAmountFromSubmitter(t, fs); got != reducedFirst {
+		t.Fatalf("first crank amount: expected reduced %d, got %d", reducedFirst, got)
+	}
+	// Membership fiat amount is still the new full price (cents) — only the on-chain
+	// first pull is reduced.
+	if lc.created == nil || lc.created.Amount != 5000 {
+		t.Fatalf("membership fiat amount should be the full new price: %+v", lc.created)
+	}
+}
+
+// TestConfirmEnrollmentFirstChargeZeroUsesFull confirms a zero override falls
+// back to the full AmountBaseUnits (a normal, non-upgrade subscribe).
+func TestConfirmEnrollmentFirstChargeZeroUsesFull(t *testing.T) {
+	fs := &fakeSubmitter{merchant: newMerchant(t)}
+	lc := &fakeLifecycle{sub: &models.Subscription{ID: uuid.New()}}
+	store := &fakeStore{}
+	svc := NewEnrollService(NewCrankService(fs), lc, store, fakeBalance{lamports: 2_000_000}, fs, "mainnet")
+
+	const fullAmount = uint64(10_000_000)
+	_, err := svc.ConfirmEnrollment(context.Background(), EnrollInput{
+		TenantID: tenant.DefaultID, UserID: "user-1", PriceID: uuid.New(),
+		SubscriberWallet: newMerchant(t).String(), PlanID: 7, MintSymbol: "USDC",
+		AmountBaseUnits: fullAmount, PeriodHours: 720,
+		FiatAmount: 1000, Currency: "usd",
+		FirstChargeBaseUnits: 0, // no override
+	})
+	if err != nil {
+		t.Fatalf("ConfirmEnrollment: %v", err)
+	}
+	if got := crankAmountFromSubmitter(t, fs); got != fullAmount {
+		t.Fatalf("first crank amount: expected full %d, got %d", fullAmount, got)
 	}
 }
 

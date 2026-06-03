@@ -61,11 +61,18 @@ type EnrollInput struct {
 	// Plan terms (from the price's Solana processor config).
 	PlanID          uint64
 	MintSymbol      string
-	AmountBaseUnits uint64 // on-chain pull amount (token base units)
+	AmountBaseUnits uint64 // on-chain pull amount (token base units) — the NORMAL full per-cycle amount
 	PeriodHours     uint64
 	PlanCreatedAt   int64 // ghost-plan fingerprint
 	FiatAmount      int64 // price.Amount (cents) recorded on the payment
 	Currency        string
+
+	// FirstChargeBaseUnits, when non-zero, overrides the amount pulled on the
+	// FIRST crank only (token base units). Used by the Model-B upgrade flow (#267)
+	// to charge a reduced first pull (new_full - old_unused) while the persisted
+	// row keeps the normal full AmountBaseUnits so every subsequent cranker pull is
+	// the full per-cycle amount. Zero => use AmountBaseUnits for the first pull.
+	FirstChargeBaseUnits uint64
 }
 
 // ConfirmEnrollment derives the on-chain PDAs, verifies the subscription exists
@@ -127,8 +134,15 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 	}
 
 	// First charge = the first crank. It must succeed to activate (no membership
-	// without a paid first cycle — same as a card first charge).
-	sig, err := s.cranker.Crank(ctx, in.TenantID, row, in.AmountBaseUnits)
+	// without a paid first cycle — same as a card first charge). For a Model-B
+	// upgrade (#267) the first pull is REDUCED (FirstChargeBaseUnits =
+	// new_full - old_unused); every subsequent cranker pull uses the persisted
+	// full AmountBaseUnits, so only this first cycle differs.
+	firstPull := in.AmountBaseUnits
+	if in.FirstChargeBaseUnits != 0 {
+		firstPull = in.FirstChargeBaseUnits
+	}
+	sig, err := s.cranker.Crank(ctx, in.TenantID, row, firstPull)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: first crank failed: %w", err)
 	}

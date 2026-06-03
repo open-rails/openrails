@@ -42,6 +42,14 @@ type CheckoutSessionCreateRequest struct {
 	Payment        CheckoutSessionPaymentRequest
 	Metadata       map[string]string
 	IdempotencyKey string
+
+	// UpgradeFromSubscriptionID, when set on a Solana subscription session,
+	// requests a Model-B upgrade (#267): the new subscribe's FIRST crank is
+	// charged the prorated amount (new_full - old_unused) and, once enrolled, the
+	// named OLD subscription is soft-cancelled (membership cancelled + cranker
+	// stopped). The caller must own the named subscription. Empty => a normal
+	// (non-upgrade) subscribe.
+	UpgradeFromSubscriptionID string
 }
 
 type CheckoutSessionConfirmPayment struct {
