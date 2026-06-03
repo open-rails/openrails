@@ -70,6 +70,12 @@ type PrepareTierChangeInput struct {
 	// FirstChargeBaseUnits is the prorated first pull for an upgrade
 	// (new_full - old_unused, in token base units). Ignored for downgrades.
 	FirstChargeBaseUnits uint64
+
+	// Reference, when set, attaches a Solana Pay REFERENCE (read-only, non-signer)
+	// to the atomic tx's cancel instruction so the reference poller can detect the
+	// landed tier change via getSignaturesForAddress — letting a Solana Pay
+	// checkout session drive a tier change. Empty => no tagging.
+	Reference string
 }
 
 // PrepareTierChangeResult is the transaction the wallet must sign + send.
@@ -150,12 +156,16 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		return nil, fmt.Errorf("recurring: subscription authority %s not found — expected an existing same-mint subscription for a tier change", saPDA)
 	}
 
-	cancelOld := subscriptions.BuildCancelSubscription(subscriptions.CancelOrResumeParams{
+	cancelOldIx := subscriptions.BuildCancelSubscription(subscriptions.CancelOrResumeParams{
 		Subscriber:      subscriber,
 		PlanPDA:         oldPlanPDA,
 		SubscriptionPDA: oldSubPDA,
 		EventAuthority:  eventAuth,
 	})
+	cancelOld, err := withReferenceMeta(cancelOldIx, in.Reference)
+	if err != nil {
+		return nil, err
+	}
 	subscribeNew := subscriptions.BuildSubscribe(subscriptions.SubscribeParams{
 		Subscriber:                     subscriber,
 		Merchant:                       merchant,

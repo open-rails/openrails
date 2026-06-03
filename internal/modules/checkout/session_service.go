@@ -104,6 +104,53 @@ type CheckoutSessionService struct {
 	// composition root. nil -> solana+subscription checkout returns 503.
 	solanaPrepareSubscribe *recurring.PrepareSubscribeService
 	solanaEnroll           *recurring.EnrollService
+
+	// Solana subscription-lifecycle services that extend the Solana Pay
+	// transaction-request flow to CANCEL + TIER-CHANGE (new checkout modes). nil
+	// -> a solana_cancel / solana_tier_change session returns 503. Wired via
+	// SetSolanaLifecycle at the composition root.
+	solanaPrepareCancel     solanaLifecyclePrepareCancel
+	solanaPrepareTierChange solanaLifecyclePrepareTierChange
+	solanaConfirmCancel     solanaLifecycleConfirmCancel
+	solanaConfirmTierChange solanaLifecycleConfirmTierChange
+	subscriptionReader      subscriptionReader
+	solanaSubscriptionRows  solanaSubscriptionRowReader
+}
+
+// solanaLifecyclePrepareCancel builds the unsigned cancel_subscription tx with an
+// optional Solana Pay reference (satisfied by *recurring.PrepareCancelService).
+type solanaLifecyclePrepareCancel interface {
+	PrepareWithReference(ctx context.Context, subscriptionID uuid.UUID, reference string) (*recurring.PrepareCancelResult, error)
+}
+
+// solanaLifecyclePrepareTierChange builds the atomic tier-change tx (satisfied by
+// *recurring.PrepareTierChangeService).
+type solanaLifecyclePrepareTierChange interface {
+	Prepare(ctx context.Context, in recurring.PrepareTierChangeInput) (*recurring.PrepareTierChangeResult, error)
+}
+
+// solanaLifecycleConfirmCancel mirrors a confirmed on-chain cancel into the DB
+// (satisfied by *recurring.ConfirmCancelService).
+type solanaLifecycleConfirmCancel interface {
+	Confirm(ctx context.Context, subscriptionID uuid.UUID, signature string) error
+}
+
+// solanaLifecycleConfirmTierChange mirrors a confirmed on-chain tier change into
+// the DB (satisfied by *recurring.ConfirmTierChangeService).
+type solanaLifecycleConfirmTierChange interface {
+	Confirm(ctx context.Context, in recurring.ConfirmTierChangeInput) (*recurring.ConfirmTierChangeResult, error)
+}
+
+// subscriptionReader loads a lifecycle subscription for ownership checks
+// (satisfied by *subscriptions.SubscriptionService).
+type subscriptionReader interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*models.Subscription, error)
+}
+
+// solanaSubscriptionRowReader loads the stored on-chain identifiers for a
+// subscription (satisfied by *repo.SolanaSubscriptionRepo).
+type solanaSubscriptionRowReader interface {
+	GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error)
 }
 
 // SetSolanaRecurring wires the recurring-Solana subscribe (prepare) + enroll
@@ -112,6 +159,59 @@ type CheckoutSessionService struct {
 func (s *CheckoutSessionService) SetSolanaRecurring(prepare *recurring.PrepareSubscribeService, enroll *recurring.EnrollService) {
 	s.solanaPrepareSubscribe = prepare
 	s.solanaEnroll = enroll
+}
+
+// SetSolanaLifecycle wires the cancel + tier-change services that back the
+// solana_cancel / solana_tier_change checkout modes. Done via a setter so the
+// constructor signature stays stable for embedded hosts. Passing a nil concrete
+// service leaves that capability unconfigured (the matching mode returns 503).
+func (s *CheckoutSessionService) SetSolanaLifecycle(
+	prepareCancel *recurring.PrepareCancelService,
+	prepareTierChange *recurring.PrepareTierChangeService,
+	confirmCancel *recurring.ConfirmCancelService,
+	confirmTierChange *recurring.ConfirmTierChangeService,
+	subs subscriptionReader,
+	rows solanaSubscriptionRowReader,
+) {
+	// Assign through nil-guarding so a nil concrete pointer stays a nil interface
+	// (an interface holding a typed-nil pointer is non-nil and would bypass the
+	// "is this configured?" checks).
+	if prepareCancel != nil {
+		s.solanaPrepareCancel = prepareCancel
+	}
+	if prepareTierChange != nil {
+		s.solanaPrepareTierChange = prepareTierChange
+	}
+	if confirmCancel != nil {
+		s.solanaConfirmCancel = confirmCancel
+	}
+	if confirmTierChange != nil {
+		s.solanaConfirmTierChange = confirmTierChange
+	}
+	if subs != nil {
+		s.subscriptionReader = subs
+	}
+	if rows != nil {
+		s.solanaSubscriptionRows = rows
+	}
+}
+
+// SetSolanaLifecycleForTest wires the lifecycle dependencies from interface
+// values so unit tests can inject fakes without constructing the real services.
+func (s *CheckoutSessionService) SetSolanaLifecycleForTest(
+	prepareCancel solanaLifecyclePrepareCancel,
+	prepareTierChange solanaLifecyclePrepareTierChange,
+	confirmCancel solanaLifecycleConfirmCancel,
+	confirmTierChange solanaLifecycleConfirmTierChange,
+	subs subscriptionReader,
+	rows solanaSubscriptionRowReader,
+) {
+	s.solanaPrepareCancel = prepareCancel
+	s.solanaPrepareTierChange = prepareTierChange
+	s.solanaConfirmCancel = confirmCancel
+	s.solanaConfirmTierChange = confirmTierChange
+	s.subscriptionReader = subs
+	s.solanaSubscriptionRows = rows
 }
 
 func NewCheckoutSessionService(
@@ -241,6 +341,14 @@ func decodeCheckoutSessionIdempotencyResult(payload json.RawMessage, fingerprint
 }
 
 func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
+	// Solana subscription-lifecycle modes (cancel / tier-change) are owner-gated
+	// actions on an EXISTING subscription, not a price purchase — route them to
+	// their dedicated builder before the price-first validation below.
+	switch models.CheckoutSessionMode(strings.TrimSpace(req.Mode)) {
+	case models.CheckoutSessionModeSolanaCancel, models.CheckoutSessionModeSolanaTierChange:
+		return s.createSolanaLifecycleSession(ctx, req, user)
+	}
+
 	if strings.TrimSpace(req.PriceID) == "" {
 		return nil, fmt.Errorf("%w: price_id is required", ErrCheckoutSessionValidation)
 	}
@@ -869,6 +977,251 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 		return nil, err
 	}
 	return s.sessionToResponse(updated), nil
+}
+
+// solanaLifecycleState is everything a cancel / tier-change Solana Pay session
+// needs to (a) build the on-chain tx in BuildSolanaPayTransaction and (b) mirror
+// the confirmed tx in the poller. It is derived once at create time and
+// persisted (mode + ProcessorState carry it forward); the build/confirm paths
+// re-derive it from the session row so they never trust client input.
+type solanaLifecycleState struct {
+	mode             models.CheckoutSessionMode
+	subscriptionID   uuid.UUID
+	subscriberWallet string
+	productName      string
+	tierChange       *resolvedSolanaLifecycleTierChange // nil for cancel
+}
+
+type resolvedSolanaLifecycleTierChange struct {
+	newPriceID           uuid.UUID
+	oldRow               *models.SolanaSubscription
+	newTerms             solanaPlanTerms
+	isUpgrade            bool
+	firstChargeBaseUnits uint64
+	oldPeriodEndsAt      *time.Time
+}
+
+// createSolanaLifecycleSession authorizes ownership and creates a Solana Pay
+// session for a CANCEL or TIER-CHANGE on the caller's EXISTING Solana
+// subscription. The subscription_id (and new_price_id for tier-change) is stored
+// in ProcessorState; the public Solana Pay endpoint then builds the reference-
+// tagged on-chain tx and the reference poller mirrors the confirmation.
+func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
+	mode := models.CheckoutSessionMode(strings.TrimSpace(req.Mode))
+	if s.subscriptionReader == nil || s.solanaSubscriptionRows == nil {
+		return nil, fmt.Errorf("%w: solana subscription lifecycle is not configured", ErrCheckoutSessionValidation)
+	}
+	if mode == models.CheckoutSessionModeSolanaCancel && s.solanaPrepareCancel == nil {
+		return nil, fmt.Errorf("%w: solana cancel is not configured", ErrCheckoutSessionValidation)
+	}
+	if mode == models.CheckoutSessionModeSolanaTierChange && s.solanaPrepareTierChange == nil {
+		return nil, fmt.Errorf("%w: solana tier change is not configured", ErrCheckoutSessionValidation)
+	}
+
+	processor := strings.ToLower(strings.TrimSpace(req.Payment.Processor))
+	if processor != string(models.ProcessorSolana) {
+		return nil, fmt.Errorf("%w: %s mode requires the solana processor", ErrCheckoutSessionValidation, mode)
+	}
+
+	subscriptionID, err := api.ParseSubscriptionID(strings.TrimSpace(req.SubscriptionID))
+	if err != nil {
+		return nil, fmt.Errorf("%w: subscription_id is required", ErrCheckoutSessionValidation)
+	}
+
+	// Authorize: the acting user must OWN the target subscription, and it must be
+	// an active Solana subscription.
+	sub, err := s.subscriptionReader.GetByID(ctx, subscriptionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: subscription not found", ErrCheckoutSessionValidation)
+		}
+		return nil, fmt.Errorf("failed to load subscription: %w", err)
+	}
+	if sub == nil || sub.UserID != user.ID {
+		// Do not leak existence of someone else's subscription.
+		return nil, fmt.Errorf("%w: subscription not found", ErrCheckoutSessionValidation)
+	}
+	if sub.Processor != models.ProcessorSolana {
+		return nil, fmt.Errorf("%w: subscription is not a solana subscription", ErrCheckoutSessionValidation)
+	}
+
+	oldRow, err := s.solanaSubscriptionRows.GetBySubscriptionID(ctx, subscriptionID)
+	if err != nil || oldRow == nil {
+		return nil, fmt.Errorf("%w: no on-chain record for this subscription", ErrCheckoutSessionValidation)
+	}
+
+	lifecycle := &solanaLifecycleState{
+		mode:             mode,
+		subscriptionID:   subscriptionID,
+		subscriberWallet: oldRow.SubscriberWallet,
+	}
+
+	// Session price + amount: cancel acts on the current price; tier-change uses
+	// the target (new) price (and bills the prorated upgrade charge).
+	sessionPriceID := sub.PriceID
+	var sessionAmount int64
+	var sessionCurrency string
+
+	switch mode {
+	case models.CheckoutSessionModeSolanaCancel:
+		curPrice, perr := s.priceService.GetByID(ctx, sub.PriceID)
+		if perr == nil && curPrice != nil {
+			sessionAmount = curPrice.Amount
+			sessionCurrency = curPrice.Currency
+			lifecycle.productName = s.productDisplayName(ctx, curPrice.ProductID)
+		}
+	case models.CheckoutSessionModeSolanaTierChange:
+		tc, perr := s.resolveSolanaTierChange(ctx, sub, oldRow, strings.TrimSpace(req.NewPriceID))
+		if perr != nil {
+			return nil, perr
+		}
+		lifecycle.tierChange = tc
+		sessionPriceID = tc.newPriceID
+		newPrice, gerr := s.priceService.GetByID(ctx, tc.newPriceID)
+		if gerr == nil && newPrice != nil {
+			sessionAmount = newPrice.Amount
+			sessionCurrency = newPrice.Currency
+			lifecycle.productName = s.productDisplayName(ctx, newPrice.ProductID)
+		}
+	}
+	if strings.TrimSpace(sessionCurrency) == "" {
+		sessionCurrency = "usd"
+	}
+
+	now := s.now()
+	expiresAt := now.Add(defaultCheckoutSessionTTL)
+	session := &models.CheckoutSession{
+		ID:              uuidutil.NewV7(),
+		UserID:          user.ID,
+		PriceID:         sessionPriceID,
+		Mode:            mode,
+		Processor:       models.ProcessorSolana,
+		Status:          models.CheckoutSessionStatusRequiresAction,
+		Amount:          sessionAmount,
+		Currency:        sessionCurrency,
+		ExpiresAt:       &expiresAt,
+		Metadata:        normalizeMetadata(req.Metadata),
+		ProcessorFields: map[string]any{"processor": string(models.ProcessorSolana)},
+		ProcessorState:  s.buildLifecycleState(lifecycle),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if strings.TrimSpace(req.IdempotencyKey) != "" {
+		session.IdempotencyKey = normalize.OptionalString(req.IdempotencyKey)
+	}
+
+	if err := s.repo.Create(ctx, session); err != nil {
+		return nil, fmt.Errorf("failed to create checkout session: %w", err)
+	}
+	return s.sessionToResponse(session), nil
+}
+
+// buildLifecycleState serializes the resolved lifecycle facts onto ProcessorState
+// (JSON-safe scalars), mirroring how the subscribe flow persists its plan terms.
+// "flow" marks the session as a lifecycle session so the poller/builder branch.
+func (s *CheckoutSessionService) buildLifecycleState(l *solanaLifecycleState) map[string]any {
+	state := map[string]any{
+		"flow":            string(l.mode),
+		"subscription_id": l.subscriptionID.String(),
+	}
+	if strings.TrimSpace(l.subscriberWallet) != "" {
+		state["subscriber_wallet"] = l.subscriberWallet
+	}
+	if strings.TrimSpace(l.productName) != "" {
+		state["product_name"] = l.productName
+	}
+	if tc := l.tierChange; tc != nil {
+		state["new_price_id"] = tc.newPriceID.String()
+		state["tier_is_upgrade"] = tc.isUpgrade
+		state["tier_first_charge_base_units"] = strconv.FormatUint(tc.firstChargeBaseUnits, 10)
+		state["tier_new_plan_id"] = strconv.FormatUint(tc.newTerms.planID, 10)
+		state["tier_new_mint_symbol"] = tc.newTerms.mintSymbol
+		state["tier_new_amount_base_units"] = strconv.FormatUint(tc.newTerms.amount, 10)
+		state["tier_new_period_hours"] = strconv.FormatUint(tc.newTerms.period, 10)
+		state["tier_new_plan_created_at"] = strconv.FormatInt(tc.newTerms.createdAt, 10)
+		if tc.oldPeriodEndsAt != nil {
+			state["tier_old_period_ends_at"] = tc.oldPeriodEndsAt.UTC().Format(time.RFC3339)
+		}
+	}
+	return state
+}
+
+func (s *CheckoutSessionService) productDisplayName(ctx context.Context, productID uuid.UUID) string {
+	if s.productService == nil {
+		return ""
+	}
+	product, err := s.productService.GetByID(ctx, productID)
+	if err != nil || product == nil {
+		return ""
+	}
+	return product.DisplayName
+}
+
+// resolveSolanaTierChange mirrors the resolution the auth-gated tier-change
+// handler does (ownership already verified by the caller): load the OLD on-chain
+// row, resolve the NEW price's canonical plan terms, decide upgrade vs downgrade
+// within the tier group, and compute the Model-B prorated first charge for an
+// upgrade.
+func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, oldSub *models.Subscription, oldRow *models.SolanaSubscription, newPriceIDStr string) (*resolvedSolanaLifecycleTierChange, error) {
+	newPriceID, err := api.ParsePriceID(newPriceIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: new_price_id is required", ErrCheckoutSessionValidation)
+	}
+	newPrice, err := s.priceService.GetByID(ctx, newPriceID)
+	if err != nil || newPrice == nil {
+		return nil, fmt.Errorf("%w: target price not found", ErrCheckoutSessionValidation)
+	}
+	if !newPrice.IsPurchasable() {
+		return nil, fmt.Errorf("%w: target price is not available", ErrCheckoutSessionValidation)
+	}
+	newTerms, err := parseSolanaPlanTerms(newPrice.GetProcessorConfig(models.ProcessorSolana))
+	if err != nil {
+		return nil, fmt.Errorf("%w: target price is not configured for Solana recurring billing", ErrCheckoutSessionValidation)
+	}
+
+	oldPrice, err := s.priceService.GetByID(ctx, oldSub.PriceID)
+	if err != nil || oldPrice == nil {
+		return nil, fmt.Errorf("%w: current price not found", ErrCheckoutSessionValidation)
+	}
+	newProduct, err := s.productService.GetByID(ctx, newPrice.ProductID)
+	if err != nil || newProduct == nil {
+		return nil, fmt.Errorf("%w: target product not found", ErrCheckoutSessionValidation)
+	}
+	oldProduct, err := s.productService.GetByID(ctx, oldPrice.ProductID)
+	if err != nil || oldProduct == nil {
+		return nil, fmt.Errorf("%w: current product not found", ErrCheckoutSessionValidation)
+	}
+	if oldProduct.ID == newProduct.ID {
+		return nil, fmt.Errorf("%w: already subscribed to this product", ErrCheckoutSessionValidation)
+	}
+	if oldProduct.TierGroup != nil && newProduct.TierGroup != nil &&
+		strings.TrimSpace(*oldProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
+		return nil, fmt.Errorf("%w: tier change must stay within the same tier group", ErrCheckoutSessionValidation)
+	}
+
+	isUpgrade := newProduct.TierRank >= oldProduct.TierRank
+	out := &resolvedSolanaLifecycleTierChange{
+		newPriceID:      newPriceID,
+		oldRow:          oldRow,
+		newTerms:        newTerms,
+		isUpgrade:       isUpgrade,
+		oldPeriodEndsAt: oldSub.CurrentPeriodEndsAt,
+	}
+	if isUpgrade {
+		firstChargeCents, _ := CalculateModelBUpgradeCharge(
+			oldPrice.Amount,
+			newPrice.Amount,
+			oldSub.CurrentPeriodEndsAt,
+			newPrice.BillingCycleDays,
+			s.now(),
+		)
+		firstChargeBaseUnits := solanamodule.FiatCentsToStablecoinBaseUnits(ctx, firstChargeCents, newTerms.mintSymbol, s.priceProvider)
+		if firstChargeBaseUnits == 0 {
+			firstChargeBaseUnits = 1
+		}
+		out.firstChargeBaseUnits = firstChargeBaseUnits
+	}
+	return out, nil
 }
 
 func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
@@ -1643,9 +1996,32 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 		}
 	}
 
+	// Lifecycle sessions render a mode-specific label (e.g. "Cancel Pro",
+	// "Change to Pro") so the wallet shows the right action, not "pay".
+	switch session.Mode {
+	case models.CheckoutSessionModeSolanaCancel:
+		productName = solanaLifecycleLabel("Cancel", productName, session.ProcessorState)
+	case models.CheckoutSessionModeSolanaTierChange:
+		productName = solanaLifecycleLabel("Change to", productName, session.ProcessorState)
+	}
+
 	return &solanamodule.PaySessionInfo{
 		ProductName: productName,
 	}, nil
+}
+
+// solanaLifecycleLabel builds the wallet label for a lifecycle Solana Pay
+// session, falling back to the product name persisted on the session state when
+// the price/product lookup did not resolve a display name.
+func solanaLifecycleLabel(verb, productName string, state map[string]any) string {
+	name := strings.TrimSpace(productName)
+	if name == "" {
+		name = strings.TrimSpace(getStringField(state, "product_name"))
+	}
+	if name == "" {
+		return strings.TrimSpace(verb + " subscription")
+	}
+	return strings.TrimSpace(verb + " " + name)
 }
 
 // BuildSolanaPayTransaction builds a Solana transaction for the given checkout session and wallet account.
@@ -1683,6 +2059,16 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 	if session.Status == models.CheckoutSessionStatusSucceeded ||
 		session.Status == models.CheckoutSessionStatusCanceled {
 		return nil, ErrCheckoutSessionAlreadyCompleted
+	}
+
+	// Lifecycle modes (cancel / tier-change) build their on-chain tx via the
+	// recurring services, with the Solana Pay reference injected, instead of the
+	// transfer-request quote path.
+	switch session.Mode {
+	case models.CheckoutSessionModeSolanaCancel:
+		return s.buildSolanaCancelTransaction(ctx, session, account)
+	case models.CheckoutSessionModeSolanaTierChange:
+		return s.buildSolanaTierChangeTransaction(ctx, session, account)
 	}
 
 	// Get token symbol from processor state
@@ -1766,4 +2152,232 @@ func solanaBuildRequestFromSession(session *models.CheckoutSession, account, tok
 		Amount:      session.Amount,
 		Currency:    session.Currency,
 	}, nil
+}
+
+// bindSolanaLifecycleReference ensures the session has a durable Solana Pay
+// reference + bound payer before a lifecycle tx is returned, so the reference
+// poller can recover the session via GetByReference and the build is bound to
+// one wallet. The bound wallet must equal the subscription's on-chain subscriber
+// wallet — only that wallet can sign the cancel / tier-change. Returns the
+// reference string to inject into the tx.
+func (s *CheckoutSessionService) bindSolanaLifecycleReference(ctx context.Context, session *models.CheckoutSession, account string) (string, error) {
+	if session.ProcessorState == nil {
+		session.ProcessorState = map[string]any{}
+	}
+	// The signer must be the subscription's subscriber wallet (it owns the
+	// SubscriptionAuthority / fee payer slot). Reject a mismatched wallet up front.
+	if subscriber := strings.TrimSpace(getStringField(session.ProcessorState, "subscriber_wallet")); subscriber != "" && subscriber != account {
+		return "", fmt.Errorf("%w: account is not the subscriber wallet for this subscription", ErrCheckoutSessionConflict)
+	}
+	if existingPayer := strings.TrimSpace(getStringField(session.ProcessorState, "payer")); existingPayer != "" && existingPayer != account {
+		return "", fmt.Errorf("%w: solana checkout session is already bound to a different payer", ErrCheckoutSessionConflict)
+	}
+	if session.Reference == nil || strings.TrimSpace(*session.Reference) == "" {
+		reference, err := solana.GenerateReference()
+		if err != nil {
+			return "", fmt.Errorf("failed to generate reference: %w", err)
+		}
+		session.Reference = &reference
+	}
+	session.ProcessorState["payer"] = account
+	if err := s.repo.BindSolanaTransactionRequest(ctx, session, account, s.now()); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrCheckoutSessionConflict, err)
+	}
+	return strings.TrimSpace(*session.Reference), nil
+}
+
+// buildSolanaCancelTransaction builds the unsigned cancel_subscription tx (with
+// the Solana Pay reference attached) for the wallet to sign + send. The poller
+// mirrors the confirmed cancel.
+func (s *CheckoutSessionService) buildSolanaCancelTransaction(ctx context.Context, session *models.CheckoutSession, account string) (*solanamodule.PayTransactionResponse, error) {
+	if s.solanaPrepareCancel == nil {
+		return nil, fmt.Errorf("%w: solana cancel is not configured", ErrCheckoutSessionValidation)
+	}
+	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.ProcessorState, "subscription_id")))
+	if err != nil {
+		return nil, fmt.Errorf("%w: subscription_id missing from session", ErrCheckoutSessionValidation)
+	}
+	reference, err := s.bindSolanaLifecycleReference(ctx, session, account)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.solanaPrepareCancel.PrepareWithReference(ctx, subscriptionID, reference)
+	if err != nil {
+		return nil, err
+	}
+	return &solanamodule.PayTransactionResponse{
+		TransactionBase64: res.Transaction,
+		Message:           "Sign to cancel your subscription",
+	}, nil
+}
+
+// buildSolanaTierChangeTransaction builds the atomic tier-change tx (with the
+// Solana Pay reference attached) for the wallet to sign + send. For an upgrade
+// the cranker has co-signed the prorated transfer slot. The poller mirrors the
+// confirmed switch.
+func (s *CheckoutSessionService) buildSolanaTierChangeTransaction(ctx context.Context, session *models.CheckoutSession, account string) (*solanamodule.PayTransactionResponse, error) {
+	if s.solanaPrepareTierChange == nil {
+		return nil, fmt.Errorf("%w: solana tier change is not configured", ErrCheckoutSessionValidation)
+	}
+	in, err := s.tierChangePrepareInput(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	reference, err := s.bindSolanaLifecycleReference(ctx, session, account)
+	if err != nil {
+		return nil, err
+	}
+	in.Reference = reference
+	res, err := s.solanaPrepareTierChange.Prepare(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return &solanamodule.PayTransactionResponse{
+		TransactionBase64: res.Transaction,
+		Message:           "Sign to change your subscription tier",
+	}, nil
+}
+
+// tierChangePrepareInput reconstructs the prepare input from the persisted
+// lifecycle state. The old on-chain identifiers are loaded from the stored row;
+// the new terms are the canonical values stamped at create time.
+func (s *CheckoutSessionService) tierChangePrepareInput(ctx context.Context, session *models.CheckoutSession) (recurring.PrepareTierChangeInput, error) {
+	var in recurring.PrepareTierChangeInput
+	if s.solanaSubscriptionRows == nil {
+		return in, fmt.Errorf("%w: solana subscription lifecycle is not configured", ErrCheckoutSessionValidation)
+	}
+	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.ProcessorState, "subscription_id")))
+	if err != nil {
+		return in, fmt.Errorf("%w: subscription_id missing from session", ErrCheckoutSessionValidation)
+	}
+	oldRow, err := s.solanaSubscriptionRows.GetBySubscriptionID(ctx, subscriptionID)
+	if err != nil || oldRow == nil {
+		return in, fmt.Errorf("%w: no on-chain record for this subscription", ErrCheckoutSessionValidation)
+	}
+	in = recurring.PrepareTierChangeInput{
+		TenantID:             tenant.FromContextOrDefault(ctx),
+		SubscriberWallet:     oldRow.SubscriberWallet,
+		MintSymbol:           getStringField(session.ProcessorState, "tier_new_mint_symbol"),
+		OldPlanPDA:           oldRow.PlanPDA,
+		OldSubscriptionPDA:   oldRow.SubscriptionPDA,
+		NewPlanID:            getUint64Field(session.ProcessorState, "tier_new_plan_id"),
+		NewAmountBaseUnits:   getUint64Field(session.ProcessorState, "tier_new_amount_base_units"),
+		NewPeriodHours:       getUint64Field(session.ProcessorState, "tier_new_period_hours"),
+		NewPlanCreatedAt:     int64(getUint64Field(session.ProcessorState, "tier_new_plan_created_at")),
+		IsUpgrade:            getBoolField(session.ProcessorState, "tier_is_upgrade"),
+		FirstChargeBaseUnits: getUint64Field(session.ProcessorState, "tier_first_charge_base_units"),
+	}
+	return in, nil
+}
+
+// ConfirmSolanaLifecycleSession mirrors a confirmed on-chain cancel / tier-change
+// for a lifecycle Solana Pay session, then marks the session succeeded. Called by
+// the reference poller when it detects the reference-tagged tx has landed.
+// Idempotent: a re-confirm of an already-succeeded session is a no-op, and the
+// underlying ConfirmCancel / ConfirmTierChange mirrors are themselves idempotent.
+func (s *CheckoutSessionService) ConfirmSolanaLifecycleSession(ctx context.Context, sessionID uuid.UUID, signature string) error {
+	session, err := s.repo.GetByID(ctx, sessionID)
+	if err != nil {
+		return ErrCheckoutSessionNotFound
+	}
+	if session.Status == models.CheckoutSessionStatusSucceeded {
+		return nil
+	}
+	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.ProcessorState, "subscription_id")))
+	if err != nil {
+		return fmt.Errorf("%w: subscription_id missing from session", ErrCheckoutSessionValidation)
+	}
+	signature = strings.TrimSpace(signature)
+	if signature == "" {
+		return fmt.Errorf("%w: signature is required", ErrCheckoutSessionValidation)
+	}
+
+	switch session.Mode {
+	case models.CheckoutSessionModeSolanaCancel:
+		if s.solanaConfirmCancel == nil {
+			return fmt.Errorf("%w: solana cancel is not configured", ErrCheckoutSessionValidation)
+		}
+		if err := s.solanaConfirmCancel.Confirm(ctx, subscriptionID, signature); err != nil {
+			return err
+		}
+		return s.MarkSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, subscriptionID)
+	case models.CheckoutSessionModeSolanaTierChange:
+		if s.solanaConfirmTierChange == nil {
+			return fmt.Errorf("%w: solana tier change is not configured", ErrCheckoutSessionValidation)
+		}
+		in, err := s.tierChangeConfirmInput(ctx, session, subscriptionID, signature)
+		if err != nil {
+			return err
+		}
+		res, err := s.solanaConfirmTierChange.Confirm(ctx, in)
+		if err != nil {
+			return err
+		}
+		newSubID := uuid.Nil
+		if res != nil && res.NewSubscription != nil {
+			newSubID = res.NewSubscription.ID
+		}
+		return s.MarkSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, newSubID)
+	default:
+		return fmt.Errorf("%w: not a solana lifecycle session", ErrCheckoutSessionValidation)
+	}
+}
+
+// tierChangeConfirmInput reconstructs the confirm input from the persisted
+// lifecycle state + the prepare-derived new subscription PDA (re-derived
+// server-side, never trusting client input).
+func (s *CheckoutSessionService) tierChangeConfirmInput(ctx context.Context, session *models.CheckoutSession, subscriptionID uuid.UUID, signature string) (recurring.ConfirmTierChangeInput, error) {
+	var out recurring.ConfirmTierChangeInput
+	prepIn, err := s.tierChangePrepareInput(ctx, session)
+	if err != nil {
+		return out, err
+	}
+	prep, err := s.solanaPrepareTierChange.Prepare(ctx, prepIn)
+	if err != nil {
+		return out, err
+	}
+	newPriceID, err := uuid.Parse(strings.TrimSpace(getStringField(session.ProcessorState, "new_price_id")))
+	if err != nil {
+		return out, fmt.Errorf("%w: new_price_id missing from session", ErrCheckoutSessionValidation)
+	}
+	var oldPeriodEnds *time.Time
+	if v := strings.TrimSpace(getStringField(session.ProcessorState, "tier_old_period_ends_at")); v != "" {
+		if t, perr := time.Parse(time.RFC3339, v); perr == nil {
+			tt := t.UTC()
+			oldPeriodEnds = &tt
+		}
+	}
+
+	out = recurring.ConfirmTierChangeInput{
+		Signature:            signature,
+		OldSubscriptionID:    subscriptionID,
+		UserID:               session.UserID,
+		NewPriceID:           newPriceID,
+		NewSubscriptionPDA:   prep.NewSubscriptionPDA,
+		NewPlanID:            prepIn.NewPlanID,
+		NewMintSymbol:        prepIn.MintSymbol,
+		NewAmountBaseUnits:   prepIn.NewAmountBaseUnits,
+		NewPeriodHours:       prepIn.NewPeriodHours,
+		NewPlanCreatedAt:     prepIn.NewPlanCreatedAt,
+		NewFiatAmount:        session.Amount,
+		NewCurrency:          session.Currency,
+		IsUpgrade:            prepIn.IsUpgrade,
+		FirstChargeBaseUnits: prepIn.FirstChargeBaseUnits,
+		OldPeriodEndsAt:      oldPeriodEnds,
+	}
+	return out, nil
+}
+
+func getBoolField(fields map[string]any, key string) bool {
+	if fields == nil {
+		return false
+	}
+	switch v := fields[key].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	default:
+		return false
+	}
 }

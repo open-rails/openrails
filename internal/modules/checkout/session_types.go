@@ -42,6 +42,15 @@ type CheckoutSessionCreateRequest struct {
 	Payment        CheckoutSessionPaymentRequest
 	Metadata       map[string]string
 	IdempotencyKey string
+
+	// SubscriptionID is required for the solana_cancel / solana_tier_change modes:
+	// the target lifecycle subscription the session acts on. The acting user must
+	// own it (authorized server-side).
+	SubscriptionID string
+	// NewPriceID is required for the solana_tier_change mode: the price to change
+	// TO. For a tier-change session this becomes the session's PriceID; PriceID in
+	// the request is ignored.
+	NewPriceID string
 }
 
 type CheckoutSessionConfirmPayment struct {

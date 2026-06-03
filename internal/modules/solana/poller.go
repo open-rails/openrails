@@ -45,6 +45,10 @@ type paymentLookup interface {
 
 type checkoutSessionMarker interface {
 	MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error
+	// ConfirmSolanaLifecycleSession mirrors a confirmed on-chain cancel /
+	// tier-change for a lifecycle Solana Pay session and marks it succeeded. It is
+	// idempotent. Implemented by *checkout.CheckoutSessionService.
+	ConfirmSolanaLifecycleSession(ctx context.Context, sessionID uuid.UUID, signature string) error
 }
 
 // SolanaPayPoller polls the blockchain for confirmed Solana Pay payments
@@ -358,6 +362,28 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 	default:
 		return nil, nil
 	}
+
+	// Lifecycle sessions (cancel / tier-change) carry no token quote — their
+	// confirmation mirrors an on-chain action, not a transfer. Mark the pending
+	// record as lifecycle so the poller skips token verification and routes the
+	// confirmed signature to ConfirmSolanaLifecycleSession.
+	switch session.Mode {
+	case models.CheckoutSessionModeSolanaCancel, models.CheckoutSessionModeSolanaTierChange:
+		pending := &PendingSolanaPayment{
+			UserID:    session.UserID,
+			PriceID:   session.PriceID.String(),
+			SessionID: session.ID.String(),
+			Amount:    session.Amount,
+			Currency:  session.Currency,
+			CreatedAt: session.CreatedAt,
+			Lifecycle: true,
+		}
+		if session.ExpiresAt != nil {
+			pending.ExpiresAt = session.ExpiresAt.UTC()
+		}
+		return pending, nil
+	}
+
 	token := strings.ToUpper(strings.TrimSpace(solanaStateString(session.ProcessorState, "token_symbol")))
 	tokenMint := strings.TrimSpace(solanaStateString(session.ProcessorState, "token_mint"))
 	recipient := strings.TrimSpace(solanaStateString(session.ProcessorState, "recipient"))
@@ -484,6 +510,13 @@ func (p *SolanaPayPoller) deferRetryFor(reference string, backoff time.Duration)
 
 // verifyPayment validates that a transaction matches our expected payment
 func (p *SolanaPayPoller) verifyPayment(ctx context.Context, reference string, signature string, pending *PendingSolanaPayment) bool {
+	if pending != nil && pending.Lifecycle {
+		// Lifecycle (cancel / tier-change) sessions have no transfer to verify; the
+		// random reference appearing on this signature already proves it is the tx
+		// built for THIS session. The on-chain SUCCESS check happens in the
+		// ConfirmCancel / ConfirmTierChange mirror invoked by processConfirmedPayment.
+		return true
+	}
 	if p.solanaTransactionSvc == nil {
 		// Reference key is cryptographically random (32 bytes); fallback to reference-only checks.
 		return true
@@ -534,6 +567,28 @@ func solanaPaymentExpiryDeadline(pending *PendingSolanaPayment) *time.Time {
 
 // processConfirmedPayment uses CheckoutService.RegisterPurchase to record payment and grant entitlements
 func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference, signature string, pending *PendingSolanaPayment) error {
+	// Lifecycle (cancel / tier-change): mirror the confirmed on-chain action via
+	// the checkout session service instead of registering a purchase. The mirror
+	// re-confirms the signature LANDED + SUCCEEDED on-chain (source of truth) and
+	// is idempotent.
+	if pending.Lifecycle {
+		if p.checkoutSessionService == nil {
+			return fmt.Errorf("checkout session service is not configured")
+		}
+		sessionID, err := uuid.Parse(strings.TrimSpace(pending.SessionID))
+		if err != nil {
+			return fmt.Errorf("invalid checkout session id %q: %w", pending.SessionID, err)
+		}
+		if err := p.checkoutSessionService.ConfirmSolanaLifecycleSession(ctx, sessionID, signature); err != nil {
+			return err
+		}
+		log.WithFields(log.Fields{
+			"session_id": pending.SessionID,
+			"reference":  reference,
+		}).Info("Mirrored confirmed Solana lifecycle (cancel/tier-change) checkout session")
+		return nil
+	}
+
 	priceID, err := uuid.Parse(pending.PriceID)
 	if err != nil {
 		return err

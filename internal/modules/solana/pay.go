@@ -60,6 +60,13 @@ type PendingSolanaPayment struct {
 	Recipient   string    `json:"recipient"`    // merchant wallet
 	CreatedAt   time.Time `json:"created_at"`
 	ExpiresAt   time.Time `json:"expires_at,omitempty"`
+
+	// Lifecycle marks a checkout-session-backed pending record whose confirmation
+	// mirrors an on-chain CANCEL or TIER-CHANGE (checkout modes solana_cancel /
+	// solana_tier_change) rather than registering a purchase. When set, the poller
+	// skips token/amount verification (the random reference already identifies the
+	// tx) and routes the confirmed signature to ConfirmSolanaLifecycleSession.
+	Lifecycle bool `json:"lifecycle,omitempty"`
 }
 
 // SolanaPayService handles Solana Pay Transfer Request flow

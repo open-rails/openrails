@@ -284,6 +284,31 @@ func New(deps Dependencies) (*Server, error) {
 				if deps.Runtime.CheckoutSessionService != nil {
 					prepareSvc := recurring.NewPrepareSubscribeService(submitter, deps.Runtime.SolanaRPC, network)
 					deps.Runtime.CheckoutSessionService.SetSolanaRecurring(prepareSvc, enrollSvc)
+
+					// Cancel + tier-change as Solana Pay checkout modes: reuse the same
+					// prepare services as the auth-gated #271/#272 handlers, and build the
+					// confirm services (mirrors) for the reference poller to invoke on
+					// confirmation. This extends the existing Solana Pay machinery to the
+					// solana_cancel / solana_tier_change modes — no parallel protocol.
+					solanaSubRepo := dbrepo.NewSolanaSubscriptionRepo(deps.Runtime.DB)
+					confirmCancelSvc := recurring.NewConfirmCancelService(
+						deps.Runtime.SolanaRPC,
+						deps.Runtime.SubscriptionLifecycleService,
+					)
+					confirmTierChangeSvc := recurring.NewConfirmTierChangeService(
+						deps.Runtime.SolanaRPC,
+						deps.Runtime.SubscriptionLifecycleService,
+						solanaSubRepo,
+						network,
+					)
+					deps.Runtime.CheckoutSessionService.SetSolanaLifecycle(
+						deps.Runtime.SolanaPrepareCancelService,
+						deps.Runtime.SolanaPrepareTierChangeService,
+						confirmCancelSvc,
+						confirmTierChangeSvc,
+						deps.Runtime.SubscriptionService,
+						solanaSubRepo,
+					)
 				}
 			}
 		}

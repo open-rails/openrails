@@ -34,11 +34,20 @@ type checkoutSessionPaymentParams struct {
 }
 
 type checkoutSessionCreateRequest struct {
-	PriceID        string                       `json:"price_id" binding:"required"`
-	Mode           string                       `json:"mode,omitempty" binding:"omitempty,oneof=one_off subscription"`
+	// PriceID is required for purchase/subscribe modes. For solana_cancel /
+	// solana_tier_change it is optional (cancel uses the subscription's current
+	// price; tier-change uses new_price_id).
+	PriceID        string                       `json:"price_id,omitempty" binding:"omitempty"`
+	Mode           string                       `json:"mode,omitempty" binding:"omitempty,oneof=one_off subscription solana_cancel solana_tier_change"`
 	Payment        checkoutSessionPaymentParams `json:"payment" binding:"required"`
 	Metadata       map[string]string            `json:"metadata,omitempty"`
 	IdempotencyKey string                       `json:"-"`
+
+	// SubscriptionID is required for the solana_cancel / solana_tier_change modes:
+	// the caller's existing Solana subscription to act on (ownership enforced).
+	SubscriptionID string `json:"subscription_id,omitempty" binding:"omitempty"`
+	// NewPriceID is required for the solana_tier_change mode: the price to change to.
+	NewPriceID string `json:"new_price_id,omitempty" binding:"omitempty"`
 }
 
 type checkoutSessionConfirmRequest struct {
@@ -77,7 +86,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 			req.Metadata["e2e_run_id"] = e2eRunID
 		}
 	}
-	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{Processor: req.Payment.Processor, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
+	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{Processor: req.Payment.Processor, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if err != nil {
 		log.WithError(err).Error("Failed to create checkout session")

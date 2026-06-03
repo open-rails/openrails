@@ -65,6 +65,14 @@ type PrepareCancelResult struct {
 // (subscriber signs + pays gas) for the wallet to sign + send. OpenRails then
 // observes the confirmed cancel and mirrors it (cranker stops).
 func (s *PrepareCancelService) Prepare(ctx context.Context, subscriptionID uuid.UUID) (*PrepareCancelResult, error) {
+	return s.PrepareWithReference(ctx, subscriptionID, "")
+}
+
+// PrepareWithReference is Prepare with an optional Solana Pay REFERENCE attached
+// to the cancel instruction (read-only, non-signer) so the reference poller can
+// detect the landed cancel via getSignaturesForAddress — the same mechanism the
+// one-off Solana Pay path uses. An empty reference behaves exactly like Prepare.
+func (s *PrepareCancelService) PrepareWithReference(ctx context.Context, subscriptionID uuid.UUID, reference string) (*PrepareCancelResult, error) {
 	if subscriptionID == uuid.Nil {
 		return nil, fmt.Errorf("recurring: subscription id is required")
 	}
@@ -99,6 +107,10 @@ func (s *PrepareCancelService) Prepare(ctx context.Context, subscriptionID uuid.
 		SubscriptionPDA: subPDA,
 		EventAuthority:  eventAuth,
 	})
+	ix, err = withReferenceMeta(ix, reference)
+	if err != nil {
+		return nil, err
+	}
 
 	tx, err := s.buildUnsignedTxBase64(ctx, subscriber, []solanago.Instruction{ix})
 	if err != nil {
