@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/uptrace/bun"
 )
@@ -33,21 +34,12 @@ func NewService(database *db.DB, clocks ...clockwork.Clock) *Service {
 	return &Service{
 		db:    database,
 		repo:  repo.NewProductAccessGrantRepo(database),
-		clock: firstClock(clocks...),
+		clock: timeutil.FirstClock(clocks...),
 	}
-}
-
-func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
-	for _, c := range clocks {
-		if c != nil {
-			return c
-		}
-	}
-	return clockwork.NewRealClock()
 }
 
 // SetClock overrides the service clock (tests).
-func (s *Service) SetClock(c clockwork.Clock) { s.clock = firstClock(c) }
+func (s *Service) SetClock(c clockwork.Clock) { s.clock = timeutil.FirstClock(c) }
 
 func (s *Service) now() time.Time {
 	if s.clock != nil {

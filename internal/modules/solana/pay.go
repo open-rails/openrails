@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
@@ -123,7 +124,7 @@ func NewSolanaPayService(
 		eligibilityChecker: eligibilityChecker,
 		fxProvider:         fxProvider,
 		priceProvider:      priceProvider,
-		clock:              firstClock(clocks...),
+		clock:              timeutil.FirstClock(clocks...),
 	}
 }
 
@@ -139,20 +140,11 @@ func (s *SolanaPayService) now() time.Time {
 }
 
 func (s *SolanaPayService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *SolanaPayService) Clock() clockwork.Clock {
 	return s.clock
-}
-
-func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
-	for _, c := range clocks {
-		if c != nil {
-			return c
-		}
-	}
-	return clockwork.NewRealClock()
 }
 
 // GeneratePayment creates a new pending Solana payment and returns the Transfer Request URL.

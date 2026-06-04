@@ -14,8 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
-func intPtr(i int) *int       { return &i }
-func strPtr(s string) *string { return &s }
+func intPtr(i int) *int { return &i }
 
 // newMobiusAdapterWithServer builds a mobiusAdapter whose NMI client points at
 // the given test server for both direct-post and query traffic.

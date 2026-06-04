@@ -19,8 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
-	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/http/request/ginreq"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -488,12 +486,6 @@ func (s *Server) NewHTTPHandler(opts HTTPHandlerOptions) http.Handler {
 // embedded route surface (issue #282), or nil when none is available.
 func (s *Server) embeddedAuthenticator() billingauth.Authenticator {
 	return s.authenticator
-}
-
-func (s *Server) wrap(fn func(r *httprequest.Request)) func(c *gin.Context) {
-	return func(c *gin.Context) {
-		fn(ginreq.New(c, s.runtime))
-	}
 }
 
 // Handler returns the full public HTTP surface: health + debug (dev only) + user

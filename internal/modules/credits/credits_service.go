@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -28,11 +29,11 @@ type CreditsService struct {
 }
 
 func NewCreditsService(database *db.DB, clocks ...clockwork.Clock) *CreditsService {
-	return &CreditsService{db: database, clock: firstClock(clocks...)}
+	return &CreditsService{db: database, clock: timeutil.FirstClock(clocks...)}
 }
 
 func (s *CreditsService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *CreditsService) Clock() clockwork.Clock {
@@ -46,17 +47,8 @@ func (s *CreditsService) now() time.Time {
 	return time.Now().UTC()
 }
 
-func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
-	for _, c := range clocks {
-		if c != nil {
-			return c
-		}
-	}
-	return clockwork.NewRealClock()
-}
-
-// ErrTenantSubjectRequired is returned when a credit operation cannot resolve a real
-// tenant subject id. HARDCUT (#221): tenant_subject_id is supplied by the caller and is NOT
+// ErrOwnerRequired is returned when a credit operation cannot resolve a real
+// owner org id. HARDCUT (#221): owner_id is supplied by the caller and is NOT
 // synthesized — there is no deterministic stand-in derivation. For the
 // self-hosted / single-tenant personal case the tenant subject IS the authenticated
 // user's own account/personal tenant-subject UUID, so a non-UUID invoker with no explicit

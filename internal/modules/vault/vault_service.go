@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -57,7 +58,7 @@ func (s *VaultService) now() time.Time {
 }
 
 func (s *VaultService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *VaultService) Clock() clockwork.Clock {
@@ -133,27 +134,8 @@ func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClient
 		NMIClients:           nmiClients,
 		Config:               cfg,
 		DB:                   dbx,
-		clock:                firstClock(clocks...),
+		clock:                timeutil.FirstClock(clocks...),
 	}
-}
-
-func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
-	for _, c := range clocks {
-		if c != nil {
-			return c
-		}
-	}
-	return clockwork.NewRealClock()
-}
-
-// SetTenantSecretStore wires dynamic tenant processor credentials into saved-card
-// vault operations. Tenant secrets take precedence; static clients/config remain
-// the fallback for single-tenant/static installs when a tenant secret is absent.
-func (s *VaultService) SetTenantSecretStore(store tenantSecretGetter) {
-	if s == nil {
-		return
-	}
-	s.TenantSecrets = store
 }
 
 // CreateVault creates a NMI customer vault and stores a local PaymentMethod

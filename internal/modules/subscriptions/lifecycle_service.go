@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
@@ -70,8 +71,8 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService NotificationEmailSender, paymentService *payments.PaymentService, eventLogService LifecycleEventLogger, clocks ...clockwork.Clock) *SubscriptionLifecycleService {
 	return &SubscriptionLifecycleService{
 		DB:                  db,
-		Config:              nil,                   // Set via SetConfig if feature flags are needed
-		clock:               firstClock(clocks...), // Default to real clock, can be overridden for tests
+		Config:              nil,                            // Set via SetConfig if feature flags are needed
+		clock:               timeutil.FirstClock(clocks...), // Default to real clock, can be overridden for tests
 		ProductService:      productService,
 		PriceService:        priceService,
 		EntitlementService:  entitlementService,
@@ -83,7 +84,7 @@ func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductS
 
 // SetClock allows replacing the clock for testing
 func (s *SubscriptionLifecycleService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *SubscriptionLifecycleService) Clock() clockwork.Clock {

@@ -258,20 +258,6 @@ func transactionPlanID(body *NMITransactionEventBody) string {
 	return ""
 }
 
-func transactionAmountRaw(body *NMITransactionEventBody) (string, error) {
-	if body == nil {
-		return "", fmt.Errorf("transaction body is nil")
-	}
-	candidates := transactionAmountCandidates(body)
-	for _, value := range candidates {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value), nil
-		}
-	}
-
-	return "", fmt.Errorf("amount not provided")
-}
-
 func transactionAmountCandidates(body *NMITransactionEventBody) []string {
 	if body == nil {
 		return nil
@@ -1395,11 +1381,6 @@ func parseNMIDate(raw string) (time.Time, bool) {
 		return ts.UTC(), true
 	}
 	return time.Time{}, false
-}
-
-func startOfUTCDate(value time.Time) time.Time {
-	utc := value.UTC()
-	return time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func (s *NMIWebhookService) nmiSubscriptionAddTransactionID(ctx context.Context, subscription *models.Subscription, nmiSubID string) (string, error) {

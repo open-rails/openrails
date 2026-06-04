@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -245,7 +246,7 @@ func NewCheckoutSessionService(
 		fxProvider:               fxProvider,
 		priceProvider:            priceProvider,
 		config:                   cfg,
-		clock:                    firstClock(clocks...),
+		clock:                    timeutil.FirstClock(clocks...),
 	}
 }
 
@@ -257,7 +258,7 @@ func (s *CheckoutSessionService) now() time.Time {
 }
 
 func (s *CheckoutSessionService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *CheckoutSessionService) Clock() clockwork.Clock {
