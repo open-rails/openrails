@@ -1,5 +1,5 @@
 {
-  "next_id": 292,
+  "next_id": 294,
   "issues": [
     {
       "id": 107,
@@ -115,7 +115,7 @@
     {
       "id": 127,
       "name": "durable-workflow-execution",
-      "description": "Evaluate and potentially adopt embedded durable workflow execution for critical payment flows\n\n## Metadata\n\n- Category: architecture\n- Status: on_hold\n- Passes: false\n\n## Details\n\n- status_update: {\"date\":\"2025-12-14\",\"decision\":\"On hold - focus on simpler solutions first\",\"reasoning\":[\"Ad-hoc durable workflow system was built and then reverted\",\"Durable workflows don't compensate for faulty code - unit tests do\",\"Idempotency keys on NMI calls solve the double-charge problem more simply\",\"If we need durable workflows later, use a proper library like go-workflows\"],\"prerequisite\":\"Implement wrap-nmi-calls-with-idempotency first, then reassess if durable workflows are still needed\"}\n- candidate_library: {\"go_workflows\":{\"repo\":\"github.com/cschleiden/go-workflows\",\"maturity\":\"Production-ready, supports PostgreSQL\",\"when_to_adopt\":[\"Multi-step flows that genuinely need crash recovery\",\"Workflows with long-running waits (e.g., approval flows)\",\"Complex saga patterns with compensating transactions\"]}}\n- candidate_workflows: [\"Checkout flow (charge → record → grant entitlements)\",\"Subscription upgrade (charge proration → cancel old → create new)\",\"Dunning/rebill (charge → renew or → escalate failure)\",\"Refund flow (refund at processor → revoke entitlements → update records)\"]\n- when_to_reconsider: [\"After idempotency keys are implemented and we still see issues\",\"When we add complex multi-step flows (e.g., multi-party payouts)\",\"If reconciliation reports show frequent partial-completion issues\"]",
+      "description": "Evaluate and potentially adopt embedded durable workflow execution for critical payment flows\n\n## Metadata\n\n- Category: architecture\n- Status: on_hold\n- Passes: false\n\n## Details\n\n- status_update: {\"date\":\"2025-12-14\",\"decision\":\"On hold - focus on simpler solutions first\",\"reasoning\":[\"Ad-hoc durable workflow system was built and then reverted\",\"Durable workflows don't compensate for faulty code - unit tests do\",\"Idempotency keys on NMI calls solve the double-charge problem more simply\",\"If we need durable workflows later, use a proper library like go-workflows\"],\"prerequisite\":\"Implement wrap-nmi-calls-with-idempotency first, then reassess if durable workflows are still needed\"}\n- candidate_library: {\"go_workflows\":{\"repo\":\"github.com/cschleiden/go-workflows\",\"maturity\":\"Production-ready, supports PostgreSQL\",\"when_to_adopt\":[\"Multi-step flows that genuinely need crash recovery\",\"Workflows with long-running waits (e.g., approval flows)\",\"Complex saga patterns with compensating transactions\"]}}\n- candidate_workflows: [\"Checkout flow (charge \u2192 record \u2192 grant entitlements)\",\"Subscription upgrade (charge proration \u2192 cancel old \u2192 create new)\",\"Dunning/rebill (charge \u2192 renew or \u2192 escalate failure)\",\"Refund flow (refund at processor \u2192 revoke entitlements \u2192 update records)\"]\n- when_to_reconsider: [\"After idempotency keys are implemented and we still see issues\",\"When we add complex multi-step flows (e.g., multi-party payouts)\",\"If reconciliation reports show frequent partial-completion issues\"]",
       "tasks": [
         "ON HOLD - Reassess after implementing idempotency keys",
         "Previous ad-hoc implementation was reverted on 2025-12-14",
@@ -167,12 +167,12 @@
         "[x] Expiration: mark ended/expired and end/revoke entitlements",
         "",
         "CODE CHANGES (expected touch points):",
-        "[x] `internal/services/webhook_ccbill.go`: parse and apply `nextRenewalDate` on `NewSaleSuccess` and `RenewalSuccess` (don’t rely solely on `price.billing_cycle_days`)",
+        "[x] `internal/services/webhook_ccbill.go`: parse and apply `nextRenewalDate` on `NewSaleSuccess` and `RenewalSuccess` (don\u2019t rely solely on `price.billing_cycle_days`)",
         "[x] `internal/services/webhook_ccbill.go`: on `RenewalFailure`, parse `nextRetryDate` and update `subscriptions.status=past_due` + `subscriptions.next_retry_at` (avoid calling `SubscriptionLifecycleService.FailMembership`, which schedules NMI-style retries)",
         "[x] `internal/services/webhook_ccbill.go`: on `Cancellation`, call `CancelMembership` with `RevokeAccess=false` (today it passes true)",
         "[x] `internal/services/lifecycle_service.go`: update `CreateMembership` entitlement grant behavior for CCBill to create finite windows ending at `current_period_ends_at` (instead of indefinite `end_at=NULL`)",
-        "[x] `internal/services/lifecycle_service.go`: update `RenewMembership` for CCBill to extend entitlements to match the new `current_period_ends_at` (today renewal doesn’t extend entitlements at all unless a downgrade changes entitlement set)",
-        "[x] `internal/db/repo/entitlement.go`: make `IsEntitled` / “active entitlement” queries explicitly exclude `deleted_at` (don’t rely on implicit soft-delete behavior)",
+        "[x] `internal/services/lifecycle_service.go`: update `RenewMembership` for CCBill to extend entitlements to match the new `current_period_ends_at` (today renewal doesn\u2019t extend entitlements at all unless a downgrade changes entitlement set)",
+        "[x] `internal/db/repo/entitlement.go`: make `IsEntitled` / \u201cactive entitlement\u201d queries explicitly exclude `deleted_at` (don\u2019t rely on implicit soft-delete behavior)",
         "[x] `config/config.go`: add a feature flag / config for CCBill grace behavior (enable/disable + max cap)",
         "",
         "ANALYTICS:",
@@ -202,7 +202,7 @@
         "[ ] Ensure README.md does not mention removed keys; update if needed",
         "",
         "COMPAT / SAFETY:",
-        "[ ] Confirm unknown config keys do not crash koanf load/validate (so removal doesn’t break old config files)",
+        "[ ] Confirm unknown config keys do not crash koanf load/validate (so removal doesn\u2019t break old config files)",
         "",
         "VERIFY:",
         "[ ] `go test ./...` passes"
@@ -216,7 +216,7 @@
       "tasks": [
         "DESIGN:",
         "[ ] Decide opt-in mechanism: (A) standalone CLI subcommand `openrails cloudflared up` that supervises both OpenRails + cloudflared, or (B) OpenRails spawns cloudflared when `cloudflared.tunnel_token` is set and `env=dev`",
-        "[ ] Decide what constitutes “success”: tunnel established + /health/ready reachable via public hostname",
+        "[ ] Decide what constitutes \u201csuccess\u201d: tunnel established + /health/ready reachable via public hostname",
         "",
         "IMPLEMENTATION (if spawning subprocess):",
         "[ ] Add a small `pkg/cloudflared` supervisor that starts `cloudflared tunnel run` with the configured token and captures stdout/stderr into structured logs",

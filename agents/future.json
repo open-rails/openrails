@@ -188,6 +188,40 @@
         "[ ] cranker gas spend per tenant (surface alongside the gas-alert #258)",
         "[ ] admin endpoints / dashboard wiring matching the card-processor metrics shape"
       ]
+    },
+    {
+      "id": 292,
+      "name": "openrails-helm-charts-k8s-deploy",
+      "description": "Make OpenRails trivial to deploy on Kubernetes via OFFICIAL Helm charts, targeting BOTH self-hosted k8s (bare/on-prem clusters) AND managed k8s (DigitalOcean DOKS first, then GKE/EKS/AKS). Today deployment is docker-compose + a hand-rolled image; there is no first-class k8s story. A clean Helm chart is the substrate for both self-hosters and our own managed SaaS (see [[openrails-managed-saas]] / #293).\n\n## Scope\nPackage the whole stack as a configurable chart: the OpenRails app (HTTP API + the embedded River workers for crank/dunning/reconcile), DB (in-cluster Postgres OR point at an external/managed DB), Redis/Garnet, ClickHouse (analytics, optional/toggleable), the migrations job, secrets (k8s Secrets / Vault / sealed-secrets), ingress + TLS, autoscaling, and config via values.yaml. Self-hosted vs managed differ mainly in whether DB/Redis/CH are in-cluster or external managed services \u2014 express both via values.\n\n## Why DigitalOcean specifically\nDOKS is cheap + popular with the indie/self-host audience; ship a DOKS quickstart (DO managed Postgres + Redis, DO load balancer + cert) and evaluate a DO Marketplace 1-click app. Keep the chart cloud-agnostic so GKE/EKS/AKS are just different values.",
+      "tasks": [
+        "[ ] Chart skeleton (deployment for the API, a separate deployment/args for the River workers, service, configmap, secret, HPA, PDB, serviceaccount); helm lint + a CI render test.",
+        "[ ] values.yaml profiles: self-hosted (in-cluster Postgres/Redis/ClickHouse subcharts) vs managed (externalDatabase/externalRedis/externalClickHouse pointing at DO/GCP/etc managed services). ClickHouse/analytics fully optional (toggle).",
+        "[ ] Migrations as a pre-install/pre-upgrade Job (helm hook) running the OpenRails migrator; gate the app start on it.",
+        "[ ] Secrets: support k8s Secrets, Vault (the existing vault KV/transit adapter #251), and sealed-secrets/external-secrets; document the per-tenant DEK/secret-store wiring.",
+        "[ ] Ingress + TLS via cert-manager (Let's Encrypt) + an nginx/traefik example; configurable host, CORS allowlist, and the public base URL the Solana Pay endpoints need.",
+        "[ ] Resource requests/limits + HPA (CPU/RAM, and a worker-queue-depth custom metric later); readiness/liveness probes on the health endpoint.",
+        "[ ] DigitalOcean DOKS quickstart: DO managed Postgres + managed Redis + DO LB; a values-do.yaml + a runbook; evaluate a DO Marketplace 1-click listing.",
+        "[ ] Publish the chart to an OCI registry (ghcr) + a versioned helm repo; pin the OpenRails image tag; document upgrade/rollback.",
+        "[ ] Docs: 'deploy OpenRails on k8s in 10 minutes' for self-hosted and for DOKS; production hardening notes (DB backups, Redis persistence for the Solana Pay pending set, secret rotation)."
+      ],
+      "completed": false
+    },
+    {
+      "id": 293,
+      "name": "openrails-managed-saas",
+      "description": "Stand up a HOSTED OpenRails SaaS where a user signs up and spins up their own OpenRails in a few clicks \u2014 no infra to run. THIS IS THE MAIN BUSINESS MODEL. Self-hosting stays free/OSS; the managed service is the commercial offering: we run, scale, monitor, and upgrade OpenRails for customers who just want billing-as-a-service.\n\n## What it is\nA control plane + dashboard on top of OpenRails' existing multi-tenant foundation: signup -> provision a tenant (or an isolated instance) -> the customer gets API keys + a dashboard to configure products/prices, connect their processors (Stripe/NMI/CCBill/Solana), and watch revenue. We lean on the multi-tenant work already built \u2014 RLS isolation + per-tenant secret store / DEK (#227/#259), federated/delegated tokens, the catalog-as-code apply, the de-embed/standalone deploy (#249). The Helm charts (#292 / [[openrails-helm-charts-k8s-deploy]]) are the deploy substrate for the managed pods (and keep self-host parity).\n\n## Isolation model (decide early)\nTwo tiers: (a) SHARED multi-tenant cluster with RLS + per-tenant DEK (cheap, for small customers / free tier), and (b) DEDICATED per-tenant instance/namespace (for larger customers needing hard isolation / their own DB). Same image + chart, different provisioning.\n\n## Meta-billing (the fun part)\nWe bill our SaaS customers... using OpenRails itself (dogfood): usage metering (API calls / active subscriptions / GMV %), pricing tiers, free tier, Stripe for the SaaS subscription. OpenRails-billing-OpenRails.",
+      "tasks": [
+        "[ ] Signup + onboarding: create an account -> provision a tenant (RLS row + per-tenant secret store/DEK) -> issue API keys + a delegated dashboard token. Self-serve, < 5 min to first test charge.",
+        "[ ] Control-plane dashboard (web): manage products/prices (catalog-as-code #162 under the hood), connect processors (Stripe/NMI/CCBill/Solana keys into the per-tenant secret store), view subscriptions/revenue/dunning, manage webhooks.",
+        "[ ] Isolation tiers: (a) shared cluster + RLS + per-tenant DEK for free/small; (b) dedicated instance/namespace via the Helm chart (#292) for enterprise. Provisioning automation for both.",
+        "[ ] Meta-billing: dogfood OpenRails to bill SaaS customers \u2014 usage metering (active subs / API volume / optional GMV %), pricing tiers + free tier, Stripe for the SaaS plan, dunning on our own customers.",
+        "[ ] Usage metering + quotas + rate limiting per tenant; surface usage in the dashboard; enforce plan limits.",
+        "[ ] Scaling + ops: per-tenant/queue autoscaling, monitoring/alerting (cranker gas, failed pulls, webhook lag), backups, on-call runbooks, status page.",
+        "[ ] Migration paths: self-host -> managed import, and managed -> self-host export (no lock-in; OSS core is the trust anchor).",
+        "[ ] Security/compliance posture for handling processor keys + payment data at scale (secret rotation, audit log, SOC2 trajectory, PCI scope minimization since processors hold the PANs).",
+        "[ ] Pricing + positioning: free tier (self-host parity), usage-based paid tiers, the 'Stripe-like billing infra you actually own, hosted for you' pitch."
+      ],
+      "completed": false
     }
   ]
 }
