@@ -19,16 +19,22 @@ OpenRails was built to help break the parasitic monopoly Visa + MasterCard curre
 
 ---
 
-### "I don't need a billing server! I will just vibe-code it! Claude; make no mistakes."
+### Required Services
 
-Okay sure; good luck with:
+Requires a Postgres 18+ instance to use (can be shared with your web-server). Optionally also uses Redis for rate-limiting and Clickhouse for analytics.
 
-- Users having duplicate subscriptions
-- Billing users twice
-- Failing to downgrade users whose accounts didn't rebill
-- Rate-limiting card testers + fraudsters
+In embedded (library) mode, OpenRails obviously requires your webserver http-handlers to be written in Go (a great choice btw).
 
-This is a multi-month long epic to build, even with AI, and the 
+---
+
+## Scope / PCI-Compliance
+
+OpenRails does not store or process customer credit card details; instead we use two flows to avoid this:
+
+- **Redirect flow**: Browser -> payment provider's checkout page (ex. Stripe) -> user enters credit card details -> payment provider redirects back to your frontend. Behind the scenes Stripe webhook -> Your OpenRails server -> updates entitlements in your database.
+- **Tokenized-vault flow**: Browser -> sends credit card details directly to your payment provider -> browser receives a token in response -> browser sends the token to OpenRails -> OpenRails sends the charge + token to the payment provider -> payment provider charges the card and returns the result to OpenRails -> OpenRails updates entitlements in your database.
+
+As a result, self-hosted instances only need to meet PCI compliance requirements of SAQ-A, which is a self-assessment + annual questionnaire.
 
 ---
 

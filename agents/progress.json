@@ -1,5 +1,5 @@
 {
-  "next_id": 294,
+  "next_id": 297,
   "issues": [
     {
       "id": 107,
@@ -313,7 +313,7 @@
     {
       "id": 289,
       "name": "credit-ledger-usage-event-pricing",
-      "description": "Make usage billing a first-class extension of the existing credit billing system used by Tensorhub and gen-orchestrator: ingest idempotent usage events, price them with configured rules, then authorize/hold/capture/release credits through the current ledger.\n\n## Metadata\n\n- Category: feature\n- Status: planned\n- Passes: false\n\n## Motivation\n\n- Lago is strongest at usage events, metrics, and invoices. OpenRails should not clone Lago, but customers using OpenRails for AI/API workloads need a clean event-to-credit-charge path instead of each host manually calculating all debits.\n- This should reuse the current credit ledger, holds, capture/release, prepaid/arrears behavior, spend caps, and owner/actor model.\n\n## Non-goals\n\n- No invoice PDF/e-invoicing/tax product in this issue.\n- No full Lago-style billing engine.\n- No replacement for Tensorhub/gen-orchestrator pricing if those systems remain the pricing source of truth; support both host-computed and OpenRails-computed amounts.\n",
+      "description": "Make usage billing a first-class extension of the existing credit billing system used by Tensorhub and gen-orchestrator: ingest idempotent usage events, price them with configured rules, then authorize/hold/capture/release credits through the current ledger.\n\n## Metadata\n\n- Category: feature\n- Status: planned\n- Passes: false\n\n## Motivation\n\n- Lago is strongest at usage events, metrics, and invoices. OpenRails should not clone Lago, but customers using OpenRails for AI/API workloads need a clean event-to-credit-charge path instead of each host manually calculating all debits.\n- This should reuse the current credit ledger, holds, capture/release, prepaid/arrears behavior, spend caps, and owner/actor model.\n\n## Non-goals\n\n- No invoice PDF/e-invoicing/tax product in this issue.\n- No full Lago-style billing engine.\n- No replacement for Tensorhub/gen-orchestrator pricing if those systems remain the pricing source of truth; support both host-computed and OpenRails-computed amounts.\n\n\n--- DESIGN ADDENDUM (Lago/Hyperswitch competitive analysis, 2026-06-04) ---\nLago analysis confirms #289 is the right home for the NATIVE usage-pricing engine (do NOT delegate pricing to Stripe Meters \u2014 see #134). The cleanest, highest-value port is Lago's CHARGE-MODEL math, which are pure (units, properties)->amount functions with thorough spec files:\n- standard (units x unit_amount), graduated (each tier at its own rate, summed), volume (one tier rate for the WHOLE qty), package (round up to package count x price), percentage (rate% + fixed_per_event, free-units, optional per-txn min/max), graduated_percentage, dynamic.\n- Source to translate into Go table-tests: lago api/app/services/charge_models/{standard,graduated,volume,package,percentage,graduated_percentage,dynamic}_service.rb + api/spec/services/charge_models/*_spec.rb + amount_details/range_graduated_service.rb + factory.rb.\n- PRECISION: Lago carries amount_cents (rounded) AND precise_amount_cents (un-rounded BigDecimal); rounds ONCE at the fee edge. OpenRails is integer-cents end-to-end -> adopt shopspring/decimal (or big.Rat) INSIDE the pricing package and round only when writing the debit/fee, else tiered/percentage pricing compounds rounding error across many small events.\n- Store the model + tier bands as JSONB 'properties' on the pricing rule (per credit_type/product/price). Keep the existing host-priced vs OpenRails-priced two-mode contract.\nEffort: ~1 Go pkg internal/modules/usage/pricing with a ChargeModel interface + ~6 impls, ported from the specs. BUILD THIS FIRST for usage billing.",
       "tasks": [
         "CONTRACT:",
         "[ ] Define a usage event API: owner_id, actor_user_id, subject/user_id, event_type, quantity, unit, source, source_id/idempotency key, metadata, occurred_at.",
@@ -337,7 +337,10 @@
         "",
         "VERIFY:",
         "[ ] Add integration tests for idempotent usage event ingestion, host-priced debit, OpenRails-priced debit, partial capture, release-on-failure, and owner scoping.",
-        "[ ] Run the existing unified billing e2e after adding usage-event pricing."
+        "[ ] Run the existing unified billing e2e after adding usage-event pricing.",
+        "[ ] PRICING MODELS: implement a ChargeModel interface + standard/graduated/volume/package/percentage/dynamic impls as pure (units, props)->amount funcs, ported from Lago's charge_models specs into Go table tests. Tier bands + free-units + per-txn min/max as JSONB properties.",
+        "[ ] PRECISION: use shopspring/decimal inside the pricing pkg; carry precise + rounded amounts; round once at the debit/fee edge (prevents compounding rounding on per-unit fractional pricing).",
+        "[ ] AGGREGATION (event->quantity): a usage_events table + windowed SQL aggregators sum/count/max/unique_count over [from,to) (Lago aggregation_factory.rb + aggregations/*). Skip weighted_sum/custom-expression initially."
       ],
       "completed": false
     },
