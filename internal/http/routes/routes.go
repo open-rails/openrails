@@ -111,6 +111,7 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	me.Handle(http.MethodPost, "/subscriptions/:id/cancel", h(httphandlers.CancelSubscription))
 	me.Handle(http.MethodPost, "/subscriptions/:id/resume", h(httphandlers.ResumeSubscription))
 	me.Handle(http.MethodPost, "/subscriptions/:id/change-tier", h(httphandlers.ChangeTier))
+	me.Handle(http.MethodPost, "/subscriptions/:id/change-tier/preview", h(httphandlers.ChangeTierPreview))
 	me.Handle(http.MethodGet, "/payments", h(httphandlers.GetUserPayments))
 	me.Handle(http.MethodGet, "/payment-methods", h(httphandlers.ListPaymentMethods))
 	me.Handle(http.MethodPost, "/payment-methods", h(httphandlers.CreatePaymentMethod))

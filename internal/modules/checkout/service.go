@@ -47,6 +47,33 @@ type TierChangeResponse struct {
 	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`     // For redirects
 	Message        string                         `json:"message,omitempty"`         // User-friendly message
 	DelayedStart   *time.Time                     `json:"delayed_start,omitempty"`   // For scheduled downgrades
+	// Money summary so the client can confirm/announce what actually happened.
+	// AmountDueNow is what was charged immediately (0 for a scheduled downgrade);
+	// NextChargeAmount/NextChargeDate describe the next renewal at the new price.
+	// For Stripe upgrades AmountDueNow is the local Model B estimate (Stripe
+	// finalizes the exact proration on its side), so treat it as approximate.
+	Currency         string     `json:"currency,omitempty"`
+	AmountDueNow     int64      `json:"amount_due_now"`
+	NextChargeAmount int64      `json:"next_charge_amount"`
+	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
+}
+
+// TierChangePreviewResponse is the non-mutating dry-run of a tier change: it
+// reports what a confirm WOULD charge now and at the next renewal, without
+// touching Stripe or the local subscription. The frontend renders it as a
+// "Right now: $X / On <date>: $Y" confirmation before calling change-tier.
+type TierChangePreviewResponse struct {
+	Object           string     `json:"object"` // "tier_change_preview"
+	Action           string     `json:"action"` // upgrade | downgrade
+	PriceID          string     `json:"price_id"`
+	Processor        string     `json:"processor"`
+	Currency         string     `json:"currency"`
+	AmountDueNow     int64      `json:"amount_due_now"`     // cents charged immediately (0 for downgrade)
+	NextChargeAmount int64      `json:"next_charge_amount"` // cents at next renewal (new plan price)
+	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
+	Effective        string     `json:"effective"`   // "now" (upgrade) | "period_end" (downgrade)
+	IsEstimate       bool       `json:"is_estimate"` // true when the processor finalizes the exact amount (Stripe upgrades)
+	Message          string     `json:"message,omitempty"`
 }
 
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
@@ -2026,6 +2053,129 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 	}
 }
 
+// TierChangePreview computes what a tier change WOULD charge, without mutating
+// anything (no Stripe call, no DB write). It mirrors TierChange's resolution and
+// validation, then derives the money summary from the universal Model B math so
+// the preview and the eventual charge agree:
+//
+//   - upgrade:   charged now = CalculateModelBUpgradeCharge(old, new, ...); the
+//     cycle resets, so the next charge (new full price) is now + cycle.
+//   - downgrade: nothing now; the change applies at the current period end, where
+//     the next charge is the new (lower) full price.
+//
+// For Stripe upgrades the returned now-amount is an ESTIMATE (IsEstimate=true):
+// Stripe finalizes the exact proration per-second on its side. NMI/Solana charge
+// the local math exactly, so it is not an estimate there.
+func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangePreviewResponse, error) {
+	priceID, err := api.ParsePriceID(req.PriceID)
+	if err != nil {
+		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "invalid price_id"}
+	}
+	newPrice, err := s.PriceService.GetByID(ctx, priceID)
+	if err != nil {
+		return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "price not found"}
+	}
+	if !newPrice.IsPurchasable() {
+		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "price is not available"}
+	}
+	newProduct, err := s.ProductService.GetByID(ctx, newPrice.ProductID)
+	if err != nil {
+		return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "product not found"}
+	}
+	if !newProduct.IsPurchasable() {
+		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "product is not available"}
+	}
+
+	var existingSub *models.Subscription
+	if req.SubscriptionID != uuid.Nil {
+		existingSub, err = s.SubscriptionService.GetByID(ctx, req.SubscriptionID)
+		if err != nil || existingSub.UserID != user.ID {
+			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
+		}
+	} else {
+		existingSub, err = s.SubscriptionService.GetActiveSubscription(ctx, user.ID)
+		if err != nil {
+			return nil, ErrTierChangeNoSubscription
+		}
+	}
+
+	currentPrice, err := s.PriceService.GetByID(ctx, existingSub.PriceID)
+	if err != nil {
+		return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "current price not found"}
+	}
+	currentProduct, err := s.ProductService.GetByID(ctx, currentPrice.ProductID)
+	if err != nil {
+		return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "current product not found"}
+	}
+
+	if currentProduct.ID == newProduct.ID {
+		return nil, ErrTierChangeSameProduct
+	}
+	if currentProduct.TierGroup != nil && newProduct.TierGroup != nil {
+		if strings.TrimSpace(*currentProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
+			return nil, ErrTierChangeDifferentGroup
+		}
+	}
+
+	processor := string(existingSub.Processor)
+	now := s.now()
+	resp := &TierChangePreviewResponse{
+		Object:           "tier_change_preview",
+		PriceID:          api.FormatPriceID(newPrice.ID),
+		Processor:        processor,
+		Currency:         newPrice.Currency,
+		NextChargeAmount: newPrice.Amount,
+	}
+
+	if newProduct.TierRank < currentProduct.TierRank {
+		// Downgrade: scheduled for period end, nothing charged now.
+		if existingSub.ScheduledPriceID != nil {
+			return nil, ErrTierChangePending
+		}
+		resp.Action = "downgrade"
+		resp.AmountDueNow = 0
+		resp.Effective = "period_end"
+		resp.NextChargeDate = existingSub.CurrentPeriodEndsAt
+		resp.IsEstimate = false
+		if existingSub.CurrentPeriodEndsAt != nil {
+			resp.Message = fmt.Sprintf("No charge now. Your plan changes to %s on %s, then %s.",
+				newProduct.DisplayName,
+				existingSub.CurrentPeriodEndsAt.Format("January 2, 2006"),
+				formatMinorAmount(newPrice.Amount, newPrice.Currency))
+		}
+		return resp, nil
+	}
+
+	// Upgrade: Model B reset-period — charge now, rebill the full price at now+cycle.
+	firstCharge, cycleDays := CalculateModelBUpgradeCharge(currentPrice.Amount, newPrice.Amount, existingSub.CurrentPeriodEndsAt, newPrice.BillingCycleDays, now)
+	nextDate := now.AddDate(0, 0, cycleDays)
+	resp.Action = "upgrade"
+	resp.AmountDueNow = firstCharge
+	resp.Effective = "now"
+	resp.NextChargeDate = &nextDate
+	resp.IsEstimate = processor == "stripe"
+	resp.Message = fmt.Sprintf("You'll be charged %s now and %s on %s.",
+		formatMinorAmount(firstCharge, newPrice.Currency),
+		formatMinorAmount(newPrice.Amount, newPrice.Currency),
+		nextDate.Format("January 2, 2006"))
+	return resp, nil
+}
+
+// formatMinorAmount renders a minor-unit (cents) amount as a currency string for
+// human-facing preview/confirmation copy, e.g. (6001,"usd") -> "$60.01".
+func formatMinorAmount(minor int64, currency string) string {
+	sign := ""
+	if minor < 0 {
+		sign = "-"
+		minor = -minor
+	}
+	symbol := "$"
+	if !strings.EqualFold(strings.TrimSpace(currency), "usd") {
+		symbol = strings.ToUpper(strings.TrimSpace(currency)) + " "
+	}
+	return fmt.Sprintf("%s%s%d.%02d", sign, symbol, minor/100, minor%100)
+}
+
 // processTierChangeStripe handles Stripe subscription tier changes.
 // Upgrades are processed immediately. Downgrades are scheduled for period end
 // so the user keeps access to the higher tier they already paid for.
@@ -2111,9 +2261,13 @@ func (s *CheckoutService) processTierChangeStripe(
 			Action:         action,
 			PriceID:        api.FormatPriceID(newPrice.ID),
 			Payment:        CheckoutSessionPaymentResponse{Processor: "stripe"},
-			SubscriptionID: &subID,
-			Message:        fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", newProduct.DisplayName, effectiveDate),
-			DelayedStart:   existingSub.CurrentPeriodEndsAt,
+			SubscriptionID:   &subID,
+			Message:          fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", newProduct.DisplayName, effectiveDate),
+			DelayedStart:     existingSub.CurrentPeriodEndsAt,
+			Currency:         newPrice.Currency,
+			AmountDueNow:     0,
+			NextChargeAmount: newPrice.Amount,
+			NextChargeDate:   existingSub.CurrentPeriodEndsAt,
 		}, nil
 	}
 
@@ -2144,7 +2298,10 @@ func (s *CheckoutService) processTierChangeStripe(
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
-	if err := stripeService.UpdateSubscriptionPrice(ctx, existingSub.ProcessorSubscriptionID, itemID, stripePriceID, "always_invoice", "now"); err != nil {
+	// Pass newPrice.ID so the subscription's metadata[internal_price_id] is
+	// rewritten to the new tier; otherwise the proration invoice and every future
+	// renewal would resolve the stale old price in the invoice.paid webhook (#268).
+	if err := stripeService.UpdateSubscriptionPrice(ctx, existingSub.ProcessorSubscriptionID, itemID, stripePriceID, newPrice.ID.String(), "always_invoice", "now"); err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
 
@@ -2158,6 +2315,17 @@ func (s *CheckoutService) processTierChangeStripe(
 		stripeCycleDays = *newPrice.BillingCycleDays
 	}
 	stripePeriodEnd := stripeNow.AddDate(0, 0, stripeCycleDays)
+
+	// Capture the OLD price + period BEFORE the local reset below overwrites them,
+	// so the success-toast estimate matches the preview's now-amount. Stripe
+	// finalizes the exact prorated total on its side, so this is an estimate.
+	var oldFull int64
+	if existingSub.Price != nil {
+		oldFull = existingSub.Price.Amount
+	}
+	oldPeriodEnd := existingSub.CurrentPeriodEndsAt
+	estimatedNow, _ := CalculateModelBUpgradeCharge(oldFull, newPrice.Amount, oldPeriodEnd, newPrice.BillingCycleDays, stripeNow)
+
 	existingSub.PriceID = newPrice.ID
 	existingSub.ProductID = newPrice.ProductID
 	existingSub.ScheduledPriceID = nil
@@ -2170,14 +2338,18 @@ func (s *CheckoutService) processTierChangeStripe(
 	subID := api.FormatSubscriptionID(existingSub.ID)
 
 	return &TierChangeResponse{
-		Object:         "tier_change",
-		Status:         "succeeded",
-		Mode:           "tier_change",
-		Action:         action,
-		PriceID:        api.FormatPriceID(newPrice.ID),
-		Payment:        CheckoutSessionPaymentResponse{Processor: "stripe"},
-		SubscriptionID: &subID,
-		Message:        "Plan updated",
+		Object:           "tier_change",
+		Status:           "succeeded",
+		Mode:             "tier_change",
+		Action:           action,
+		PriceID:          api.FormatPriceID(newPrice.ID),
+		Payment:          CheckoutSessionPaymentResponse{Processor: "stripe"},
+		SubscriptionID:   &subID,
+		Message:          "Plan updated",
+		Currency:         newPrice.Currency,
+		AmountDueNow:     estimatedNow,
+		NextChargeAmount: newPrice.Amount,
+		NextChargeDate:   &stripePeriodEnd,
 	}, nil
 }
 

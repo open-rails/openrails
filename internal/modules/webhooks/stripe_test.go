@@ -195,6 +195,27 @@ func TestValidateStripeInvoicePrice(t *testing.T) {
 	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 2399, Currency: "eur"}, price); err == nil || !strings.Contains(err.Error(), "currency mismatch") {
 		t.Fatalf("expected currency mismatch, got %v", err)
 	}
+
+	// Model B upgrade: billing_reason=subscription_update invoices carry a
+	// PRORATED amount (new_full - old_unused) that never equals the new tier's
+	// list price. They must be accepted as long as currency matches and the
+	// settled amount is positive (Stripe is the source of truth for the amount).
+	gm := &models.Price{Amount: 11900, Currency: "USD"} // Grandmaster list $119.00
+	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 6001, Currency: "usd", BillingReason: "subscription_update", Charge: "ch_up"}, gm); err != nil {
+		t.Fatalf("expected prorated upgrade invoice (6001 != 11900) to be accepted: %v", err)
+	}
+	// Currency still validated on proration invoices.
+	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 6001, Currency: "eur", BillingReason: "subscription_update"}, gm); err == nil || !strings.Contains(err.Error(), "currency mismatch") {
+		t.Fatalf("expected currency mismatch on proration invoice, got %v", err)
+	}
+	// A non-positive proration amount is still rejected (nothing was collected).
+	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 0, Currency: "usd", BillingReason: "subscription_update"}, gm); err == nil || !strings.Contains(err.Error(), "non-positive") {
+		t.Fatalf("expected non-positive proration amount to fail, got %v", err)
+	}
+	// Renewals (subscription_cycle) keep the strict exact list-price match.
+	if err := validateStripeInvoicePrice(stripeInvoice{AmountPaid: 6001, Currency: "usd", BillingReason: "subscription_cycle"}, gm); err == nil || !strings.Contains(err.Error(), "amount mismatch") {
+		t.Fatalf("expected renewal invoice to keep exact amount match, got %v", err)
+	}
 }
 
 func TestParseCheckoutSessionIDUsesEffectiveMetadata(t *testing.T) {

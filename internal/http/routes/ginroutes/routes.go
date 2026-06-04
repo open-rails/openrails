@@ -198,6 +198,7 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	subs.POST("/:id/cancel", subscriptionManage, wrap(httphandlers.CancelSubscription))
 	subs.POST("/:id/resume", subscriptionManage, wrap(httphandlers.ResumeSubscription))
 	subs.POST("/:id/change-tier", subscriptionManage, wrap(httphandlers.ChangeTier))
+	subs.POST("/:id/change-tier/preview", subscriptionManage, wrap(httphandlers.ChangeTierPreview))
 	subs.PUT("/:id/payment-method", manage, wrap(httphandlers.UpdateSubscriptionPaymentMethod))
 	// App-driven on-chain cancel/revoke (#266/#271): the full prepare -> sign ->
 	// confirm -> mirror loop. solana-cancel-tx builds the unsigned cancel tx the

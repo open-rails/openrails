@@ -217,8 +217,9 @@ func TestStripeModelBUpgrade_Integration(t *testing.T) {
 		sub.ID,
 		itemID,
 		newPriceID,
-		"always_invoice", // proration_behavior
-		"now",            // billing_cycle_anchor
+		"019e5e09-37e6-7ef7-be77-13a9891a13e0", // internal_price_id (new local price)
+		"always_invoice",                       // proration_behavior
+		"now",                                  // billing_cycle_anchor
 	), "UpdateSubscriptionPrice (Model-B upgrade) failed")
 
 	// 5) Fetch the resulting subscription + the upgrade invoice and report.

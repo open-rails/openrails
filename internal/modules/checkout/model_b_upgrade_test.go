@@ -173,3 +173,26 @@ func TestModelBNewPeriodEnd(t *testing.T) {
 		t.Fatalf("new period end: expected %v, got %v", wantEnd, gotEnd)
 	}
 }
+
+// TestFormatMinorAmount pins the currency formatting used in tier-change preview
+// and success copy (#138).
+func TestFormatMinorAmount(t *testing.T) {
+	tests := []struct {
+		minor    int64
+		currency string
+		want     string
+	}{
+		{6001, "usd", "$60.01"},
+		{3990, "USD", "$39.90"},
+		{2900, "usd", "$29.00"},
+		{0, "usd", "$0.00"},
+		{5, "usd", "$0.05"},
+		{-1234, "usd", "-$12.34"},
+		{1999, "eur", "EUR 19.99"},
+	}
+	for _, tt := range tests {
+		if got := formatMinorAmount(tt.minor, tt.currency); got != tt.want {
+			t.Fatalf("formatMinorAmount(%d,%q) = %q, want %q", tt.minor, tt.currency, got, tt.want)
+		}
+	}
+}

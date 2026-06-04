@@ -61,6 +61,53 @@ func ChangeTier(r *httprequest.Request) {
 	r.SuccessJSON(resp)
 }
 
+// ChangeTierPreview is the non-mutating dry-run of ChangeTier: it returns what a
+// confirm WOULD charge now and at the next renewal, without touching the
+// processor or the local subscription. The frontend renders it as a
+// "Right now: $X / On <date>: $Y" confirmation before calling ChangeTier.
+func ChangeTierPreview(r *httprequest.Request) {
+	var req ChangeTierRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+
+	user := r.GetUser()
+	if user == nil || strings.TrimSpace(user.ID) == "" {
+		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	subscriptionIDStr := r.Param("id")
+	if subscriptionIDStr == "" {
+		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
+		return
+	}
+
+	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
+		return
+	}
+
+	if r.State.CheckoutService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "checkout service unavailable")
+		return
+	}
+
+	svcReq := &checkout.TierChangeRequest{
+		PriceID:        req.PriceID,
+		SubscriptionID: subscriptionID,
+	}
+
+	resp, err := r.State.CheckoutService.TierChangePreview(r.Request.Context(), svcReq, user)
+	if err != nil {
+		writeChangeTierError(r, err)
+		return
+	}
+
+	r.SuccessJSON(resp)
+}
+
 func writeChangeTierError(r *httprequest.Request, err error) {
 	var tierErr *checkout.TierChangeError
 	if errors.As(err, &tierErr) {

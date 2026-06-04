@@ -317,7 +317,17 @@ func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionI
 	return out.Items.Data[0].ID, nil
 }
 
-func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, prorationBehavior, billingAnchor string) error {
+// UpdateSubscriptionPrice swaps the subscription's line-item price and, when
+// internalPriceID is non-empty, rewrites the subscription's
+// metadata[internal_price_id] to the new local price UUID. The metadata rewrite
+// is essential: every invoice Stripe emits for this subscription (the immediate
+// proration invoice AND all future renewals) carries the subscription's metadata
+// under subscription_details.metadata, and the invoice.paid webhook resolves the
+// price from internal_price_id first. If we changed only the line-item price but
+// left stale metadata pointing at the OLD price, the upgrade proration invoice
+// and every later renewal would resolve the old price, fail the amount check,
+// and be dropped (#268).
+func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, internalPriceID, prorationBehavior, billingAnchor string) error {
 	_, secretKey, err := RequireStripeSecretKey(s.Config)
 	if err != nil {
 		return err
@@ -331,6 +341,9 @@ func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptio
 	values := url.Values{}
 	values.Set("items[0][id]", itemID)
 	values.Set("items[0][price]", newPriceID)
+	if internalPriceID = strings.TrimSpace(internalPriceID); internalPriceID != "" {
+		values.Set("metadata[internal_price_id]", internalPriceID)
+	}
 	if strings.TrimSpace(prorationBehavior) != "" {
 		values.Set("proration_behavior", prorationBehavior)
 	}

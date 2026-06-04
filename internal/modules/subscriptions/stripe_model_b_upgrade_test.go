@@ -35,6 +35,7 @@ func TestUpdateSubscriptionPrice_ModelBUpgradeRequest(t *testing.T) {
 		"sub_123",
 		"si_item_1",
 		"price_new",
+		"019e5e09-37e6-7ef7-be77-13a9891a13e0",
 		"always_invoice",
 		"now",
 	)
@@ -44,6 +45,9 @@ func TestUpdateSubscriptionPrice_ModelBUpgradeRequest(t *testing.T) {
 	assert.Equal(t, "/v1/subscriptions/sub_123", gotPath)
 	assert.Equal(t, "si_item_1", form.Get("items[0][id]"))
 	assert.Equal(t, "price_new", form.Get("items[0][price]"))
+	// Rewrite the subscription metadata to the new local price so the proration
+	// invoice and all future renewals resolve the new tier in invoice.paid (#268).
+	assert.Equal(t, "019e5e09-37e6-7ef7-be77-13a9891a13e0", form.Get("metadata[internal_price_id]"))
 	// Model B: invoice the proration now + reset the cycle anchor to now.
 	assert.Equal(t, "always_invoice", form.Get("proration_behavior"))
 	assert.Equal(t, "now", form.Get("billing_cycle_anchor"))
