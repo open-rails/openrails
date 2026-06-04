@@ -27,16 +27,6 @@ jobs:
           git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
           go mod download
           git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
-      - name: Cache Go build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-        continue-on-error: true
       - name: Vet
         run: go vet ./...
       - name: Build
@@ -70,16 +60,6 @@ jobs:
           git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
           go mod download
           git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
-      - name: Cache Go build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-        continue-on-error: true
       # Integration tests self-provision their infra (Postgres/Redis/ClickHouse)
       # via testcontainers — ubuntu-latest ships with Docker, so no `services:`
       # block is needed. See internal/dbtest and tests/testcontainer_suite.go.
