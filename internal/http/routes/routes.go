@@ -42,7 +42,7 @@ func (opts Options) requiredMW() router.Middleware {
 				r.AbortJSON(http.StatusUnauthorized, unauthenticatedMessage(err))
 				return
 			}
-			r.Request = r.Request.WithContext(billingauth.SetUserContext(r.Request.Context(), uc))
+			r.SetUserContext(uc)
 			next(r)
 		}
 	}
@@ -55,7 +55,7 @@ func (opts Options) optionalMW() router.Middleware {
 		return func(r *httprequest.Request) {
 			if a := opts.Authenticator; a != nil {
 				if uc, err := a.Authenticate(r.Request.Context(), r.Request); err == nil {
-					r.Request = r.Request.WithContext(billingauth.SetUserContext(r.Request.Context(), uc))
+					r.SetUserContext(uc)
 				}
 			}
 			next(r)

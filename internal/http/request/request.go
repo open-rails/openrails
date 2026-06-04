@@ -55,6 +55,14 @@ type Request struct {
 	Clock   clockwork.Clock
 
 	t Transport
+
+	// uc is the authenticated principal pinned by the auth middleware
+	// (SetUserContext). It is the source of truth for UserContext()/GetUser so
+	// the identity survives middleware reassigning r.Request — the net/http
+	// Transport caches its own *http.Request and would otherwise not see a
+	// UserContext stored only on a re-wrapped request context.
+	uc    authprovider.UserContext
+	ucSet bool
 }
 
 // NewWithTransport builds a Request over an arbitrary Transport. The gin backend
@@ -203,7 +211,23 @@ func (r *Request) Header(key string) string {
 // of the former authprovider.UserContextFromGin(r.GinCtx). Works on both the gin
 // and net/http backends.
 func (r *Request) UserContext() (authprovider.UserContext, bool) {
+	if r.ucSet {
+		return r.uc, true
+	}
 	return r.t.UserContext()
+}
+
+// SetUserContext pins the authenticated principal on this request. The auth
+// middleware calls it after Authenticate succeeds; handlers read it via
+// UserContext()/GetUser(). It also propagates the principal into the request
+// context (billingauth.SetUserContext) for any downstream that reads it from
+// r.Request.Context() directly.
+func (r *Request) SetUserContext(uc authprovider.UserContext) {
+	r.uc = uc
+	r.ucSet = true
+	if r.Request != nil {
+		r.Request = r.Request.WithContext(billingauth.SetUserContext(r.Request.Context(), uc))
+	}
 }
 
 func (r *Request) Next() {
@@ -227,7 +251,7 @@ func (r *Request) Set(key string, value any) {
 }
 
 func (r *Request) GetUser() *checkout.UserIdentity {
-	if uc, ok := r.t.UserContext(); ok && uc.UserID != "" {
+	if uc, ok := r.UserContext(); ok && uc.UserID != "" {
 		user := &checkout.UserIdentity{
 			ID:       uc.UserID,
 			Username: uc.Username,
