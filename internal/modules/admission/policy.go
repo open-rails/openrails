@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -26,11 +27,12 @@ type TierPolicyStore struct {
 
 func NewTierPolicyStore(database *db.DB) *TierPolicyStore { return &TierPolicyStore{db: database} }
 
-// ResolvedPolicy is a tier's enforceable policy: throughput windows + the set of
-// entitled endpoints (empty = all allowed).
+// ResolvedPolicy is a tier's enforceable policy: throughput windows, entitled
+// endpoints (empty = all allowed), and rolling money-budget windows (#304).
 type ResolvedPolicy struct {
 	Throughput        ratelimit.Policy
 	EntitledEndpoints []string
+	BudgetWindows     []budgets.BudgetWindow
 }
 
 // UpsertTierPolicy sets the throughput windows for (owner, tier).
@@ -87,7 +89,19 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, owner identity.Owne
 	if !found {
 		return ResolvedPolicy{}, nil
 	}
-	return ResolvedPolicy{Throughput: toRatelimitPolicy(row.Policy), EntitledEndpoints: row.Policy.EntitledEndpoints}, nil
+	return ResolvedPolicy{
+		Throughput:        toRatelimitPolicy(row.Policy),
+		EntitledEndpoints: row.Policy.EntitledEndpoints,
+		BudgetWindows:     toBudgetWindows(row.Policy.BudgetWindows),
+	}, nil
+}
+
+func toBudgetWindows(ws []models.BudgetWindowPolicy) []budgets.BudgetWindow {
+	out := make([]budgets.BudgetWindow, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMillicents: w.LimitMillicents})
+	}
+	return out
 }
 
 func toRatelimitPolicy(p models.ThroughputPolicy) ratelimit.Policy {

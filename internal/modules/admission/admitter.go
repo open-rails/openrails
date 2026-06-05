@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/abuse"
+	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -27,10 +29,11 @@ type Admitter struct {
 	credits   *credits.CreditsService
 	policies  *TierPolicyStore
 	blocklist *abuse.BlocklistService // optional; nil disables blocklist checks
+	budgets   *budgets.Service        // optional; nil disables rolling money-budget windows (#304)
 }
 
-func NewAdmitter(limiter *ratelimit.Limiter, creditsSvc *credits.CreditsService, policies *TierPolicyStore, blocklist *abuse.BlocklistService) *Admitter {
-	return &Admitter{limiter: limiter, credits: creditsSvc, policies: policies, blocklist: blocklist}
+func NewAdmitter(limiter *ratelimit.Limiter, creditsSvc *credits.CreditsService, policies *TierPolicyStore, blocklist *abuse.BlocklistService, budgetSvc *budgets.Service) *Admitter {
+	return &Admitter{limiter: limiter, credits: creditsSvc, policies: policies, blocklist: blocklist, budgets: budgetSvc}
 }
 
 // BlockCheck is one (kind,value) tested against the payment blocklist (#300),
@@ -70,8 +73,13 @@ type AdmitDecision struct {
 	BlockedUnit string // throughput: the window unit that blocked
 	DenyCode    string // money: the ledger deny code
 	RetryAfter  time.Duration
-	Windows     []ratelimit.WindowInfo     // for x-ratelimit-* headers
-	Hold        *models.CreditTransaction  // the placed money hold when allowed
+	Windows     []ratelimit.WindowInfo    // for x-ratelimit-* headers
+	Hold        *models.CreditTransaction // the placed money hold when allowed
+
+	// BudgetReservationID is the rolling money-budget reservation placed when
+	// allowed (#304); BudgetWindows is the per-window state for introspection.
+	BudgetReservationID uuid.UUID
+	BudgetWindows       []budgets.WindowStatus
 }
 
 // Admit runs throughput then money and returns the unified decision.
@@ -132,6 +140,27 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}, nil
 	}
 
+	// --- money-budget windows (#304): rolling per-tier spend caps on the actor ---
+	var budgetResID uuid.UUID
+	var budgetWindows []budgets.WindowStatus
+	if a.budgets != nil && len(pol.BudgetWindows) > 0 && req.EstimateCents > 0 {
+		ttl := time.Hour
+		if !req.ExpiresAt.IsZero() {
+			if d := time.Until(req.ExpiresAt); d > 0 {
+				ttl = d
+			}
+		}
+		resID, statuses, ok, err := a.budgets.Reserve(ctx, req.Owner, req.Actor, pol.BudgetWindows, req.EstimateCents, req.Source, req.SourceID, ttl)
+		if err != nil {
+			return AdmitDecision{}, err
+		}
+		budgetWindows = statuses
+		if !ok {
+			return AdmitDecision{Allowed: false, BlockedBy: "budget", RetryAfter: budgetRetry(statuses), Windows: tp.Windows, BudgetWindows: statuses}, nil
+		}
+		budgetResID = resID
+	}
+
 	// --- money axis (reserve the estimate via the existing ledger gate) ---
 	if req.EstimateCents > 0 {
 		res, err := a.credits.AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
@@ -147,17 +176,27 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			return AdmitDecision{}, err
 		}
 		if !res.Decision.Allowed {
-			return AdmitDecision{
-				Allowed:   false,
-				BlockedBy: "money",
-				DenyCode:  res.Decision.DenyCode,
-				Windows:   tp.Windows,
-			}, nil
+			// Roll back the budget reservation so a money-denied request doesn't
+			// consume the actor's rolling budget.
+			if budgetResID != uuid.Nil && a.budgets != nil {
+				_ = a.budgets.Release(ctx, budgetResID)
+			}
+			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: res.Decision.DenyCode, Windows: tp.Windows, BudgetWindows: budgetWindows}, nil
 		}
-		return AdmitDecision{Allowed: true, Windows: tp.Windows, Hold: res.Hold}, nil
+		return AdmitDecision{Allowed: true, Windows: tp.Windows, Hold: res.Hold, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows}, nil
 	}
 
-	return AdmitDecision{Allowed: true, Windows: tp.Windows}, nil
+	return AdmitDecision{Allowed: true, Windows: tp.Windows, BudgetReservationID: budgetResID, BudgetWindows: budgetWindows}, nil
+}
+
+func budgetRetry(ws []budgets.WindowStatus) time.Duration {
+	var best int64
+	for _, w := range ws {
+		if !w.Allowed && w.RetryAfterSeconds > 0 && (best == 0 || w.RetryAfterSeconds < best) {
+			best = w.RetryAfterSeconds
+		}
+	}
+	return time.Duration(best) * time.Second
 }
 
 // retryAfter returns the reset time of the window that blocked.

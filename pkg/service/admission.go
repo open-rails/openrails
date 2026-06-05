@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
+	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
 )
@@ -49,6 +51,21 @@ type AdmitResult struct {
 	RetryAfterSeconds int64            `json:"retry_after_seconds,omitempty"`
 	Windows           []AdmitWindowDTO `json:"windows,omitempty"`
 	ReservationID     string           `json:"reservation_id,omitempty"`
+	// Budget (#304): the rolling money-budget reservation + per-window state.
+	BudgetReservationID string                 `json:"budget_reservation_id,omitempty"`
+	BudgetWindows       []AdmitBudgetWindowDTO `json:"budget_windows,omitempty"`
+}
+
+// AdmitBudgetWindowDTO is a rolling money-budget window's state (#304), for the
+// host's /status dashboard.
+type AdmitBudgetWindowDTO struct {
+	Key               string `json:"key"`
+	Limit             int64  `json:"limit"`
+	Used              int64  `json:"used"`
+	Reserved          int64  `json:"reserved"`
+	Remaining         int64  `json:"remaining"`
+	ResetAfterSeconds int64  `json:"reset_after_seconds"`
+	Allowed           bool   `json:"allowed"`
 }
 
 // Admit runs the unified admission check (issue #298): blocklist + suspension +
@@ -68,7 +85,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	lim := ratelimit.NewLimiter(s.rt.RedisClient)
 	store := admission.NewTierPolicyStore(s.rt.DB)
 	bl := abuse.NewBlocklistService(s.rt.DB)
-	adm := admission.NewAdmitter(lim, s.creditsService(), store, bl)
+	bsvc := budgets.NewService(s.rt.DB)
+	adm := admission.NewAdmitter(lim, s.creditsService(), store, bl, bsvc)
 
 	var exp time.Time
 	switch {
@@ -122,5 +140,55 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	if dec.Hold != nil {
 		res.ReservationID = dec.Hold.ID.String()
 	}
+	if dec.BudgetReservationID != uuid.Nil {
+		res.BudgetReservationID = dec.BudgetReservationID.String()
+	}
+	for _, w := range dec.BudgetWindows {
+		rs := int64(time.Until(w.ResetAt) / time.Second)
+		if rs < 0 {
+			rs = 0
+		}
+		res.BudgetWindows = append(res.BudgetWindows, AdmitBudgetWindowDTO{
+			Key: w.Key, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
+			Remaining: w.Remaining, ResetAfterSeconds: rs, Allowed: w.Allowed,
+		})
+	}
 	return res, nil
+}
+
+// BudgetStatus returns the rolling money-budget windows for (owner, actor) at a
+// tier WITHOUT reserving (issue #304 introspection) — powers a host's /status
+// dashboard (e.g. cozy-art useGenerationBudgetStatus).
+func (s *Service) BudgetStatus(ctx context.Context, owner identity.OwnerOrgID, actor, tier string) ([]AdmitBudgetWindowDTO, error) {
+	if s == nil || s.rt == nil {
+		return nil, fmt.Errorf("service not initialized")
+	}
+	if owner.IsZero() {
+		return nil, fmt.Errorf("owner required")
+	}
+	if tier == "" {
+		tier = admission.DefaultTier
+	}
+	store := admission.NewTierPolicyStore(s.rt.DB)
+	pol, err := store.GetTierPolicy(ctx, owner, tier)
+	if err != nil {
+		return nil, err
+	}
+	bsvc := budgets.NewService(s.rt.DB)
+	statuses, _, err := bsvc.Check(ctx, owner, actor, pol.BudgetWindows, 0)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AdmitBudgetWindowDTO, 0, len(statuses))
+	for _, w := range statuses {
+		rs := int64(time.Until(w.ResetAt) / time.Second)
+		if rs < 0 {
+			rs = 0
+		}
+		out = append(out, AdmitBudgetWindowDTO{
+			Key: w.Key, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
+			Remaining: w.Remaining, ResetAfterSeconds: rs, Allowed: w.Allowed,
+		})
+	}
+	return out, nil
 }

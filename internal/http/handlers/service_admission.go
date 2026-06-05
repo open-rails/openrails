@@ -105,3 +105,29 @@ func ServiceAdmit(r *httprequest.Request) {
 		r.JSON(http.StatusForbidden, res)
 	}
 }
+
+// ServiceGetBudget returns the actor's rolling money-budget windows (#304
+// introspection) for a host's /status dashboard. owner + actor + tier are query
+// params; the tenant is pinned from the OAT.
+func ServiceGetBudget(r *httprequest.Request) {
+	ownerRaw := strings.TrimSpace(r.Query("owner"))
+	if ownerRaw == "" {
+		ownerRaw = strings.TrimSpace(r.Query("owner_id"))
+	}
+	payer, err := parseServiceOwnerOrgID(ownerRaw, "")
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "owner required")
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, r.Query("actor"), r.Query("tier"))
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "budget lookup failed")
+		return
+	}
+	r.SuccessJSON(map[string]any{"windows": windows})
+}

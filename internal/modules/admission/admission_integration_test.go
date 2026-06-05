@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
+	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -59,6 +60,7 @@ func admitEnv(t *testing.T) (*admission.Admitter, *credits.CreditsService, *admi
 	ownerID := owner.UUID()
 	t.Cleanup(func() {
 		_, _ = bunDB.NewDelete().Model((*models.TierPolicy)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.BudgetReservation)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
@@ -80,7 +82,8 @@ func admitEnv(t *testing.T) (*admission.Admitter, *credits.CreditsService, *admi
 	cs := credits.NewCreditsService(dbi)
 	store := admission.NewTierPolicyStore(dbi)
 	bl := abuse.NewBlocklistService(dbi)
-	adm := admission.NewAdmitter(ratelimit.NewLimiter(rdb), cs, store, bl)
+	bsvc := budgets.NewService(dbi)
+	adm := admission.NewAdmitter(ratelimit.NewLimiter(rdb), cs, store, bl, bsvc)
 	return adm, cs, store, owner, ctName, ctx, bl
 }
 
@@ -173,6 +176,29 @@ func TestAdmit_EndpointGating(t *testing.T) {
 		Model: "dall-e-3", Amounts: map[string]int64{"request": 1}, CreditType: ct})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
+}
+
+func TestAdmit_BudgetDeny(t *testing.T) {
+	adm, cs, store, owner, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicyFull(ctx, owner, "free", models.ThroughputPolicy{
+		Windows:       []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 1000}},
+		BudgetWindows: []models.BudgetWindowPolicy{{Key: "1h", WindowSeconds: 3600, LimitMillicents: 500}},
+	}))
+	_, err := cs.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed"})
+	require.NoError(t, err)
+
+	// First request reserves 400 of the 500/hour budget -> allowed.
+	d, err := adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 400, Source: "usage", SourceID: "b1", ExpiresAt: time.Now().Add(time.Hour)})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+
+	// Second request (200) would push the window to 600 > 500 -> budget deny.
+	d, err = adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 200, Source: "usage", SourceID: "b2", ExpiresAt: time.Now().Add(time.Hour)})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.Equal(t, "budget", d.BlockedBy)
 }
 
 func TestAdmit_SuspendedDeny(t *testing.T) {

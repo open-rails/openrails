@@ -112,6 +112,8 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// suspension + blocklist + endpoint gating in one call; emits x-ratelimit-*
 	// + 429/Retry-After. Hot-path gate hosts call before doing work.
 	group.POST("/admit", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmit))
+	// Budget introspection (#304): rolling money-budget windows for a host /status.
+	group.GET("/budget", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetBudget))
 
 	// Unified authorize: policy decision + ATOMIC hold placement (issue #235/#247).
 	credits.POST("/authorize", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAuthorizeCredits))

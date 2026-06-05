@@ -28,11 +28,21 @@ type TierPolicy struct {
 }
 
 // ThroughputPolicy is the JSONB-stored tier policy: fixed-window throughput
-// limits plus the set of endpoints/models this tier may call (empty = all
-// allowed). Endpoint gating denies a request whose model is not entitled (#298).
+// limits, the set of endpoints/models this tier may call (empty = all allowed),
+// and rolling money-budget windows (#304, e.g. $2/4h, $5/week). Endpoint gating
+// denies a request whose model is not entitled (#298).
 type ThroughputPolicy struct {
-	Windows           []ThroughputWindow `json:"windows"`
-	EntitledEndpoints []string           `json:"entitled_endpoints,omitempty"`
+	Windows           []ThroughputWindow   `json:"windows"`
+	EntitledEndpoints []string             `json:"entitled_endpoints,omitempty"`
+	BudgetWindows     []BudgetWindowPolicy `json:"budget_windows,omitempty"`
+}
+
+// BudgetWindowPolicy is one rolling money-budget window for a tier (#304): at
+// most LimitMillicents (the ledger's smallest unit) of spend per WindowSeconds.
+type BudgetWindowPolicy struct {
+	Key             string `json:"key"`
+	WindowSeconds   int64  `json:"window_seconds"`
+	LimitMillicents int64  `json:"limit_millicents"`
 }
 
 // ThroughputWindow is one limit: at most Max units of Unit per WindowSeconds.
