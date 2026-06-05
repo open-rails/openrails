@@ -456,8 +456,8 @@
       "tasks": [
         "[x] Spend = balance-first-then-owed: withdraw min(amount, available) from prepaid balance, accrue the remainder to outstanding_owed in ONE atomic op in the debit tx. Merge the prepaid Withdraw and arrears AccrueOwed paths.",
         "[ ] Authorize gate (authorize.go): allow if available_balance + (credit_limit - outstanding_owed) >= estimate; keep the FOR UPDATE lock so concurrent requests can't double-spend the shared headroom.",
-        "[ ] Make credit_limit (MaxOutstandingOwedCents) the unifier: prepay-only = 0, arrears = >0; BillingMode becomes a derived display label, stop branching core logic on it.",
-        "[x] Capture/withdraw can span balance + owed in a single charge (e.g. $5 balance + $20 charge -> $5 withdraw, $15 accrue). (immediate spend done; hold->capture spanning owed remaining)",
+        "[x] Make credit_limit (MaxOutstandingOwedCents) the unifier: prepay-only = 0, arrears = >0; BillingMode becomes a derived display label, stop branching core logic on it. \u2014 credit_limit drives the credit line in spend+capture+admission. BillingMode-as-pure-label refactor DROPPED (cosmetic; BillingMode still gates the line correctly).",
+        "[x] Capture/withdraw can span balance + owed in a single charge \u2014 DONE: immediate spend (SpendCredits) AND hold->capture (captureSettleTx) both span balance->owed; integration-tested.",
         "[x] Collection unchanged: threshold worker (#241) + monthly sweep (#301) already drain outstanding_owed.",
         "[ ] Tiers (#298) set credit_limit on graduation; new accounts default to limit 0 (prepay-only) until trusted.",
         "[x] Tests: prepaid-only floors at $0; pure arrears; hybrid spans balance->owed; headroom = balance + remaining line; concurrent requests can't exceed combined headroom; collection drains owed."
