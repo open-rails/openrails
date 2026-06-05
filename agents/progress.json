@@ -447,7 +447,7 @@
       "tasks": [
         "[x] Monthly sweep River job: at each period boundary, charge full outstanding_owed_cents for arrears accounts via the existing ChargeOutstanding/Charger path (largely ChargeOutstanding with a ~$1 min on a monthly cadence).",
         "[x] Min-charge floor: skip accounts whose owed < configurable minimum (default 100 cents = $1); carry sub-floor balance to next period.",
-        "[ ] Decide month boundary: calendar-month UTC vs per-account anniversary vs per-tenant config.",
+        "[x] Decide month boundary: calendar-month UTC vs per-account anniversary vs per-tenant config. \u2014 DECIDED: arrears sweep uses a fixed ~30d interval (robust+idempotent); the #303 invoice worker uses calendar-month. Calendar arrears = future refinement.",
         "[x] Idempotency: sweep + hourly threshold worker must not double-charge the same owed (reuse owed_payment source/source_id keying).",
         "[x] Reuse charge path + dunning (#295) on failure; no new payment primitives; the itemized statement lives in #303.",
         "[x] Tests: sweep charges owed>=floor, skips owed<floor (rolls over), no double-charge with the hourly worker, failure -> dunning."
