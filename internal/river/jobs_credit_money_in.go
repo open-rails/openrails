@@ -139,6 +139,47 @@ func (w ArrearsChargeWorker) Work(ctx context.Context, job *river.Job[ArrearsCha
 	return nil
 }
 
+// --- Monthly itemized invoices (#303) ---
+
+const KindInvoiceFinalize = "billing.invoice_finalize"
+
+type InvoiceFinalizeArgs struct{}
+
+func (InvoiceFinalizeArgs) Kind() string { return KindInvoiceFinalize }
+
+type InvoiceFinalizeWorker struct {
+	river.WorkerDefaults[InvoiceFinalizeArgs]
+	Credits *credits.CreditsService
+	Clock   clockwork.Clock
+}
+
+func (InvoiceFinalizeWorker) Kind() string { return KindInvoiceFinalize }
+
+func (w InvoiceFinalizeWorker) Work(ctx context.Context, _ *river.Job[InvoiceFinalizeArgs]) error {
+	logger := log.WithContext(ctx).WithField("worker", KindInvoiceFinalize)
+	if w.Credits == nil {
+		logger.Debug("credits service not configured; skipping invoice finalize")
+		return nil
+	}
+	now := time.Now().UTC()
+	if w.Clock != nil {
+		now = w.Clock.Now().UTC()
+	}
+	// Finalize the PREVIOUS calendar month [firstOfPrevMonth, firstOfThisMonth).
+	// Idempotent per (owner, credit_type, period), so running daily is safe and
+	// guarantees the prior month is finalized shortly after rollover.
+	firstThis := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	from := firstThis.AddDate(0, -1, 0)
+	n, err := w.Credits.FinalizeDueInvoices(ctx, from, firstThis)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		logger.WithField("invoices", n).Info("monthly invoices finalized")
+	}
+	return nil
+}
+
 // --- Ledger reconciliation (#243) ---
 
 const KindCreditReconcile = "billing.credit_reconcile"

@@ -42,6 +42,7 @@ var ModelRegistry = []any{
 	(*SolanaSubscription)(nil),
 	(*ProductAccessGrant)(nil),
 	(*UsageEvent)(nil),
+	(*Invoice)(nil),
 }
 
 func RegisterModels(db *bun.DB) {

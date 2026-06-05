@@ -129,6 +129,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add credit reconcile worker: %w", err)
 	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.InvoiceFinalizeWorker{
+		Credits: r.CreditsService,
+		Clock:   clock,
+	}); err != nil {
+		return fmt.Errorf("add invoice finalize worker: %w", err)
+	}
 	// Solana recurring cranker (#256). The Cranker (per-tenant signer + RPC) is
 	// wired once tenant Solana signing lands; until then it log-and-skips like the
 	// money-in workers above. Lifecycle is wired so renewals + dunning route
@@ -380,6 +386,20 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.ArrearsChargeArgs{ThresholdCents: riverjobs.ArrearsMonthlyFloorCents}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: 30 * 24 * time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Daily: finalize the previous calendar month's itemized invoices (#303).
+	// Idempotent per (owner, credit_type, period), so a daily run reliably
+	// finalizes the prior month shortly after rollover and no-ops thereafter.
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(24*time.Hour),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.InvoiceFinalizeArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
