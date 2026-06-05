@@ -2,7 +2,7 @@ package controlplane
 
 import (
 	"context"
-	"crypto/rsa"
+	"crypto"
 	"errors"
 	"testing"
 	"time"
@@ -57,7 +57,7 @@ func newTestDelegatedVerifier(t *testing.T) (*authhttp.Verifier, jwtkit.Signer) 
 	)
 	pub := signer.PublicKey()
 	require.NoError(t, v.AddIssuer(testDelegatedIssuer, []string{canonicalAudience}, authhttp.IssuerOptions{
-		RawKeys: map[string]*rsa.PublicKey{testDelegatedKID: pub},
+		RawKeys: map[string]crypto.PublicKey{testDelegatedKID: pub},
 	}))
 	return v, signer
 }
