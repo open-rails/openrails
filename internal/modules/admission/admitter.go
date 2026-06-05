@@ -89,6 +89,17 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 	}
 
+	// Suspension (#299): a past_due/suspended account is denied all spend.
+	if req.CreditType != "" {
+		suspended, err := a.credits.IsSuspended(ctx, req.Owner, req.CreditType)
+		if err != nil {
+			return AdmitDecision{}, err
+		}
+		if suspended {
+			return AdmitDecision{Allowed: false, BlockedBy: "suspended"}, nil
+		}
+	}
+
 	// New-account low default (#300): no explicit tier => lowest tier.
 	tier := req.Tier
 	if tier == "" {

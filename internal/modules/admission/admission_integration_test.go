@@ -174,3 +174,16 @@ func TestAdmit_EndpointGating(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
 }
+
+func TestAdmit_SuspendedDeny(t *testing.T) {
+	adm, cs, store, owner, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
+		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
+	require.NoError(t, cs.Suspend(ctx, owner, ct, "past_due"))
+
+	d, err := adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free",
+		Model: "gpt-4o", Amounts: map[string]int64{"request": 1}, CreditType: ct})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.Equal(t, "suspended", d.BlockedBy)
+}
