@@ -1,5 +1,5 @@
 {
-  "next_id": 305,
+  "next_id": 306,
   "issues": [
     {
       "id": 107,
@@ -402,13 +402,8 @@
         "[x] ADMISSION wiring: one server-side check beside AuthorizeAndHold -> money + throughput + endpoint-entitlement -> allowed + blocking limit + retry_after; sub-ms; never aggregates #289. x-ratelimit-* headers; 429 + Retry-After; backoff docs. \u2014 DONE: internal/modules/admission Admitter unifies throughput+money (integration-tested). REMAINING: endpoint-entitlement gating + headers handler.",
         "[ ] Token accounting: count = max(max_tokens, estimate); TPM/TPD from #289 input+output dimensions.",
         "[ ] ADMIN/DASH: per-customer tier + usage-vs-limit across throughput, credit limit, monthly cap, and entitled endpoints.",
-        "LATENCY (hot path):",
-        "[ ] CONFIGURABLE consistency per host/tenant (optionally per endpoint/credit_type): STRICT (sync AuthorizeAndHold, exact, zero overspend, higher latency) vs FAST (Redis headroom, eventual, bounded overspend, sub-ms). Default STRICT; opt into FAST for high-QPS.",
-        "[ ] FAST PATH: admission = one Redis/Garnet op (throughput windows + cached money-headroom counter, atomic decrement); NO Postgres lock/round-trip per request. Keep strict FOR-UPDATE AuthorizeAndHold for low-QPS/exact callers.",
-        "[ ] WRITE-BEHIND + RECONCILE: durable PG debit + usage_event async via host RecordUsage (#289); periodically resync the Redis headroom from the authoritative PG balance.",
-        "[ ] BOUNDED OVERSPEND: atomic Redis decrement (no concurrent oversell) + credit_limit cap + reconcile-lag bound (throughput caps spend-rate); make the tolerance tier-tunable.",
-        "[ ] OPTIONAL phase 2: host-side lease (reserve N units, spend locally, reconcile) to remove the per-request network hop; overspend bounded by lease size.",
-        "[ ] VERIFY: tier graduation thresholds, endpoint gating, hard-stop cutoff, window rollover, concurrency, whichever-limit-first (money vs throughput vs entitlement), failed-request counting, per-model + per-tenant isolation."
+        "[ ] VERIFY: tier graduation thresholds, endpoint gating, hard-stop cutoff, window rollover, concurrency, whichever-limit-first (money vs throughput vs entitlement), failed-request counting, per-model + per-tenant isolation.",
+        "MOVED to future #305: FAST eventual-consistency mode (write-behind/reconcile + host-side lease) \u2014 premature; admission is synchronous strong-consistency, the Redis rate-limiter already caps abuse."
       ],
       "completed": false
     },

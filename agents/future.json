@@ -232,6 +232,19 @@
         "[ ] NOT to do (record the rationale): do NOT receive raw PANs in OpenRails (->SAQ D), do NOT self-host a PAN vault (->PCI Level 1 + breach liability), do NOT depend on Hyperswitch Cloud's vault for adult (termination trapdoor + cooperation-dependent export).",
         "[ ] TRIGGER/sequencing: prioritize this work if any card processor (Mobius/NMI/CCBill) signals de-platform risk (the interim phase leaves card tokens processor-locked = stranded-on-ban). Otherwise sequence behind the usage-billing engine (#289)."
       ]
+    },
+    {
+      "id": 305,
+      "name": "fast-eventual-consistency-admission",
+      "description": "OPTIONAL future optimization: a FAST (eventual-consistency) admission mode for extreme per-payer throughput. TODAY the money axis is STRONG consistency: admission.Admitter calls credits.AuthorizeAndHold, a Postgres tx with SELECT ... FOR UPDATE on the payer balance row, so requests for one payer serialize on the lock and read the exact committed balance (zero overspend, but throughput bounded by lock-serialized txns + a DB round-trip per request). The THROUGHPUT axis is already Redis-fast in both modes.\n\nFAST mode (this issue): per-request money decision against a Redis/Garnet HEADROOM counter (= available balance + remaining credit line), O(1), no lock, no DB round-trip; the durable Postgres debit is WRITE-BEHIND (async) and the Redis counter is RECONCILED from the authoritative PG balance periodically. Sub-ms at scale. BOUNDED OVERSPEND: atomic Redis decrement (no concurrent oversell) + cap = reconcile-lag x spend-rate, hard-capped by the credit limit. Per-host CONFIGURABLE strict|fast. Phase-2 host-side LEASE: the host reserves N units from OpenRails and spends locally, removing the per-request network hop; overspend bounded by lease size.\n\nWHEN TO BUILD: only when a single payer needs hundreds+ req/s where the per-payer FOR UPDATE serialization or the admission round-trip becomes the bottleneck. Until then strict is plenty. Source: internal/modules/admission + the #298 latency design.",
+      "tasks": [
+        "[ ] CONFIGURABLE consistency per host/tenant (optionally per endpoint/credit_type): STRICT (sync AuthorizeAndHold, exact, zero overspend, higher latency) vs FAST (Redis headroom, eventual, bounded overspend, sub-ms). Default STRICT; opt into FAST for high-QPS.",
+        "[ ] FAST PATH: admission = one Redis/Garnet op (throughput windows + cached money-headroom counter, atomic decrement); NO Postgres lock/round-trip per request. Keep strict FOR-UPDATE AuthorizeAndHold for low-QPS/exact callers.",
+        "[ ] WRITE-BEHIND + RECONCILE: durable PG debit + usage_event async via host RecordUsage (#289); periodically resync the Redis headroom from the authoritative PG balance.",
+        "[ ] BOUNDED OVERSPEND: atomic Redis decrement (no concurrent oversell) + credit_limit cap + reconcile-lag bound (throughput caps spend-rate); make the tolerance tier-tunable.",
+        "[ ] OPTIONAL phase 2: host-side lease (reserve N units, spend locally, reconcile) to remove the per-request network hop; overspend bounded by lease size."
+      ],
+      "completed": false
     }
   ]
 }
