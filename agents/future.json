@@ -51,66 +51,33 @@
     },
     {
       "id": 134,
-      "name": "usage-based-billing (postpaid metering + invoicing)",
-      "description": "Add first-class support for usage-based (metered) billing where users consume resources first and are billed after the fact.\n\nToday, doujins-billing primarily supports prepaid-style charging (subscriptions and one-off payments) plus a credits/balance system that can be decremented at time-of-use. That covers many \"usage\" cases as prepaid credits.\n\nThis issue is specifically about **postpaid** usage: record usage events, aggregate them into an invoice/statement for a billing period, and collect payment after the usage occurred.\n\n## Stripe Billing Meter API (2025+)\n\nStripe deprecated the legacy usage records API (removed in API version 2025-03-31). The new approach uses the **Billing Meter API**:\n\n1. **Meters** - Define how to aggregate usage (sum, count, last_during_period)\n2. **Meter Events** - Individual usage records sent to Stripe (POST /v1/billing/meter_events)\n3. **Metered Prices** - Prices that link to meters (per-unit or tiered)\n4. **Subscriptions** - Connect customers to metered prices\n5. **Invoices** - Stripe auto-generates at period end based on aggregated meter events\n\n### Stripe Meter Event Structure\n```json\n{\n  \"event_name\": \"api_requests\",\n  \"payload\": {\n    \"stripe_customer_id\": \"cus_xxx\",\n    \"value\": \"150\"\n  },\n  \"identifier\": \"unique-idempotency-key\",\n  \"timestamp\": 1234567890\n}\n```\n\n### Rate Limits\n- Standard API: 1,000 events/second\n- V2 Meter Event Stream: 10,000 events/second (requires session auth)\n- Events must be within 35 days past or 5 minutes future\n\n## Goals\n\n- Support metered products (e.g. $/image, $/minute, $/GB) billed in arrears.\n- Align with Stripe's Billing Meter API as the primary integration path.\n- Keep internal usage tracking for audit/reporting (mirror events locally).\n- Make usage accounting auditable and idempotent (no double-billing).\n\n## Non-goals (initially)\n\n- Real-time streaming analytics dashboard.\n- Non-Stripe processor support for metered billing.\n\n## Design sketch\n\n### Data model (internal mirror)\n- `billing.meters` - Mirror of Stripe meters: {id, stripe_meter_id, event_name, display_name, aggregation, created_at}\n- `billing.meter_events` (append-only): {id, meter_id, user_id, stripe_customer_id, value, occurred_at, identifier, synced_to_stripe_at, error?}\n- `billing.metered_subscriptions` - Link users to Stripe subscriptions with metered prices\n\n### Flow\n1. Host app calls `RecordUsage(user_id, meter_name, value, idempotency_key)`\n2. doujins-billing stores event locally in `meter_events`\n3. doujins-billing forwards to Stripe via `POST /v1/billing/meter_events`\n4. Mark `synced_to_stripe_at` on success, store error on failure\n5. At billing period end, Stripe aggregates and generates invoice automatically\n6. Webhook `invoice.paid` / `invoice.payment_failed` updates subscription status\n\n### Stripe Setup (one-time)\n1. Create Meter in Stripe (event_name, aggregation: sum)\n2. Create Product with metered Price linked to Meter\n3. When user enables arrears billing, create Subscription with metered price\n\n## Open questions\n\n- Do we want spend caps / kill-switch when usage exceeds a threshold? (Stripe supports this)\n- How do we handle users without Stripe customer? (Require Stripe for arrears billing)\n- Retry strategy for failed Stripe meter event syncs?\n\n## References\n\n- https://docs.stripe.com/api/billing/meter\n- https://docs.stripe.com/api/billing/meter-event\n- https://docs.stripe.com/billing/subscriptions/usage-based/recording-usage-api\n- https://docs.stripe.com/billing/subscriptions/usage-based/implementation-guide\n\n\n--- DESIGN ADDENDUM (Lago/Hyperswitch competitive analysis, 2026-06-04) ---\nREFRAME after the Lago/Hyperswitch analysis: this issue's Stripe-Meter-API delegation is an OPTION for Stripe-native customers, but the PREFERRED path is OpenRails' OWN metering->pricing->invoice engine (the moat): it works across ALL processors (NMI/CCBill/Solana), feeds the prepaid credit ledger, and is required for the managed SaaS (#293). Split the native work out: pricing models + aggregation live in #289; the line-itemized statement lives in the new Invoice+Fee issue. Keep Stripe-Meter sync here only as a connector for customers who specifically want Stripe to host the metered invoice. Lago's heavy infra (Kafka/Redpanda+ClickHouse events-processor, custom-expression CGo engine, EU e-invoicing/XML/VIES) is explicitly OUT OF SCOPE \u2014 River + a Postgres usage_events table is the right scale.",
+      "name": "stripe-meter-connector (optional; Stripe-hosted metered invoices)",
+      "description": "OPTIONAL connector for the narrow case where a customer specifically wants STRIPE to host their metered billing + invoice, instead of OpenRails' native usage metering (#289). Native metering (#289) is the DEFAULT: it works across all rails (NMI/CCBill/Solana) and feeds the credit ledger. This issue only adds a thin one-way sync so a Stripe-native customer's usage_events are mirrored to Stripe's Billing Meter API and Stripe generates the invoice.\n\nThis is niche, NOT the main path. DROPPED from the original plan (do not build): the internal Stripe meter / meter_events mirror tables, the metered_subscriptions table, and any native invoice generation.\n\nMechanism: POST usage_events to Stripe /v1/billing/meter_events; let Stripe aggregate + invoice; handle invoice.paid / invoice.payment_failed webhooks for status only.\nRefs: https://docs.stripe.com/api/billing/meter , https://docs.stripe.com/api/billing/meter-event",
       "tasks": [
-        "STRIPE SETUP:",
-        "[ ] Create Stripe Meters for each usage type (api_requests, gpu_seconds, tokens, etc.)",
-        "[ ] Create metered Prices linked to each Meter",
-        "[ ] Document meter event_name conventions",
-        "",
-        "DATA MODEL:",
-        "[ ] Add migrations for meters + meter_events tables (internal mirror)",
-        "[ ] Add metered_subscriptions table to link users to Stripe metered subscriptions",
-        "[ ] Ensure idempotency via unique (meter_id, identifier) constraint",
-        "",
-        "API SURFACE:",
-        "[ ] Add RecordUsage(user_id, meter_name, value, idempotency_key, timestamp?) method",
-        "[ ] Sync to Stripe via POST /v1/billing/meter_events",
-        "[ ] Add retry/queue for failed Stripe syncs (River job)",
-        "[ ] Add GET /v1/me/usage endpoint for user to see current period usage",
-        "",
-        "SUBSCRIPTION MANAGEMENT:",
-        "[ ] Add endpoint to enable arrears billing for a user (creates Stripe subscription with metered price)",
-        "[ ] Handle invoice.paid webhook to confirm payment",
-        "[ ] Handle invoice.payment_failed webhook (dunning, disable access?)",
-        "",
-        "HIGH VOLUME (OPTIONAL):",
-        "[ ] Implement V2 Meter Event Stream for >1000 events/sec",
-        "[ ] Batch local events and sync periodically instead of real-time",
-        "",
-        "TESTS + DOCS:",
-        "[ ] Integration tests: record usage, verify Stripe sync, invoice generation",
-        "[ ] Document how host apps should call RecordUsage"
+        "[ ] Forward usage_events (#289) to Stripe via POST /v1/billing/meter_events (event_name + stripe_customer_id + value + idempotency identifier).",
+        "[ ] Map OpenRails event_type -> Stripe meter event_name; document the one-time Stripe Meter + metered Price setup.",
+        "[ ] River retry/queue for failed meter-event syncs.",
+        "[ ] Handle invoice.paid / invoice.payment_failed webhooks (status only; Stripe owns the invoice in this mode).",
+        "[ ] Tests: usage_event -> meter_event sync + idempotency.",
+        "DROPPED (do not build): internal meter/meter_events mirror tables, metered_subscriptions table, native invoice generation."
       ],
       "completed": false
     },
     {
       "id": 230,
-      "name": "auto-topup (low-balance automatic credit purchases)",
-      "description": "Add an optional per-user auto-topup feature for prepaid credits.\n\nUse case: a user opts in to auto-buy more API credits when their balance drops below a threshold (e.g. below $5, automatically purchase enough to reach $100).\n\nThis is not postpaid metering; it is **prepaid auto-replenishment**.\n\n## Goals\n\n- Users can opt in/out and set:\n  - `threshold_cents` (trigger when balance <= threshold)\n  - `target_cents` or `topup_amount_cents` (how much to buy)\n  - `price_id` (which credits package / product to purchase)\n  - optional safety caps (e.g. max topups per day/week/month)\n- Topups are idempotent and safe under concurrency (no double-charging).\n- Works with whichever processor supports one-off purchases for that user (Stripe/NMI/etc), but the internal model is processor-agnostic.\n\n## Non-goals (initially)\n\n- Complex dynamic pricing or tiered metering.\n- Automatic retries forever; we should stop after a bounded number of failures and notify the user.\n\n## Design sketch\n\n- Data model:\n  - `billing.auto_topups` (per user): {id, user_id, enabled, price_id, threshold_cents, target_cents, max_per_day?, max_per_week?, last_triggered_at?, created_at, updated_at}\n  - `billing.auto_topup_events` (append-only): {id, auto_topup_id, user_id, observed_balance_cents, triggered_at, status, payment_id?, error_code?, error_message?}\n  - Reuse existing `billing.payments` as the purchase record; entitlements/credits granted are sourced from that payment.\n\n- Triggering:\n  - Option A (recommended): piggyback on credit spend paths.\n    - When credits are withdrawn/captured, check if balance <= threshold and enqueue an auto-topup job.\n  - Option B: scheduled worker that scans for low-balance users (requires indexes and careful load control).\n\n- Worker:\n  - Load user config and current balance.\n  - If balance > threshold or auto-topup disabled, no-op.\n  - Compute purchase amount (either fixed package via `price_id` or \"to target\" semantics if supported).\n  - Perform purchase using the same internal checkout/payment service used for one-off credit purchases.\n  - Idempotency key should include: user_id + auto_topup_id + \u201cbalance_snapshot\u201d/period bucket.\n  - On success: create payment + credit grant, record auto_topup_event.\n  - On failure: record event, increment failure counters, disable auto-topup after N consecutive failures, and notify user.\n\n- Safety:\n  - Enforce rate limits/caps (max topups per time window).\n  - Require a valid payment method on file / processor customer.\n  - Never run for users on unpaid/past_due subscription states unless explicitly allowed.\n\n\n\n--- DESIGN ADDENDUM (Lago/Hyperswitch competitive analysis, 2026-06-04) ---\nTwo cherry-picks from Lago's wallet (api/app/services/wallets/threshold_top_up_service.rb + recurring_transaction_rules + create_interval_wallet_transactions_service.rb): (a) GRANTED_CREDITS alongside PAID_CREDITS in one top-up transaction -> 'buy 100, get 10 free' promos (OpenRails' Deposit is a single amount today and can't express this); (b) INTERVAL (scheduled) top-ups as a distinct trigger from the threshold trigger, with a pending-transaction guard against double top-up. OpenRails' threshold auto-topup (#239) is already strong; these are small additive wins.",
+      "name": "auto-topup hardening (core shipped #239; caps + disable-on-failure + extras)",
+      "description": "Auto-topup so a customer's prepaid credit never hits $0 and gets shut off: when balance drops below a floor, charge their card a fixed amount and deposit it.\n\n## CORE ALREADY SHIPPED (#239) \u2014 the user's exact ask\nOn CreditAccountSettings: low_balance_threshold_cents (the floor, e.g. $100), auto_topup_amount_cents (the charge, e.g. $50), auto_topup_enabled, auto_topup_payment_method_id, last_topup_at (cooldown). RunAutoTopups (internal/modules/credits/money_in.go) scans below-threshold accounts and charges the card OFF-SESSION via Charger + deposits credits; AutoTopupWorker runs it every 15min (River); LowBalanceAlertWorker (#240) alerts. Configured via the admin settings endpoint (service_credits.go). Tests: TestRunAutoTopups_ChargesAndDeposits/_Declined.\n=> 'keep $100, charge $50 when it dips below' = set threshold=10000, amount=5000, enabled=true, a payment method. Both values are user-configurable. NOTHING TO BUILD for the basic feature.\nNOTE: implemented as a fixed-amount charge + cooldown on CreditAccountSettings, NOT the separate auto_topups/auto_topup_events tables or price_id-package model this issue originally sketched (superseded).\n\n## REMAINING (optional deltas only)\n- Hard safety caps (max topups per day/week/month) beyond the single cooldown.\n- Disable-after-N-consecutive-failures + notify the user.\n- Optional 'top up TO a target' mode vs the current fixed-amount charge.\n- Lago wallet cherry-picks: GRANTED_CREDITS (paid + bonus in one topup, 'buy $50 get $5 free' \u2014 needs Deposit to carry granted vs paid), and INTERVAL (scheduled) top-ups distinct from the threshold trigger, with a pending-transaction guard.",
       "tasks": [
-        "FOUNDATION:",
-        "[ ] Define user-facing settings (threshold, target, price selection, caps) and defaults",
-        "[ ] Decide trigger strategy: spend-hook enqueue vs periodic scanner (prefer spend-hook)",
-        "",
-        "DATA MODEL:",
-        "[ ] Add migrations for auto_topups + auto_topup_events tables",
-        "[ ] Add indexes for enabled lookups and rate-limit enforcement (by user_id, triggered_at)",
-        "",
-        "WORKERS + IDP:",
-        "[ ] Implement River worker to execute an auto-topup purchase with a strict idempotency key",
-        "[ ] Implement safety caps (max per day/week/month) and disable-on-failure behavior",
-        "",
-        "INTEGRATION:",
-        "[ ] Hook into credits spend/capture path to enqueue auto-topup checks",
-        "[ ] Ensure topups create a normal Payment and grant credits sourced from that payment (no special casing)",
-        "",
-        "TESTS + DOCS:",
-        "[ ] Integration tests for: trigger threshold, idempotency (double enqueue), caps, and failure disablement",
-        "[ ] Document the user/admin UX and operational guardrails",
-        "[ ] GRANTED_CREDITS: add granted vs paid amounts to a top-up so promos ('buy X get Y free') grant bonus credits in one transaction.",
-        "[ ] INTERVAL TOP-UPS: add a scheduled (interval) top-up trigger distinct from the low-balance threshold trigger, with a pending-transaction guard."
+        "[x] Threshold trigger + fixed-amount off-session charge + deposit + cooldown (SHIPPED #239: RunAutoTopups, AutoTopupWorker).",
+        "[x] Settings surface (threshold, amount, payment method, enabled) + admin endpoint (SHIPPED: CreditAccountSettings + service_credits.go).",
+        "[x] Low-balance alerts (SHIPPED #240: LowBalanceAlertWorker).",
+        "[x] Integration tests for charge+deposit and decline (SHIPPED: money_in_integration_test.go).",
+        "REMAINING (optional deltas):",
+        "[ ] Hard safety caps (max topups per day/week/month) beyond the single cooldown.",
+        "[ ] Disable-after-N-consecutive-failures + notify the user.",
+        "[ ] OPTIONAL 'top up TO target' mode (vs the current fixed-amount charge).",
+        "[ ] GRANTED_CREDITS: paid + granted in one topup ('buy $50 get $5 free') \u2014 needs Deposit to carry granted vs paid.",
+        "[ ] INTERVAL top-ups: scheduled (e.g. monthly) trigger distinct from the low-balance threshold, with a pending-transaction guard."
       ],
       "completed": false
     },
@@ -226,20 +193,6 @@
       "completed": false
     },
     {
-      "id": 294,
-      "name": "first-class-invoice-and-fee-model",
-      "completed": false,
-      "description": "Add a first-class INVOICE + FEE model so OpenRails can produce a line-itemized, defensible statement of WHAT was charged and WHY \u2014 required for usage/arrears billing and the SaaS (#293). Today OpenRails has only Payment (an immutable single-amount event log: internal/db/models/payment.go) \u2014 no line items, no draft/finalize, no breakdown. #241 (arrears, completed) explicitly flagged 'REMAINING: invoice records' and #221 wanted org-owned invoices.\n\n## Design (grounded in Lago, scope-trimmed)\n- INVOICE: a finalizable container with a SMALL state machine draft->finalized->voided (NOT Lago's 8-state AASM). Fields: owner/org, period [from,to), currency, totals (subtotal/tax/total, precise + rounded), status, finalized_at.\n- FEE: one row per charge x filter x pricing-group, typed (charge/subscription/usage/credit/commitment/true_up), carrying units, amount, unit_amount, events_count, amount_details (JSONB: the tier breakdown from the charge model), taxes. Source: lago api/app/models/{invoice,fee}.rb + api/app/services/invoices/calculate_fees_service.rb + fees/charge_service.rb.\n- An invoice is the STATEMENT a charge settles \u2014 OpenRails still OWNS the charge (Stripe/NMI/CCBill/Solana) + dunning. Do NOT adopt Lago's invoice->payment_request->external-provider indirection (that exists because Lago doesn't own payments).\n- A River job finalizes draft invoices at period end (rolls usage fees + subscription fee + true-ups into the invoice, applies coupons/wallet credits/taxes), then drives collection through the existing charge path.\n\nOUT OF SCOPE: EU e-invoicing/XML/PDF, VIES, tax-provider sync (Lago generate_xml_service etc.) \u2014 enterprise scope OpenRails doesn't need.",
-      "tasks": [
-        "[ ] Migrations: invoices (draft/finalized/voided, period, totals precise+rounded) + fees (typed, units/amount/unit_amount/events_count/amount_details JSONB/taxes), owner-scoped (RLS).",
-        "[ ] Fee builder: roll priced usage (from #289) + the subscription fee + true-ups into Fee rows; compute amount_details breakdown from the charge model.",
-        "[ ] Invoice finalize service + River job at period end: aggregate fees -> invoice totals, apply coupons + prepaid wallet credits + taxes, draft->finalized.",
-        "[ ] Settlement: a finalized invoice is collected via the EXISTING charge path (OpenRails owns the charge); record the Payment against the invoice. No external payment-request indirection.",
-        "[ ] Credit notes (refund/adjustment) as a typed negative-fee on a follow-up invoice (light version of Lago credit_note.rb).",
-        "[ ] GET /v1/self/invoices + /:id (line items) for the dashboard; admin list. Cross-ref #289 (pricing), #134 (usage umbrella), #241 (arrears), #221 (org-owned)."
-      ]
-    },
-    {
       "id": 295,
       "name": "decline-code-aware-dunning-retry-scheduling",
       "completed": false,
@@ -277,7 +230,7 @@
         "[ ] Maintain standing relationships with multiple ADULT/HIGH-RISK acquirers (CCBill, NMI-via-high-risk-bank, Epoch, Verotel/Vendo) so the vault can route A->B->C if one acquirer drops you.",
         "[ ] Document the two-layer resilience posture for ops + sales: card payers ride a portable/exportable vault (move on 30 days' notice); crypto payers ride Solana (no vault, no PCI, no acquirer, nothing to de-platform).",
         "[ ] NOT to do (record the rationale): do NOT receive raw PANs in OpenRails (->SAQ D), do NOT self-host a PAN vault (->PCI Level 1 + breach liability), do NOT depend on Hyperswitch Cloud's vault for adult (termination trapdoor + cooperation-dependent export).",
-        "[ ] TRIGGER/sequencing: prioritize this work if any card processor (Mobius/NMI/CCBill) signals de-platform risk (the interim phase leaves card tokens processor-locked = stranded-on-ban). Otherwise sequence behind the usage-billing engine (#289/#294)."
+        "[ ] TRIGGER/sequencing: prioritize this work if any card processor (Mobius/NMI/CCBill) signals de-platform risk (the interim phase leaves card tokens processor-locked = stranded-on-ban). Otherwise sequence behind the usage-billing engine (#289)."
       ]
     }
   ]
