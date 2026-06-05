@@ -479,7 +479,7 @@
         "[x] MONEY MOVEMENTS section: deposits/top-ups, prepaid drawdown, arrears accrual, amount charged/collected, other period charges; totals reconcile to the ledger.",
         "[x] Monthly River finalize job: roll period -> invoice + items -> draft->finalized; align boundary with the #301 sweep.",
         "[x] PREPAID = informational statement (no new charge); ARREARS = statement settled by the existing charge path / #301 (OpenRails owns the charge; no payment_request indirection).",
-        "[ ] API: GET /v1/self/invoices + /:id (line items) + admin list; CSV export; PDF optional.",
+        "[x] API: GET /v1/self/invoices + /:id (line items) + admin list; CSV export; PDF optional. \u2014 DONE: GET /v1/self/invoices (list, paginated) + /:id (line items), integration-tested. REMAINING: admin list, CSV export, PDF.",
         "[x] Tests: prepaid statement matches drawdown, arrears invoice matches owed + settlement, totals reconcile to ledger + usage_events, immutability after finalize."
       ],
       "completed": false
