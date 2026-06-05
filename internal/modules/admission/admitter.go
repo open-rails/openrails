@@ -108,10 +108,18 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 	}
 
-	// New-account low default (#300): no explicit tier => lowest tier.
+	// Tier resolution: explicit tier > graduated tier (#298, earned from paid
+	// spend) > lowest default (#300 new-account low default).
 	tier := req.Tier
 	if tier == "" {
-		tier = DefaultTier
+		if req.CreditType != "" {
+			if t, terr := a.credits.GetTier(ctx, req.Owner, req.CreditType); terr == nil && t != "" {
+				tier = t
+			}
+		}
+		if tier == "" {
+			tier = DefaultTier
+		}
 	}
 
 	// --- tier policy + endpoint gating (#298) ---

@@ -41,6 +41,8 @@ type CreditAccountSettings struct {
 	VerifiedAt            *time.Time `bun:"verified_at,nullzero" json:"verified_at,omitempty"`
 	SuspendedAt           *time.Time `bun:"suspended_at,nullzero" json:"suspended_at,omitempty"`
 	SuspendReason         *string    `bun:"suspend_reason,nullzero" json:"suspend_reason,omitempty"`
+	// Tier is the graduated trust tier earned from cumulative paid spend (#298).
+	Tier *string `bun:"tier,nullzero" json:"tier,omitempty"`
 
 	CreatedAt time.Time `bun:"created_at,notnull" json:"created_at"`
 	UpdatedAt time.Time `bun:"updated_at,notnull" json:"updated_at"`
