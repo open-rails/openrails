@@ -107,19 +107,20 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	}
 
 	// Debit the ledger for the host-priced amount (skip for zero-cost events).
+	// Unified credit line (#302): draw prepaid balance first, then accrue to
+	// owed up to the credit line. Prepay-only accounts (no line) deny when the
+	// amount exceeds available balance.
 	var debitID *uuid.UUID
 	if params.Amount > 0 {
-		trx, derr := s.withdrawTx(ctx, tx, ct.ID, CreditWithdrawParams{
-			OwnerID:    &owner,
-			UserID:     params.UserID,
-			CreditType: params.CreditType,
-			Amount:     params.Amount,
-			Source:     params.Source,
-		})
+		balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, tx, ct, owner, params.UserID, params.Source, params.SourceID, params.Amount)
 		if derr != nil {
 			return nil, derr
 		}
-		debitID = &trx.ID
+		if balID != nil {
+			debitID = balID
+		} else {
+			debitID = owedID
+		}
 	}
 
 	occurred := params.OccurredAt.UTC()
