@@ -193,3 +193,56 @@ func nullStr(s string) *string {
 	}
 	return &s
 }
+
+// captureSettleTx settles a captured hold's actual amount balance-first-then-owed
+// (#302): it draws min(amount, availableAfter) from the prepaid balance/blocks
+// and spills any remainder to outstanding_owed (the arrears credit line). This is
+// what lets a hold placed against an arrears credit line capture even when the
+// balance can't cover it. availableAfter is the available balance AFTER this
+// hold's reservation has been released. The capture is pre-authorized, so this
+// never re-gates. Returns the post-settlement balance.
+func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, owner identity.OwnerOrgID, userID string, creditTypeID uuid.UUID, amount, availableAfter int64) (int64, error) {
+	now := s.now()
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	ownerID := owner.UUID()
+	if availableAfter < 0 {
+		availableAfter = 0
+	}
+	fromBalance := amount
+	if fromBalance > availableAfter {
+		fromBalance = availableAfter
+	}
+	fromOwed := amount - fromBalance
+
+	var newBal int64
+	if fromBalance > 0 {
+		nb, err := s.withdrawBalanceAndBlocks(ctx, tx, owner, userID, creditTypeID, fromBalance)
+		if err != nil {
+			return 0, err
+		}
+		newBal = nb
+	} else {
+		b := new(models.UserCreditBalance)
+		if err := tx.NewSelect().Model(b).
+			Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+			Limit(1).Scan(ctx); err != nil {
+			return 0, err
+		}
+		newBal = b.Balance
+	}
+
+	if fromOwed > 0 {
+		// Only reachable for an arrears credit line (a prepaid hold reserves balance).
+		if err := s.ensureSettingsRowTx(ctx, tx, tenantID, ownerID, creditTypeID, BillingModeArrears, now); err != nil {
+			return 0, err
+		}
+		if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
+			Set("outstanding_owed_cents = outstanding_owed_cents + ?", fromOwed).
+			Set("updated_at = ?", now).
+			Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+			Exec(ctx); err != nil {
+			return 0, err
+		}
+	}
+	return newBal, nil
+}

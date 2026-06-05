@@ -664,8 +664,11 @@ func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actu
 		return nil, err
 	}
 
-	// Apply the actual withdrawal and update the existing hold transaction row to reflect capture.
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, tx, holdOwner, hold.UserID, hold.CreditTypeID, actualAmount)
+	// Settle the actual balance-first-then-owed (#302): an arrears hold spills the
+	// uncovered remainder to outstanding_owed instead of failing. availableAfter
+	// reflects this hold's reservation already released above.
+	availableAfter := bal.Balance - (bal.HeldBalance - authorized)
+	newBal, err := s.captureSettleTx(ctx, tx, holdOwner, hold.UserID, hold.CreditTypeID, actualAmount, availableAfter)
 	if err != nil {
 		return nil, err
 	}
