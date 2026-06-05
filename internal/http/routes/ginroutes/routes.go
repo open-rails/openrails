@@ -108,6 +108,11 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	creditsSpend := ginmw.RequireOATPermission(controlplane.PermCreditsSpend)
 	creditsWrite := ginmw.RequireOATPermission(controlplane.PermCreditsWrite)
 
+	// Unified ADMISSION (issue #298): throughput (rate-limit) + money (hold) +
+	// suspension + blocklist + endpoint gating in one call; emits x-ratelimit-*
+	// + 429/Retry-After. Hot-path gate hosts call before doing work.
+	group.POST("/admit", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmit))
+
 	// Unified authorize: policy decision + ATOMIC hold placement (issue #235/#247).
 	credits.POST("/authorize", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAuthorizeCredits))
 	// Payer balance snapshot (issue #235/#247): available = balance - held.

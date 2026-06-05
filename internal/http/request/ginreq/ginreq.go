@@ -35,7 +35,8 @@ func (g ginTransport) Query(key string) string      { return g.c.Query(key) }
 func (g ginTransport) Get(key string) (any, bool)   { return g.c.Get(key) }
 func (g ginTransport) Set(key string, value any)    { g.c.Set(key, value) }
 func (g ginTransport) Next()                        { g.c.Next() }
-func (g ginTransport) Header(key string) string     { return g.c.GetHeader(key) }
+func (g ginTransport) Header(key string) string      { return g.c.GetHeader(key) }
+func (g ginTransport) SetHeader(key, value string)   { g.c.Header(key, value) }
 func (g ginTransport) Redirect(code int, location string) {
 	g.c.Redirect(code, location)
 }

@@ -43,6 +43,7 @@ type Transport interface {
 	Set(key string, value any)
 	Next()
 	Header(key string) string
+	SetHeader(key, value string)
 	Redirect(code int, location string)
 	PostForm(key string) string
 	FormFile(key string) (multipart.File, *multipart.FileHeader, error)
@@ -205,6 +206,12 @@ func (r *Request) Query(key string) string {
 // former r.GinCtx.GetHeader(...).
 func (r *Request) Header(key string) string {
 	return r.t.Header(key)
+}
+
+// SetHeader sets a response header (framework-neutral). Used e.g. for
+// x-ratelimit-* and Retry-After on the admission endpoint (#298).
+func (r *Request) SetHeader(key, value string) {
+	r.t.SetHeader(key, value)
 }
 
 // UserContext returns the authenticated principal, framework-neutral counterpart
@@ -393,6 +400,7 @@ func (h *httpTransport) Get(key string) (any, bool) { v, ok := h.kv[key]; return
 func (h *httpTransport) Set(key string, value any)  { h.kv[key] = value }
 func (h *httpTransport) Next()                      {}
 func (h *httpTransport) Header(key string) string   { return h.r.Header.Get(key) }
+func (h *httpTransport) SetHeader(key, value string) { h.w.Header().Set(key, value) }
 func (h *httpTransport) Redirect(code int, location string) {
 	http.Redirect(h.w, h.r, location, code)
 }
