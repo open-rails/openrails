@@ -131,3 +131,37 @@ func ServiceGetBudget(r *httprequest.Request) {
 	}
 	r.SuccessJSON(map[string]any{"windows": windows})
 }
+
+type serviceTierPolicyRequest struct {
+	Payer   string `json:"payer"`
+	OwnerID string `json:"owner_id"`
+	billingservice.TierPolicyInput
+}
+
+// ServiceSetTierPolicy upserts a per-owner tier policy (#298 tier admin API):
+// throughput windows + entitled endpoints + rolling money-budget windows.
+func ServiceSetTierPolicy(r *httprequest.Request) {
+	var req serviceTierPolicyRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	ownerRaw := strings.TrimSpace(req.Payer)
+	if ownerRaw == "" {
+		ownerRaw = strings.TrimSpace(req.OwnerID)
+	}
+	payer, err := parseServiceOwnerOrgID(ownerRaw, "")
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "payer required")
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	if err := svc.SetTierPolicy(r.Request.Context(), *payer, req.TierPolicyInput); err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "set tier policy failed")
+		return
+	}
+	r.SuccessJSONMessage("ok")
+}

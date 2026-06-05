@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/budgets"
@@ -191,4 +192,45 @@ func (s *Service) BudgetStatus(ctx context.Context, owner identity.OwnerOrgID, a
 		})
 	}
 	return out, nil
+}
+
+// TierWindowInput / TierBudgetWindowInput / TierPolicyInput configure a tier's
+// policy via the admin endpoint (#298: tier admin API).
+type TierWindowInput struct {
+	Unit          string `json:"unit"`
+	WindowSeconds int64  `json:"window_seconds"`
+	Max           int64  `json:"max"`
+}
+type TierBudgetWindowInput struct {
+	Key             string `json:"key"`
+	WindowSeconds   int64  `json:"window_seconds"`
+	LimitMillicents int64  `json:"limit_millicents"`
+}
+type TierPolicyInput struct {
+	Tier              string                  `json:"tier"`
+	Windows           []TierWindowInput       `json:"windows"`
+	EntitledEndpoints []string                `json:"entitled_endpoints"`
+	BudgetWindows     []TierBudgetWindowInput `json:"budget_windows"`
+}
+
+// SetTierPolicy upserts a per-owner tier policy (throughput + entitled endpoints
+// + money-budget windows).
+func (s *Service) SetTierPolicy(ctx context.Context, owner identity.OwnerOrgID, in TierPolicyInput) error {
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	if owner.IsZero() {
+		return fmt.Errorf("owner required")
+	}
+	if in.Tier == "" {
+		return fmt.Errorf("tier required")
+	}
+	pol := models.ThroughputPolicy{EntitledEndpoints: in.EntitledEndpoints}
+	for _, w := range in.Windows {
+		pol.Windows = append(pol.Windows, models.ThroughputWindow{Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max})
+	}
+	for _, b := range in.BudgetWindows {
+		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMillicents: b.LimitMillicents})
+	}
+	return admission.NewTierPolicyStore(s.rt.DB).UpsertTierPolicyFull(ctx, owner, in.Tier, pol)
 }
