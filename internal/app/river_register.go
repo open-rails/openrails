@@ -363,9 +363,23 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	jobs = append(jobs, river.NewPeriodicJob(
 		river.PeriodicInterval(time.Hour),
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ArrearsChargeArgs{}, &river.InsertOpts{
+			return riverjobs.ArrearsChargeArgs{ThresholdCents: riverjobs.ArrearsHourlyThresholdCents}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
+				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+	// Monthly arrears sweep (#301): collect the long tail of small owed balances
+	// (>= $1 floor) the hourly threshold trigger leaves behind. "Whichever comes
+	// first." Idempotent per owed-snapshot so it never double-charges what the
+	// hourly job already collected.
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(30*24*time.Hour),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.ArrearsChargeArgs{ThresholdCents: riverjobs.ArrearsMonthlyFloorCents}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByArgs: true, ByPeriod: 30 * 24 * time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

@@ -445,12 +445,12 @@
       "name": "arrears-monthly-sweep",
       "description": "Add a calendar MONTHLY SWEEP to arrears collection, alongside the existing HOURLY threshold collection (#241: ChargeOutstanding + ArrearsChargeWorker). At each month boundary, charge every arrears account's full outstanding_owed_cents \u2014 but only if owed >= a configurable MIN (default 100 cents = $1) so we don't burn payment-processor fees on dust; sub-floor balances roll to next period. 'Whichever comes first': the hourly threshold worker still catches big mid-month balances; the monthly sweep catches the long tail of small balances at period close.\n\nImplementation is small: it is largely ChargeOutstanding(minThreshold=~100) on a MONTHLY River trigger (the hourly worker uses a higher threshold). Reuses the existing charge path (Charger) + dunning (#295) on failure. The itemized statement is #303 (monthly invoices); this sweep settles an arrears invoice's owed total by charging the card.\n\nDecisions: month boundary = calendar-month UTC vs per-account billing anniversary (signup date) vs per-tenant config; the $1 floor default + make it configurable; idempotency so a sweep and a threshold charge can't double-collect the same owed. Related: #241 (shipped arrears), #295 (dunning), #299 (suspend on failure).",
       "tasks": [
-        "[ ] Monthly sweep River job: at each period boundary, charge full outstanding_owed_cents for arrears accounts via the existing ChargeOutstanding/Charger path (largely ChargeOutstanding with a ~$1 min on a monthly cadence).",
-        "[ ] Min-charge floor: skip accounts whose owed < configurable minimum (default 100 cents = $1); carry sub-floor balance to next period.",
+        "[x] Monthly sweep River job: at each period boundary, charge full outstanding_owed_cents for arrears accounts via the existing ChargeOutstanding/Charger path (largely ChargeOutstanding with a ~$1 min on a monthly cadence).",
+        "[x] Min-charge floor: skip accounts whose owed < configurable minimum (default 100 cents = $1); carry sub-floor balance to next period.",
         "[ ] Decide month boundary: calendar-month UTC vs per-account anniversary vs per-tenant config.",
-        "[ ] Idempotency: sweep + hourly threshold worker must not double-charge the same owed (reuse owed_payment source/source_id keying).",
-        "[ ] Reuse charge path + dunning (#295) on failure; no new payment primitives; the itemized statement lives in #303.",
-        "[ ] Tests: sweep charges owed>=floor, skips owed<floor (rolls over), no double-charge with the hourly worker, failure -> dunning."
+        "[x] Idempotency: sweep + hourly threshold worker must not double-charge the same owed (reuse owed_payment source/source_id keying).",
+        "[x] Reuse charge path + dunning (#295) on failure; no new payment primitives; the itemized statement lives in #303.",
+        "[x] Tests: sweep charges owed>=floor, skips owed<floor (rolls over), no double-charge with the hourly worker, failure -> dunning."
       ],
       "completed": false
     },
