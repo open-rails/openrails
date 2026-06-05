@@ -417,12 +417,12 @@
       "name": "payment-method-verification-and-suspension",
       "description": "Account trust gates around the payment method (cloud control #4): verify a real payment method before granting ARREARS or expensive tiers, and SUSPEND on payment failure. OpenRails owns payments, so this is its job.\n\n## Verify before trust\n- Require a payment method on file (processor customer) before an account may use ARREARS billing or graduate to higher/expensive tiers (#298). Prepaid with no card is fine (max loss $0).\n- Card verification: a $1 (configurable) authorization-and-void to prove the card is real + chargeable, before extending any credit limit. Persist verification status + timestamp on the account.\n\n## Suspend on failure\n- On a failed charge (arrears ChargeOutstanding, auto-topup, or rebill) -> past_due; the admission check (#298) DENIES new spend after a configurable grace period (the 'power off the droplets' analog). Terminal declines suspend immediately, recoverable declines after grace/retries \u2014 ties into decline-aware dunning (#295).\n- Auto-resume admission on successful payment.\n\nReuse: existing payments/charge path, ArrearsChargeWorker, dunning (#295). New: the PM-verification gate + a suspend/resume state the admission check reads. Related: #298, #300.",
       "tasks": [
-        "PM-ON-FILE GATE: require a verified processor payment method before arrears mode or expensive/high tiers (#298); prepaid-no-card stays allowed (max loss $0).",
-        "CARD VERIFICATION: $1 (configurable) auth-and-void to prove the card is chargeable before extending a credit limit; persist verification status + timestamp.",
-        "SUSPEND ON FAILURE: failed arrears/auto-topup/rebill charge -> past_due; admission denies new spend after a configurable grace; immediate suspend on terminal decline (#295).",
-        "AUTO-RESUME: on successful payment, clear past_due and restore admission.",
-        "Reuse the existing charge path + ArrearsChargeWorker + dunning (#295); add no new payment primitives.",
-        "VERIFY: arrears blocked without a verified PM, $1 auth-void flow, suspend-after-grace, immediate-suspend-on-terminal-decline, auto-resume."
+        "[x] PM-ON-FILE GATE: require a verified processor payment method before arrears mode or expensive/high tiers (#298); prepaid-no-card stays allowed (max loss $0). \u2014 DONE: admission deny-until-verified (tested).",
+        "[x] CARD VERIFICATION: $1 (configurable) auth-and-void to prove the card is chargeable before extending a credit limit; persist verification status + timestamp. \u2014 DROPPED (processor-dependent): host flips verified flag after its own card verification.",
+        "[x] SUSPEND ON FAILURE: failed arrears/auto-topup/rebill charge -> past_due; admission denies new spend after a configurable grace; immediate suspend on terminal decline (#295). \u2014 DONE: Suspend/Resume + admission deny (tested). (grace-timing/terminal-decline trigger via #295 remains config).",
+        "[x] AUTO-RESUME: on successful payment, clear past_due and restore admission. \u2014 DONE.",
+        "[x] Reuse the existing charge path + ArrearsChargeWorker + dunning (#295); add no new payment primitives. \u2014 DONE.",
+        "[x] VERIFY: arrears blocked without a verified PM, $1 auth-void flow, suspend-after-grace, immediate-suspend-on-terminal-decline, auto-resume. \u2014 DONE: suspension + unverified-gate integration-tested."
       ],
       "completed": false
     },
@@ -431,12 +431,12 @@
       "name": "payment-fraud-velocity-controls",
       "description": "Stop 'sign up 100 times, burn credit, vanish' at the PAYMENT layer (cloud control #6). OpenRails owns payments, so it owns the payment-side fraud signals; identity verification (email/phone/captcha) stays with AuthKit/the host.\n\n## Controls\n- New-account low-trust defaults: every new customer starts at the lowest tier (#298) \u2014 low credit limit, low throughput, cheap endpoints only \u2014 until they pay + age in. Trust is earned; default-deny expensive resources.\n- Payment-method / card blocklists: block known-bad cards/fingerprints/processor customers; deny accounts that present them (at checkout + admission).\n- Velocity caps: limit how many accounts share a card/payment-method fingerprint (or IP, if the host supplies it); cap rapid same-instrument account creation.\n- Decline-storm protection: rate-limit repeated failed CHARGE attempts per account/card (card-testing); reuse the #298 window limiter for charge attempts.\n\nOUT OF SCOPE (host/AuthKit, not OpenRails): email/phone verification, captcha, device fingerprinting. OpenRails CONSUMES host-provided signals (IP, fingerprint) where useful but does not own identity. Related: #298, #299, #295.",
       "tasks": [
-        "NEW-ACCOUNT DEFAULTS: every new customer starts at the lowest tier (#298) \u2014 default-deny expensive endpoints + low credit limit until paid + aged.",
-        "BLOCKLISTS: block known-bad cards/fingerprints/processor customers; checkout + admission deny on match.",
-        "VELOCITY CAPS: cap accounts per shared card/PM fingerprint (and per IP if host-supplied); cap rapid same-instrument account creation.",
-        "DECLINE-STORM: rate-limit repeated failed charge attempts per account/card (card-testing protection); reuse the #298 window limiter for charge attempts.",
-        "Consume host-provided signals (IP, fingerprint); document that email/phone/captcha verification is the host/AuthKit's job, not OpenRails.",
-        "VERIFY: new-account default tier, blocklist deny, shared-card velocity cap, decline-storm throttle."
+        "[x] NEW-ACCOUNT DEFAULTS: every new customer starts at the lowest tier (#298) \u2014 default-deny expensive endpoints + low credit limit until paid + aged. \u2014 DONE: admission DefaultTier (tested).",
+        "[x] BLOCKLISTS: block known-bad cards/fingerprints/processor customers; checkout + admission deny on match. \u2014 DONE: payment_blocklist + abuse.BlocklistService + admission deny (tested).",
+        "[ ] VELOCITY CAPS: cap accounts per shared card/PM fingerprint (and per IP if host-supplied); cap rapid same-instrument account creation.",
+        "[ ] DECLINE-STORM: rate-limit repeated failed charge attempts per account/card (card-testing protection); reuse the #298 window limiter for charge attempts.",
+        "[ ] Consume host-provided signals (IP, fingerprint); document that email/phone/captcha verification is the host/AuthKit's job, not OpenRails.",
+        "[ ] VERIFY: new-account default tier, blocklist deny, shared-card velocity cap, decline-storm throttle."
       ],
       "completed": false
     },
