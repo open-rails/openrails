@@ -1,5 +1,5 @@
 {
-  "next_id": 304,
+  "next_id": 305,
   "issues": [
     {
       "id": 107,
@@ -481,6 +481,32 @@
         "[x] PREPAID = informational statement (no new charge); ARREARS = statement settled by the existing charge path / #301 (OpenRails owns the charge; no payment_request indirection).",
         "[ ] API: GET /v1/self/invoices + /:id (line items) + admin list; CSV export; PDF optional.",
         "[x] Tests: prepaid statement matches drawdown, arrears invoice matches owed + settlement, totals reconcile to ledger + usage_events, immutability after finalize."
+      ],
+      "completed": false
+    },
+    {
+      "id": 304,
+      "name": "delegated-user-windowed-budgets-and-tier-policies",
+      "description": "Lift tensorhub's delegated-user RATE-LIMITING / windowed-budget system into OpenRails so the platform tier logic lives where the ledger lives (the de-embed direction). Today tensorhub owns it; only the MONEY hold/capture already calls OpenRails. OpenRails should own the tier policy + the rolling windowed-budget accounting + reservations + introspection, and tensorhub/cozy-art become thin clients.\n\n## Identity mapping (no new identity needed)\nOpenRails (tenant=tensorhub, owner=cozy [OwnerOrgID, the payer], actor=Paul [ActorUserID, delegated user]) already EQUALS tensorhub's (tenant, platform-owner, delegated-user). The credit BALANCE stays at the OWNER (cozy); these budgets cap the ACTOR (Paul) against the owner's balance, per the actor's TIER. This extends credit_spend_limits (#237/#246, the per-invoker cap primitive) from flat daily/monthly caps to ROLLING windowed budgets-by-tier.\n\n## What to lift (grounded in tensorhub source)\n1. TIER POLICY (per owner) = tensorhub platformTierPolicy (internal/api/platform.go): BudgetWindows [{key, window_seconds, limit_millicents}] = MONEY budgets per ROLLING window (e.g. 4h->$2, 1w->$5); AbuseWindows [{key, window_seconds, limit_events}] = event-count limits; EndpointFunctions = which endpoints/models the tier may call; Daily/MonthlySafetyCapMillicents, MaxQueuedJobs, MaxJobTTLSeconds; PlanLimits[tier]{RPM}; PolicyVersion.\n2. WINDOWED-BUDGET ACCOUNTING (per owner+actor) = tensorhub generationBudgetWindow (platform_delegated_user.go + platform_budget_reservations.go): per budget window compute {limit, used, reserved, remaining, window_started_at, reset_at, allowed, retry_after_seconds, next_allowed_at} over a ROLLING window (port alignedIntervalStart).\n3. RESERVATIONS: reserve estimated millicents against the windows at request start, capture actual / release on failure (the windowed analog of the ledger Hold/Capture, which already exists and which tensorhub already calls).\n4. INTROSPECTION: a GET endpoint returning the windows for a delegated user -> powers cozy-art's /status (its frontend useGenerationBudgetStatus polls tensorhub's /platforms/me/generation-budget today).\n\n## Relationship to #298\n#298's 'tier model + graduation' bullet is the THIN version; #304 is the RICH tensorhub-derived tier policy. #298's fixed-window limiter covers AbuseWindows/RPM (event axis); #304 adds the ROLLING MONEY-windowed budgets + reservations + introspection. The admission check unifies: ledger money (AuthorizeAndHold) + #298 throughput + #304 windowed budgets + endpoint entitlement -> one allow/deny.\n\n## Decisions\n- ROLLING vs FIXED windows: tensorhub uses rolling/aligned windows for budgets; the #298 limiter is fixed-window. Budgets need a ROLLING mode (port alignedIntervalStart).\n- Storage: new RLS-scoped tier_policies table (per owner) + a windowed usage/reservation store (Redis hot counters for used+reserved per the #298 hot-path rule, Postgres for durable reservations) vs extending credit_spend_limits. \n- Migration: does tensorhub's platform_policies MOVE into OpenRails (one source of truth) or does OpenRails offer it and tensorhub migrate over time?\n\nOUT OF SCOPE: tensorhub-specific endpoint/function override controls (model_override/lora) stay in tensorhub; OpenRails models the generic 'entitled endpoints' set.\n\nSources \u2014 tensorhub: internal/api/platform.go (platformPolicy, platformTierPolicy, platformBudgetWindowPolicy, platformAbuseWindowPolicy), internal/api/platform_delegated_user.go (generationBudgetWindow, generationBudgetWindows, /platforms/me/generation-budget[/check]), internal/api/platform_budget_reservations.go (reserve/capture/release, generationBudgetWindowsWithTx, alignedIntervalStart). cozy-art: frontend/src/pages/GeneratePage/useGenerationBudgetStatus.ts. Depends: #298 (limiter + admission), #259 (delegated token carries owner+actor+tier). See memory tensorhub-platform-budget-system.",
+      "tasks": [
+        "DATA MODEL:",
+        "[ ] tier_policies table (per tenant+owner, RLS): JSONB tier map -> {budget_windows[], abuse_windows[], endpoint_functions[], safety caps, RPM} + policy_version. Mirror tensorhub platformPolicy/platformTierPolicy.",
+        "[ ] Windowed budget store: rolling-window used+reserved per (tenant, owner, actor, window_key) \u2014 Redis hot counters + durable Postgres reservation records; reconcilable.",
+        "ACCOUNTING:",
+        "[ ] Port the rolling-window computation (tensorhub generationBudgetWindowsWithTx + alignedIntervalStart): per budget window -> used/reserved/remaining/reset/allowed/retry_after/next_allowed_at.",
+        "[ ] Reserve -> Capture/Release against the windows, tied to the ledger Hold/Capture (money charged to the OWNER balance; the window tracks the ACTOR's tier spend).",
+        "[ ] Resolve the actor's tier from the delegated token (DelegatedUserTier, #259) -> select the tier policy.",
+        "ADMISSION:",
+        "[ ] Unify into ONE admission decision: ledger money (AuthorizeAndHold) + #298 throughput + #304 windowed budgets + endpoint entitlement -> allow/deny + blocking window + retry_after.",
+        "INTROSPECTION:",
+        "[ ] GET introspection endpoint (delegated-user budget windows: limit/used/reserved/remaining/reset/retry) -> powers cozy-art /status. Mirror tensorhub /platforms/me/generation-budget + /check.",
+        "ADMIN:",
+        "[ ] Admin API to define/update per-owner tier policies (mirror tensorhub PUT /policy), versioned.",
+        "MIGRATION:",
+        "[ ] Decide + execute the tensorhub -> OpenRails ownership move (platform_policies + budget reservations); keep tensorhub a thin client; backfill existing policies.",
+        "VERIFY:",
+        "[ ] Tests: rolling-window used/reserved/remaining math, budget-exhausted deny + retry_after, reserve/capture/release lifecycle, per-(owner,actor) isolation, tier resolution, whichever-window-first.",
+        "[ ] Cross-repo: validate the contract against tensorhub's generation-budget callers + cozy-art's useGenerationBudgetStatus consumer."
       ],
       "completed": false
     }
