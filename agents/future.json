@@ -245,6 +245,20 @@
         "[ ] OPTIONAL phase 2: host-side lease (reserve N units, spend locally, reconcile) to remove the per-request network hop; overspend bounded by lease size."
       ],
       "completed": false
+    },
+    {
+      "id": 306,
+      "name": "billing-admission-future-refinements",
+      "completed": false,
+      "description": "Deferred refinements to the usage-billing/admission system (core shipped + live-validated). None blocking; each is a small, well-scoped follow-up.\n\n- TENANT->OWNER limit level (#304): admission enforces owner->actor budgets/throughput today; add the second level so a TENANT can cap each OWNER (tensorhub caps cozy), via the SAME admitter logic at a tenant-scoped key + tenant-level tier policy (owner sentinel). The budgets/limiter engines already support arbitrary scope keys.\n- BUDGET CAPTURE tie-to-ledger (#304): on ledger CaptureHold, also budgets.Capture the matching reservation so reserved->used converts immediately. NOT required for correctness (the rolling window self-heals: an un-captured reservation ages out of the window), so it's an accuracy nicety.\n- /v1/self delegated budget introspection (#304): a browser-token variant of GET /v1/service/budget. Redundant while hosts proxy the service endpoint; add if browsers should read budgets directly.\n- usage_events MONTH PARTITIONING (#289): partition billing.usage_events by month for scale. Wrinkle: the idempotency unique index (tenant,owner,event_type,source,source_id) must include the partition key, weakening cross-month dedup (acceptable since source_ids are request/time-scoped). Premature until event volume demands it.\n- INVOICE admin list + CSV export (#303): an admin (cross-owner) invoice list + CSV download. Self endpoints (GET /v1/self/invoices[/:id]) cover the customer need; admin/CSV on demand. (PDF rendering intentionally NOT planned.)\n- tensorhub->OpenRails platform_policies ownership migration (#304): cross-repo move of tensorhub's tier policies onto OpenRails' tier_policies; do when consolidating.",
+      "tasks": [
+        "[ ] TENANT->OWNER admission level (tensorhub caps cozy) via tenant-scoped tier policy + admitter check.",
+        "[ ] Tie budgets.Capture/Release to ledger CaptureHold/ReleaseHold (accuracy; window self-heals without it).",
+        "[ ] /v1/self delegated budget introspection variant.",
+        "[ ] usage_events month partitioning (include partition key in the idempotency index).",
+        "[ ] Invoice admin (cross-owner) list + CSV export.",
+        "[ ] Migrate tensorhub platform_policies -> OpenRails tier_policies (cross-repo)."
+      ]
     }
   ]
 }

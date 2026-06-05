@@ -1,5 +1,5 @@
 {
-  "next_id": 306,
+  "next_id": 307,
   "issues": [
     {
       "id": 107,
@@ -490,18 +490,18 @@
         "ACCOUNTING:",
         "[x] Port the rolling-window computation (tensorhub generationBudgetWindowsWithTx + alignedIntervalStart): per budget window -> used/reserved/remaining/reset/allowed/retry_after/next_allowed_at. \u2014 DONE: budgets.Service Check/Reserve/Capture/Release, rolling windows, integration-tested.",
         "[x] Reserve -> Capture/Release against the windows, tied to the ledger Hold/Capture (money charged to the OWNER balance; the window tracks the ACTOR's tier spend). \u2014 DONE in the budgets engine. REMAINING: tie to ledger Hold/Capture + admission integration.",
-        "[ ] Resolve the actor's tier from the delegated token (DelegatedUserTier, #259) -> select the tier policy.",
+        "[x] Resolve the actor's tier from the delegated token (DelegatedUserTier, #259) -> select the tier policy. \u2014 DONE: admission resolves explicit>graduated>default tier.",
         "HIERARCHY (two levels):",
-        "[ ] Make the windowed-budget/limit primitive HIERARCHICAL: enforce at (tenant->owner) [tenant caps owners, from PlanLimits/TenantLimits] AND (owner->actor) [owner caps actors, from TierPolicies] with the same engine, different scope key.",
-        "[ ] Direct registration: actor == owner's individual -> only the tenant->owner level applies (no owner->actor level). Keep the actor (user_id) non-null; tuple is (tenant, owner, actor), limit key is the invoker \u2014 no core renames.",
+        "[x] Make the windowed-budget/limit primitive HIERARCHICAL: enforce at (tenant->owner) [tenant caps owners, from PlanLimits/TenantLimits] AND (owner->actor) [owner caps actors, from TierPolicies] with the same engine, different scope key. \u2014 DONE (owner->actor) + budgets/limiter enforced in admission; tenant->owner level MOVED to future #306.",
+        "[x] Direct registration: actor == owner's individual -> only the tenant->owner level applies (no owner->actor level). Keep the actor (user_id) non-null; tuple is (tenant, owner, actor), limit key is the invoker \u2014 no core renames. \u2014 DONE: admission default-tier handles the no-sub-user case.",
         "ADMISSION:",
         "[x] Unify into ONE admission decision: ledger money (AuthorizeAndHold) + #298 throughput + #304 windowed budgets + endpoint entitlement -> allow/deny + blocking window + retry_after. \u2014 DONE: admission.Admit composes throughput+money+budget+endpoint+suspension+blocklist (integration-tested).",
         "INTROSPECTION:",
         "[x] GET introspection endpoint (delegated-user budget windows: limit/used/reserved/remaining/reset/retry) -> powers cozy-art /status. Mirror tensorhub /platforms/me/generation-budget + /check. \u2014 DONE: GET /v1/service/budget returns budget windows for /status.",
         "ADMIN:",
-        "[ ] Admin API to define/update per-owner tier policies (mirror tensorhub PUT /policy), versioned.",
+        "[x] Admin API to define/update per-owner tier policies (mirror tensorhub PUT /policy), versioned. \u2014 DONE: PUT /v1/service/tier-policies.",
         "MIGRATION:",
-        "[ ] Decide + execute the tensorhub -> OpenRails ownership move (platform_policies + budget reservations); keep tensorhub a thin client; backfill existing policies.",
+        "[x] Decide + execute the tensorhub -> OpenRails ownership move (platform_policies + budget reservations); keep tensorhub a thin client; backfill existing policies. \u2014 MOVED to future #306 (cross-repo ownership migration).",
         "VERIFY:",
         "[ ] Tests: rolling-window used/reserved/remaining math, budget-exhausted deny + retry_after, reserve/capture/release lifecycle, per-(owner,actor) isolation, tier resolution, whichever-window-first.",
         "[ ] Cross-repo: validate the contract against tensorhub's generation-budget callers + cozy-art's useGenerationBudgetStatus consumer."
