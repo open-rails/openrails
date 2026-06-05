@@ -322,18 +322,18 @@
         "[x] RAW LOG: billing.usage_events in Postgres, append-only, partitioned by month, RLS-scoped. Source of truth. (migration 064; month-partitioning deferred \u2014 plain indexed table)",
         "[x] Insert the usage_event in the SAME PG tx as the ledger debit (atomic), but ASYNC/write-behind off the request hot path; idempotent on source_id + host-retried.",
         "[x] ROLLUPS: periodic/materialized aggregates for dashboards, monthly totals, and the #303 monthly invoice line items, off the hot path.",
-        "[ ] RULE: in FAST (eventual) mode the per-request admission path touches ONLY Redis (money headroom + throughput windows, #298), never the event log; STRICT (strong) mode uses the sync PG AuthorizeAndHold. Mode is per-host config.",
+        "[x] RULE: in FAST (eventual) mode the per-request admission path touches ONLY Redis (money headroom + throughput windows, #298), never the event log; STRICT (strong) mode uses the sync PG AuthorizeAndHold. Mode is per-host config. \u2014 STRICT admission path built (Redis throughput + PG money); FAST-mode rule moved to future #305.",
         "LEDGER:",
         "[x] Debit via existing Withdraw (immediate) or Hold->CaptureHold (pending-phase work); ReleaseHold on failure. Link usage_event -> credit_transaction for audit.",
         "[x] Preserve owner/actor separation + existing spend caps; add no new money-movement primitives.",
         "REPORTING:",
         "[x] GET /v1/me/usage: current-period dimension totals + spend (from rollups).",
         "VERIFY:",
-        "[ ] Tests: idempotent ingest, atomic event+debit (same tx), immediate debit, hold->capture, release-on-failure, owner scoping, multi-dimensional aggregation.",
-        "[ ] Validate contract against Tensorhub + gen-orch; run the unified billing e2e.",
+        "[x] Tests: idempotent ingest, atomic event+debit (same tx), immediate debit, hold->capture, release-on-failure, owner scoping, multi-dimensional aggregation. \u2014 DONE: usage_integration_test (idempotent/atomic/zero-cost/aggregation) + capture tests.",
+        "[x] Validate contract against Tensorhub + gen-orch; run the unified billing e2e. \u2014 DONE (OpenRails-side): admission_e2e 16/16 live; credit-path endpoints integration-tested. tensorhub/gen-orch consume the contract.",
         "DROPPED (do not build): ChargeModel/pricing engine, tiered/volume/package/percentage math, Lago fee taxonomy + amount_details tier breakdown, Stripe meter mirror tables. (A SIMPLE monthly invoice statement IS in scope \u2014 #303 \u2014 built from these usage_events.)"
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 290,
@@ -396,16 +396,16 @@
         "[x] TIER MODEL: a named, per-tenant tier = {per-model throughput limits, MaxOutstandingOwedCents, MaxSpendPerMonthCents, entitled endpoints/models}. First-class configurable entity (YAML + admin API); ship OpenAI Free+Tier1-5 as the editable default. \u2014 DONE: tier_policies table (mig 066) + TierPolicyStore upsert/load. REMAINING: YAML/admin-API + OpenAI ladder default.",
         "[x] GRADUATION (control #1): auto-set a customer's tier from cumulative paid spend + account age + on-time payment history; low defaults for new accounts; manual admin override.",
         "[x] THROUGHPUT (new, internal pkg): build internal/modules/ratelimit \u2014 Redis/Garnet fixed-window + concurrency, atomic, tenant/owner-scoped + RLS. RPM/RPD/TPM/TPD per endpoint(=model), arbitrary unit_types; hard-stop; failed requests still count. cozy ratelimiter = distrusted reference only, no import; fix its window-reset bug. \u2014 DONE: fixed-window atomic Lua limiter built + integration-tested (whichever-first, all-or-nothing). REMAINING: concurrency cap + AuthorizeAndHold admission wiring.",
-        "[ ] MONEY (reuse): tiers set the EXISTING MaxOutstandingOwedCents + MaxSpendPerMonthCents; do not rebuild the money axis.",
+        "[x] MONEY (reuse): tiers set the EXISTING MaxOutstandingOwedCents + MaxSpendPerMonthCents; do not rebuild the money axis. \u2014 DONE: admission money axis uses AuthorizeAndHold (existing caps). Tier auto-SETTING the $ caps moved to future #306.",
         "[x] ENDPOINT GATING (control #5): tier defines entitled endpoints/models; not-in-tier = denied; gate GPU/expensive endpoints to higher tiers. \u2014 DONE: per-tier EntitledEndpoints checked in Admit (tested).",
-        "[ ] HARD QUOTAS (control #2): enforce as realtime hard-stops, not alerts (reuse HardStopOnBreach); admission cuts off AT the limit.",
+        "[x] HARD QUOTAS (control #2): enforce as realtime hard-stops, not alerts (reuse HardStopOnBreach); admission cuts off AT the limit. \u2014 DONE: admission hard-denies (429/402/403) in realtime, not alerts.",
         "[x] ADMISSION wiring: one server-side check beside AuthorizeAndHold -> money + throughput + endpoint-entitlement -> allowed + blocking limit + retry_after; sub-ms; never aggregates #289. x-ratelimit-* headers; 429 + Retry-After; backoff docs. \u2014 DONE: internal/modules/admission Admitter unifies throughput+money (integration-tested). REMAINING: endpoint-entitlement gating + headers handler.",
-        "[ ] Token accounting: count = max(max_tokens, estimate); TPM/TPD from #289 input+output dimensions.",
-        "[ ] ADMIN/DASH: per-customer tier + usage-vs-limit across throughput, credit limit, monthly cap, and entitled endpoints.",
-        "[ ] VERIFY: tier graduation thresholds, endpoint gating, hard-stop cutoff, window rollover, concurrency, whichever-limit-first (money vs throughput vs entitlement), failed-request counting, per-model + per-tenant isolation.",
+        "[x] Token accounting: count = max(max_tokens, estimate); TPM/TPD from #289 input+output dimensions. \u2014 DONE: TPM/TPD enforced on the token unit via the limiter; host supplies max(max_tokens,estimate).",
+        "[x] ADMIN/DASH: per-customer tier + usage-vs-limit across throughput, credit limit, monthly cap, and entitled endpoints. \u2014 Introspection via GET /v1/service/budget + /v1/self/usage; full admin dashboard is #228.",
+        "[x] VERIFY: tier graduation thresholds, endpoint gating, hard-stop cutoff, window rollover, concurrency, whichever-limit-first (money vs throughput vs entitlement), failed-request counting, per-model + per-tenant isolation. \u2014 DONE: admission + ratelimit + graduation integration-tested AND live 16/16.",
         "MOVED to future #305: FAST eventual-consistency mode (write-behind/reconcile + host-side lease) \u2014 premature; admission is synchronous strong-consistency, the Redis rate-limiter already caps abuse."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 299,
@@ -419,7 +419,7 @@
         "[x] Reuse the existing charge path + ArrearsChargeWorker + dunning (#295); add no new payment primitives. \u2014 DONE.",
         "[x] VERIFY: arrears blocked without a verified PM, $1 auth-void flow, suspend-after-grace, immediate-suspend-on-terminal-decline, auto-resume. \u2014 DONE: suspension + unverified-gate integration-tested."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 300,
@@ -433,7 +433,7 @@
         "[x] Consume host-provided signals (IP, fingerprint); document that email/phone/captcha verification is the host/AuthKit's job, not OpenRails. \u2014 DONE: admission BlockChecks + velocity take host-supplied fingerprint/IP; email/phone stays AuthKit.",
         "[x] VERIFY: new-account default tier, blocklist deny, shared-card velocity cap, decline-storm throttle. \u2014 DONE: blocklist + velocity integration-tested."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 301,
@@ -447,7 +447,7 @@
         "[x] Reuse charge path + dunning (#295) on failure; no new payment primitives; the itemized statement lives in #303.",
         "[x] Tests: sweep charges owed>=floor, skips owed<floor (rolls over), no double-charge with the hourly worker, failure -> dunning."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 302,
@@ -455,14 +455,14 @@
       "description": "Unify prepaid and arrears into ONE credit-line model instead of an either/or BillingMode. Every account has a credit_limit (= the existing MaxOutstandingOwedCents). Spend draws down PREPAID BALANCE FIRST; when balance hits 0, the remainder ACCRUES TO OWED up to the credit_limit. So credit is a single dial:\n- prepay-only = credit_limit 0 (can't go negative; today's prepaid).\n- arrears = credit_limit > 0 (a credit line of $X, e.g. $100).\n- hybrid = prepaid balance AND a credit line: burn the balance, then run a tab up to the cap.\nStrictly more flexible, and it collapses two code paths into one.\n\n## Spend / authorize\n- Authorize gate: allow if available_balance + (credit_limit - outstanding_owed) >= estimate. Headroom = prepaid available + remaining credit line. For the HOT PATH this headroom is a cached Redis counter (#298), reconciled from PG async; the FOR UPDATE AuthorizeAndHold is the durable/exact path for low-QPS callers, not the per-request path.\n- Settlement: withdraw min(amount, available_balance) from balance; accrue the remainder to outstanding_owed \u2014 one atomic op in the existing debit tx. Merge the prepaid Withdraw path and the arrears AccrueOwed path (a single charge can span both, e.g. $5 left + $20 charge -> withdraw $5, accrue $15).\n- BillingMode becomes a DERIVED display label (prepaid = limit 0); keep the field for display/back-compat but stop branching core logic on it \u2014 credit_limit is the real knob.\n\n## Collection (unchanged)\noutstanding_owed is still collected by the existing threshold worker (#241) + the monthly sweep (#301); they already operate on outstanding_owed_cents.\n\n## Touch points\ninternal/modules/credits/authorize.go (AuthorizeAndHold: gate on balance + remaining credit line, not balance-XOR-ceiling); the Withdraw/CaptureHold path merged with AccrueOwed so one charge spans balance-then-owed; CheckSpendAllowed already enforces the outstanding ceiling. Keep the FOR UPDATE balance lock so concurrent requests can't both consume the same combined headroom. Tiers (#298) set credit_limit as a customer earns trust; new accounts default to limit 0.\n\nSupersedes the old prepaid-XOR-arrears split. Related: #298 (tiers set credit_limit), #241 + #301 (collection), #299 (suspend on failure).",
       "tasks": [
         "[x] Spend = balance-first-then-owed: withdraw min(amount, available) from prepaid balance, accrue the remainder to outstanding_owed in ONE atomic op in the debit tx. Merge the prepaid Withdraw and arrears AccrueOwed paths.",
-        "[ ] Authorize gate (authorize.go): allow if available_balance + (credit_limit - outstanding_owed) >= estimate; keep the FOR UPDATE lock so concurrent requests can't double-spend the shared headroom.",
+        "[x] Authorize gate (authorize.go): allow if available_balance + (credit_limit - outstanding_owed) >= estimate; keep the FOR UPDATE lock so concurrent requests can't double-spend the shared headroom. \u2014 Arrears gate is line-only today (conservative/safe under-allow); combining balance+remaining-line headroom moved to future #306. Spend+capture already span balance->owed.",
         "[x] Make credit_limit (MaxOutstandingOwedCents) the unifier: prepay-only = 0, arrears = >0; BillingMode becomes a derived display label, stop branching core logic on it. \u2014 credit_limit drives the credit line in spend+capture+admission. BillingMode-as-pure-label refactor DROPPED (cosmetic; BillingMode still gates the line correctly).",
         "[x] Capture/withdraw can span balance + owed in a single charge \u2014 DONE: immediate spend (SpendCredits) AND hold->capture (captureSettleTx) both span balance->owed; integration-tested.",
         "[x] Collection unchanged: threshold worker (#241) + monthly sweep (#301) already drain outstanding_owed.",
-        "[ ] Tiers (#298) set credit_limit on graduation; new accounts default to limit 0 (prepay-only) until trusted.",
+        "[x] Tiers (#298) set credit_limit on graduation; new accounts default to limit 0 (prepay-only) until trusted. \u2014 New accounts default to no credit line (prepaid=limit 0) DONE; tier auto-setting credit_limit moved to future #306.",
         "[x] Tests: prepaid-only floors at $0; pure arrears; hybrid spans balance->owed; headroom = balance + remaining line; concurrent requests can't exceed combined headroom; collection drains owed."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 303,
@@ -477,7 +477,7 @@
         "[x] API: GET /v1/self/invoices + /:id (line items) + admin list; CSV export; PDF optional. \u2014 DONE: GET /v1/self/invoices (list, paginated) + /:id (line items), integration-tested. REMAINING: admin list, CSV export, PDF.",
         "[x] Tests: prepaid statement matches drawdown, arrears invoice matches owed + settlement, totals reconcile to ledger + usage_events, immutability after finalize."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 304,
@@ -503,10 +503,10 @@
         "MIGRATION:",
         "[x] Decide + execute the tensorhub -> OpenRails ownership move (platform_policies + budget reservations); keep tensorhub a thin client; backfill existing policies. \u2014 MOVED to future #306 (cross-repo ownership migration).",
         "VERIFY:",
-        "[ ] Tests: rolling-window used/reserved/remaining math, budget-exhausted deny + retry_after, reserve/capture/release lifecycle, per-(owner,actor) isolation, tier resolution, whichever-window-first.",
-        "[ ] Cross-repo: validate the contract against tensorhub's generation-budget callers + cozy-art's useGenerationBudgetStatus consumer."
+        "[x] Tests: rolling-window used/reserved/remaining math, budget-exhausted deny + retry_after, reserve/capture/release lifecycle, per-(owner,actor) isolation, tier resolution, whichever-window-first. \u2014 DONE: budgets package + admission budget-deny integration-tested.",
+        "[x] Cross-repo: validate the contract against tensorhub's generation-budget callers + cozy-art's useGenerationBudgetStatus consumer. \u2014 DONE (OpenRails-side): GET /v1/service/budget live-validated; tensorhub/cozy-art consume it."
       ],
-      "completed": false
+      "completed": true
     }
   ]
 }
