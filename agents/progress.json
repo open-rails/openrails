@@ -428,10 +428,10 @@
       "tasks": [
         "[x] NEW-ACCOUNT DEFAULTS: every new customer starts at the lowest tier (#298) \u2014 default-deny expensive endpoints + low credit limit until paid + aged. \u2014 DONE: admission DefaultTier (tested).",
         "[x] BLOCKLISTS: block known-bad cards/fingerprints/processor customers; checkout + admission deny on match. \u2014 DONE: payment_blocklist + abuse.BlocklistService + admission deny (tested).",
-        "[ ] VELOCITY CAPS: cap accounts per shared card/PM fingerprint (and per IP if host-supplied); cap rapid same-instrument account creation.",
-        "[ ] DECLINE-STORM: rate-limit repeated failed charge attempts per account/card (card-testing protection); reuse the #298 window limiter for charge attempts.",
-        "[ ] Consume host-provided signals (IP, fingerprint); document that email/phone/captcha verification is the host/AuthKit's job, not OpenRails.",
-        "[ ] VERIFY: new-account default tier, blocklist deny, shared-card velocity cap, decline-storm throttle."
+        "[x] VELOCITY CAPS: cap accounts per shared card/PM fingerprint (and per IP if host-supplied); cap rapid same-instrument account creation. \u2014 DONE: abuse.VelocityGuard.AllowSignup (tested).",
+        "[x] DECLINE-STORM: rate-limit repeated failed charge attempts per account/card (card-testing protection); reuse the #298 window limiter for charge attempts. \u2014 DONE: abuse.VelocityGuard.AllowChargeAttempt (tested).",
+        "[x] Consume host-provided signals (IP, fingerprint); document that email/phone/captcha verification is the host/AuthKit's job, not OpenRails. \u2014 DONE: admission BlockChecks + velocity take host-supplied fingerprint/IP; email/phone stays AuthKit.",
+        "[x] VERIFY: new-account default tier, blocklist deny, shared-card velocity cap, decline-storm throttle. \u2014 DONE: blocklist + velocity integration-tested."
       ],
       "completed": false
     },
