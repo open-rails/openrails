@@ -54,4 +54,11 @@ C=$(code -H "$AUTH" -H "$CT" "$B/budget?owner_id=$OWNER2&actor=user:e2e&tier=fre
 ck "GET /budget 200" 200 "$C" "" "$(cat /tmp/b.json)"
 grep -q '"limit":500' /tmp/b.json && { echo "PASS: budget window limit present"; pass=$((pass+1)); } || { echo "FAIL: budget windows: $(cat /tmp/b.json)"; fail=$((fail+1)); }
 
+echo "--- #299 unverified arrears deny ---"
+OWNER4=$(uuid)
+curl -sS -m15 -H "$AUTH" -H "$CT" -X PUT "$B/tier-policies" -d "{\"owner_id\":\"$OWNER4\",\"tier\":\"free\",\"windows\":[{\"unit\":\"request\",\"window_seconds\":60,\"max\":1000}]}" >/dev/null
+curl -sS -m15 -H "$AUTH" -H "$CT" -X PUT "$B/credits/account-settings" -d "{\"payer\":\"$OWNER4\",\"credit_type\":\"$CTYPE\",\"billing_mode\":\"arrears\"}" >/dev/null
+adm "$OWNER4" gpt-4o 100; ck "unverified arrears 403" 403 "$C" "" "$(cat /tmp/b.json)"
+grep -q '"blocked_by":"unverified"' /tmp/b.json && { echo "PASS: blocked_by unverified"; pass=$((pass+1)); } || { echo "FAIL: unverified: $(cat /tmp/b.json)"; fail=$((fail+1)); }
+
 echo "==== RESULT: pass=$pass fail=$fail ===="
