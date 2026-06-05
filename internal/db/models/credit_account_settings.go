@@ -36,6 +36,12 @@ type CreditAccountSettings struct {
 	LastAlertAt          *time.Time `bun:"last_alert_at,nullzero" json:"last_alert_at,omitempty"`
 	LastTopupAt          *time.Time `bun:"last_topup_at,nullzero" json:"last_topup_at,omitempty"`
 
+	// Suspension + payment-method-verification state (issue #299).
+	VerifiedPaymentMethod bool       `bun:"verified_payment_method,notnull" json:"verified_payment_method"`
+	VerifiedAt            *time.Time `bun:"verified_at,nullzero" json:"verified_at,omitempty"`
+	SuspendedAt           *time.Time `bun:"suspended_at,nullzero" json:"suspended_at,omitempty"`
+	SuspendReason         *string    `bun:"suspend_reason,nullzero" json:"suspend_reason,omitempty"`
+
 	CreatedAt time.Time `bun:"created_at,notnull" json:"created_at"`
 	UpdatedAt time.Time `bun:"updated_at,notnull" json:"updated_at"`
 }
