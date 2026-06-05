@@ -126,7 +126,7 @@ func newFedTestPool(t *testing.T) *pgxpool.Pool {
 func jwksServer(t *testing.T, signer *jwtkit.RSASigner) *httptest.Server {
 	t.Helper()
 	ks := jwtkit.JWKS{Keys: []jwtkit.JWK{
-		jwtkit.RSAPublicToJWK(signer.PublicKey(), signer.KID(), "RS256"),
+		jwtkit.PublicToJWK(signer.PublicKey(), signer.KID(), "RS256"),
 	}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		jwtkit.ServeJWKS(w, r, ks)
