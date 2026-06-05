@@ -62,6 +62,46 @@ func (s *Service) GetCreditAccount(ctx context.Context, owner identity.OwnerOrgI
 	return snap, err
 }
 
+// UsageRow is one per-event_type usage rollup over a window: summed host-priced
+// amount, event count, and summed per-dimension counts (issue #289). It mirrors
+// credits.UsageRollupRow but lives on the public facade so HTTP/library callers
+// don't import the internal credits package.
+type UsageRow struct {
+	EventType   string           `json:"event_type"`
+	TotalAmount int64            `json:"total_amount"`
+	EventCount  int64            `json:"event_count"`
+	Dimensions  map[string]int64 `json:"dimensions"`
+}
+
+// GetUsage rolls up an owner's usage events over [from, to) grouped by
+// event_type with summed dimensions (issue #289). Like GetCreditAccount it pins
+// a tenant-scoped connection so the rollup query runs RLS-scoped under the
+// openrails_app role (#227); RunInTenantConn reuses the request's already-pinned
+// connection when one is set.
+func (s *Service) GetUsage(ctx context.Context, owner identity.OwnerOrgID, from, to time.Time) ([]UsageRow, error) {
+	if owner.IsZero() {
+		return nil, fmt.Errorf("owner required")
+	}
+	var out []UsageRow
+	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+		rows, err := s.creditsService().AggregateUsage(ctx, owner, from, to)
+		if err != nil {
+			return err
+		}
+		out = make([]UsageRow, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, UsageRow{
+				EventType:   r.EventType,
+				TotalAmount: r.TotalAmount,
+				EventCount:  r.EventCount,
+				Dimensions:  r.Dimensions,
+			})
+		}
+		return nil
+	})
+	return out, err
+}
+
 // AuthorizeSpendRequest is the input to AuthorizeSpend — the read+decision side
 // of the authorize/hold route (issue #235). The hold itself is placed by
 // HoldCredits once this allows it.

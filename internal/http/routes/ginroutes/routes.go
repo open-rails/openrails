@@ -176,6 +176,11 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	group.GET("/credits/:type", read, wrap(httphandlers.GetMyCreditsType))
 	group.GET("/credits/:type/transactions", read, wrap(httphandlers.GetMyCreditTransactions))
 
+	// Usage breakdown (issue #289): the acting user's metered usage rolled up by
+	// event_type (endpoint/model) over a [from, to) window, with summed dimensions.
+	// Scoped to the token's subject + tenant like every other self route.
+	group.GET("/usage", read, wrap(httphandlers.GetMyUsage))
+
 	// Payment / transaction history.
 	group.GET("/payments", read, wrap(httphandlers.GetUserPayments))
 	group.GET("/entitlements/active", read, wrap(httphandlers.SelfGetActiveEntitlements))

@@ -327,7 +327,7 @@
         "[x] Debit via existing Withdraw (immediate) or Hold->CaptureHold (pending-phase work); ReleaseHold on failure. Link usage_event -> credit_transaction for audit.",
         "[x] Preserve owner/actor separation + existing spend caps; add no new money-movement primitives.",
         "REPORTING:",
-        "[ ] GET /v1/me/usage: current-period dimension totals + spend (from rollups).",
+        "[x] GET /v1/me/usage: current-period dimension totals + spend (from rollups).",
         "VERIFY:",
         "[ ] Tests: idempotent ingest, atomic event+debit (same tx), immediate debit, hold->capture, release-on-failure, owner scoping, multi-dimensional aggregation.",
         "[ ] Validate contract against Tensorhub + gen-orch; run the unified billing e2e.",
