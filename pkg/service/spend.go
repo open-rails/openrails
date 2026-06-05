@@ -102,6 +102,118 @@ func (s *Service) GetUsage(ctx context.Context, owner identity.OwnerOrgID, from,
 	return out, err
 }
 
+// InvoiceLineItemDTO is one metered-usage line on an invoice: the per-event_type
+// (per model/endpoint) total amount, event count, and summed dimensions. It
+// mirrors models.InvoiceLineItem on the public facade so HTTP/library callers
+// don't import the internal models/credits packages.
+type InvoiceLineItemDTO struct {
+	EventType  string           `json:"event_type"`
+	Amount     int64            `json:"amount"`
+	Count      int64            `json:"count"`
+	Dimensions map[string]int64 `json:"dimensions,omitempty"`
+}
+
+// InvoiceDTO is the public view of a finalized monthly itemized invoice (issue
+// #303), served by the customer-facing GET /v1/self/invoices[/:id] routes. It is
+// a public projection of models.Invoice so callers don't import internal types.
+type InvoiceDTO struct {
+	ID             uuid.UUID            `json:"id"`
+	Currency       string               `json:"currency"`
+	PeriodFrom     time.Time            `json:"period_from"`
+	PeriodTo       time.Time            `json:"period_to"`
+	UsageTotal     int64                `json:"usage_total"`
+	DepositsTotal  int64                `json:"deposits_total"`
+	OwedAccrued    int64                `json:"owed_accrued"`
+	OwedPaid       int64                `json:"owed_paid"`
+	ClosingBalance int64                `json:"closing_balance"`
+	LineItems      []InvoiceLineItemDTO `json:"line_items"`
+	MoneyMovements map[string]int64     `json:"money_movements,omitempty"`
+	Status         string               `json:"status"`
+	FinalizedAt    *time.Time           `json:"finalized_at,omitempty"`
+	CreatedAt      time.Time            `json:"created_at"`
+}
+
+// invoiceToDTO projects an internal models.Invoice onto the public InvoiceDTO.
+func invoiceToDTO(inv *models.Invoice) InvoiceDTO {
+	items := make([]InvoiceLineItemDTO, 0, len(inv.LineItems))
+	for _, li := range inv.LineItems {
+		items = append(items, InvoiceLineItemDTO{
+			EventType:  li.EventType,
+			Amount:     li.Amount,
+			Count:      li.Count,
+			Dimensions: li.Dimensions,
+		})
+	}
+	return InvoiceDTO{
+		ID:             inv.ID,
+		Currency:       inv.Currency,
+		PeriodFrom:     inv.PeriodFrom,
+		PeriodTo:       inv.PeriodTo,
+		UsageTotal:     inv.UsageTotal,
+		DepositsTotal:  inv.DepositsTotal,
+		OwedAccrued:    inv.OwedAccrued,
+		OwedPaid:       inv.OwedPaid,
+		ClosingBalance: inv.ClosingBalance,
+		LineItems:      items,
+		MoneyMovements: inv.MoneyMovements,
+		Status:         inv.Status,
+		FinalizedAt:    inv.FinalizedAt,
+		CreatedAt:      inv.CreatedAt,
+	}
+}
+
+// ListInvoices lists an owner's finalized invoices, newest period first,
+// paginated (issue #303). Like GetUsage it pins a tenant-scoped connection so the
+// read runs RLS-scoped under the openrails_app role (#227); RunInTenantConn
+// reuses the request's already-pinned connection when one is set. Returns the
+// page of public DTOs plus the total count for pagination.
+func (s *Service) ListInvoices(ctx context.Context, owner identity.OwnerOrgID, limit, offset int) ([]InvoiceDTO, int, error) {
+	if owner.IsZero() {
+		return nil, 0, fmt.Errorf("owner required")
+	}
+	var out []InvoiceDTO
+	var total int
+	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+		rows, t, err := s.creditsService().ListInvoices(ctx, owner, limit, offset)
+		if err != nil {
+			return err
+		}
+		total = t
+		out = make([]InvoiceDTO, 0, len(rows))
+		for i := range rows {
+			out = append(out, invoiceToDTO(&rows[i]))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// GetInvoice returns one finalized invoice (with its line items) for an owner by
+// id (issue #303). RLS-scoped like ListInvoices; an invoice belonging to another
+// owner/tenant is unreachable (fail closed). Returns a public DTO.
+func (s *Service) GetInvoice(ctx context.Context, owner identity.OwnerOrgID, id uuid.UUID) (*InvoiceDTO, error) {
+	if owner.IsZero() {
+		return nil, fmt.Errorf("owner required")
+	}
+	var out *InvoiceDTO
+	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
+		inv, err := s.creditsService().GetInvoiceByID(ctx, owner, id)
+		if err != nil {
+			return err
+		}
+		dto := invoiceToDTO(inv)
+		out = &dto
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthorizeSpendRequest is the input to AuthorizeSpend — the read+decision side
 // of the authorize/hold route (issue #235). The hold itself is placed by
 // HoldCredits once this allows it.

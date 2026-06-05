@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -169,6 +170,66 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, owner identity.Own
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+// ListInvoices lists an owner org's finalized invoices, newest period first,
+// paginated (issue #303). It filters owner_id directly (the payer) and is
+// RLS-scoped to the request tenant via Q(ctx), mirroring GetTransactionsByOwner.
+// Returns the page plus the total count for pagination.
+func (s *CreditsService) ListInvoices(ctx context.Context, owner identity.OwnerOrgID, limit, offset int) ([]models.Invoice, int, error) {
+	if s == nil || s.db == nil {
+		return nil, 0, fmt.Errorf("credits service not initialized")
+	}
+	if owner.IsZero() {
+		return nil, 0, fmt.Errorf("owner required")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var items []models.Invoice
+	var total int
+	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		q := s.db.Q(ctx).NewSelect().Model(&items).
+			Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
+			Where("owner_id = ?", owner.UUID())
+		var e error
+		total, e = q.Count(ctx)
+		if e != nil {
+			return e
+		}
+		return q.OrderExpr("period_from DESC").Limit(limit).Offset(offset).Scan(ctx)
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+// GetInvoiceByID returns one finalized invoice (with its snapshotted line items)
+// for an owner org by id (issue #303). It filters tenant + owner + id and is
+// RLS-scoped via Q(ctx); an invoice belonging to another owner/tenant is
+// unreachable (fail closed, sql.ErrNoRows).
+func (s *CreditsService) GetInvoiceByID(ctx context.Context, owner identity.OwnerOrgID, id uuid.UUID) (*models.Invoice, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("credits service not initialized")
+	}
+	if owner.IsZero() {
+		return nil, fmt.Errorf("owner required")
+	}
+	inv := new(models.Invoice)
+	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		return s.db.Q(ctx).NewSelect().Model(inv).
+			Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
+			Where("owner_id = ? AND id = ?", owner.UUID(), id).
+			Limit(1).Scan(ctx)
+	})
+	if err != nil {
 		return nil, err
 	}
 	return inv, nil

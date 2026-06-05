@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -211,6 +213,84 @@ func GetMyUsage(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(rows)
+}
+
+// GetMyInvoices lists the authenticated owner's finalized monthly invoices,
+// newest period first, paginated via limit/offset query params (issue #303). The
+// acting user is the delegated token's subject (r.GetUser()); their owner org is
+// that subject's personal org (identity.OwnerOrgIDFromString), matching how the
+// rest of the self-service surface resolves the payer (mirrors GetMyUsage).
+func GetMyInvoices(r *httprequest.Request) {
+	user := r.GetUser()
+	if user == nil || user.ID == "" {
+		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		return
+	}
+	owner := identity.OwnerOrgIDFromString(user.ID)
+	if owner.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "owner could not be resolved from subject")
+		return
+	}
+
+	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	offset, _ := strconv.Atoi(r.Request.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	items, total, err := svc.ListInvoices(r.Request.Context(), owner, limit, offset)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to load invoices")
+		return
+	}
+	r.SuccessJSONPaginated(items, int64(total), limit, offset)
+}
+
+// GetMyInvoice returns one of the authenticated owner's invoices with its line
+// items, addressed by :id (issue #303). RLS + the owner filter scope it to the
+// acting user's own invoices: an id belonging to another owner/tenant returns
+// 404 (fail closed). The acting owner is resolved exactly as in GetMyInvoices.
+func GetMyInvoice(r *httprequest.Request) {
+	user := r.GetUser()
+	if user == nil || user.ID == "" {
+		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		return
+	}
+	owner := identity.OwnerOrgIDFromString(user.ID)
+	if owner.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "owner could not be resolved from subject")
+		return
+	}
+
+	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid invoice id")
+		return
+	}
+
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	inv, err := svc.GetInvoice(r.Request.Context(), owner, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			r.ErrorJSON(http.StatusNotFound, "invoice not found")
+			return
+		}
+		r.ErrorJSON(http.StatusInternalServerError, "failed to load invoice")
+		return
+	}
+	r.SuccessJSON(inv)
 }
 
 func derefInt64(v *int64) int64 {

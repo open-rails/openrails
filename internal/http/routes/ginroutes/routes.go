@@ -181,6 +181,12 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	// Scoped to the token's subject + tenant like every other self route.
 	group.GET("/usage", read, wrap(httphandlers.GetMyUsage))
 
+	// Invoices (issue #303): the acting user's finalized monthly itemized
+	// statements (newest first, paginated) and a single invoice with its line
+	// items. Scoped to the token's subject + tenant like every other self route.
+	group.GET("/invoices", read, wrap(httphandlers.GetMyInvoices))
+	group.GET("/invoices/:id", read, wrap(httphandlers.GetMyInvoice))
+
 	// Payment / transaction history.
 	group.GET("/payments", read, wrap(httphandlers.GetUserPayments))
 	group.GET("/entitlements/active", read, wrap(httphandlers.SelfGetActiveEntitlements))
