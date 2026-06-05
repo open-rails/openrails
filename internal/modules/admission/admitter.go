@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -17,14 +18,26 @@ import (
 // op); per the OpenAI model a counted request still counts even if the money gate
 // then denies. Money is checked via the existing AuthorizeAndHold (which reserves
 // the estimate). Deny on whichever axis blocks first.
+// DefaultTier is assigned to actors with no explicit tier — the new-account low
+// default (#300): start at the lowest tier until graduated.
+const DefaultTier = "free"
+
 type Admitter struct {
-	limiter  *ratelimit.Limiter
-	credits  *credits.CreditsService
-	policies *TierPolicyStore
+	limiter   *ratelimit.Limiter
+	credits   *credits.CreditsService
+	policies  *TierPolicyStore
+	blocklist *abuse.BlocklistService // optional; nil disables blocklist checks
 }
 
-func NewAdmitter(limiter *ratelimit.Limiter, creditsSvc *credits.CreditsService, policies *TierPolicyStore) *Admitter {
-	return &Admitter{limiter: limiter, credits: creditsSvc, policies: policies}
+func NewAdmitter(limiter *ratelimit.Limiter, creditsSvc *credits.CreditsService, policies *TierPolicyStore, blocklist *abuse.BlocklistService) *Admitter {
+	return &Admitter{limiter: limiter, credits: creditsSvc, policies: policies, blocklist: blocklist}
+}
+
+// BlockCheck is one (kind,value) tested against the payment blocklist (#300),
+// e.g. {"card_fingerprint","abc"} or {"ip","1.2.3.4"}.
+type BlockCheck struct {
+	Kind  string
+	Value string
 }
 
 // AdmitRequest is one admission decision input.
@@ -44,6 +57,10 @@ type AdmitRequest struct {
 	Source        string    // idempotency namespace (e.g. "usage")
 	SourceID      string    // idempotency id (e.g. request id)
 	ExpiresAt     time.Time // hold expiry
+
+	// BlockChecks (optional) are payment identifiers to test against the #300
+	// blocklist (card fingerprint, processor customer, email, ip).
+	BlockChecks []BlockCheck
 }
 
 // AdmitDecision is the unified outcome.
@@ -59,14 +76,38 @@ type AdmitDecision struct {
 
 // Admit runs throughput then money and returns the unified decision.
 func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, error) {
-	// --- throughput axis (cheap Redis op; counts even if money later denies) ---
-	pol, err := a.policies.GetThroughputPolicy(ctx, req.Owner, req.Tier)
+	// --- blocklist (#300): deny known-bad payment identifiers up front ---
+	if a.blocklist != nil {
+		for _, bc := range req.BlockChecks {
+			blocked, err := a.blocklist.IsBlocked(ctx, bc.Kind, bc.Value)
+			if err != nil {
+				return AdmitDecision{}, err
+			}
+			if blocked {
+				return AdmitDecision{Allowed: false, BlockedBy: "blocked", BlockedUnit: bc.Kind}, nil
+			}
+		}
+	}
+
+	// New-account low default (#300): no explicit tier => lowest tier.
+	tier := req.Tier
+	if tier == "" {
+		tier = DefaultTier
+	}
+
+	// --- tier policy + endpoint gating (#298) ---
+	pol, err := a.policies.GetTierPolicy(ctx, req.Owner, tier)
 	if err != nil {
 		return AdmitDecision{}, err
 	}
+	if len(pol.EntitledEndpoints) > 0 && !contains(pol.EntitledEndpoints, req.Model) {
+		return AdmitDecision{Allowed: false, BlockedBy: "endpoint"}, nil
+	}
+
+	// --- throughput axis (cheap Redis op; counts even if money later denies) ---
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	base := fmt.Sprintf("%s:%s:%s:%s", tenantID, req.Owner.UUID(), req.Actor, req.Model)
-	tp, err := a.limiter.Check(ctx, base, pol, req.Amounts)
+	tp, err := a.limiter.Check(ctx, base, pol.Throughput, req.Amounts)
 	if err != nil {
 		return AdmitDecision{}, err
 	}
@@ -116,4 +157,13 @@ func retryAfter(d ratelimit.Decision) time.Duration {
 		}
 	}
 	return 0
+}
+
+func contains(xs []string, v string) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }

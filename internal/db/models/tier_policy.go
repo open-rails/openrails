@@ -27,9 +27,12 @@ type TierPolicy struct {
 	UpdatedAt     time.Time        `bun:"updated_at,notnull" json:"updated_at"`
 }
 
-// ThroughputPolicy is the JSONB-stored set of fixed-window throughput limits.
+// ThroughputPolicy is the JSONB-stored tier policy: fixed-window throughput
+// limits plus the set of endpoints/models this tier may call (empty = all
+// allowed). Endpoint gating denies a request whose model is not entitled (#298).
 type ThroughputPolicy struct {
-	Windows []ThroughputWindow `json:"windows"`
+	Windows           []ThroughputWindow `json:"windows"`
+	EntitledEndpoints []string           `json:"entitled_endpoints,omitempty"`
 }
 
 // ThroughputWindow is one limit: at most Max units of Unit per WindowSeconds.

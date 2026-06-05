@@ -26,8 +26,20 @@ type TierPolicyStore struct {
 
 func NewTierPolicyStore(database *db.DB) *TierPolicyStore { return &TierPolicyStore{db: database} }
 
+// ResolvedPolicy is a tier's enforceable policy: throughput windows + the set of
+// entitled endpoints (empty = all allowed).
+type ResolvedPolicy struct {
+	Throughput        ratelimit.Policy
+	EntitledEndpoints []string
+}
+
 // UpsertTierPolicy sets the throughput windows for (owner, tier).
 func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, owner identity.OwnerOrgID, tier string, windows []models.ThroughputWindow) error {
+	return s.UpsertTierPolicyFull(ctx, owner, tier, models.ThroughputPolicy{Windows: windows})
+}
+
+// UpsertTierPolicyFull sets the full tier policy (windows + entitled endpoints).
+func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, owner identity.OwnerOrgID, tier string, policy models.ThroughputPolicy) error {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	now := time.Now().UTC()
 	row := &models.TierPolicy{
@@ -35,7 +47,7 @@ func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, owner identity.O
 		TenantID:      tenantID,
 		OwnerID:       owner.UUID(),
 		Tier:          tier,
-		Policy:        models.ThroughputPolicy{Windows: windows},
+		Policy:        policy,
 		PolicyVersion: 1,
 		CreatedAt:     now,
 		UpdatedAt:     now,
@@ -50,9 +62,9 @@ func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, owner identity.O
 	})
 }
 
-// GetThroughputPolicy returns the ratelimit.Policy for (owner, tier). A missing
-// row yields an empty policy (no throughput limit).
-func (s *TierPolicyStore) GetThroughputPolicy(ctx context.Context, owner identity.OwnerOrgID, tier string) (ratelimit.Policy, error) {
+// GetTierPolicy returns the enforceable policy for (owner, tier). A missing row
+// yields an empty policy (no throughput limit, all endpoints allowed).
+func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, owner identity.OwnerOrgID, tier string) (ResolvedPolicy, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	row := new(models.TierPolicy)
 	found := false
@@ -70,12 +82,12 @@ func (s *TierPolicyStore) GetThroughputPolicy(ctx context.Context, owner identit
 		return nil
 	})
 	if err != nil {
-		return ratelimit.Policy{}, err
+		return ResolvedPolicy{}, err
 	}
 	if !found {
-		return ratelimit.Policy{}, nil
+		return ResolvedPolicy{}, nil
 	}
-	return toRatelimitPolicy(row.Policy), nil
+	return ResolvedPolicy{Throughput: toRatelimitPolicy(row.Policy), EntitledEndpoints: row.Policy.EntitledEndpoints}, nil
 }
 
 func toRatelimitPolicy(p models.ThroughputPolicy) ratelimit.Policy {

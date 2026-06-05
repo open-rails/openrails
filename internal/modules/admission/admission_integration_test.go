@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
@@ -24,7 +25,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 )
 
-func admitEnv(t *testing.T) (*admission.Admitter, *credits.CreditsService, *admission.TierPolicyStore, identity.OwnerOrgID, string, context.Context) {
+func admitEnv(t *testing.T) (*admission.Admitter, *credits.CreditsService, *admission.TierPolicyStore, identity.OwnerOrgID, string, context.Context, *abuse.BlocklistService) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -78,12 +79,13 @@ func admitEnv(t *testing.T) (*admission.Admitter, *credits.CreditsService, *admi
 
 	cs := credits.NewCreditsService(dbi)
 	store := admission.NewTierPolicyStore(dbi)
-	adm := admission.NewAdmitter(ratelimit.NewLimiter(rdb), cs, store)
-	return adm, cs, store, owner, ctName, ctx
+	bl := abuse.NewBlocklistService(dbi)
+	adm := admission.NewAdmitter(ratelimit.NewLimiter(rdb), cs, store, bl)
+	return adm, cs, store, owner, ctName, ctx, bl
 }
 
 func TestAdmit_ThroughputDeny(t *testing.T) {
-	adm, _, store, owner, ct, ctx := admitEnv(t)
+	adm, _, store, owner, ct, ctx, _ := admitEnv(t)
 	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 2}}))
 
@@ -103,7 +105,7 @@ func TestAdmit_ThroughputDeny(t *testing.T) {
 }
 
 func TestAdmit_MoneyDeny(t *testing.T) {
-	adm, _, store, owner, ct, ctx := admitEnv(t)
+	adm, _, store, owner, ct, ctx, _ := admitEnv(t)
 	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
 	// no deposit -> balance 0, prepaid
@@ -119,7 +121,7 @@ func TestAdmit_MoneyDeny(t *testing.T) {
 }
 
 func TestAdmit_Allow(t *testing.T) {
-	adm, cs, store, owner, ct, ctx := admitEnv(t)
+	adm, cs, store, owner, ct, ctx, _ := admitEnv(t)
 	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 10_000, Source: "seed"})
@@ -134,4 +136,41 @@ func TestAdmit_Allow(t *testing.T) {
 	require.True(t, d.Allowed)
 	require.NotNil(t, d.Hold, "allowed admit reserves a money hold")
 	require.NotEmpty(t, d.Windows)
+}
+
+func TestAdmit_BlocklistDeny(t *testing.T) {
+	adm, _, store, owner, ct, ctx, bl := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
+		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
+	fp := "fp_" + uuid.NewString()
+	require.NoError(t, bl.Add(ctx, nil, "card_fingerprint", fp, "test"))
+
+	d, err := adm.Admit(ctx, admission.AdmitRequest{
+		Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, CreditType: ct,
+		BlockChecks: []admission.BlockCheck{{Kind: "card_fingerprint", Value: fp}},
+	})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.Equal(t, "blocked", d.BlockedBy)
+	require.Equal(t, "card_fingerprint", d.BlockedUnit)
+}
+
+func TestAdmit_EndpointGating(t *testing.T) {
+	adm, _, store, owner, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicyFull(ctx, owner, "free", models.ThroughputPolicy{
+		Windows:           []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
+		EntitledEndpoints: []string{"dall-e-3"},
+	}))
+
+	d, err := adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free",
+		Model: "gpt-4o", Amounts: map[string]int64{"request": 1}, CreditType: ct})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.Equal(t, "endpoint", d.BlockedBy)
+
+	d, err = adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free",
+		Model: "dall-e-3", Amounts: map[string]int64{"request": 1}, CreditType: ct})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
 }
