@@ -108,6 +108,18 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 	}
 
+	// PM-on-file gate (#299): a credit-line (arrears) account must have a verified
+	// payment method before it may spend on credit.
+	if req.CreditType != "" {
+		needV, err := a.credits.ArrearsRequiresVerification(ctx, req.Owner, req.CreditType)
+		if err != nil {
+			return AdmitDecision{}, err
+		}
+		if needV {
+			return AdmitDecision{Allowed: false, BlockedBy: "unverified"}, nil
+		}
+	}
+
 	// Tier resolution: explicit tier > graduated tier (#298, earned from paid
 	// spend) > lowest default (#300 new-account low default).
 	tier := req.Tier

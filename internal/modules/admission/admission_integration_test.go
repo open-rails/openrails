@@ -201,6 +201,29 @@ func TestAdmit_BudgetDeny(t *testing.T) {
 	require.Equal(t, "budget", d.BlockedBy)
 }
 
+func TestAdmit_UnverifiedArrearsDeny(t *testing.T) {
+	adm, cs, store, owner, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
+		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 1000}}))
+	bm := credits.BillingModeArrears
+	_, err := cs.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{BillingMode: &bm})
+	require.NoError(t, err)
+
+	// arrears (credit line) + unverified payment method -> deny.
+	d, err := adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 100, Source: "usage", SourceID: "u1", ExpiresAt: time.Now().Add(time.Hour)})
+	require.NoError(t, err)
+	require.False(t, d.Allowed)
+	require.Equal(t, "unverified", d.BlockedBy)
+
+	// verify -> allowed (arrears with unlimited line).
+	require.NoError(t, cs.SetPaymentMethodVerified(ctx, owner, ct, true))
+	d, err = adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 100, Source: "usage", SourceID: "u2", ExpiresAt: time.Now().Add(time.Hour)})
+	require.NoError(t, err)
+	require.True(t, d.Allowed)
+}
+
 func TestAdmit_SuspendedDeny(t *testing.T) {
 	adm, cs, store, owner, ct, ctx, _ := admitEnv(t)
 	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",

@@ -165,3 +165,14 @@ func (s *CreditsService) IsPaymentMethodVerified(ctx context.Context, owner iden
 	}
 	return settings.VerifiedPaymentMethod, nil
 }
+
+// ArrearsRequiresVerification reports whether an account is on a credit line
+// (arrears) but has NOT verified a payment method (#299 PM-on-file gate). When
+// true, admission should deny credit-line spend until a method is verified.
+func (s *CreditsService) ArrearsRequiresVerification(ctx context.Context, owner identity.OwnerOrgID, creditType string) (bool, error) {
+	settings, err := s.GetAccountSettings(ctx, owner, creditType)
+	if err != nil {
+		return false, err
+	}
+	return settings.BillingMode == BillingModeArrears && !settings.VerifiedPaymentMethod, nil
+}
