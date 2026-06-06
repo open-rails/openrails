@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
@@ -45,7 +46,7 @@ func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
 	group.POST("/:id/delete", s.tenantDeleteHandler())
 
 	// Per-tenant processor credential management (issue #225): rotate + test.
-	group.PUT("/:id/credentials/:name", s.tenantPutCredentialHandler())
+	group.PUT("/:id/credentials/*name", s.tenantPutCredentialHandler())
 	group.POST("/:id/credentials/test-stripe", s.tenantTestStripeHandler())
 
 	log.WithField("prefix", StandaloneV1Prefix+TenantAdminPrefix).
@@ -245,7 +246,12 @@ func (s *Server) tenantPutCredentialHandler() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "value is required"})
 			return
 		}
-		sec, err := s.tenancy.RotateCredential(c.Request.Context(), id, c.Param("name"), body.Value, "operator")
+		name := strings.TrimPrefix(c.Param("name"), "/")
+		if strings.TrimSpace(name) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "credential name is required"})
+			return
+		}
+		sec, err := s.tenancy.RotateCredential(c.Request.Context(), id, name, body.Value, "operator")
 		if err != nil {
 			s.tenantErr(c, err)
 			return

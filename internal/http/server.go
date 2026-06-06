@@ -187,7 +187,9 @@ func New(deps Dependencies) (*Server, error) {
 			}
 		} else {
 			// Self-hosted default: DB-backed store + per-tenant envelope encryption
-			// (issue #227). With no master key, the plain store is used unchanged.
+			// (issue #227). With no master key, most secrets keep the legacy
+			// plaintext behavior, but Solana private keys are write-blocked below so
+			// recurring signing keys are never newly stored plaintext.
 			dbStore, sserr := tenancy.NewDBSecretStore(deps.ControlPlane.Pool())
 			if sserr != nil {
 				return nil, fmt.Errorf("build tenant secret store: %w", sserr)
@@ -208,6 +210,11 @@ func New(deps Dependencies) (*Server, error) {
 			if sserr != nil {
 				return nil, fmt.Errorf("wrap tenant secret store with encryption: %w", sserr)
 			}
+			if !enc.Enabled() {
+				secretStore = tenancy.NewWriteRestrictedSecretStore(secretStore, map[string]string{
+					solanaint.SecretSolanaPrivateKey: "ENCRYPTION_MASTER_KEY is required before storing DB-backed Solana private keys",
+				})
+			}
 		}
 
 		// Front the chosen store with an in-process TTL cache (#251) so workers and
@@ -220,22 +227,23 @@ func New(deps Dependencies) (*Server, error) {
 		}
 		secretStore = tenancy.NewCachedSecretStore(secretStore, secretCacheTTL)
 
-		// Single-tenant bridge (#253): a global-config Solana private key is seeded
-		// into the default tenant's secret store as solana/private_key so recurring
-		// Solana can sign without a manual secret write. Idempotent; never overwrites
-		// an existing secret. No-op when Solana is unconfigured or uses Vault Transit
-		// (non-extractable key, so no global private key is set).
-		if pc := deps.Config.GetSolanaProcessor(); pc != nil {
-			if err := recurring.SeedDefaultTenantSolanaSecret(context.Background(), secretStore, pc.PrivateKey); err != nil {
-				return nil, fmt.Errorf("seed default-tenant solana secret: %w", err)
-			}
-		}
-
 		tsvc, terr := tenancy.NewService(deps.ControlPlane.Pool(), deps.ControlPlane, secretStore)
 		if terr != nil {
 			return nil, fmt.Errorf("build tenancy service: %w", terr)
 		}
 		s.tenancy = tsvc
+
+		// Single-install bridge (#253): a global-config Solana private key is seeded
+		// only into the default tenant's secret store as solana/private_key. Named
+		// tenants must be configured explicitly by an operator credential rotation.
+		// Idempotent; never overwrites an existing secret. No-op when Solana is
+		// unconfigured or uses Vault Transit (non-extractable key, so no global
+		// private key is set).
+		if pc := deps.Config.GetSolanaProcessor(); pc != nil {
+			if err := recurring.SeedDefaultTenantSolanaSecret(context.Background(), secretStore, pc.PrivateKey); err != nil {
+				return nil, fmt.Errorf("seed default tenant solana secret: %w", err)
+			}
+		}
 
 		// Recurring Solana services (#254/#255/#256): build one per-tenant
 		// Submitter (Transit when configured so the key never leaves Vault, else a
@@ -259,18 +267,23 @@ func New(deps Dependencies) (*Server, error) {
 			if pc := deps.Config.GetSolanaProcessor(); pc != nil && pc.Network != "" {
 				network = pc.Network
 			}
+			var solanaTokens map[string]config.SolanaToken
+			if pc := deps.Config.GetSolanaProcessor(); pc != nil {
+				solanaTokens = pc.Tokens
+			}
 			cranker := recurring.NewCrankService(submitter)
 			deps.Runtime.SetSolanaCranker(cranker)
 			// Plan-publish (#254) + enroll-confirm (#255) HTTP surfaces. Enroll needs
 			// the lifecycle (membership) + the on-chain subscription store.
 			if deps.Runtime.SubscriptionLifecycleService != nil && deps.Runtime.DB != nil {
-				planSvc := recurring.NewPlanServiceWithReader(submitter, deps.Runtime.SolanaRPC, network)
+				planSvc := recurring.NewPlanServiceWithReader(submitter, deps.Runtime.SolanaRPC, network, solanaTokens)
 				enrollSvc := recurring.NewEnrollService(
 					deps.Runtime.SubscriptionLifecycleService,
 					dbrepo.NewSolanaSubscriptionRepo(deps.Runtime.DB),
 					deps.Runtime.SolanaRPC,
 					submitter,
 					network,
+					solanaTokens,
 				)
 				deps.Runtime.SetSolanaRecurringServices(planSvc, enrollSvc)
 
@@ -291,6 +304,7 @@ func New(deps Dependencies) (*Server, error) {
 					solanaSigner,
 					deps.Runtime.SolanaRPC,
 					network,
+					solanaTokens,
 				))
 
 				// Subscribe-via-checkout (#261/#262): the prepare service builds the
@@ -302,7 +316,7 @@ func New(deps Dependencies) (*Server, error) {
 					// [subscribe + transfer(first period)]. The cranker pre-signs the
 					// transfer slot, so the prepare service takes the SAME signer + RPC +
 					// network as the cranker (the slot it pre-signs is the merchant's key).
-					prepareSvc := recurring.NewPrepareSubscribeService(submitter, solanaSigner, deps.Runtime.SolanaRPC, network)
+					prepareSvc := recurring.NewPrepareSubscribeService(submitter, solanaSigner, deps.Runtime.SolanaRPC, network, solanaTokens)
 					deps.Runtime.CheckoutSessionService.SetSolanaRecurring(prepareSvc, enrollSvc)
 
 					// Cancel + tier-change as Solana Pay checkout modes: reuse the same
@@ -320,6 +334,7 @@ func New(deps Dependencies) (*Server, error) {
 						deps.Runtime.SubscriptionLifecycleService,
 						solanaSubRepo,
 						network,
+						solanaTokens,
 					)
 					deps.Runtime.CheckoutSessionService.SetSolanaLifecycle(
 						deps.Runtime.SolanaPrepareCancelService,

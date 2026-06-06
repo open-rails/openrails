@@ -9,6 +9,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -31,27 +32,31 @@ import (
 // A backend error (store unavailable) is returned so the caller can fail boot
 // loudly rather than start a signer that will never resolve a key.
 func SeedDefaultTenantSolanaSecret(ctx context.Context, store tenancy.TenantSecretStore, configKey string) error {
+	return SeedTenantSolanaSecret(ctx, store, tenant.DefaultID, configKey)
+}
+
+func SeedTenantSolanaSecret(ctx context.Context, store tenancy.TenantSecretStore, tenantID tenant.ID, configKey string) error {
 	key := strings.TrimSpace(configKey)
 	if key == "" {
 		return nil // nothing configured via global config
 	}
 	if store == nil {
-		return fmt.Errorf("recurring: seed default-tenant solana secret: nil secret store")
+		return fmt.Errorf("recurring: seed tenant solana secret: nil secret store")
 	}
-	_, err := store.Get(ctx, tenant.DefaultID, solanaint.SecretSolanaPrivateKey)
+	_, err := store.Get(ctx, tenantID, solanaint.SecretSolanaPrivateKey)
 	switch {
 	case err == nil:
 		return nil // already present — never overwrite an existing secret
 	case errors.Is(err, tenancy.ErrSecretNotFound):
 		// fall through to seed
 	default:
-		return fmt.Errorf("recurring: check default-tenant solana secret: %w", err)
+		return fmt.Errorf("recurring: check tenant solana secret: %w", err)
 	}
-	if _, err := store.Put(ctx, tenant.DefaultID, solanaint.SecretSolanaPrivateKey, key); err != nil {
-		return fmt.Errorf("recurring: seed default-tenant solana secret: %w", err)
+	if _, err := store.Put(ctx, tenantID, solanaint.SecretSolanaPrivateKey, key); err != nil {
+		return fmt.Errorf("recurring: seed tenant solana secret: %w", err)
 	}
-	log.WithField("tenant", tenant.DefaultID.String()).
-		Info("seeded default-tenant Solana signing key from global config (solana/private_key)")
+	log.WithField("tenant", tenantID.String()).
+		Info("seeded tenant Solana signing key from global config (solana/private_key)")
 	return nil
 }
 
@@ -102,8 +107,8 @@ func NewCrankServiceFromStore(store tenancy.TenantSecretStore, rpc *solanaint.RP
 // NewPlanServiceFromStore builds a PlanService backed by the tenant secret store
 // + RPC for the given network (mainnet/devnet). The same RPC client serves as the
 // plan reader, enabling the idempotent re-publish guard (#254).
-func NewPlanServiceFromStore(store tenancy.TenantSecretStore, rpc *solanaint.RPCClient, network string, ttl time.Duration) *PlanService {
-	return NewPlanServiceWithReader(NewSignerSubmitterFromStore(store, rpc, ttl), rpc, network)
+func NewPlanServiceFromStore(store tenancy.TenantSecretStore, rpc *solanaint.RPCClient, network string, tokens map[string]config.SolanaToken, ttl time.Duration) *PlanService {
+	return NewPlanServiceWithReader(NewSignerSubmitterFromStore(store, rpc, ttl), rpc, network, tokens)
 }
 
 // NewSignerSubmitterFromTransit builds a Submitter whose signing key lives in

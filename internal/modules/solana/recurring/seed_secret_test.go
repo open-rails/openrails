@@ -25,6 +25,29 @@ func TestSeedDefaultTenantSolanaSecret_SeedsWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestSeedTenantSolanaSecret_SeedsRequestedTenant(t *testing.T) {
+	store := tenancy.NewMemorySecretStore()
+	tenantID, err := tenant.ParseID("019e986d-145c-7a4d-ab33-e7e087f4ce0d")
+	if err != nil {
+		t.Fatalf("parse tenant id: %v", err)
+	}
+	const key = "TENANT_SOLANA_KEY"
+
+	if err := SeedTenantSolanaSecret(context.Background(), store, tenantID, key); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	got, err := store.Get(context.Background(), tenantID, solanaint.SecretSolanaPrivateKey)
+	if err != nil {
+		t.Fatalf("get tenant key: %v", err)
+	}
+	if got.Value != key {
+		t.Fatalf("tenant key = %q, want %q", got.Value, key)
+	}
+	if _, err := store.Get(context.Background(), tenant.DefaultID, solanaint.SecretSolanaPrivateKey); err == nil {
+		t.Fatal("did not expect requested tenant seed to write default tenant")
+	}
+}
+
 func TestSeedDefaultTenantSolanaSecret_NoOpWhenPresent(t *testing.T) {
 	store := tenancy.NewMemorySecretStore()
 	const existing = "EXISTING_TENANT_KEY"
