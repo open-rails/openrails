@@ -55,6 +55,15 @@ CREATE TABLE IF NOT EXISTS billing.tenant_delegated_issuers (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     CONSTRAINT uq_fed_issuer UNIQUE (issuer)
 );
+CREATE TABLE IF NOT EXISTS billing.tenant_subjects (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id    UUID NOT NULL REFERENCES billing.tenants (id) ON DELETE CASCADE,
+    issuer       TEXT NOT NULL,
+    subject      TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CONSTRAINT uq_fed_tenant_subject UNIQUE (tenant_id, issuer, subject)
+);
 `
 
 func mustTenantID(s string) tenant.ID {
@@ -166,9 +175,14 @@ func newFedControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 
 func mintFed(t *testing.T, signer *jwtkit.RSASigner, issuer, sub string, perms []string, tenantClaim string) string {
 	t.Helper()
+	return mintFedWithAudience(t, signer, issuer, sub, perms, tenantClaim, []string{"openrails"})
+}
+
+func mintFedWithAudience(t *testing.T, signer *jwtkit.RSASigner, issuer, sub string, perms []string, tenantClaim string, audiences []string) string {
+	t.Helper()
 	tok, err := authhttp.MintDelegatedAccessToken(context.Background(), signer, authhttp.DelegatedAccessParams{
 		Issuer:           issuer,
-		Audiences:        []string{"openrails"},
+		Audiences:        audiences,
 		DelegatedSubject: sub,
 		Permissions:      perms,
 		Tenant:           tenantClaim,
@@ -182,7 +196,7 @@ func registerIssuerRow(t *testing.T, pool *pgxpool.Pool, tid tenant.ID, issuer, 
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO billing.tenant_delegated_issuers (tenant_id, issuer, jwks_uri, audiences, enabled)
-		VALUES ($1, $2, $3, ARRAY['openrails-test'], $4)
+		VALUES ($1, $2, $3, ARRAY['openrails'], $4)
 		ON CONFLICT (issuer) DO UPDATE SET jwks_uri = EXCLUDED.jwks_uri, audiences = EXCLUDED.audiences, enabled = EXCLUDED.enabled
 	`, tid.String(), issuer, jwksURI, enabled)
 	require.NoError(t, err)
@@ -212,6 +226,10 @@ func TestFederatedDelegatedTokens(t *testing.T) {
 	t.Run("TenantAdminPermissionResolves", func(t *testing.T) {
 		truncateIssuers(t, pool)
 		federatedTenantAdmin(t, pool)
+	})
+	t.Run("WrongAudienceRejected", func(t *testing.T) {
+		truncateIssuers(t, pool)
+		federatedWrongAudience(t, pool)
 	})
 	t.Run("UnregisteredIssuerRejected", func(t *testing.T) {
 		truncateIssuers(t, pool)
@@ -311,6 +329,20 @@ func federatedTenantAdmin(t *testing.T, pool *pgxpool.Pool) {
 	require.True(t, res.HasPermission(PermTenantEntitlementsWrite))
 }
 
+func federatedWrongAudience(t *testing.T, pool *pgxpool.Pool) {
+	ctx := context.Background()
+	cp := newFedControlPlane(t, pool)
+
+	sg, _ := jwtkit.NewRSASigner(2048, "wrong-aud-kid")
+	iss := "https://wrong-aud.test"
+	registerIssuerRow(t, pool, fedTenantA, iss, jwksServer(t, sg).URL, true)
+	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
+
+	tok := mintFedWithAudience(t, sg, iss, "u", []string{PermSelfBillingRead}, "org-a", []string{"tensorhub"})
+	_, err := cp.ResolveDelegated(ctx, tok)
+	require.ErrorIs(t, err, ErrDelegatedInvalid)
+}
+
 func federatedUnregistered(t *testing.T, pool *pgxpool.Pool) {
 	ctx := context.Background()
 	cp := newFedControlPlane(t, pool)
@@ -333,17 +365,26 @@ func federatedGlobalUniqueness(t *testing.T, pool *pgxpool.Pool) {
 
 	// Tenant A registers it.
 	require.NoError(t, cp.RegisterDelegatedIssuer(ctx, RegisterDelegatedIssuerParams{
-		TenantID: fedTenantA, Issuer: iss, JWKSURI: js, Audiences: []string{"openrails-test"},
+		TenantID: fedTenantA, Issuer: iss, JWKSURI: js, Audiences: []string{"openrails"},
 	}))
+	oldToken := mintFed(t, sg, iss, "rotated-user", []string{PermSelfBillingRead}, "org-a")
+	_, err := cp.ResolveDelegated(ctx, oldToken)
+	require.NoError(t, err)
+
 	// Tenant B cannot claim the same globally-unique issuer.
-	err := cp.RegisterDelegatedIssuer(ctx, RegisterDelegatedIssuerParams{
-		TenantID: fedTenantB, Issuer: iss, JWKSURI: js, Audiences: []string{"openrails-test"},
+	err = cp.RegisterDelegatedIssuer(ctx, RegisterDelegatedIssuerParams{
+		TenantID: fedTenantB, Issuer: iss, JWKSURI: js, Audiences: []string{"openrails"},
 	})
 	require.ErrorIs(t, err, ErrIssuerOwnedByOtherTenant)
 
 	// Tenant A rotating its own issuer (same issuer, new JWKS) succeeds.
 	sg2, _ := jwtkit.NewRSASigner(2048, "k2")
 	require.NoError(t, cp.RegisterDelegatedIssuer(ctx, RegisterDelegatedIssuerParams{
-		TenantID: fedTenantA, Issuer: iss, JWKSURI: jwksServer(t, sg2).URL, Audiences: []string{"openrails-test"},
+		TenantID: fedTenantA, Issuer: iss, JWKSURI: jwksServer(t, sg2).URL, Audiences: []string{"openrails"},
 	}))
+	_, err = cp.ResolveDelegated(ctx, oldToken)
+	require.ErrorIs(t, err, ErrDelegatedInvalid)
+	newToken := mintFed(t, sg2, iss, "rotated-user", []string{PermSelfBillingRead}, "org-a")
+	_, err = cp.ResolveDelegated(ctx, newToken)
+	require.NoError(t, err)
 }

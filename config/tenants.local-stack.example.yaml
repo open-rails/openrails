@@ -1,0 +1,36 @@
+version: 2
+tenants:
+  - slug: local-stack
+    name: Local Stack
+    issuers:
+      - issuer: "http://doujins:8080"
+        jwks_uri: "http://doujins:8080/.well-known/jwks.json"
+        audiences:
+          - "openrails-app"
+      - issuer: "http://hentai0:8081"
+        jwks_uri: "http://hentai0:8081/.well-known/jwks.json"
+        audiences:
+          - "openrails-app"
+    service_tokens:
+      - name: doujins-runtime
+        permissions:
+          - "openrails:entitlements:read"
+        resources:
+          - kind: "openrails.tenant"
+            id: "$tenant"
+        outputs:
+          - vault:
+              mount: "secret"
+              path: "openrails/local-stack/doujins"
+              field: "service_token"
+      - name: hentai0-runtime
+        permissions:
+          - "openrails:entitlements:read"
+        resources:
+          - kind: "openrails.tenant"
+            id: "$tenant"
+        outputs:
+          - vault:
+              mount: "secret"
+              path: "openrails/local-stack/hentai0"
+              field: "service_token"

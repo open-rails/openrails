@@ -470,25 +470,25 @@
         "[x] Preserve existing non-empty output tokens; mint only when outputs are absent/empty. Use explicit/manual rotation instead of implicit startup rotation.",
         "[x] Reconcile tenant issuers in the background if JWKS endpoints are unavailable during initial startup, but keep tenant/service-token reconciliation synchronous before readiness.",
         "[x] Expose a one-shot `bootstrap-tenants` command for production deployments so Vault write permission can belong to a short-lived deploy/bootstrap identity instead of every API pod.",
-        "[ ] Update local Docker compose manifests for Doujins/Hentai0 usage to the v2 schema once OpenRails supports it, but keep this issue in OpenRails generic and app-agnostic.",
-        "[ ] Add tests for idempotent tenant creation/update, issuer update/disable, arbitrary permissions/resources, Vault output preservation, file output, invalid manifest rejection, and multi-replica lock behavior."
+        "[x] Update local Docker compose manifests for Doujins/Hentai0 usage to the v2 schema once OpenRails supports it, but keep this issue in OpenRails generic and app-agnostic. Added the opt-in local-stack v2 manifest example and compose env wiring without affecting default migrate/server startup.",
+        "[x] Add tests for idempotent tenant creation/update, issuer update/disable, arbitrary permissions/resources, Vault output preservation, file output, invalid manifest rejection, and multi-replica lock behavior. Validated with bootstrap unit tests and `OPENRAILS_TEST_DB_DSN`-backed integration tests."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 314,
       "name": "OpenRails delegated-user authorization via OIDC iss/sub/aud/JWKS",
       "description": "Make OpenRails browser/admin authorization explicitly OIDC-federated. Tenant issuers advertise JWKS, and delegated users are identified by the pair `(issuer, subject)` within an OpenRails tenant. OpenRails must not treat delegated users as native users or require them to register in OpenRails.\n\n## Token flow\n\nDoujins and Hentai0 mint delegated JWTs using their normal AuthKit signing keys and publish public keys through JWKS. OpenRails validates `iss`, `sub`, `aud`, expiration/not-before, and JOSE key id against the registered tenant issuer, then authorizes `/v1/self/*` and `/v1/tenant-admin/*` operations as delegated-user principals.\n\n## Frontend/direct authorization examples\n\n- Cozy Art OpenRails: end-user delegated JWT `tenant=cozy-art`, `subject=PaulFidika`, `permissions=[self]` can buy/cancel/upgrade/view own membership.\n- Cozy Art OpenRails: admin delegated JWT `tenant=cozy-art`, `subject=<admin>`, admin permissions can cancel/refund/manage memberships.\n- Tensorhub OpenRails: delegated JWT `tenant=tensorhub`, `subject=cozy-art`, permissions such as self/view-balance/buy-credits lets Cozy Art directly view/buy its own Tensorhub API balance from the frontend.\n\nThese are delegated JWTs, not service tokens.",
       "tasks": [
-        "[ ] Define OpenRails delegated principal type with `tenant_id`, `issuer`, `subject`, and optional `delegated_user_id`; do not reuse native-user or service-token principal types.",
-        "[ ] Require registered tenant issuer match by exact OIDC `iss`; reject tokens whose issuer is not enabled for the target tenant.",
-        "[ ] Validate JWT signature through the issuer's `jwks_uri`, including `kid` key selection and key-refresh behavior.",
-        "[ ] Validate `aud` against OpenRails configured/manifest-declared allowed audiences so a Doujins/Hentai0 token for another audience cannot be replayed to OpenRails.",
-        "[ ] Persist or touch the minimal delegated user row on successful delegated-token use only if OpenRails needs it for billing/audit/entity references.",
-        "[ ] Wire delegated-user principals into self-service and tenant-admin authorization without enabling OpenRails-native registration/login.",
-        "[ ] Add tests for valid Doujins issuer, valid Hentai0 issuer, same `sub` under two issuers, wrong audience, unknown issuer, disabled issuer, stale/rotated JWKS key, and delegated user not appearing as native user.",
-        "[ ] Update docs explaining delegated JWTs are for browser/admin direct calls, while service tokens are for server-to-server calls.",
-        "[ ] Add OpenRails route/principal tests showing frontend/direct self/admin operations accept delegated JWTs and reject service tokens unless a route is explicitly server-to-server.",
+        "[x] Define OpenRails delegated principal type with `tenant_id`, `issuer`, `subject`, and optional `delegated_user_id`; do not reuse native-user or service-token principal types.",
+        "[x] Require registered tenant issuer match by exact OIDC `iss`; reject tokens whose issuer is not enabled for the target tenant.",
+        "[x] Validate JWT signature through the issuer's `jwks_uri`, including `kid` key selection and key-refresh behavior.",
+        "[x] Validate `aud` against OpenRails configured/manifest-declared allowed audiences so a Doujins/Hentai0 token for another audience cannot be replayed to OpenRails.",
+        "[x] Persist or touch the minimal delegated user row on successful delegated-token use only if OpenRails needs it for billing/audit/entity references. Current payable identity is `billing.tenant_subjects` keyed by `(tenant_id, issuer, subject)`.",
+        "[x] Wire delegated-user principals into self-service and tenant-admin authorization without enabling OpenRails-native registration/login.",
+        "[x] Add tests for valid Doujins issuer, valid Hentai0 issuer, same `sub` under two issuers, wrong audience, unknown issuer, disabled issuer, stale/rotated JWKS key, and delegated user not appearing as native user. Validated via delegated verifier, middleware, self/tenant-admin route tests, and federated issuer integration tests.",
+        "[x] Update docs explaining delegated JWTs are for browser/admin direct calls, while service tokens are for server-to-server calls.",
+        "[x] Add OpenRails route/principal tests showing frontend/direct self/admin operations accept delegated JWTs and reject service tokens unless a route is explicitly server-to-server.",
         "[ ] Document delegated JWT examples for Cozy/Doujins/Hentai0 membership UI and Tensorhub tenant balance UI."
       ],
       "completed": false
@@ -500,15 +500,15 @@
       "tasks": [
         "[x] Rename OpenRails AuthKit-facing service token resolution code to consume AuthKit service-token/tenant-service-token contracts after the AuthKit hard cut.",
         "[x] Preserve OpenRails public `service token` terminology for server-to-server credentials and remove old AuthKit access-token wording.",
-        "[ ] Ensure runtime app tokens for Doujins and Hentai0 are minted by OpenRails/bootstrap and written to deployment-configured Vault outputs, never requested by the apps at startup.",
-        "[ ] Keep token output permissions and resource scopes manifest-driven and arbitrary; examples may use entitlement-read, but code must not hardcode that as the only possible runtime token.",
+        "[x] Ensure runtime app tokens for Doujins and Hentai0 are minted by OpenRails/bootstrap and written to deployment-configured Vault outputs, never requested by the apps at startup.",
+        "[x] Keep token output permissions and resource scopes manifest-driven and arbitrary; examples may use entitlement-read, but code must not hardcode that as the only possible runtime token.",
         "[x] Ensure service-token principals cannot access delegated-user/browser endpoints unless explicitly designed, and delegated JWTs cannot use service-token routes.",
         "[ ] Audit entitlement reads, credits, account/balance, admin, and bootstrap flows for correct principal-type checks.",
         "[ ] Add tests for service-token entitlement read, wrong resource scope denial, missing permission denial, delegated JWT rejected on service route, and service token rejected on delegated-user route.",
-        "[ ] Update compose/GitOps docs to state Doujins/Hentai0 receive server-to-server OpenRails tokens from Vault/env injection, not by calling OpenRails registration APIs.",
-        "[ ] Enforce and document service-token routes as server-to-server only; service tokens must not be accepted for delegated-user browser/self routes.",
+        "[x] Update compose/GitOps docs to state Doujins/Hentai0 receive server-to-server OpenRails tokens from Vault/env injection, not by calling OpenRails registration APIs.",
+        "[x] Enforce and document service-token routes as server-to-server only; service tokens must not be accepted for delegated-user browser/self routes.",
         "[ ] Add examples for Doujins/Hentai0/Cozy entitlement-read service tokens and Tensorhub balance reserve/capture/release service tokens.",
-        "[ ] Add tests proving delegated JWTs are rejected on service-token-only reserve/capture/release routes, and service tokens are rejected on frontend/direct self routes."
+        "[x] Add tests proving delegated JWTs are rejected on service-token-only reserve/capture/release routes, and service tokens are rejected on frontend/direct self routes."
       ],
       "completed": false
     },

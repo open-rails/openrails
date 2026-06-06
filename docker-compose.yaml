@@ -218,6 +218,11 @@ services:
       # For docker-compose E2E sandbox, the default issuer is the in-network `issuer` service (profile: e2e-sandbox).
       AUTH_ISSUERS: '${AUTH_ISSUERS:-["http://issuer:8080"]}'
       AUTH_EXPECTED_AUDIENCE: "${AUTH_EXPECTED_AUDIENCE:-openrails-app}"
+      # Optional closed-registration tenant manifest. To use the checked-in
+      # Doujins/Hentai0 local-stack example, mount
+      # ./config/tenants.local-stack.example.yaml at /etc/openrails/tenants.yaml
+      # and set OPENRAILS_TENANTS_FILE=/etc/openrails/tenants.yaml.
+      OPENRAILS_TENANTS_FILE: "${OPENRAILS_TENANTS_FILE:-}"
 
       # Processor env passthrough (for local sandbox/E2E)
       PROCESSORS_MOBIUS_TYPE: "nmi"

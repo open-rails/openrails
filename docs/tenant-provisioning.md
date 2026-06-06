@@ -101,6 +101,31 @@ authority as the rest of `/v1/admin` (`openrails:admin`):
 | `PUT /v1/admin/tenants/:id/credentials/:name` | Rotate a per-tenant credential (`{"value":"..."}`) |
 | `POST /v1/admin/tenants/:id/credentials/test-stripe` | Test the tenant's Stripe key (no charge) |
 
+## Closed-registration tenant manifest
+
+Closed-registration deployments should bootstrap tenants through the deploy
+pipeline, not by modeling bootstrap authority as an AuthKit tenant. Set
+`tenant_bootstrap.file` or `OPENRAILS_TENANTS_FILE` to a tenant manifest v2 file:
+
+- `tenants[].issuers[]` registers tenant-owned OIDC issuers with exact
+  `issuer`, `jwks_uri`, accepted `audiences`, and optional `enabled`.
+- Delegated browser/admin calls use JWTs signed by those issuer keys. OpenRails
+  validates `iss`, `aud`, `kid`/JWKS signature, expiry, and delegated
+  `openrails:self:*` or `openrails:tenant:*` permissions, then touches the
+  minimal payable tenant subject `(tenant_id, issuer, subject)`.
+- `tenants[].service_tokens[]` mints opaque AuthKit service tokens for
+  server-to-server callers. Permissions and resources come from the manifest;
+  OpenRails only interprets `openrails.tenant` and
+  `openrails.tenant_subject` resource scopes at request time.
+- `outputs[]` writes runtime tokens to deployment-owned targets such as Vault KV
+  fields or mounted files. Non-empty outputs are preserved on startup; rotation
+  is an explicit deploy action.
+
+Delegated JWTs are for browser/direct self-service or tenant-admin operations.
+Service tokens are for backend calls such as entitlement reads and credit
+reserve/capture/release flows, and must not be accepted by delegated browser
+routes.
+
 ## Remaining / needs live infrastructure
 
 - **Vault**: the Vault-backed store is a fail-closed stub. A managed deployment

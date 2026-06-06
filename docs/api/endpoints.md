@@ -1,7 +1,9 @@
-# Billing Service API Reference
+# OpenRails API Reference
 
-The billing service exposes public catalog routes, authenticated user APIs, administrative endpoints, processor webhooks,
-and a private service-to-service surface. All responses are JSON encoded. Unless otherwise stated, errors follow the
+OpenRails exposes public catalog routes, delegated browser/self-service APIs,
+tenant-admin APIs, processor webhooks, and a service-token server-to-server
+surface on the same public port. All responses are JSON encoded. Unless
+otherwise stated, errors follow the
 Stripe-style envelope:
 
 ```json
@@ -36,10 +38,19 @@ List endpoints use a Stripe-like envelope:
 | Surface | How to authenticate |
 |---------|---------------------|
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
-| User routes (`/v1/checkout`, `/v1/me/*`) | `Authorization: Bearer <JWT>` issued by AuthKit |
-| Admin routes (`/v1/admin/*`) | Same JWT header, user must have the `admin` role |
+| Delegated self routes (`/v1/self/*`) | `Authorization: Bearer <delegated JWT>` signed by a registered tenant issuer; token must carry OIDC `iss`, `sub` via AuthKit `delegated_sub`, accepted `aud`, and `openrails:self:*` permissions |
+| Delegated tenant-admin routes (`/v1/tenant-admin/*`) | Same delegated JWT shape, with `openrails:tenant:*` permissions |
+| Legacy user/admin routes (`/v1/checkout`, `/v1/me/*`, `/v1/admin/*`) | Host JWT auth where still mounted by the embedding deployment |
 | Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <OpenRails-issued service token>`; each route requires an `openrails:*` permission (see Service API section) |
 | Webhooks (`/v1/webhooks/:provider`) | Provider-specific verification (see notes) |
+
+Delegated JWTs and service tokens are intentionally different credentials.
+Delegated JWTs are browser/direct-user credentials verified through OIDC issuer,
+JWKS, audience, expiry, and permission checks. OpenRails stores/touches only the
+minimal payable tenant subject `(tenant_id, issuer, subject)` needed for billing
+and audit references; it does not create OpenRails-native users for delegated
+subjects. Service tokens are opaque AuthKit-owned server credentials and are
+rejected by delegated self/admin routes.
 
 ## Health & Service Banner
 

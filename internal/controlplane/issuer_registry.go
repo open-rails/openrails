@@ -127,6 +127,11 @@ func (c *ControlPlane) reloadDelegatedIssuers(ctx context.Context) error {
 		if iss.Issuer == strings.TrimSpace(c.issuer) {
 			continue
 		}
+		// Re-registration must replace the JWKS cache. AuthKit's AddIssuer
+		// upserts issuer metadata but intentionally preserves cached keys unless
+		// explicit keys are supplied, so remove first to make issuer rotations
+		// take effect immediately after registry reload.
+		c.delegatedVerifier.RemoveIssuer(iss.Issuer)
 		if err := c.delegatedVerifier.AddIssuer(iss.Issuer, iss.Audiences, authhttp.IssuerOptions{
 			JWKSURI:  iss.JWKSURI,
 			CacheTTL: delegatedIssuerJWKSCacheTTL,

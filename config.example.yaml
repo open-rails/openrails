@@ -1,4 +1,4 @@
-# Billing Service Configuration Example
+# OpenRails Configuration Example
 # Copy this to config.yaml and fill in your actual values
 # All settings can also be set via environment variables (see .env.example)
 
@@ -24,7 +24,7 @@ test_mode: true
 # =============================================================================
 # STANDALONE MODE ONLY
 # =============================================================================
-# These settings only apply when running Open Rails Billing as a standalone service.
+# These settings only apply when running OpenRails as a standalone service.
 # In embedded mode, the host application handles binding and routing.
 
 host: "0.0.0.0"        # Address to bind to (default: 0.0.0.0)
@@ -41,7 +41,7 @@ port: 2053             # Public HTTP/HTTPS port (default: 2053)
 # DEVELOPER TOOLS (OPTIONAL)
 # =============================================================================
 # Cloudflared is used for deterministic public webhook URLs when testing Mobius/NMI sandbox.
-# Billing does not run `cloudflared`, but these keys document the stable hostname/token
+# OpenRails does not run `cloudflared`, but these keys document the stable hostname/token
 # that your developer tooling uses. Prefer setting `cloudflared.tunnel_token` via env.
 #
 # See: docs/cloudflared-webhooks.md and .env.example
@@ -55,7 +55,7 @@ cloudflared:
 # =============================================================================
 # These settings apply in both standalone and embedded modes.
 
-# API URL: Base URL where billing's /v1/* routes are mounted.
+# API URL: Base URL where OpenRails' /v1/* routes are mounted.
 # REQUIRED for Solana Pay transaction_request URLs and webhook generation.
 #
 # Standalone mode: Routes are at /v1/*, so just the origin:
@@ -63,8 +63,8 @@ cloudflared:
 #   → Generated URL: https://api.mysite.com/v1/checkout/:id/solana-pay
 #
 # Embedded mode: Routes are at /{mount_prefix}/v1/*, include the mount prefix:
-#   api_url: "https://api.mysite.com/billing"
-#   → Generated URL: https://api.mysite.com/billing/v1/checkout/:id/solana-pay
+#   api_url: "https://api.mysite.com/openrails"
+#   → Generated URL: https://api.mysite.com/openrails/v1/checkout/:id/solana-pay
 #
 api_url: "https://api.example.com"
 
@@ -155,30 +155,62 @@ auth:
   # Expected audience - the expected "aud" claim in incoming JWTs
   expected_audience: "openrails-app"
 
-  # operator_tenant_slug, when set, makes the named AuthKit tenant the admin authority
-  # for /admin/* routes (instead of a global "admin" role). See #221.
-  # operator_tenant_slug: "operator"
-
   # ---------------------------------------------------------------------------
   # OpenRails-owned AuthKit control plane (#224). OPTIONAL and OFF by default.
   # When omitted/disabled, OpenRails is a pure JWT verifier (current behavior).
   # When enabled, OpenRails builds an in-process AuthKit control plane:
   #   * selectively mounts only intentional AuthKit route groups under /auth
   #     (NEVER AuthKit DefaultAPI in locked-down mode),
-  #   * disables public user registration + public org management (self-hosted),
-  #   * bootstraps the default tenant's operator tenant + openrails.* permission
-  #     catalog + operator role + an initial operator service token at startup.
+  #   * disables public native-user registration + public tenant registration,
+  #   * provides the in-process AuthKit core used by tenant manifest bootstrap.
   # The control plane needs a database holding AuthKit's profiles.* schema.
   # ---------------------------------------------------------------------------
   # control_plane:
   #   enabled: true
-  #   issuer: "https://billing.mysite.com"   # AuthKit token issuer this CP signs as
-  #   org_mode: "multi"                       # required for operator-org + service tokens
+  #   issuer: "https://openrails.mysite.com" # AuthKit token issuer this CP signs as
+  #   org_mode: "multi"                       # required for tenant service tokens
   #   token_prefix: "openrails"               # service token brand prefix -> openrails_st_...
   #   locked_down: true                       # self-hosted posture (default true)
   #   # issued_audiences: ["openrails-app"]   # defaults to expected_audience
   #   # expected_audiences: ["openrails-app"]
-  #   # operator_service_token_name: "openrails-bootstrap-operator"
+
+# Declarative tenant bootstrap for closed-registration deployments. The mounted
+# file uses tenant manifest v2: tenants, OIDC issuers, service tokens, arbitrary
+# permissions/resources, and deployment-owned output targets.
+# tenant_bootstrap:
+#   file: "/etc/openrails/tenants.yaml"
+#
+# Example tenants.yaml:
+# version: 2
+# tenants:
+#   - slug: local-stack
+#     name: Local Stack
+#     issuers:
+#       - issuer: "http://doujins:8080"
+#         jwks_uri: "http://doujins:8080/.well-known/jwks.json"
+#         audiences: ["openrails-app"]
+#       - issuer: "http://hentai0:8081"
+#         jwks_uri: "http://hentai0:8081/.well-known/jwks.json"
+#         audiences: ["openrails-app"]
+#     service_tokens:
+#       - name: doujins-runtime
+#         permissions: ["openrails:entitlements:read"]
+#         resources:
+#           - kind: openrails.tenant
+#             id: "$tenant"
+#         outputs:
+#           - vault:
+#               mount: "secret"
+#               path: "openrails/local-stack/doujins"
+#               field: "service_token"
+#       - name: hentai0-runtime
+#         permissions: ["openrails:entitlements:read"]
+#         resources:
+#           - kind: openrails.tenant
+#             id: "$tenant"
+#         outputs:
+#           - file:
+#               path: "/run/secrets/openrails_hentai0_service_token"
 
 # =============================================================================
 # ENCRYPTION AT REST (issue #227)

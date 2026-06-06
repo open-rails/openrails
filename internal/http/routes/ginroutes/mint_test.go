@@ -73,6 +73,17 @@ func postMint(e *gin.Engine, withAuth bool, body string) *httptest.ResponseRecor
 	return w
 }
 
+func doServiceRoute(e *gin.Engine, method, path, token, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+	return w
+}
+
 func operatorServiceToken(org string) *controlplane.ResolvedServiceToken {
 	return &controlplane.ResolvedServiceToken{
 		AuthKitTenantSlug: org,
@@ -132,6 +143,29 @@ func TestMintRoute_RejectedWithoutServiceToken(t *testing.T) {
 	w := postMint(e, false, `{"delegated_sub":"u1","permissions":["openrails:self:billing:read"]}`)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.False(t, minter.called, "no token may be minted without a valid service token")
+}
+
+func TestCreditServiceRoutesRejectDelegatedJWTs(t *testing.T) {
+	resolver := fakeServiceTokenResolver{looksLikeServiceToken: false}
+	e := newMintRouter(t, resolver, nil)
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"hold", http.MethodPost, "/v1/service/credits/hold"},
+		{"capture-plural", http.MethodPost, "/v1/service/credits/holds/00000000-0000-0000-0000-000000000001/capture"},
+		{"release-plural", http.MethodPost, "/v1/service/credits/holds/00000000-0000-0000-0000-000000000001/release"},
+		{"capture-singular", http.MethodPost, "/v1/service/credits/hold/00000000-0000-0000-0000-000000000001/capture"},
+		{"release-singular", http.MethodPost, "/v1/service/credits/hold/00000000-0000-0000-0000-000000000001/release"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doServiceRoute(e, tc.method, tc.path, "eyJ.delegated.jwt", `{}`)
+			require.Equal(t, http.StatusUnauthorized, w.Code)
+			require.Contains(t, w.Body.String(), "openrails-issued service token required")
+		})
+	}
 }
 
 // A service token lacking PermSelfMint is forbidden: the per-route permission gate blocks
