@@ -188,12 +188,15 @@ func (f *fakeRepo) Upsert(_ context.Context, s *models.SolanaSubscription) error
 	return nil
 }
 
-// fakeBalanceChecker reports a funded subscription PDA (proving the atomic
-// subscribe bundle landed).
+// fakeBalanceChecker reports a present subscription PDA account (proving the
+// atomic subscribe bundle landed). bal>0 => account exists (non-empty data).
 type fakeBalanceChecker struct{ bal uint64 }
 
-func (f fakeBalanceChecker) GetBalance(context.Context, solanago.PublicKey) (uint64, error) {
-	return f.bal, nil
+func (f fakeBalanceChecker) GetAccountData(context.Context, solanago.PublicKey) ([]byte, error) {
+	if f.bal == 0 {
+		return nil, nil
+	}
+	return []byte{1}, nil
 }
 
 func TestConfirmEnrollment_CreatesMembershipWithoutCrank(t *testing.T) {
@@ -210,7 +213,7 @@ func TestConfirmEnrollment_CreatesMembershipWithoutCrank(t *testing.T) {
 	// Note: NewEnrollService no longer takes a *CrankService — the first pull is
 	// inside the atomic subscribe tx. The PDA is funded, so confirm just creates
 	// the membership.
-	svc := NewEnrollService(lc, repo, fakeBalanceChecker{bal: 2_039_280}, submitter, "mainnet")
+	svc := NewEnrollService(lc, repo, fakeBalanceChecker{bal: 2_039_280}, submitter, "devnet", testSolanaTokens())
 
 	sub, err := svc.ConfirmEnrollment(context.Background(), EnrollInput{
 		TenantID:         tenant.DefaultID,
@@ -261,7 +264,7 @@ func TestConfirmEnrollment_FallsBackToPDAIdentifier(t *testing.T) {
 	}
 	signer := solana.NewKeypairSigner(subSecrets{key: merchant.String()}, 0)
 	submitter := NewSignerSubmitter(signer, nil)
-	svc := NewEnrollService(lc, repo, fakeBalanceChecker{bal: 1}, submitter, "mainnet")
+	svc := NewEnrollService(lc, repo, fakeBalanceChecker{bal: 1}, submitter, "devnet", testSolanaTokens())
 
 	if _, err := svc.ConfirmEnrollment(context.Background(), EnrollInput{
 		TenantID:         tenant.DefaultID,

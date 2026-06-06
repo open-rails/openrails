@@ -22,10 +22,13 @@ type membershipCreator interface {
 	CreateMembership(ctx context.Context, params *submod.CreateMembershipParams) (*models.Subscription, error)
 }
 
-// balanceChecker is the minimal RPC surface used to confirm the on-chain
-// subscription exists (satisfied by *solana.RPCClient).
-type balanceChecker interface {
-	GetBalance(ctx context.Context, address solanago.PublicKey) (uint64, error)
+// accountReader is the minimal RPC surface used to confirm the on-chain
+// subscription account exists (satisfied by *solana.RPCClient). GetAccountData
+// reads at CONFIRMED commitment and returns (nil, nil) when the account is
+// absent — so we settle as soon as the subscribe tx is confirmed rather than
+// waiting for finalization (which raced the HTTP confirm window and 500'd).
+type accountReader interface {
+	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
 }
 
 // subscriptionStore persists the on-chain state row (satisfied by
@@ -44,7 +47,7 @@ type subscriptionStore interface {
 type EnrollService struct {
 	lifecycle membershipCreator
 	repo      subscriptionStore
-	rpc       balanceChecker
+	rpc       accountReader
 	submitter Submitter // for MerchantAddress
 	network   string
 	tokens    map[string]config.SolanaToken
@@ -55,7 +58,7 @@ type EnrollService struct {
 // of confirm (#286): the first pull is bundled into the atomic subscribe tx, so
 // confirm only verifies + creates the membership. Recurring rebills still use
 // CrankService elsewhere.
-func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, rpc balanceChecker, submitter Submitter, network string, tokens ...map[string]config.SolanaToken) *EnrollService {
+func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, rpc accountReader, submitter Submitter, network string, tokens ...map[string]config.SolanaToken) *EnrollService {
 	return &EnrollService{lifecycle: lifecycle, repo: repo, rpc: rpc, submitter: submitter, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
 }
 
@@ -135,17 +138,19 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 	//
 	// READ-AFTER-CONFIRM LAG: the wallet signed + sent the bundle and confirmed it
 	// client-side, so the server never saw that tx's slot to gate this read on. A
-	// single GetBalance right after can hit a lagging RPC node that does not yet see
-	// the just-created PDA (balance 0), spuriously rejecting a valid enrollment.
-	// Poll until the PDA is funded (eventual consistency).
-	bal, berr := solanaint.ReadUntilConsistent(ctx, solanaint.ReadUntilConsistentOpts{},
-		func(ctx context.Context) (uint64, error) { return s.rpc.GetBalance(ctx, subPDA) },
-		func(b uint64) bool { return b > 0 },
+	// single read right after can hit a lagging RPC node that does not yet see the
+	// just-created PDA, spuriously rejecting a valid enrollment. Poll until the PDA
+	// account exists (eventual consistency). GetAccountData reads at CONFIRMED and
+	// returns (nil,nil) when absent, so we settle once the subscribe tx is confirmed
+	// rather than waiting for finalization (the lag that 500'd the HTTP confirm).
+	data, berr := solanaint.ReadUntilConsistent(ctx, solanaint.ReadUntilConsistentOpts{},
+		func(ctx context.Context) ([]byte, error) { return s.rpc.GetAccountData(ctx, subPDA) },
+		func(d []byte) bool { return len(d) > 0 },
 	)
 	if berr != nil {
 		return nil, fmt.Errorf("recurring: subscription %s not found on-chain — did the wallet run the atomic subscribe? (%w)", subPDA, berr)
 	}
-	if bal == 0 {
+	if len(data) == 0 {
 		return nil, fmt.Errorf("recurring: subscription %s not found on-chain — did the wallet run the atomic subscribe?", subPDA)
 	}
 

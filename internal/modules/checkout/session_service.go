@@ -1035,6 +1035,14 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 		Signature: sig,
 	})
 	if err != nil {
+		// The subscribe tx hasn't reached the read commitment yet (confirmation lag):
+		// the chain may already hold the subscription, but the server can't see the PDA
+		// in this request window. Return a retryable conflict (not a 500) so the client
+		// polls; the reconciler worker also settles it asynchronously. Mirrors the
+		// Solana Pay poller path (ErrSolanaSubscribePending).
+		if isSolanaSubscribeNotLandedErr(err) {
+			return nil, fmt.Errorf("%w: subscription not yet confirmed on-chain; retry", ErrCheckoutSessionConflict)
+		}
 		return nil, err
 	}
 
