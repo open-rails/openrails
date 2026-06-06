@@ -95,8 +95,10 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 
 	users := group.Group("/users/:user_id")
 	users.GET("/entitlements", ginmw.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
-	users.GET("/credits", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
 	users.GET("/product-access", ginmw.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
+
+	invokers := group.Group("/invokers/:invoker_id")
+	invokers.GET("/credits", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
 
 	credits := group.Group("/credits")
 	// SPEND (hot-path billing) operations — authorize/hold/capture draw down a
@@ -129,8 +131,10 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	credits.POST("/holds/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
 	credits.POST("/hold/:id/capture", creditsWrite, creditsSpend, wrap(httphandlers.ServiceCaptureHold))
 	credits.POST("/hold/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
+	// #311: per-dimension spend rollup for the platform usage/revenue surfaces.
+	credits.POST("/usage/rollup", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceUsageRollup))
 	credits.GET("/transactions/lookup", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
-	credits.GET("/users/:user_id", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetUserCredits))
+	credits.GET("/invokers/:invoker_id", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
 
 	// Org billing-account admin surface (issue #242): configure prepaid|arrears
 	// mode + spend caps + auto-top-up, read settings, and list usage. Tensorhub's
@@ -138,7 +142,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	creditsRead := ginmw.RequireOATPermission(controlplane.PermCreditsRead)
 	credits.PUT("/account-settings", creditsWrite, wrap(httphandlers.ServiceSetCreditAccountSettings))
 	credits.GET("/account-settings", creditsRead, wrap(httphandlers.ServiceGetCreditAccountSettings))
-	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListOwnerCreditTransactions))
+	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListPayerCreditTransactions))
 
 	// Credit-type definition writes are catalog-definition operations: gate them
 	// behind the explicit catalog-write permission (issue #222 — catalog/definition

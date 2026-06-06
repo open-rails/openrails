@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/modules/credits"
@@ -46,10 +47,8 @@ var ErrInsufficientCredits = credits.ErrInsufficientCredits
 var ErrCreditTypeInactive = credits.ErrCreditTypeInactive
 
 type HoldCreditsRequest struct {
-	// OwnerID is the OWNER ORG charged for the reservation (issue #221). When
-	// nil, the owner defaults to UserID's deterministic personal org.
-	OwnerID    *identity.OwnerOrgID
-	UserID     string
+	PayerOrgID *identity.PayerOrgID
+	InvokerID  string
 	CreditType string
 	Amount     int64
 	Source     string
@@ -59,7 +58,7 @@ type HoldCreditsRequest struct {
 
 type CreditHold struct {
 	ID        uuid.UUID
-	UserID    string
+	InvokerID string
 	Amount    int64
 	Source    string
 	SourceID  string
@@ -71,12 +70,15 @@ type CreditHold struct {
 }
 
 func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*CreditHold, error) {
-	req.UserID = strings.TrimSpace(req.UserID)
+	req.InvokerID = strings.TrimSpace(req.InvokerID)
 	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
 	req.SourceID = strings.TrimSpace(req.SourceID)
-	if req.UserID == "" {
-		return nil, fmt.Errorf("user_id required")
+	if req.PayerOrgID == nil || req.PayerOrgID.IsZero() {
+		return nil, fmt.Errorf("payer_org_id required")
+	}
+	if req.InvokerID == "" {
+		return nil, fmt.Errorf("invoker_id required")
 	}
 	if req.CreditType == "" {
 		return nil, fmt.Errorf("credit_type required")
@@ -94,7 +96,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.creditsService().Hold(ctx, req.OwnerID, req.UserID, req.CreditType, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.creditsService().Hold(ctx, req.PayerOrgID, req.InvokerID, req.CreditType, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +114,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 	}
 	return &CreditHold{
 		ID:        hold.ID,
-		UserID:    hold.UserID,
+		InvokerID: hold.InvokerID,
 		Amount:    amount,
 		Source:    hold.Source,
 		SourceID:  srcID,
@@ -127,11 +129,24 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 type CaptureHoldRequest struct {
 	HoldID uuid.UUID
 	Amount int64
+
+	// Usage analytics (#311): when EventType is set, the capture ALSO appends a
+	// billing.usage_events row linked to the capture transaction (no second
+	// debit), so the platform's /budget-usage + revenue analytics can be served
+	// from OpenRails. EventType is the metered model/endpoint; Metadata carries
+	// the string grouping dims (function_name, availability_tier,
+	// delegated_user_id, ...). Source/SourceID default to the capture's.
+	EventType  string
+	Dimensions map[string]int64
+	Metadata   map[string]any
+	Source     string
+	SourceID   string
 }
 
 type CreditTransaction struct {
 	ID              uuid.UUID
-	UserID          string
+	PayerOrgID      uuid.UUID
+	InvokerID       string
 	CreditTypeID    uuid.UUID
 	Amount          int64
 	BalanceAfter    *int64
@@ -148,10 +163,8 @@ type CreditTransaction struct {
 }
 
 type WithdrawCreditsRequest struct {
-	// OwnerID is the OWNER ORG to withdraw from (issue #221). When nil, defaults
-	// to UserID's deterministic personal org.
-	OwnerID    *identity.OwnerOrgID
-	UserID     string
+	PayerOrgID *identity.PayerOrgID
+	InvokerID  string
 	CreditType string
 	Amount     int64
 	Source     string
@@ -159,11 +172,14 @@ type WithdrawCreditsRequest struct {
 }
 
 func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
-	req.UserID = strings.TrimSpace(req.UserID)
+	req.InvokerID = strings.TrimSpace(req.InvokerID)
 	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
-	if req.UserID == "" {
-		return nil, fmt.Errorf("user_id required")
+	if req.PayerOrgID == nil || req.PayerOrgID.IsZero() {
+		return nil, fmt.Errorf("payer_org_id required")
+	}
+	if req.InvokerID == "" {
+		return nil, fmt.Errorf("invoker_id required")
 	}
 	if req.CreditType == "" {
 		return nil, fmt.Errorf("credit_type required")
@@ -178,8 +194,8 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.creditsService().Withdraw(ctx, credits.CreditWithdrawParams{
-		OwnerID:    req.OwnerID,
-		UserID:     req.UserID,
+		PayerOrgID: req.PayerOrgID,
+		InvokerID:  req.InvokerID,
 		CreditType: req.CreditType,
 		Amount:     req.Amount,
 		Source:     req.Source,
@@ -190,7 +206,8 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		UserID:          trx.UserID,
+		PayerOrgID:      trx.PayerOrgID,
+		InvokerID:       trx.InvokerID,
 		CreditTypeID:    trx.CreditTypeID,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
@@ -208,10 +225,8 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 }
 
 type DepositCreditsRequest struct {
-	// OwnerID is the OWNER ORG that owns the deposited balance (issue #221). When
-	// nil, defaults to UserID's deterministic personal org.
-	OwnerID     *identity.OwnerOrgID
-	UserID      string
+	PayerOrgID  *identity.PayerOrgID
+	InvokerID   string
 	CreditType  string
 	Amount      int64
 	Source      string
@@ -221,11 +236,14 @@ type DepositCreditsRequest struct {
 }
 
 func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
-	req.UserID = strings.TrimSpace(req.UserID)
+	req.InvokerID = strings.TrimSpace(req.InvokerID)
 	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
-	if req.UserID == "" {
-		return nil, fmt.Errorf("user_id required")
+	if req.PayerOrgID == nil || req.PayerOrgID.IsZero() {
+		return nil, fmt.Errorf("payer_org_id required")
+	}
+	if req.InvokerID == "" {
+		return nil, fmt.Errorf("invoker_id required")
 	}
 	if req.CreditType == "" {
 		return nil, fmt.Errorf("credit_type required")
@@ -240,8 +258,8 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.creditsService().Deposit(ctx, credits.CreditDepositParams{
-		OwnerID:     req.OwnerID,
-		UserID:      req.UserID,
+		PayerOrgID:  req.PayerOrgID,
+		InvokerID:   req.InvokerID,
 		CreditType:  req.CreditType,
 		Amount:      req.Amount,
 		Source:      req.Source,
@@ -254,7 +272,8 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		UserID:          trx.UserID,
+		PayerOrgID:      trx.PayerOrgID,
+		InvokerID:       trx.InvokerID,
 		CreditTypeID:    trx.CreditTypeID,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
@@ -282,9 +301,39 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	if err != nil {
 		return nil, err
 	}
+	// #311: append an analytics usage_event linked to this capture (no second
+	// debit) so OpenRails is the source of truth for platform usage/revenue.
+	if strings.TrimSpace(req.EventType) != "" {
+		source := strings.TrimSpace(req.Source)
+		if source == "" {
+			source = strings.TrimSpace(trx.Source)
+		}
+		sourceID := strings.TrimSpace(req.SourceID)
+		if sourceID == "" && trx.SourceID != nil {
+			sourceID = strings.TrimSpace(*trx.SourceID)
+		}
+		captureTxnID := trx.ID
+		if uerr := s.creditsService().InsertCaptureUsageEvent(ctx, credits.CaptureUsageEventParams{
+			PayerOrgID:          trx.PayerOrgID,
+			InvokerID:           trx.InvokerID,
+			CreditTypeID:        trx.CreditTypeID,
+			EventType:           req.EventType,
+			Amount:              req.Amount,
+			Dimensions:          req.Dimensions,
+			Metadata:            req.Metadata,
+			Source:              source,
+			SourceID:            sourceID,
+			CreditTransactionID: &captureTxnID,
+		}); uerr != nil {
+			// Analytics is best-effort: a usage_event failure must NOT fail the
+			// capture (the money is already captured).
+			log.Warnf("service capture: usage_event insert failed (capture %s kept): %v", trx.ID, uerr)
+		}
+	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		UserID:          trx.UserID,
+		PayerOrgID:      trx.PayerOrgID,
+		InvokerID:       trx.InvokerID,
 		CreditTypeID:    trx.CreditTypeID,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
@@ -299,6 +348,40 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		CreatedAt:       trx.CreatedAt,
 		UpdatedAt:       trx.UpdatedAt,
 	}, nil
+}
+
+// ServiceUsageRollupRow is one grouped spend bucket (dimension value, event
+// count, summed host-priced amount).
+type ServiceUsageRollupRow struct {
+	Key         string `json:"key"`
+	EventCount  int64  `json:"event_count"`
+	TotalAmount int64  `json:"total_amount"`
+}
+
+// ServiceUsageRollupRequest selects a payer + window + grouping dimension.
+type ServiceUsageRollupRequest struct {
+	PayerOrgID *identity.PayerOrgID
+	From       time.Time
+	To         time.Time
+	GroupBy    string // endpoint | function | tier | user
+}
+
+// ServiceUsageRollup returns per-dimension-value spend for a payer over a
+// window (#311) — the OpenRails-sourced data behind the platform's
+// /budget-usage + revenue analytics. Service-scoped (operator OAT).
+func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollupRequest) ([]ServiceUsageRollupRow, error) {
+	if req.PayerOrgID == nil || req.PayerOrgID.IsZero() {
+		return nil, fmt.Errorf("payer_org_id required")
+	}
+	rows, err := s.creditsService().ServiceUsageRollup(ctx, *req.PayerOrgID, req.From, req.To, req.GroupBy)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ServiceUsageRollupRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, ServiceUsageRollupRow{Key: r.Key, EventCount: r.EventCount, TotalAmount: r.TotalAmount})
+	}
+	return out, nil
 }
 
 func (s *Service) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {

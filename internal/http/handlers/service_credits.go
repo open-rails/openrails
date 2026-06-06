@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/controlplane"
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -17,9 +19,8 @@ import (
 )
 
 type serviceWithdrawRequest struct {
-	OwnerID    string     `json:"owner_id"`
-	OwnerOrgID string     `json:"owner_org_id"`
-	UserID     string     `json:"user_id" binding:"required"`
+	PayerOrgID string     `json:"payer_org_id"`
+	InvokerID  string     `json:"invoker_id" binding:"required"`
 	CreditType string     `json:"credit_type" binding:"required"`
 	Amount     int64      `json:"amount" binding:"required"`
 	Source     string     `json:"source" binding:"required"`
@@ -27,9 +28,8 @@ type serviceWithdrawRequest struct {
 }
 
 type serviceDepositRequest struct {
-	OwnerID     string     `json:"owner_id"`
-	OwnerOrgID  string     `json:"owner_org_id"`
-	UserID      string     `json:"user_id" binding:"required"`
+	PayerOrgID  string     `json:"payer_org_id"`
+	InvokerID   string     `json:"invoker_id" binding:"required"`
 	CreditType  string     `json:"credit_type" binding:"required"`
 	Amount      int64      `json:"amount" binding:"required"`
 	Source      string     `json:"source" binding:"required"`
@@ -39,9 +39,8 @@ type serviceDepositRequest struct {
 }
 
 type serviceHoldRequest struct {
-	OwnerID    string `json:"owner_id"`
-	OwnerOrgID string `json:"owner_org_id"`
-	UserID     string `json:"user_id" binding:"required"`
+	PayerOrgID string `json:"payer_org_id"`
+	InvokerID  string `json:"invoker_id" binding:"required"`
 	CreditType string `json:"credit_type" binding:"required"`
 	Amount     int64  `json:"amount" binding:"required"`
 	Source     string `json:"source" binding:"required"`
@@ -51,33 +50,54 @@ type serviceHoldRequest struct {
 
 type serviceCaptureRequest struct {
 	Amount int64 `json:"amount" binding:"required"`
+
+	// Usage analytics (#311): when event_type is set, the capture also appends a
+	// usage_event (no second debit) for the platform usage/revenue rollup.
+	EventType  string           `json:"event_type,omitempty"`
+	Dimensions map[string]int64 `json:"dimensions,omitempty"`
+	Metadata   map[string]any   `json:"metadata,omitempty"`
+	Source     string           `json:"source,omitempty"`
+	SourceID   string           `json:"source_id,omitempty"`
 }
 
-func parseServiceOwnerOrgID(ownerID, ownerOrgID string) (*billingidentity.OwnerOrgID, error) {
-	raw := strings.TrimSpace(ownerID)
-	if raw == "" {
-		raw = strings.TrimSpace(ownerOrgID)
-	}
+func parseServicePayerOrgID(raw string) (*billingidentity.PayerOrgID, error) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
 	}
 	id, err := uuid.Parse(raw)
 	if err != nil || id == uuid.Nil {
-		return nil, errors.New("invalid owner_id")
+		return nil, errors.New("invalid payer_org_id")
 	}
-	owner := billingidentity.OwnerOrgID(id)
-	return &owner, nil
+	payer := billingidentity.PayerOrgID(id)
+	return &payer, nil
+}
+
+func requireServicePayerScope(r *httprequest.Request, payer billingidentity.PayerOrgID) bool {
+	v, ok := r.Get(ginmw.OATContextKey)
+	if !ok {
+		r.ErrorJSON(http.StatusUnauthorized, "oat required")
+		return false
+	}
+	resolved, ok := v.(*controlplane.ResolvedOAT)
+	if !ok || resolved == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "oat state invalid")
+		return false
+	}
+	if !resolved.AllowsPayer(payer.UUID()) {
+		r.ErrorJSON(http.StatusForbidden, "oat_payer_scope_denied")
+		return false
+	}
+	return true
 }
 
 // serviceAuthorizeRequest is the body of POST /v1/service/credits/authorize
-// (issue #235/#247). payer = the owner org billed; invoker = the canonical actor
+// (issue #235/#247). payer = the payer org billed; invoker = the canonical invoker
 // for per-(payer,invoker) sub-budgets; estimate_cents = the upper-bound charge;
 // request_id = the idempotency key for the placed hold.
 type serviceAuthorizeRequest struct {
-	Payer         string `json:"payer"`
-	OwnerID       string `json:"owner_id"`
-	OwnerOrgID    string `json:"owner_org_id"`
-	Invoker       string `json:"invoker"`
+	PayerOrgID    string `json:"payer_org_id"`
+	InvokerID     string `json:"invoker_id"`
 	CreditType    string `json:"credit_type" binding:"required"`
 	EstimateCents int64  `json:"estimate_cents"`
 	RequestID     string `json:"request_id" binding:"required"`
@@ -125,22 +145,16 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 		return
 	}
 
-	// Payer is derived from the body but is ONLY ever billed within the OAT's
-	// tenant (RLS). A missing/invalid payer fails closed.
-	payerRaw := req.Payer
-	if strings.TrimSpace(payerRaw) == "" {
-		payerRaw = req.OwnerID
-	}
-	if strings.TrimSpace(payerRaw) == "" {
-		payerRaw = req.OwnerOrgID
-	}
-	payer, err := parseServiceOwnerOrgID(payerRaw, "")
+	payer, err := parseServicePayerOrgID(req.PayerOrgID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid payer")
 		return
 	}
 	if payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "payer required")
+		return
+	}
+	if !requireServicePayerScope(r, *payer) {
 		return
 	}
 
@@ -150,8 +164,8 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	}
 
 	out, err := svc.AuthorizeAndHold(r.Request.Context(), billingservice.AuthorizeAndHoldRequest{
-		Payer:         *payer,
-		Invoker:       req.Invoker,
+		PayerOrgID:    *payer,
+		InvokerID:     req.InvokerID,
 		CreditType:    req.CreditType,
 		EstimateCents: req.EstimateCents,
 		RequestID:     req.RequestID,
@@ -181,7 +195,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 // serviceBalanceResponse is the payer balance snapshot served by
 // GET /v1/service/credits/balance (issue #235/#247).
 type serviceBalanceResponse struct {
-	OwnerID              uuid.UUID `json:"owner_id"`
+	PayerOrgID           uuid.UUID `json:"payer_org_id"`
 	CreditType           string    `json:"credit_type"`
 	BillingMode          string    `json:"billing_mode"`
 	BalanceCents         int64     `json:"balance_cents"`
@@ -192,7 +206,7 @@ type serviceBalanceResponse struct {
 
 // ServiceGetCreditsBalance returns the payer's REAL balance snapshot (issue
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
-// Tenant-bound by the OAT (RLS); payer supplied via ?payer= (or ?owner_id=).
+// Tenant-bound by the OAT (RLS); payer supplied via ?payer_org_id=.
 func ServiceGetCreditsBalance(r *httprequest.Request) {
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
 	if creditType == "" {
@@ -201,20 +215,16 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 	if creditType == "" {
 		creditType = "api_credits"
 	}
-	payerRaw := r.Request.URL.Query().Get("payer")
-	if strings.TrimSpace(payerRaw) == "" {
-		payerRaw = r.Request.URL.Query().Get("owner_id")
-	}
-	if strings.TrimSpace(payerRaw) == "" {
-		payerRaw = r.Request.URL.Query().Get("owner_org_id")
-	}
-	payer, err := parseServiceOwnerOrgID(payerRaw, "")
+	payer, err := parseServicePayerOrgID(r.Request.URL.Query().Get("payer_org_id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid payer")
 		return
 	}
 	if payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "payer required")
+		return
+	}
+	if !requireServicePayerScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -228,7 +238,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(serviceBalanceResponse{
-		OwnerID:              snap.OwnerID,
+		PayerOrgID:           snap.PayerOrgID,
 		CreditType:           snap.CreditType,
 		BillingMode:          snap.BillingMode,
 		BalanceCents:         snap.BalanceCents,
@@ -238,24 +248,16 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 	})
 }
 
-// serviceQueryPayer extracts the payer/owner org from the query string,
-// accepting payer | owner_id | owner_org_id. Returns nil when absent.
-func serviceQueryPayer(r *httprequest.Request) (*identity.OwnerOrgID, error) {
-	raw := r.Request.URL.Query().Get("payer")
-	if strings.TrimSpace(raw) == "" {
-		raw = r.Request.URL.Query().Get("owner_id")
-	}
-	if strings.TrimSpace(raw) == "" {
-		raw = r.Request.URL.Query().Get("owner_org_id")
-	}
-	return parseServiceOwnerOrgID(raw, "")
+// serviceQueryPayer extracts the payer org from the query string.
+func serviceQueryPayer(r *httprequest.Request) (*identity.PayerOrgID, error) {
+	return parseServicePayerOrgID(r.Request.URL.Query().Get("payer_org_id"))
 }
 
 // serviceAccountSettingsRequest is the PUT body for configuring an org's credit
 // billing account (issue #242). All settings are optional pointers (only the
 // supplied fields are changed); payer + credit_type identify the account.
 type serviceAccountSettingsRequest struct {
-	Payer                   string  `json:"payer"`
+	PayerOrgID              string  `json:"payer_org_id"`
 	CreditType              string  `json:"credit_type"`
 	BillingMode             *string `json:"billing_mode"` // "prepaid" | "arrears"
 	MaxSpendPerDayCents     *int64  `json:"max_spend_per_day_cents"`
@@ -279,9 +281,12 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	payer, err := parseServiceOwnerOrgID(req.Payer, "")
+	payer, err := parseServicePayerOrgID(req.PayerOrgID)
 	if err != nil || payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "payer required")
+		return
+	}
+	if !requireServicePayerScope(r, *payer) {
 		return
 	}
 	creditType := strings.TrimSpace(req.CreditType)
@@ -334,6 +339,9 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "payer required")
 		return
 	}
+	if !requireServicePayerScope(r, *payer) {
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
@@ -347,10 +355,10 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 	r.SuccessJSON(settings)
 }
 
-// ServiceListOwnerCreditTransactions (GET /v1/service/credits/transactions)
+// ServiceListPayerCreditTransactions (GET /v1/service/credits/transactions)
 // lists an org's credit transactions (usage history) for the billing-account
 // admin surface (issue #242). Query: payer, credit_type, limit, offset.
-func ServiceListOwnerCreditTransactions(r *httprequest.Request) {
+func ServiceListPayerCreditTransactions(r *httprequest.Request) {
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
 	if creditType == "" {
 		creditType = "api_credits"
@@ -360,6 +368,9 @@ func ServiceListOwnerCreditTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "payer required")
 		return
 	}
+	if !requireServicePayerScope(r, *payer) {
+		return
+	}
 	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.Request.URL.Query().Get("offset"))
 	svc, err := billingservice.New(r.State)
@@ -367,7 +378,7 @@ func ServiceListOwnerCreditTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	items, total, err := svc.GetOwnerCreditTransactions(r.Request.Context(), *payer, creditType, limit, offset)
+	items, total, err := svc.GetPayerCreditTransactions(r.Request.Context(), *payer, creditType, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -375,7 +386,7 @@ func ServiceListOwnerCreditTransactions(r *httprequest.Request) {
 	out := make([]serviceTxnResponse, 0, len(items))
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{
-			ID: t.ID, OwnerID: t.OwnerID, UserID: t.UserID, Amount: t.Amount,
+			ID: t.ID, PayerOrgID: t.PayerOrgID, InvokerID: t.InvokerID, Amount: t.Amount,
 			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
 			CreatedAt: t.CreatedAt,
 		})
@@ -385,13 +396,58 @@ func ServiceListOwnerCreditTransactions(r *httprequest.Request) {
 
 type serviceTxnResponse struct {
 	ID              uuid.UUID `json:"id"`
-	OwnerID         uuid.UUID `json:"owner_id"`
-	UserID          string    `json:"user_id"`
+	PayerOrgID      uuid.UUID `json:"payer_org_id"`
+	InvokerID       string    `json:"invoker_id"`
 	Amount          int64     `json:"amount"`
 	TransactionType string    `json:"transaction_type"`
 	Status          string    `json:"status"`
 	Source          string    `json:"source"`
 	CreatedAt       time.Time `json:"created_at"`
+}
+
+type serviceUsageRollupRequest struct {
+	PayerOrgID string `json:"payer_org_id" binding:"required"`
+	From       int64  `json:"from" binding:"required"` // unix seconds, inclusive
+	To         int64  `json:"to" binding:"required"`   // unix seconds, exclusive
+	GroupBy    string `json:"group_by" binding:"required"`
+}
+
+// ServiceUsageRollup returns per-dimension-value spend for a payer org over a
+// window (#311) — the OpenRails-sourced data behind the tensorhub platform's
+// /budget-usage + revenue analytics. Operator-OAT, credits:read scope.
+func ServiceUsageRollup(r *httprequest.Request) {
+	var req serviceUsageRollupRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	payerOrgID, err := parseServicePayerOrgID(req.PayerOrgID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	if payerOrgID == nil {
+		r.ErrorJSON(http.StatusBadRequest, "payer_org_id required")
+		return
+	}
+	if !requireServicePayerScope(r, *payerOrgID) {
+		return
+	}
+	rows, err := svc.ServiceUsageRollup(r.Request.Context(), billingservice.ServiceUsageRollupRequest{
+		PayerOrgID: payerOrgID,
+		From:       time.Unix(req.From, 0).UTC(),
+		To:         time.Unix(req.To, 0).UTC(),
+		GroupBy:    req.GroupBy,
+	})
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	r.SuccessJSON(map[string]any{"rows": rows})
 }
 
 func ServiceDepositCredits(r *httprequest.Request) {
@@ -405,9 +461,16 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		return
 	}
 
-	ownerID, err := parseServiceOwnerOrgID(req.OwnerID, req.OwnerOrgID)
+	payerOrgID, err := parseServicePayerOrgID(req.PayerOrgID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	if payerOrgID == nil {
+		r.ErrorJSON(http.StatusBadRequest, "payer_org_id required")
+		return
+	}
+	if !requireServicePayerScope(r, *payerOrgID) {
 		return
 	}
 
@@ -418,8 +481,8 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	}
 
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
-		OwnerID:     ownerID,
-		UserID:      req.UserID,
+		PayerOrgID:  payerOrgID,
+		InvokerID:   req.InvokerID,
 		CreditType:  req.CreditType,
 		Amount:      req.Amount,
 		Source:      req.Source,
@@ -448,14 +511,21 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	ownerID, err := parseServiceOwnerOrgID(req.OwnerID, req.OwnerOrgID)
+	payerOrgID, err := parseServicePayerOrgID(req.PayerOrgID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
+	if payerOrgID == nil {
+		r.ErrorJSON(http.StatusBadRequest, "payer_org_id required")
+		return
+	}
+	if !requireServicePayerScope(r, *payerOrgID) {
+		return
+	}
 	trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
-		OwnerID:    ownerID,
-		UserID:     req.UserID,
+		PayerOrgID: payerOrgID,
+		InvokerID:  req.InvokerID,
 		CreditType: req.CreditType,
 		Amount:     req.Amount,
 		Source:     req.Source,
@@ -486,14 +556,21 @@ func ServiceHoldCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	ownerID, err := parseServiceOwnerOrgID(req.OwnerID, req.OwnerOrgID)
+	payerOrgID, err := parseServicePayerOrgID(req.PayerOrgID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
+	if payerOrgID == nil {
+		r.ErrorJSON(http.StatusBadRequest, "payer_org_id required")
+		return
+	}
+	if !requireServicePayerScope(r, *payerOrgID) {
+		return
+	}
 	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
-		OwnerID:    ownerID,
-		UserID:     req.UserID,
+		PayerOrgID: payerOrgID,
+		InvokerID:  req.InvokerID,
 		CreditType: req.CreditType,
 		Amount:     req.Amount,
 		Source:     req.Source,
@@ -530,7 +607,15 @@ func ServiceCaptureHold(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	trx, err := svc.CaptureHold(r.Request.Context(), billingservice.CaptureHoldRequest{HoldID: holdID, Amount: req.Amount})
+	trx, err := svc.CaptureHold(r.Request.Context(), billingservice.CaptureHoldRequest{
+		HoldID:     holdID,
+		Amount:     req.Amount,
+		EventType:  req.EventType,
+		Dimensions: req.Dimensions,
+		Metadata:   req.Metadata,
+		Source:     req.Source,
+		SourceID:   req.SourceID,
+	})
 	if err == billingservice.ErrInsufficientCredits {
 		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
 		return
@@ -560,31 +645,34 @@ func ServiceReleaseHold(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"ok": true})
 }
 
-func ServiceGetUserCredits(r *httprequest.Request) {
-	userID := strings.TrimSpace(r.Param("user_id"))
-	if userID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "user_id required")
+func ServiceGetInvokerCredits(r *httprequest.Request) {
+	invokerID := strings.TrimSpace(r.Param("invoker_id"))
+	if invokerID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "invoker_id required")
 		return
 	}
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("type"))
 	if creditType == "" {
 		creditType = "api_credits"
 	}
-	ownerID, err := parseServiceOwnerOrgID(r.Request.URL.Query().Get("owner_id"), r.Request.URL.Query().Get("owner_org_id"))
+	payerOrgID, err := parseServicePayerOrgID(r.Request.URL.Query().Get("payer_org_id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	var balance int64
 	var heldBalance int64
-	if ownerID != nil {
-		bal, err := r.State.CreditsService.GetBalanceForOwner(r.Request.Context(), *ownerID, creditType)
+	if payerOrgID != nil {
+		if !requireServicePayerScope(r, *payerOrgID) {
+			return
+		}
+		bal, err := r.State.CreditsService.GetBalanceForPayer(r.Request.Context(), *payerOrgID, creditType)
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance
 		}
 	} else {
-		bal, err := r.State.CreditsService.GetBalance(r.Request.Context(), userID, creditType)
+		bal, err := r.State.CreditsService.GetBalance(r.Request.Context(), invokerID, creditType)
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance
@@ -602,9 +690,9 @@ func ServiceGetUserCredits(r *httprequest.Request) {
 }
 
 func ServiceLookupCreditTransaction(r *httprequest.Request) {
-	userID := strings.TrimSpace(r.Request.URL.Query().Get("user_id"))
-	if userID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "user_id required")
+	invokerID := strings.TrimSpace(r.Request.URL.Query().Get("invoker_id"))
+	if invokerID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "invoker_id required")
 		return
 	}
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
@@ -627,7 +715,7 @@ func ServiceLookupCreditTransaction(r *httprequest.Request) {
 		transactionType = "hold"
 	}
 
-	trx, err := r.State.CreditsService.GetTransactionBySource(r.Request.Context(), userID, creditType, transactionType, source, sourceID)
+	trx, err := r.State.CreditsService.GetTransactionBySource(r.Request.Context(), invokerID, creditType, transactionType, source, sourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			r.ErrorJSON(http.StatusNotFound, "not found")
