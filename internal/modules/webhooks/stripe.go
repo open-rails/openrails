@@ -92,15 +92,15 @@ func (li stripeInvoiceLineItem) priceID() string {
 }
 
 type stripeInvoice struct {
-	ID            string            `json:"id"`
-	Subscription  string            `json:"subscription"`
-	Customer      string            `json:"customer"`
-	CustomerEmail string            `json:"customer_email"`
-	PaymentIntent string            `json:"payment_intent"`
-	Charge        string            `json:"charge"`
-	AmountPaid    int64             `json:"amount_paid"`
-	AmountDue     int64             `json:"amount_due"`
-	Currency      string            `json:"currency"`
+	ID            string `json:"id"`
+	Subscription  string `json:"subscription"`
+	Customer      string `json:"customer"`
+	CustomerEmail string `json:"customer_email"`
+	PaymentIntent string `json:"payment_intent"`
+	Charge        string `json:"charge"`
+	AmountPaid    int64  `json:"amount_paid"`
+	AmountDue     int64  `json:"amount_due"`
+	Currency      string `json:"currency"`
 	// BillingReason is Stripe's reason for the invoice ("subscription_create",
 	// "subscription_cycle", "subscription_update", ...). "subscription_update"
 	// marks a mid-cycle change (a Model B upgrade) whose total is a PRORATED

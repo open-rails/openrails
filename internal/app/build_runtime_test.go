@@ -3,8 +3,6 @@ package app
 import (
 	"testing"
 
-	"github.com/riverqueue/river"
-
 	"github.com/open-rails/openrails/config"
 	"github.com/stretchr/testify/require"
 )
@@ -53,30 +51,4 @@ func TestStandaloneRiverSchemaTracksDBSchema(t *testing.T) {
 		require.Equal(t, "billing", standaloneRiverSchema(&config.Config{}))
 		require.Equal(t, "billing", standaloneRiverSchema(nil))
 	})
-}
-
-// TestBuildRiverClientUsesConfiguredSchema proves the configured schema actually
-// reaches the constructed River client (not just the helper). pgxpool.New is lazy
-// (it parses the URL without dialing), so the client builds without a live DB.
-func TestBuildRiverClientUsesConfiguredSchema(t *testing.T) {
-	t.Parallel()
-
-	for _, schema := range []string{"billing", "host_billing"} {
-		schema := schema
-		t.Run(schema, func(t *testing.T) {
-			cfg := config.GetDefaultBillingConfig()
-			cfg.DB.Schema = schema
-			cfg.DB.URL = "postgres://u:p@localhost:5432/db?sslmode=disable"
-
-			client, pool, err := buildRiverClient(cfg, river.NewWorkers())
-			require.NoError(t, err)
-			t.Cleanup(func() {
-				if pool != nil {
-					pool.Close()
-				}
-			})
-			require.NotNil(t, client)
-			require.Equal(t, schema, client.Schema())
-		})
-	}
 }

@@ -39,6 +39,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/services/health"
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
@@ -212,6 +213,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	}
 
 	serviceInstances := createServices(database, cfg, ccbillRESTClient, nmiClients, redisClient, clock, solanaPriceProvider)
+	healthManager := createHealthManager(database, redisClient)
 
 	var emailService *subscriptions.EmailService
 	if cfg.SendGrid != nil {
@@ -237,6 +239,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		RedisClient:      redisClient,
 		Config:           cfg,
 		Clock:            clock,
+		HealthManager:    healthManager,
 		CCBillClient:     ccbillClient,
 		CCBillRESTClient: ccbillRESTClient,
 		CCBillDataLink:   ccbillDataLinkClient,
@@ -305,6 +308,10 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		runtime.AdminSubscriptionService.EventLogService = runtime.EventLogService
 	}
 
+	if runtime.HealthManager != nil {
+		runtime.HealthManager.Start()
+	}
+
 	return runtime, nil
 }
 
@@ -323,9 +330,7 @@ func buildRiverProducer(cfg *config.Config) (*river.Client[pgx.Tx], *pgxpool.Poo
 	if dbURL == "" {
 		return nil, nil, fmt.Errorf("missing database configuration for River producer (DB_URL or DB_HOST/DB_PORT/etc.)")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dbURL)
+	pool, err := db.NewPGXPoolWithRetry(context.Background(), dbURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed creating pgx pool for River producer: %w", err)
 	}
@@ -360,6 +365,21 @@ func createDatabase(cfg *config.Config) (*db.DB, error) {
 		return nil, err
 	}
 	return database, nil
+}
+
+func createHealthManager(database *db.DB, redisClient *redis.Client) *health.ServiceHealthManager {
+	manager := health.NewServiceHealthManager()
+	if database != nil {
+		if bunDB, ok := database.GetDB().(*bun.DB); ok && bunDB != nil {
+			manager.RegisterChecker(health.NewPostgresHealthChecker(bunDB))
+		} else {
+			log.Warn("database health checker not registered: runtime DB is not *bun.DB")
+		}
+	}
+	if redisClient != nil {
+		manager.RegisterChecker(health.NewRedisHealthChecker(redisClient))
+	}
+	return manager
 }
 
 func validateDatabase(cfg *config.Config, database *db.DB) error {
@@ -743,9 +763,7 @@ func buildRiverClient(cfg *config.Config, workers *river.Workers) (*river.Client
 	if dbURL == "" {
 		return nil, nil, fmt.Errorf("missing database configuration for River (DB_URL or DB_HOST/DB_PORT/etc.)")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dbURL)
+	pool, err := db.NewPGXPoolWithRetry(context.Background(), dbURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed creating pgx pool for River: %w", err)
 	}

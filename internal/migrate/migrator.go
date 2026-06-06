@@ -13,7 +13,6 @@ import (
 	clickhousemigrations "github.com/open-rails/openrails/migrations/clickhouse"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 	log "github.com/sirupsen/logrus"
@@ -195,7 +194,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 // runRiverMigrations executes River's built-in schema migrations
 func runRiverMigrations(ctx context.Context, cfg *config.Config, schema string) error {
-	pgxPool, err := pgxpool.New(ctx, cfg.DB.GetConnectionString())
+	pgxPool, err := db.NewPGXPoolWithRetry(ctx, cfg.DB.GetConnectionString())
 	if err != nil {
 		return fmt.Errorf("create pgx pool: %w", err)
 	}

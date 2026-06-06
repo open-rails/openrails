@@ -45,6 +45,13 @@ func mintOperatorOAT(cmd *cobra.Command, _ []string) error {
 		org = "operator"
 	}
 
+	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
+		OperatorOrgSlug: org,
+		MintInitialOAT:  false,
+	}); berr != nil {
+		return fmt.Errorf("bootstrap operator org/role: %w", berr)
+	}
+
 	name, err := cmd.Flags().GetString("name")
 	if err != nil {
 		return fmt.Errorf("read name flag: %w", err)

@@ -43,8 +43,8 @@ type Invoice struct {
 // InvoiceLineItem is one metered-usage line on an invoice: the per-event_type
 // (per model/endpoint) total amount, event count, and summed dimensions.
 type InvoiceLineItem struct {
-	EventType   string           `json:"event_type"`
-	Amount      int64            `json:"amount"`
-	Count       int64            `json:"count"`
-	Dimensions  map[string]int64 `json:"dimensions,omitempty"`
+	EventType  string           `json:"event_type"`
+	Amount     int64            `json:"amount"`
+	Count      int64            `json:"count"`
+	Dimensions map[string]int64 `json:"dimensions,omitempty"`
 }

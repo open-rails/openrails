@@ -14,6 +14,7 @@ import (
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/http/router/ginrouter"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/services/health"
 )
 
 func (s *Server) registerUserRoutesAt(e *gin.Engine, apiPrefix string) {
@@ -135,7 +136,7 @@ func (s *Server) registerStandaloneMetaRoutes(e *gin.Engine) {
 		c.JSON(http.StatusOK, gin.H{
 			"service":   "billing",
 			"status":    "ok",
-			"endpoints": []string{"/health/live", "/health/ready", StandaloneV1Prefix},
+			"endpoints": []string{"/health/live", "/health/ready", "/health/services", StandaloneV1Prefix},
 		})
 	})
 
@@ -144,6 +145,7 @@ func (s *Server) registerStandaloneMetaRoutes(e *gin.Engine) {
 	})
 
 	e.GET("/health/ready", s.readyHandler)
+	e.GET("/health/services", s.serviceHealthHandler)
 
 	// Kubernetes-style health check endpoints (aliases)
 	e.GET("/healthz", func(c *gin.Context) {
@@ -153,36 +155,83 @@ func (s *Server) registerStandaloneMetaRoutes(e *gin.Engine) {
 }
 
 func (s *Server) readyHandler(c *gin.Context) {
-	ctx := c.Request.Context()
+	services, servicesReady := s.requiredServiceHealth()
+	authReady := s.authProvider != nil
+	if !servicesReady || !authReady {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":       "not_ready",
+			"service":      "billing",
+			"auth":         gin.H{"available": authReady},
+			"dependencies": services,
+		})
+		return
+	}
 
-	// Check database (critical)
-	var one int
-	if s.runtime != nil && s.runtime.DB != nil {
-		if err := s.runtime.DB.GetDB().NewSelect().ColumnExpr("1").Scan(ctx, &one); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
-			return
+	c.JSON(http.StatusOK, gin.H{
+		"status":       "ready",
+		"service":      "billing",
+		"auth":         gin.H{"available": true},
+		"dependencies": services,
+	})
+}
+
+func (s *Server) serviceHealthHandler(c *gin.Context) {
+	services, ready := s.requiredServiceHealth()
+	status := http.StatusOK
+	statusText := "ready"
+	if !ready {
+		status = http.StatusServiceUnavailable
+		statusText = "not_ready"
+	}
+	c.JSON(status, gin.H{
+		"status":       statusText,
+		"service":      "billing",
+		"dependencies": services,
+	})
+}
+
+func (s *Server) requiredServiceHealth() (gin.H, bool) {
+	required := []string{"postgres", "garnet"}
+	services := make(gin.H, len(required))
+	if s == nil || s.runtime == nil || s.runtime.HealthManager == nil {
+		for _, name := range required {
+			services[name] = gin.H{"available": false, "reason": "health_manager_unavailable"}
 		}
-	} else {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
-		return
+		return services, false
 	}
 
-	// Check Redis (critical for billing operations)
-	if s.runtime != nil && s.runtime.RedisClient != nil {
-		if _, err := s.runtime.RedisClient.Ping(ctx).Result(); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
-			return
+	allReady := true
+	for _, name := range required {
+		status, exists := s.runtime.HealthManager.GetServiceHealth(name)
+		if !exists {
+			services[name] = gin.H{"available": false, "reason": "checker_not_registered"}
+			allReady = false
+			continue
 		}
-	} else {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
-		return
+		services[name] = serviceHealthResponse(status)
+		if !status.Available || status.CircuitOpen {
+			allReady = false
+		}
 	}
+	return services, allReady
+}
 
-	// Check AuthKit verifier (critical for authentication)
-	if s.authProvider == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
-		return
+func serviceHealthResponse(status *health.ServiceHealth) gin.H {
+	if status == nil {
+		return gin.H{"available": false}
 	}
-
-	c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	resp := gin.H{
+		"available":            status.Available && !status.CircuitOpen,
+		"last_check":           status.LastCheck,
+		"last_success":         status.LastSuccess,
+		"consecutive_failures": status.ConsecutiveFailures,
+		"circuit_open":         status.CircuitOpen,
+		"next_retry_at":        status.NextRetryAt,
+		"total_checks":         status.TotalChecks,
+		"total_failures":       status.TotalFailures,
+	}
+	if status.LastError != nil {
+		resp["last_error"] = status.LastError.Error()
+	}
+	return resp
 }

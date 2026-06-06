@@ -138,7 +138,7 @@ func (l *Limiter) Check(ctx context.Context, base string, p Policy, amounts map[
 		if remaining < 0 {
 			remaining = 0
 		}
-		resetAfter := time.Duration((secs-(now.Unix()%secs))) * time.Second
+		resetAfter := time.Duration((secs - (now.Unix() % secs))) * time.Second
 		dec.Windows[i] = WindowInfo{Unit: w.Unit, Limit: w.Max, Remaining: remaining, ResetAfter: resetAfter}
 	}
 	if blocked > 0 && int(blocked) <= len(p.Windows) {

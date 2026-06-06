@@ -31,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/services/health"
 )
 
 // Runtime aggregates infrastructure clients and application services.
@@ -39,6 +40,7 @@ type Runtime struct {
 	RedisClient      *redis.Client
 	Config           *config.Config
 	Clock            clockwork.Clock
+	HealthManager    *health.ServiceHealthManager
 	CCBillClient     *ccbill.CCBillClient
 	CCBillRESTClient *ccbill.RESTClient
 	CCBillDataLink   *ccbill.DataLinkClient
@@ -117,6 +119,10 @@ func (r *Runtime) Close(ctx context.Context) error {
 		return nil
 	}
 	var errs []error
+
+	if r.HealthManager != nil {
+		r.HealthManager.Stop()
+	}
 
 	// Stop Solana Pay poller
 	if r.SolanaPayPoller != nil {

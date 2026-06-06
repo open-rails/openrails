@@ -61,7 +61,7 @@ func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, *bun.DB, i
 // $1 = 100 cents = 100_000 millicents.
 func windows() []budgets.BudgetWindow {
 	return []budgets.BudgetWindow{
-		{Key: "4h", WindowSeconds: 4 * 3600, LimitMillicents: 200_000},   // $2
+		{Key: "4h", WindowSeconds: 4 * 3600, LimitMillicents: 200_000},        // $2
 		{Key: "week", WindowSeconds: 7 * 24 * 3600, LimitMillicents: 500_000}, // $5
 	}
 }

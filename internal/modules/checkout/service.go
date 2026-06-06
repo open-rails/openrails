@@ -2255,12 +2255,12 @@ func (s *CheckoutService) processTierChangeStripe(
 		subID := api.FormatSubscriptionID(existingSub.ID)
 		effectiveDate := existingSub.CurrentPeriodEndsAt.Format("January 2, 2006")
 		return &TierChangeResponse{
-			Object:         "tier_change",
-			Status:         "succeeded",
-			Mode:           "tier_change",
-			Action:         action,
-			PriceID:        api.FormatPriceID(newPrice.ID),
-			Payment:        CheckoutSessionPaymentResponse{Processor: "stripe"},
+			Object:           "tier_change",
+			Status:           "succeeded",
+			Mode:             "tier_change",
+			Action:           action,
+			PriceID:          api.FormatPriceID(newPrice.ID),
+			Payment:          CheckoutSessionPaymentResponse{Processor: "stripe"},
 			SubscriptionID:   &subID,
 			Message:          fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", newProduct.DisplayName, effectiveDate),
 			DelayedStart:     existingSub.CurrentPeriodEndsAt,

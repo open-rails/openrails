@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS daily_metrics {{ON_CLUSTER}} (
     ),
     created_at DateTime('UTC') DEFAULT now(),
     version DateTime('UTC') DEFAULT now()
-) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', version)
+) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}_tenant_scoped_v2', '{replica}', version)
 ORDER BY (snapshot_date, currency, tenant_id)
 PARTITION BY toYYYYMM(snapshot_date)
 SETTINGS index_granularity = 8192;

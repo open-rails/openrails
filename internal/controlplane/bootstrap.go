@@ -81,11 +81,18 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		}
 		created, cerr := core.CreateOrg(ctx, slug)
 		if cerr != nil {
-			return nil, fmt.Errorf("controlplane: create operator org %q: %w", slug, cerr)
+			if !errors.Is(cerr, authcore.ErrOwnerSlugTaken) {
+				return nil, fmt.Errorf("controlplane: create operator org %q: %w", slug, cerr)
+			}
+			created, cerr = core.ResolveOrgBySlug(ctx, slug)
+			if cerr != nil {
+				return nil, fmt.Errorf("controlplane: resolve concurrently-created operator org %q: %w", slug, cerr)
+			}
+		} else {
+			res.OrgCreated = true
+			log.WithField("operator_org", slug).Info("controlplane: created operator org")
 		}
 		org = created
-		res.OrgCreated = true
-		log.WithField("operator_org", slug).Info("controlplane: created operator org")
 	}
 	res.OperatorOrgID = org.ID
 
@@ -187,11 +194,18 @@ func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstra
 		}
 		created, cerr := core.CreateOrg(ctx, slug)
 		if cerr != nil {
-			return nil, fmt.Errorf("controlplane: create platform org %q: %w", slug, cerr)
+			if !errors.Is(cerr, authcore.ErrOwnerSlugTaken) {
+				return nil, fmt.Errorf("controlplane: create platform org %q: %w", slug, cerr)
+			}
+			created, cerr = core.ResolveOrgBySlug(ctx, slug)
+			if cerr != nil {
+				return nil, fmt.Errorf("controlplane: resolve concurrently-created platform org %q: %w", slug, cerr)
+			}
+		} else {
+			res.OrgCreated = true
+			log.WithField("platform_org", slug).Info("controlplane: created platform superadmin org")
 		}
 		org = created
-		res.OrgCreated = true
-		log.WithField("platform_org", slug).Info("controlplane: created platform superadmin org")
 	}
 	res.PlatformOrgID = org.ID
 

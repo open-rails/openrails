@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 const (
@@ -123,6 +124,7 @@ func ensureProduct(ctx context.Context, svc interface {
 			return nil, err
 		}
 		product = &models.Product{
+			ID:          uuidutil.NewV7(),
 			Slug:        slug,
 			DisplayName: displayName,
 			Description: description,
@@ -168,6 +170,7 @@ func ensureRecurringPrice(ctx context.Context, priceSvc interface {
 		}
 		cycleDays := spec.CycleDays
 		price = &models.Price{
+			ID:               uuidutil.NewV7(),
 			ProductID:        spec.ProductID,
 			Status:           models.CatalogStatusActive,
 			Amount:           spec.Amount,

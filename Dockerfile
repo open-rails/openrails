@@ -65,7 +65,9 @@ WORKDIR /app
 
 # Create non-root user
 RUN addgroup -g 1001 -S billing && \
-    adduser -S -D -H -u 1001 -s /sbin/nologin -G billing billing
+    adduser -S -D -H -u 1001 -s /sbin/nologin -G billing billing && \
+    mkdir -p /var/lib/openrails/spool && \
+    chown -R billing:billing /var/lib/openrails
 
 # Copy binary and migrations from builder stage
 COPY --from=builder /app/bin/billing ./billing-server

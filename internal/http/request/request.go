@@ -394,12 +394,12 @@ func (h *httpTransport) BindURI(data any) error {
 	return validateBinding(data)
 }
 
-func (h *httpTransport) Param(key string) string    { return h.r.PathValue(key) }
-func (h *httpTransport) Query(key string) string    { return h.r.URL.Query().Get(key) }
-func (h *httpTransport) Get(key string) (any, bool) { v, ok := h.kv[key]; return v, ok }
-func (h *httpTransport) Set(key string, value any)  { h.kv[key] = value }
-func (h *httpTransport) Next()                      {}
-func (h *httpTransport) Header(key string) string   { return h.r.Header.Get(key) }
+func (h *httpTransport) Param(key string) string     { return h.r.PathValue(key) }
+func (h *httpTransport) Query(key string) string     { return h.r.URL.Query().Get(key) }
+func (h *httpTransport) Get(key string) (any, bool)  { v, ok := h.kv[key]; return v, ok }
+func (h *httpTransport) Set(key string, value any)   { h.kv[key] = value }
+func (h *httpTransport) Next()                       {}
+func (h *httpTransport) Header(key string) string    { return h.r.Header.Get(key) }
 func (h *httpTransport) SetHeader(key, value string) { h.w.Header().Set(key, value) }
 func (h *httpTransport) Redirect(code int, location string) {
 	http.Redirect(h.w, h.r, location, code)
