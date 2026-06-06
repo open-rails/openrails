@@ -2,7 +2,7 @@
 // (issue #226): cross-tenant audit logging, time-boxed break-glass elevation,
 // and platform-wide metrics aggregation. It is DISTINCT from per-tenant operator
 // admin (#224): everything here is cross-tenant control-plane state, gated by the
-// openrails:platform:superadmin permission held in a separate platform org.
+// openrails:platform:superadmin permission held in a separate platform tenant.
 package platform
 
 import (

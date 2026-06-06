@@ -80,7 +80,7 @@ type Server struct {
 
 	// publicHandler is the single "full surface" HTTP handler. It includes
 	// health + debug (dev only) + user + admin + webhook routes AND the
-	// OAT-authenticated server-to-server service routes (issue #222). There is no
+	// service token-authenticated server-to-server service routes (issue #222). There is no
 	// separate private/service trust surface or port.
 	publicHandler *gin.Engine
 }
@@ -382,9 +382,9 @@ func New(deps Dependencies) (*Server, error) {
 	// /auth — never AuthKit DefaultAPI. No-op in verifier-only mode.
 	s.registerControlPlaneAuthRoutes(s.publicHandler)
 
-	// Server-to-server service API: OAT-authenticated, on the SAME public engine
+	// Server-to-server service API: service token-authenticated, on the SAME public engine
 	// (issue #222). No private port, no mTLS listener. No-op without a control
-	// plane (verifier-only mode has no OAT issuer).
+	// plane (verifier-only mode has no service token issuer).
 	s.registerServiceRoutes(s.publicHandler)
 
 	// Browser-direct self-service API: delegated-access-token-authenticated, on
@@ -403,8 +403,8 @@ func New(deps Dependencies) (*Server, error) {
 	s.registerTenantAdminRoutes(s.publicHandler)
 
 	// Platform-superadmin cross-tenant admin API (issue #226), gated by
-	// openrails:platform:superadmin in the SEPARATE platform org. No-op without
-	// the control plane / platform org configured.
+	// openrails:platform:superadmin in the SEPARATE platform tenant. No-op without
+	// the control plane / platform tenant configured.
 	s.registerPlatformRoutes(s.publicHandler)
 
 	log.Info("Billing service initialized successfully")
@@ -480,7 +480,7 @@ func (s *Server) wrap(fn func(r *httprequest.Request)) func(c *gin.Context) {
 }
 
 // Handler returns the full public HTTP surface: health + debug (dev only) + user
-// + admin + webhooks + OAT-authenticated server-to-server service routes
+// + admin + webhooks + service token-authenticated server-to-server service routes
 // (issue #222). There is no separate private/service handler — embedded hosts use
 // the in-process pkg/service facade (Embedded.Service()) or this same public
 // surface. It is designed to be mounted at a path prefix via http.StripPrefix.

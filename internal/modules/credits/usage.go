@@ -19,7 +19,7 @@ import (
 // host supplies the final Amount (in the credit type's smallest unit); OpenRails
 // records the event AND debits the ledger atomically.
 type RecordUsageParams struct {
-	// Payer is the payer org BILLED for this usage (the payer). When nil it is
+	// Payer is the tenant subject BILLED for this usage (the payer). When nil it is
 	// resolved from InvokerID (self-hosted/personal case), never synthesized.
 	Payer      *identity.TenantSubjectID
 	InvokerID  string // invoker (attribution only)
@@ -71,7 +71,7 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	if !ct.IsActive {
 		return nil, ErrCreditTypeInactive
 	}
-	payer, err := resolvePayer(params.Payer, params.InvokerID)
+	payer, err := resolveTenantSubject(params.Payer, params.InvokerID)
 	if err != nil {
 		return nil, err
 	}

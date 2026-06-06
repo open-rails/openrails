@@ -3,7 +3,7 @@ package recurring
 import (
 	"testing"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 func assertUnsignedSignatureSlots(t *testing.T, tx *solanago.Transaction) {

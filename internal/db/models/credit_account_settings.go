@@ -7,7 +7,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// CreditAccountSettings is the per-(tenant, payer org, credit_type) spend policy
+// CreditAccountSettings is the per-(tenant, tenant subject, credit_type) spend policy
 // and money-in configuration (issue #237). Tensorhub sets these; OpenRails
 // stores and enforces them. NULL cap columns mean "no cap".
 type CreditAccountSettings struct {
@@ -48,10 +48,10 @@ type CreditAccountSettings struct {
 	UpdatedAt time.Time `bun:"updated_at,notnull" json:"updated_at"`
 }
 
-// CreditSpendLimit is an optional per-invoker spend cap under a payer org
+// CreditSpendLimit is an optional per-invoker spend cap under a tenant subject
 // (issue #237 per_invoker_caps / #246). The invoker_id string is matched against
 // credit_transactions.invoker_id (the principal that caused usage), in one of the
-// canonical forms: 'oat:<key_id>', 'user:<user_id>', or '<issuer>:<sub>'.
+// canonical forms: 'serviceToken:<key_id>', 'user:<user_id>', or '<issuer>:<sub>'.
 type CreditSpendLimit struct {
 	bun.BaseModel `bun:"table:billing.credit_spend_limits,alias:csl"`
 

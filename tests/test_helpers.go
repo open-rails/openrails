@@ -20,11 +20,10 @@ import (
 	server "github.com/open-rails/openrails/internal/http"
 )
 
-// testOperatorOrgSlug is the operator org slug the integration suite configures
-// (config.Auth.OperatorOrgSlug). HARDCUT (#224): admin authority is the
-// operator-org permission model ONLY, so admin tokens must carry this org slug
-// in the `org` claim plus an admin-equivalent role in `org_roles`.
-const testOperatorOrgSlug = "operator"
+// testOperatorTenantSlug is the legacy config field value the integration suite
+// configures (config.Auth.OperatorTenantSlug). HARDCUT (#224): admin authority is
+// bootstrap-managed only, so admin tokens must carry configured admin claims.
+const testOperatorTenantSlug = "operator"
 
 var (
 	// Test issuer for auth verification (shared across tests)
@@ -36,22 +35,20 @@ var (
 	sharedSuite     *TestContainerSuite
 )
 
-// personalOwnerID returns the owner org id for the self-hosted / single-tenant
-// personal case: the user's own account/personal-org UUID. HARDCUT (#221): this
-// matches credits.resolveOwner / identity.PayerOrgIDFromString — the owner is the
-// caller-provided personal-org id, never a synthesized stand-in. Test user ids
-// are UUIDs, so the owner is simply the parsed subject.
+// personalOwnerID returns the tenant-subject id for the self-hosted /
+// single-tenant personal case. HARDCUT (#221): this matches the caller-provided
+// payable subject id, never a synthesized stand-in. Test user ids are UUIDs, so
+// the subject is simply the parsed value.
 func personalOwnerID(userID string) uuid.UUID {
 	return uuid.MustParse(userID)
 }
 
-// operatorAdminClaims returns the extra JWT claims that make a token an operator
-// admin under the hardcut model: the operator org slug and an admin-equivalent
-// org role. authkit's verifier maps these to Claims.Org / Claims.OrgRoles, which
-// OpenRails copies into UserContext.Org / UserContext.OrgRoles.
+// operatorAdminClaims returns the extra JWT claims that make a token an admin
+// under the hardcut model. authkit's current verifier maps these to Claims.Tenant /
+// Claims.TenantRoles, which OpenRails copies into UserContext.Tenant / UserContext.TenantRoles.
 func operatorAdminClaims() map[string]any {
 	return map[string]any{
-		"org":       testOperatorOrgSlug,
+		"org":       testOperatorTenantSlug,
 		"org_roles": []string{"admin"},
 	}
 }
@@ -171,9 +168,9 @@ func setupTestSuiteWithAdminAuth(t *testing.T) (*TestContainerSuite, string, str
 	suite := getSharedTestSuite(t)
 	userID := uuid.New().String()
 	email := "admin-" + t.Name() + "@test.example.com"
-	// HARDCUT (#224): admin authority is the operator-org model ONLY. The token
-	// carries the operator org slug + admin org role; no profiles.user_roles
-	// seeding is needed (and would be ignored — that legacy fallback is removed).
+	// HARDCUT (#224): admin authority is bootstrap-managed only. The token
+	// carries configured admin claims; no profiles.user_roles seeding is needed
+	// or honored.
 	token := getTestIssuer().CreateTokenWithClaims(userID, email, operatorAdminClaims())
 	return suite, token, userID
 }

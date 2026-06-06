@@ -21,9 +21,9 @@ import (
 // `delegated_sub`), the resolved OpenRails tenant the user belongs to, and the
 // token's `openrails:self:*` permission grants.
 type ResolvedDelegated struct {
-	// Tenant is the AuthKit org slug from the token's `tenant` claim. It is the
+	// Tenant is the AuthKit tenant slug from the token's `tenant` claim. It is the
 	// org that administers the user's billing namespace; it maps to an OpenRails
-	// tenant via the billing.tenants directory (same mapping as OATs).
+	// tenant via the billing.tenants directory (same mapping as service tokens).
 	Tenant string
 	// TenantID is the resolved OpenRails tenant (#223).
 	TenantID tenant.ID
@@ -64,7 +64,7 @@ type ResolvedDelegated struct {
 
 // HasPermission reports whether the resolved delegated token grants perm.
 //
-// Unlike OATs, delegated self tokens do NOT honor a broad admin grant: a browser
+// Unlike service tokens, delegated self tokens do NOT honor a broad admin grant: a browser
 // token can only carry `openrails:self:*` permissions (enforced at verify time),
 // so every permission check is an exact-string match against what the token
 // actually carries.
@@ -122,8 +122,8 @@ func newDelegatedVerifier(coreSvc *authcore.Service, expectedAudiences []string,
 	}
 
 	v := authhttp.NewVerifier(
-		authhttp.WithOrgMode(orgMode),
-		authhttp.WithTokenPrefix(tokenPrefix),
+		authhttp.WithTenantMode(orgMode),
+		authhttp.WithServiceTokenPrefix(tokenPrefix),
 		// Enforce that every permission on a browser token belongs to the
 		// {self-service, tenant-admin} catalog (issue #259). A token carrying an
 		// operator/server-to-server grant (or any unknown permission) is rejected
@@ -159,11 +159,11 @@ func newDelegatedVerifier(coreSvc *authcore.Service, expectedAudiences []string,
 //   - resolves the OpenRails tenant: for a FEDERATED tenant-signed token (#259)
 //     from the VALIDATED `iss` via the issuer registry (issuer is globally
 //     unique -> pins exactly one tenant); for a SELF-ISSUED token (migration
-//     window) from the `tenant` claim (AuthKit org slug) via billing.tenants.
+//     window) from the `tenant` claim (AuthKit tenant slug) via billing.tenants.
 //
 // Returns:
 //   - authcore.ErrAccessTokenExpired for an expired token,
-//   - ErrOATTenantUnresolved when a self-issued token's org maps to no active
+//   - ErrServiceTokenTenantUnresolved when a self-issued token's org maps to no active
 //     tenant,
 //   - ErrDelegatedIssuerUnknown when a federated token's issuer is not
 //     registered+enabled for an active tenant (cross-tenant / unmapped),
@@ -217,13 +217,13 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 	case issuer != "" && issuer == strings.TrimSpace(c.issuer):
 		// SELF-ISSUED token (issue #222, migration window / dual-trust): OpenRails
 		// itself signed it. The issuer carries no tenant binding of its own, so the
-		// tenant is resolved from the `tenant` claim (AuthKit org slug) exactly as
+		// tenant is resolved from the `tenant` claim (AuthKit tenant slug) exactly as
 		// before. This path is removed once all tenants self-sign (#259 task 11).
 		if orgSlug == "" {
 			return nil, ErrDelegatedInvalid
 		}
 		var err error
-		tid, tslug, err = c.tenantForOrgSlug(ctx, orgSlug)
+		tid, tslug, err = c.tenantForAuthKitTenantSlug(ctx, orgSlug)
 		if err != nil {
 			return nil, err
 		}
@@ -243,7 +243,7 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 		// issuer's tenant — a tenant-signed token can never name a different
 		// tenant than the one its issuer is pinned to.
 		if orgSlug != "" {
-			claimTID, _, cerr := c.tenantForOrgSlug(ctx, orgSlug)
+			claimTID, _, cerr := c.tenantForAuthKitTenantSlug(ctx, orgSlug)
 			if cerr != nil || claimTID != tid {
 				return nil, ErrDelegatedInvalid
 			}

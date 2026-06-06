@@ -38,8 +38,8 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     slug             TEXT NOT NULL,
     name             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active',
-    authkit_org_id   TEXT,
-    authkit_org_slug TEXT,
+    authkit_tenant_id   TEXT,
+    authkit_tenant_slug TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at       TIMESTAMPTZ
@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS billing.tenant_delegated_issuers (
     tenant_id   UUID NOT NULL REFERENCES billing.tenants (id) ON DELETE CASCADE,
     issuer      TEXT NOT NULL,
     jwks_uri    TEXT NOT NULL,
+    audiences   TEXT[] NOT NULL DEFAULT '{}',
     enabled     BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -83,7 +84,7 @@ func newFedTestPool(t *testing.T) *pgxpool.Pool {
 		_, err = pool.Exec(ctx, fedSchemaDDL)
 		require.NoError(t, err)
 		_, err = pool.Exec(ctx, `
-			INSERT INTO billing.tenants (id, slug, name, authkit_org_slug) VALUES
+			INSERT INTO billing.tenants (id, slug, name, authkit_tenant_slug) VALUES
 			  ($1, 'tenant-a', 'Tenant A', 'org-a'),
 			  ($2, 'tenant-b', 'Tenant B', 'org-b')
 			ON CONFLICT (id) DO NOTHING
@@ -113,7 +114,7 @@ func newFedTestPool(t *testing.T) *pgxpool.Pool {
 	_, err = pool.Exec(ctx, fedSchemaDDL)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-		INSERT INTO billing.tenants (id, slug, name, authkit_org_slug) VALUES
+		INSERT INTO billing.tenants (id, slug, name, authkit_tenant_slug) VALUES
 		  ($1, 'tenant-a', 'Tenant A', 'org-a'),
 		  ($2, 'tenant-b', 'Tenant B', 'org-b')
 		ON CONFLICT (id) DO NOTHING
@@ -140,7 +141,7 @@ func jwksServer(t *testing.T, signer *jwtkit.RSASigner) *httptest.Server {
 func newFedControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	t.Helper()
 	v := authhttp.NewVerifier(
-		authhttp.WithOrgMode("multi"),
+		authhttp.WithTenantMode("multi"),
 		authhttp.WithPermissionCatalog(func(perms []string) error {
 			if len(perms) == 0 {
 				return errors.New("no perms")
@@ -180,9 +181,9 @@ func mintFed(t *testing.T, signer *jwtkit.RSASigner, issuer, sub string, perms [
 func registerIssuerRow(t *testing.T, pool *pgxpool.Pool, tid tenant.ID, issuer, jwksURI string, enabled bool) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO billing.tenant_delegated_issuers (tenant_id, issuer, jwks_uri, enabled)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (issuer) DO UPDATE SET jwks_uri = EXCLUDED.jwks_uri, enabled = EXCLUDED.enabled
+		INSERT INTO billing.tenant_delegated_issuers (tenant_id, issuer, jwks_uri, audiences, enabled)
+		VALUES ($1, $2, $3, ARRAY['openrails-test'], $4)
+		ON CONFLICT (issuer) DO UPDATE SET jwks_uri = EXCLUDED.jwks_uri, audiences = EXCLUDED.audiences, enabled = EXCLUDED.enabled
 	`, tid.String(), issuer, jwksURI, enabled)
 	require.NoError(t, err)
 }
@@ -332,17 +333,17 @@ func federatedGlobalUniqueness(t *testing.T, pool *pgxpool.Pool) {
 
 	// Tenant A registers it.
 	require.NoError(t, cp.RegisterDelegatedIssuer(ctx, RegisterDelegatedIssuerParams{
-		TenantID: fedTenantA, Issuer: iss, JWKSURI: js,
+		TenantID: fedTenantA, Issuer: iss, JWKSURI: js, Audiences: []string{"openrails-test"},
 	}))
 	// Tenant B cannot claim the same globally-unique issuer.
 	err := cp.RegisterDelegatedIssuer(ctx, RegisterDelegatedIssuerParams{
-		TenantID: fedTenantB, Issuer: iss, JWKSURI: js,
+		TenantID: fedTenantB, Issuer: iss, JWKSURI: js, Audiences: []string{"openrails-test"},
 	})
 	require.ErrorIs(t, err, ErrIssuerOwnedByOtherTenant)
 
 	// Tenant A rotating its own issuer (same issuer, new JWKS) succeeds.
 	sg2, _ := jwtkit.NewRSASigner(2048, "k2")
 	require.NoError(t, cp.RegisterDelegatedIssuer(ctx, RegisterDelegatedIssuerParams{
-		TenantID: fedTenantA, Issuer: iss, JWKSURI: jwksServer(t, sg2).URL,
+		TenantID: fedTenantA, Issuer: iss, JWKSURI: jwksServer(t, sg2).URL, Audiences: []string{"openrails-test"},
 	}))
 }

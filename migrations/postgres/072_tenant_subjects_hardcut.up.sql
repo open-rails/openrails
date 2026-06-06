@@ -4,9 +4,9 @@
 -- OpenRails billing/payable identity is now a tenant subject:
 --   tenant_subjects(id, tenant_id, issuer, subject, created_at, last_seen_at)
 --
--- Billing tables reference tenant_subject_id. Callers must send
--- tenant_subject_id; old payer_org_id/account/delegated-user/subject-type fields
--- are not accepted by application code.
+-- Credit/account/budget/usage/invoice tables reference tenant_subject_id. Callers
+-- must send tenant_subject_id; old tenant_subject_id/account/delegated-user/
+-- subject-type fields are not accepted by application code.
 -- =============================================================================
 
 SET lock_timeout      = '10s';
@@ -35,7 +35,7 @@ COMMENT ON COLUMN billing.tenant_subjects.subject IS
 DO $$
 DECLARE
     t TEXT;
-    payer_tables CONSTANT TEXT[] := ARRAY[
+    payable_tables CONSTANT TEXT[] := ARRAY[
         'user_credit_balances',
         'credit_transactions',
         'credit_blocks',
@@ -47,32 +47,13 @@ DECLARE
         'payment_blocklist',
         'budget_reservations'
     ];
-    user_subject_tables CONSTANT TEXT[] := ARRAY[
-        'entitlements',
-        'subscriptions',
-        'payments',
-        'payment_methods',
-        'processor_customers',
-        'checkout_sessions',
-        'manual_rebill_attempts',
-        'product_access_grants'
-    ];
 BEGIN
-    FOREACH t IN ARRAY payer_tables LOOP
+    FOREACH t IN ARRAY payable_tables LOOP
         IF EXISTS (
             SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'billing' AND table_name = t AND column_name = 'payer_org_id'
+            WHERE table_schema = 'billing' AND table_name = t AND column_name = 'tenant_subject_id'
         ) THEN
-            EXECUTE format('ALTER TABLE billing.%I RENAME COLUMN payer_org_id TO tenant_subject_id', t);
-        END IF;
-    END LOOP;
-
-    FOREACH t IN ARRAY user_subject_tables LOOP
-        IF EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'billing' AND table_name = t AND column_name = 'user_id'
-        ) THEN
-            EXECUTE format('ALTER TABLE billing.%I RENAME COLUMN user_id TO tenant_subject_id', t);
+            EXECUTE format('ALTER TABLE billing.%I RENAME COLUMN tenant_subject_id TO tenant_subject_id', t);
         END IF;
     END LOOP;
 END $$;
@@ -94,13 +75,6 @@ BEGIN
     END LOOP;
 END $$;
 
-CREATE INDEX IF NOT EXISTS idx_entitlements_tenant_subject
-    ON billing.entitlements (tenant_subject_id, entitlement)
-    WHERE revoked_at IS NULL AND deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant_subject
-    ON billing.subscriptions (tenant_subject_id, product_id, status);
-CREATE INDEX IF NOT EXISTS idx_payments_tenant_subject
-    ON billing.payments (tenant_subject_id, purchased_at DESC);
 CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_subject_time
     ON billing.usage_events (tenant_subject_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_subject

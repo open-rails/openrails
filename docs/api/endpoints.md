@@ -38,7 +38,7 @@ List endpoints use a Stripe-like envelope:
 | Public catalog (`/`, `/v1/products`, `/v1/prices`, `/v1/solana/tokens`, health probes) | No auth required |
 | User routes (`/v1/checkout`, `/v1/me/*`) | `Authorization: Bearer <JWT>` issued by AuthKit |
 | Admin routes (`/v1/admin/*`) | Same JWT header, user must have the `admin` role |
-| Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <OpenRails-issued OAT>`; each route requires an `openrails:*` permission (see Service API section) |
+| Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <OpenRails-issued service token>`; each route requires an `openrails:*` permission (see Service API section) |
 | Webhooks (`/v1/webhooks/:provider`) | Provider-specific verification (see notes) |
 
 ## Health & Service Banner
@@ -240,22 +240,24 @@ Lists credit transactions for the credit type (including hold lifecycle rows). Q
 ### POST /v1/me/portal
 Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
 
-## Service API (`/v1/service/*`, OAT-authenticated)
+## Service API (`/v1/service/*`, service-token-authenticated)
 
 Server-to-server endpoints. They live on the SAME public port as everything else
 (issue #222) — there is no private port, mTLS listener, or API key. Machine callers
-present an OpenRails-issued tenant OAT:
+present an OpenRails-issued tenant service token:
 
 ```
-Authorization: Bearer <openrails_oat_...>
+Authorization: Bearer <openrails_st_...>
 ```
 
-The OAT is resolved through the OpenRails-owned AuthKit control plane: its owning
-org maps to an OpenRails tenant, its AuthKit resource scopes constrain where it
-may act, and its granted permissions gate what it may do. Every service OAT must
-carry `resources: [{kind:"openrails.tenant", id:"<tenant_uuid>"}]`. Payer-scoped
-OATs additionally carry `{kind:"openrails.tenant_subject", id:"<authkit_org_uuid>"}`
-and may only act for that exact `tenant_subject_id`; tenant-wide OATs omit the payer
+The service token is resolved through the OpenRails-owned AuthKit control plane:
+its owning tenant maps to an OpenRails tenant, its AuthKit resource scopes
+constrain where it may act, and its granted permissions gate what it may do.
+Every service token must carry
+`resources: [{kind:"openrails.tenant", id:"<tenant_uuid>"}]`.
+Subject-scoped tokens additionally carry
+`{kind:"openrails.tenant_subject", id:"<tenant_subject_uuid>"}` and may only act
+for that exact `tenant_subject_id`; tenant-wide tokens omit the tenant-subject
 resource. The canonical permission vocabulary is colon-form
 `openrails:<resource>:<action>`:
 

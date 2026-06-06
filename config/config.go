@@ -140,8 +140,8 @@ type Config struct {
 	Vault        *VaultConfig                 `koanf:"vault,omitempty"`
 	// TenantBootstrap points OpenRails at an optional declarative tenant manifest.
 	// Standalone deployments mount this YAML file and OpenRails idempotently
-	// reconciles tenants, trusted delegated issuers, and named runtime OAT outputs
-	// at startup.
+	// reconciles tenants, trusted OIDC issuers, and named runtime service-token
+	// outputs at startup or through the bootstrap-tenants command.
 	TenantBootstrap *TenantBootstrapConfig `koanf:"tenant_bootstrap,omitempty"`
 	// BillingHotPath configures the degraded-mode behavior of the per-invocation
 	// billing authorize call (issue #248). EXPLICIT, never a silent default.
@@ -625,34 +625,34 @@ type AuthConfig struct {
 	Issuers          []string `koanf:"issuers"`           // List of expected token issuers (e.g., ["https://issuer.example.com"])
 	ExpectedAudience string   `koanf:"expected_audience"` // Accept token only if it contains this audience (e.g., "openrails-app")
 
-	// OperatorOrgSlug, when set, switches admin auth (all /admin/* routes) from
+	// OperatorTenantSlug, when set, switches admin auth (all /admin/* routes) from
 	// the global "admin" role check to an AuthKit-org-claim check:
-	// the caller must have UserContext.Org == OperatorOrgSlug AND hold one of
-	// OperatorOrgAdminRoles within that org. When empty (default), the
+	// the caller must have UserContext.Tenant == OperatorTenantSlug AND hold one of
+	// OperatorTenantAdminRoles within that org. When empty (default), the
 	// global "admin" role check from profiles.user_roles is used.
 	//
 	// Use this for multi-org AuthKit deployments where a single org owns the
 	// billing operator role. For single-org AuthKit deployments and self-hosted
 	// instances with one customer, leave this unset.
-	OperatorOrgSlug string `koanf:"operator_org_slug,omitempty"`
+	OperatorTenantSlug string `koanf:"operator_tenant_slug,omitempty"`
 
-	// OperatorOrgAdminRoles is the list of OrgRoles considered admin-equivalent
-	// when OperatorOrgSlug is set. Defaults to ["admin", "owner"].
-	OperatorOrgAdminRoles []string `koanf:"operator_org_admin_roles,omitempty"`
+	// OperatorTenantAdminRoles is the list of TenantRoles considered admin-equivalent
+	// when OperatorTenantSlug is set. Defaults to ["admin", "owner"].
+	OperatorTenantAdminRoles []string `koanf:"operator_tenant_admin_roles,omitempty"`
 
 	// ControlPlane configures OpenRails' OpenRails-owned AuthKit control plane
 	// (issue #224). When nil/disabled, OpenRails behaves as a pure JWT verifier
 	// (current default). When enabled, OpenRails builds an in-process AuthKit
 	// core/service, can selectively mount AuthKit route groups, and bootstraps
-	// the default tenant's operator org + roles + permission catalog + initial
-	// operator OAT.
+	// the default tenant's operator tenant + roles + permission catalog + initial
+	// operator service token.
 	ControlPlane *ControlPlaneConfig `koanf:"control_plane,omitempty"`
 }
 
 // ControlPlaneConfig configures the OpenRails-owned AuthKit control plane
 // (issue #224). It is OPTIONAL and OFF by default: a deployment that only
 // verifies externally-issued JWTs does not set this. A self-hosted, locked-down
-// deployment enables it to own user/org/role/OAT operations in-process.
+// deployment enables it to own user/org/role/service token operations in-process.
 type ControlPlaneConfig struct {
 	// Enabled turns on the in-process AuthKit control plane. When false (the
 	// default), OpenRails does not construct an AuthKit core/service and does not
@@ -669,13 +669,13 @@ type ControlPlaneConfig struct {
 	IssuedAudiences   []string `koanf:"issued_audiences,omitempty"`
 	ExpectedAudiences []string `koanf:"expected_audiences,omitempty"`
 
-	// OrgMode is the AuthKit org mode ("single" or "multi"). Operator-org
+	// OrgMode is the AuthKit tenant mode ("single" or "multi"). Operator-org
 	// bootstrap and the org-management HTTP routes require "multi". Defaults to
-	// "multi" when Enabled so the operator org and its OATs exist.
+	// "multi" when Enabled so the operator tenant and its service tokens exist.
 	OrgMode string `koanf:"org_mode,omitempty"`
 
-	// TokenPrefix is the brand prefix for minted OATs (e.g. "openrails" ->
-	// `openrails_oat_<key_id>_<secret>`). Empty -> bare `oat_`.
+	// TokenPrefix is the brand prefix for minted service tokens (e.g. "openrails" ->
+	// `openrails_st_<key_id>_<secret>`). Empty -> bare service-token marker.
 	TokenPrefix string `koanf:"token_prefix,omitempty"`
 
 	// LockedDown selects the self-hosted, locked-down posture: public user
@@ -684,30 +684,30 @@ type ControlPlaneConfig struct {
 	// to true when Enabled — hosted-SaaS mode must explicitly opt out.
 	LockedDown *bool `koanf:"locked_down,omitempty"`
 
-	// OperatorOATName is the human-readable name of the initial operator OAT
+	// OperatorServiceTokenName is the human-readable name of the initial operator service token
 	// minted at bootstrap. Defaults to "openrails-bootstrap-operator".
-	OperatorOATName string `koanf:"operator_oat_name,omitempty"`
+	OperatorServiceTokenName string `koanf:"operator_service_token_name,omitempty"`
 
-	// PlatformOrgSlug is the AuthKit org slug for the managed-hosting PLATFORM
-	// superadmin org (issue #226), DISTINCT from any tenant operator org. The
-	// platform org holds the openrails-platform-superadmin role with the
+	// PlatformTenantSlug is the AuthKit tenant slug for the managed-hosting PLATFORM
+	// superadmin org (issue #226), DISTINCT from any tenant operator tenant. The
+	// platform tenant holds the openrails-platform-superadmin role with the
 	// openrails:platform:superadmin permission and gates the cross-tenant
 	// /v1/platform/* surface. When empty (the default), platform-superadmin
 	// bootstrap and the /v1/platform/* routes are NOT enabled — a single-tenant
 	// or non-managed deployment never grows a cross-tenant superadmin.
-	PlatformOrgSlug string `koanf:"platform_org_slug,omitempty"`
+	PlatformTenantSlug string `koanf:"platform_tenant_slug,omitempty"`
 
 	// PlatformAdminUserID, when set, is assigned the platform-superadmin role in
-	// the platform org at bootstrap (issue #226). Optional: the platform org can
+	// the platform tenant at bootstrap (issue #226). Optional: the platform tenant can
 	// be seeded empty and admins added later.
 	PlatformAdminUserID string `koanf:"platform_admin_user_id,omitempty"`
 }
 
-// PlatformOrgEnabled reports whether a managed-hosting platform-superadmin org
+// PlatformTenantEnabled reports whether a managed-hosting platform-superadmin org
 // is configured (issue #226). When false, the cross-tenant /v1/platform/*
 // surface is not mounted and no platform-superadmin is bootstrapped.
-func (cp *ControlPlaneConfig) PlatformOrgEnabled() bool {
-	return cp != nil && strings.TrimSpace(cp.PlatformOrgSlug) != ""
+func (cp *ControlPlaneConfig) PlatformTenantEnabled() bool {
+	return cp != nil && strings.TrimSpace(cp.PlatformTenantSlug) != ""
 }
 
 // ControlPlaneEnabled reports whether the OpenRails-owned AuthKit control plane
@@ -729,17 +729,17 @@ func (cp *ControlPlaneConfig) LockedDownEnabled() bool {
 	return *cp.LockedDown
 }
 
-// OperatorOrgEnabled reports whether OperatorOrgSlug is set (multi-org admin mode).
-func (c *AuthConfig) OperatorOrgEnabled() bool {
-	return c != nil && strings.TrimSpace(c.OperatorOrgSlug) != ""
+// OperatorTenantEnabled reports whether OperatorTenantSlug is set (multi-org admin mode).
+func (c *AuthConfig) OperatorTenantEnabled() bool {
+	return c != nil && strings.TrimSpace(c.OperatorTenantSlug) != ""
 }
 
-// EffectiveOperatorOrgAdminRoles returns OperatorOrgAdminRoles or the default set.
-func (c *AuthConfig) EffectiveOperatorOrgAdminRoles() []string {
-	if c == nil || len(c.OperatorOrgAdminRoles) == 0 {
+// EffectiveOperatorTenantAdminRoles returns OperatorTenantAdminRoles or the default set.
+func (c *AuthConfig) EffectiveOperatorTenantAdminRoles() []string {
+	if c == nil || len(c.OperatorTenantAdminRoles) == 0 {
 		return []string{"admin", "owner"}
 	}
-	return c.OperatorOrgAdminRoles
+	return c.OperatorTenantAdminRoles
 }
 
 type SolanaConfig struct {

@@ -1,7 +1,7 @@
 -- =============================================================================
 -- 043 — Credit account spend policy + per-invoker spend limits (issue #237)
 --
--- Per-(tenant, owner org, credit_type) billing/spend policy: the "API settings
+-- Per-(tenant, tenant subject, credit_type) billing/spend policy: the "API settings
 -- around credits" surface. One row holds the org-level policy (billing mode,
 -- daily/monthly spend caps, outstanding ceiling, low-balance threshold,
 -- auto-top-up config, default credit expiry) plus the dynamic accrual/dedup
@@ -60,7 +60,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_credit_account_settings_owner_type
     ON billing.credit_account_settings (tenant_id, owner_id, credit_type_id);
 
 COMMENT ON TABLE billing.credit_account_settings IS
-    'Per-(tenant, owner org, credit_type) spend policy + money-in config (issue #237). Tensorhub SETS these; OpenRails STORES + ENFORCES them.';
+    'Per-(tenant, tenant subject, credit_type) spend policy + money-in config (issue #237). Tensorhub SETS these; OpenRails STORES + ENFORCES them.';
 
 -- -----------------------------------------------------------------------------
 -- Optional per-invoker sub-limits (issue #237 per_invoker_caps / #246).

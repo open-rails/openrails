@@ -7,15 +7,15 @@
 //   - mounts only the AuthKit route groups it intentionally exposes (NOT the
 //     full DefaultAPI surface),
 //   - runs with public user registration and public org management disabled,
-//   - bootstraps the default tenant's operator org, OpenRails roles, the
-//     `openrails:*` permission catalog, and an initial operator OAT through
-//     in-process AuthKit CORE calls (CreateOrg / DefineRole / AssignRole /
-//     MintOrgAccessToken) — never raw SQL or a private HTTP route.
+//   - bootstraps the default tenant's operator tenant, OpenRails roles, the
+//     `openrails:*` permission catalog, and an initial operator service token through
+//     in-process AuthKit CORE calls (CreateTenant / DefineRole / AssignRole /
+//     MintServiceToken) — never raw SQL or a private HTTP route.
 //
-// This package establishes admin authority via the operator org + permission
+// This package establishes admin authority via the operator tenant + permission
 // catalog (the #221/#222 direction). It coordinates with #223's tenant
 // primitive: the default tenant (tenant.DefaultSlug) maps to one OpenRails-owned
-// AuthKit operator org.
+// AuthKit operator tenant.
 package controlplane
 
 import (
@@ -52,13 +52,13 @@ const (
 	PermCreditsWrite = "openrails:credits:write"
 
 	// PermCreditsSpend is the billing:spend (payer) capability (issue #246): the
-	// authority to DRAW DOWN a payer org's balance on the hot path
+	// authority to DRAW DOWN a tenant subject's balance on the hot path
 	// (authorize/hold/capture). It is PARALLEL to, and checked separately from,
 	// the coarse PermCreditsWrite operator capability: a service principal billing
 	// a payer on every invocation must hold credits:spend, scoped to a tenant whose
 	// payers it is allowed to bill. Per #246 this is the "may you bill this payer"
 	// gate (verified against the credential's tenant), distinct from "may you run
-	// this endpoint" (endpoint:invoke against the endpoint-owner org, enforced in
+	// this endpoint" (endpoint:invoke against the endpoint-tenant subject, enforced in
 	// gen-orchestrator). A restricted role can omit credits:spend for cost
 	// governance even when it can otherwise write credits (refunds/deposits).
 	PermCreditsSpend = "openrails:credits:spend"
@@ -77,7 +77,7 @@ const (
 	// self-service surface (`/v1/self/*`) reached with a DELEGATED ACCESS TOKEN
 	// minted by a tenant's host frontend (issue #222 foundation for the browser
 	// tier. Unlike the coarse
-	// server-to-server OAT permissions above, `openrails:self:*` authorizes a
+	// server-to-server service token permissions above, `openrails:self:*` authorizes a
 	// human end-user (the token's `delegated_sub`) to manage ONLY their own
 	// billing — never another user's and never operator/admin surfaces.
 	PermSelfBillingRead        = "openrails:self:billing:read"
@@ -90,14 +90,14 @@ const (
 	// + local minting). Retained for the dual-trust migration window; removed once
 	// all tenants self-sign.
 	//
-	// PermSelfMint authorizes a server-to-server OAT caller (a tenant's host
+	// PermSelfMint authorizes a server-to-server service token caller (a tenant's host
 	// backend, e.g. host apps) to MINT short-lived, user-scoped delegated
 	// access tokens for its OWN tenant, to hand to a browser for the
 	// `openrails:self:*` surface (issue #222 browser tier). It is an
-	// operator/server-to-server permission carried by OATs — NOT a browser
+	// operator/server-to-server permission carried by service tokens — NOT a browser
 	// self-permission — so it is deliberately NOT part of selfCatalog: a minted
 	// browser token can never itself carry the mint capability. The minting tenant
-	// is always the CALLER's OAT tenant, so this permission can never mint
+	// is always the CALLER's service token tenant, so this permission can never mint
 	// cross-tenant.
 	PermSelfMint = "openrails:self:mint"
 
@@ -130,13 +130,13 @@ const (
 
 	// PermPlatformSuperadmin is the PLATFORM-level cross-tenant administrative
 	// capability (issue #226), DISTINCT from PermAdmin. PermAdmin is per-tenant
-	// operator authority: it is held by an operator org and only governs THAT
-	// tenant. PermPlatformSuperadmin is held by a SEPARATE platform org/role
-	// (cfg.Auth.ControlPlane.PlatformOrgSlug) and authorizes managed-hosting
+	// operator authority: it is held by an operator tenant and only governs THAT
+	// tenant. PermPlatformSuperadmin is held by a SEPARATE platform tenant/role
+	// (cfg.Auth.ControlPlane.PlatformTenantSlug) and authorizes managed-hosting
 	// platform operators to administer ANY tenant via the control plane:
 	// the cross-tenant `/v1/platform/*` surface, cross-tenant search, platform
 	// metrics, and break-glass elevation. A tenant operator admin does NOT hold
-	// this permission (it is never seeded into operator orgs), so it cannot pass
+	// this permission (it is never seeded into operator tenants), so it cannot pass
 	// the platform-superadmin gate. It is deliberately NOT part of selfCatalog:
 	// a browser delegated token can never carry it.
 	PermPlatformSuperadmin = "openrails:platform:superadmin"
@@ -148,7 +148,7 @@ var catalogEntries = []Permission{
 	{Name: PermAdmin, Description: "Full OpenRails operator/admin authority for the deployment."},
 	{Name: PermCreditsRead, Description: "Read credit balances and transactions."},
 	{Name: PermCreditsWrite, Description: "Deposit, withdraw, hold, capture, and release credits."},
-	{Name: PermCreditsSpend, Description: "Bill (draw down) a payer org's balance on the hot path: authorize, hold, and capture against the payer's account (issue #246)."},
+	{Name: PermCreditsSpend, Description: "Bill (draw down) a tenant subject's balance on the hot path: authorize, hold, and capture against the payer's account (issue #246)."},
 	{Name: PermEntitlementsRead, Description: "Read/enrich entitlements."},
 	{Name: PermCatalogWrite, Description: "Create and update products and prices."},
 	{Name: PermPaymentsRefund, Description: "Refund payments."},
@@ -158,7 +158,7 @@ var catalogEntries = []Permission{
 	{Name: PermSelfSubscriptionCancel, Description: "Self-service: cancel your own subscriptions."},
 	{Name: PermSelfPaymentMethods, Description: "Self-service: manage your own payment methods."},
 	{Name: PermSelfMint, Description: "Mint short-lived, user-scoped delegated access tokens for your own tenant (server-to-server, browser tier)."},
-	{Name: PermPlatformSuperadmin, Description: "Platform superadmin: administer ANY tenant across the managed-hosting platform (cross-tenant control plane). Seeded ONLY to the platform org, never to per-tenant operator orgs (issue #226)."},
+	{Name: PermPlatformSuperadmin, Description: "Platform superadmin: administer ANY tenant across the managed-hosting platform (cross-tenant control plane). Seeded ONLY to the platform tenant, never to per-tenant operator tenants (issue #226)."},
 }
 
 // selfCatalog is the set of self-service permissions accepted on delegated
@@ -250,15 +250,15 @@ func CatalogNames() []string {
 
 // Operator-role identity. The operator role is granted every OpenRails
 // permission EXCEPT the platform-superadmin capability, and is the admin
-// authority for ONE tenant's operator org.
+// authority for ONE tenant's operator tenant.
 const (
-	// OperatorRole is the OpenRails role seeded in a tenant's operator org. It
+	// OperatorRole is the OpenRails role seeded in a tenant's operator tenant. It
 	// holds the full OpenRails per-tenant catalog but NOT PermPlatformSuperadmin
 	// (which is cross-tenant platform authority, seeded only to PlatformRole).
 	OperatorRole = "openrails-operator"
 
-	// PlatformRole is the OpenRails role seeded in the SEPARATE platform org
-	// (cfg.Auth.ControlPlane.PlatformOrgSlug, issue #226). It holds
+	// PlatformRole is the OpenRails role seeded in the SEPARATE platform tenant
+	// (cfg.Auth.ControlPlane.PlatformTenantSlug, issue #226). It holds
 	// PermPlatformSuperadmin — the cross-tenant managed-hosting authority — and
 	// is the only role granted that permission. It is distinct from OperatorRole
 	// so that a tenant operator admin can never reach the platform surface.
@@ -268,7 +268,7 @@ const (
 // OperatorRolePermissions returns the permission names granted to a tenant's
 // operator role: the full OpenRails catalog EXCEPT PermPlatformSuperadmin. The
 // platform-superadmin capability is cross-tenant and must never be carried by a
-// per-tenant operator org (issue #226).
+// per-tenant operator tenant (issue #226).
 func OperatorRolePermissions() []string {
 	all := CatalogNames()
 	out := make([]string, 0, len(all))

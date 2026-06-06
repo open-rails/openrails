@@ -17,22 +17,22 @@ import (
 )
 
 // PlatformPrefix is the cross-tenant managed-hosting superadmin API (issue #226).
-// It is gated by openrails:platform:superadmin in the SEPARATE platform org —
+// It is gated by openrails:platform:superadmin in the SEPARATE platform tenant —
 // DISTINCT from the per-tenant operator-admin gate on /v1/admin/*. A tenant
 // operator admin cannot reach this surface.
 const PlatformPrefix = "/platform"
 
 // registerPlatformRoutes mounts the platform-superadmin cross-tenant API. No-op
 // when the control plane / platform services are absent (verifier-only mode), or
-// when no platform org is configured (the superadmin gate could never pass, so
+// when no platform tenant is configured (the superadmin gate could never pass, so
 // the surface stays closed).
 func (s *Server) registerPlatformRoutes(e *gin.Engine) {
 	if s.controlPlane == nil || s.tenancy == nil || s.platformAudit == nil {
 		return
 	}
-	if s.controlPlane.PlatformOrgSlug() == "" {
-		// No platform org configured: do not mount a surface nobody can pass.
-		log.Info("platform superadmin routes not mounted: no platform org configured")
+	if s.controlPlane.PlatformTenantSlug() == "" {
+		// No platform tenant configured: do not mount a surface nobody can pass.
+		log.Info("platform superadmin routes not mounted: no platform tenant configured")
 		return
 	}
 
@@ -170,7 +170,7 @@ func (s *Server) platformBreakGlassGrantHandler() gin.HandlerFunc {
 		uc, _ := ginauth.UserContextFromGin(c)
 		grant, err := s.platformBreakGlass.Grant(c.Request.Context(), platform.GrantRequest{
 			InvokerID:     uc.UserID,
-			ActorOrg:      uc.Org,
+			ActorOrg:      uc.Tenant,
 			TargetTenant:  target,
 			Justification: body.Justification,
 			TTL:           time.Duration(body.TTLSeconds) * time.Second,
@@ -209,7 +209,7 @@ func (s *Server) platformBreakGlassRevokeHandler() gin.HandlerFunc {
 			return
 		}
 		uc, _ := ginauth.UserContextFromGin(c)
-		err := s.platformBreakGlass.Revoke(c.Request.Context(), c.Param("id"), uc.UserID, uc.Org)
+		err := s.platformBreakGlass.Revoke(c.Request.Context(), c.Param("id"), uc.UserID, uc.Tenant)
 		if err != nil {
 			if errors.Is(err, platform.ErrBreakGlassNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "grant not found"})

@@ -34,11 +34,11 @@ func TestMigration040_EnforcesNotNullOwnerID(t *testing.T) {
 	if !strings.Contains(c, "ADD COLUMN IF NOT EXISTS owner_id UUID NOT NULL") {
 		t.Error("migration 040 must add a NOT NULL owner_id UUID column")
 	}
-	// No SHA-1 stand-in derivation / personal-org backfill in a hardcut.
+	// No SHA-1 stand-in derivation / personal tenant-subject backfill in a hardcut.
 	if strings.Contains(c, "6f1c9b3e2a445d7c8e109a2b3c4d5e6f") {
-		t.Error("migration 040 must NOT carry the legacy personal-org namespace backfill")
+		t.Error("migration 040 must NOT carry the legacy personal tenant-subject namespace backfill")
 	}
-	if strings.Contains(c, "openrails:personal-org:") {
+	if strings.Contains(c, "openrails:personal tenant-subject:") {
 		t.Error("migration 040 must NOT carry the legacy stand-in derivation prefix")
 	}
 	if strings.Contains(c, "owner_id IS NULL") {

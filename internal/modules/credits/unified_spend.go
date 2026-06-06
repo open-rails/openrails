@@ -55,7 +55,7 @@ func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) e
 	if !ct.IsActive {
 		return ErrCreditTypeInactive
 	}
-	payer, err := resolvePayer(params.Payer, params.InvokerID)
+	payer, err := resolveTenantSubject(params.Payer, params.InvokerID)
 	if err != nil {
 		return err
 	}

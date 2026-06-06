@@ -19,7 +19,7 @@ func TestRemainingTodayCents(t *testing.T) {
 		t.Fatalf("monthly-only => nil, got %v", *r)
 	}
 
-	// Org daily cap: report its remaining.
+	// Tenant daily cap: report its remaining.
 	org := []credits.CapResult{
 		{Code: credits.DenyMonthlyCap, Remaining: 9000},
 		{Code: credits.DenyDailyCap, Remaining: 300},

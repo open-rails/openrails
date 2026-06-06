@@ -62,7 +62,7 @@ func ParseID(s string) (ID, error) {
 type tenantCtxKey struct{}
 
 // WithID returns a child context carrying the resolved tenant id. Resolution
-// plumbing (HTTP middleware, OAT/JWT resolution, admin routes, background job
+// plumbing (HTTP middleware, service token/JWT resolution, admin routes, background job
 // enqueue) calls this once the tenant is known, before authorization and
 // before any tenant-owned DB access.
 func WithID(ctx context.Context, id ID) context.Context {

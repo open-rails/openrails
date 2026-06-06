@@ -100,7 +100,7 @@ func ServiceAdmit(r *httprequest.Request) {
 
 // ServiceGetBudget returns the invoker's rolling money-budget windows (#304
 // introspection) for a host's /status dashboard. tenant_subject_id + invoker_id + tier are
-// query params; the tenant is pinned from the OAT.
+// query params; the tenant is pinned from the service token.
 func ServiceGetBudget(r *httprequest.Request) {
 	payer, err := parseServiceTenantSubjectID(r.Query("tenant_subject_id"))
 	if err != nil || payer == nil {

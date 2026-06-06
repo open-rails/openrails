@@ -124,39 +124,44 @@ func main() {
 		Short: "Seed a minimal dev billing catalog for local migrations",
 		RunE:  seedDevCatalog,
 	}
-	mintOperatorOATCmd := &cobra.Command{
-		Use:   "mint-operator-oat",
-		Short: "Mint an OpenRails operator OAT and print the one-time token",
-		RunE:  mintOperatorOAT,
+	bootstrapTenantsCmd := &cobra.Command{
+		Use:   "bootstrap-tenants",
+		Short: "Reconcile the mounted tenant manifest and exit",
+		RunE:  bootstrapTenants,
 	}
-	mintOperatorOATCmd.Flags().String("name", "openrails-operator-manual", "OAT display name")
-	mintOperatorOATCmd.Flags().String("org", "", "Operator org slug (defaults to config/operator)")
-	mintOperatorOATCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
-	mintOperatorOATCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to full operator permissions")
+	mintOperatorServiceTokenCmd := &cobra.Command{
+		Use:   "mint-operator-service-token",
+		Short: "Mint an OpenRails operator service token and print the one-time token",
+		RunE:  mintOperatorServiceToken,
+	}
+	mintOperatorServiceTokenCmd.Flags().String("name", "openrails-operator-manual", "service token display name")
+	mintOperatorServiceTokenCmd.Flags().String("org", "", "Operator tenant slug (defaults to config/operator)")
+	mintOperatorServiceTokenCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
+	mintOperatorServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to full operator permissions")
 
-	mintTenantSubjectOATCmd := &cobra.Command{
-		Use:   "mint-tenant-subject-oat",
-		Short: "Mint an OpenRails tenant-subject-scoped OAT and print the one-time token",
-		RunE:  mintTenantSubjectOAT,
+	mintTenantSubjectServiceTokenCmd := &cobra.Command{
+		Use:   "mint-tenant-subject-service-token",
+		Short: "Mint an OpenRails tenant-subject-scoped service token and print the one-time token",
+		RunE:  mintTenantSubjectServiceToken,
 	}
-	mintTenantSubjectOATCmd.Flags().String("name", "", "OAT display name")
-	mintTenantSubjectOATCmd.Flags().String("org", "", "Operator org slug that owns the OAT (defaults to config/operator)")
-	mintTenantSubjectOATCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
-	mintTenantSubjectOATCmd.Flags().String("payer", "", "AuthKit payer org slug to scope the OAT to")
-	mintTenantSubjectOATCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to openrails:credits:spend")
+	mintTenantSubjectServiceTokenCmd.Flags().String("name", "", "service token display name")
+	mintTenantSubjectServiceTokenCmd.Flags().String("org", "", "Operator tenant slug that owns the service token (defaults to config/operator)")
+	mintTenantSubjectServiceTokenCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
+	mintTenantSubjectServiceTokenCmd.Flags().String("tenant-subject", "", "OpenRails tenant subject UUID to scope the service token to")
+	mintTenantSubjectServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to openrails:credits:spend")
 
 	mintOperatorJWTCmd := &cobra.Command{
 		Use:   "mint-operator-jwt",
 		Short: "Mint a JWKS-verifiable operator-org user JWT (for /v1/admin/* e2e provisioning)",
 		RunE:  mintOperatorJWT,
 	}
-	mintOperatorJWTCmd.Flags().String("org", "", "Operator org slug (defaults to config/operator)")
+	mintOperatorJWTCmd.Flags().String("org", "", "Operator tenant slug (defaults to config/operator)")
 	mintOperatorJWTCmd.Flags().String("email", "", "Test user email (default e2e-operator@openrails.test)")
 	mintOperatorJWTCmd.Flags().String("username", "", "Test user username (default e2e-operator)")
-	mintOperatorJWTCmd.Flags().String("role", "", "Org role to assign (default openrails-operator)")
+	mintOperatorJWTCmd.Flags().String("role", "", "Tenant role to assign (default openrails-operator)")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, mintOperatorOATCmd, mintTenantSubjectOATCmd, mintOperatorJWTCmd, newCatalogCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, bootstrapTenantsCmd, mintOperatorServiceTokenCmd, mintTenantSubjectServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		log.WithError(err).Fatal("Failed to execute command")
@@ -199,15 +204,15 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Bootstrap the OpenRails-owned AuthKit control plane (#224) when enabled.
 	// Idempotent + a no-op in verifier-only mode. Runs after migrations have been
 	// applied (migrations are a separate `billing migrate` step) and at startup.
-	if res, err := embcp.RunBootstrap(context.Background(), embeddedApp.App(), controlplane.BootstrapOptions{MintInitialOAT: true}); err != nil {
+	if res, err := embcp.RunBootstrap(context.Background(), embeddedApp.App(), controlplane.BootstrapOptions{MintInitialServiceToken: true}); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("control plane bootstrap: %w", err)
-	} else if res != nil && res.OATMinted {
+	} else if res != nil && res.ServiceTokenMinted {
 		log.WithFields(log.Fields{
-			"oat_key_id": res.OATKeyID,
-			"oat_secret": res.OATSecret,
+			"service_token_key_id": res.ServiceTokenKeyID,
+			"service_token_secret": res.ServiceTokenSecret,
 		}).
-			Warn("control plane: initial operator OAT minted; capture the secret from logs now (shown once)")
+			Warn("control plane: initial operator service token minted; capture the secret from logs now (shown once)")
 	}
 
 	tenantBootstrapCtx, tenantBootstrapCancel := context.WithCancel(context.Background())
@@ -239,7 +244,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Issue #222: there is no separate private/service listener. Server-to-server
-	// callers authenticate with OpenRails-issued tenant OATs against the SAME
+	// callers authenticate with OpenRails-issued tenant service tokens against the SAME
 	// public API surface (publicSrv); embedded hosts use the in-process facade.
 
 	// Start public server in a goroutine

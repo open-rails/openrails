@@ -296,7 +296,7 @@ func nilIfNeg(v *int64) *int64 {
 
 // SetSpendLimit upserts a per-invoker sub-limit under (payer, credit_type).
 // A nil day/month cap clears that cap. invoker is a canonical invoker string
-// ('oat:<key_id>', 'user:<id>', '<issuer>:<sub>').
+// ('serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>').
 func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.TenantSubjectID, creditType, invoker string, maxDay, maxMonth *int64) (*models.CreditSpendLimit, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
@@ -436,7 +436,7 @@ func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.T
 		}
 	}
 
-	// Org-level daily / monthly caps.
+	// Tenant-level daily / monthly caps.
 	if settings.MaxSpendPerDayCents != nil {
 		spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, dayStart, "")
 		if e != nil {

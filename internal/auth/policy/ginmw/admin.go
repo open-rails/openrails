@@ -19,13 +19,13 @@ import (
 )
 
 // PlatformSuperadminRequired gates a cross-tenant /v1/platform/* route on the
-// LIVE openrails:platform:superadmin permission held in the platform org
+// LIVE openrails:platform:superadmin permission held in the platform tenant
 // (issue #226). The caller must be authenticated (else 401). On denial it
 // returns 403 "platform_superadmin_required". When checker is nil this is a
 // configuration error and fails closed with 500.
 //
 // A tenant operator admin is denied here: their authority is the per-tenant
-// openrails:admin permission in a tenant operator org, which is a different org
+// openrails:admin permission in a tenant operator tenant, which is a different org
 // and a different permission than the one this gate checks.
 func PlatformSuperadminRequired(checker policy.PlatformSuperadminChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -49,7 +49,7 @@ func PlatformSuperadminRequired(checker policy.PlatformSuperadminChecker) gin.Ha
 			return
 		}
 		if !allowed {
-			log.WithFields(log.Fields{"user_id": uc.UserID, "caller_org": uc.Org}).
+			log.WithFields(log.Fields{"user_id": uc.UserID, "caller_org": uc.Tenant}).
 				Warn("platform superadmin denied")
 			response.ForbiddenWithMessage(c, "platform_superadmin_required")
 			c.Abort()
@@ -60,8 +60,8 @@ func PlatformSuperadminRequired(checker policy.PlatformSuperadminChecker) gin.Ha
 }
 
 // OperatorPermissionRequired gates a route on a LIVE OpenRails permission held
-// in the operator org (#224 admin authority). It is the forward replacement for
-// the global-admin fallback: admin authority comes from the operator org +
+// in the operator tenant (#224 admin authority). It is the forward replacement for
+// the global-admin fallback: admin authority comes from the operator tenant +
 // permission catalog, evaluated live, rather than from a global `admin` role or
 // trusting JWT role claims.
 //
@@ -83,7 +83,7 @@ func OperatorPermissionRequired(checker policy.OperatorPermissionChecker, perm s
 			c.Abort()
 			return
 		}
-		allowed, err := checker.HasOperatorPermission(c.Request.Context(), uc.Org, uc.UserID, perm)
+		allowed, err := checker.HasOperatorPermission(c.Request.Context(), uc.Tenant, uc.UserID, perm)
 		if err != nil {
 			log.WithError(err).Error("failed to evaluate operator permission")
 			response.InternalError(c, "failed to check permission")
@@ -103,7 +103,7 @@ func OperatorPermissionRequired(checker policy.OperatorPermissionChecker, perm s
 
 // OperatorAdminRequired ensures the caller is an admin under the operator-org
 // permission model. HARDCUT (#221/#224): the legacy global-`admin`-role fallback
-// against profiles.user_roles has been REMOVED. Authority is the operator org +
+// against profiles.user_roles has been REMOVED. Authority is the operator tenant +
 // its admin-equivalent roles ONLY.
 //
 // An unauthenticated caller gets 401 "authentication required". `db` is unused
@@ -117,39 +117,39 @@ func OperatorAdminRequired(cfg *config.Config, db bun.IDB) gin.HandlerFunc {
 			return
 		}
 
-		if cfg == nil || !cfg.Auth.OperatorOrgEnabled() {
+		if cfg == nil || !cfg.Auth.OperatorTenantEnabled() {
 			log.WithField("user_id", uc.UserID).
-				Warn("admin access denied: operator org not configured; global-admin fallback removed (#221/#224)")
+				Warn("admin access denied: operator tenant not configured; global-admin fallback removed (#221/#224)")
 			response.ForbiddenWithMessage(c, "admin_required")
 			c.Abort()
 			return
 		}
 
-		operatorSlug := strings.TrimSpace(cfg.Auth.OperatorOrgSlug)
-		if strings.TrimSpace(uc.Org) == "" {
-			log.WithField("user_id", uc.UserID).Warn("operator admin denied: org claim missing")
-			response.ForbiddenWithMessage(c, "operator_org_required")
+		operatorSlug := strings.TrimSpace(cfg.Auth.OperatorTenantSlug)
+		if strings.TrimSpace(uc.Tenant) == "" {
+			log.WithField("user_id", uc.UserID).Warn("operator admin denied: tenant claim missing")
+			response.ForbiddenWithMessage(c, "operator_tenant_required")
 			c.Abort()
 			return
 		}
-		if !strings.EqualFold(strings.TrimSpace(uc.Org), operatorSlug) {
+		if !strings.EqualFold(strings.TrimSpace(uc.Tenant), operatorSlug) {
 			log.WithFields(log.Fields{
-				"user_id":      uc.UserID,
-				"caller_org":   uc.Org,
-				"operator_org": operatorSlug,
+				"user_id":         uc.UserID,
+				"caller_org":      uc.Tenant,
+				"operator_tenant": operatorSlug,
 			}).Warn("operator admin denied: org mismatch")
-			response.ForbiddenWithMessage(c, "operator_org_mismatch")
+			response.ForbiddenWithMessage(c, "operator_tenant_mismatch")
 			c.Abort()
 			return
 		}
-		adminRoles := cfg.Auth.EffectiveOperatorOrgAdminRoles()
-		if !uc.HasAnyOrgRole(adminRoles...) {
+		adminRoles := cfg.Auth.EffectiveOperatorTenantAdminRoles()
+		if !uc.HasAnyTenantRole(adminRoles...) {
 			log.WithFields(log.Fields{
 				"user_id":    uc.UserID,
-				"org":        uc.Org,
+				"org":        uc.Tenant,
 				"want_roles": adminRoles,
-			}).Warn("operator admin denied: required org role missing")
-			response.ForbiddenWithMessage(c, "operator_org_role_required")
+			}).Warn("operator admin denied: required tenant role missing")
+			response.ForbiddenWithMessage(c, "operator_tenant_role_required")
 			c.Abort()
 			return
 		}

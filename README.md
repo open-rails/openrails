@@ -52,7 +52,7 @@ curl http://localhost:2053/health
 
 - **Public API** on `:2053` — user billing routes, admin routes, and webhooks.
 - **Server-to-server** calls hit `/v1/service/*` on the same port, authenticated with an
-  OpenRails-issued **Operator Access Token** (`Authorization: Bearer <openrails_oat_...>`).
+  OpenRails-issued **Operator Access Token** (`Authorization: Bearer <openrails_st_...>`).
 - Your services authorize the user, then call OpenRails to hold/capture/release credits or
   read entitlements.
 
@@ -166,8 +166,8 @@ ents, _ := svc.ListActiveEntitlements(ctx, userID, time.Now())
   comes entirely from your `Authenticator`.
 - **Admin authority:** the host decides. Set `UserContext.CanAdministerBilling` (a capability
   OpenRails defines; your `Authenticator` populates it from whatever roles/claims you use) and
-  OpenRails honors it — it never interprets your role names or invents admin rights. Standalone
-  multi-org mode derives the same signal from the operator org's roles.
+  OpenRails honors it -- it never interprets your role names or invents admin rights. Standalone
+  deployments derive the same signal from bootstrap-managed admin claims.
 - **Sandbox vs live:** `test_mode` (default `true`) routes every processor to its
   test/sandbox environment so you can't accidentally charge a real card.
 
@@ -182,7 +182,7 @@ Zero-config against the bundled compose stack. Override with a `config.yaml` (re
 
 - **HTTP API reference:** [docs/api/endpoints.md](docs/api/endpoints.md)
 - **Entitlements model:** [docs/entitlements_timeline.md](docs/entitlements_timeline.md)
-- **Tenant provisioning & OATs:** [docs/tenant-provisioning.md](docs/tenant-provisioning.md)
+- **Tenant provisioning & service tokens:** [docs/tenant-provisioning.md](docs/tenant-provisioning.md)
 - **Testing with business time:** [docs/business-time.md](docs/business-time.md)
 - More runbooks (Solana, NMI/Mobius sandbox, vault secrets, reconciliation) under `docs/`.
 

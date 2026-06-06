@@ -45,8 +45,8 @@ type BlockCheck struct {
 
 // AdmitRequest is one admission decision input.
 type AdmitRequest struct {
-	TenantSubjectID identity.TenantSubjectID // the payer org
-	Invoker         string                   // canonical invoker: user:<id> / oat:<key_id> / <issuer>:<sub>
+	TenantSubjectID identity.TenantSubjectID // the tenant subject
+	Invoker         string                   // canonical invoker: user:<id> / serviceToken:<key_id> / <issuer>:<sub>
 	Tier            string                   // the invoker's tier (selects the throughput policy)
 	Model           string                   // endpoint/model (namespaces the throughput counters)
 

@@ -40,10 +40,10 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     status          TEXT         NOT NULL DEFAULT 'active'
                         CHECK (status IN ('active', 'suspended', 'deleted')),
 
-    -- Link to the OpenRails-owned AuthKit org that operates this tenant
-    -- (control plane). Nullable until #221/#222 wire AuthKit org ownership.
-    authkit_org_id   TEXT,
-    authkit_org_slug TEXT,
+    -- Link to the OpenRails-owned AuthKit tenant that operates this tenant
+    -- (control plane). Nullable until #221/#222 wire AuthKit tenant ownership.
+    authkit_tenant_id   TEXT,
+    authkit_tenant_slug TEXT,
 
     -- Optional hosting/plan/region metadata for the managed platform. Unused
     -- by self-hosted single-tenant installs.
@@ -58,16 +58,16 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     CONSTRAINT uq_tenants_slug UNIQUE (slug)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_tenants_authkit_org_id
-    ON billing.tenants (authkit_org_id)
-    WHERE authkit_org_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tenants_authkit_tenant_id
+    ON billing.tenants (authkit_tenant_id)
+    WHERE authkit_tenant_id IS NOT NULL;
 
 COMMENT ON TABLE  billing.tenants IS
     'Tenant / billing-namespace directory. GLOBAL (control-plane) table, not tenant-scoped. Self-hosted installs have exactly one row (slug=default).';
 COMMENT ON COLUMN billing.tenants.slug IS
     'Stable tenant slug used in tenant-scoped routes and resolution. The well-known value ''default'' is the single-tenant / self-hosted namespace.';
-COMMENT ON COLUMN billing.tenants.authkit_org_id IS
-    'OpenRails-owned AuthKit org id that operates this tenant (control plane). Nullable until org ownership is wired in #221/#222.';
+COMMENT ON COLUMN billing.tenants.authkit_tenant_id IS
+    'OpenRails-owned AuthKit tenant id that operates this tenant (control plane). Nullable until org ownership is wired in #221/#222.';
 
 -- -----------------------------------------------------------------------------
 -- Seed the single DEFAULT tenant. Deterministic UUID so application code,

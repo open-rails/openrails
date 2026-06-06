@@ -206,9 +206,9 @@ services:
         condition: service_healthy
     ports:
       # Single public API surface. Server-to-server callers authenticate with
-      # OpenRails-issued tenant OATs on this same port (issue #222) — there is no
+      # OpenRails-issued tenant service tokens on this same port (issue #222) — there is no
       # separate private/mTLS service port.
-      - "127.0.0.1:2053:2053"  # API (public + admin + OAT service routes)
+      - "127.0.0.1:2053:2053"  # API (public + admin + service token service routes)
     environment:
       # Service runtime mode
       ENV: "${ENV:-development}"

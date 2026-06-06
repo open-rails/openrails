@@ -26,7 +26,7 @@ type BudgetReservation struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223/#227).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// TenantSubjectID is the payer org the budget is charged against (issue #221, the payer).
+	// TenantSubjectID is the tenant subject the budget is charged against (issue #221, the payer).
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
 	// InvokerID is the delegated subject whose spend the windows cap.
 	InvokerID string `bun:"invoker_id,notnull" json:"invoker_id"`

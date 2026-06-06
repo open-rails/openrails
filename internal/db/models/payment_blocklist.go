@@ -12,7 +12,7 @@ import (
 // (kind, value) matches an entry.
 //
 // An entry is either tenant-wide (TenantSubjectID nil/zero) — applying to every payer
-// org in the tenant — or scoped to a single payer org (TenantSubjectID set, issue #221).
+// org in the tenant — or scoped to a single tenant subject (TenantSubjectID set, issue #221).
 // Uniqueness is (tenant_id, kind, value); that index is also the IsBlocked lookup.
 type PaymentBlocklistEntry struct {
 	bun.BaseModel `bun:"table:billing.payment_blocklist,alias:pbl"`
@@ -20,7 +20,7 @@ type PaymentBlocklistEntry struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223/#227).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// TenantSubjectID, when set, scopes the block to a single payer org (issue #221).
+	// TenantSubjectID, when set, scopes the block to a single tenant subject (issue #221).
 	// Nil/zero means a tenant-wide block.
 	TenantSubjectID *uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
 	// Kind is the kind of identifier blocked:

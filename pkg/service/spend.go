@@ -25,7 +25,7 @@ type CreditAccountSnapshot struct {
 	OutstandingOwedCents int64     `json:"outstanding_owed_cents"`
 }
 
-// GetCreditAccount returns the balance + policy snapshot for an payer org.
+// GetCreditAccount returns the balance + policy snapshot for an tenant subject.
 func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*CreditAccountSnapshot, error) {
 	creditType = strings.TrimSpace(creditType)
 	if creditType == "" {
@@ -40,7 +40,7 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSub
 	// one, so this is safe whether called from a request or directly.
 	var snap *CreditAccountSnapshot
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		bal, err := s.creditsService().GetBalanceForPayer(ctx, payer, creditType)
+		bal, err := s.creditsService().GetBalanceForTenantSubject(ctx, payer, creditType)
 		if err != nil {
 			return err
 		}
@@ -289,7 +289,7 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 
 // AuthorizeAndHoldRequest is the input to AuthorizeAndHold — the atomic
 // policy-decision + hold placement that backs POST /v1/service/credits/authorize
-// (issue #235/#247). Payer is the payer org billed; Invoker is the canonical
+// (issue #235/#247). Payer is the tenant subject billed; Invoker is the canonical
 // invoker for per-invoker sub-budgets; RequestID is the idempotency key for the
 // placed hold.
 type AuthorizeAndHoldRequest struct {
@@ -419,12 +419,12 @@ func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.T
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	return s.creditsService().GetAccountSettingsForPayer(ctx, payer, strings.TrimSpace(creditType))
+	return s.creditsService().GetAccountSettingsForTenantSubject(ctx, payer, strings.TrimSpace(creditType))
 }
 
-// GetPayerCreditTransactions lists a payer org's credit transactions (usage) for
+// GetTenantSubjectCreditTransactions lists a tenant subject's credit transactions (usage) for
 // the billing-account admin surface (issue #242). RLS-scoped.
-func (s *Service) GetPayerCreditTransactions(ctx context.Context, payer identity.TenantSubjectID, creditType string, limit, offset int) ([]models.CreditTransaction, int, error) {
+func (s *Service) GetTenantSubjectCreditTransactions(ctx context.Context, payer identity.TenantSubjectID, creditType string, limit, offset int) ([]models.CreditTransaction, int, error) {
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
 	}
@@ -432,7 +432,7 @@ func (s *Service) GetPayerCreditTransactions(ctx context.Context, payer identity
 	var total int
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		items, total, e = s.creditsService().GetTransactionsByPayer(ctx, payer, strings.TrimSpace(creditType), limit, offset)
+		items, total, e = s.creditsService().GetTransactionsByTenantSubject(ctx, payer, strings.TrimSpace(creditType), limit, offset)
 		return e
 	})
 	return items, total, err

@@ -1,6 +1,6 @@
 // Package budgets implements the rolling-window money-budget engine (issue #304).
 //
-// A delegated user (invoker) under an payer org is capped to a money budget over
+// A delegated user (invoker) under an tenant subject is capped to a money budget over
 // one or more ROLLING windows (e.g. "$2 per 4h, $5 per week"). For each window
 // the engine computes used / reserved / remaining and an allow/deny decision plus
 // a retry hint. The windows are PASSED IN by the caller — this package does NOT
@@ -38,10 +38,10 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// ErrOwnerRequired is returned when a budget operation is given a zero payer org
+// ErrTenantSubjectRequired is returned when a budget operation is given a zero tenant subject
 // id. Like the credits engine, the payer is supplied by the caller and is never
 // synthesized.
-var ErrOwnerRequired = errors.New("tenant_subject_id required")
+var ErrTenantSubjectRequired = errors.New("tenant_subject_id required")
 
 // ErrReservationNotFound is returned by Capture/Release when no active
 // reservation with the given id exists for the request tenant.
@@ -114,7 +114,7 @@ func (s *Service) Check(ctx context.Context, payer identity.TenantSubjectID, inv
 		return nil, false, fmt.Errorf("budgets service not initialized")
 	}
 	if payer.IsZero() {
-		return nil, false, ErrOwnerRequired
+		return nil, false, ErrTenantSubjectRequired
 	}
 	invoker = strings.TrimSpace(invoker)
 	if invoker == "" {
@@ -148,7 +148,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, i
 		return uuid.Nil, nil, false, fmt.Errorf("budgets service not initialized")
 	}
 	if payer.IsZero() {
-		return uuid.Nil, nil, false, ErrOwnerRequired
+		return uuid.Nil, nil, false, ErrTenantSubjectRequired
 	}
 	invoker = strings.TrimSpace(invoker)
 	if invoker == "" {

@@ -13,12 +13,12 @@ bookkeeping). It is additive and idempotent.
 ## Lifecycle service — `tenancy.Service`
 
 Built in the HTTP server only when the control plane is present (it reuses the
-control plane's pgx pool and operator-org provisioner). All operations are
+control plane's pgx pool and tenant provisioner). All operations are
 idempotent.
 
 | Operation | Behaviour |
 |---|---|
-| `Provision` | Upserts the `billing.tenants` row (resolve-by-slug, no duplicates), creates/links the operator AuthKit org via `controlplane.EnsureTenantOrg`, records routing/tier/region. Re-running returns the existing tenant. |
+| `Provision` | Upserts the `billing.tenants` row (resolve-by-slug, no duplicates), ensures the embedded AuthKit tenant exists, records routing/tier/region. Re-running returns the existing tenant. |
 | `Suspend` / `Resume` | Flips `status` + `suspended_at`. A suspended tenant denies writes (`IsWritable` is false) while reads still resolve. Idempotent. |
 | `TierChange` | Updates the platform's OWN `billing_tier` for the tenant (dogfood). |
 | `Export` | Writes a completed `tenant_exports` row (row-count manifest + secret-NAME enumeration; values never exported). Required before delete. |
@@ -85,10 +85,10 @@ The tenant pastes their Stripe **webhook signing secret** into OpenRails via the
 credential API (`PUT /v1/admin/tenants/:id/credentials/stripe/webhook_signing_secret`),
 and their Stripe **secret key** for thin-event hydration / credential tests.
 
-## Operator-gated provisioning admin API
+## Bootstrap-gated provisioning API
 
-Mounted at `/v1/admin/tenants`, gated by the SAME operator-admin authority as the
-rest of `/v1/admin` (operator org + `openrails:admin`):
+Mounted at `/v1/admin/tenants`, gated by the same bootstrap-managed admin
+authority as the rest of `/v1/admin` (`openrails:admin`):
 
 | Method & path | Action |
 |---|---|
@@ -111,6 +111,6 @@ rest of `/v1/admin` (operator org + `openrails:admin`):
 - **Stripe Connect** onboarding (`accounts.create`, hosted onboarding,
   account-status webhooks) and a webhook **delivery monitor** (alert on N
   consecutive failures) are scoped by #225 but not implemented in this increment.
-- Tenant **onboarding** (invite admins, mint tenant OATs) reuses the #222/#224
-  OAT/bootstrap paths via `EnsureTenantOrg`; the OAT-minting convenience wrapper
-  is left to the existing control-plane mint API.
+- Tenant **onboarding** (configure tenant issuers and mint runtime service
+  tokens) reuses the bootstrap/control-plane paths. Token output locations are
+  deployment wiring, not durable OpenRails domain state.

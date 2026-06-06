@@ -1,7 +1,7 @@
 set -u
-OAT="${OPENRAILS_OAT:?set OPENRAILS_OAT (docker compose exec -T openrails /app/billing-server --config /app/config/openrails.config.yaml mint-operator-oat)}"
+service token="${OPENRAILS_SERVICE_TOKEN:?set OPENRAILS_SERVICE_TOKEN (docker compose exec -T openrails /app/billing-server --config /app/config/openrails.config.yaml mint-operator-service-token)}"
 B="${BASE_URL:-http://127.0.0.1:2053}/v1/service"
-AUTH="Authorization: Bearer $OAT"
+AUTH="Authorization: Bearer $service token"
 CT="JT="; CT="Content-Type: application/json"
 uuid(){ cat /proc/sys/kernel/random/uuid; }
 pass=0; fail=0

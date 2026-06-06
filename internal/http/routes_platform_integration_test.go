@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     slug         TEXT NOT NULL UNIQUE,
     name         TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'active',
-    authkit_org_id TEXT, authkit_org_slug TEXT,
+    authkit_tenant_id TEXT, authkit_tenant_slug TEXT,
     billing_tier TEXT, region TEXT, webhook_host TEXT, webhook_path TEXT,
     provisioned_at TIMESTAMPTZ,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -167,8 +167,8 @@ func TestPlatformAPI_GateAndAudit(t *testing.T) {
 
 	base := StandaloneV1Prefix + PlatformPrefix
 
-	platformUC := authprovider.UserContext{UserID: "platform-admin", Org: "openrails-platform"}
-	tenantAdminUC := authprovider.UserContext{UserID: "tenant-admin", Org: "tenant-acme", OrgRoles: []string{"admin"}}
+	platformUC := authprovider.UserContext{UserID: "platform-admin", Tenant: "openrails-platform"}
+	tenantAdminUC := authprovider.UserContext{UserID: "tenant-admin", Tenant: "tenant-acme", TenantRoles: []string{"admin"}}
 
 	// 1. A tenant operator admin is DENIED the platform surface.
 	rr := doReq(t, s, checker, http.MethodGet, base+"/tenants", tenantAdminUC, "")

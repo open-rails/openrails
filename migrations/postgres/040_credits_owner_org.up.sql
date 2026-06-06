@@ -1,20 +1,20 @@
 -- =============================================================================
--- 040 — Org-owned API usage credits (issue #221)
+-- 040 — Tenant-subject-owned API usage credits (issue #221)
 --
 -- Makes the credit tables OWNER-ORG-owned (the payer / billing owner) while
 -- keeping user_id for ACTOR attribution (who caused usage).
 --
 -- THE THREE-WAY IDENTITY SPLIT (see pkg/identity):
---   * operator org  — admin authority (#224), NOT stored on credit rows;
+--   * operator tenant  — admin authority (#224), NOT stored on credit rows;
 --   * owner_id       — the org that OWNS the balance / is billed (this migration);
 --   * user_id        — the ACTOR that caused usage (kept, unchanged).
 --
 -- HARDCUT / GREENFIELD: this branch replaces the pre-refactor user-scoped credit
 -- schema wholesale. There are NO pre-existing rows to preserve, so:
 --   * owner_id is created NOT NULL from the start (writers supply the real owner
---     AuthKit org id at write time; there is NO stand-in/deterministic backfill
+--     AuthKit tenant id at write time; there is NO stand-in/deterministic backfill
 --     and NO later reconciliation to a "real" personal org — the value written
---     IS the real owner org id);
+--     IS the real tenant subject id);
 --   * the legacy user-scoped idempotency / balance uniques are REPLACED with
 --     owner+tenant-scoped ones (old dropped, new created — never both);
 --   * user_id is kept for ACTOR attribution (NOT dropped, NOT renamed); the Go
@@ -28,9 +28,9 @@ SET lock_timeout      = '10s';
 SET statement_timeout = '300s';
 
 -- -----------------------------------------------------------------------------
--- Add a NOT NULL owner_id (owner org) column to the three credit tables.
+-- Add a NOT NULL owner_id (tenant subject) column to the three credit tables.
 -- Greenfield: no existing rows, so the column is created NOT NULL directly with
--- no backfill. Writers stamp the real owner org id.
+-- no backfill. Writers stamp the real tenant subject id.
 -- -----------------------------------------------------------------------------
 
 DO $$
@@ -52,7 +52,7 @@ BEGIN
                 t
             );
             EXECUTE format(
-                $cmt$COMMENT ON COLUMN billing.%I.owner_id IS 'Owner org that OWNS this balance / is billed (issue #221, payer/billing owner). NOT NULL; the real AuthKit owner org id supplied by the writer. user_id is kept for ACTOR attribution.'$cmt$,
+                $cmt$COMMENT ON COLUMN billing.%I.owner_id IS 'Tenant subject that OWNS this balance / is billed (issue #221, payer/billing owner). NOT NULL; the real AuthKit tenant subject id supplied by the writer. user_id is kept for ACTOR attribution.'$cmt$,
                 t
             );
         END IF;

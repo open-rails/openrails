@@ -75,7 +75,7 @@ func userContextFromClaims(cl authhttp.Claims) authprovider.UserContext {
 		// Operator-org admin authority (#224, hardcut): the org slug + org-scoped
 		// roles carried in the `org` / `org_roles` claims are the ONLY admin
 		// authority path now that the legacy global-admin DB fallback is removed.
-		Org:      cl.Org,
-		OrgRoles: cl.OrgRoles,
+		Tenant:      cl.Tenant,
+		TenantRoles: cl.TenantRoles,
 	}
 }

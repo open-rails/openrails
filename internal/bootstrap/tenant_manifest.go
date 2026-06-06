@@ -31,27 +31,33 @@ type TenantManifest struct {
 }
 
 type ManifestTenant struct {
-	Slug            string           `yaml:"slug"`
-	Name            string           `yaml:"name"`
-	OperatorOrgSlug string           `yaml:"operator_org_slug"`
-	BillingTier     string           `yaml:"billing_tier"`
-	Region          string           `yaml:"region"`
-	WebhookHost     string           `yaml:"webhook_host"`
-	WebhookPath     string           `yaml:"webhook_path"`
-	Issuers         []ManifestIssuer `yaml:"issuers"`
-	OATs            []ManifestOAT    `yaml:"oats"`
+	Slug          string                 `yaml:"slug"`
+	Name          string                 `yaml:"name"`
+	BillingTier   string                 `yaml:"billing_tier"`
+	Region        string                 `yaml:"region"`
+	WebhookHost   string                 `yaml:"webhook_host"`
+	WebhookPath   string                 `yaml:"webhook_path"`
+	Issuers       []ManifestIssuer       `yaml:"issuers"`
+	ServiceTokens []ManifestServiceToken `yaml:"service_tokens"`
 }
 
 type ManifestIssuer struct {
-	Issuer  string `yaml:"issuer"`
-	JWKSURI string `yaml:"jwks_uri"`
-	Enabled *bool  `yaml:"enabled"`
+	Issuer    string   `yaml:"issuer"`
+	JWKSURI   string   `yaml:"jwks_uri"`
+	Audiences []string `yaml:"audiences"`
+	Enabled   *bool    `yaml:"enabled"`
 }
 
-type ManifestOAT struct {
-	Name        string         `yaml:"name"`
-	Permissions []string       `yaml:"permissions"`
-	Output      ManifestOutput `yaml:"output"`
+type ManifestServiceToken struct {
+	Name        string             `yaml:"name"`
+	Permissions []string           `yaml:"permissions"`
+	Resources   []ManifestResource `yaml:"resources"`
+	Outputs     []ManifestOutput   `yaml:"outputs"`
+}
+
+type ManifestResource struct {
+	Kind string `yaml:"kind"`
+	ID   string `yaml:"id"`
 }
 
 type ManifestOutput struct {
@@ -72,8 +78,8 @@ type ManifestVaultOutput struct {
 }
 
 // ReconcileTenantManifest loads cfg.tenant_bootstrap.file, if configured, and
-// applies the deployment-declared tenant state. Tenant rows and OAT outputs are
-// reconciled synchronously. Issuer registration is retried in the background
+// applies the deployment-declared tenant state. Tenant rows and service-token
+// outputs are reconciled synchronously. Issuer registration is retried in the background
 // because registration validates JWKS reachability, and app pods may not be
 // reachable yet during OpenRails startup.
 func ReconcileTenantManifest(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane) error {
@@ -105,26 +111,24 @@ func ReconcileTenantManifest(ctx context.Context, cfg *config.Config, cp *contro
 
 	for _, mt := range manifest.Tenants {
 		tn, err := svc.Provision(ctx, tenancy.ProvisionRequest{
-			Slug:            mt.Slug,
-			Name:            mt.Name,
-			OperatorOrgSlug: mt.OperatorOrgSlug,
-			BillingTier:     mt.BillingTier,
-			Region:          mt.Region,
-			WebhookHost:     mt.WebhookHost,
-			WebhookPath:     mt.WebhookPath,
+			Slug:        mt.Slug,
+			Name:        mt.Name,
+			BillingTier: mt.BillingTier,
+			Region:      mt.Region,
+			WebhookHost: mt.WebhookHost,
+			WebhookPath: mt.WebhookPath,
 		})
 		if err != nil {
 			return fmt.Errorf("tenant bootstrap: provision %q: %w", mt.Slug, err)
 		}
 		log.WithFields(log.Fields{
-			"tenant":       tn.Slug,
-			"tenant_id":    tn.ID.String(),
-			"operator_org": tn.AuthKitOrgSlug,
+			"tenant":    tn.Slug,
+			"tenant_id": tn.ID.String(),
 		}).Info("tenant bootstrap: tenant ensured")
 
-		for _, oat := range mt.OATs {
-			if err := ensureManifestOAT(ctx, cfg, cp, tn.AuthKitOrgSlug, tn.ID, oat); err != nil {
-				return fmt.Errorf("tenant bootstrap: oat %q for tenant %q: %w", oat.Name, tn.Slug, err)
+		for _, token := range mt.ServiceTokens {
+			if err := ensureManifestServiceToken(ctx, cfg, cp, tn.AuthKitTenantSlug, tn.ID, tn.Slug, token); err != nil {
+				return fmt.Errorf("tenant bootstrap: service token %q for tenant %q: %w", token.Name, tn.Slug, err)
 			}
 		}
 	}
@@ -162,35 +166,47 @@ func loadTenantManifest(path string) (*TenantManifest, error) {
 		return nil, fmt.Errorf("tenant bootstrap: read %s: %w", path, err)
 	}
 	var manifest TenantManifest
-	if err := yaml.Unmarshal(raw, &manifest); err != nil {
+	if err := yaml.UnmarshalWithOptions(raw, &manifest, yaml.DisallowUnknownField()); err != nil {
 		return nil, fmt.Errorf("tenant bootstrap: parse %s: %w", path, err)
+	}
+	if manifest.Version != 2 {
+		return nil, fmt.Errorf("tenant bootstrap: manifest version must be 2")
 	}
 	return &manifest, nil
 }
 
-func ensureManifestOAT(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, orgSlug string, tenantID tenant.ID, oat ManifestOAT) error {
-	name := strings.TrimSpace(oat.Name)
+func ensureManifestServiceToken(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, ownerSlug string, tenantID tenant.ID, tenantSlug string, token ManifestServiceToken) error {
+	name := strings.TrimSpace(token.Name)
 	if name == "" {
 		return errors.New("name is required")
 	}
-	orgSlug = strings.TrimSpace(orgSlug)
-	if orgSlug == "" {
-		return errors.New("operator org slug is required")
+	ownerSlug = strings.TrimSpace(ownerSlug)
+	if ownerSlug == "" {
+		return errors.New("service token owner is required")
+	}
+	if len(token.Outputs) == 0 {
+		return errors.New("at least one service token output is required")
 	}
 
-	if existing, err := readExistingOATOutput(ctx, cfg, oat.Output); err != nil {
+	if existing, err := readExistingServiceTokenOutput(ctx, cfg, token.Outputs); err != nil {
 		return err
 	} else if strings.TrimSpace(existing) != "" {
-		log.WithFields(log.Fields{"org": orgSlug, "oat": name}).Info("tenant bootstrap: oat output already populated")
+		if err := writeServiceTokenOutputs(ctx, cfg, token.Outputs, existing); err != nil {
+			return err
+		}
+		log.WithFields(log.Fields{"tenant": tenantSlug, "service_token": name}).Info("tenant bootstrap: service token output already populated")
 		return nil
 	}
 
-	permissions := cleanStrings(oat.Permissions)
+	permissions := cleanStrings(token.Permissions)
 	if len(permissions) == 0 {
-		return fmt.Errorf("permissions are required for oat %q", name)
+		return fmt.Errorf("permissions are required for service token %q", name)
 	}
-	resources := []authcore.OrgAccessTokenResource{controlplane.TenantResource(tenantID)}
-	created, token, err := cp.Core().MintOrgAccessTokenWithOptions(ctx, orgSlug, authcore.OrgAccessTokenMintOptions{
+	resources, err := resolveManifestResources(token.Resources, tenantID, tenantSlug)
+	if err != nil {
+		return err
+	}
+	created, secret, err := cp.Core().MintServiceTokenWithOptions(ctx, ownerSlug, authcore.ServiceTokenMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,
@@ -198,14 +214,46 @@ func ensureManifestOAT(ctx context.Context, cfg *config.Config, cp *controlplane
 	if err != nil {
 		return err
 	}
-	if err := writeOATOutput(ctx, cfg, oat.Output, token); err != nil {
+	if err := writeServiceTokenOutputs(ctx, cfg, token.Outputs, secret); err != nil {
 		return err
 	}
-	log.WithFields(log.Fields{"org": orgSlug, "oat": name, "oat_key_id": created.KeyID}).Info("tenant bootstrap: oat minted and output written")
+	log.WithFields(log.Fields{"tenant": tenantSlug, "service_token": name, "token_key_id": created.KeyID}).Info("tenant bootstrap: service token minted and output written")
 	return nil
 }
 
-func readExistingOATOutput(ctx context.Context, cfg *config.Config, out ManifestOutput) (string, error) {
+func resolveManifestResources(in []ManifestResource, tenantID tenant.ID, tenantSlug string) ([]authcore.ServiceTokenResource, error) {
+	if len(in) == 0 {
+		return nil, errors.New("resources are required for service token")
+	}
+	out := make([]authcore.ServiceTokenResource, 0, len(in))
+	for _, r := range in {
+		kind := strings.TrimSpace(r.Kind)
+		id := strings.TrimSpace(r.ID)
+		if kind == "" || id == "" {
+			return nil, errors.New("resource kind and id are required")
+		}
+		if kind == controlplane.ResourceKindTenant {
+			switch strings.ToLower(id) {
+			case "$tenant", "self", tenantSlug:
+				id = tenantID.String()
+			}
+		}
+		out = append(out, authcore.ServiceTokenResource{Kind: kind, ID: id})
+	}
+	return out, nil
+}
+
+func readExistingServiceTokenOutput(ctx context.Context, cfg *config.Config, outputs []ManifestOutput) (string, error) {
+	for _, out := range outputs {
+		token, err := readOneServiceTokenOutput(ctx, cfg, out)
+		if err != nil || strings.TrimSpace(token) != "" {
+			return token, err
+		}
+	}
+	return "", nil
+}
+
+func readOneServiceTokenOutput(ctx context.Context, cfg *config.Config, out ManifestOutput) (string, error) {
 	if out.File != nil && strings.TrimSpace(out.File.Path) != "" {
 		raw, err := os.ReadFile(out.File.Path)
 		if err == nil {
@@ -227,7 +275,16 @@ func readExistingOATOutput(ctx context.Context, cfg *config.Config, out Manifest
 	return "", nil
 }
 
-func writeOATOutput(ctx context.Context, cfg *config.Config, out ManifestOutput, token string) error {
+func writeServiceTokenOutputs(ctx context.Context, cfg *config.Config, outputs []ManifestOutput, token string) error {
+	for _, out := range outputs {
+		if err := writeOneServiceTokenOutput(ctx, cfg, out, token); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeOneServiceTokenOutput(ctx context.Context, cfg *config.Config, out ManifestOutput, token string) error {
 	wrote := false
 	if out.File != nil && strings.TrimSpace(out.File.Path) != "" {
 		path := strings.TrimSpace(out.File.Path)
@@ -251,7 +308,7 @@ func writeOATOutput(ctx context.Context, cfg *config.Config, out ManifestOutput,
 		wrote = true
 	}
 	if !wrote {
-		return errors.New("at least one oat output is required")
+		return errors.New("service token output requires file.path or vault.path/vault.field")
 	}
 	return nil
 }
@@ -294,9 +351,10 @@ func reconcileManifestIssuersOnce(ctx context.Context, cp *controlplane.ControlP
 				continue
 			}
 			err := cp.RegisterDelegatedIssuer(ctx, controlplane.RegisterDelegatedIssuerParams{
-				TenantID: tid,
-				Issuer:   issuer.Issuer,
-				JWKSURI:  issuer.JWKSURI,
+				TenantID:  tid,
+				Issuer:    issuer.Issuer,
+				JWKSURI:   issuer.JWKSURI,
+				Audiences: issuer.Audiences,
 			})
 			if err != nil {
 				log.WithError(err).WithFields(log.Fields{"tenant": mt.Slug, "issuer": issuer.Issuer, "jwks_uri": issuer.JWKSURI}).
@@ -361,7 +419,7 @@ func vaultClient(cfg *config.Config, out ManifestVaultOutput) (*vaultapi.Client,
 		mount = "secret"
 	}
 	if address == "" || token == "" {
-		return nil, "", errors.New("vault oat output requires VAULT_ADDR and VAULT_TOKEN")
+		return nil, "", errors.New("vault service token output requires VAULT_ADDR and VAULT_TOKEN")
 	}
 	vcfg := vaultapi.DefaultConfig()
 	vcfg.Address = address

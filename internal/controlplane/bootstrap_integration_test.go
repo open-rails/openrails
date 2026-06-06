@@ -33,8 +33,8 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     slug             TEXT NOT NULL,
     name             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active',
-    authkit_org_id   TEXT,
-    authkit_org_slug TEXT,
+    authkit_tenant_id   TEXT,
+    authkit_tenant_slug TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at       TIMESTAMPTZ
@@ -101,8 +101,8 @@ func newEnabledControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	cfg := &config.Config{
 		Env: "test",
 		Auth: &config.AuthConfig{
-			ExpectedAudience: "openrails-app",
-			OperatorOrgSlug:  "operator",
+			ExpectedAudience:   "openrails-app",
+			OperatorTenantSlug: "operator",
 			ControlPlane: &config.ControlPlaneConfig{
 				Enabled:     true,
 				Issuer:      "https://billing.test",
@@ -122,22 +122,22 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 	cp := newEnabledControlPlane(t, pool)
 
-	// First run: creates org, seeds role/perms, mints OAT, records tenant.
-	res1, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialOAT: true})
+	// First run: creates org, seeds role/perms, mints service token, records tenant.
+	res1, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: true})
 	require.NoError(t, err)
 	require.NotNil(t, res1)
-	require.True(t, res1.OrgCreated, "first run should create the operator org")
-	require.True(t, res1.OATMinted, "first run should mint the initial operator OAT")
-	require.NotEmpty(t, res1.OATSecret)
-	require.NotEmpty(t, res1.OperatorOrgID)
+	require.True(t, res1.TenantCreated, "first run should create the operator tenant")
+	require.True(t, res1.ServiceTokenMinted, "first run should mint the initial operator service token")
+	require.NotEmpty(t, res1.ServiceTokenSecret)
+	require.NotEmpty(t, res1.OperatorTenantID)
 
-	// Tenant directory records the operator org.
+	// Tenant directory records the operator tenant.
 	var orgSlug, orgID string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT authkit_org_slug, authkit_org_id FROM billing.tenants WHERE id = $1::uuid`,
+		`SELECT authkit_tenant_slug, authkit_tenant_id FROM billing.tenants WHERE id = $1::uuid`,
 		tenant.DefaultID.String()).Scan(&orgSlug, &orgID))
 	require.Equal(t, "operator", orgSlug)
-	require.Equal(t, res1.OperatorOrgID, orgID)
+	require.Equal(t, res1.OperatorTenantID, orgID)
 
 	// Operator role holds the per-tenant operator catalog (full catalog EXCEPT
 	// the cross-tenant platform-superadmin permission, #226).
@@ -146,29 +146,29 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.ElementsMatch(t, OperatorRolePermissions(), perms)
 	require.NotContains(t, perms, PermPlatformSuperadmin)
 
-	// Second run: idempotent. No new org, no new OAT.
-	res2, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialOAT: true})
+	// Second run: idempotent. No new org, no new service token.
+	res2, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: true})
 	require.NoError(t, err)
 	require.NotNil(t, res2)
-	require.False(t, res2.OrgCreated, "re-run must not recreate the operator org")
-	require.False(t, res2.OATMinted, "re-run must not mint a second OAT")
-	require.Empty(t, res2.OATSecret)
-	require.Equal(t, res1.OperatorOrgID, res2.OperatorOrgID)
+	require.False(t, res2.TenantCreated, "re-run must not recreate the operator tenant")
+	require.False(t, res2.ServiceTokenMinted, "re-run must not mint a second service token")
+	require.Empty(t, res2.ServiceTokenSecret)
+	require.Equal(t, res1.OperatorTenantID, res2.OperatorTenantID)
 
-	// Exactly one OAT exists after two runs.
-	oats, err := cp.Core().ListOrgAccessTokens(ctx, "operator")
+	// Exactly one service token exists after two runs.
+	serviceTokens, err := cp.Core().ListServiceTokens(ctx, "operator")
 	require.NoError(t, err)
-	require.Len(t, oats, 1, "exactly one operator OAT after two bootstrap runs")
-	require.ElementsMatch(t, []string{ResourceKindTenant}, resourceKinds(oats[0].Resources))
-	require.Contains(t, resourceIDs(oats[0].Resources, ResourceKindTenant), tenant.DefaultID.String())
+	require.Len(t, serviceTokens, 1, "exactly one operator service token after two bootstrap runs")
+	require.ElementsMatch(t, []string{ResourceKindTenant}, resourceKinds(serviceTokens[0].Resources))
+	require.Contains(t, resourceIDs(serviceTokens[0].Resources, ResourceKindTenant), tenant.DefaultID.String())
 
-	resolved, err := cp.ResolveOAT(ctx, res1.OATSecret)
+	resolved, err := cp.ResolveServiceToken(ctx, res1.ServiceTokenSecret)
 	require.NoError(t, err)
 	require.Equal(t, tenant.DefaultID, resolved.TenantID)
 	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindTenant), tenant.DefaultID.String())
 }
 
-func resourceKinds(resources []authcore.OrgAccessTokenResource) []string {
+func resourceKinds(resources []authcore.ServiceTokenResource) []string {
 	out := make([]string, 0, len(resources))
 	for _, r := range resources {
 		out = append(out, r.Kind)
@@ -176,7 +176,7 @@ func resourceKinds(resources []authcore.OrgAccessTokenResource) []string {
 	return out
 }
 
-func resourceIDs(resources []authcore.OrgAccessTokenResource, kind string) []string {
+func resourceIDs(resources []authcore.ServiceTokenResource, kind string) []string {
 	out := make([]string, 0, len(resources))
 	for _, r := range resources {
 		if r.Kind == kind {
@@ -191,7 +191,7 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 	cp := newEnabledControlPlane(t, pool)
 
-	_, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialOAT: false})
+	_, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: false})
 	require.NoError(t, err)
 
 	// Every per-tenant operator permission is granted to the operator role and
@@ -205,7 +205,7 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	require.NotContains(t, eff, PermPlatformSuperadmin)
 
 	// Re-running with the same catalog keeps the grant stable (replace, not grow).
-	_, err = cp.Bootstrap(ctx, BootstrapOptions{MintInitialOAT: false})
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: false})
 	require.NoError(t, err)
 	eff2, err := cp.Core().EffectiveRolePermissions(ctx, "operator", OperatorRole)
 	require.NoError(t, err)
@@ -213,9 +213,9 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 }
 
 // TestBootstrapPlatform_SeedsSuperadminInSeparateOrg proves the #226 platform
-// layer: BootstrapPlatform seeds a SEPARATE platform org whose role holds ONLY
+// layer: BootstrapPlatform seeds a SEPARATE platform tenant whose role holds ONLY
 // openrails:platform:superadmin, and HasPlatformSuperadmin authorizes a member
-// of that org while a tenant operator admin (in the operator org) is denied.
+// of that org while a tenant operator admin (in the operator tenant) is denied.
 func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
@@ -223,14 +223,14 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
 	cfg := &config.Config{
 		Env: "test",
 		Auth: &config.AuthConfig{
-			ExpectedAudience: "openrails-app",
-			OperatorOrgSlug:  "operator",
+			ExpectedAudience:   "openrails-app",
+			OperatorTenantSlug: "operator",
 			ControlPlane: &config.ControlPlaneConfig{
-				Enabled:         true,
-				Issuer:          "https://billing.test",
-				OrgMode:         "multi",
-				TokenPrefix:     "openrails",
-				PlatformOrgSlug: "openrails-platform",
+				Enabled:            true,
+				Issuer:             "https://billing.test",
+				OrgMode:            "multi",
+				TokenPrefix:        "openrails",
+				PlatformTenantSlug: "openrails-platform",
 			},
 		},
 	}
@@ -238,13 +238,13 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cp)
 
-	// Bootstrap the tenant operator org AND the platform org.
-	_, err = cp.Bootstrap(ctx, BootstrapOptions{MintInitialOAT: false})
+	// Bootstrap the tenant operator tenant AND the platform tenant.
+	_, err = cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: false})
 	require.NoError(t, err)
 	pres, err := cp.BootstrapPlatform(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, pres)
-	require.Equal(t, "openrails-platform", pres.PlatformOrgSlug)
+	require.Equal(t, "openrails-platform", pres.PlatformTenantSlug)
 
 	// The platform role holds ONLY the platform-superadmin permission.
 	perms, err := cp.Core().GetRolePermissions(ctx, "openrails-platform", PlatformRole)
@@ -266,8 +266,8 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "platform identity must hold platform superadmin")
 
-	// A tenant OPERATOR admin (operator org, openrails:admin) is NOT a platform
-	// superadmin: HasPlatformSuperadmin evaluates the platform org, where they are
+	// A tenant OPERATOR admin (operator tenant, openrails:admin) is NOT a platform
+	// superadmin: HasPlatformSuperadmin evaluates the platform tenant, where they are
 	// not a member.
 	require.NoError(t, cp.Core().AddMember(ctx, "operator", tenantOperatorAdminID))
 	require.NoError(t, cp.Core().AssignRole(ctx, "operator", tenantOperatorAdminID, OperatorRole))
@@ -287,7 +287,7 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
 // ResolveDelegated relies on for browser-direct delegated access tokens (issue
 // #222 browser tier): an active org maps to its tenant, while an unknown or
 // suspended org is rejected as cross-tenant/unmapped. ResolveDelegated and
-// ResolveOAT share this exact mapping (tenantForOrgSlug).
+// ResolveServiceToken share this exact mapping (tenantForAuthKitTenantSlug).
 func TestDelegatedTenantResolution(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
@@ -295,29 +295,29 @@ func TestDelegatedTenantResolution(t *testing.T) {
 
 	// A second, suspended tenant owned by a distinct org.
 	_, err := pool.Exec(ctx, `
-		INSERT INTO billing.tenants (id, slug, name, status, authkit_org_slug)
+		INSERT INTO billing.tenants (id, slug, name, status, authkit_tenant_slug)
 		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'Acme', 'suspended', 'acme-org')
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
 	// Map the default tenant to an active org so the happy path resolves.
 	_, err = pool.Exec(ctx, `
-		UPDATE billing.tenants SET authkit_org_slug = 'default-org', status = 'active'
+		UPDATE billing.tenants SET authkit_tenant_slug = 'default-org', status = 'active'
 		WHERE id = $1::uuid`, tenant.DefaultID.String())
 	require.NoError(t, err)
 
 	// Active org -> its tenant.
-	tid, slug, err := cp.tenantForOrgSlug(ctx, "default-org")
+	tid, slug, err := cp.tenantForAuthKitTenantSlug(ctx, "default-org")
 	require.NoError(t, err)
 	require.Equal(t, tenant.DefaultID, tid)
 	require.Equal(t, "default", slug)
 
 	// Suspended tenant's org -> cross-tenant/unmapped rejection.
-	_, _, err = cp.tenantForOrgSlug(ctx, "acme-org")
-	require.ErrorIs(t, err, ErrOATTenantUnresolved)
+	_, _, err = cp.tenantForAuthKitTenantSlug(ctx, "acme-org")
+	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
 
 	// Unknown org -> rejection.
-	_, _, err = cp.tenantForOrgSlug(ctx, "nobody")
-	require.ErrorIs(t, err, ErrOATTenantUnresolved)
+	_, _, err = cp.tenantForAuthKitTenantSlug(ctx, "nobody")
+	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
 
 	// The control plane built a delegated verifier (browser-tier prerequisite).
 	require.NotNil(t, cp.DelegatedVerifier())

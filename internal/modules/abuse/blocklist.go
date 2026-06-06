@@ -64,8 +64,8 @@ func NewBlocklistService(database *db.DB) *BlocklistService {
 }
 
 // Add records a block for (kind, value). When owner is nil (or zero) the block
-// is tenant-wide (applies to every owner org in the tenant); when set the block
-// is scoped to that owner org. reason is an optional free-form note.
+// is tenant-wide (applies to every tenant subject in the tenant); when set the block
+// is scoped to that tenant subject. reason is an optional free-form note.
 //
 // Add is idempotent on (tenant, kind, value): re-adding the same identifier is a
 // no-op (the existing row and its payer scoping are left untouched).

@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS billing.usage_events (
     -- Tenant scoping (issue #223 / #227). NOT NULL: every event belongs to a tenant.
     tenant_id       UUID        NOT NULL,
 
-    -- Owner org that is BILLED for this usage (issue #221, the payer).
+    -- Tenant subject that is BILLED for this usage (issue #221, the payer).
     owner_id        UUID        NOT NULL,
     -- Actor that caused the usage (attribution only; not the financial owner).
     user_id         TEXT        NOT NULL,

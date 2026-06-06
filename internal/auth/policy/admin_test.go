@@ -8,11 +8,11 @@ import (
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
-// TestIsOperatorAdmin_NoOperatorOrgDeniesGlobalAdmin proves the helper variant of
-// the hardcut: with no operator org configured, IsOperatorAdmin returns false
+// TestIsOperatorAdmin_NoOperatorTenantDeniesGlobalAdmin proves the helper variant of
+// the hardcut: with no operator tenant configured, IsOperatorAdmin returns false
 // without consulting the DB (nil db would otherwise panic). There is no
 // global-admin DB fallback.
-func TestIsOperatorAdmin_NoOperatorOrgDeniesGlobalAdmin(t *testing.T) {
+func TestIsOperatorAdmin_NoOperatorTenantDeniesGlobalAdmin(t *testing.T) {
 	cfg := &config.Config{
 		Auth: &config.AuthConfig{
 			ControlPlane: &config.ControlPlaneConfig{Enabled: true},
@@ -33,7 +33,7 @@ func TestIsOperatorAdmin_NoOperatorOrgDeniesGlobalAdmin(t *testing.T) {
 func TestIsOperatorAdmin_MultiOrg(t *testing.T) {
 	cfg := &config.Config{
 		Auth: &config.AuthConfig{
-			OperatorOrgSlug: "acme",
+			OperatorTenantSlug: "acme",
 		},
 	}
 
@@ -43,10 +43,10 @@ func TestIsOperatorAdmin_MultiOrg(t *testing.T) {
 		want bool
 	}{
 		{name: "no org -> false", uc: authprovider.UserContext{UserID: "u1"}, want: false},
-		{name: "wrong org -> false", uc: authprovider.UserContext{UserID: "u1", Org: "globex", OrgRoles: []string{"admin"}}, want: false},
-		{name: "right org, wrong role -> false", uc: authprovider.UserContext{UserID: "u1", Org: "acme", OrgRoles: []string{"member"}}, want: false},
-		{name: "right org, admin role -> true", uc: authprovider.UserContext{UserID: "u1", Org: "acme", OrgRoles: []string{"admin"}}, want: true},
-		{name: "right org, owner role -> true", uc: authprovider.UserContext{UserID: "u1", Org: "acme", OrgRoles: []string{"owner"}}, want: true},
+		{name: "wrong org -> false", uc: authprovider.UserContext{UserID: "u1", Tenant: "globex", TenantRoles: []string{"admin"}}, want: false},
+		{name: "right org, wrong role -> false", uc: authprovider.UserContext{UserID: "u1", Tenant: "acme", TenantRoles: []string{"member"}}, want: false},
+		{name: "right org, admin role -> true", uc: authprovider.UserContext{UserID: "u1", Tenant: "acme", TenantRoles: []string{"admin"}}, want: true},
+		{name: "right org, owner role -> true", uc: authprovider.UserContext{UserID: "u1", Tenant: "acme", TenantRoles: []string{"owner"}}, want: true},
 	}
 
 	for _, tc := range cases {
@@ -62,30 +62,30 @@ func TestIsOperatorAdmin_MultiOrg(t *testing.T) {
 	}
 }
 
-func TestAuthConfig_EffectiveOperatorOrgAdminRoles(t *testing.T) {
+func TestAuthConfig_EffectiveOperatorTenantAdminRoles(t *testing.T) {
 	// Default fallback when no roles configured.
 	cfg := &config.AuthConfig{}
-	got := cfg.EffectiveOperatorOrgAdminRoles()
+	got := cfg.EffectiveOperatorTenantAdminRoles()
 	if len(got) != 2 || got[0] != "admin" || got[1] != "owner" {
 		t.Errorf("default roles: got %v want [admin owner]", got)
 	}
 
 	// Explicit override.
-	cfg = &config.AuthConfig{OperatorOrgAdminRoles: []string{"billing_admin"}}
-	got = cfg.EffectiveOperatorOrgAdminRoles()
+	cfg = &config.AuthConfig{OperatorTenantAdminRoles: []string{"billing_admin"}}
+	got = cfg.EffectiveOperatorTenantAdminRoles()
 	if len(got) != 1 || got[0] != "billing_admin" {
 		t.Errorf("override: got %v want [billing_admin]", got)
 	}
 }
 
-func TestAuthConfig_OperatorOrgEnabled(t *testing.T) {
-	if (&config.AuthConfig{}).OperatorOrgEnabled() {
-		t.Error("empty config: OperatorOrgEnabled should be false")
+func TestAuthConfig_OperatorTenantEnabled(t *testing.T) {
+	if (&config.AuthConfig{}).OperatorTenantEnabled() {
+		t.Error("empty config: OperatorTenantEnabled should be false")
 	}
-	if !(&config.AuthConfig{OperatorOrgSlug: "acme"}).OperatorOrgEnabled() {
+	if !(&config.AuthConfig{OperatorTenantSlug: "acme"}).OperatorTenantEnabled() {
 		t.Error("acme: should be true")
 	}
-	if (&config.AuthConfig{OperatorOrgSlug: "   "}).OperatorOrgEnabled() {
+	if (&config.AuthConfig{OperatorTenantSlug: "   "}).OperatorTenantEnabled() {
 		t.Error("whitespace-only slug: should be false")
 	}
 }

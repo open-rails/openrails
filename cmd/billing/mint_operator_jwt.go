@@ -18,13 +18,13 @@ import (
 )
 
 // mintOperatorJWT mints a real, JWKS-verifiable, ORG-SCOPED user access token
-// (NOT an opaque OAT) for the operator org, so that the standalone server's
+// (NOT an opaque service token) for the operator tenant, so that the standalone server's
 // JWT verifier accepts it on the /v1/admin/* surface (OperatorAdminRequired
 // checks the `org` + `org_roles` claims). It is the e2e provisioning bridge:
 // the admin catalog/price/solana-plan routes are gated by a JWT claim check,
-// while mint-operator-oat only produces an opaque OAT usable on /v1/service/*.
+// while mint-operator-service-token only produces an opaque service token usable on /v1/service/*.
 //
-// It idempotently ensures the operator org + role exist (control-plane
+// It idempotently ensures the operator tenant + role exist (control-plane
 // bootstrap), creates (or reuses) a test user, makes them an operator-org
 // member, assigns them the operator role, then issues an org access token via
 // AuthKit core. The result verifies against the control plane's own JWKS when
@@ -51,7 +51,7 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	org, _ := cmd.Flags().GetString("org")
 	org = strings.ToLower(strings.TrimSpace(org))
 	if org == "" && cfg != nil && cfg.Auth != nil {
-		org = strings.ToLower(strings.TrimSpace(cfg.Auth.OperatorOrgSlug))
+		org = strings.ToLower(strings.TrimSpace(cfg.Auth.OperatorTenantSlug))
 	}
 	if org == "" {
 		org = "operator"
@@ -73,12 +73,12 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 		role = controlplane.OperatorRole
 	}
 
-	// 1. Ensure operator org + role exist (idempotent bootstrap).
+	// 1. Ensure operator tenant + role exist (idempotent bootstrap).
 	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		OperatorOrgSlug: org,
-		MintInitialOAT:  false,
+		OperatorTenantSlug:      org,
+		MintInitialServiceToken: false,
 	}); berr != nil {
-		return fmt.Errorf("bootstrap operator org/role: %w", berr)
+		return fmt.Errorf("bootstrap operator tenant/role: %w", berr)
 	}
 
 	// 2. Find or create the test user.
@@ -95,10 +95,10 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("assign role %q: %w", role, err)
 	}
 
-	// 4. Issue the org-scoped JWT (carries org + org_roles claims).
-	token, exp, err := core.IssueOrgAccessToken(ctx, userID, email, org, nil)
+	// 4. Issue the tenant-scoped JWT (carries tenant + tenant_roles claims).
+	token, exp, err := core.IssueServiceToken(ctx, userID, email, org, nil)
 	if err != nil {
-		return fmt.Errorf("issue org access token: %w", err)
+		return fmt.Errorf("issue tenant access token: %w", err)
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{

@@ -36,7 +36,7 @@ func TestRecordUsage_DebitsAndAggregates(t *testing.T) {
 	require.NoError(t, err)
 
 	// Balance debited by 8_000.
-	bal, err := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, err := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(92_000), bal.Balance)
 
@@ -74,7 +74,7 @@ func TestRecordUsage_Idempotent(t *testing.T) {
 	require.Equal(t, ev1.ID, ev2.ID, "replay must return the same event")
 
 	// Only ONE debit happened.
-	bal, err := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, err := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(8_000), bal.Balance)
 }
@@ -98,7 +98,7 @@ func TestRecordUsage_ZeroCostNoDebit(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, ev.CreditTransactionID, "zero-cost event has no debit txn")
 
-	bal, err := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, err := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(5_000), bal.Balance, "zero-cost event must not debit")
 }

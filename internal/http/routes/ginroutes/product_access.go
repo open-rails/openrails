@@ -18,10 +18,10 @@ import (
 //     The caller's `group` must already require an authenticated end-user
 //     (AuthProvider.Required at the central mount, mirroring the existing /me/*
 //     routes). Handlers read r.GetUser().
-//   - OAT SERVICE: GET /service/users/:user_id/product-access (optional
-//     ?product_id=... narrows to a has-access check). The OAT auth middleware is
-//     applied at the central /service group mount (ginmw.OATRequired); this
-//     function adds the per-route OAT permission gate.
+//   - service token SERVICE: GET /service/users/:user_id/product-access (optional
+//     ?product_id=... narrows to a has-access check). The service token auth middleware is
+//     applied at the central /service group mount (ginmw.ServiceTokenRequired); this
+//     function adds the per-route service token permission gate.
 //   - ADMIN: GET/POST/DELETE under /admin/users/:user_id/product-access. The
 //     caller's /admin group must already apply the operator-admin gate (mirroring
 //     RegisterAdminRoutes).
@@ -40,10 +40,10 @@ func RegisterProductAccessRoutes(group *gin.RouterGroup, rt *app.Runtime) {
 	me.GET("/products", wrap(httphandlers.GetMyProducts))
 	me.GET("/products/:product_id/access", wrap(httphandlers.GetMyProductAccess))
 
-	// OAT SERVICE surface (OATRequired applied at the central /service mount).
+	// service token SERVICE surface (ServiceTokenRequired applied at the central /service mount).
 	service := group.Group("/service")
 	service.GET("/users/:user_id/product-access",
-		ginmw.RequireOATPermission(controlplane.PermEntitlementsRead),
+		ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead),
 		wrap(httphandlers.ServiceGetUserProductAccess),
 	)
 

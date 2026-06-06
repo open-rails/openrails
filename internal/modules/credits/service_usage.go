@@ -90,7 +90,7 @@ var serviceUsageGroupExpr = map[string]string{
 	"user":     "ue.metadata->>'delegated_user_id'",
 }
 
-// ServiceUsageRollup returns per-dimension-VALUE spend for a payer org over
+// ServiceUsageRollup returns per-dimension-VALUE spend for a tenant subject over
 // [from, to), grouped by group_by. Service-scoped (any payer), for the platform
 // usage/revenue surfaces — NOT the hot admission path.
 func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.TenantSubjectID, from, to time.Time, groupBy string) ([]ServiceUsageRollupRow, error) {

@@ -2,7 +2,7 @@
 -- 069 — Account suspension + payment-method-verification state (issue #299)
 --
 -- Adds suspension + payment-method-verification columns to the per-(tenant,
--- owner org, credit_type) account settings row. These record state only:
+-- tenant subject, credit_type) account settings row. These record state only:
 --   - verified_payment_method / verified_at: set true after a successful $1
 --     auth-and-void verification charge (the charge itself is a separate slice).
 --   - suspended_at / suspend_reason: set when an account is suspended.

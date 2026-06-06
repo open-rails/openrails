@@ -21,7 +21,7 @@ type UsageEvent struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223/#227).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// TenantSubjectID is the payer org BILLED for this usage (issue #221, the payer).
+	// TenantSubjectID is the tenant subject BILLED for this usage (issue #221, the payer).
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
 	// InvokerID is the invoker that caused usage (attribution only; not the payer).
 	InvokerID string `bun:"invoker_id,notnull" json:"invoker_id"`

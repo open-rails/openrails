@@ -19,7 +19,7 @@ import (
 
 // TenantAdminPrefix is the operator-gated tenant provisioning/lifecycle API
 // (issue #225). It is gated by the SAME operator-admin authority as the rest of
-// /v1/admin: only the operator org (with openrails:admin) may provision, suspend,
+// /v1/admin: only the operator tenant (with openrails:admin) may provision, suspend,
 // resume, delete, or change a tenant's tier or processor credentials.
 const TenantAdminPrefix = "/admin/tenants"
 
@@ -70,7 +70,7 @@ func (s *Server) auditTenantMutation(c *gin.Context, action string, target *tena
 	uc, _ := ginauth.UserContextFromGin(c)
 	if _, err := s.platformAudit.Record(c.Request.Context(), platform.AuditEntry{
 		InvokerID:      uc.UserID,
-		ActorOrg:       uc.Org,
+		ActorOrg:       uc.Tenant,
 		Action:         action,
 		TargetTenantID: target,
 		Reason:         reason,
@@ -290,14 +290,14 @@ func (s *Server) tenantErr(c *gin.Context, err error) {
 
 func tenantView(t *tenancy.Tenant) gin.H {
 	return gin.H{
-		"id":               t.ID.String(),
-		"slug":             t.Slug,
-		"name":             t.Name,
-		"status":           string(t.Status),
-		"authkit_org_slug": t.AuthKitOrgSlug,
-		"billing_tier":     t.BillingTier,
-		"region":           t.Region,
-		"webhook_host":     t.WebhookHost,
-		"webhook_path":     t.WebhookPath,
+		"id":                  t.ID.String(),
+		"slug":                t.Slug,
+		"name":                t.Name,
+		"status":              string(t.Status),
+		"authkit_tenant_slug": t.AuthKitTenantSlug,
+		"billing_tier":        t.BillingTier,
+		"region":              t.Region,
+		"webhook_host":        t.WebhookHost,
+		"webhook_path":        t.WebhookPath,
 	}
 }

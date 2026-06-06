@@ -2,11 +2,12 @@
 
 Two complementary harnesses prove the unified credit money path
 (estimate → authorize+hold → capture/release) on OpenRails' standalone public
-OAT surface — the exact contract gen-orchestrator / Tensorhub call (#233/#222).
+service-token surface -- the exact server-to-server contract gen-orchestrator /
+Tensorhub call (#233/#222).
 
 ## 1. In-repo Go harness (CI) — `tests/unified_billing_e2e_test.go`
 
-Build tag `integration`. Drives the lifecycle through the OAT-authed public
+Build tag `integration`. Drives the lifecycle through the service-token-authenticated public
 routes (`/v1/service/credits/*`) against a test Postgres, then asserts ledger
 rows/statuses/balances directly. Scenarios:
 
@@ -28,7 +29,7 @@ go test -tags integration -run TestUnifiedBilling ./tests/
 
 ## 2. Deployed-stack harness — `scripts/unified_billing_e2e.sh`
 
-POSIX sh + curl. Hits a *running, standalone* OpenRails over the public OAT
+POSIX sh + curl. Hits a *running, standalone* OpenRails over the public service-token
 routes — fresh credit type per run, so balances are deterministic. Asserts:
 create credit-type → deposit → GET balance (#247) → atomic authorize+hold (#235)
 → partial capture → balance reflects actual → over-balance authorize DENIED
@@ -38,13 +39,13 @@ Run against `~/cozy/e2e` (openrails:2053 is not host-published, so run from a
 container on the e2e network):
 
 ```sh
-OAT=$(docker compose exec -T openrails /app/billing-server \
-  --config /app/config/openrails.config.yaml mint-operator-oat --tenant default \
-  | grep -o '"oat_secret":"[^"]*"' | cut -d'"' -f4)
+SERVICE_TOKEN=$(docker compose exec -T openrails /app/billing-server \
+  --config /app/config/openrails.config.yaml mint-operator-service-token --tenant default \
+  | grep -o '"service_token_secret":"[^"]*"' | cut -d'"' -f4)
 
 docker run --rm --network e2e_default \
   -v "$PWD/scripts/unified_billing_e2e.sh:/h.sh:ro" \
-  -e OPENRAILS_OAT="$OAT" -e BASE_URL=http://openrails:2053 \
+  -e OPENRAILS_SERVICE_TOKEN="$SERVICE_TOKEN" -e BASE_URL=http://openrails:2053 \
   --entrypoint sh alpine/curl:latest /h.sh
 # => 12 passed, 0 failed
 ```

@@ -48,8 +48,8 @@ func (e *ErrMintForbiddenPermission) Error() string {
 // MintDelegatedParams describes a browser-tier delegated access token to mint on
 // behalf of a tenant's host backend.
 type MintDelegatedParams struct {
-	// Tenant is the AuthKit org slug the token is scoped to. The caller MUST pass
-	// the CALLING OAT's tenant (resolved server-side) — never a value from the
+	// Tenant is the AuthKit tenant slug the token is scoped to. The caller MUST pass
+	// the CALLING service token's tenant (resolved server-side) — never a value from the
 	// request body — so cross-tenant minting is impossible.
 	Tenant string
 	// DelegatedSubject is the end-user id the browser token will act as
@@ -80,7 +80,7 @@ type MintedDelegatedToken struct {
 // aud=openrails tokens (verified via the tenant's registered JWKS), removing the
 // frontend -> host -> OpenRails mint round-trip. New hosts should register an
 // issuer (POST /v1/service/tenant/issuers) and mint locally; this method + the
-// `openrails:self:mint` OAT permission are retired once all tenants self-sign.
+// `openrails:self:mint` service token permission are retired once all tenants self-sign.
 //
 // It signs with the control plane's OWN active signing key — the SAME key the
 // `/v1/self` delegated verifier trusts — using AuthKit's delegated access token
@@ -90,7 +90,7 @@ type MintedDelegatedToken struct {
 // DelegatedSelfRequired middleware for the same tenant + delegated_sub.
 //
 // Authorization to CALL this is the caller's responsibility: it must be gated by
-// an OAT holding PermSelfMint, and the caller MUST pass the OAT's resolved tenant
+// an service token holding PermSelfMint, and the caller MUST pass the service token's resolved tenant
 // as p.Tenant (never a body-supplied tenant). This method enforces the remaining
 // invariants: a non-empty subject, at least one permission, and that EVERY
 // requested permission is an `openrails:self:*` self-service permission.
@@ -101,9 +101,9 @@ func (c *ControlPlane) MintDelegatedAccessToken(ctx context.Context, p MintDeleg
 
 	tenant := strings.TrimSpace(p.Tenant)
 	if tenant == "" {
-		// The caller failed to bind the OAT's tenant; refuse rather than mint an
+		// The caller failed to bind the service token's tenant; refuse rather than mint an
 		// untenanted token.
-		return nil, ErrOATTenantUnresolved
+		return nil, ErrServiceTokenTenantUnresolved
 	}
 
 	subject := strings.TrimSpace(p.DelegatedSubject)

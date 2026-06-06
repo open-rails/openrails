@@ -33,8 +33,8 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
     slug             TEXT NOT NULL UNIQUE,
     name             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active',
-    authkit_org_id   TEXT,
-    authkit_org_slug TEXT,
+    authkit_tenant_id   TEXT,
+    authkit_tenant_slug TEXT,
     plan             TEXT,
     region           TEXT,
     billing_tier     TEXT,
@@ -148,17 +148,17 @@ func newExternalTenancyTestPool(t *testing.T, ctx context.Context, adminDSN stri
 	return pool
 }
 
-// fakeOrgProvisioner records EnsureTenantOrg calls and returns a stable id.
-type fakeOrgProvisioner struct{ calls int }
+// fakeTenantProvisioner records EnsureAuthKitTenant calls and returns a stable id.
+type fakeTenantProvisioner struct{ calls int }
 
-func (f *fakeOrgProvisioner) EnsureTenantOrg(_ context.Context, slug string) (string, error) {
+func (f *fakeTenantProvisioner) EnsureAuthKitTenant(_ context.Context, slug string) (string, error) {
 	f.calls++
 	return "org-" + slug, nil
 }
 
-func newSvc(t *testing.T) (*Service, *fakeOrgProvisioner) {
+func newSvc(t *testing.T) (*Service, *fakeTenantProvisioner) {
 	pool := newTestPool(t)
-	orgs := &fakeOrgProvisioner{}
+	orgs := &fakeTenantProvisioner{}
 	svc, err := NewService(pool, orgs, NewMemorySecretStore())
 	require.NoError(t, err)
 	return svc, orgs
@@ -172,7 +172,7 @@ func TestProvision_Idempotent(t *testing.T) {
 	first, err := svc.Provision(ctx, req)
 	require.NoError(t, err)
 	require.Equal(t, "acme", first.Slug)
-	require.Equal(t, "org-tenant-acme", first.AuthKitOrgID)
+	require.Equal(t, "org-tenant-acme", first.AuthKitTenantID)
 	require.Equal(t, "pro", first.BillingTier)
 
 	// Re-provision: same tenant id, no duplicate row, org ensured again (the org

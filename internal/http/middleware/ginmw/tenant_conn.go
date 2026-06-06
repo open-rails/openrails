@@ -11,7 +11,7 @@ import (
 // the `app.tenant_id` GUC on it, so every tenant-owned query the request issues
 // through db.Q(ctx) is constrained by the migration-050 RLS policies (issue
 // #227). It MUST be mounted AFTER the tenant has been resolved onto the request
-// context (ResolveTenant for single-tenant; OATRequired / DelegatedSelfRequired
+// context (ResolveTenant for single-tenant; ServiceTokenRequired / DelegatedSelfRequired
 // for the multi-tenant service/self/tenant-admin groups, which override the
 // tenant) — otherwise the connection would be pinned to the wrong tenant.
 //

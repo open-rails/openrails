@@ -2,7 +2,7 @@ package authprovider
 
 import "testing"
 
-func TestUserContext_HasAnyOrgRole(t *testing.T) {
+func TestUserContext_HasAnyTenantRole(t *testing.T) {
 	cases := []struct {
 		name string
 		uc   UserContext
@@ -11,56 +11,56 @@ func TestUserContext_HasAnyOrgRole(t *testing.T) {
 	}{
 		{
 			name: "empty org returns false even if roles match",
-			uc:   UserContext{OrgRoles: []string{"admin"}},
+			uc:   UserContext{TenantRoles: []string{"admin"}},
 			want: []string{"admin"},
 			ok:   false,
 		},
 		{
 			name: "empty want returns false",
-			uc:   UserContext{Org: "acme", OrgRoles: []string{"admin"}},
+			uc:   UserContext{Tenant: "acme", TenantRoles: []string{"admin"}},
 			want: []string{},
 			ok:   false,
 		},
 		{
 			name: "single matching role",
-			uc:   UserContext{Org: "acme", OrgRoles: []string{"admin"}},
+			uc:   UserContext{Tenant: "acme", TenantRoles: []string{"admin"}},
 			want: []string{"admin"},
 			ok:   true,
 		},
 		{
 			name: "case-insensitive role match",
-			uc:   UserContext{Org: "acme", OrgRoles: []string{"ADMIN"}},
+			uc:   UserContext{Tenant: "acme", TenantRoles: []string{"ADMIN"}},
 			want: []string{"admin"},
 			ok:   true,
 		},
 		{
 			name: "matches against any element in want list",
-			uc:   UserContext{Org: "acme", OrgRoles: []string{"owner"}},
+			uc:   UserContext{Tenant: "acme", TenantRoles: []string{"owner"}},
 			want: []string{"admin", "owner", "billing_admin"},
 			ok:   true,
 		},
 		{
 			name: "no overlap returns false",
-			uc:   UserContext{Org: "acme", OrgRoles: []string{"member", "viewer"}},
+			uc:   UserContext{Tenant: "acme", TenantRoles: []string{"member", "viewer"}},
 			want: []string{"admin", "owner"},
 			ok:   false,
 		},
 		{
-			name: "multiple OrgRoles, first matches",
-			uc:   UserContext{Org: "acme", OrgRoles: []string{"admin", "billing_admin"}},
+			name: "multiple TenantRoles, first matches",
+			uc:   UserContext{Tenant: "acme", TenantRoles: []string{"admin", "billing_admin"}},
 			want: []string{"admin"},
 			ok:   true,
 		},
 		{
-			name: "multiple OrgRoles, last matches",
-			uc:   UserContext{Org: "acme", OrgRoles: []string{"member", "admin"}},
+			name: "multiple TenantRoles, last matches",
+			uc:   UserContext{Tenant: "acme", TenantRoles: []string{"member", "admin"}},
 			want: []string{"admin"},
 			ok:   true,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.uc.HasAnyOrgRole(tc.want...); got != tc.ok {
+			if got := tc.uc.HasAnyTenantRole(tc.want...); got != tc.ok {
 				t.Errorf("got %v want %v", got, tc.ok)
 			}
 		})
@@ -68,7 +68,7 @@ func TestUserContext_HasAnyOrgRole(t *testing.T) {
 }
 
 func TestUserContext_HasRole_Unchanged(t *testing.T) {
-	// Sanity: adding Org/OrgRoles fields didn't break existing HasRole behavior.
+	// Sanity: adding Tenant/TenantRoles fields didn't break existing HasRole behavior.
 	uc := UserContext{Roles: []string{"admin", "moderator"}}
 	if !uc.HasRole("admin") {
 		t.Error("expected HasRole(admin) to be true")

@@ -32,7 +32,7 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 	_, err = svc.CaptureHold(ctx, res.Hold.ID, 800)
 	require.NoError(t, err, "arrears capture past balance must not error")
 
-	bal, _ := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, _ := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.Equal(t, int64(0), bal.Balance, "balance drawn first")
 	owed, _ := svc.GetOutstandingOwed(ctx, payer, ct)
 	require.Equal(t, int64(500), owed, "remainder (800-300) spilled to owed")

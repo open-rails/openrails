@@ -2,7 +2,7 @@
 // credentials, and webhook routing for OpenRails' multi-tenant platform (issue
 // #225). It builds on the #223 tenant primitive (pkg/tenant + billing.tenants)
 // and the #224 in-process AuthKit control plane (internal/controlplane): the
-// lifecycle service mints/links operator orgs and OATs through control-plane core
+// lifecycle service mints/links operator tenants and service tokens through control-plane core
 // calls and records tenant directory state directly in billing.* (OpenRails-owned
 // control-plane state).
 package tenancy

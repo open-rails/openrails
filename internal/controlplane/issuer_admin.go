@@ -18,7 +18,7 @@ import (
 )
 
 // Issuer-registration errors (issue #259 bootstrap flow). All are sanitized for
-// the OAT-gated route to map to precise client responses.
+// the service token-gated route to map to precise client responses.
 var (
 	// ErrIssuerOwnedByOtherTenant indicates the issuer is already registered to a
 	// DIFFERENT tenant. Issuers are globally unique (-> exactly one tenant), so a
@@ -29,6 +29,9 @@ var (
 	ErrIssuerInvalidJWKSURI = errors.New("controlplane: jwks_uri is invalid or not allowed")
 	// ErrIssuerInvalidIssuer indicates the issuer string is empty/malformed.
 	ErrIssuerInvalidIssuer = errors.New("controlplane: issuer is empty or invalid")
+	// ErrIssuerAudiencesRequired indicates the issuer has no accepted `aud`
+	// values. Audience checking is part of the OIDC trust contract.
+	ErrIssuerAudiencesRequired = errors.New("controlplane: issuer audiences are required")
 	// ErrIssuerJWKSUnreachable indicates the jwks_uri could not be fetched or did
 	// not return a well-formed, non-empty JWKS at registration time.
 	ErrIssuerJWKSUnreachable = errors.New("controlplane: jwks_uri is unreachable or not a valid JWKS")
@@ -41,13 +44,14 @@ var (
 const jwksProbeTimeout = 5 * time.Second
 
 // RegisterDelegatedIssuerParams describes a federated issuer to register/rotate
-// (issue #259). TenantID is bound from the CALLING OAT (resolved server-side) —
+// (issue #259). TenantID is bound from the CALLING service token (resolved server-side) —
 // never from the request body — so a caller can only register issuers under its
 // OWN tenant.
 type RegisterDelegatedIssuerParams struct {
-	TenantID tenant.ID
-	Issuer   string
-	JWKSURI  string
+	TenantID  tenant.ID
+	Issuer    string
+	JWKSURI   string
+	Audiences []string
 }
 
 // RegisterDelegatedIssuer registers (or rotates) a federated delegated-token
@@ -73,8 +77,12 @@ func (c *ControlPlane) RegisterDelegatedIssuer(ctx context.Context, p RegisterDe
 	if err := c.validateJWKSURI(jwksURI); err != nil {
 		return err
 	}
+	audiences := cleanAudiences(p.Audiences)
+	if len(audiences) == 0 {
+		return ErrIssuerAudiencesRequired
+	}
 	if (p.TenantID == tenant.ID{}) {
-		return ErrOATTenantUnresolved
+		return ErrServiceTokenTenantUnresolved
 	}
 
 	// Probe the JWKS once so registration fails fast on a typo'd/unreachable URL
@@ -89,15 +97,16 @@ func (c *ControlPlane) RegisterDelegatedIssuer(ctx context.Context, p RegisterDe
 	// which we surface as ErrIssuerOwnedByOtherTenant.
 	var id string
 	err := c.pool.QueryRow(ctx, `
-		INSERT INTO billing.tenant_delegated_issuers (tenant_id, issuer, jwks_uri, enabled)
-		VALUES ($1, $2, $3, TRUE)
+		INSERT INTO billing.tenant_delegated_issuers (tenant_id, issuer, jwks_uri, audiences, enabled)
+		VALUES ($1, $2, $3, $4, TRUE)
 		ON CONFLICT (issuer) DO UPDATE
 		   SET jwks_uri   = EXCLUDED.jwks_uri,
+		       audiences  = EXCLUDED.audiences,
 		       enabled    = TRUE,
 		       updated_at = current_timestamp
 		 WHERE billing.tenant_delegated_issuers.tenant_id = $1
 		RETURNING id::text
-	`, p.TenantID.String(), issuer, jwksURI).Scan(&id)
+	`, p.TenantID.String(), issuer, jwksURI, audiences).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrIssuerOwnedByOtherTenant
@@ -123,7 +132,7 @@ func (c *ControlPlane) DisableDelegatedIssuer(ctx context.Context, tenantID tena
 		return ErrIssuerInvalidIssuer
 	}
 	if (tenantID == tenant.ID{}) {
-		return ErrOATTenantUnresolved
+		return ErrServiceTokenTenantUnresolved
 	}
 
 	ct, err := c.pool.Exec(ctx, `
@@ -147,7 +156,7 @@ func (c *ControlPlane) ListDelegatedIssuers(ctx context.Context, tenantID tenant
 		return nil, ErrNoControlPlane
 	}
 	rows, err := c.pool.Query(ctx, `
-		SELECT issuer, jwks_uri, enabled
+		SELECT issuer, jwks_uri, audiences, enabled
 		  FROM billing.tenant_delegated_issuers
 		 WHERE tenant_id = $1
 		 ORDER BY issuer
@@ -159,13 +168,23 @@ func (c *ControlPlane) ListDelegatedIssuers(ctx context.Context, tenantID tenant
 	var out []DelegatedIssuer
 	for rows.Next() {
 		var d DelegatedIssuer
-		if err := rows.Scan(&d.Issuer, &d.JWKSURI, &d.Enabled); err != nil {
+		if err := rows.Scan(&d.Issuer, &d.JWKSURI, &d.Audiences, &d.Enabled); err != nil {
 			return nil, err
 		}
 		d.TenantID = tenantID
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+func cleanAudiences(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // validateJWKSURI enforces the SSRF allowlist for a registered jwks_uri. The URL

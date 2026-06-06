@@ -74,25 +74,25 @@ func parseServiceTenantSubjectID(raw string) (*billingidentity.TenantSubjectID, 
 }
 
 func requireServiceTenantSubjectScope(r *httprequest.Request, payer billingidentity.TenantSubjectID) bool {
-	v, ok := r.Get(ginmw.OATContextKey)
+	v, ok := r.Get(ginmw.ServiceTokenContextKey)
 	if !ok {
-		r.ErrorJSON(http.StatusUnauthorized, "oat required")
+		r.ErrorJSON(http.StatusUnauthorized, "service token required")
 		return false
 	}
-	resolved, ok := v.(*controlplane.ResolvedOAT)
+	resolved, ok := v.(*controlplane.ResolvedServiceToken)
 	if !ok || resolved == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "oat state invalid")
+		r.ErrorJSON(http.StatusInternalServerError, "service token state invalid")
 		return false
 	}
 	if !resolved.AllowsTenantSubject(payer.UUID()) {
-		r.ErrorJSON(http.StatusForbidden, "oat_payer_scope_denied")
+		r.ErrorJSON(http.StatusForbidden, "service_token_tenant_subject_scope_denied")
 		return false
 	}
 	return true
 }
 
 // serviceAuthorizeRequest is the body of POST /v1/service/credits/authorize
-// (issue #235/#247). payer = the payer org billed; invoker = the canonical invoker
+// (issue #235/#247). payer = the tenant subject billed; invoker = the canonical invoker
 // for per-(payer,invoker) sub-budgets; estimate_cents = the upper-bound charge;
 // request_id = the idempotency key for the placed hold.
 type serviceAuthorizeRequest struct {
@@ -117,16 +117,16 @@ type serviceAuthorizeResponse struct {
 	ReservationID       *uuid.UUID `json:"reservation_id,omitempty"`
 }
 
-// ServiceAuthorizeCredits is the OAT-authed policy-decision + ATOMIC hold
+// ServiceAuthorizeCredits is the service token-authed policy-decision + ATOMIC hold
 // placement (issue #235/#247). The decision (CheckSpendAllowed + prepaid
 // available-balance gate) and the hold are run in ONE transaction so two
 // concurrent authorizes cannot both pass on the same balance.
 //
-// PAYER AUTHORIZATION (issue #246): the acting TENANT is bound by the OAT
-// (middleware.OATRequired pinned it onto the context; RegisterServiceRoutes then
-// pinned the RLS connection), NEVER by the body. The payer (owner org) is read
-// from the body but every credit query runs RLS-scoped to the OAT's tenant, so a
-// payer outside the OAT's tenant is structurally unreachable (its rows carry a
+// PAYER AUTHORIZATION (issue #246): the acting TENANT is bound by the service token
+// (middleware.ServiceTokenRequired pinned it onto the context; RegisterServiceRoutes then
+// pinned the RLS connection), NEVER by the body. The payer (tenant subject) is read
+// from the body but every credit query runs RLS-scoped to the service token's tenant, so a
+// payer outside the service token's tenant is structurally unreachable (its rows carry a
 // different tenant_id and are invisible — fail closed). The route additionally
 // requires PermCreditsSpend (billing:spend), the explicit "may you draw down this
 // payer's balance" gate.
@@ -206,7 +206,7 @@ type serviceBalanceResponse struct {
 
 // ServiceGetCreditsBalance returns the payer's REAL balance snapshot (issue
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
-// Tenant-bound by the OAT (RLS); payer supplied via ?tenant_subject_id=.
+// Tenant-bound by the service token (RLS); payer supplied via ?tenant_subject_id=.
 func ServiceGetCreditsBalance(r *httprequest.Request) {
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
 	if creditType == "" {
@@ -248,7 +248,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 	})
 }
 
-// serviceQueryTenantSubject extracts the payer org from the query string.
+// serviceQueryTenantSubject extracts the tenant subject from the query string.
 func serviceQueryTenantSubject(r *httprequest.Request) (*identity.TenantSubjectID, error) {
 	return parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
 }
@@ -275,7 +275,7 @@ type serviceAccountSettingsRequest struct {
 // ServiceSetCreditAccountSettings (PUT /v1/service/credits/account-settings)
 // configures an org's billing account: prepaid vs arrears mode, spend caps,
 // auto-top-up, and expiry default (issue #242). Tensorhub's billing-admin surface
-// proxies to this with its service OAT; OpenRails owns the settings.
+// proxies to this with its service service token; OpenRails owns the settings.
 func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 	var req serviceAccountSettingsRequest
 	if !r.BindJSON(&req) {
@@ -355,10 +355,10 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 	r.SuccessJSON(settings)
 }
 
-// ServiceListPayerCreditTransactions (GET /v1/service/credits/transactions)
+// ServiceListTenantSubjectCreditTransactions (GET /v1/service/credits/transactions)
 // lists an org's credit transactions (usage history) for the billing-account
 // admin surface (issue #242). Query: payer, credit_type, limit, offset.
-func ServiceListPayerCreditTransactions(r *httprequest.Request) {
+func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
 	if creditType == "" {
 		creditType = "api_credits"
@@ -378,7 +378,7 @@ func ServiceListPayerCreditTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	items, total, err := svc.GetPayerCreditTransactions(r.Request.Context(), *payer, creditType, limit, offset)
+	items, total, err := svc.GetTenantSubjectCreditTransactions(r.Request.Context(), *payer, creditType, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -412,9 +412,9 @@ type serviceUsageRollupRequest struct {
 	GroupBy         string `json:"group_by" binding:"required"`
 }
 
-// ServiceUsageRollup returns per-dimension-value spend for a payer org over a
+// ServiceUsageRollup returns per-dimension-value spend for a tenant subject over a
 // window (#311) — the OpenRails-sourced data behind the tensorhub platform's
-// /budget-usage + revenue analytics. Operator-OAT, credits:read scope.
+// /budget-usage + revenue analytics. Operator-service token, credits:read scope.
 func ServiceUsageRollup(r *httprequest.Request) {
 	var req serviceUsageRollupRequest
 	if !r.BindJSON(&req) {
@@ -666,7 +666,7 @@ func ServiceGetInvokerCredits(r *httprequest.Request) {
 		if !requireServiceTenantSubjectScope(r, *payerOrgID) {
 			return
 		}
-		bal, err := r.State.CreditsService.GetBalanceForPayer(r.Request.Context(), *payerOrgID, creditType)
+		bal, err := r.State.CreditsService.GetBalanceForTenantSubject(r.Request.Context(), *payerOrgID, creditType)
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance

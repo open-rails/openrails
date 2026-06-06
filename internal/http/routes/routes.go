@@ -18,10 +18,10 @@ type Options struct {
 	// neutral Required/Optional middleware for these routes (issue #282/#285).
 	Authenticator billingauth.Authenticator
 
-	// OperatorPermissionChecker, when set, makes the operator org the LIVE
+	// OperatorPermissionChecker, when set, makes the operator tenant the LIVE
 	// authority for admin routes (#224): after the operator-org gate, admin
 	// routes additionally require the openrails:admin permission evaluated live
-	// against the operator org. nil in verifier-only mode (legacy gate only).
+	// against the operator tenant. nil in verifier-only mode (legacy gate only).
 	OperatorPermissionChecker authpolicy.OperatorPermissionChecker
 }
 
@@ -137,8 +137,8 @@ func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 		authpolicy.OperatorAdminRequiredMW(rt.Config, rt.DB.GetDB()),
 	}
 	// #224: when the OpenRails-owned AuthKit control plane is present, the
-	// operator org is the LIVE authority — require the openrails:admin permission
-	// evaluated against the operator org at request time. This is the forward
+	// operator tenant is the LIVE authority — require the openrails:admin permission
+	// evaluated against the operator tenant at request time. This is the forward
 	// path away from the global-admin fallback.
 	if opts.OperatorPermissionChecker != nil {
 		mw = append(mw, authpolicy.OperatorPermissionRequiredMW(opts.OperatorPermissionChecker, authpolicy.PermOperatorAdmin))

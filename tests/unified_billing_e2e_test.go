@@ -14,7 +14,7 @@ package tests
 // Tensorhub call standalone -- implement the unified credit lifecycle
 // correctly: hold for an estimate, capture the actual (full and PARTIAL),
 // release on failure, reject on insufficient balance, dedupe on replay, and
-// scope every operation to (tenant, owner).
+// scope every operation to a tenant subject.
 //
 // HOST'S REMAINING PART (cross-service live wiring, intentionally NOT here):
 //   - The gen-orchestrator driver that, on job submit, calls OpenRails
@@ -28,7 +28,7 @@ package tests
 //     their own integration coverage in this repo; #244's cross-service driver
 //     is what stitches them to a live job and belongs in the embedding repo.
 //
-// This file drives the lifecycle through the OAT-authenticated PUBLIC service
+// This file drives the lifecycle through the service-token-authenticated PUBLIC service
 // routes (issue #222, /v1/service/credits/*) wherever a public route exists --
 // deposit, hold, capture, release, get-credits, transaction lookup -- because
 // that is the standalone server-to-server contract gen-orchestrator / Tensorhub
@@ -57,10 +57,10 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 )
 
-// billingE2EHarness is a small reusable driver over the OAT-authed public
+// billingE2EHarness is a small reusable driver over the service-token-authenticated public
 // service routes. It mirrors the harness style already established in
-// service_facade_parity_test.go (stubOATResolver + RegisterServiceRoutes) so
-// the same OAT contract gen-orchestrator / Tensorhub use is exercised here.
+// service_facade_parity_test.go (stubServiceTokenResolver + RegisterServiceRoutes) so
+// the same server-to-server contract gen-orchestrator / Tensorhub use is exercised here.
 type billingE2EHarness struct {
 	t          *testing.T
 	suite      *TestContainerSuite
@@ -90,14 +90,14 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	router := gin.New()
 	router.Use(ginmw.ResolveTenant())
 	group := router.Group("/v1/service")
-	resolver := stubOATResolver{permissions: []string{
+	resolver := stubServiceTokenResolver{permissions: []string{
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
 		controlplane.PermCreditsSpend,
 	}}
 	// nil minter + issuer-admin: the delegated-token mint/issuer routes are
 	// irrelevant to the money path.
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.OATRequired(resolver), nil, nil)
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver), nil, nil)
 
 	return &billingE2EHarness{
 		t:          t,
@@ -119,7 +119,7 @@ func (h *billingE2EHarness) do(method, path string, body any) *httptest.Response
 		rdr = bytes.NewReader(nil)
 	}
 	req := httptest.NewRequest(method, path, rdr)
-	req.Header.Set("Authorization", "Bearer openrails_oat_testkeyid_testsecret")
+	req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	h.router.ServeHTTP(w, req)
@@ -436,11 +436,11 @@ func TestUnifiedBilling_OwnerScoping(t *testing.T) {
 	}
 }
 
-// TestUnifiedBilling_LifecycleViaPublicOATRoutes is the end-to-end "happy path"
+// TestUnifiedBilling_LifecycleViaPublicServiceTokenRoutes is the end-to-end "happy path"
 // that a gen-orchestrator / Tensorhub driver would run for a single job, all
-// over the OAT-authed public surface, proving the standalone-call contract:
+// over the service-token-authenticated public surface, proving the standalone-call contract:
 // fund -> lookup confirms hold -> capture actual -> ledger conserved.
-func TestUnifiedBilling_LifecycleViaPublicOATRoutes(t *testing.T) {
+func TestUnifiedBilling_LifecycleViaPublicServiceTokenRoutes(t *testing.T) {
 	suite := setupTestSuite(t)
 	h := newBillingE2EHarness(t, suite)
 	user := uuid.NewString()

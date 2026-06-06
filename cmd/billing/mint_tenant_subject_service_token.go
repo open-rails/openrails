@@ -17,7 +17,7 @@ import (
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
-func mintTenantSubjectOAT(cmd *cobra.Command, _ []string) error {
+func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	ctx := context.Background()
 
@@ -41,16 +41,16 @@ func mintTenantSubjectOAT(cmd *cobra.Command, _ []string) error {
 	}
 	operatorOrg = strings.ToLower(strings.TrimSpace(operatorOrg))
 	if operatorOrg == "" && cfg != nil && cfg.Auth != nil {
-		operatorOrg = strings.ToLower(strings.TrimSpace(cfg.Auth.OperatorOrgSlug))
+		operatorOrg = strings.ToLower(strings.TrimSpace(cfg.Auth.OperatorTenantSlug))
 	}
 	if operatorOrg == "" {
 		operatorOrg = "operator"
 	}
 	if _, err := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		OperatorOrgSlug: operatorOrg,
-		MintInitialOAT:  false,
+		OperatorTenantSlug:      operatorOrg,
+		MintInitialServiceToken: false,
 	}); err != nil {
-		return fmt.Errorf("bootstrap operator org/role: %w", err)
+		return fmt.Errorf("bootstrap operator tenant/role: %w", err)
 	}
 
 	tenantRef, err := cmd.Flags().GetString("tenant")
@@ -62,17 +62,13 @@ func mintTenantSubjectOAT(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve tenant %q: %w", tenantRef, err)
 	}
 
-	payerSlug, err := cmd.Flags().GetString("payer")
+	tenantSubjectRef, err := cmd.Flags().GetString("tenant-subject")
 	if err != nil {
-		return fmt.Errorf("read payer flag: %w", err)
+		return fmt.Errorf("read tenant-subject flag: %w", err)
 	}
-	payerSlug = strings.ToLower(strings.TrimSpace(payerSlug))
-	if payerSlug == "" {
-		return fmt.Errorf("--payer is required")
-	}
-	payerOrg, err := cp.Core().ResolveOrgBySlug(ctx, payerSlug)
-	if err != nil {
-		return fmt.Errorf("resolve payer org %q: %w", payerSlug, err)
+	tenantSubjectID, err := uuid.Parse(strings.TrimSpace(tenantSubjectRef))
+	if err != nil || tenantSubjectID == uuid.Nil {
+		return fmt.Errorf("--tenant-subject must be a tenant subject UUID")
 	}
 
 	name, err := cmd.Flags().GetString("name")
@@ -81,7 +77,7 @@ func mintTenantSubjectOAT(cmd *cobra.Command, _ []string) error {
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = "openrails-payer-" + payerSlug
+		name = "openrails-tenant-subject-" + tenantSubjectID.String()
 	}
 
 	permissions, err := cmd.Flags().GetStringSlice("permission")
@@ -95,33 +91,28 @@ func mintTenantSubjectOAT(cmd *cobra.Command, _ []string) error {
 		permissions = []string{controlplane.PermCreditsSpend}
 	}
 
-	payerID, err := uuid.Parse(payerOrg.ID)
-	if err != nil {
-		return fmt.Errorf("payer org %q has invalid id %q: %w", payerSlug, payerOrg.ID, err)
-	}
-	resources := []authcore.OrgAccessTokenResource{
+	resources := []authcore.ServiceTokenResource{
 		tenantResource,
-		controlplane.TenantSubjectResource(payerID),
+		controlplane.TenantSubjectResource(tenantSubjectID),
 	}
-	oat, token, err := cp.Core().MintOrgAccessTokenWithOptions(ctx, operatorOrg, authcore.OrgAccessTokenMintOptions{
+	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, operatorOrg, authcore.ServiceTokenMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,
 	})
 	if err != nil {
-		return fmt.Errorf("mint payer oat: %w", err)
+		return fmt.Errorf("mint tenant subject serviceToken: %w", err)
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":               operatorOrg,
-		"name":              name,
-		"tenant":            tenantSlug,
-		"tenant_id":         tenantID.String(),
-		"payer":             payerSlug,
-		"tenant_subject_id": payerOrg.ID,
-		"oat_key_id":        oat.KeyID,
-		"oat_secret":        token,
-		"permissions":       oat.Permissions,
-		"resources":         oat.Resources,
+		"org":                  operatorOrg,
+		"name":                 name,
+		"tenant":               tenantSlug,
+		"tenant_id":            tenantID.String(),
+		"tenant_subject_id":    tenantSubjectID.String(),
+		"service_token_key_id": serviceToken.KeyID,
+		"service_token_secret": token,
+		"permissions":          serviceToken.Permissions,
+		"resources":            serviceToken.Resources,
 	})
 }

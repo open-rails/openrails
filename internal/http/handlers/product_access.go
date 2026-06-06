@@ -170,10 +170,10 @@ func newProductAccessCheck(productID uuid.UUID, userID string, has bool) product
 	return productAccessCheckResponse{UserID: userID, ProductID: productID.String(), HasAccess: has}
 }
 
-// --- OAT service (GET /v1/service/users/:user_id/product-access) ---
+// --- service token service (GET /v1/service/users/:user_id/product-access) ---
 
 // ServiceGetUserProductAccess lists a user's accessible products for a
-// server-to-server (OAT) caller. Optional ?product_id=... narrows to a single
+// server-to-server (service token) caller. Optional ?product_id=... narrows to a single
 // has-access check.
 func ServiceGetUserProductAccess(r *httprequest.Request) {
 	userID := strings.TrimSpace(r.Param("user_id"))

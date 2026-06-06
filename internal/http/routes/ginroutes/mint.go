@@ -24,7 +24,7 @@ type DelegatedMinter interface {
 
 // mintDelegatedTokenRequest is the body of POST /v1/service/delegated-tokens.
 // The tenant is deliberately ABSENT: it is resolved server-side from the calling
-// OAT so a host backend can never mint cross-tenant.
+// service token so a host backend can never mint cross-tenant.
 type mintDelegatedTokenRequest struct {
 	// DelegatedSub is the end-user id the minted browser token acts as.
 	DelegatedSub string `json:"delegated_sub" binding:"required"`
@@ -46,13 +46,13 @@ type mintDelegatedTokenResponse struct {
 // mintDelegatedTokenHandler builds the POST /v1/service/delegated-tokens handler.
 //
 // It is the MINT side of the browser-direct delegated-token tier: a tenant's host
-// backend (authenticated by an OpenRails OAT holding PermSelfMint) asks OpenRails
+// backend (authenticated by an OpenRails service token holding PermSelfMint) asks OpenRails
 // to mint a short-lived, user-scoped delegated access token it can hand to a
 // browser for the `/v1/self/*` surface. Host backends do NOT hold the control
 // plane's signing key, so OpenRails mints on their behalf.
 //
-// SECURITY: the minted token's tenant is taken from the CALLING OAT (resolved by
-// OATRequired), NEVER from the request body. This makes cross-tenant minting
+// SECURITY: the minted token's tenant is taken from the CALLING service token (resolved by
+// ServiceTokenRequired), NEVER from the request body. This makes cross-tenant minting
 // impossible. Every requested permission must be in the `openrails:self:*` self
 // catalog; any other permission is rejected.
 func mintDelegatedTokenHandler(minter DelegatedMinter) gin.HandlerFunc {
@@ -63,10 +63,10 @@ func mintDelegatedTokenHandler(minter DelegatedMinter) gin.HandlerFunc {
 			return
 		}
 
-		// Resolve the tenant from the authenticated OAT — never the body.
-		oat, ok := ginmw.OATFromGin(c)
-		if !ok || oat == nil {
-			response.UnauthorizedWithMessage(c, "oat required")
+		// Resolve the tenant from the authenticated service token — never the body.
+		serviceToken, ok := ginmw.ServiceTokenFromGin(c)
+		if !ok || serviceToken == nil {
+			response.UnauthorizedWithMessage(c, "service token required")
 			c.Abort()
 			return
 		}
@@ -84,9 +84,9 @@ func mintDelegatedTokenHandler(minter DelegatedMinter) gin.HandlerFunc {
 		}
 
 		minted, err := minter.MintDelegatedAccessToken(c.Request.Context(), controlplane.MintDelegatedParams{
-			// Tenant is bound to the OAT's owning org slug — the SAME value the
+			// Tenant is bound to the service token's owning org slug — the SAME value the
 			// delegated verifier maps back to this tenant. Body cannot override it.
-			Tenant:           oat.OrgSlug,
+			Tenant:           serviceToken.AuthKitTenantSlug,
 			DelegatedSubject: req.DelegatedSub,
 			Permissions:      req.Permissions,
 			TTL:              ttl,
@@ -100,8 +100,8 @@ func mintDelegatedTokenHandler(minter DelegatedMinter) gin.HandlerFunc {
 				response.BadRequest(c, "delegated_sub_required")
 			case errors.Is(err, controlplane.ErrMintNoPermissions):
 				response.BadRequest(c, "permissions_required")
-			case errors.Is(err, controlplane.ErrOATTenantUnresolved):
-				response.ForbiddenWithMessage(c, "oat_tenant_unresolved")
+			case errors.Is(err, controlplane.ErrServiceTokenTenantUnresolved):
+				response.ForbiddenWithMessage(c, "service_token_tenant_unresolved")
 			case errors.Is(err, controlplane.ErrMintNotConfigured):
 				response.InternalError(c, "delegated mint not configured")
 			default:

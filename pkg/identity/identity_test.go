@@ -7,7 +7,7 @@ import (
 )
 
 // TestTenantSubjectIDFromString_ParsesUUID asserts a valid UUID subject resolves to
-// the same owner org id (the caller-provided personal-org / account id).
+// the same tenant subject id (the caller-provided personal tenant-subject / account id).
 func TestTenantSubjectIDFromString_ParsesUUID(t *testing.T) {
 	u := uuid.New()
 	got := TenantSubjectIDFromString(u.String())

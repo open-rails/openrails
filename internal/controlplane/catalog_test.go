@@ -104,24 +104,24 @@ func TestCatalogNames_StableOrder(t *testing.T) {
 func TestAnyLiveOAT(t *testing.T) {
 	now := time.Now()
 	revoked := &now
-	if anyLiveOAT(nil) {
-		t.Error("nil OATs should not be live")
+	if anyLiveServiceToken(nil) {
+		t.Error("nil service tokens should not be live")
 	}
-	if anyLiveOAT([]authcore.OrgAccessToken{{RevokedAt: revoked}}) {
-		t.Error("only-revoked OATs should not count as live")
+	if anyLiveServiceToken([]authcore.ServiceToken{{RevokedAt: revoked}}) {
+		t.Error("only-revoked service tokens should not count as live")
 	}
-	if !anyLiveOAT([]authcore.OrgAccessToken{{RevokedAt: nil}}) {
-		t.Error("a non-revoked OAT should count as live")
+	if !anyLiveServiceToken([]authcore.ServiceToken{{RevokedAt: nil}}) {
+		t.Error("a non-revoked service token should count as live")
 	}
-	if !anyLiveOAT([]authcore.OrgAccessToken{{RevokedAt: revoked}, {RevokedAt: nil}}) {
-		t.Error("a mix with one live OAT should count as live")
+	if !anyLiveServiceToken([]authcore.ServiceToken{{RevokedAt: revoked}, {RevokedAt: nil}}) {
+		t.Error("a mix with one live service token should count as live")
 	}
 }
 
 // TestOperatorRoleExcludesPlatformSuperadmin proves the #226 separation: a
 // tenant operator role is granted the full catalog EXCEPT the cross-tenant
 // platform-superadmin permission, so a tenant operator admin can never reach the
-// platform surface via their operator org.
+// platform surface via their operator tenant.
 func TestOperatorRoleExcludesPlatformSuperadmin(t *testing.T) {
 	for _, p := range OperatorRolePermissions() {
 		if p == PermPlatformSuperadmin {
@@ -136,7 +136,7 @@ func TestOperatorRoleExcludesPlatformSuperadmin(t *testing.T) {
 
 // TestCreditsSpendPermission_GateSemantics proves the billing:spend (#246) gate:
 // the operator role holds credits:spend by default (member role default-grant),
-// an OAT WITHOUT it fails the spend gate while still passing credits:write, and
+// an service token WITHOUT it fails the spend gate while still passing credits:write, and
 // PermAdmin satisfies it.
 func TestCreditsSpendPermission_GateSemantics(t *testing.T) {
 	// Default-grant: the operator role includes billing:spend.
@@ -144,23 +144,23 @@ func TestCreditsSpendPermission_GateSemantics(t *testing.T) {
 		t.Fatalf("operator role must include %q (default member grant, #246)", PermCreditsSpend)
 	}
 
-	// A cost-governed OAT with write but NOT spend fails the spend gate.
-	writeOnly := &ResolvedOAT{Permissions: []string{PermCreditsWrite}}
+	// A cost-governed service token with write but NOT spend fails the spend gate.
+	writeOnly := &ResolvedServiceToken{Permissions: []string{PermCreditsWrite}}
 	if writeOnly.HasPermission(PermCreditsSpend) {
 		t.Fatalf("credits:write must NOT imply credits:spend (#246: separate gates)")
 	}
 	if !writeOnly.HasPermission(PermCreditsWrite) {
-		t.Fatalf("write-only OAT must still pass the write gate")
+		t.Fatalf("write-only service token must still pass the write gate")
 	}
 
-	// An OAT holding billing:spend passes the spend gate.
-	spender := &ResolvedOAT{Permissions: []string{PermCreditsWrite, PermCreditsSpend}}
+	// An service token holding billing:spend passes the spend gate.
+	spender := &ResolvedServiceToken{Permissions: []string{PermCreditsWrite, PermCreditsSpend}}
 	if !spender.HasPermission(PermCreditsSpend) {
-		t.Fatalf("OAT holding %q must pass the spend gate", PermCreditsSpend)
+		t.Fatalf("service token holding %q must pass the spend gate", PermCreditsSpend)
 	}
 
 	// PermAdmin satisfies the spend gate (broad operator authority).
-	admin := &ResolvedOAT{Permissions: []string{PermAdmin}}
+	admin := &ResolvedServiceToken{Permissions: []string{PermAdmin}}
 	if !admin.HasPermission(PermCreditsSpend) {
 		t.Fatalf("PermAdmin must satisfy the spend gate")
 	}

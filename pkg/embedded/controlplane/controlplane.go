@@ -79,8 +79,8 @@ func Attach(ctx context.Context, a *app.App, cfg *config.Config, injectedPool *p
 }
 
 // RunBootstrap idempotently bootstraps the OpenRails-owned AuthKit control plane
-// (#224): ensures the default tenant's operator org, OpenRails operator role, the
-// openrails.* permission catalog, and an initial operator OAT, plus the
+// (#224): ensures the default tenant's operator tenant, OpenRails operator role, the
+// openrails.* permission catalog, and an initial operator service token, plus the
 // managed-hosting platform superadmin org+role when configured (#226). It is a
 // no-op when the control plane is disabled.
 //
@@ -91,15 +91,15 @@ func RunBootstrap(ctx context.Context, a *app.App, opts controlplane.BootstrapOp
 	if cp == nil {
 		return nil, nil
 	}
-	if !opts.MintInitialOAT {
-		opts.MintInitialOAT = true
+	if !opts.MintInitialServiceToken {
+		opts.MintInitialServiceToken = true
 	}
 	res, err := cp.Bootstrap(ctx, opts)
 	if err != nil {
 		return res, err
 	}
 	// #226: also ensure the managed-hosting platform superadmin org + role when
-	// configured. No-op when no platform org is set (single-tenant / non-managed).
+	// configured. No-op when no platform tenant is set (single-tenant / non-managed).
 	if _, perr := cp.BootstrapPlatform(ctx); perr != nil {
 		return res, fmt.Errorf("platform superadmin bootstrap: %w", perr)
 	}

@@ -3,7 +3,7 @@
 --
 -- A list of known-bad payment identifiers (card fingerprints, processor customer
 -- ids, emails, IPs) so checkout/admission can later DENY them. Each row is either
--- tenant-wide (owner_id NULL) or scoped to a single owner org (owner_id set).
+-- tenant-wide (owner_id NULL) or scoped to a single tenant subject (owner_id set).
 --
 -- This slice builds ONLY the blocklist primitive (table + lookup). Wiring it into
 -- the checkout/admission deny path — plus velocity caps and new-account default
@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS billing.payment_blocklist (
     -- Tenant scoping (issue #223 / #227). NOT NULL: every entry belongs to a tenant.
     tenant_id   UUID        NOT NULL,
 
-    -- Owner org the block is scoped to. NULL = tenant-wide block (applies to all
-    -- owners in the tenant); set = block only for that owner org (issue #221).
+    -- Tenant subject the block is scoped to. NULL = tenant-wide block (applies to all
+    -- owners in the tenant); set = block only for that tenant subject (issue #221).
     owner_id    UUID,
 
     -- What kind of identifier is blocked.

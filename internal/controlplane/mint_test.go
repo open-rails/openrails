@@ -2,7 +2,7 @@ package controlplane
 
 import (
 	"context"
-	"crypto/rsa"
+	"crypto"
 	"errors"
 	"testing"
 	"time"
@@ -19,7 +19,7 @@ import (
 // honored, non-self permissions are refused, and the TTL is clamped. They build a
 // minimal ControlPlane wired with a freshly generated signing key — the same key
 // the test verifier trusts — so no database is needed (the tenant resolution in
-// ResolveDelegated is covered by the OAT/middleware tests).
+// ResolveDelegated is covered by the service token/middleware tests).
 
 // newMintControlPlane builds a ControlPlane whose active signer + the returned
 // verifier share one generated key, mirroring how New wires the real deployment.
@@ -35,7 +35,7 @@ func newMintControlPlane(t *testing.T) (*ControlPlane, *authhttp.Verifier) {
 	}
 
 	v := authhttp.NewVerifier(
-		authhttp.WithOrgMode("multi"),
+		authhttp.WithTenantMode("multi"),
 		authhttp.WithPermissionCatalog(func(permissions []string) error {
 			if len(permissions) == 0 {
 				return errors.New("delegated token carries no permissions")
@@ -49,12 +49,12 @@ func newMintControlPlane(t *testing.T) (*ControlPlane, *authhttp.Verifier) {
 		}),
 	)
 	require.NoError(t, v.AddIssuer(testDelegatedIssuer, []string{canonicalAudience}, authhttp.IssuerOptions{
-		RawKeys: map[string]*rsa.PublicKey{testDelegatedKID: signer.PublicKey()},
+		RawKeys: map[string]crypto.PublicKey{testDelegatedKID: signer.PublicKey()},
 	}))
 	return cp, v
 }
 
-// (1) An OAT-authed mint returns a token the EXISTING /v1/self delegated verifier
+// (1) An service token-authed mint returns a token the EXISTING /v1/self delegated verifier
 // accepts for the same tenant + delegated_sub.
 func TestMintDelegated_RoundTripsThroughSelfVerifier(t *testing.T) {
 	cp, v := newMintControlPlane(t)
@@ -104,7 +104,7 @@ func TestMintDelegated_RejectsMintPermissionItself(t *testing.T) {
 }
 
 // (3) The minted token's tenant always equals the param tenant (the handler binds
-// it to the OAT's tenant; here we assert mint honors exactly what it is given and
+// it to the service token's tenant; here we assert mint honors exactly what it is given and
 // never derives tenant from elsewhere).
 func TestMintDelegated_TenantIsExactlyTheParam(t *testing.T) {
 	cp, v := newMintControlPlane(t)
@@ -127,7 +127,7 @@ func TestMintDelegated_RejectsEmptyTenant(t *testing.T) {
 		DelegatedSubject: testDelegatedSubject,
 		Permissions:      []string{PermSelfBillingRead},
 	})
-	require.ErrorIs(t, err, ErrOATTenantUnresolved)
+	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
 }
 
 func TestMintDelegated_RejectsEmptySubject(t *testing.T) {

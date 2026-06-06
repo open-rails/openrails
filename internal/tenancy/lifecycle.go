@@ -13,15 +13,15 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// OrgProvisioner is the slice of the #224 control plane the lifecycle service
-// needs to create/link a tenant's operator AuthKit org and seed its role. The
+// TenantProvisioner is the slice of the #224 control plane the lifecycle service
+// needs to create/link a tenant's operator AuthKit tenant and seed its role. The
 // concrete *controlplane.ControlPlane satisfies it (see the adapter in
 // internal/controlplane), and tests inject a fake so lifecycle logic is exercised
 // without a live AuthKit/DB.
-type OrgProvisioner interface {
-	// EnsureTenantOrg idempotently ensures an AuthKit org for the given slug
+type TenantProvisioner interface {
+	// EnsureAuthKitTenant idempotently ensures an AuthKit tenant for the given slug
 	// exists with the OpenRails operator role + full catalog, returning its id.
-	EnsureTenantOrg(ctx context.Context, orgSlug string) (orgID string, err error)
+	EnsureAuthKitTenant(ctx context.Context, orgSlug string) (orgID string, err error)
 }
 
 // TenantStatus mirrors billing.tenants.status.
@@ -35,17 +35,17 @@ const (
 
 // Tenant is the directory view of a row in billing.tenants.
 type Tenant struct {
-	ID             tenant.ID
-	Slug           string
-	Name           string
-	Status         TenantStatus
-	AuthKitOrgID   string
-	AuthKitOrgSlug string
-	BillingTier    string
-	Region         string
-	WebhookHost    string
-	WebhookPath    string
-	SuspendedAt    *time.Time
+	ID                tenant.ID
+	Slug              string
+	Name              string
+	Status            TenantStatus
+	AuthKitTenantID   string
+	AuthKitTenantSlug string
+	BillingTier       string
+	Region            string
+	WebhookHost       string
+	WebhookPath       string
+	SuspendedAt       *time.Time
 }
 
 // ProvisionRequest parameterizes tenant provisioning.
@@ -54,9 +54,9 @@ type ProvisionRequest struct {
 	Slug string
 	// Name is the human-readable tenant name.
 	Name string
-	// OperatorOrgSlug is the AuthKit org slug that operates this tenant. Defaults
+	// OperatorTenantSlug is the AuthKit tenant slug that operates this tenant. Defaults
 	// to "tenant-<slug>" when empty.
-	OperatorOrgSlug string
+	OperatorTenantSlug string
 	// BillingTier is the platform's own billing tier for this tenant (dogfood).
 	BillingTier string
 	// Region is optional hosting metadata.
@@ -75,17 +75,17 @@ var ErrExportRequired = errors.New("tenancy: export required before delete")
 
 // Service is the tenant provisioning + lifecycle service (issue #225). It owns
 // the billing.tenants directory rows and per-tenant secrets, and delegates
-// operator-org/OAT creation to the control plane via OrgProvisioner.
+// operator-org/service token creation to the control plane via TenantProvisioner.
 type Service struct {
 	pool    *pgxpool.Pool
-	orgs    OrgProvisioner // optional: nil disables org linking (DB-only mode)
+	orgs    TenantProvisioner // optional: nil disables org linking (DB-only mode)
 	secrets TenantSecretStore
 }
 
 // NewService builds the lifecycle service. pool is required (it owns the tenant
-// directory). orgs may be nil (provision then records no operator org). secrets
+// directory). orgs may be nil (provision then records no operator tenant). secrets
 // may be nil (credential management disabled).
-func NewService(pool *pgxpool.Pool, orgs OrgProvisioner, secrets TenantSecretStore) (*Service, error) {
+func NewService(pool *pgxpool.Pool, orgs TenantProvisioner, secrets TenantSecretStore) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("tenancy: pgx pool is required")
 	}
@@ -98,7 +98,7 @@ func (s *Service) Secrets() TenantSecretStore { return s.secrets }
 // Provision idempotently provisions a tenant (issue #225):
 //
 //  1. create/ensure the billing.tenants namespace row (resolve by slug),
-//  2. create/link the operator AuthKit org via the control plane and record it,
+//  2. create/link the operator AuthKit tenant via the control plane and record it,
 //  3. record routing (webhook host/path) + billing tier + region.
 //
 // Re-running with the same slug returns the existing tenant (no duplicate row,
@@ -114,7 +114,7 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant,
 	if name == "" {
 		name = slug
 	}
-	orgSlug := normalizeSlug(req.OperatorOrgSlug)
+	orgSlug := normalizeSlug(req.OperatorTenantSlug)
 	if orgSlug == "" {
 		orgSlug = "tenant-" + slug
 	}
@@ -136,22 +136,22 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant,
 		return nil, err
 	}
 
-	// 2. Create/link the operator org and record it on the tenant row (idempotent).
+	// 2. Create/link the operator tenant and record it on the tenant row (idempotent).
 	if s.orgs != nil {
-		orgID, oerr := s.orgs.EnsureTenantOrg(ctx, orgSlug)
+		orgID, oerr := s.orgs.EnsureAuthKitTenant(ctx, orgSlug)
 		if oerr != nil {
-			return nil, fmt.Errorf("tenancy: ensure operator org %q: %w", orgSlug, oerr)
+			return nil, fmt.Errorf("tenancy: ensure operator tenant %q: %w", orgSlug, oerr)
 		}
 		if _, uerr := s.pool.Exec(ctx, `
 			UPDATE billing.tenants
-			   SET authkit_org_id = $2, authkit_org_slug = $3, updated_at = current_timestamp
+			   SET authkit_tenant_id = $2, authkit_tenant_slug = $3, updated_at = current_timestamp
 			 WHERE id = $1::uuid
-			   AND (authkit_org_id IS DISTINCT FROM $2 OR authkit_org_slug IS DISTINCT FROM $3)
+			   AND (authkit_tenant_id IS DISTINCT FROM $2 OR authkit_tenant_slug IS DISTINCT FROM $3)
 		`, t.ID.String(), orgID, orgSlug); uerr != nil {
-			return nil, fmt.Errorf("tenancy: record operator org on tenant: %w", uerr)
+			return nil, fmt.Errorf("tenancy: record operator tenant on tenant: %w", uerr)
 		}
-		t.AuthKitOrgID = orgID
-		t.AuthKitOrgSlug = orgSlug
+		t.AuthKitTenantID = orgID
+		t.AuthKitTenantSlug = orgSlug
 	}
 
 	// 3. Reconcile routing / tier / region for an already-existing row (provision
@@ -286,7 +286,7 @@ func normalizeSlug(s string) string {
 }
 
 const tenantSelectCols = `id::text, slug, name, status,
-	COALESCE(authkit_org_id,''), COALESCE(authkit_org_slug,''),
+	COALESCE(authkit_tenant_id,''), COALESCE(authkit_tenant_slug,''),
 	COALESCE(billing_tier,''), COALESCE(region,''),
 	COALESCE(webhook_host,''), COALESCE(webhook_path,''), suspended_at`
 
@@ -298,7 +298,7 @@ func scanTenant(row pgx.Row) (*Tenant, error) {
 		suspendedAt *time.Time
 	)
 	if err := row.Scan(&idStr, &t.Slug, &t.Name, &status,
-		&t.AuthKitOrgID, &t.AuthKitOrgSlug, &t.BillingTier, &t.Region,
+		&t.AuthKitTenantID, &t.AuthKitTenantSlug, &t.BillingTier, &t.Region,
 		&t.WebhookHost, &t.WebhookPath, &suspendedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrTenantNotFound

@@ -31,9 +31,9 @@ host: "0.0.0.0"        # Address to bind to (default: 0.0.0.0)
 port: 2053             # Public HTTP/HTTPS port (default: 2053)
 
 # Server-to-server calls (credits, entitlements) authenticate with
-# OpenRails-issued tenant OATs on this SAME public port. There is no separate
+# OpenRails-issued tenant service tokens on this SAME public port. There is no separate
 # private/mTLS service listener, no service port, and no API key (issue #222).
-# OATs are minted/resolved through the OpenRails-owned AuthKit control plane;
+# service tokens are minted/resolved through the OpenRails-owned AuthKit control plane;
 # see auth.control_plane.* below. Any infrastructure TLS / service mesh is
 # deployment-owned and is NOT part of OpenRails authorization.
 
@@ -155,9 +155,9 @@ auth:
   # Expected audience - the expected "aud" claim in incoming JWTs
   expected_audience: "openrails-app"
 
-  # operator_org_slug, when set, makes the named AuthKit org the admin authority
+  # operator_tenant_slug, when set, makes the named AuthKit tenant the admin authority
   # for /admin/* routes (instead of a global "admin" role). See #221.
-  # operator_org_slug: "operator"
+  # operator_tenant_slug: "operator"
 
   # ---------------------------------------------------------------------------
   # OpenRails-owned AuthKit control plane (#224). OPTIONAL and OFF by default.
@@ -166,19 +166,19 @@ auth:
   #   * selectively mounts only intentional AuthKit route groups under /auth
   #     (NEVER AuthKit DefaultAPI in locked-down mode),
   #   * disables public user registration + public org management (self-hosted),
-  #   * bootstraps the default tenant's operator org + openrails.* permission
-  #     catalog + operator role + an initial operator OAT at startup.
+  #   * bootstraps the default tenant's operator tenant + openrails.* permission
+  #     catalog + operator role + an initial operator service token at startup.
   # The control plane needs a database holding AuthKit's profiles.* schema.
   # ---------------------------------------------------------------------------
   # control_plane:
   #   enabled: true
   #   issuer: "https://billing.mysite.com"   # AuthKit token issuer this CP signs as
-  #   org_mode: "multi"                       # required for operator-org + OATs
-  #   token_prefix: "openrails"               # OAT brand prefix -> openrails_oat_...
+  #   org_mode: "multi"                       # required for operator-org + service tokens
+  #   token_prefix: "openrails"               # service token brand prefix -> openrails_st_...
   #   locked_down: true                       # self-hosted posture (default true)
   #   # issued_audiences: ["openrails-app"]   # defaults to expected_audience
   #   # expected_audiences: ["openrails-app"]
-  #   # operator_oat_name: "openrails-bootstrap-operator"
+  #   # operator_service_token_name: "openrails-bootstrap-operator"
 
 # =============================================================================
 # ENCRYPTION AT REST (issue #227)

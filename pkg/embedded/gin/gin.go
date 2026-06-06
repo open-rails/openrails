@@ -33,7 +33,7 @@ type RouteOptions struct {
 }
 
 // Handler returns the full standalone gin HTTP surface for the embedded app:
-// health + debug (dev only) + user + admin + webhooks + the OAT-authenticated
+// health + debug (dev only) + user + admin + webhooks + the service token-authenticated
 // server-to-server service routes. It is built from the gin-free app graph and
 // is intended for the standalone server entrypoint (cmd/billing).
 func Handler(e *embedded.Embedded) (http.Handler, error) {

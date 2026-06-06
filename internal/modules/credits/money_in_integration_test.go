@@ -179,7 +179,7 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 	require.Equal(t, int64(5000), ch.charges[0].AmountCents)
 	require.Equal(t, pm, ch.charges[0].PaymentMethodID)
 
-	bal, err := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, err := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(5500), bal.Balance) // 500 + 5000
 
@@ -207,7 +207,7 @@ func TestRunAutoTopups_Declined(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Len(t, ch.charges, 1, "charge attempted")
-	bal, err := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, err := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), bal.Balance, "declined -> no deposit")
 }

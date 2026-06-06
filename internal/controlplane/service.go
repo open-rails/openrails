@@ -19,7 +19,7 @@ import (
 
 // ControlPlane is OpenRails' in-process AuthKit control plane (issue #224). It
 // wraps an AuthKit http.Service (which exposes selectable route groups) and its
-// underlying core.Service (used for in-process org/role/OAT bootstrap calls).
+// underlying core.Service (used for in-process org/role/service token bootstrap calls).
 //
 // It is constructed only when auth.control_plane.enabled is true. In pure
 // verifier mode this is never built and OpenRails keeps acting as an external
@@ -122,15 +122,15 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 	}
 
 	coreCfg := authcore.Config{
-		Keys:              keySource,
-		Issuer:            issuer,
-		BaseURL:           issuer,
-		IssuedAudiences:   issued,
-		ExpectedAudiences: expected,
-		OrgMode:           orgMode,
-		TokenPrefix:       strings.TrimSpace(cp.TokenPrefix),
-		Environment:       strings.TrimSpace(cfg.Env),
-		PermissionCatalog: Catalog(),
+		Keys:               keySource,
+		Issuer:             issuer,
+		BaseURL:            issuer,
+		IssuedAudiences:    issued,
+		ExpectedAudiences:  expected,
+		TenantMode:         orgMode,
+		ServiceTokenPrefix: strings.TrimSpace(cp.TokenPrefix),
+		Environment:        strings.TrimSpace(cfg.Env),
+		PermissionCatalog:  Catalog(),
 		DefaultRoles: []authcore.DefaultRole{
 			// The operator role is also declared as a per-org DefaultRole so that
 			// AssignRole can materialize it lazily even on orgs created outside the
@@ -139,9 +139,9 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		},
 		// Self-hosted locked-down posture (#47 switches): no public user
 		// self-registration, no public org onboarding/management. Embedded
-		// bootstrap/core calls (CreateOrg/AssignRole/MintOAT) are unaffected.
-		PublicRegistrationDisabled:  locked,
-		PublicOrgManagementDisabled: locked,
+		// bootstrap/core calls (CreateTenant/AssignRole/MintOAT) are unaffected.
+		PublicRegistrationDisabled:     locked,
+		PublicTenantManagementDisabled: locked,
 	}
 
 	authSvc, err := authhttp.NewService(coreCfg)
@@ -182,7 +182,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 }
 
 // Core returns the underlying AuthKit core service used for in-process
-// org/role/OAT operations.
+// org/role/service token operations.
 func (c *ControlPlane) Core() *authcore.Service {
 	if c == nil {
 		return nil

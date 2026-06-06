@@ -147,7 +147,7 @@ func DetachProductFeature(r *httprequest.Request) {
 
 // ServiceGetActiveEntitlements handles
 // GET /v1/service/entitlements/active_entitlements?user_id=...
-// for server-to-server callers (OAT-gated). It returns the Stripe-shaped active
+// for server-to-server callers (service token-gated). It returns the Stripe-shaped active
 // entitlements for the given user.
 func ServiceGetActiveEntitlements(r *httprequest.Request) {
 	svc := featureService(r)

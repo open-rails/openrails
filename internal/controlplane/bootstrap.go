@@ -14,46 +14,46 @@ import (
 
 // BootstrapResult reports what the idempotent bootstrap did/ensured.
 type BootstrapResult struct {
-	OperatorOrgSlug string
-	OperatorOrgID   string
-	// OrgCreated is true if CreateOrg ran (false if the org already existed).
-	OrgCreated bool
-	// OATMinted is true if an initial operator OAT was minted on this run
-	// (false if one already existed). When true, OATSecret holds the one-time
+	OperatorTenantSlug string
+	OperatorTenantID   string
+	// TenantCreated is true if CreateTenant ran (false if the org already existed).
+	TenantCreated bool
+	// ServiceTokenMinted is true if an initial operator service token was minted on this run
+	// (false if one already existed). When true, ServiceTokenSecret holds the one-time
 	// plaintext token — it is NOT persisted by AuthKit and cannot be recovered.
-	OATMinted bool
-	OATSecret string
-	OATKeyID  string
+	ServiceTokenMinted bool
+	ServiceTokenSecret string
+	ServiceTokenKeyID  string
 }
 
 // BootstrapOptions parameterizes the control-plane bootstrap.
 type BootstrapOptions struct {
-	// OperatorOrgSlug is the AuthKit org slug that operates the default tenant.
-	// When empty, falls back to auth.operator_org_slug, then "operator".
-	OperatorOrgSlug string
+	// OperatorTenantSlug is the AuthKit tenant slug that operates the default tenant.
+	// When empty, falls back to auth.operator_tenant_slug, then "operator".
+	OperatorTenantSlug string
 
 	// InitialAdminUserID, when set, is assigned the operator role in the
-	// operator org (the user must already exist and be a member, or AddMember is
-	// attempted first). Optional: self-hosted bootstrap may seed the operator OAT
+	// operator tenant (the user must already exist and be a member, or AddMember is
+	// attempted first). Optional: self-hosted bootstrap may seed the operator service token
 	// alone and add an admin user later.
 	InitialAdminUserID string
 
-	// MintInitialOAT controls whether an operator OAT is minted when none exists.
+	// MintInitialServiceToken controls whether an operator service token is minted when none exists.
 	// Defaults to true.
-	MintInitialOAT bool
+	MintInitialServiceToken bool
 }
 
 // Bootstrap idempotently ensures the OpenRails control-plane state for the
-// DEFAULT tenant (#223): the operator AuthKit org exists, the OpenRails operator
+// DEFAULT tenant (#223): the operator AuthKit tenant exists, the OpenRails operator
 // role is defined and granted the full `openrails:*` permission catalog, the
-// default tenant directory row records the operator org, and (optionally) an
-// initial operator OAT is minted when the org has none.
+// default tenant directory row records the operator tenant, and (optionally) an
+// initial operator service token is minted when the org has none.
 //
 // It runs AFTER migrations / at startup, exclusively through in-process AuthKit
-// CORE calls (CreateOrg / DefineRole / SetRolePermissions / AssignRole /
-// MintOrgAccessToken) — never raw AuthKit SQL or a private HTTP route. Re-running
+// CORE calls (CreateTenant / DefineRole / SetRolePermissions / AssignRole /
+// MintServiceToken) — never raw AuthKit SQL or a private HTTP route. Re-running
 // it is safe: org creation, role definition, and catalog seeding are upserts;
-// the OAT is minted only when none already exists.
+// the service token is minted only when none already exists.
 func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*BootstrapResult, error) {
 	if c == nil {
 		return nil, errors.New("controlplane: nil control plane")
@@ -63,38 +63,38 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		return nil, errors.New("controlplane: core service unavailable")
 	}
 
-	slug := strings.ToLower(strings.TrimSpace(opts.OperatorOrgSlug))
+	slug := strings.ToLower(strings.TrimSpace(opts.OperatorTenantSlug))
 	if slug == "" && c.cfg != nil && c.cfg.Auth != nil {
-		slug = strings.ToLower(strings.TrimSpace(c.cfg.Auth.OperatorOrgSlug))
+		slug = strings.ToLower(strings.TrimSpace(c.cfg.Auth.OperatorTenantSlug))
 	}
 	if slug == "" {
 		slug = "operator"
 	}
 
-	res := &BootstrapResult{OperatorOrgSlug: slug}
+	res := &BootstrapResult{OperatorTenantSlug: slug}
 
-	// 1. Ensure the operator org exists (idempotent: resolve, else create).
-	org, err := core.ResolveOrgBySlug(ctx, slug)
+	// 1. Ensure the operator tenant exists (idempotent: resolve, else create).
+	org, err := core.ResolveTenantBySlug(ctx, slug)
 	if err != nil {
-		if !errors.Is(err, authcore.ErrOrgNotFound) {
-			return nil, fmt.Errorf("controlplane: resolve operator org %q: %w", slug, err)
+		if !errors.Is(err, authcore.ErrTenantNotFound) {
+			return nil, fmt.Errorf("controlplane: resolve operator tenant %q: %w", slug, err)
 		}
-		created, cerr := core.CreateOrg(ctx, slug)
+		created, cerr := core.CreateTenant(ctx, slug)
 		if cerr != nil {
 			if !errors.Is(cerr, authcore.ErrOwnerSlugTaken) {
-				return nil, fmt.Errorf("controlplane: create operator org %q: %w", slug, cerr)
+				return nil, fmt.Errorf("controlplane: create operator tenant %q: %w", slug, cerr)
 			}
-			created, cerr = core.ResolveOrgBySlug(ctx, slug)
+			created, cerr = core.ResolveTenantBySlug(ctx, slug)
 			if cerr != nil {
-				return nil, fmt.Errorf("controlplane: resolve concurrently-created operator org %q: %w", slug, cerr)
+				return nil, fmt.Errorf("controlplane: resolve concurrently-created operator tenant %q: %w", slug, cerr)
 			}
 		} else {
-			res.OrgCreated = true
-			log.WithField("operator_org", slug).Info("controlplane: created operator org")
+			res.TenantCreated = true
+			log.WithField("operator_tenant", slug).Info("controlplane: created operator tenant")
 		}
 		org = created
 	}
-	res.OperatorOrgID = org.ID
+	res.OperatorTenantID = org.ID
 
 	// 2. Define the operator role and seed it the full OpenRails catalog
 	//    (idempotent: DefineRole upserts, SetRolePermissions replaces).
@@ -110,47 +110,47 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		// AddMember is idempotent (ON CONFLICT DO NOTHING semantics in AuthKit);
 		// AssignRole only succeeds once the user is a member.
 		if err := core.AddMember(ctx, slug, adminID); err != nil {
-			return nil, fmt.Errorf("controlplane: add initial admin to operator org: %w", err)
+			return nil, fmt.Errorf("controlplane: add initial admin to operator tenant: %w", err)
 		}
 		if err := core.AssignRole(ctx, slug, adminID, OperatorRole); err != nil {
 			return nil, fmt.Errorf("controlplane: assign operator role to initial admin: %w", err)
 		}
-		log.WithFields(log.Fields{"operator_org": slug, "user_id": adminID}).
+		log.WithFields(log.Fields{"operator_tenant": slug, "user_id": adminID}).
 			Info("controlplane: assigned operator role to initial admin")
 	}
 
-	// 4. Record the operator org on the DEFAULT tenant directory row so tenant
-	//    resolution / admin policy can map the default tenant -> operator org.
-	if err := c.recordOperatorOrgOnDefaultTenant(ctx, tenant.DefaultID, org.ID, slug); err != nil {
+	// 4. Record the operator tenant on the DEFAULT tenant directory row so tenant
+	//    resolution / admin policy can map the default tenant -> operator tenant.
+	if err := c.recordOperatorTenantOnDefaultTenant(ctx, tenant.DefaultID, org.ID, slug); err != nil {
 		return nil, err
 	}
 
-	// 5. Mint an initial operator OAT only when the org has none yet.
-	if opts.MintInitialOAT {
-		existing, lerr := core.ListOrgAccessTokens(ctx, slug)
+	// 5. Mint an initial operator service token only when the org has none yet.
+	if opts.MintInitialServiceToken {
+		existing, lerr := core.ListServiceTokens(ctx, slug)
 		if lerr != nil {
-			return nil, fmt.Errorf("controlplane: list operator OATs: %w", lerr)
+			return nil, fmt.Errorf("controlplane: list operator service tokens: %w", lerr)
 		}
-		if !anyLiveOAT(existing) {
+		if !anyLiveServiceToken(existing) {
 			name := "openrails-bootstrap-operator"
 			if c.cfg != nil && c.cfg.Auth != nil && c.cfg.Auth.ControlPlane != nil {
-				if n := strings.TrimSpace(c.cfg.Auth.ControlPlane.OperatorOATName); n != "" {
+				if n := strings.TrimSpace(c.cfg.Auth.ControlPlane.OperatorServiceTokenName); n != "" {
 					name = n
 				}
 			}
-			oat, secret, merr := core.MintOrgAccessTokenWithOptions(ctx, slug, authcore.OrgAccessTokenMintOptions{
+			serviceToken, secret, merr := core.MintServiceTokenWithOptions(ctx, slug, authcore.ServiceTokenMintOptions{
 				Name:        name,
 				Permissions: OperatorRolePermissions(),
-				Resources:   []authcore.OrgAccessTokenResource{TenantResource(tenant.DefaultID)},
+				Resources:   []authcore.ServiceTokenResource{TenantResource(tenant.DefaultID)},
 			})
 			if merr != nil {
-				return nil, fmt.Errorf("controlplane: mint initial operator OAT: %w", merr)
+				return nil, fmt.Errorf("controlplane: mint initial operator service token: %w", merr)
 			}
-			res.OATMinted = true
-			res.OATSecret = secret
-			res.OATKeyID = oat.KeyID
-			log.WithFields(log.Fields{"operator_org": slug, "oat_key_id": oat.KeyID}).
-				Warn("controlplane: minted initial operator OAT (secret shown once)")
+			res.ServiceTokenMinted = true
+			res.ServiceTokenSecret = secret
+			res.ServiceTokenKeyID = serviceToken.KeyID
+			log.WithFields(log.Fields{"operator_tenant": slug, "service_token_key_id": serviceToken.KeyID}).
+				Warn("controlplane: minted initial operator service token (secret shown once)")
 		}
 	}
 
@@ -159,28 +159,28 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 
 // PlatformBootstrapResult reports what the platform-superadmin bootstrap did.
 type PlatformBootstrapResult struct {
-	PlatformOrgSlug string
-	PlatformOrgID   string
-	OrgCreated      bool
-	AdminAssigned   bool
+	PlatformTenantSlug string
+	PlatformTenantID   string
+	TenantCreated      bool
+	AdminAssigned      bool
 }
 
 // BootstrapPlatform idempotently ensures the managed-hosting PLATFORM org
-// (issue #226), DISTINCT from any tenant operator org: the platform AuthKit org
+// (issue #226), DISTINCT from any tenant operator tenant: the platform AuthKit tenant
 // exists, the openrails-platform-superadmin role is defined and granted ONLY the
 // openrails:platform:superadmin permission, and (optionally) an initial platform
 // admin user is assigned that role.
 //
-// It runs through in-process AuthKit CORE calls (CreateOrg / DefineRole /
+// It runs through in-process AuthKit CORE calls (CreateTenant / DefineRole /
 // SetRolePermissions / AssignRole) — never raw SQL. Re-running is safe (upserts).
 //
-// No-op (returns nil, nil) when no platform org is configured: a single-tenant
+// No-op (returns nil, nil) when no platform tenant is configured: a single-tenant
 // or non-managed deployment never grows a cross-tenant superadmin.
 func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstrapResult, error) {
 	if c == nil {
 		return nil, errors.New("controlplane: nil control plane")
 	}
-	slug := c.PlatformOrgSlug()
+	slug := c.PlatformTenantSlug()
 	if slug == "" {
 		return nil, nil
 	}
@@ -189,29 +189,29 @@ func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstra
 		return nil, errors.New("controlplane: core service unavailable")
 	}
 
-	res := &PlatformBootstrapResult{PlatformOrgSlug: slug}
+	res := &PlatformBootstrapResult{PlatformTenantSlug: slug}
 
-	org, err := core.ResolveOrgBySlug(ctx, slug)
+	org, err := core.ResolveTenantBySlug(ctx, slug)
 	if err != nil {
-		if !errors.Is(err, authcore.ErrOrgNotFound) {
-			return nil, fmt.Errorf("controlplane: resolve platform org %q: %w", slug, err)
+		if !errors.Is(err, authcore.ErrTenantNotFound) {
+			return nil, fmt.Errorf("controlplane: resolve platform tenant %q: %w", slug, err)
 		}
-		created, cerr := core.CreateOrg(ctx, slug)
+		created, cerr := core.CreateTenant(ctx, slug)
 		if cerr != nil {
 			if !errors.Is(cerr, authcore.ErrOwnerSlugTaken) {
-				return nil, fmt.Errorf("controlplane: create platform org %q: %w", slug, cerr)
+				return nil, fmt.Errorf("controlplane: create platform tenant %q: %w", slug, cerr)
 			}
-			created, cerr = core.ResolveOrgBySlug(ctx, slug)
+			created, cerr = core.ResolveTenantBySlug(ctx, slug)
 			if cerr != nil {
-				return nil, fmt.Errorf("controlplane: resolve concurrently-created platform org %q: %w", slug, cerr)
+				return nil, fmt.Errorf("controlplane: resolve concurrently-created platform tenant %q: %w", slug, cerr)
 			}
 		} else {
-			res.OrgCreated = true
-			log.WithField("platform_org", slug).Info("controlplane: created platform superadmin org")
+			res.TenantCreated = true
+			log.WithField("platform_tenant", slug).Info("controlplane: created platform superadmin org")
 		}
 		org = created
 	}
-	res.PlatformOrgID = org.ID
+	res.PlatformTenantID = org.ID
 
 	if err := core.DefineRole(ctx, slug, PlatformRole); err != nil {
 		return nil, fmt.Errorf("controlplane: define platform superadmin role: %w", err)
@@ -223,13 +223,13 @@ func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstra
 	if c.cfg != nil && c.cfg.Auth != nil && c.cfg.Auth.ControlPlane != nil {
 		if adminID := strings.TrimSpace(c.cfg.Auth.ControlPlane.PlatformAdminUserID); adminID != "" {
 			if err := core.AddMember(ctx, slug, adminID); err != nil {
-				return nil, fmt.Errorf("controlplane: add platform admin to platform org: %w", err)
+				return nil, fmt.Errorf("controlplane: add platform admin to platform tenant: %w", err)
 			}
 			if err := core.AssignRole(ctx, slug, adminID, PlatformRole); err != nil {
 				return nil, fmt.Errorf("controlplane: assign platform superadmin role: %w", err)
 			}
 			res.AdminAssigned = true
-			log.WithFields(log.Fields{"platform_org": slug, "user_id": adminID}).
+			log.WithFields(log.Fields{"platform_tenant": slug, "user_id": adminID}).
 				Info("controlplane: assigned platform superadmin role to initial platform admin")
 		}
 	}
@@ -237,9 +237,9 @@ func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstra
 	return res, nil
 }
 
-// anyLiveOAT reports whether the org already has at least one non-revoked OAT,
+// anyLiveServiceToken reports whether the org already has at least one non-revoked service token,
 // so bootstrap does not mint a duplicate on re-run.
-func anyLiveOAT(toks []authcore.OrgAccessToken) bool {
+func anyLiveServiceToken(toks []authcore.ServiceToken) bool {
 	for _, t := range toks {
 		if t.RevokedAt == nil {
 			return true
@@ -248,23 +248,23 @@ func anyLiveOAT(toks []authcore.OrgAccessToken) bool {
 	return false
 }
 
-// recordOperatorOrgOnDefaultTenant writes the operator org id/slug onto the
+// recordOperatorTenantOnDefaultTenant writes the operator tenant id/slug onto the
 // default tenant directory row (billing.tenants). billing.* is OpenRails-owned
 // control-plane state, so this is a direct, idempotent UPDATE — not AuthKit SQL.
-func (c *ControlPlane) recordOperatorOrgOnDefaultTenant(ctx context.Context, tenantID tenant.ID, orgID, orgSlug string) error {
+func (c *ControlPlane) recordOperatorTenantOnDefaultTenant(ctx context.Context, tenantID tenant.ID, orgID, orgSlug string) error {
 	if c.pool == nil {
 		return errors.New("controlplane: pgx pool unavailable for tenant directory update")
 	}
 	_, err := c.pool.Exec(ctx, `
 		UPDATE billing.tenants
-		   SET authkit_org_id   = $2,
-		       authkit_org_slug = $3,
+		   SET authkit_tenant_id   = $2,
+		       authkit_tenant_slug = $3,
 		       updated_at       = current_timestamp
 		 WHERE id = $1::uuid
-		   AND (authkit_org_id IS DISTINCT FROM $2 OR authkit_org_slug IS DISTINCT FROM $3)
+		   AND (authkit_tenant_id IS DISTINCT FROM $2 OR authkit_tenant_slug IS DISTINCT FROM $3)
 	`, tenantID.String(), orgID, orgSlug)
 	if err != nil {
-		return fmt.Errorf("controlplane: record operator org on default tenant: %w", err)
+		return fmt.Errorf("controlplane: record operator tenant on default tenant: %w", err)
 	}
 	return nil
 }

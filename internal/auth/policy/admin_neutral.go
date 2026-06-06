@@ -30,7 +30,7 @@ func userContext(r *request.Request) (billingauth.UserContext, bool) {
 
 // OperatorAdminRequiredMW is the framework-neutral analogue of
 // OperatorAdminRequired (issue #282). Same authority model: operator-org slug +
-// admin-equivalent org roles ONLY (no global-admin fallback). `db` is unused and
+// admin-equivalent tenant roles ONLY (no global-admin fallback). `db` is unused and
 // retained for call-site symmetry; pass nil.
 func OperatorAdminRequiredMW(cfg *config.Config, db bun.IDB) router.Middleware {
 	return func(next router.Handler) router.Handler {
@@ -40,35 +40,35 @@ func OperatorAdminRequiredMW(cfg *config.Config, db bun.IDB) router.Middleware {
 				r.AbortJSON(http.StatusUnauthorized, "authentication required")
 				return
 			}
-			if cfg == nil || !cfg.Auth.OperatorOrgEnabled() {
+			if cfg == nil || !cfg.Auth.OperatorTenantEnabled() {
 				log.WithField("user_id", uc.UserID).
-					Warn("admin access denied: operator org not configured; global-admin fallback removed (#221/#224)")
+					Warn("admin access denied: operator tenant not configured; global-admin fallback removed (#221/#224)")
 				r.AbortJSON(http.StatusForbidden, "admin_required")
 				return
 			}
-			operatorSlug := strings.TrimSpace(cfg.Auth.OperatorOrgSlug)
-			if strings.TrimSpace(uc.Org) == "" {
-				log.WithField("user_id", uc.UserID).Warn("operator admin denied: org claim missing")
-				r.AbortJSON(http.StatusForbidden, "operator_org_required")
+			operatorSlug := strings.TrimSpace(cfg.Auth.OperatorTenantSlug)
+			if strings.TrimSpace(uc.Tenant) == "" {
+				log.WithField("user_id", uc.UserID).Warn("operator admin denied: tenant claim missing")
+				r.AbortJSON(http.StatusForbidden, "operator_tenant_required")
 				return
 			}
-			if !strings.EqualFold(strings.TrimSpace(uc.Org), operatorSlug) {
+			if !strings.EqualFold(strings.TrimSpace(uc.Tenant), operatorSlug) {
 				log.WithFields(log.Fields{
-					"user_id":      uc.UserID,
-					"caller_org":   uc.Org,
-					"operator_org": operatorSlug,
+					"user_id":         uc.UserID,
+					"caller_org":      uc.Tenant,
+					"operator_tenant": operatorSlug,
 				}).Warn("operator admin denied: org mismatch")
-				r.AbortJSON(http.StatusForbidden, "operator_org_mismatch")
+				r.AbortJSON(http.StatusForbidden, "operator_tenant_mismatch")
 				return
 			}
-			adminRoles := cfg.Auth.EffectiveOperatorOrgAdminRoles()
-			if !uc.HasAnyOrgRole(adminRoles...) {
+			adminRoles := cfg.Auth.EffectiveOperatorTenantAdminRoles()
+			if !uc.HasAnyTenantRole(adminRoles...) {
 				log.WithFields(log.Fields{
 					"user_id":    uc.UserID,
-					"org":        uc.Org,
+					"org":        uc.Tenant,
 					"want_roles": adminRoles,
-				}).Warn("operator admin denied: required org role missing")
-				r.AbortJSON(http.StatusForbidden, "operator_org_role_required")
+				}).Warn("operator admin denied: required tenant role missing")
+				r.AbortJSON(http.StatusForbidden, "operator_tenant_role_required")
 				return
 			}
 			next(r)
@@ -92,7 +92,7 @@ func OperatorPermissionRequiredMW(checker OperatorPermissionChecker, perm string
 				r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
 				return
 			}
-			allowed, err := checker.HasOperatorPermission(r.Request.Context(), uc.Org, uc.UserID, perm)
+			allowed, err := checker.HasOperatorPermission(r.Request.Context(), uc.Tenant, uc.UserID, perm)
 			if err != nil {
 				log.WithError(err).Error("failed to evaluate operator permission")
 				r.AbortJSON(http.StatusInternalServerError, "failed to check permission")

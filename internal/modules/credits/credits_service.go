@@ -55,30 +55,30 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 	return clockwork.NewRealClock()
 }
 
-// ErrOwnerRequired is returned when a credit operation cannot resolve a real
-// payer org id. HARDCUT (#221): tenant_subject_id is supplied by the caller and is NOT
+// ErrTenantSubjectRequired is returned when a credit operation cannot resolve a real
+// tenant subject id. HARDCUT (#221): tenant_subject_id is supplied by the caller and is NOT
 // synthesized — there is no deterministic stand-in derivation. For the
-// self-hosted / single-tenant personal case the payer org IS the authenticated
-// user's own account/personal-org UUID, so a non-UUID invoker with no explicit
+// self-hosted / single-tenant personal case the tenant subject IS the authenticated
+// user's own account/personal tenant-subject UUID, so a non-UUID invoker with no explicit
 // payer is a programming error rather than something to paper over.
-var ErrOwnerRequired = errors.New("tenant_subject_id required")
+var ErrTenantSubjectRequired = errors.New("tenant_subject_id required")
 
-// resolvePayer resolves the PAYER ORG for a credit operation (issue #221, the
-// payer/billing payer). When the caller supplies an explicit payer org it is
+// resolveTenantSubject resolves the tenant subject for a credit operation (issue #221, the
+// payer/billing payer). When the caller supplies an explicit tenant subject it is
 // used verbatim. Otherwise, for the self-hosted / single-tenant personal case,
-// the payer is the invoker's own account/personal-org id parsed from its UUID
+// the payer is the invoker's own account/personal tenant-subject id parsed from its UUID
 // subject (identity.TenantSubjectIDFromString). It is NEVER a synthesized stand-in.
 //
 // The invokerInvokerID is the existing free-form invoker_id (who caused usage); it is
-// retained for attribution and is NOT the financial payer. resolvePayer returns
-// ErrOwnerRequired when no payer can be resolved.
-func resolvePayer(payer *identity.TenantSubjectID, invokerInvokerID string) (identity.TenantSubjectID, error) {
+// retained for attribution and is NOT the financial payer. resolveTenantSubject returns
+// ErrTenantSubjectRequired when no payer can be resolved.
+func resolveTenantSubject(payer *identity.TenantSubjectID, invokerInvokerID string) (identity.TenantSubjectID, error) {
 	if payer != nil && !payer.IsZero() {
 		return *payer, nil
 	}
 	resolved := identity.TenantSubjectIDFromString(invokerInvokerID)
 	if resolved.IsZero() {
-		return identity.TenantSubjectID{}, ErrOwnerRequired
+		return identity.TenantSubjectID{}, ErrTenantSubjectRequired
 	}
 	return resolved, nil
 }
@@ -112,10 +112,10 @@ func (s *CreditsService) GetBalance(ctx context.Context, invokerID string, credi
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	// Reads are scoped by tenant + OWNER (issue #221). For the self-hosted /
-	// single-tenant personal case the payer IS the user's own account/personal-org
-	// UUID — the same row the org-owned writers stamp — so single-user reads return
+	// single-tenant personal case the payer IS the user's own account/personal tenant-subject
+	// UUID — the same row the tenant-subject-owned writers stamp — so single-user reads return
 	// the right balance. tenant_subject_id is never synthesized.
-	payer, err := resolvePayer(nil, invokerID)
+	payer, err := resolveTenantSubject(nil, invokerID)
 	if err != nil {
 		return nil, err
 	}
@@ -143,10 +143,10 @@ func (s *CreditsService) GetBalance(ctx context.Context, invokerID string, credi
 	return nil, err
 }
 
-// GetBalanceForPayer reads a balance scoped explicitly by PAYER ORG (issue
+// GetBalanceForTenantSubject reads a balance scoped explicitly by tenant subject (issue
 // #221), for callers that own balances at a team org rather than a personal
 // org. The invoker invoker id is not required for an payer-scoped read.
-func (s *CreditsService) GetBalanceForPayer(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*models.UserCreditBalance, error) {
+func (s *CreditsService) GetBalanceForTenantSubject(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*models.UserCreditBalance, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
@@ -186,7 +186,7 @@ func (s *CreditsService) GetTransactions(ctx context.Context, invokerID string, 
 	if err != nil {
 		return nil, 0, err
 	}
-	payer, err := resolvePayer(nil, invokerID)
+	payer, err := resolveTenantSubject(nil, invokerID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -212,12 +212,12 @@ func (s *CreditsService) GetTransactions(ctx context.Context, invokerID string, 
 	return items, total, nil
 }
 
-// GetTransactionsByPayer lists credit transactions for an EXPLICIT payer org
+// GetTransactionsByTenantSubject lists credit transactions for an EXPLICIT tenant subject
 // (the payer), newest first, paginated. Unlike GetTransactions it does not derive
 // the payer from a invoker id — it filters tenant_subject_id directly, which is what the
 // org-level billing-account usage view (issue #242) needs. RLS-scoped to the
 // request tenant via Q(ctx).
-func (s *CreditsService) GetTransactionsByPayer(ctx context.Context, payer identity.TenantSubjectID, creditType string, limit, offset int) ([]models.CreditTransaction, int, error) {
+func (s *CreditsService) GetTransactionsByTenantSubject(ctx context.Context, payer identity.TenantSubjectID, creditType string, limit, offset int) ([]models.CreditTransaction, int, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("credits service not initialized")
 	}
@@ -248,11 +248,11 @@ func (s *CreditsService) GetTransactionsByPayer(ctx context.Context, payer ident
 	return items, total, nil
 }
 
-// GetAccountSettingsForPayer returns the stored credit-account settings for an
+// GetAccountSettingsForTenantSubject returns the stored credit-account settings for an
 // payer+credit_type (billing mode, spend caps, auto-top-up, expiry default),
 // RLS-scoped to the request tenant (issue #242). Never nil — missing rows return
 // the defaults.
-func (s *CreditsService) GetAccountSettingsForPayer(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*models.CreditAccountSettings, error) {
+func (s *CreditsService) GetAccountSettingsForTenantSubject(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*models.CreditAccountSettings, error) {
 	var out *models.CreditAccountSettings
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		st, e := s.GetAccountSettings(ctx, payer, creditType)
@@ -298,7 +298,7 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, invokerID s
 		return nil, err
 	}
 
-	payer, err := resolvePayer(nil, invokerID)
+	payer, err := resolveTenantSubject(nil, invokerID)
 	if err != nil {
 		return nil, err
 	}
@@ -318,8 +318,8 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, invokerID s
 }
 
 type CreditDepositParams struct {
-	// TenantSubjectID is the PAYER ORG that owns the deposited balance (issue #221). When
-	// nil, the payer is the invoker (InvokerID)'s own account/personal-org UUID for the
+	// TenantSubjectID is the tenant subject that owns the deposited balance (issue #221). When
+	// nil, the payer is the invoker (InvokerID)'s own account/personal tenant-subject UUID for the
 	// self-hosted / single-tenant personal case; it is never a synthesized
 	// stand-in, and a non-UUID InvokerID with no explicit payer is rejected.
 	TenantSubjectID *identity.TenantSubjectID
@@ -356,7 +356,7 @@ func (s *CreditsService) Deposit(ctx context.Context, params CreditDepositParams
 	// Apply the per-account default expiry (issue #240) when requested and the
 	// caller did not set an explicit expiry.
 	if params.ExpiresAt == nil && params.ApplyAccountExpiryDefault {
-		if payer, oerr := resolvePayer(params.TenantSubjectID, params.InvokerID); oerr == nil {
+		if payer, oerr := resolveTenantSubject(params.TenantSubjectID, params.InvokerID); oerr == nil {
 			if settings, serr := s.GetAccountSettings(ctx, payer, params.CreditType); serr == nil &&
 				settings.DefaultCreditExpiryDays != nil && *settings.DefaultCreditExpiryDays > 0 {
 				exp := s.now().AddDate(0, 0, *settings.DefaultCreditExpiryDays)
@@ -393,7 +393,7 @@ func (s *CreditsService) getCreditTypeByNameTx(ctx context.Context, tx bun.Tx, n
 func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.CreditType, params CreditDepositParams) (*models.CreditTransaction, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	payer, err := resolvePayer(params.TenantSubjectID, params.InvokerID)
+	payer, err := resolveTenantSubject(params.TenantSubjectID, params.InvokerID)
 	if err != nil {
 		return nil, err
 	}
@@ -477,8 +477,8 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 }
 
 type CreditWithdrawParams struct {
-	// TenantSubjectID is the PAYER ORG to withdraw from (issue #221). When nil, the payer
-	// is the invoker (InvokerID)'s own account/personal-org UUID for the self-hosted /
+	// TenantSubjectID is the tenant subject to withdraw from (issue #221). When nil, the payer
+	// is the invoker (InvokerID)'s own account/personal tenant-subject UUID for the self-hosted /
 	// single-tenant personal case; it is never a synthesized stand-in.
 	TenantSubjectID *identity.TenantSubjectID
 	InvokerID       string
@@ -521,9 +521,9 @@ func (s *CreditsService) Withdraw(ctx context.Context, params CreditWithdrawPara
 }
 
 // Hold reserves credits for prepay usage (issue #221: Reserve/Hold(payer) ->
-// CaptureHold(actual) -> ReleaseHold(failure/zero)). payer is the PAYER ORG the
+// CaptureHold(actual) -> ReleaseHold(failure/zero)). payer is the tenant subject the
 // reservation is charged against; when nil the payer is the invoker (invokerID)'s own
-// account/personal-org UUID for the self-hosted / single-tenant personal case
+// account/personal tenant-subject UUID for the self-hosted / single-tenant personal case
 // (never a synthesized stand-in).
 func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubjectID, invokerID string, creditType string, amount int64, source, sourceID string, expiresAt time.Time) (*models.CreditTransaction, error) {
 	if s == nil || s.db == nil {
@@ -548,7 +548,7 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerOrg, err := resolvePayer(payer, invokerID)
+	ownerOrg, err := resolveTenantSubject(payer, invokerID)
 	if err != nil {
 		return nil, err
 	}
@@ -796,7 +796,7 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 	return newBal, nil
 }
 
-// lockBalance selects-for-update the balance row for an PAYER ORG (issue #221)
+// lockBalance selects-for-update the balance row for an tenant subject (issue #221)
 // within the resolved tenant (issue #223), creating it if absent. The balance
 // is keyed by (tenant, payer, credit_type); invoker_id is stamped for attribution.
 //
@@ -849,7 +849,7 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, payer ident
 func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID uuid.UUID, params CreditWithdrawParams) (*models.CreditTransaction, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	payer, err := resolvePayer(params.TenantSubjectID, params.InvokerID)
+	payer, err := resolveTenantSubject(params.TenantSubjectID, params.InvokerID)
 	if err != nil {
 		return nil, err
 	}

@@ -23,6 +23,8 @@ type DelegatedIssuer struct {
 	// JWKSURI is the ONLY URL OpenRails fetches this issuer's keys from
 	// (allowlist; a token-supplied jwks_uri/iss is never fetched).
 	JWKSURI string
+	// Audiences are accepted JWT `aud` values for this issuer.
+	Audiences []string
 	// TenantID is the OpenRails tenant (#223) this issuer speaks for.
 	TenantID tenant.ID
 	// TenantSlug is that tenant's slug.
@@ -46,10 +48,11 @@ func (c *ControlPlane) loadEnabledDelegatedIssuers(ctx context.Context) ([]Deleg
 		return nil, errors.New("controlplane: pgx pool unavailable for issuer registry")
 	}
 	rows, err := c.pool.Query(ctx, `
-		SELECT i.issuer, i.jwks_uri, i.tenant_id::text, t.slug, i.enabled
+		SELECT i.issuer, i.jwks_uri, i.audiences, i.tenant_id::text, t.slug, i.enabled
 		  FROM billing.tenant_delegated_issuers i
 		  JOIN billing.tenants t ON t.id = i.tenant_id
 		 WHERE i.enabled
+		   AND cardinality(i.audiences) > 0
 		   AND t.status = 'active'
 		   AND t.deleted_at IS NULL
 		 ORDER BY i.issuer
@@ -64,11 +67,12 @@ func (c *ControlPlane) loadEnabledDelegatedIssuers(ctx context.Context) ([]Deleg
 		var (
 			issuer  string
 			jwksURI string
+			aud     []string
 			tidStr  string
 			slug    string
 			enabled bool
 		)
-		if err := rows.Scan(&issuer, &jwksURI, &tidStr, &slug, &enabled); err != nil {
+		if err := rows.Scan(&issuer, &jwksURI, &aud, &tidStr, &slug, &enabled); err != nil {
 			return nil, err
 		}
 		tid, perr := tenant.ParseID(tidStr)
@@ -78,6 +82,7 @@ func (c *ControlPlane) loadEnabledDelegatedIssuers(ctx context.Context) ([]Deleg
 		out = append(out, DelegatedIssuer{
 			Issuer:     strings.TrimSpace(issuer),
 			JWKSURI:    strings.TrimSpace(jwksURI),
+			Audiences:  cleanAudiences(aud),
 			TenantID:   tid,
 			TenantSlug: slug,
 			Enabled:    enabled,
@@ -96,7 +101,7 @@ func (c *ControlPlane) loadEnabledDelegatedIssuers(ctx context.Context) ([]Deleg
 // JWKS keys are fetched lazily by the verifier on first use and refreshed on the
 // configured cadence / on unknown-kid, so registering an issuer whose JWKS is
 // momentarily unreachable does not fail here — it fails closed per token at
-// verify time. Registration-time reachability is validated by the OAT-gated
+// verify time. Registration-time reachability is validated by the service token-gated
 // register route (issue #259 bootstrap), not here.
 func (c *ControlPlane) reloadDelegatedIssuers(ctx context.Context) error {
 	if c == nil || c.delegatedVerifier == nil {
@@ -122,8 +127,8 @@ func (c *ControlPlane) reloadDelegatedIssuers(ctx context.Context) error {
 		if iss.Issuer == strings.TrimSpace(c.issuer) {
 			continue
 		}
-		if err := c.delegatedVerifier.AddIssuer(iss.Issuer, c.delegatedAudiences, authhttp.IssuerOptions{
-			JWKSURL:  iss.JWKSURI,
+		if err := c.delegatedVerifier.AddIssuer(iss.Issuer, iss.Audiences, authhttp.IssuerOptions{
+			JWKSURI:  iss.JWKSURI,
 			CacheTTL: delegatedIssuerJWKSCacheTTL,
 		}); err != nil {
 			return fmt.Errorf("controlplane: register delegated issuer %q: %w", iss.Issuer, err)

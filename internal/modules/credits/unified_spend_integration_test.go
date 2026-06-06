@@ -18,12 +18,12 @@ func TestSpendCredits_PrepaidFloorsAtBalance(t *testing.T) {
 	// Prepay-only (no credit line): cannot exceed balance.
 	err = svc.SpendCredits(ctx, credits.SpendParams{Payer: &payer, InvokerID: "u", CreditType: ct, Amount: 1500, Source: "s", SourceID: "x1"})
 	require.ErrorIs(t, err, credits.ErrInsufficientCredits)
-	bal, _ := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, _ := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.Equal(t, int64(1000), bal.Balance, "denied spend must not debit")
 
 	err = svc.SpendCredits(ctx, credits.SpendParams{Payer: &payer, InvokerID: "u", CreditType: ct, Amount: 600, Source: "s", SourceID: "x2"})
 	require.NoError(t, err)
-	bal, _ = svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, _ = svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.Equal(t, int64(400), bal.Balance)
 }
 
@@ -37,7 +37,7 @@ func TestSpendCredits_ArrearsAccruesBeyondBalance(t *testing.T) {
 	err = svc.SpendCredits(ctx, credits.SpendParams{Payer: &payer, InvokerID: "u", CreditType: ct, Amount: 1500, Source: "s", SourceID: "x1"})
 	require.NoError(t, err)
 
-	bal, _ := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, _ := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.Equal(t, int64(0), bal.Balance, "balance drawn first")
 	owed, _ := svc.GetOutstandingOwed(ctx, payer, ct)
 	require.Equal(t, int64(500), owed, "remainder accrued to owed")
@@ -53,7 +53,7 @@ func TestSpendCredits_HybridSpansBalanceThenOwed(t *testing.T) {
 
 	err = svc.SpendCredits(ctx, credits.SpendParams{Payer: &payer, InvokerID: "u", CreditType: ct, Amount: 2000, Source: "s", SourceID: "x1"})
 	require.NoError(t, err)
-	bal, _ := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, _ := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.Equal(t, int64(0), bal.Balance)
 	owed, _ := svc.GetOutstandingOwed(ctx, payer, ct)
 	require.Equal(t, int64(1500), owed)
@@ -84,7 +84,7 @@ func TestSpendCredits_Idempotent(t *testing.T) {
 	p := credits.SpendParams{Payer: &payer, InvokerID: "u", CreditType: ct, Amount: 300, Source: "s", SourceID: "dup"}
 	require.NoError(t, svc.SpendCredits(ctx, p))
 	require.NoError(t, svc.SpendCredits(ctx, p)) // replay
-	bal, _ := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, _ := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.Equal(t, int64(700), bal.Balance, "replay must not double-spend")
 }
 
@@ -103,7 +103,7 @@ func TestRecordUsage_ArrearsDrawsThenAccrues(t *testing.T) {
 		Amount: 1500, Source: "req", SourceID: "r1",
 	})
 	require.NoError(t, err)
-	bal, _ := svc.GetBalanceForPayer(ctx, payer, ct)
+	bal, _ := svc.GetBalanceForTenantSubject(ctx, payer, ct)
 	require.Equal(t, int64(0), bal.Balance)
 	owed, _ := svc.GetOutstandingOwed(ctx, payer, ct)
 	require.Equal(t, int64(500), owed)

@@ -15,14 +15,14 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-// TestOperatorAdminRequired_OperatorOrgMode focuses on the operator-org branch,
+// TestOperatorAdminRequired_OperatorTenantMode focuses on the operator-org branch,
 // which is the ONLY admin-authority path after the hardcut (the legacy
 // global-`admin` DB fallback has been removed).
-func TestOperatorAdminRequired_OperatorOrgMode(t *testing.T) {
+func TestOperatorAdminRequired_OperatorTenantMode(t *testing.T) {
 	cfg := &config.Config{
 		Auth: &config.AuthConfig{
-			OperatorOrgSlug:       "acme",
-			OperatorOrgAdminRoles: []string{"admin", "owner"},
+			OperatorTenantSlug:       "acme",
+			OperatorTenantAdminRoles: []string{"admin", "owner"},
 		},
 	}
 
@@ -39,67 +39,67 @@ func TestOperatorAdminRequired_OperatorOrgMode(t *testing.T) {
 			wantBody:   "authentication required",
 		},
 		{
-			name: "user has no org claim -> 403 operator_org_required",
+			name: "user has no tenant claim -> 403 operator_tenant_required",
 			uc: authprovider.UserContext{
 				UserID: "user-1",
-				// Org and OrgRoles intentionally empty
+				// Tenant and TenantRoles intentionally empty
 			},
 			wantStatus: http.StatusForbidden,
-			wantBody:   "operator_org_required",
+			wantBody:   "operator_tenant_required",
 		},
 		{
-			name: "user has org but it does not match operator slug -> 403 operator_org_mismatch",
+			name: "user has org but it does not match operator slug -> 403 operator_tenant_mismatch",
 			uc: authprovider.UserContext{
-				UserID:   "user-1",
-				Org:      "globex",
-				OrgRoles: []string{"admin"},
+				UserID:      "user-1",
+				Tenant:      "globex",
+				TenantRoles: []string{"admin"},
 			},
 			wantStatus: http.StatusForbidden,
-			wantBody:   "operator_org_mismatch",
+			wantBody:   "operator_tenant_mismatch",
 		},
 		{
-			name: "user in correct org but lacks admin role -> 403 operator_org_role_required",
+			name: "user in correct org but lacks admin role -> 403 operator_tenant_role_required",
 			uc: authprovider.UserContext{
-				UserID:   "user-1",
-				Org:      "acme",
-				OrgRoles: []string{"member", "viewer"},
+				UserID:      "user-1",
+				Tenant:      "acme",
+				TenantRoles: []string{"member", "viewer"},
 			},
 			wantStatus: http.StatusForbidden,
-			wantBody:   "operator_org_role_required",
+			wantBody:   "operator_tenant_role_required",
 		},
 		{
 			name: "user in correct org with admin role -> 200 (passes through)",
 			uc: authprovider.UserContext{
-				UserID:   "user-1",
-				Org:      "acme",
-				OrgRoles: []string{"admin"},
+				UserID:      "user-1",
+				Tenant:      "acme",
+				TenantRoles: []string{"admin"},
 			},
 			wantStatus: http.StatusOK,
 		},
 		{
 			name: "user in correct org with owner role -> 200 (default admin-equivalent set)",
 			uc: authprovider.UserContext{
-				UserID:   "user-1",
-				Org:      "acme",
-				OrgRoles: []string{"owner"},
+				UserID:      "user-1",
+				Tenant:      "acme",
+				TenantRoles: []string{"owner"},
 			},
 			wantStatus: http.StatusOK,
 		},
 		{
 			name: "case-insensitive role match -> 200",
 			uc: authprovider.UserContext{
-				UserID:   "user-1",
-				Org:      "acme",
-				OrgRoles: []string{"ADMIN"},
+				UserID:      "user-1",
+				Tenant:      "acme",
+				TenantRoles: []string{"ADMIN"},
 			},
 			wantStatus: http.StatusOK,
 		},
 		{
 			name: "case-insensitive org match -> 200",
 			uc: authprovider.UserContext{
-				UserID:   "user-1",
-				Org:      "Acme",
-				OrgRoles: []string{"admin"},
+				UserID:      "user-1",
+				Tenant:      "Acme",
+				TenantRoles: []string{"admin"},
 			},
 			wantStatus: http.StatusOK,
 		},
@@ -139,12 +139,12 @@ func TestOperatorAdminRequired_OperatorOrgMode(t *testing.T) {
 	}
 }
 
-// TestOperatorAdminRequired_NoOperatorOrgFailsClosed proves the hardcut: with no
-// operator org configured there is NO DB-role fallback — OperatorAdminRequired
+// TestOperatorAdminRequired_NoOperatorTenantFailsClosed proves the hardcut: with no
+// operator tenant configured there is NO DB-role fallback — OperatorAdminRequired
 // fails closed with admin_required WITHOUT consulting profiles.user_roles (db ==
 // nil here, so any DB consultation would panic). Authority comes from the
 // operator-org permission layer (OperatorPermissionRequired) at the route.
-func TestOperatorAdminRequired_NoOperatorOrgFailsClosed(t *testing.T) {
+func TestOperatorAdminRequired_NoOperatorTenantFailsClosed(t *testing.T) {
 	cfg := &config.Config{
 		Auth: &config.AuthConfig{
 			ControlPlane: &config.ControlPlaneConfig{Enabled: true},

@@ -140,7 +140,7 @@ func TestDelegatedSelfRequired_DeniesNormalSubOrInvalid(t *testing.T) {
 
 func TestDelegatedSelfRequired_DeniesCrossTenant(t *testing.T) {
 	// Token's org maps to no active tenant for this deployment.
-	resolver := fakeDelegatedResolver{err: controlplane.ErrOATTenantUnresolved}
+	resolver := fakeDelegatedResolver{err: controlplane.ErrServiceTokenTenantUnresolved}
 	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusForbidden, w.Code)

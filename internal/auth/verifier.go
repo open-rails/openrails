@@ -39,7 +39,7 @@ func NewVerifier(cfg *config.AuthConfig) (Verifier, error) {
 			audiences = []string{expectedAudience}
 		}
 		if err := v.AddIssuer(issuer, audiences, authhttp.IssuerOptions{
-			JWKSURL: issuer + "/.well-known/jwks.json",
+			JWKSURI: issuer + "/.well-known/jwks.json",
 		}); err != nil {
 			return nil, fmt.Errorf("add auth issuer %q: %w", issuer, err)
 		}

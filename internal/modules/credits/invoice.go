@@ -175,9 +175,9 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 	return inv, nil
 }
 
-// ListInvoices lists an payer org's finalized invoices, newest period first,
+// ListInvoices lists an tenant subject's finalized invoices, newest period first,
 // paginated (issue #303). It filters tenant_subject_id directly (the payer) and is
-// RLS-scoped to the request tenant via Q(ctx), mirroring GetTransactionsByPayer.
+// RLS-scoped to the request tenant via Q(ctx), mirroring GetTransactionsByTenantSubject.
 // Returns the page plus the total count for pagination.
 func (s *CreditsService) ListInvoices(ctx context.Context, payer identity.TenantSubjectID, limit, offset int) ([]models.Invoice, int, error) {
 	if s == nil || s.db == nil {
@@ -212,7 +212,7 @@ func (s *CreditsService) ListInvoices(ctx context.Context, payer identity.Tenant
 }
 
 // GetInvoiceByID returns one finalized invoice (with its snapshotted line items)
-// for an payer org by id (issue #303). It filters tenant + payer + id and is
+// for an tenant subject by id (issue #303). It filters tenant + payer + id and is
 // RLS-scoped via Q(ctx); an invoice belonging to another payer/tenant is
 // unreachable (fail closed, sql.ErrNoRows).
 func (s *CreditsService) GetInvoiceByID(ctx context.Context, payer identity.TenantSubjectID, id uuid.UUID) (*models.Invoice, error) {

@@ -23,22 +23,22 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// stubOATResolver is a test OATResolver (issue #222) that accepts any non-empty
-// bearer token as a valid OAT for the default tenant with the given permissions,
-// so the parity test can exercise the OAT-authenticated public service routes
-// without standing up a full AuthKit control plane.
-type stubOATResolver struct {
+// stubServiceTokenResolver is a test resolver (issue #222) that accepts any non-empty
+// bearer token as a valid service token for the default tenant with the given
+// permissions, so the parity test can exercise the service-token-authenticated
+// public service routes without standing up a full AuthKit control plane.
+type stubServiceTokenResolver struct {
 	permissions []string
 }
 
-func (s stubOATResolver) LooksLikeOAT(token string) bool { return token != "" }
+func (s stubServiceTokenResolver) LooksLikeServiceToken(token string) bool { return token != "" }
 
-func (s stubOATResolver) ResolveOAT(_ context.Context, token string) (*controlplane.ResolvedOAT, error) {
-	return &controlplane.ResolvedOAT{
-		OrgSlug:     "operator",
-		TenantID:    tenant.DefaultID,
-		TenantSlug:  tenant.DefaultSlug,
-		Permissions: s.permissions,
+func (s stubServiceTokenResolver) ResolveServiceToken(_ context.Context, token string) (*controlplane.ResolvedServiceToken, error) {
+	return &controlplane.ResolvedServiceToken{
+		AuthKitTenantSlug: "operator",
+		TenantID:          tenant.DefaultID,
+		TenantSlug:        tenant.DefaultSlug,
+		Permissions:       s.permissions,
 	}, nil
 }
 
@@ -96,23 +96,23 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
 
-	// Build the OAT-authenticated PUBLIC service routes (issue #222) directly,
-	// with a stub OAT resolver granting the credit + entitlement permissions. This
+	// Build the service-token-authenticated PUBLIC service routes (issue #222)
+	// directly, with a stub resolver granting the credit + entitlement permissions. This
 	// is the same surface registered on the public handler at /v1/service/*.
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(ginmw.ResolveTenant())
 	group := router.Group("/v1/service")
-	resolver := stubOATResolver{permissions: []string{
+	resolver := stubServiceTokenResolver{permissions: []string{
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
 		controlplane.PermCreditsSpend,
 		controlplane.PermEntitlementsRead,
 	}}
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.OATRequired(resolver), nil, nil)
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver), nil, nil)
 
 	withOAT := func(req *http.Request) {
-		req.Header.Set("Authorization", "Bearer openrails_oat_testkeyid_testsecret")
+		req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
 	}
 
 	// 1) Create hold via Service facade, release via service HTTP.

@@ -13,9 +13,9 @@ import (
 )
 
 // Issue #222: the private/mTLS service trust surface is removed. The
-// server-to-server surface is now OAT-authenticated and lives on the PUBLIC
+// server-to-server surface is now service token-authenticated and lives on the PUBLIC
 // engine under /v1/service/*, and is mounted ONLY when the OpenRails-owned
-// AuthKit control plane is configured (it resolves OATs). These tests assert that
+// AuthKit control plane is configured (it resolves service tokens). These tests assert that
 // removal + gating without requiring a live control plane.
 
 func TestRegisterServiceRoutes_NotMountedWithoutControlPlane(t *testing.T) {
@@ -25,7 +25,7 @@ func TestRegisterServiceRoutes_NotMountedWithoutControlPlane(t *testing.T) {
 	e := gin.New()
 	srv.registerServiceRoutes(e)
 
-	// No control plane => no OAT issuer => the service surface is not mounted.
+	// No control plane => no service token issuer => the service surface is not mounted.
 	req := httptest.NewRequest(http.MethodGet, "/v1/service/users/user-1/entitlements", nil)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
@@ -35,9 +35,9 @@ func TestRegisterServiceRoutes_NotMountedWithoutControlPlane(t *testing.T) {
 func TestRegisterServiceRoutes_OATAuthGatesMountedSurface(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Mount the service surface with an OAT middleware that always rejects
-	// (modelling "no valid OAT presented"). This proves the public service surface
-	// is OAT-gated rather than an open or certificate-trusted listener. We mount
+	// Mount the service surface with an service token middleware that always rejects
+	// (modelling "no valid service token presented"). This proves the public service surface
+	// is service token-gated rather than an open or certificate-trusted listener. We mount
 	// the routes directly because building a Server with a real control plane
 	// requires a live AuthKit/DB; the middleware contract is what matters here.
 	e := gin.New()
@@ -45,7 +45,7 @@ func TestRegisterServiceRoutes_OATAuthGatesMountedSurface(t *testing.T) {
 	rejectAll := gin.HandlerFunc(func(c *gin.Context) {
 		c.AbortWithStatus(http.StatusUnauthorized)
 	})
-	// Use the same registration path as the server, with a rejecting OAT gate.
+	// Use the same registration path as the server, with a rejecting service token gate.
 	// Runtime is only dereferenced lazily inside handlers, which the rejecting
 	// gate prevents from ever running.
 	httproutes.RegisterServiceRoutes(group, nil, rejectAll, nil, nil)

@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 // marshalUnsignedTxBase64 serializes an unsigned transaction in the shape wallet

@@ -16,12 +16,12 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (payer org), the
+// AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (tenant subject), the
 // invoker (canonical invoker for per-invoker caps), the credit type, the estimated
 // charge, and the idempotency-keyed source coordinates of the hold.
 type AuthorizeHoldInput struct {
 	Payer         identity.TenantSubjectID
-	Invoker       string // canonical: 'oat:<key_id>', 'user:<id>', '<issuer>:<sub>'
+	Invoker       string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
 	CreditType    string
 	EstimateCents int64
 	// Source + SourceID form the idempotency key for the placed hold (typically
@@ -222,7 +222,7 @@ type accountSnapshot struct {
 
 // snapshotTx reads the balance + settings snapshot using the (tx-scoped) service.
 func (s *CreditsService) snapshotTx(ctx context.Context, payer identity.TenantSubjectID, creditType string) (accountSnapshot, error) {
-	bal, err := s.GetBalanceForPayer(ctx, payer, creditType)
+	bal, err := s.GetBalanceForTenantSubject(ctx, payer, creditType)
 	if err != nil {
 		return accountSnapshot{}, err
 	}

@@ -12,10 +12,10 @@ import (
 )
 
 // ServiceRoutePrefix is the path under the tenant-scoped public API where
-// OAT-authenticated server-to-server billing operations live (issue #222). It
+// service token-authenticated server-to-server billing operations live (issue #222). It
 // REPLACES the retired private/mTLS service listener: machine callers present an
-// OpenRails-issued tenant OAT as a Bearer token against this public surface. The
-// acting tenant is bound by the OAT's owning org, not the URL.
+// OpenRails-issued tenant service token as a Bearer token against this public surface. The
+// acting tenant is bound by the service token's owning org, not the URL.
 const ServiceRoutePrefix = "/service"
 
 // SelfRoutePrefix is the path under the tenant-scoped public API where
@@ -43,32 +43,32 @@ func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFu
 }
 
 // RegisterServiceRoutes mounts the server-to-server billing surface on a
-// tenant-scoped PUBLIC route group authenticated by OpenRails-issued tenant OATs
+// tenant-scoped PUBLIC route group authenticated by OpenRails-issued tenant service tokens
 // (issue #222). This replaces the retired private/mTLS listener and its
-// certificate-scope model: every operation is gated by an OAT permission from the
+// certificate-scope model: every operation is gated by an service token permission from the
 // canonical colon-form OpenRails permission catalog, and the acting tenant is the
-// OAT's owning tenant (pinned by OATRequired before any tenant-owned DB access).
+// service token's owning tenant (pinned by ServiceTokenRequired before any tenant-owned DB access).
 //
-// oatMW must authenticate the OAT (typically ginmw.OATRequired); it pins the
+// oatMW must authenticate the service token (typically ginmw.ServiceTokenRequired); it pins the
 // resolved tenant + permissions onto the context that the per-route
-// RequireOATPermission gates and the handlers read.
+// RequireServiceTokenPermission gates and the handlers read.
 func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc, minter DelegatedMinter, issuerAdmin DelegatedIssuerAdmin) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
 
 	group.Use(oatMW)
-	// Pin a tenant-scoped DB connection AFTER the OAT resolves the tenant, so RLS
+	// Pin a tenant-scoped DB connection AFTER the service token resolves the tenant, so RLS
 	// constrains every tenant-owned query (issue #227).
 	if rt != nil && rt.DB != nil {
 		group.Use(ginmw.TenantDBConn(rt.DB))
 	}
 
 	// Browser-tier delegated-token MINT (issue #222). A host backend authenticated
-	// by an OAT holding PermSelfMint asks OpenRails to mint a short-lived,
+	// by an service token holding PermSelfMint asks OpenRails to mint a short-lived,
 	// user-scoped delegated access token (for its OWN tenant) to hand to a browser
 	// for the /v1/self/* surface. Mounted only when a minter is wired (control
-	// plane present); the OAT gate + per-route permission keep it server-to-server.
+	// plane present); the service token gate + per-route permission keep it server-to-server.
 	//
 	// DEPRECATED (issue #259): the federated/tenant-signed tier lets hosts mint
 	// their OWN aud=openrails tokens (signed with their key, verified via JWKS),
@@ -76,29 +76,29 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// retired once all tenants self-sign (see the issuer-management routes below).
 	if minter != nil {
 		group.POST("/delegated-tokens",
-			ginmw.RequireOATPermission(controlplane.PermSelfMint),
+			ginmw.RequireServiceTokenPermission(controlplane.PermSelfMint),
 			mintDelegatedTokenHandler(minter),
 		)
 	}
 
-	// FEDERATED issuer management (issue #259). The OAT remains the ROOT
-	// tenant-management credential: a host backend authenticated by an OAT holding
+	// FEDERATED issuer management (issue #259). The service token remains the ROOT
+	// tenant-management credential: a host backend authenticated by an service token holding
 	// PermAdmin for its tenant registers/rotates/disables the issuer + JWKS URL it
 	// self-signs aud=openrails browser tokens with. The tenant is bound from the
-	// OAT (never the body), so a caller can only manage its OWN tenant's issuers.
+	// service token (never the body), so a caller can only manage its OWN tenant's issuers.
 	if issuerAdmin != nil {
 		issuers := group.Group("/tenant/issuers")
-		issuers.POST("", ginmw.RequireOATPermission(controlplane.PermAdmin), registerDelegatedIssuerHandler(issuerAdmin))
-		issuers.GET("", ginmw.RequireOATPermission(controlplane.PermAdmin), listDelegatedIssuersHandler(issuerAdmin))
-		issuers.POST("/disable", ginmw.RequireOATPermission(controlplane.PermAdmin), disableDelegatedIssuerHandler(issuerAdmin))
+		issuers.POST("", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), registerDelegatedIssuerHandler(issuerAdmin))
+		issuers.GET("", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), listDelegatedIssuersHandler(issuerAdmin))
+		issuers.POST("/disable", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), disableDelegatedIssuerHandler(issuerAdmin))
 	}
 
 	users := group.Group("/users/:user_id")
-	users.GET("/entitlements", ginmw.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
-	users.GET("/product-access", ginmw.RequireOATPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
+	users.GET("/entitlements", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
+	users.GET("/product-access", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
 
 	invokers := group.Group("/invokers/:invoker_id")
-	invokers.GET("/credits", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
+	invokers.GET("/credits", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
 
 	credits := group.Group("/credits")
 	// SPEND (hot-path billing) operations — authorize/hold/capture draw down a
@@ -107,22 +107,22 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// payer" gate (issue #246). The two are checked in sequence; PermAdmin
 	// satisfies either. Release returns a remainder (un-bills), so it needs write
 	// but not spend.
-	creditsSpend := ginmw.RequireOATPermission(controlplane.PermCreditsSpend)
-	creditsWrite := ginmw.RequireOATPermission(controlplane.PermCreditsWrite)
+	creditsSpend := ginmw.RequireServiceTokenPermission(controlplane.PermCreditsSpend)
+	creditsWrite := ginmw.RequireServiceTokenPermission(controlplane.PermCreditsWrite)
 
 	// Unified ADMISSION (issue #298): throughput (rate-limit) + money (hold) +
 	// suspension + blocklist + endpoint gating in one call; emits x-ratelimit-*
 	// + 429/Retry-After. Hot-path gate hosts call before doing work.
 	group.POST("/admit", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmit))
 	// Budget introspection (#304): rolling money-budget windows for a host /status.
-	group.GET("/budget", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetBudget))
+	group.GET("/budget", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetBudget))
 	// Tier policy admin (#298): configure a tier's throughput + entitled endpoints + money budgets.
 	group.PUT("/tier-policies", creditsWrite, wrap(httphandlers.ServiceSetTierPolicy))
 
 	// Unified authorize: policy decision + ATOMIC hold placement (issue #235/#247).
 	credits.POST("/authorize", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAuthorizeCredits))
 	// Payer balance snapshot (issue #235/#247): available = balance - held.
-	credits.GET("/balance", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditsBalance))
+	credits.GET("/balance", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetCreditsBalance))
 
 	credits.POST("/deposit", creditsWrite, wrap(httphandlers.ServiceDepositCredits))
 	credits.POST("/withdraw", creditsWrite, wrap(httphandlers.ServiceWithdrawCredits))
@@ -132,28 +132,28 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	credits.POST("/hold/:id/capture", creditsWrite, creditsSpend, wrap(httphandlers.ServiceCaptureHold))
 	credits.POST("/hold/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
 	// #311: per-dimension spend rollup for the platform usage/revenue surfaces.
-	credits.POST("/usage/rollup", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceUsageRollup))
-	credits.GET("/transactions/lookup", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
-	credits.GET("/invokers/:invoker_id", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
+	credits.POST("/usage/rollup", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceUsageRollup))
+	credits.GET("/transactions/lookup", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
+	credits.GET("/invokers/:invoker_id", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
 
-	// Org billing-account admin surface (issue #242): configure prepaid|arrears
+	// Tenant billing-account admin surface (issue #242): configure prepaid|arrears
 	// mode + spend caps + auto-top-up, read settings, and list usage. Tensorhub's
-	// billing-admin proxies to these with its service OAT; OpenRails owns the model.
-	creditsRead := ginmw.RequireOATPermission(controlplane.PermCreditsRead)
+	// billing-admin proxies to these with its service service token; OpenRails owns the model.
+	creditsRead := ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead)
 	credits.PUT("/account-settings", creditsWrite, wrap(httphandlers.ServiceSetCreditAccountSettings))
 	credits.GET("/account-settings", creditsRead, wrap(httphandlers.ServiceGetCreditAccountSettings))
-	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListPayerCreditTransactions))
+	credits.GET("/transactions", creditsRead, wrap(httphandlers.ServiceListTenantSubjectCreditTransactions))
 
 	// Credit-type definition writes are catalog-definition operations: gate them
 	// behind the explicit catalog-write permission (issue #222 — catalog/definition
-	// writes available to OATs only under an explicit permission). Reads use the
+	// writes available to service tokens only under an explicit permission). Reads use the
 	// coarse credits:read capability.
 	creditTypes := group.Group("/credit-types")
-	creditTypes.POST("", ginmw.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceCreateCreditType))
-	creditTypes.GET("", ginmw.RequireOATPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceListCreditTypes))
-	creditTypes.PATCH("/:name", ginmw.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceUpdateCreditType))
-	creditTypes.POST("/:name/deactivate", ginmw.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceDeactivateCreditType))
-	creditTypes.POST("/:name/activate", ginmw.RequireOATPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceActivateCreditType))
+	creditTypes.POST("", ginmw.RequireServiceTokenPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceCreateCreditType))
+	creditTypes.GET("", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceListCreditTypes))
+	creditTypes.PATCH("/:name", ginmw.RequireServiceTokenPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceUpdateCreditType))
+	creditTypes.POST("/:name/deactivate", ginmw.RequireServiceTokenPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceDeactivateCreditType))
+	creditTypes.POST("/:name/activate", ginmw.RequireServiceTokenPermission(controlplane.PermCatalogWrite), wrap(httphandlers.ServiceActivateCreditType))
 }
 
 // RegisterSelfServiceRoutes mounts the browser-direct SELF-SERVICE billing

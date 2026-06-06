@@ -12,8 +12,8 @@ import (
 // First increment: this resolves to the single default tenant, which is the
 // correct behaviour for self-hosted / single-tenant deployments and keeps
 // existing single-tenant routes working through the same code path. Multi-tenant
-// resolution from host / path / JWT / OAT / admin route is layered in by #222
-// (tenant-scoped public routes & OATs) at the marked extension point below; the
+// resolution from host / path / JWT / service token / admin route is layered in by #222
+// (tenant-scoped public routes & service tokens) at the marked extension point below; the
 // rest of the stack already reads the tenant from context via
 // tenant.FromContextOrDefault, so only this resolver needs to change.
 func ResolveTenant() gin.HandlerFunc {
@@ -36,7 +36,7 @@ func ResolveTenant() gin.HandlerFunc {
 // resolveTenantID determines the tenant for a request.
 //
 // Extension point for #222: inspect host (subdomain), path prefix
-// (/t/:tenant/...), the OAT's owning tenant, or a delegated browser token's
+// (/t/:tenant/...), the service token's owning tenant, or a delegated browser token's
 // `tenant` claim, look the slug up in billing.tenants, and return that id.
 // Until then every request maps to the single default tenant.
 func resolveTenantID(_ *gin.Context) tenant.ID {

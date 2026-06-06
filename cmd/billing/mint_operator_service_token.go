@@ -16,7 +16,7 @@ import (
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
-func mintOperatorOAT(cmd *cobra.Command, _ []string) error {
+func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	ctx := context.Background()
 
@@ -40,17 +40,17 @@ func mintOperatorOAT(cmd *cobra.Command, _ []string) error {
 	}
 	org = strings.ToLower(strings.TrimSpace(org))
 	if org == "" && cfg != nil && cfg.Auth != nil {
-		org = strings.ToLower(strings.TrimSpace(cfg.Auth.OperatorOrgSlug))
+		org = strings.ToLower(strings.TrimSpace(cfg.Auth.OperatorTenantSlug))
 	}
 	if org == "" {
 		org = "operator"
 	}
 
 	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		OperatorOrgSlug: org,
-		MintInitialOAT:  false,
+		OperatorTenantSlug:      org,
+		MintInitialServiceToken: false,
 	}); berr != nil {
-		return fmt.Errorf("bootstrap operator org/role: %w", berr)
+		return fmt.Errorf("bootstrap operator tenant/role: %w", berr)
 	}
 
 	name, err := cmd.Flags().GetString("name")
@@ -82,24 +82,24 @@ func mintOperatorOAT(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve tenant %q: %w", tenantRef, err)
 	}
 
-	resources := []authcore.OrgAccessTokenResource{tenantResource}
-	oat, token, err := cp.Core().MintOrgAccessTokenWithOptions(ctx, org, authcore.OrgAccessTokenMintOptions{
+	resources := []authcore.ServiceTokenResource{tenantResource}
+	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, org, authcore.ServiceTokenMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,
 	})
 	if err != nil {
-		return fmt.Errorf("mint operator oat: %w", err)
+		return fmt.Errorf("mint operator serviceToken: %w", err)
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":         org,
-		"name":        name,
-		"tenant":      tenantSlug,
-		"tenant_id":   tenantID.String(),
-		"oat_key_id":  oat.KeyID,
-		"oat_secret":  token,
-		"permissions": oat.Permissions,
-		"resources":   oat.Resources,
+		"org":                  org,
+		"name":                 name,
+		"tenant":               tenantSlug,
+		"tenant_id":            tenantID.String(),
+		"service_token_key_id": serviceToken.KeyID,
+		"service_token_secret": token,
+		"permissions":          serviceToken.Permissions,
+		"resources":            serviceToken.Resources,
 	})
 }

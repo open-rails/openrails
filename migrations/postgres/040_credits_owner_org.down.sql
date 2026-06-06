@@ -1,4 +1,4 @@
--- Reverse of 040: remove the owner-org ownership of the credit tables.
+-- Reverse of 040: remove the tenant-subject ownership of the credit tables.
 -- NOTE: migratekit (LoadFromFS) only applies *.up.sql files; this .down.sql is
 -- kept for documentation / manual rollback and is NOT auto-loaded.
 --

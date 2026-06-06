@@ -3,7 +3,7 @@
 Keystone refactor that makes OpenRails core tenant-aware so one shared app/DB
 can serve many tenants, while **self-hosted single-tenant installs run the SAME
 code paths** with one default tenant namespace. This is the prerequisite that
-unblocks #221 (org-owned credits) and #222 (OAT public tenant routes).
+unblocks #221 (tenant-subject-owned credits) and #222 (service-token public tenant routes).
 
 This document describes the **first, additive increment** that has landed and,
 crucially, the **remaining work** so the rest can be completed without
@@ -22,17 +22,12 @@ re-discovering the plan.
   to the default tenant.
 - Adds new **tenant-scoped indexes** for the hot paths (entitlements, credit
   balances/transactions/blocks).
-- It is **additive and backward-compatible**:
-  - `tenant_id` is **not** `NOT NULL` yet.
-  - No existing unique constraint / index is dropped or rewritten.
-  - No cross-table FK to `billing.tenants` is added yet.
-
-  > **Cross-repo coupling:** host applications may read `billing.entitlements`
-  > via **direct SQL** from their own processes. Adding a nullable column and
-  > extra indexes does not break `SELECT ... FROM billing.entitlements WHERE
-  > user_id = ...` reads, so those direct readers keep working unchanged. Do
-  > **not** make `tenant_id` `NOT NULL` or change the entitlements unique/overlap
-  > constraints until those readers are coordinated.
+- The planned hard-cut direction is:
+  - tenant-owned rows must carry the tenant namespace until the table moves to
+    the `tenant_subject_id` model.
+  - old org/payer/account vocabulary should be removed instead of aliased.
+  - host applications should use OpenRails APIs or current tenant-subject
+    columns, not direct SQL against old user/org fields.
 
 The `.down.sql` is documentation-only (migratekit's `LoadFromFS` applies only
 `*.up.sql`), matching this repo's convention.
@@ -51,7 +46,7 @@ The `.down.sql` is documentation-only (migratekit's `LoadFromFS` applies only
 
 Mounted in the public engine **before** authorization and before any
 tenant-owned DB access. For now it resolves to the default tenant; the marked
-extension point is where #222 layers host/path/JWT/OAT/delegated-token
+extension point is where #222 layers host/path/JWT/service-token/delegated-JWT
 resolution. Because downstream code reads the tenant via
 `tenant.FromContextOrDefault`, only this resolver needs to change to turn on
 multi-tenant routing.
@@ -109,7 +104,7 @@ tenant-scoped):
    in lockstep with all writers being tenant-aware. Affected uniques today:
    - `processor_customers (user_id, processor)` and `(processor, customer_id)`
    - credit balance and ledger uniqueness, now keyed by
-     `(tenant_id, tenant_subject_id, credit_type_id)` plus idempotency coordinates
+     `(tenant_subject_id, credit_type_id)` plus idempotency coordinates
    - `payment_methods (user_id, vault_id)` / `(processor, vault_id)`
    - `subscriptions` lifecycle-owner uniques
    - `entitlements` overlap-exclusion + `uniq_entitlements_active`
@@ -125,24 +120,24 @@ tenant-scoped):
 ### Resolution — deferred to #222
 
 `resolveTenantID` currently returns the default tenant. #222 fills in
-host/subdomain, `/t/:tenant/...` path, OAT-owning-tenant, and delegated browser
-token (`tenant` claim) resolution, including looking the slug up in
+host/subdomain, `/t/:tenant/...` path, service-token-owning tenant, and delegated
+browser JWT (`tenant` claim) resolution, including looking the slug up in
 `billing.tenants`.
 
 ## Coordination notes / open questions
 
-- **Payer / invoker vocabulary:** durable OpenRails billing identity is
-  `tenant_id` + `tenant_subject_id` + `invoker_id`. `tenant_id` is the
-  deployment/application namespace; `tenant_subject_id` is the AuthKit org or
-  personal-org whose balance is charged; `invoker_id` is the user/service/OAT
-  principal causing the operation. Billing credit, usage, admission, and budget
-  storage use those physical column names; service API fields use
+- **Tenant subject / invoker vocabulary:** durable OpenRails billing identity is
+  `tenant_subject_id` plus optional `invoker_id`. `tenant_subject_id` identifies
+  the payable OIDC subject under a tenant (`tenant + issuer + subject`);
+  `invoker_id` identifies the principal causing the operation when it differs
+  from the charged subject. Billing credit, usage, admission, and budget storage
+  should use those physical column names; service API fields use
   `tenant_subject_id` and `invoker_id`.
-- **AuthKit resource-scoped OATs:** standalone OpenRails OATs are opaque AuthKit
-  Organization Access Tokens. AuthKit stores permissions plus opaque resource
-  scopes; OpenRails interprets `openrails.tenant=<tenant_uuid>` and optional
-  `openrails.tenant_subject=<authkit_org_uuid>`. Permissions say what the token may
-  do; resources say where it may do it.
+- **AuthKit resource-scoped service tokens:** standalone OpenRails service
+  tokens are opaque server-to-server credentials. AuthKit stores permissions plus
+  opaque resource scopes; OpenRails interprets `openrails.tenant=<tenant_uuid>`
+  and optional `openrails.tenant_subject=<tenant_subject_uuid>`. Permissions say
+  what the token may do; resources say where it may do it.
 - **Host application direct SQL reads of `billing.entitlements`:** the additive
   column is safe today, but before `tenant_id` becomes `NOT NULL` or before any
   entitlements unique/overlap constraint is rescoped by tenant, those repos'

@@ -22,41 +22,41 @@ ALTER INDEX IF EXISTS billing.ix_invoices_payer RENAME TO ix_invoices_owner;
 ALTER TABLE billing.budget_reservations
     RENAME COLUMN invoker_id TO actor;
 ALTER TABLE billing.budget_reservations
-    RENAME COLUMN payer_org_id TO owner_id;
+    RENAME COLUMN tenant_subject_id TO owner_id;
 
 ALTER TABLE billing.payment_blocklist
-    RENAME COLUMN payer_org_id TO owner_id;
+    RENAME COLUMN tenant_subject_id TO owner_id;
 
 ALTER TABLE billing.tier_policies
-    RENAME COLUMN payer_org_id TO owner_id;
+    RENAME COLUMN tenant_subject_id TO owner_id;
 
 ALTER TABLE billing.invoices
-    RENAME COLUMN payer_org_id TO owner_id;
+    RENAME COLUMN tenant_subject_id TO owner_id;
 
 ALTER TABLE billing.usage_events
     RENAME COLUMN invoker_id TO user_id;
 ALTER TABLE billing.usage_events
-    RENAME COLUMN payer_org_id TO owner_id;
+    RENAME COLUMN tenant_subject_id TO owner_id;
 
 ALTER TABLE billing.credit_spend_limits
     RENAME COLUMN invoker_id TO invoker;
 ALTER TABLE billing.credit_spend_limits
-    RENAME COLUMN payer_org_id TO owner_id;
+    RENAME COLUMN tenant_subject_id TO owner_id;
 
 ALTER TABLE billing.credit_account_settings
-    RENAME COLUMN payer_org_id TO owner_id;
+    RENAME COLUMN tenant_subject_id TO owner_id;
 
 ALTER TABLE billing.credit_blocks
     RENAME COLUMN invoker_id TO user_id;
 ALTER TABLE billing.credit_blocks
-    RENAME COLUMN payer_org_id TO owner_id;
+    RENAME COLUMN tenant_subject_id TO owner_id;
 
 ALTER TABLE billing.credit_transactions
     RENAME COLUMN invoker_id TO user_id;
 ALTER TABLE billing.credit_transactions
-    RENAME COLUMN payer_org_id TO owner_id;
+    RENAME COLUMN tenant_subject_id TO owner_id;
 
 ALTER TABLE billing.user_credit_balances
     RENAME COLUMN invoker_id TO user_id;
 ALTER TABLE billing.user_credit_balances
-    RENAME COLUMN payer_org_id TO owner_id;
+    RENAME COLUMN tenant_subject_id TO owner_id;

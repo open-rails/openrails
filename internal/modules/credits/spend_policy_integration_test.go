@@ -21,7 +21,7 @@ import (
 )
 
 // spendTestEnv connects to the integration DB, verifies the #237 schema, and
-// seeds a fresh credit type + payer. It returns the service, the payer org, the
+// seeds a fresh credit type + payer. It returns the service, the tenant subject, the
 // credit-type name, and a cleanup-registered context.
 func spendTestEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.TenantSubjectID, string, context.Context) {
 	t.Helper()

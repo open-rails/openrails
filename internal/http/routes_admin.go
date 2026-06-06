@@ -12,7 +12,7 @@ func (s *Server) registerAdminRoutesAt(e *gin.Engine, apiPrefix string) {
 	opts := httproutes.Options{
 		Authenticator: s.embeddedAuthenticator(),
 	}
-	// #224: when the control plane is enabled, make the operator org the live
+	// #224: when the control plane is enabled, make the operator tenant the live
 	// admin authority. Guard against passing a typed-nil pointer as a non-nil
 	// interface (which would make the gate fire with a nil checker).
 	if s.controlPlane != nil {

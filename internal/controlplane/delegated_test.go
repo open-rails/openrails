@@ -2,7 +2,7 @@ package controlplane
 
 import (
 	"context"
-	"crypto/rsa"
+	"crypto"
 	"errors"
 	"testing"
 	"time"
@@ -21,7 +21,7 @@ import (
 // requirement, and the openrails:self:* permission-catalog gate. They build the
 // exact verifier configuration newDelegatedVerifier uses, so they pin the real
 // behavior without needing a database (the org->tenant mapping in
-// ResolveDelegated reuses tenantForOrgSlug, covered by the OAT path + the
+// ResolveDelegated reuses tenantForAuthKitTenantSlug, covered by the service token path + the
 // middleware tests).
 
 const (
@@ -42,7 +42,7 @@ func newTestDelegatedVerifier(t *testing.T) (*authhttp.Verifier, jwtkit.Signer) 
 	require.NoError(t, err)
 
 	v := authhttp.NewVerifier(
-		authhttp.WithOrgMode("multi"),
+		authhttp.WithTenantMode("multi"),
 		authhttp.WithPermissionCatalog(func(permissions []string) error {
 			if len(permissions) == 0 {
 				return errors.New("delegated token carries no permissions")
@@ -57,7 +57,7 @@ func newTestDelegatedVerifier(t *testing.T) (*authhttp.Verifier, jwtkit.Signer) 
 	)
 	pub := signer.PublicKey()
 	require.NoError(t, v.AddIssuer(testDelegatedIssuer, []string{canonicalAudience}, authhttp.IssuerOptions{
-		RawKeys: map[string]*rsa.PublicKey{testDelegatedKID: pub},
+		RawKeys: map[string]crypto.PublicKey{testDelegatedKID: pub},
 	}))
 	return v, signer
 }

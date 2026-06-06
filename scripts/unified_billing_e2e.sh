@@ -2,9 +2,9 @@
 # Unified-billing e2e harness — deployed-stack edition (issue #244).
 #
 # Drives the FULL unified-billing money path against a *running, standalone*
-# OpenRails over its OAT-authenticated public service routes — the exact
+# OpenRails over its service token-authenticated public service routes — the exact
 # server-to-server contract gen-orchestrator / Tensorhub use in production
-# (issue #233 topology, #222 public OAT routes). Unlike the in-repo Go harness
+# (issue #233 topology, #222 public service token routes). Unlike the in-repo Go harness
 # (tests/unified_billing_e2e_test.go, which needs testcontainers), this hits a
 # real deployed service + its own Postgres, so it runs anywhere the stack is up
 # (e.g. ~/cozy/e2e) and is the artifact that proved #244 end-to-end.
@@ -15,23 +15,23 @@
 # read settings back. A FRESH credit type per run makes balances deterministic.
 #
 # POSIX sh + curl only (runs in alpine/curl). Usage:
-#   OPENRAILS_OAT=openrails_oat_xxx BASE_URL=http://openrails:2053 \
+#   OPENRAILS_SERVICE_TOKEN=openrails_st_xxx BASE_URL=http://openrails:2053 \
 #   USER_ID=66666666-6666-6666-6666-666666666666 \
 #     sh scripts/unified_billing_e2e.sh
 #
-# In ~/cozy/e2e: mint the OAT with
+# In ~/cozy/e2e: mint the service token with
 #   docker compose exec -T openrails /app/billing-server \
-#     --config /app/config/openrails.config.yaml mint-operator-oat
+#     --config /app/config/openrails.config.yaml mint-operator-service-token
 # then run this from a container ON the e2e_default network (openrails:2053 is
 # not host-published):
 #   docker run --rm --network e2e_default \
 #     -v "$PWD/scripts/unified_billing_e2e.sh:/h.sh:ro" \
-#     -e OPENRAILS_OAT=... -e BASE_URL=http://openrails:2053 \
+#     -e OPENRAILS_SERVICE_TOKEN=... -e BASE_URL=http://openrails:2053 \
 #     --entrypoint sh alpine/curl:latest /h.sh
 set -u
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:2053}"
-: "${OPENRAILS_OAT:?set OPENRAILS_OAT to a minted operator OAT}"
+: "${OPENRAILS_SERVICE_TOKEN:?set OPENRAILS_SERVICE_TOKEN to a minted operator service token}"
 USER_ID="${USER_ID:-66666666-6666-6666-6666-666666666666}"
 SVC="$BASE_URL/v1/service"
 CREDITS="$SVC/credits"
@@ -50,11 +50,11 @@ req() { # METHOD PATH [JSON] -> $CODE, $BODY
   _m="$1"; _p="$2"; _d="${3:-}"
   if [ -n "$_d" ]; then
     _out=$(curl -sS -m 20 -w '\n%{http_code}' \
-      -H "Authorization: Bearer $OPENRAILS_OAT" -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $OPENRAILS_SERVICE_TOKEN" -H "Content-Type: application/json" \
       -X "$_m" "$_p" -d "$_d")
   else
     _out=$(curl -sS -m 20 -w '\n%{http_code}' \
-      -H "Authorization: Bearer $OPENRAILS_OAT" -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $OPENRAILS_SERVICE_TOKEN" -H "Content-Type: application/json" \
       -X "$_m" "$_p")
   fi
   CODE=$(printf '%s' "$_out" | tail -n1)

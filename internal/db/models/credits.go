@@ -25,9 +25,9 @@ type UserCreditBalance struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// TenantSubjectID is the payer org that OWNS this balance / is billed (issue #221,
+	// TenantSubjectID is the tenant subject that OWNS this balance / is billed (issue #221,
 	// payer/billing payer). Nullable during the additive rollout; defaults to the
-	// invoker's deterministic personal-org id. See pkg/identity.TenantSubjectID.
+	// invoker's deterministic personal tenant-subject id. See pkg/identity.TenantSubjectID.
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
 	// InvokerID is the invoker that caused usage (issue #221). Kept for attribution;
 	// it is NOT the financial payer. See pkg/identity.InvokerID.
@@ -45,7 +45,7 @@ type CreditTransaction struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// TenantSubjectID is the payer org that OWNS / is billed for this transaction (issue
+	// TenantSubjectID is the tenant subject that OWNS / is billed for this transaction (issue
 	// #221, payer/billing payer). See pkg/identity.TenantSubjectID.
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
 	// InvokerID is the invoker that caused usage (issue #221, attribution only).
@@ -71,7 +71,7 @@ type CreditBlock struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// TenantSubjectID is the payer org that OWNS this block of credits (issue #221).
+	// TenantSubjectID is the tenant subject that OWNS this block of credits (issue #221).
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
 	// InvokerID is the invoker that caused usage (issue #221, attribution only).
 	InvokerID           string     `bun:"invoker_id,notnull" json:"invoker_id"`

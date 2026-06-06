@@ -1,7 +1,7 @@
 -- =============================================================================
 -- 068 — Rolling-window money-budget reservations (issue #304)
 --
--- A delegated user (actor) under an owner org is capped to a money budget over
+-- A delegated user (actor) under an tenant subject is capped to a money budget over
 -- one or more ROLLING windows (e.g. "$2 per 4h, $5 per week"). Each reservation
 -- row is one in-flight or settled charge against those windows. The budget
 -- engine (internal/modules/budgets) computes used/reserved/remaining per window
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS billing.budget_reservations (
     -- Tenant scoping (issue #223 / #227). NOT NULL: every reservation belongs to a tenant.
     tenant_id            UUID        NOT NULL,
 
-    -- Owner org that the budget is charged against (issue #221, the payer).
+    -- Tenant subject that the budget is charged against (issue #221, the payer).
     owner_id             UUID        NOT NULL,
     -- Delegated actor (free-form subject) whose spend the windows cap.
     actor                TEXT        NOT NULL,

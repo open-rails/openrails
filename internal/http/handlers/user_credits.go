@@ -172,7 +172,7 @@ func parseTimeParam(v string) (time.Time, error) {
 // GetMyUsage returns the authenticated owner's metered usage rolled up by
 // event_type (endpoint/model) over a [from, to) window, with summed per-dimension
 // counts (issue #289). The acting user is the delegated token's subject
-// (r.GetUser()); their owner org is that subject's personal org
+// (r.GetUser()); their tenant subject is that subject's personal org
 // (identity.TenantSubjectIDFromString), matching how the self-service surface resolves
 // the payer. from/to accept RFC3339 timestamps or plain YYYY-MM-DD dates; when
 // omitted the window defaults to the current calendar month [firstOfMonthUTC, now).
@@ -217,7 +217,7 @@ func GetMyUsage(r *httprequest.Request) {
 
 // GetMyInvoices lists the authenticated owner's finalized monthly invoices,
 // newest period first, paginated via limit/offset query params (issue #303). The
-// acting user is the delegated token's subject (r.GetUser()); their owner org is
+// acting user is the delegated token's subject (r.GetUser()); their tenant subject is
 // that subject's personal org (identity.TenantSubjectIDFromString), matching how the
 // rest of the self-service surface resolves the payer (mirrors GetMyUsage).
 func GetMyInvoices(r *httprequest.Request) {
