@@ -14,11 +14,11 @@ import (
 )
 
 func TestReconcile_Clean(t *testing.T) {
-	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
 	resetCreditLedger(t, bunDB, ctx)
-	_, err := svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
+	_, err := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = svc.Hold(ctx, &owner, "user:a", ct, 200, "usage", "h1", time.Now().Add(time.Hour).UTC())
+	_, err = svc.Hold(ctx, &payer, "user:a", ct, 200, "usage", "h1", time.Now().Add(time.Hour).UTC())
 	require.NoError(t, err)
 
 	rep, err := svc.Reconcile(ctx)
@@ -29,12 +29,12 @@ func TestReconcile_Clean(t *testing.T) {
 }
 
 func TestReconcile_OrphanedExpiredHold(t *testing.T) {
-	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
 	resetCreditLedger(t, bunDB, ctx)
-	_, err := svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
+	_, err := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 	// Active hold already past expiry (HoldExpiryWorker hasn't run).
-	_, err = svc.Hold(ctx, &owner, "user:a", ct, 50, "usage", "h-old", time.Now().Add(-time.Minute).UTC())
+	_, err = svc.Hold(ctx, &payer, "user:a", ct, 50, "usage", "h-old", time.Now().Add(-time.Minute).UTC())
 	require.NoError(t, err)
 
 	orphans, err := svc.FindOrphanedExpiredHolds(ctx)
@@ -48,17 +48,17 @@ func TestReconcile_OrphanedExpiredHold(t *testing.T) {
 }
 
 func TestReconcile_HeldBalanceDriftAndRepair(t *testing.T) {
-	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
 	resetCreditLedger(t, bunDB, ctx)
-	_, err := svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
+	_, err := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = svc.Hold(ctx, &owner, "user:a", ct, 200, "usage", "h1", time.Now().Add(time.Hour).UTC())
+	_, err = svc.Hold(ctx, &payer, "user:a", ct, 200, "usage", "h1", time.Now().Add(time.Hour).UTC())
 	require.NoError(t, err)
 
 	// Corrupt the stored held_balance.
 	_, err = bunDB.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 		Set("held_balance = ?", 999).
-		Where("owner_id = ?", owner.UUID()).Exec(ctx)
+		Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
 	require.NoError(t, err)
 
 	drift, err := svc.FindHeldBalanceDrift(ctx)
@@ -67,7 +67,7 @@ func TestReconcile_HeldBalanceDriftAndRepair(t *testing.T) {
 	require.Equal(t, int64(999), drift[0].Stored)
 	require.Equal(t, int64(200), drift[0].Computed)
 
-	corrected, err := svc.RepairHeldBalance(ctx, owner, ct)
+	corrected, err := svc.RepairHeldBalance(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(200), corrected)
 
@@ -77,14 +77,14 @@ func TestReconcile_HeldBalanceDriftAndRepair(t *testing.T) {
 }
 
 func TestReconcile_BalanceAnomaly(t *testing.T) {
-	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
 	resetCreditLedger(t, bunDB, ctx)
-	_, err := svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 100, Source: "seed"})
+	_, err := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 100, Source: "seed"})
 	require.NoError(t, err)
 	// held > balance.
 	_, err = bunDB.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 		Set("held_balance = ?", 500).
-		Where("owner_id = ?", owner.UUID()).Exec(ctx)
+		Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
 	require.NoError(t, err)
 
 	anomalies, err := svc.FindBalanceAnomalies(ctx)

@@ -13,7 +13,7 @@ import (
 // It is the source of truth for usage reporting + #303 invoice line items.
 //
 // Idempotency is enforced by a unique index on
-// (tenant_id, owner_id, event_type, source, source_id): a replayed metered
+// (tenant_id, tenant_subject_id, event_type, source, source_id): a replayed metered
 // request neither double-records nor double-charges.
 type UsageEvent struct {
 	bun.BaseModel `bun:"table:billing.usage_events,alias:ue"`
@@ -21,10 +21,10 @@ type UsageEvent struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223/#227).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// OwnerID is the owner org BILLED for this usage (issue #221, the payer).
-	OwnerID uuid.UUID `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
-	// UserID is the ACTOR that caused usage (attribution only; not the owner).
-	UserID string `bun:"user_id,notnull" json:"user_id"`
+	// TenantSubjectID is the payer org BILLED for this usage (issue #221, the payer).
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	// InvokerID is the invoker that caused usage (attribution only; not the payer).
+	InvokerID string `bun:"invoker_id,notnull" json:"invoker_id"`
 	// CreditTypeID is the credit type debited for this event.
 	CreditTypeID uuid.UUID `bun:"credit_type_id,type:uuid,notnull" json:"credit_type_id"`
 	// EventType is the metered endpoint / model (e.g. "gpt-4o").

@@ -19,14 +19,14 @@ import (
 // TestListInvoices_Statement proves the facade methods backing
 // GET /v1/self/invoices and GET /v1/self/invoices/:id (issue #303): after
 // FinalizeInvoice rolls up a window into a statement, ListInvoices returns it for
-// the owner (paginated, newest first) and GetInvoice returns it with its line
+// the payer (paginated, newest first) and GetInvoice returns it with its line
 // items. Mirrors TestGetUsage_Breakdown — it exercises the public service facade
 // the HTTP handlers call, not the credits package directly.
 func TestListInvoices_Statement(t *testing.T) {
-	svc, cs, owner, ct, ctx := authzEnv(t)
+	svc, cs, payer, ct, ctx := authzEnv(t)
 
 	// Separate connection (bypasses RLS) used only to clean up the usage_events
-	// and invoices rows this test writes, scoped by owner. authzEnv cleans up the
+	// and invoices rows this test writes, scoped by payer. authzEnv cleans up the
 	// ledger/balance rows but not these.
 	cleanupDB := bun.NewDB(
 		sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.SharedPostgresDSN(t)))),
@@ -34,42 +34,42 @@ func TestListInvoices_Statement(t *testing.T) {
 	)
 	models.RegisterModels(cleanupDB)
 	t.Cleanup(func() {
-		_, _ = cleanupDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("owner_id = ?", owner.UUID()).Exec(ctx)
-		_, _ = cleanupDB.NewDelete().Model((*models.Invoice)(nil)).Where("owner_id = ?", owner.UUID()).Exec(ctx)
+		_, _ = cleanupDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
+		_, _ = cleanupDB.NewDelete().Model((*models.Invoice)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
 		_ = cleanupDB.Close()
 	})
 
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
-		OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 100_000, Source: "purchase",
+		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "purchase",
 	})
 	require.NoError(t, err)
 
 	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Owner: &owner, UserID: "user:a", CreditType: ct, EventType: "gpt-4o",
+		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 100, "output_tokens": 50},
 		Amount:     5_000, Source: "req", SourceID: "u1",
 	})
 	require.NoError(t, err)
 	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Owner: &owner, UserID: "user:a", CreditType: ct, EventType: "gpt-4o",
+		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 60, "output_tokens": 30},
 		Amount:     3_000, Source: "req", SourceID: "u2",
 	})
 	require.NoError(t, err)
 	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Owner: &owner, UserID: "user:a", CreditType: ct, EventType: "embeddings",
+		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "embeddings",
 		Dimensions: map[string]int64{"input_tokens": 200},
 		Amount:     1_000, Source: "req", SourceID: "u3",
 	})
 	require.NoError(t, err)
 
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
-	finalized, err := cs.FinalizeInvoice(ctx, owner, ct, from, to)
+	finalized, err := cs.FinalizeInvoice(ctx, payer, ct, from, to)
 	require.NoError(t, err)
 	require.Equal(t, "finalized", finalized.Status)
 
-	// ListInvoices returns the owner's invoice (newest first, paginated).
-	list, total, err := svc.ListInvoices(ctx, owner, 50, 0)
+	// ListInvoices returns the payer's invoice (newest first, paginated).
+	list, total, err := svc.ListInvoices(ctx, payer, 50, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, total)
 	require.Len(t, list, 1)
@@ -78,7 +78,7 @@ func TestListInvoices_Statement(t *testing.T) {
 	require.Equal(t, int64(100_000), list[0].DepositsTotal)
 
 	// GetInvoiceByID returns the same invoice WITH its snapshotted line items.
-	got, err := svc.GetInvoice(ctx, owner, finalized.ID)
+	got, err := svc.GetInvoice(ctx, payer, finalized.ID)
 	require.NoError(t, err)
 	require.Equal(t, finalized.ID, got.ID)
 	require.Len(t, got.LineItems, 2)
@@ -99,7 +99,7 @@ func TestListInvoices_Statement(t *testing.T) {
 	require.Equal(t, int64(200), emb.Dimensions["input_tokens"])
 
 	// Pagination: offset past the only row yields an empty page but the same total.
-	page2, total2, err := svc.ListInvoices(ctx, owner, 50, 1)
+	page2, total2, err := svc.ListInvoices(ctx, payer, 50, 1)
 	require.NoError(t, err)
 	require.Equal(t, 1, total2)
 	require.Empty(t, page2)

@@ -46,6 +46,7 @@ var ModelRegistry = []any{
 	(*TierPolicy)(nil),
 	(*PaymentBlocklistEntry)(nil),
 	(*BudgetReservation)(nil),
+	(*TenantSubject)(nil),
 }
 
 func RegisterModels(db *bun.DB) {

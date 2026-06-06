@@ -897,7 +897,8 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, creditType 
 	for _, t := range transactions {
 		result = append(result, CreditTransaction{
 			ID:              t.ID,
-			UserID:          t.UserID,
+			TenantSubjectID: t.TenantSubjectID,
+			InvokerID:       t.InvokerID,
 			Amount:          t.Amount,
 			TransactionType: t.TransactionType,
 			Source:          t.Source,

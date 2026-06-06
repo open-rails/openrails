@@ -25,13 +25,13 @@ type UserCreditBalance struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// OwnerID is the owner org that OWNS this balance / is billed (issue #221,
-	// payer/billing owner). Nullable during the additive rollout; defaults to the
-	// actor's deterministic personal-org id. See pkg/identity.OwnerOrgID.
-	OwnerID uuid.UUID `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
-	// UserID is the ACTOR that caused usage (issue #221). Kept for attribution;
-	// it is NOT the financial owner. See pkg/identity.ActorUserID.
-	UserID       string    `bun:"user_id,notnull" json:"user_id"`
+	// TenantSubjectID is the payer org that OWNS this balance / is billed (issue #221,
+	// payer/billing payer). Nullable during the additive rollout; defaults to the
+	// invoker's deterministic personal-org id. See pkg/identity.TenantSubjectID.
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	// InvokerID is the invoker that caused usage (issue #221). Kept for attribution;
+	// it is NOT the financial payer. See pkg/identity.InvokerID.
+	InvokerID    string    `bun:"invoker_id,notnull" json:"invoker_id"`
 	CreditTypeID uuid.UUID `bun:"credit_type_id,notnull" json:"credit_type_id"`
 	Balance      int64     `bun:"balance,notnull" json:"balance"`
 	HeldBalance  int64     `bun:"held_balance,notnull" json:"held_balance"`
@@ -45,11 +45,11 @@ type CreditTransaction struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// OwnerID is the owner org that OWNS / is billed for this transaction (issue
-	// #221, payer/billing owner). See pkg/identity.OwnerOrgID.
-	OwnerID uuid.UUID `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
-	// UserID is the ACTOR that caused usage (issue #221, attribution only).
-	UserID          string     `bun:"user_id,notnull" json:"user_id"`
+	// TenantSubjectID is the payer org that OWNS / is billed for this transaction (issue
+	// #221, payer/billing payer). See pkg/identity.TenantSubjectID.
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	// InvokerID is the invoker that caused usage (issue #221, attribution only).
+	InvokerID       string     `bun:"invoker_id,notnull" json:"invoker_id"`
 	CreditTypeID    uuid.UUID  `bun:"credit_type_id,notnull" json:"credit_type_id"`
 	Amount          int64      `bun:"amount,notnull" json:"amount"`
 	BalanceAfter    *int64     `bun:"balance_after,nullzero" json:"balance_after,omitempty"`
@@ -71,10 +71,10 @@ type CreditBlock struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// OwnerID is the owner org that OWNS this block of credits (issue #221).
-	OwnerID uuid.UUID `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
-	// UserID is the ACTOR that caused usage (issue #221, attribution only).
-	UserID              string     `bun:"user_id,notnull" json:"user_id"`
+	// TenantSubjectID is the payer org that OWNS this block of credits (issue #221).
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	// InvokerID is the invoker that caused usage (issue #221, attribution only).
+	InvokerID           string     `bun:"invoker_id,notnull" json:"invoker_id"`
 	CreditTypeID        uuid.UUID  `bun:"credit_type_id,notnull" json:"credit_type_id"`
 	OriginalAmount      int64      `bun:"original_amount,notnull" json:"original_amount"`
 	RemainingAmount     int64      `bun:"remaining_amount,notnull" json:"remaining_amount"`

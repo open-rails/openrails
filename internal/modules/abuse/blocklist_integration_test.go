@@ -98,7 +98,7 @@ func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
 			Where("value = ?", value).Exec(context.Background())
 	})
 
-	owner := identity.OwnerOrgIDFromString(uuid.NewString())
+	owner := identity.TenantSubjectIDFromString(uuid.NewString())
 
 	// Not blocked before adding.
 	blocked, err := svc.IsBlocked(ctx, abuse.KindProcessorCustomer, value)

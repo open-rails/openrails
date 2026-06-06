@@ -3,7 +3,7 @@ package recurring
 import (
 	"fmt"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 // withReferenceMeta attaches a Solana Pay REFERENCE to an instruction by

@@ -8,7 +8,7 @@ import (
 )
 
 // BudgetReservation is one in-flight or settled charge against a delegated
-// actor's rolling money-budget windows (issue #304). The budget engine
+// invoker's rolling money-budget windows (issue #304). The budget engine
 // (internal/modules/budgets) computes per-window used/reserved/remaining as
 // windowed SUM() over these rows by CreatedAt — the windows themselves are
 // PASSED IN by the caller, never read from any tier table.
@@ -18,7 +18,7 @@ import (
 // Release -> "released" (counts against neither).
 //
 // Idempotency is enforced by a unique index on
-// (tenant_id, owner_id, actor, source, source_id): a replayed Reserve returns
+// (tenant_id, tenant_subject_id, invoker_id, source, source_id): a replayed Reserve returns
 // the existing row rather than double-reserving.
 type BudgetReservation struct {
 	bun.BaseModel `bun:"table:billing.budget_reservations,alias:br"`
@@ -26,10 +26,10 @@ type BudgetReservation struct {
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223/#227).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// OwnerID is the owner org the budget is charged against (issue #221, the payer).
-	OwnerID uuid.UUID `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
-	// Actor is the delegated subject whose spend the windows cap.
-	Actor string `bun:"actor,notnull" json:"actor"`
+	// TenantSubjectID is the payer org the budget is charged against (issue #221, the payer).
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	// InvokerID is the delegated subject whose spend the windows cap.
+	InvokerID string `bun:"invoker_id,notnull" json:"invoker_id"`
 	// AmountMillicents is the reserved (authorized) amount; counts against
 	// `reserved` while Status == "active".
 	AmountMillicents int64 `bun:"amount_millicents,notnull" json:"amount_millicents"`

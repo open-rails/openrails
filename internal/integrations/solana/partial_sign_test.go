@@ -5,8 +5,8 @@ import (
 	"encoding/base64"
 	"testing"
 
-	solanago "github.com/doujins-org/solana-go"
-	"github.com/doujins-org/solana-go/programs/system"
+	solanago "github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/programs/system"
 	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
 )

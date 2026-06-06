@@ -93,7 +93,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		UserID:                  userID,
+		InvokerID:               userID,
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -106,9 +106,9 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("user_id = ?", userID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("user_id = ?", userID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("invoker_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("invoker_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("invoker_id = ?", userID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", creditTypeID).Exec(ctx)
@@ -132,7 +132,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 
 	depositCount, err := bunDB.NewSelect().
 		Model((*models.CreditTransaction)(nil)).
-		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
+		Where("invoker_id = ? AND credit_type_id = ?", userID, creditTypeID).
 		Where("transaction_type = 'deposit' AND source = 'subscription_renewal'").
 		Count(ctx)
 	require.NoError(t, err)
@@ -146,7 +146,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	dep := new(models.CreditTransaction)
 	require.NoError(t, bunDB.NewSelect().
 		Model(dep).
-		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
+		Where("invoker_id = ? AND credit_type_id = ?", userID, creditTypeID).
 		Where("transaction_type = 'deposit' AND source = 'subscription_renewal'").
 		Limit(1).
 		Scan(ctx))
@@ -156,7 +156,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	bal := new(models.UserCreditBalance)
 	require.NoError(t, bunDB.NewSelect().
 		Model(bal).
-		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
+		Where("invoker_id = ? AND credit_type_id = ?", userID, creditTypeID).
 		Limit(1).
 		Scan(ctx))
 	require.Equal(t, int64(100), bal.Balance)
@@ -257,7 +257,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		UserID:                  userID,
+		InvokerID:               userID,
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -270,8 +270,8 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("user_id = ?", userID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("invoker_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("invoker_id = ?", userID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
@@ -310,9 +310,9 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 
 	// Total should be 10 + 100 across two types, each exactly once.
 	balOnce := new(models.UserCreditBalance)
-	require.NoError(t, bunDB.NewSelect().Model(balOnce).Where("user_id = ? AND credit_type_id = ?", userID, ctOnceID).Scan(ctx))
+	require.NoError(t, bunDB.NewSelect().Model(balOnce).Where("invoker_id = ? AND credit_type_id = ?", userID, ctOnceID).Scan(ctx))
 	require.Equal(t, int64(10), balOnce.Balance)
 	balRenew := new(models.UserCreditBalance)
-	require.NoError(t, bunDB.NewSelect().Model(balRenew).Where("user_id = ? AND credit_type_id = ?", userID, ctRenewID).Scan(ctx))
+	require.NoError(t, bunDB.NewSelect().Model(balRenew).Where("invoker_id = ? AND credit_type_id = ?", userID, ctRenewID).Scan(ctx))
 	require.Equal(t, int64(100), balRenew.Balance)
 }

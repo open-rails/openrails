@@ -19,7 +19,7 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// TierPolicyStore loads + stores per-owner, per-tier throughput policies
+// TierPolicyStore loads + stores per-payer, per-tier throughput policies
 // (billing.tier_policies). The money axis stays in credit_account_settings.
 type TierPolicyStore struct {
 	db *db.DB
@@ -35,28 +35,28 @@ type ResolvedPolicy struct {
 	BudgetWindows     []budgets.BudgetWindow
 }
 
-// UpsertTierPolicy sets the throughput windows for (owner, tier).
-func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, owner identity.OwnerOrgID, tier string, windows []models.ThroughputWindow) error {
-	return s.UpsertTierPolicyFull(ctx, owner, tier, models.ThroughputPolicy{Windows: windows})
+// UpsertTierPolicy sets the throughput windows for (payer, tier).
+func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, payer identity.TenantSubjectID, tier string, windows []models.ThroughputWindow) error {
+	return s.UpsertTierPolicyFull(ctx, payer, tier, models.ThroughputPolicy{Windows: windows})
 }
 
 // UpsertTierPolicyFull sets the full tier policy (windows + entitled endpoints).
-func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, owner identity.OwnerOrgID, tier string, policy models.ThroughputPolicy) error {
+func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identity.TenantSubjectID, tier string, policy models.ThroughputPolicy) error {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	now := time.Now().UTC()
 	row := &models.TierPolicy{
-		ID:            uuidutil.NewV7(),
-		TenantID:      tenantID,
-		OwnerID:       owner.UUID(),
-		Tier:          tier,
-		Policy:        policy,
-		PolicyVersion: 1,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:              uuidutil.NewV7(),
+		TenantID:        tenantID,
+		TenantSubjectID: payer.UUID(),
+		Tier:            tier,
+		Policy:          policy,
+		PolicyVersion:   1,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		_, err := s.db.Q(ctx).NewInsert().Model(row).
-			On("CONFLICT (tenant_id, owner_id, tier) DO UPDATE").
+			On("CONFLICT (tenant_id, tenant_subject_id, tier) DO UPDATE").
 			Set("policy = EXCLUDED.policy").
 			Set("updated_at = EXCLUDED.updated_at").
 			Exec(ctx)
@@ -64,15 +64,15 @@ func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, owner identi
 	})
 }
 
-// GetTierPolicy returns the enforceable policy for (owner, tier). A missing row
+// GetTierPolicy returns the enforceable policy for (payer, tier). A missing row
 // yields an empty policy (no throughput limit, all endpoints allowed).
-func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, owner identity.OwnerOrgID, tier string) (ResolvedPolicy, error) {
+func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.TenantSubjectID, tier string) (ResolvedPolicy, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	row := new(models.TierPolicy)
 	found := false
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		e := s.db.Q(ctx).NewSelect().Model(row).
-			Where("tenant_id = ? AND owner_id = ? AND tier = ?", tenantID, owner.UUID(), tier).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND tier = ?", tenantID, payer.UUID(), tier).
 			Limit(1).Scan(ctx)
 		if errors.Is(e, sql.ErrNoRows) {
 			return nil

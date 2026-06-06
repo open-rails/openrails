@@ -26,7 +26,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 )
 
-func admitEnv(t *testing.T) (*admission.Admitter, *credits.CreditsService, *admission.TierPolicyStore, identity.OwnerOrgID, string, context.Context, *abuse.BlocklistService) {
+func admitEnv(t *testing.T) (*admission.Admitter, *credits.CreditsService, *admission.TierPolicyStore, identity.TenantSubjectID, string, context.Context, *abuse.BlocklistService) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -56,15 +56,15 @@ func admitEnv(t *testing.T) (*admission.Admitter, *credits.CreditsService, *admi
 	}).Exec(ctx)
 	require.NoError(t, err)
 
-	owner := identity.OwnerOrgIDFromString(uuid.NewString())
-	ownerID := owner.UUID()
+	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	ownerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.TierPolicy)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.BudgetReservation)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.TierPolicy)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.BudgetReservation)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
 	})
 
@@ -84,15 +84,15 @@ func admitEnv(t *testing.T) (*admission.Admitter, *credits.CreditsService, *admi
 	bl := abuse.NewBlocklistService(dbi)
 	bsvc := budgets.NewService(dbi)
 	adm := admission.NewAdmitter(ratelimit.NewLimiter(rdb), cs, store, bl, bsvc)
-	return adm, cs, store, owner, ctName, ctx, bl
+	return adm, cs, store, payer, ctName, ctx, bl
 }
 
 func TestAdmit_ThroughputDeny(t *testing.T) {
-	adm, _, store, owner, ct, ctx, _ := admitEnv(t)
-	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
+	adm, _, store, payer, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 2}}))
 
-	req := admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+	req := admission.AdmitRequest{Payer: payer, Invoker: "user:a", Tier: "free", Model: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 0}
 	for i := 0; i < 2; i++ {
 		d, err := adm.Admit(ctx, req)
@@ -108,12 +108,12 @@ func TestAdmit_ThroughputDeny(t *testing.T) {
 }
 
 func TestAdmit_MoneyDeny(t *testing.T) {
-	adm, _, store, owner, ct, ctx, _ := admitEnv(t)
-	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
+	adm, _, store, payer, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
 	// no deposit -> balance 0, prepaid
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
-		Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+		Payer: payer, Invoker: "user:a", Tier: "free", Model: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 500,
 		Source: "usage", SourceID: "m1", ExpiresAt: time.Now().Add(time.Hour),
 	})
@@ -124,14 +124,14 @@ func TestAdmit_MoneyDeny(t *testing.T) {
 }
 
 func TestAdmit_Allow(t *testing.T) {
-	adm, cs, store, owner, ct, ctx, _ := admitEnv(t)
-	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
+	adm, cs, store, payer, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
-	_, err := cs.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 10_000, Source: "seed"})
+	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 10_000, Source: "seed"})
 	require.NoError(t, err)
 
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
-		Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+		Payer: payer, Invoker: "user:a", Tier: "free", Model: "gpt-4o",
 		Amounts: map[string]int64{"request": 1, "token": 50}, CreditType: ct, EstimateCents: 500,
 		Source: "usage", SourceID: "ok1", ExpiresAt: time.Now().Add(time.Hour),
 	})
@@ -142,14 +142,14 @@ func TestAdmit_Allow(t *testing.T) {
 }
 
 func TestAdmit_BlocklistDeny(t *testing.T) {
-	adm, _, store, owner, ct, ctx, bl := admitEnv(t)
-	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
+	adm, _, store, payer, ct, ctx, bl := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
 	fp := "fp_" + uuid.NewString()
 	require.NoError(t, bl.Add(ctx, nil, "card_fingerprint", fp, "test"))
 
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
-		Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+		Payer: payer, Invoker: "user:a", Tier: "free", Model: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, CreditType: ct,
 		BlockChecks: []admission.BlockCheck{{Kind: "card_fingerprint", Value: fp}},
 	})
@@ -160,41 +160,41 @@ func TestAdmit_BlocklistDeny(t *testing.T) {
 }
 
 func TestAdmit_EndpointGating(t *testing.T) {
-	adm, _, store, owner, ct, ctx, _ := admitEnv(t)
-	require.NoError(t, store.UpsertTierPolicyFull(ctx, owner, "free", models.ThroughputPolicy{
+	adm, _, store, payer, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{
 		Windows:           []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}},
 		EntitledEndpoints: []string{"dall-e-3"},
 	}))
 
-	d, err := adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free",
+	d, err := adm.Admit(ctx, admission.AdmitRequest{Payer: payer, Invoker: "user:a", Tier: "free",
 		Model: "gpt-4o", Amounts: map[string]int64{"request": 1}, CreditType: ct})
 	require.NoError(t, err)
 	require.False(t, d.Allowed)
 	require.Equal(t, "endpoint", d.BlockedBy)
 
-	d, err = adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free",
+	d, err = adm.Admit(ctx, admission.AdmitRequest{Payer: payer, Invoker: "user:a", Tier: "free",
 		Model: "dall-e-3", Amounts: map[string]int64{"request": 1}, CreditType: ct})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
 }
 
 func TestAdmit_BudgetDeny(t *testing.T) {
-	adm, cs, store, owner, ct, ctx, _ := admitEnv(t)
-	require.NoError(t, store.UpsertTierPolicyFull(ctx, owner, "free", models.ThroughputPolicy{
+	adm, cs, store, payer, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{
 		Windows:       []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 1000}},
 		BudgetWindows: []models.BudgetWindowPolicy{{Key: "1h", WindowSeconds: 3600, LimitMillicents: 500}},
 	}))
-	_, err := cs.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed"})
+	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed"})
 	require.NoError(t, err)
 
 	// First request reserves 400 of the 500/hour budget -> allowed.
-	d, err := adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+	d, err := adm.Admit(ctx, admission.AdmitRequest{Payer: payer, Invoker: "user:a", Tier: "free", Model: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 400, Source: "usage", SourceID: "b1", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
 
 	// Second request (200) would push the window to 600 > 500 -> budget deny.
-	d, err = adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+	d, err = adm.Admit(ctx, admission.AdmitRequest{Payer: payer, Invoker: "user:a", Tier: "free", Model: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 200, Source: "usage", SourceID: "b2", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.False(t, d.Allowed)
@@ -202,35 +202,35 @@ func TestAdmit_BudgetDeny(t *testing.T) {
 }
 
 func TestAdmit_UnverifiedArrearsDeny(t *testing.T) {
-	adm, cs, store, owner, ct, ctx, _ := admitEnv(t)
-	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
+	adm, cs, store, payer, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 1000}}))
 	bm := credits.BillingModeArrears
-	_, err := cs.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{BillingMode: &bm})
+	_, err := cs.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: &bm})
 	require.NoError(t, err)
 
 	// arrears (credit line) + unverified payment method -> deny.
-	d, err := adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+	d, err := adm.Admit(ctx, admission.AdmitRequest{Payer: payer, Invoker: "user:a", Tier: "free", Model: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 100, Source: "usage", SourceID: "u1", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.False(t, d.Allowed)
 	require.Equal(t, "unverified", d.BlockedBy)
 
 	// verify -> allowed (arrears with unlimited line).
-	require.NoError(t, cs.SetPaymentMethodVerified(ctx, owner, ct, true))
-	d, err = adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free", Model: "gpt-4o",
+	require.NoError(t, cs.SetPaymentMethodVerified(ctx, payer, ct, true))
+	d, err = adm.Admit(ctx, admission.AdmitRequest{Payer: payer, Invoker: "user:a", Tier: "free", Model: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 100, Source: "usage", SourceID: "u2", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
 }
 
 func TestAdmit_SuspendedDeny(t *testing.T) {
-	adm, cs, store, owner, ct, ctx, _ := admitEnv(t)
-	require.NoError(t, store.UpsertTierPolicy(ctx, owner, "free",
+	adm, cs, store, payer, ct, ctx, _ := admitEnv(t)
+	require.NoError(t, store.UpsertTierPolicy(ctx, payer, "free",
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 100}}))
-	require.NoError(t, cs.Suspend(ctx, owner, ct, "past_due"))
+	require.NoError(t, cs.Suspend(ctx, payer, ct, "past_due"))
 
-	d, err := adm.Admit(ctx, admission.AdmitRequest{Owner: owner, Actor: "user:a", Tier: "free",
+	d, err := adm.Admit(ctx, admission.AdmitRequest{Payer: payer, Invoker: "user:a", Tier: "free",
 		Model: "gpt-4o", Amounts: map[string]int64{"request": 1}, CreditType: ct})
 	require.NoError(t, err)
 	require.False(t, d.Allowed)

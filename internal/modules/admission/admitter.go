@@ -20,7 +20,7 @@ import (
 // op); per the OpenAI model a counted request still counts even if the money gate
 // then denies. Money is checked via the existing AuthorizeAndHold (which reserves
 // the estimate). Deny on whichever axis blocks first.
-// DefaultTier is assigned to actors with no explicit tier — the new-account low
+// DefaultTier is assigned to invokers with no explicit tier — the new-account low
 // default (#300): start at the lowest tier until graduated.
 const DefaultTier = "free"
 
@@ -45,10 +45,10 @@ type BlockCheck struct {
 
 // AdmitRequest is one admission decision input.
 type AdmitRequest struct {
-	Owner identity.OwnerOrgID // the payer (org)
-	Actor string              // canonical invoker: user:<id> / oat:<key_id> / <issuer>:<sub>
-	Tier  string              // the actor's tier (selects the throughput policy)
-	Model string              // endpoint/model (namespaces the throughput counters)
+	TenantSubjectID identity.TenantSubjectID // the payer org
+	Invoker         string                   // canonical invoker: user:<id> / oat:<key_id> / <issuer>:<sub>
+	Tier            string                   // the invoker's tier (selects the throughput policy)
+	Model           string                   // endpoint/model (namespaces the throughput counters)
 
 	// Amounts is the throughput consumption for this request, e.g.
 	// {"request":1,"token":150}.
@@ -99,7 +99,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 
 	// Suspension (#299): a past_due/suspended account is denied all spend.
 	if req.CreditType != "" {
-		suspended, err := a.credits.IsSuspended(ctx, req.Owner, req.CreditType)
+		suspended, err := a.credits.IsSuspended(ctx, req.TenantSubjectID, req.CreditType)
 		if err != nil {
 			return AdmitDecision{}, err
 		}
@@ -111,7 +111,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// PM-on-file gate (#299): a credit-line (arrears) account must have a verified
 	// payment method before it may spend on credit.
 	if req.CreditType != "" {
-		needV, err := a.credits.ArrearsRequiresVerification(ctx, req.Owner, req.CreditType)
+		needV, err := a.credits.ArrearsRequiresVerification(ctx, req.TenantSubjectID, req.CreditType)
 		if err != nil {
 			return AdmitDecision{}, err
 		}
@@ -125,7 +125,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	tier := req.Tier
 	if tier == "" {
 		if req.CreditType != "" {
-			if t, terr := a.credits.GetTier(ctx, req.Owner, req.CreditType); terr == nil && t != "" {
+			if t, terr := a.credits.GetTier(ctx, req.TenantSubjectID, req.CreditType); terr == nil && t != "" {
 				tier = t
 			}
 		}
@@ -135,7 +135,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	}
 
 	// --- tier policy + endpoint gating (#298) ---
-	pol, err := a.policies.GetTierPolicy(ctx, req.Owner, tier)
+	pol, err := a.policies.GetTierPolicy(ctx, req.TenantSubjectID, tier)
 	if err != nil {
 		return AdmitDecision{}, err
 	}
@@ -145,7 +145,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 
 	// --- throughput axis (cheap Redis op; counts even if money later denies) ---
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	base := fmt.Sprintf("%s:%s:%s:%s", tenantID, req.Owner.UUID(), req.Actor, req.Model)
+	base := fmt.Sprintf("%s:%s:%s:%s", tenantID, req.TenantSubjectID.UUID(), req.Invoker, req.Model)
 	tp, err := a.limiter.Check(ctx, base, pol.Throughput, req.Amounts)
 	if err != nil {
 		return AdmitDecision{}, err
@@ -160,7 +160,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}, nil
 	}
 
-	// --- money-budget windows (#304): rolling per-tier spend caps on the actor ---
+	// --- money-budget windows (#304): rolling per-tier spend caps on the invoker ---
 	var budgetResID uuid.UUID
 	var budgetWindows []budgets.WindowStatus
 	if a.budgets != nil && len(pol.BudgetWindows) > 0 && req.EstimateCents > 0 {
@@ -170,7 +170,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 				ttl = d
 			}
 		}
-		resID, statuses, ok, err := a.budgets.Reserve(ctx, req.Owner, req.Actor, pol.BudgetWindows, req.EstimateCents, req.Source, req.SourceID, ttl)
+		resID, statuses, ok, err := a.budgets.Reserve(ctx, req.TenantSubjectID, req.Invoker, pol.BudgetWindows, req.EstimateCents, req.Source, req.SourceID, ttl)
 		if err != nil {
 			return AdmitDecision{}, err
 		}
@@ -184,8 +184,8 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// --- money axis (reserve the estimate via the existing ledger gate) ---
 	if req.EstimateCents > 0 {
 		res, err := a.credits.AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
-			Owner:         req.Owner,
-			Invoker:       req.Actor,
+			Payer:         req.TenantSubjectID,
+			Invoker:       req.Invoker,
 			CreditType:    req.CreditType,
 			EstimateCents: req.EstimateCents,
 			Source:        req.Source,
@@ -197,7 +197,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 		if !res.Decision.Allowed {
 			// Roll back the budget reservation so a money-denied request doesn't
-			// consume the actor's rolling budget.
+			// consume the invoker's rolling budget.
 			if budgetResID != uuid.Nil && a.budgets != nil {
 				_ = a.budgets.Release(ctx, budgetResID)
 			}

@@ -76,7 +76,7 @@ const (
 	// Self-service (browser-direct) permissions. These gate the tenant-scoped
 	// self-service surface (`/v1/self/*`) reached with a DELEGATED ACCESS TOKEN
 	// minted by a tenant's host frontend (issue #222 foundation for the browser
-	// tier: doujins #253 / hentai0 #142 / cozy-art #46). Unlike the coarse
+	// tier. Unlike the coarse
 	// server-to-server OAT permissions above, `openrails:self:*` authorizes a
 	// human end-user (the token's `delegated_sub`) to manage ONLY their own
 	// billing — never another user's and never operator/admin surfaces.
@@ -91,7 +91,7 @@ const (
 	// all tenants self-sign.
 	//
 	// PermSelfMint authorizes a server-to-server OAT caller (a tenant's host
-	// backend, e.g. doujins/hentai0) to MINT short-lived, user-scoped delegated
+	// backend, e.g. host apps) to MINT short-lived, user-scoped delegated
 	// access tokens for its OWN tenant, to hand to a browser for the
 	// `openrails:self:*` surface (issue #222 browser tier). It is an
 	// operator/server-to-server permission carried by OATs — NOT a browser

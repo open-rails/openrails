@@ -3,7 +3,7 @@
 --
 -- Switches the browser-direct delegated-token tier from OpenRails-sole-signer
 -- (#222: OpenRails mints + verifies with its OWN key) to a FEDERATED /
--- TRUSTED-ISSUER model: each tenant host backend (doujins, hentai0, ...) signs
+-- TRUSTED-ISSUER model: each tenant host backend signs
 -- its OWN aud=openrails delegated access tokens with its own keypair and
 -- publishes a JWKS; OpenRails verifies tenant-signed tokens against the tenant's
 -- registered JWKS.
@@ -12,13 +12,13 @@
 -- OpenRails tenant it speaks for and the JWKS URL OpenRails fetches its public
 -- keys from.
 --
--- MANY ISSUERS -> ONE TENANT (required wrinkle): doujins and hentai0 are
+-- MANY ISSUERS -> ONE TENANT (required wrinkle): multiple host apps are
 -- SEPARATE deployed services with DISTINCT signing keys / JWKS, but they are the
 -- SAME OpenRails billing tenant and SHARE one user set. So:
 --   * `issuer` is GLOBALLY UNIQUE (a UNIQUE constraint) -> it maps to exactly
 --     one tenant. This preserves no-cross-tenant-forgery: an issuer can only
 --     ever assert ITS tenant.
---   * a tenant may register MULTIPLE issuer rows (doujins + hentai0).
+--   * a tenant may register MULTIPLE issuer rows (multiple host apps).
 -- Because the user set is shared, the host MUST present the tenant's CANONICAL
 -- user id as `delegated_sub` so tokens from either issuer resolve to the SAME
 -- OpenRails billing account (enforced/documented in the resolver, not here).
@@ -50,8 +50,8 @@ CREATE TABLE IF NOT EXISTS billing.tenant_delegated_issuers (
     jwks_uri    TEXT        NOT NULL,
 
     -- Per-issuer kill-switch. Disabling evicts the issuer from the live verifier
-    -- + JWKS cache WITHOUT affecting the tenant's other issuers (disable doujins,
-    -- keep hentai0 live). The verifier only loads enabled rows.
+    -- + JWKS cache WITHOUT affecting the tenant's other issuers. The verifier
+    -- only loads enabled rows.
     enabled     BOOLEAN     NOT NULL DEFAULT TRUE,
 
     created_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -69,7 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_tenant_delegated_issuers_enabled
     WHERE enabled;
 
 COMMENT ON TABLE billing.tenant_delegated_issuers IS
-    'Federated delegated-token issuer registry (issue #259). Maps a globally-unique token issuer (iss) to the OpenRails tenant it speaks for and the JWKS URL its public keys are fetched from. MANY issuers -> ONE tenant (doujins + hentai0 = distinct keys, one tenant, shared users). GLOBAL control-plane table, not tenant-scoped.';
+    'Federated delegated-token issuer registry (issue #259). Maps a globally-unique token issuer (iss) to the OpenRails tenant it speaks for and the JWKS URL its public keys are fetched from. MANY issuers -> ONE tenant (multiple host apps = distinct keys, one tenant, shared users). GLOBAL control-plane table, not tenant-scoped.';
 COMMENT ON COLUMN billing.tenant_delegated_issuers.issuer IS
     'Token iss value. GLOBALLY UNIQUE -> maps to exactly one tenant (no cross-tenant forgery).';
 COMMENT ON COLUMN billing.tenant_delegated_issuers.jwks_uri IS

@@ -11,30 +11,30 @@ import (
 )
 
 func TestAccrueOwed_Idempotent(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears)})
+	svc, _, payer, ct, ctx := moneyInEnv(t)
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears)})
 	require.NoError(t, err)
 
-	_, err = svc.AccrueOwed(ctx, owner, ct, "usage", "req1", 300)
+	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "req1", 300)
 	require.NoError(t, err)
-	_, err = svc.AccrueOwed(ctx, owner, ct, "usage", "req1", 300) // duplicate
+	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "req1", 300) // duplicate
 	require.NoError(t, err)
-	_, err = svc.AccrueOwed(ctx, owner, ct, "usage", "req2", 200)
+	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "req2", 200)
 	require.NoError(t, err)
 
-	owed, err := svc.GetOutstandingOwed(ctx, owner, ct)
+	owed, err := svc.GetOutstandingOwed(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), owed, "300 (idempotent) + 200")
 }
 
 func TestChargeOutstanding_Threshold(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
+	svc, _, payer, ct, ctx := moneyInEnv(t)
 	pm := uuid.New()
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
 		BillingMode: strptr(credits.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.AccrueOwed(ctx, owner, ct, "usage", "r1", 500)
+	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "r1", 500)
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
@@ -51,19 +51,19 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 	require.Len(t, ch.charges, 1)
 	require.Equal(t, int64(500), ch.charges[0].AmountCents)
 
-	owed, err := svc.GetOutstandingOwed(ctx, owner, ct)
+	owed, err := svc.GetOutstandingOwed(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), owed)
 }
 
 func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
+	svc, _, payer, ct, ctx := moneyInEnv(t)
 	pm := uuid.New()
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
 		BillingMode: strptr(credits.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.AccrueOwed(ctx, owner, ct, "usage", "r1", 300)
+	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "r1", 300)
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
@@ -72,19 +72,19 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.Equal(t, int64(300), ch.charges[0].AmountCents)
-	owed, err := svc.GetOutstandingOwed(ctx, owner, ct)
+	owed, err := svc.GetOutstandingOwed(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), owed)
 }
 
 func TestChargeOutstanding_Declined_LeavesOwed(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
+	svc, _, payer, ct, ctx := moneyInEnv(t)
 	pm := uuid.New()
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
 		BillingMode: strptr(credits.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.AccrueOwed(ctx, owner, ct, "usage", "r1", 400)
+	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "r1", 400)
 	require.NoError(t, err)
 
 	ch := &fakeCharger{declineAll: true}
@@ -92,16 +92,16 @@ func TestChargeOutstanding_Declined_LeavesOwed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Len(t, ch.charges, 1, "charge attempted")
-	owed, err := svc.GetOutstandingOwed(ctx, owner, ct)
+	owed, err := svc.GetOutstandingOwed(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(400), owed, "decline leaves owed in place")
 }
 
 func TestChargeOutstanding_NoPaymentMethod_Skipped(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears)})
+	svc, _, payer, ct, ctx := moneyInEnv(t)
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears)})
 	require.NoError(t, err)
-	_, err = svc.AccrueOwed(ctx, owner, ct, "usage", "r1", 500)
+	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "r1", 500)
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}

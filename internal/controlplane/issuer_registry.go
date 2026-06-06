@@ -13,7 +13,7 @@ import (
 )
 
 // DelegatedIssuer is one registered federated delegated-token issuer (issue
-// #259): a tenant host backend (doujins, hentai0, ...) that signs its own
+// #259): a tenant host backend that signs its own
 // aud=openrails browser tokens and publishes a JWKS. OpenRails verifies
 // tenant-signed tokens against the issuer's registered JWKS and resolves the
 // OpenRails tenant from the validated `iss`.

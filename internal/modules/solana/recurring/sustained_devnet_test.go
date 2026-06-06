@@ -33,7 +33,7 @@ import (
 	"testing"
 	"time"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/internal/billing/declinecode"
 	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"

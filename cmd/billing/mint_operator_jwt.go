@@ -60,7 +60,7 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	email, _ := cmd.Flags().GetString("email")
 	email = strings.TrimSpace(email)
 	if email == "" {
-		email = "e2e-operator@doujins.test"
+		email = "e2e-operator@openrails.test"
 	}
 	username, _ := cmd.Flags().GetString("username")
 	username = strings.TrimSpace(username)

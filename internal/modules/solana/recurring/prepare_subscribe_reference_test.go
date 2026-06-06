@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 // subFakeRPCAbsent implements prepareRPC with a MISSING SubscriptionAuthority

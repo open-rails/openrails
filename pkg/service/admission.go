@@ -22,17 +22,17 @@ type AdmitBlockCheck struct {
 
 // AdmitInput is the host's admission request: throughput + money + gates.
 type AdmitInput struct {
-	Owner         identity.OwnerOrgID
-	Actor         string
-	Tier          string
-	Model         string
-	Amounts       map[string]int64
-	CreditType    string
-	EstimateCents int64
-	Source        string
-	SourceID      string
-	ExpiresAtUnix int64
-	BlockChecks   []AdmitBlockCheck
+	TenantSubjectID identity.TenantSubjectID
+	InvokerID       string
+	Tier            string
+	Model           string
+	Amounts         map[string]int64
+	CreditType      string
+	EstimateCents   int64
+	Source          string
+	SourceID        string
+	ExpiresAtUnix   int64
+	BlockChecks     []AdmitBlockCheck
 }
 
 // AdmitWindowDTO is a throughput window's state for x-ratelimit-* headers.
@@ -79,8 +79,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	if s.rt.RedisClient == nil {
 		return nil, fmt.Errorf("admission unavailable: redis not configured")
 	}
-	if in.Owner.IsZero() {
-		return nil, fmt.Errorf("owner required")
+	if in.TenantSubjectID.IsZero() {
+		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 
 	lim := ratelimit.NewLimiter(s.rt.RedisClient)
@@ -107,17 +107,17 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	}
 
 	dec, err := adm.Admit(ctx, admission.AdmitRequest{
-		Owner:         in.Owner,
-		Actor:         in.Actor,
-		Tier:          in.Tier,
-		Model:         in.Model,
-		Amounts:       in.Amounts,
-		CreditType:    in.CreditType,
-		EstimateCents: in.EstimateCents,
-		Source:        source,
-		SourceID:      in.SourceID,
-		ExpiresAt:     exp,
-		BlockChecks:   checks,
+		TenantSubjectID: in.TenantSubjectID,
+		Invoker:         in.InvokerID,
+		Tier:            in.Tier,
+		Model:           in.Model,
+		Amounts:         in.Amounts,
+		CreditType:      in.CreditType,
+		EstimateCents:   in.EstimateCents,
+		Source:          source,
+		SourceID:        in.SourceID,
+		ExpiresAt:       exp,
+		BlockChecks:     checks,
 	})
 	if err != nil {
 		return nil, err
@@ -157,26 +157,26 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	return res, nil
 }
 
-// BudgetStatus returns the rolling money-budget windows for (owner, actor) at a
+// BudgetStatus returns the rolling money-budget windows for (payer, invoker) at a
 // tier WITHOUT reserving (issue #304 introspection) — powers a host's /status
 // dashboard (e.g. cozy-art useGenerationBudgetStatus).
-func (s *Service) BudgetStatus(ctx context.Context, owner identity.OwnerOrgID, actor, tier string) ([]AdmitBudgetWindowDTO, error) {
+func (s *Service) BudgetStatus(ctx context.Context, payer identity.TenantSubjectID, invoker, tier string) ([]AdmitBudgetWindowDTO, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
-	if owner.IsZero() {
-		return nil, fmt.Errorf("owner required")
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
 	}
 	if tier == "" {
 		tier = admission.DefaultTier
 	}
 	store := admission.NewTierPolicyStore(s.rt.DB)
-	pol, err := store.GetTierPolicy(ctx, owner, tier)
+	pol, err := store.GetTierPolicy(ctx, payer, tier)
 	if err != nil {
 		return nil, err
 	}
 	bsvc := budgets.NewService(s.rt.DB)
-	statuses, _, err := bsvc.Check(ctx, owner, actor, pol.BudgetWindows, 0)
+	statuses, _, err := bsvc.Check(ctx, payer, invoker, pol.BudgetWindows, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -213,14 +213,14 @@ type TierPolicyInput struct {
 	BudgetWindows     []TierBudgetWindowInput `json:"budget_windows"`
 }
 
-// SetTierPolicy upserts a per-owner tier policy (throughput + entitled endpoints
+// SetTierPolicy upserts a per-payer tier policy (throughput + entitled endpoints
 // + money-budget windows).
-func (s *Service) SetTierPolicy(ctx context.Context, owner identity.OwnerOrgID, in TierPolicyInput) error {
+func (s *Service) SetTierPolicy(ctx context.Context, payer identity.TenantSubjectID, in TierPolicyInput) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	if owner.IsZero() {
-		return fmt.Errorf("owner required")
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
 	}
 	if in.Tier == "" {
 		return fmt.Errorf("tier required")
@@ -232,5 +232,5 @@ func (s *Service) SetTierPolicy(ctx context.Context, owner identity.OwnerOrgID, 
 	for _, b := range in.BudgetWindows {
 		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMillicents: b.LimitMillicents})
 	}
-	return admission.NewTierPolicyStore(s.rt.DB).UpsertTierPolicyFull(ctx, owner, in.Tier, pol)
+	return admission.NewTierPolicyStore(s.rt.DB).UpsertTierPolicyFull(ctx, payer, in.Tier, pol)
 }

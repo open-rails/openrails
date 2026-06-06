@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"

@@ -20,14 +20,14 @@ re-discovering the plan.
 - Adds a **NULLABLE** `tenant_id UUID` column (with a column `DEFAULT` of the
   default tenant) to every tenant-owned table, and **backfills** existing rows
   to the default tenant.
-- Adds new **tenant-scoped indexes** alongside the existing user-scoped ones for
-  the hot paths (entitlements, credit balances/transactions/blocks).
+- Adds new **tenant-scoped indexes** for the hot paths (entitlements, credit
+  balances/transactions/blocks).
 - It is **additive and backward-compatible**:
   - `tenant_id` is **not** `NOT NULL` yet.
   - No existing unique constraint / index is dropped or rewritten.
   - No cross-table FK to `billing.tenants` is added yet.
 
-  > **Cross-repo coupling:** `doujins` and `hentai0` read `billing.entitlements`
+  > **Cross-repo coupling:** host applications may read `billing.entitlements`
   > via **direct SQL** from their own processes. Adding a nullable column and
   > extra indexes does not break `SELECT ... FROM billing.entitlements WHERE
   > user_id = ...` reads, so those direct readers keep working unchanged. Do
@@ -108,9 +108,8 @@ tenant-scoped):
 1. Add tenant-scoped **UNIQUE** replacements and retire the old global uniques
    in lockstep with all writers being tenant-aware. Affected uniques today:
    - `processor_customers (user_id, processor)` and `(processor, customer_id)`
-   - `user_credit_balances (user_id, credit_type_id)` and the credits
-     idempotency partial uniques (`uniq_credit_hold_idem`,
-     `uniq_credit_deposit_idem`, `uniq_credit_withdrawal_idem`)
+   - credit balance and ledger uniqueness, now keyed by
+     `(tenant_id, tenant_subject_id, credit_type_id)` plus idempotency coordinates
    - `payment_methods (user_id, vault_id)` / `(processor, vault_id)`
    - `subscriptions` lifecycle-owner uniques
    - `entitlements` overlap-exclusion + `uniq_entitlements_active`
@@ -118,7 +117,7 @@ tenant-scoped):
    - **provider identities** (`processor`, external customer/transaction ids)
      must become tenant-scoped per #223.
 2. Enforce `tenant_id NOT NULL` once every writer stamps it and every reader
-   scopes it (and after direct-SQL readers in doujins/hentai0 are coordinated).
+   scopes it (and after direct-SQL readers in host apps are coordinated).
 3. Evaluate **Postgres RLS** as defense-in-depth: set tenant id per transaction
    and add tests proving cross-tenant access is denied even when a query forgets
    the tenant predicate.
@@ -132,20 +131,22 @@ token (`tenant` claim) resolution, including looking the slug up in
 
 ## Coordination notes / open questions
 
-- **#221 (org-owned credits):** #221 plans to migrate the credit tables from
-  `user_id` to `owner_id`/org-owned columns and rename toward owner language.
-  `tenant_id` (this issue) and `owner_id` (#221) are **orthogonal** axes:
-  `tenant_id` is the deployment/namespace; `owner_id` is who pays *within* a
-  tenant. The remaining credit-mutation scoping above should be sequenced with
-  #221 so the `user_id → owner_id` rewrite and the tenant scoping land together
-  rather than each rewriting the same `lockBalance`/`depositTx`/`withdrawTx`
-  paths twice. **Open question for a human:** do we land tenant scoping of the
-  credit mutation paths first (small, additive) or fold it into the #221
-  owner-id rewrite?
-- **doujins / hentai0 direct SQL reads of `billing.entitlements`:** the additive
+- **Payer / invoker vocabulary:** durable OpenRails billing identity is
+  `tenant_id` + `tenant_subject_id` + `invoker_id`. `tenant_id` is the
+  deployment/application namespace; `tenant_subject_id` is the AuthKit org or
+  personal-org whose balance is charged; `invoker_id` is the user/service/OAT
+  principal causing the operation. Billing credit, usage, admission, and budget
+  storage use those physical column names; service API fields use
+  `tenant_subject_id` and `invoker_id`.
+- **AuthKit resource-scoped OATs:** standalone OpenRails OATs are opaque AuthKit
+  Organization Access Tokens. AuthKit stores permissions plus opaque resource
+  scopes; OpenRails interprets `openrails.tenant=<tenant_uuid>` and optional
+  `openrails.tenant_subject=<authkit_org_uuid>`. Permissions say what the token may
+  do; resources say where it may do it.
+- **Host application direct SQL reads of `billing.entitlements`:** the additive
   column is safe today, but before `tenant_id` becomes `NOT NULL` or before any
   entitlements unique/overlap constraint is rescoped by tenant, those repos'
   direct queries must be updated to filter by `tenant_id` (or always run as the
-  default tenant). **Open question:** are doujins/hentai0 each a single tenant
+  default tenant). **Open question:** are host apps each a single tenant
   (so they can hardcode the default/their tenant id), or will one deployment
   host multiple tenants reading the same table?

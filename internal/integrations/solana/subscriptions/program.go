@@ -13,7 +13,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 // ProgramID is the Subscriptions Delegation Program address.

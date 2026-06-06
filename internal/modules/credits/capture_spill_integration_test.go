@@ -14,15 +14,15 @@ import (
 // actual exceeds the prepaid balance — drawing balance first, then spilling to
 // owed (previously this errored in withdrawBalanceAndBlocks).
 func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
+	svc, _, payer, ct, ctx := moneyInEnv(t)
 	bm := credits.BillingModeArrears
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{BillingMode: &bm})
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: &bm})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 300, Source: "seed"})
+	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 300, Source: "seed"})
 	require.NoError(t, err)
 
 	res, err := svc.AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
-		Owner: owner, Invoker: "user:a", CreditType: ct, EstimateCents: 1000,
+		Payer: payer, Invoker: "user:a", CreditType: ct, EstimateCents: 1000,
 		Source: "req", SourceID: "h1", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
@@ -32,8 +32,8 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 	_, err = svc.CaptureHold(ctx, res.Hold.ID, 800)
 	require.NoError(t, err, "arrears capture past balance must not error")
 
-	bal, _ := svc.GetBalanceForOwner(ctx, owner, ct)
+	bal, _ := svc.GetBalanceForPayer(ctx, payer, ct)
 	require.Equal(t, int64(0), bal.Balance, "balance drawn first")
-	owed, _ := svc.GetOutstandingOwed(ctx, owner, ct)
+	owed, _ := svc.GetOutstandingOwed(ctx, payer, ct)
 	require.Equal(t, int64(500), owed, "remainder (800-300) spilled to owed")
 }

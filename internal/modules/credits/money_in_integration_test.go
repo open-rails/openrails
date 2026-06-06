@@ -20,8 +20,8 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 )
 
-// moneyInEnv seeds a fresh credit type + owner with NO initial deposit (balance 0).
-func moneyInEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.OwnerOrgID, string, context.Context) {
+// moneyInEnv seeds a fresh credit type + payer with NO initial deposit (balance 0).
+func moneyInEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.TenantSubjectID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
@@ -51,17 +51,17 @@ func moneyInEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.OwnerO
 	}).Exec(ctx)
 	require.NoError(t, err)
 
-	owner := identity.OwnerOrgIDFromString(uuid.NewString())
-	ownerID := owner.UUID()
+	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	ownerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditSpendLimit)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditSpendLimit)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
 	})
-	return credits.NewCreditsService(dbi), bunDB, owner, ctName, ctx
+	return credits.NewCreditsService(dbi), bunDB, payer, ctName, ctx
 }
 
 // --- fakes ---
@@ -81,7 +81,7 @@ func (f *fakeCharger) ChargeSavedMethod(_ context.Context, req credits.ChargeReq
 
 type fakeAlerter struct{ calls int }
 
-func (f *fakeAlerter) LowBalanceAlert(_ context.Context, _ identity.OwnerOrgID, _ string, _, _ int64) error {
+func (f *fakeAlerter) LowBalanceAlert(_ context.Context, _ identity.TenantSubjectID, _ string, _, _ int64) error {
 	f.calls++
 	return nil
 }
@@ -89,46 +89,46 @@ func (f *fakeAlerter) LowBalanceAlert(_ context.Context, _ identity.OwnerOrgID, 
 func latestBlock(t *testing.T, bunDB *bun.DB, ctx context.Context, ownerID uuid.UUID) *models.CreditBlock {
 	t.Helper()
 	b := new(models.CreditBlock)
-	require.NoError(t, bunDB.NewSelect().Model(b).Where("owner_id = ?", ownerID).OrderExpr("created_at DESC").Limit(1).Scan(ctx))
+	require.NoError(t, bunDB.NewSelect().Model(b).Where("tenant_subject_id = ?", ownerID).OrderExpr("created_at DESC").Limit(1).Scan(ctx))
 	return b
 }
 
 // --- #240 expiry default ---
 
 func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
-	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
-		OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 1000,
+		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
-	b := latestBlock(t, bunDB, ctx, owner.UUID())
+	b := latestBlock(t, bunDB, ctx, payer.UUID())
 	require.NotNil(t, b.ExpiresAt, "default 365d expiry should be applied")
 	days := b.ExpiresAt.Sub(time.Now().UTC()).Hours() / 24
 	require.InDelta(t, 365, days, 1.5)
 }
 
 func TestDeposit_NoFlag_Permanent(t *testing.T) {
-	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
-		OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 1000, Source: "grant",
+		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000, Source: "grant",
 	})
 	require.NoError(t, err)
-	b := latestBlock(t, bunDB, ctx, owner.UUID())
+	b := latestBlock(t, bunDB, ctx, payer.UUID())
 	require.Nil(t, b.ExpiresAt, "no flag, no explicit expiry -> permanent")
 }
 
 func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
-	svc, bunDB, owner, ct, ctx := moneyInEnv(t)
+	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
 	days := 30
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{DefaultCreditExpiryDays: &days})
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{DefaultCreditExpiryDays: &days})
 	require.NoError(t, err)
 	_, err = svc.Deposit(ctx, credits.CreditDepositParams{
-		OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 1000,
+		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
-	b := latestBlock(t, bunDB, ctx, owner.UUID())
+	b := latestBlock(t, bunDB, ctx, payer.UUID())
 	require.NotNil(t, b.ExpiresAt)
 	require.InDelta(t, 30, b.ExpiresAt.Sub(time.Now().UTC()).Hours()/24, 1.5)
 }
@@ -136,12 +136,12 @@ func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
 // --- #240 low-balance alerts ---
 
 func TestRunLowBalanceAlerts(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
+	svc, _, payer, ct, ctx := moneyInEnv(t)
 	thr := int64(1000)
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{LowBalanceThreshold: &thr})
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{LowBalanceThreshold: &thr})
 	require.NoError(t, err)
 	// available 500 < 1000
-	_, err = svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	al := &fakeAlerter{}
@@ -160,15 +160,15 @@ func TestRunLowBalanceAlerts(t *testing.T) {
 // --- #239 auto-top-up ---
 
 func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
+	svc, _, payer, ct, ctx := moneyInEnv(t)
 	thr, amt := int64(1000), int64(5000)
 	pm := uuid.New()
 	enabled := true
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
@@ -179,7 +179,7 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 	require.Equal(t, int64(5000), ch.charges[0].AmountCents)
 	require.Equal(t, pm, ch.charges[0].PaymentMethodID)
 
-	bal, err := svc.GetBalanceForOwner(ctx, owner, ct)
+	bal, err := svc.GetBalanceForPayer(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(5500), bal.Balance) // 500 + 5000
 
@@ -191,15 +191,15 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 }
 
 func TestRunAutoTopups_Declined(t *testing.T) {
-	svc, _, owner, ct, ctx := moneyInEnv(t)
+	svc, _, payer, ct, ctx := moneyInEnv(t)
 	thr, amt := int64(1000), int64(5000)
 	pm := uuid.New()
 	enabled := true
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	ch := &fakeCharger{declineAll: true}
@@ -207,7 +207,7 @@ func TestRunAutoTopups_Declined(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Len(t, ch.charges, 1, "charge attempted")
-	bal, err := svc.GetBalanceForOwner(ctx, owner, ct)
+	bal, err := svc.GetBalanceForPayer(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), bal.Balance, "declined -> no deposit")
 }

@@ -81,11 +81,11 @@ func startOwnerOrgPostgres(t *testing.T) (*bun.DB, context.Context) {
 	return bunDB, ctx
 }
 
-// TestSchema_EnforcesNotNullTenantAndOwner proves the HARDCUT schema (migrations
+// TestSchema_EnforcesNotNullTenantAndPayer proves the HARDCUT schema (migrations
 // 039 + 040, applied fresh / greenfield) enforces NOT NULL on tenant_id and
-// owner_id for the credit tables: an insert that omits either is rejected by the
-// database, so there is no path to a tenant-less or owner-less credit row.
-func TestSchema_EnforcesNotNullTenantAndOwner(t *testing.T) {
+// tenant_subject_id for the credit tables: an insert that omits either is rejected by the
+// database, so there is no path to a tenant-less or payer-less credit row.
+func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
 	bunDB, ctx := startOwnerOrgPostgres(t)
 
 	creditTypeID := uuid.New()
@@ -100,33 +100,33 @@ func TestSchema_EnforcesNotNullTenantAndOwner(t *testing.T) {
 	}).Exec(ctx)
 	require.NoError(t, err)
 
-	owner := uuid.New()
+	payer := uuid.New()
 
-	// owner_id has no default: an insert that leaves it unset must be rejected.
+	// tenant_subject_id has no default: an insert that leaves it unset must be rejected.
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, balance, held_balance)
+		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, balance, held_balance)
 		 VALUES (?, ?, ?, 0, 0)`,
 		uuid.New(), uuid.NewString(), creditTypeID)
-	require.Error(t, err, "insert with NULL owner_id must violate NOT NULL")
+	require.Error(t, err, "insert with NULL tenant_subject_id must violate NOT NULL")
 
 	// tenant_id is NOT NULL but defaulted; an explicit NULL must still be rejected.
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, owner_id, tenant_id, balance, held_balance)
+		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
 		 VALUES (?, ?, ?, ?, NULL, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID, owner)
+		uuid.New(), uuid.NewString(), creditTypeID, payer)
 	require.Error(t, err, "insert with explicit NULL tenant_id must violate NOT NULL")
 
-	// A fully-specified owner+tenant row inserts cleanly.
+	// A fully-specified payer+tenant row inserts cleanly.
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, owner_id, balance, held_balance)
+		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, tenant_subject_id, balance, held_balance)
 		 VALUES (?, ?, ?, ?, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID, owner)
-	require.NoError(t, err, "owner+tenant-defaulted insert must succeed")
+		uuid.New(), uuid.NewString(), creditTypeID, payer)
+	require.NoError(t, err, "payer+tenant-defaulted insert must succeed")
 }
 
 // TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness proves the HARDCUT
-// owner+tenant-scoped uniqueness on user_credit_balances: two rows with the same
-// (tenant, owner, credit_type) collide, while the SAME owner across DISTINCT
+// payer+tenant-scoped uniqueness on user_credit_balances: two rows with the same
+// (tenant, payer, credit_type) collide, while the SAME payer across DISTINCT
 // tenants does NOT collide (tenant is part of the key).
 func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
 	bunDB, ctx := startOwnerOrgPostgres(t)
@@ -143,33 +143,33 @@ func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
 	}).Exec(ctx)
 	require.NoError(t, err)
 
-	owner := uuid.New()
+	payer := uuid.New()
 
 	// First row in the default tenant.
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, owner_id, balance, held_balance)
+		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, tenant_subject_id, balance, held_balance)
 		 VALUES (?, ?, ?, ?, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID, owner)
+		uuid.New(), uuid.NewString(), creditTypeID, payer)
 	require.NoError(t, err)
 
-	// Duplicate (tenant, owner, credit_type) -> unique violation.
+	// Duplicate (tenant, payer, credit_type) -> unique violation.
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, owner_id, balance, held_balance)
+		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, tenant_subject_id, balance, held_balance)
 		 VALUES (?, ?, ?, ?, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID, owner)
-	require.Error(t, err, "duplicate (tenant, owner, credit_type) must violate uniqueness")
+		uuid.New(), uuid.NewString(), creditTypeID, payer)
+	require.Error(t, err, "duplicate (tenant, payer, credit_type) must violate uniqueness")
 
-	// Same owner + credit_type in a DIFFERENT tenant -> allowed.
+	// Same payer + credit_type in a DIFFERENT tenant -> allowed.
 	otherTenant := uuid.New()
 	_, err = bunDB.ExecContext(ctx,
 		`INSERT INTO billing.tenants (id, slug, name, status) VALUES (?, ?, 'Other', 'active')`,
 		otherTenant, "other_"+uuid.NewString())
 	require.NoError(t, err)
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, user_id, credit_type_id, owner_id, tenant_id, balance, held_balance)
+		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
 		 VALUES (?, ?, ?, ?, ?, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID, owner, otherTenant)
-	require.NoError(t, err, "same owner in a different tenant must NOT collide")
+		uuid.New(), uuid.NewString(), creditTypeID, payer, otherTenant)
+	require.NoError(t, err, "same payer in a different tenant must NOT collide")
 }
 
 // seedSpendable deposits `amount` credits for a user via the service, creating a
@@ -178,7 +178,7 @@ func seedSpendable(t *testing.T, ctx context.Context, svc *credits.CreditsServic
 	t.Helper()
 	src := uuid.New()
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
-		UserID:     userID,
+		InvokerID:  userID,
 		CreditType: creditType,
 		Amount:     amount,
 		Source:     "test_seed",
@@ -188,7 +188,7 @@ func seedSpendable(t *testing.T, ctx context.Context, svc *credits.CreditsServic
 }
 
 // TestReserveCapturePartial_ConservesTotal proves Reserve(Hold) ->
-// CaptureHold(partial) -> remainder released conserves the owner's total:
+// CaptureHold(partial) -> remainder released conserves the payer's total:
 // available + held returns to (initial - captured), with the unused reservation
 // fully released back to available.
 func TestReserveCapturePartial_ConservesTotal(t *testing.T) {

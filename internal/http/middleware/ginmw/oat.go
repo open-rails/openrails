@@ -5,9 +5,10 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/doujins-org/ginapi/response"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/openrails/internal/http/response"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -34,7 +35,7 @@ type OATResolver interface {
 
 // OATRequired authenticates a tenant-scoped public route with an OpenRails-issued
 // tenant OAT (issue #222). It REPLACES the retired private/mTLS/api-key service
-// surface: machine/server callers (Doujins/Hentai0/Tensorhub reserving credits,
+// surface: machine/server callers (HostApps/Tensorhub reserving credits,
 // reading entitlements, etc.) present `Authorization: Bearer <openrails_oat_...>`
 // against public tenant routes.
 //
@@ -77,6 +78,8 @@ func OATRequired(resolver OATResolver) gin.HandlerFunc {
 			case errors.Is(err, controlplane.ErrOATTenantUnresolved):
 				// Owning org maps to no active tenant (cross-tenant / unmapped).
 				response.ForbiddenWithMessage(c, "oat_tenant_unresolved")
+			case errors.Is(err, controlplane.ErrOATScopeDenied):
+				response.ForbiddenWithMessage(c, "oat_resource_scope_denied")
 			case errors.Is(err, authcore.ErrInvalidAccessToken):
 				response.UnauthorizedWithMessage(c, "oat_invalid")
 			default:
@@ -97,6 +100,24 @@ func OATRequired(resolver OATResolver) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// RequireOATPayerScope gates a route on the resolved OAT's payer resource
+// scope. It must run after OATRequired; tenant-wide OATs pass, payer-scoped OATs
+// pass only for their exact payer org id.
+func RequireOATPayerScope(c *gin.Context, payer uuid.UUID) bool {
+	resolved, ok := OATFromGin(c)
+	if !ok || resolved == nil {
+		response.UnauthorizedWithMessage(c, "oat required")
+		c.Abort()
+		return false
+	}
+	if !resolved.AllowsTenantSubject(payer) {
+		response.ForbiddenWithMessage(c, "oat_payer_scope_denied")
+		c.Abort()
+		return false
+	}
+	return true
 }
 
 // RequireOATPermission gates a route on a specific OpenRails permission held by

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	authcore "github.com/open-rails/authkit/core"
 	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -158,6 +159,31 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	oats, err := cp.Core().ListOrgAccessTokens(ctx, "operator")
 	require.NoError(t, err)
 	require.Len(t, oats, 1, "exactly one operator OAT after two bootstrap runs")
+	require.ElementsMatch(t, []string{ResourceKindTenant}, resourceKinds(oats[0].Resources))
+	require.Contains(t, resourceIDs(oats[0].Resources, ResourceKindTenant), tenant.DefaultID.String())
+
+	resolved, err := cp.ResolveOAT(ctx, res1.OATSecret)
+	require.NoError(t, err)
+	require.Equal(t, tenant.DefaultID, resolved.TenantID)
+	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindTenant), tenant.DefaultID.String())
+}
+
+func resourceKinds(resources []authcore.OrgAccessTokenResource) []string {
+	out := make([]string, 0, len(resources))
+	for _, r := range resources {
+		out = append(out, r.Kind)
+	}
+	return out
+}
+
+func resourceIDs(resources []authcore.OrgAccessTokenResource, kind string) []string {
+	out := make([]string, 0, len(resources))
+	for _, r := range resources {
+		if r.Kind == kind {
+			out = append(out, r.ID)
+		}
+	}
+	return out
 }
 
 func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {

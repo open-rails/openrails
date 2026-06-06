@@ -47,13 +47,13 @@ var ErrInsufficientCredits = credits.ErrInsufficientCredits
 var ErrCreditTypeInactive = credits.ErrCreditTypeInactive
 
 type HoldCreditsRequest struct {
-	PayerOrgID *identity.PayerOrgID
-	InvokerID  string
-	CreditType string
-	Amount     int64
-	Source     string
-	SourceID   string
-	ExpiresAt  time.Time
+	TenantSubjectID *identity.TenantSubjectID
+	InvokerID       string
+	CreditType      string
+	Amount          int64
+	Source          string
+	SourceID        string
+	ExpiresAt       time.Time
 }
 
 type CreditHold struct {
@@ -74,8 +74,8 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
 	req.SourceID = strings.TrimSpace(req.SourceID)
-	if req.PayerOrgID == nil || req.PayerOrgID.IsZero() {
-		return nil, fmt.Errorf("payer_org_id required")
+	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
+		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.InvokerID == "" {
 		return nil, fmt.Errorf("invoker_id required")
@@ -96,7 +96,7 @@ func (s *Service) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cre
 		return nil, fmt.Errorf("expires_at required")
 	}
 
-	hold, err := s.creditsService().Hold(ctx, req.PayerOrgID, req.InvokerID, req.CreditType, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
+	hold, err := s.creditsService().Hold(ctx, req.TenantSubjectID, req.InvokerID, req.CreditType, req.Amount, req.Source, req.SourceID, req.ExpiresAt.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ type CaptureHoldRequest struct {
 
 type CreditTransaction struct {
 	ID              uuid.UUID
-	PayerOrgID      uuid.UUID
+	TenantSubjectID uuid.UUID
 	InvokerID       string
 	CreditTypeID    uuid.UUID
 	Amount          int64
@@ -163,20 +163,20 @@ type CreditTransaction struct {
 }
 
 type WithdrawCreditsRequest struct {
-	PayerOrgID *identity.PayerOrgID
-	InvokerID  string
-	CreditType string
-	Amount     int64
-	Source     string
-	SourceID   *uuid.UUID
+	TenantSubjectID *identity.TenantSubjectID
+	InvokerID       string
+	CreditType      string
+	Amount          int64
+	Source          string
+	SourceID        *uuid.UUID
 }
 
 func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
 	req.InvokerID = strings.TrimSpace(req.InvokerID)
 	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
-	if req.PayerOrgID == nil || req.PayerOrgID.IsZero() {
-		return nil, fmt.Errorf("payer_org_id required")
+	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
+		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.InvokerID == "" {
 		return nil, fmt.Errorf("invoker_id required")
@@ -194,19 +194,19 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.creditsService().Withdraw(ctx, credits.CreditWithdrawParams{
-		PayerOrgID: req.PayerOrgID,
-		InvokerID:  req.InvokerID,
-		CreditType: req.CreditType,
-		Amount:     req.Amount,
-		Source:     req.Source,
-		SourceID:   req.SourceID,
+		TenantSubjectID: req.TenantSubjectID,
+		InvokerID:       req.InvokerID,
+		CreditType:      req.CreditType,
+		Amount:          req.Amount,
+		Source:          req.Source,
+		SourceID:        req.SourceID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		PayerOrgID:      trx.PayerOrgID,
+		TenantSubjectID: trx.TenantSubjectID,
 		InvokerID:       trx.InvokerID,
 		CreditTypeID:    trx.CreditTypeID,
 		Amount:          trx.Amount,
@@ -225,22 +225,22 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 }
 
 type DepositCreditsRequest struct {
-	PayerOrgID  *identity.PayerOrgID
-	InvokerID   string
-	CreditType  string
-	Amount      int64
-	Source      string
-	SourceID    *uuid.UUID
-	ExpiresAt   *time.Time
-	Description *string
+	TenantSubjectID *identity.TenantSubjectID
+	InvokerID       string
+	CreditType      string
+	Amount          int64
+	Source          string
+	SourceID        *uuid.UUID
+	ExpiresAt       *time.Time
+	Description     *string
 }
 
 func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
 	req.InvokerID = strings.TrimSpace(req.InvokerID)
 	req.CreditType = strings.TrimSpace(req.CreditType)
 	req.Source = strings.TrimSpace(req.Source)
-	if req.PayerOrgID == nil || req.PayerOrgID.IsZero() {
-		return nil, fmt.Errorf("payer_org_id required")
+	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
+		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.InvokerID == "" {
 		return nil, fmt.Errorf("invoker_id required")
@@ -258,21 +258,21 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 		return nil, fmt.Errorf("source_id required")
 	}
 	trx, err := s.creditsService().Deposit(ctx, credits.CreditDepositParams{
-		PayerOrgID:  req.PayerOrgID,
-		InvokerID:   req.InvokerID,
-		CreditType:  req.CreditType,
-		Amount:      req.Amount,
-		Source:      req.Source,
-		SourceID:    req.SourceID,
-		ExpiresAt:   req.ExpiresAt,
-		Description: req.Description,
+		TenantSubjectID: req.TenantSubjectID,
+		InvokerID:       req.InvokerID,
+		CreditType:      req.CreditType,
+		Amount:          req.Amount,
+		Source:          req.Source,
+		SourceID:        req.SourceID,
+		ExpiresAt:       req.ExpiresAt,
+		Description:     req.Description,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		PayerOrgID:      trx.PayerOrgID,
+		TenantSubjectID: trx.TenantSubjectID,
 		InvokerID:       trx.InvokerID,
 		CreditTypeID:    trx.CreditTypeID,
 		Amount:          trx.Amount,
@@ -314,7 +314,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		}
 		captureTxnID := trx.ID
 		if uerr := s.creditsService().InsertCaptureUsageEvent(ctx, credits.CaptureUsageEventParams{
-			PayerOrgID:          trx.PayerOrgID,
+			TenantSubjectID:     trx.TenantSubjectID,
 			InvokerID:           trx.InvokerID,
 			CreditTypeID:        trx.CreditTypeID,
 			EventType:           req.EventType,
@@ -332,7 +332,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		PayerOrgID:      trx.PayerOrgID,
+		TenantSubjectID: trx.TenantSubjectID,
 		InvokerID:       trx.InvokerID,
 		CreditTypeID:    trx.CreditTypeID,
 		Amount:          trx.Amount,
@@ -360,20 +360,20 @@ type ServiceUsageRollupRow struct {
 
 // ServiceUsageRollupRequest selects a payer + window + grouping dimension.
 type ServiceUsageRollupRequest struct {
-	PayerOrgID *identity.PayerOrgID
-	From       time.Time
-	To         time.Time
-	GroupBy    string // endpoint | function | tier | user
+	TenantSubjectID *identity.TenantSubjectID
+	From            time.Time
+	To              time.Time
+	GroupBy         string // endpoint | function | tier | user
 }
 
 // ServiceUsageRollup returns per-dimension-value spend for a payer over a
 // window (#311) — the OpenRails-sourced data behind the platform's
 // /budget-usage + revenue analytics. Service-scoped (operator OAT).
 func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollupRequest) ([]ServiceUsageRollupRow, error) {
-	if req.PayerOrgID == nil || req.PayerOrgID.IsZero() {
-		return nil, fmt.Errorf("payer_org_id required")
+	if req.TenantSubjectID == nil || req.TenantSubjectID.IsZero() {
+		return nil, fmt.Errorf("tenant_subject_id required")
 	}
-	rows, err := s.creditsService().ServiceUsageRollup(ctx, *req.PayerOrgID, req.From, req.To, req.GroupBy)
+	rows, err := s.creditsService().ServiceUsageRollup(ctx, *req.TenantSubjectID, req.From, req.To, req.GroupBy)
 	if err != nil {
 		return nil, err
 	}

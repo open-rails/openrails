@@ -27,8 +27,8 @@ import (
 
 // SpendParams is a unified immediate spend (balance first, then owed).
 type SpendParams struct {
-	Owner      *identity.OwnerOrgID
-	UserID     string
+	Payer      *identity.TenantSubjectID
+	InvokerID  string
 	CreditType string
 	Amount     int64
 	Source     string
@@ -36,7 +36,7 @@ type SpendParams struct {
 }
 
 // SpendCredits debits an account balance-first-then-owed in one transaction,
-// gated by the credit line. Idempotent on (tenant, owner, credit_type, source,
+// gated by the credit line. Idempotent on (tenant, payer, credit_type, source,
 // source_id). Returns ErrInsufficientCredits when balance + remaining credit
 // line cannot cover the amount.
 func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) error {
@@ -55,7 +55,7 @@ func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) e
 	if !ct.IsActive {
 		return ErrCreditTypeInactive
 	}
-	owner, err := resolveOwner(params.Owner, params.UserID)
+	payer, err := resolvePayer(params.Payer, params.InvokerID)
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) e
 	defer func() { _ = tx.Rollback() }()
 
 	// Serialize per account and guard idempotency on the spend coordinates.
-	if _, err := s.lockBalance(ctx, tx, owner, params.UserID, ct.ID); err != nil {
+	if _, err := s.lockBalance(ctx, tx, payer, params.InvokerID, ct.ID); err != nil {
 		return err
 	}
 	if params.SourceID != "" {
@@ -76,7 +76,7 @@ func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) e
 		if err := tx.NewSelect().
 			Model((*models.CreditTransaction)(nil)).
 			ColumnExpr("count(*)").
-			Where("tenant_id = ? AND owner_id = ?", tenantID, owner.UUID()).
+			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payer.UUID()).
 			Where("credit_type_id = ?", ct.ID).
 			Where("transaction_type IN ('withdrawal', ?)", txOwedAccrual).
 			Where("source = ? AND source_id = ?", params.Source, params.SourceID).
@@ -88,7 +88,7 @@ func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) e
 		}
 	}
 
-	if _, _, err := s.spendBalanceThenOwedTx(ctx, tx, ct, owner, params.UserID, params.Source, params.SourceID, params.Amount); err != nil {
+	if _, _, err := s.spendBalanceThenOwedTx(ctx, tx, ct, payer, params.InvokerID, params.Source, params.SourceID, params.Amount); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -100,7 +100,7 @@ func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) e
 // already locked the balance row (serialization point) and handled idempotency.
 // Returns the balance-debit and owed-accrual transaction ids (either may be nil).
 func (s *CreditsService) spendBalanceThenOwedTx(
-	ctx context.Context, tx bun.Tx, ct *models.CreditType, owner identity.OwnerOrgID,
+	ctx context.Context, tx bun.Tx, ct *models.CreditType, payer identity.TenantSubjectID,
 	userID, source, sourceID string, amount int64,
 ) (balanceTxnID, owedTxnID *uuid.UUID, err error) {
 	if amount <= 0 {
@@ -108,9 +108,9 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 	}
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 
-	bal, err := s.lockBalance(ctx, tx, owner, userID, ct.ID)
+	bal, err := s.lockBalance(ctx, tx, payer, userID, ct.ID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -128,7 +128,7 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 	if fromOwed > 0 {
 		settings := new(models.CreditAccountSettings)
 		serr := tx.NewSelect().Model(settings).
-			Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 			For("UPDATE").
 			Scan(ctx)
 		if errors.Is(serr, sql.ErrNoRows) {
@@ -148,13 +148,13 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 	}
 
 	if fromBalance > 0 {
-		if _, err := s.withdrawBalanceAndBlocks(ctx, tx, owner, userID, ct.ID, fromBalance); err != nil {
+		if _, err := s.withdrawBalanceAndBlocks(ctx, tx, payer, userID, ct.ID, fromBalance); err != nil {
 			return nil, nil, err
 		}
 		newBal := bal.Balance - fromBalance
 		neg := -fromBalance
 		trx := &models.CreditTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, OwnerID: ownerID, UserID: userID,
+			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, InvokerID: userID,
 			CreditTypeID: ct.ID, Amount: neg, BalanceAfter: &newBal,
 			TransactionType: "withdrawal", Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
@@ -169,12 +169,12 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 		if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
 			Set("outstanding_owed_cents = outstanding_owed_cents + ?", fromOwed).
 			Set("updated_at = ?", now).
-			Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 			Exec(ctx); err != nil {
 			return nil, nil, err
 		}
 		trx := &models.CreditTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, OwnerID: ownerID, UserID: userID,
+			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, InvokerID: userID,
 			CreditTypeID: ct.ID, Amount: fromOwed, TransactionType: txOwedAccrual, Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
 		}
@@ -201,10 +201,10 @@ func nullStr(s string) *string {
 // balance can't cover it. availableAfter is the available balance AFTER this
 // hold's reservation has been released. The capture is pre-authorized, so this
 // never re-gates. Returns the post-settlement balance.
-func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, owner identity.OwnerOrgID, userID string, creditTypeID uuid.UUID, amount, availableAfter int64) (int64, error) {
+func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, payer identity.TenantSubjectID, userID string, creditTypeID uuid.UUID, amount, availableAfter int64) (int64, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 	if availableAfter < 0 {
 		availableAfter = 0
 	}
@@ -216,7 +216,7 @@ func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, owner i
 
 	var newBal int64
 	if fromBalance > 0 {
-		nb, err := s.withdrawBalanceAndBlocks(ctx, tx, owner, userID, creditTypeID, fromBalance)
+		nb, err := s.withdrawBalanceAndBlocks(ctx, tx, payer, userID, creditTypeID, fromBalance)
 		if err != nil {
 			return 0, err
 		}
@@ -224,7 +224,7 @@ func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, owner i
 	} else {
 		b := new(models.UserCreditBalance)
 		if err := tx.NewSelect().Model(b).
-			Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
 			Limit(1).Scan(ctx); err != nil {
 			return 0, err
 		}
@@ -239,7 +239,7 @@ func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, owner i
 		if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
 			Set("outstanding_owed_cents = outstanding_owed_cents + ?", fromOwed).
 			Set("updated_at = ?", now).
-			Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
 			Exec(ctx); err != nil {
 			return 0, err
 		}

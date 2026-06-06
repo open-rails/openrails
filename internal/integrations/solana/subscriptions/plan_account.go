@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 // Plan account on-chain layout, from the OFFICIAL Solana Subscriptions program

@@ -7,17 +7,14 @@ RUN apk add --no-cache git ca-certificates
 WORKDIR /app
 
 ARG GOPROXY=https://proxy.golang.org,direct
-ARG GOPRIVATE=github.com/doujins-org/*
-ARG GONOSUMDB=github.com/doujins-org/*
 ARG GOSUMDB=sum.golang.org
 ENV GOPROXY=${GOPROXY}
-ENV GOPRIVATE=${GOPRIVATE}
-ENV GONOSUMDB=${GONOSUMDB}
 ENV GOSUMDB=${GOSUMDB}
 ENV GIT_TERMINAL_PROMPT=0
 
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
+COPY --from=authkit . /authkit
 
 # Download dependencies with cache mount for Go modules (with retry)
 # GitHub token is optional since all dependencies are public
@@ -31,7 +28,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     fi; \
     if [ -n "${GH_TOKEN}" ]; then \
       echo "Using GitHub token for authentication"; \
-      git config --global url."https://${GH_TOKEN}@github.com/doujins-org/".insteadOf "https://github.com/doujins-org/"; \
       git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"; \
     else \
       echo "No GitHub token provided, using public access"; \
@@ -40,7 +36,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       go mod download && break || (echo "go mod download failed, retrying" && sleep 5); \
     done; \
     if [ -n "${GH_TOKEN}" ]; then \
-      git config --global --unset-all url."https://${GH_TOKEN}@github.com/doujins-org/".insteadOf || true; \
       git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true; \
     fi; \
     unset GH_TOKEN
@@ -69,9 +64,11 @@ RUN addgroup -g 1001 -S billing && \
     mkdir -p /var/lib/openrails/spool && \
     chown -R billing:billing /var/lib/openrails
 
-# Copy binary and migrations from builder stage
-COPY --from=builder /app/bin/billing ./billing-server
+# Copy binary and migrations from builder stage. The executable is named
+# openrails in the runtime image even though the Go package is still cmd/billing.
+COPY --from=builder /app/bin/billing /usr/local/bin/openrails
 COPY --from=builder /app/migrations ./migrations/
+RUN ln -sf /usr/local/bin/openrails /usr/local/bin/billing-server
 
 # Configuration files must be mounted at runtime; none are baked into the image.
 
@@ -93,5 +90,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 -O /dev/null http://localhost:2053/health/ready || exit 1
 
 # Default entrypoint runs the CLI; override CMD to choose server vs worker.
-ENTRYPOINT ["/app/billing-server"]
+ENTRYPOINT ["openrails"]
 CMD ["run-server"]

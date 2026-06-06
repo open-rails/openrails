@@ -13,10 +13,10 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
-// CreditAccountSnapshot is the balance + policy view of an owner's credit
+// CreditAccountSnapshot is the balance + policy view of an payer's credit
 // account, served by the authorize/balance route (issue #235).
 type CreditAccountSnapshot struct {
-	OwnerID              uuid.UUID `json:"owner_id"`
+	TenantSubjectID      uuid.UUID `json:"tenant_subject_id"`
 	CreditType           string    `json:"credit_type"`
 	BillingMode          string    `json:"billing_mode"`
 	BalanceCents         int64     `json:"balance_cents"`
@@ -25,14 +25,14 @@ type CreditAccountSnapshot struct {
 	OutstandingOwedCents int64     `json:"outstanding_owed_cents"`
 }
 
-// GetCreditAccount returns the balance + policy snapshot for an owner org.
-func (s *Service) GetCreditAccount(ctx context.Context, owner identity.OwnerOrgID, creditType string) (*CreditAccountSnapshot, error) {
+// GetCreditAccount returns the balance + policy snapshot for an payer org.
+func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*CreditAccountSnapshot, error) {
 	creditType = strings.TrimSpace(creditType)
 	if creditType == "" {
 		return nil, fmt.Errorf("credit_type required")
 	}
-	if owner.IsZero() {
-		return nil, fmt.Errorf("owner required")
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
 	}
 	// Pin a tenant-scoped connection so the balance/settings reads set the RLS GUC
 	// and are tenant-scoped under the openrails_app role (#227). RunInTenantConn
@@ -40,16 +40,16 @@ func (s *Service) GetCreditAccount(ctx context.Context, owner identity.OwnerOrgI
 	// one, so this is safe whether called from a request or directly.
 	var snap *CreditAccountSnapshot
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		bal, err := s.creditsService().GetBalanceForOwner(ctx, owner, creditType)
+		bal, err := s.creditsService().GetBalanceForPayer(ctx, payer, creditType)
 		if err != nil {
 			return err
 		}
-		settings, err := s.creditsService().GetAccountSettings(ctx, owner, creditType)
+		settings, err := s.creditsService().GetAccountSettings(ctx, payer, creditType)
 		if err != nil {
 			return err
 		}
 		snap = &CreditAccountSnapshot{
-			OwnerID:              owner.UUID(),
+			TenantSubjectID:      payer.UUID(),
 			CreditType:           creditType,
 			BillingMode:          settings.BillingMode,
 			BalanceCents:         bal.Balance,
@@ -73,18 +73,18 @@ type UsageRow struct {
 	Dimensions  map[string]int64 `json:"dimensions"`
 }
 
-// GetUsage rolls up an owner's usage events over [from, to) grouped by
+// GetUsage rolls up an payer's usage events over [from, to) grouped by
 // event_type with summed dimensions (issue #289). Like GetCreditAccount it pins
 // a tenant-scoped connection so the rollup query runs RLS-scoped under the
 // openrails_app role (#227); RunInTenantConn reuses the request's already-pinned
 // connection when one is set.
-func (s *Service) GetUsage(ctx context.Context, owner identity.OwnerOrgID, from, to time.Time) ([]UsageRow, error) {
-	if owner.IsZero() {
-		return nil, fmt.Errorf("owner required")
+func (s *Service) GetUsage(ctx context.Context, payer identity.TenantSubjectID, from, to time.Time) ([]UsageRow, error) {
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
 	}
 	var out []UsageRow
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		rows, err := s.creditsService().AggregateUsage(ctx, owner, from, to)
+		rows, err := s.creditsService().AggregateUsage(ctx, payer, from, to)
 		if err != nil {
 			return err
 		}
@@ -162,19 +162,19 @@ func invoiceToDTO(inv *models.Invoice) InvoiceDTO {
 	}
 }
 
-// ListInvoices lists an owner's finalized invoices, newest period first,
+// ListInvoices lists an payer's finalized invoices, newest period first,
 // paginated (issue #303). Like GetUsage it pins a tenant-scoped connection so the
 // read runs RLS-scoped under the openrails_app role (#227); RunInTenantConn
 // reuses the request's already-pinned connection when one is set. Returns the
 // page of public DTOs plus the total count for pagination.
-func (s *Service) ListInvoices(ctx context.Context, owner identity.OwnerOrgID, limit, offset int) ([]InvoiceDTO, int, error) {
-	if owner.IsZero() {
-		return nil, 0, fmt.Errorf("owner required")
+func (s *Service) ListInvoices(ctx context.Context, payer identity.TenantSubjectID, limit, offset int) ([]InvoiceDTO, int, error) {
+	if payer.IsZero() {
+		return nil, 0, fmt.Errorf("payer required")
 	}
 	var out []InvoiceDTO
 	var total int
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		rows, t, err := s.creditsService().ListInvoices(ctx, owner, limit, offset)
+		rows, t, err := s.creditsService().ListInvoices(ctx, payer, limit, offset)
 		if err != nil {
 			return err
 		}
@@ -191,16 +191,16 @@ func (s *Service) ListInvoices(ctx context.Context, owner identity.OwnerOrgID, l
 	return out, total, nil
 }
 
-// GetInvoice returns one finalized invoice (with its line items) for an owner by
+// GetInvoice returns one finalized invoice (with its line items) for an payer by
 // id (issue #303). RLS-scoped like ListInvoices; an invoice belonging to another
-// owner/tenant is unreachable (fail closed). Returns a public DTO.
-func (s *Service) GetInvoice(ctx context.Context, owner identity.OwnerOrgID, id uuid.UUID) (*InvoiceDTO, error) {
-	if owner.IsZero() {
-		return nil, fmt.Errorf("owner required")
+// payer/tenant is unreachable (fail closed). Returns a public DTO.
+func (s *Service) GetInvoice(ctx context.Context, payer identity.TenantSubjectID, id uuid.UUID) (*InvoiceDTO, error) {
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
 	}
 	var out *InvoiceDTO
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		inv, err := s.creditsService().GetInvoiceByID(ctx, owner, id)
+		inv, err := s.creditsService().GetInvoiceByID(ctx, payer, id)
 		if err != nil {
 			return err
 		}
@@ -218,11 +218,10 @@ func (s *Service) GetInvoice(ctx context.Context, owner identity.OwnerOrgID, id 
 // of the authorize/hold route (issue #235). The hold itself is placed by
 // HoldCredits once this allows it.
 type AuthorizeSpendRequest struct {
-	OwnerID       *identity.OwnerOrgID
-	UserID        string // actor; used to resolve the owner when OwnerID is nil
-	CreditType    string
-	Invoker       string // canonical invoker for per-invoker caps ('oat:...', 'user:...', 'issuer:sub')
-	EstimateCents int64
+	TenantSubjectID identity.TenantSubjectID
+	InvokerID       string
+	CreditType      string
+	EstimateCents   int64
 }
 
 // AuthorizeSpendResult is the decision returned to the caller (mirrors the
@@ -243,7 +242,7 @@ type AuthorizeSpendResult struct {
 const DenyInsufficientBalance = "insufficient_balance"
 
 // AuthorizeSpend evaluates whether an estimated charge is permitted for an
-// owner: the per-account/per-invoker spend policy (CheckSpendAllowed) AND, for
+// payer: the per-account/per-invoker spend policy (CheckSpendAllowed) AND, for
 // prepaid accounts, available balance. It does NOT move money. (#235)
 func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest) (*AuthorizeSpendResult, error) {
 	req.CreditType = strings.TrimSpace(req.CreditType)
@@ -253,21 +252,15 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 	if req.EstimateCents < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
-	owner := identity.OwnerOrgID{}
-	if req.OwnerID != nil && !req.OwnerID.IsZero() {
-		owner = *req.OwnerID
-	} else {
-		owner = identity.OwnerOrgIDFromString(strings.TrimSpace(req.UserID))
-	}
-	if owner.IsZero() {
-		return nil, fmt.Errorf("owner required (explicit OwnerID or UUID UserID)")
+	if req.TenantSubjectID.IsZero() {
+		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 
-	snap, err := s.GetCreditAccount(ctx, owner, req.CreditType)
+	snap, err := s.GetCreditAccount(ctx, req.TenantSubjectID, req.CreditType)
 	if err != nil {
 		return nil, err
 	}
-	dec, err := s.creditsService().CheckSpendAllowed(ctx, owner, req.CreditType, strings.TrimSpace(req.Invoker), req.EstimateCents)
+	dec, err := s.creditsService().CheckSpendAllowed(ctx, req.TenantSubjectID, req.CreditType, strings.TrimSpace(req.InvokerID), req.EstimateCents)
 	if err != nil {
 		return nil, err
 	}
@@ -296,15 +289,15 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 
 // AuthorizeAndHoldRequest is the input to AuthorizeAndHold — the atomic
 // policy-decision + hold placement that backs POST /v1/service/credits/authorize
-// (issue #235/#247). Payer is the owner org billed; Invoker is the canonical
-// actor for per-invoker sub-budgets; RequestID is the idempotency key for the
+// (issue #235/#247). Payer is the payer org billed; Invoker is the canonical
+// invoker for per-invoker sub-budgets; RequestID is the idempotency key for the
 // placed hold.
 type AuthorizeAndHoldRequest struct {
-	Payer         identity.OwnerOrgID
-	Invoker       string
-	CreditType    string
-	EstimateCents int64
-	RequestID     string
+	TenantSubjectID identity.TenantSubjectID
+	InvokerID       string
+	CreditType      string
+	EstimateCents   int64
+	RequestID       string
 	// ExpiresAt bounds the placed hold; when zero a default TTL is applied.
 	ExpiresAt time.Time
 }
@@ -343,8 +336,8 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	if req.CreditType == "" {
 		return nil, fmt.Errorf("credit_type required")
 	}
-	if req.Payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
+	if req.TenantSubjectID.IsZero() {
+		return nil, fmt.Errorf("tenant_subject_id required")
 	}
 	if req.EstimateCents < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
@@ -359,8 +352,8 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	}
 
 	out, err := s.creditsService().AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
-		Owner:         req.Payer,
-		Invoker:       strings.TrimSpace(req.Invoker),
+		Payer:         req.TenantSubjectID,
+		Invoker:       strings.TrimSpace(req.InvokerID),
 		CreditType:    req.CreditType,
 		EstimateCents: req.EstimateCents,
 		Source:        authorizeHoldSource,
@@ -406,50 +399,50 @@ func remainingTodayCents(caps []credits.CapResult) *int64 {
 	return nil
 }
 
-// SetCreditAccountSettings upserts an owner's spend policy (issue #237/#235
+// SetCreditAccountSettings upserts an payer's spend policy (issue #237/#235
 // admin surface). Thin passthrough to the credits service.
-func (s *Service) SetCreditAccountSettings(ctx context.Context, owner identity.OwnerOrgID, creditType string, in credits.AccountSettingsInput) error {
-	if owner.IsZero() {
-		return fmt.Errorf("owner required")
+func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.TenantSubjectID, creditType string, in credits.AccountSettingsInput) error {
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
 	}
 	// Pin a tenant connection so the upsert sets the RLS GUC under openrails_app (#227).
 	return s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
-		_, err := s.creditsService().UpsertAccountSettings(ctx, owner, strings.TrimSpace(creditType), in)
+		_, err := s.creditsService().UpsertAccountSettings(ctx, payer, strings.TrimSpace(creditType), in)
 		return err
 	})
 }
 
-// GetCreditAccountSettings returns an owner's stored credit-account settings
+// GetCreditAccountSettings returns an payer's stored credit-account settings
 // (billing mode prepaid|arrears, spend caps, auto-top-up, expiry default) for the
 // org billing-account admin surface (issue #242). RLS-scoped.
-func (s *Service) GetCreditAccountSettings(ctx context.Context, owner identity.OwnerOrgID, creditType string) (*models.CreditAccountSettings, error) {
-	if owner.IsZero() {
-		return nil, fmt.Errorf("owner required")
+func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*models.CreditAccountSettings, error) {
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
 	}
-	return s.creditsService().GetAccountSettingsForOwner(ctx, owner, strings.TrimSpace(creditType))
+	return s.creditsService().GetAccountSettingsForPayer(ctx, payer, strings.TrimSpace(creditType))
 }
 
-// GetOwnerCreditTransactions lists an owner org's credit transactions (usage) for
+// GetPayerCreditTransactions lists a payer org's credit transactions (usage) for
 // the billing-account admin surface (issue #242). RLS-scoped.
-func (s *Service) GetOwnerCreditTransactions(ctx context.Context, owner identity.OwnerOrgID, creditType string, limit, offset int) ([]models.CreditTransaction, int, error) {
-	if owner.IsZero() {
-		return nil, 0, fmt.Errorf("owner required")
+func (s *Service) GetPayerCreditTransactions(ctx context.Context, payer identity.TenantSubjectID, creditType string, limit, offset int) ([]models.CreditTransaction, int, error) {
+	if payer.IsZero() {
+		return nil, 0, fmt.Errorf("payer required")
 	}
 	var items []models.CreditTransaction
 	var total int
 	err := s.rt.DB.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		items, total, e = s.creditsService().GetTransactionsByOwner(ctx, owner, strings.TrimSpace(creditType), limit, offset)
+		items, total, e = s.creditsService().GetTransactionsByPayer(ctx, payer, strings.TrimSpace(creditType), limit, offset)
 		return e
 	})
 	return items, total, err
 }
 
-// SetSpendLimit upserts a per-invoker spend cap under an owner (issue #237).
-func (s *Service) SetSpendLimit(ctx context.Context, owner identity.OwnerOrgID, creditType, invoker string, maxDay, maxMonth *int64) error {
-	if owner.IsZero() {
-		return fmt.Errorf("owner required")
+// SetSpendLimit upserts a per-invoker spend cap under an payer (issue #237).
+func (s *Service) SetSpendLimit(ctx context.Context, payer identity.TenantSubjectID, creditType, invoker string, maxDay, maxMonth *int64) error {
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
 	}
-	_, err := s.creditsService().SetSpendLimit(ctx, owner, strings.TrimSpace(creditType), invoker, maxDay, maxMonth)
+	_, err := s.creditsService().SetSpendLimit(ctx, payer, strings.TrimSpace(creditType), invoker, maxDay, maxMonth)
 	return err
 }

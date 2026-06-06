@@ -67,8 +67,8 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	ctName := "azh_" + uuid.NewString()
 	ctID := uuid.New()
-	owner := identity.OwnerOrgIDFromString(uuid.NewString())
-	ownerID := owner.UUID()
+	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	ownerID := payer.UUID()
 
 	t.Cleanup(func() {
 		for _, q := range []struct {
@@ -76,8 +76,8 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 			where string
 			arg   any
 		}{
-			{"billing.credit_transactions", "owner_id = ?", ownerID},
-			{"billing.user_credit_balances", "owner_id = ?", ownerID},
+			{"billing.credit_transactions", "tenant_subject_id = ?", ownerID},
+			{"billing.user_credit_balances", "tenant_subject_id = ?", ownerID},
 			{"billing.credit_types", "id = ?", ctID},
 			{"billing.tenants", "id = ?", tenantID},
 		} {
@@ -93,7 +93,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.NoError(t, err)
 	_, err = super.GetDB().NewRaw(
 		`INSERT INTO billing.user_credit_balances
-		   (id, tenant_id, owner_id, user_id, credit_type_id, balance, held_balance, created_at, updated_at)
+		   (id, tenant_id, tenant_subject_id, invoker_id, credit_type_id, balance, held_balance, created_at, updated_at)
 		 VALUES (?,?,?,?,?,1000,0,?,?)`,
 		uuid.New(), tenantID, ownerID, ownerID.String(), ctID, now, now).Exec(ctx)
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 
 	// (1) Authorize WITHIN balance => allowed + hold placed + available reduced.
 	res, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		Payer: owner, Invoker: "oat:k1", CreditType: ctName, EstimateCents: 600,
+		Payer: payer, Invoker: "oat:k1", CreditType: ctName, EstimateCents: 600,
 		RequestID: "req-1", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -130,14 +130,14 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.NotNil(t, res.ReservationID)
 	require.Equal(t, int64(1000), res.AvailableCents, "snapshot is pre-hold available")
 
-	snap, err := svc.GetCreditAccount(tctx, owner, ctName)
+	snap, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
 	require.Equal(t, int64(600), snap.HeldCents)
 	require.Equal(t, int64(400), snap.AvailableCents)
 
 	// (2) Authorize OVER remaining balance => denied, NO new hold.
 	deny, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		Payer: owner, Invoker: "oat:k1", CreditType: ctName, EstimateCents: 700,
+		Payer: payer, Invoker: "oat:k1", CreditType: ctName, EstimateCents: 700,
 		RequestID: "req-2", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.Equal(t, billingservice.DenyInsufficientBalance, deny.DenyCode)
 	require.Nil(t, deny.ReservationID)
 
-	snap2, err := svc.GetCreditAccount(tctx, owner, ctName)
+	snap2, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
 	require.Equal(t, int64(600), snap2.HeldCents, "denied authorize must not change held")
 
@@ -159,7 +159,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			results[i], errs[i] = svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-				Payer: owner, Invoker: "oat:k1", CreditType: ctName, EstimateCents: 300,
+				Payer: payer, Invoker: "oat:k1", CreditType: ctName, EstimateCents: 300,
 				RequestID: "req-conc-" + string(rune('a'+i)), ExpiresAt: exp,
 			})
 		}(i)
@@ -176,7 +176,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	require.Equal(t, 1, allowed, "exactly one concurrent authorize may pass on the same balance (atomicity)")
 
 	// Final held = 600 + 300 (the one winner) = 900; available = 100.
-	final, err := svc.GetCreditAccount(tctx, owner, ctName)
+	final, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
 	require.Equal(t, int64(900), final.HeldCents)
 	require.Equal(t, int64(100), final.AvailableCents)

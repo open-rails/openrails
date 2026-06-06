@@ -24,7 +24,7 @@ import (
 // AuditRow is a read view of a billing.platform_audit row (list/inspect).
 type AuditRow struct {
 	ID             string    `json:"id"`
-	ActorUserID    string    `json:"actor_user_id"`
+	InvokerID      string    `json:"actor_user_id"`
 	ActorOrg       string    `json:"actor_org,omitempty"`
 	Action         string    `json:"action"`
 	TargetTenantID string    `json:"target_tenant_id,omitempty"`
@@ -50,7 +50,7 @@ const (
 
 // AuditEntry is a single cross-tenant platform audit record.
 type AuditEntry struct {
-	ActorUserID    string
+	InvokerID      string
 	ActorOrg       string
 	Action         string
 	TargetTenantID *tenant.ID // nil for platform-wide actions (list/metrics)
@@ -82,7 +82,7 @@ func (a *AuditLog) Record(ctx context.Context, e AuditEntry) (string, error) {
 	if a == nil || a.pool == nil {
 		return "", errors.New("platform: audit log not configured")
 	}
-	actor := strings.TrimSpace(e.ActorUserID)
+	actor := strings.TrimSpace(e.InvokerID)
 	if actor == "" {
 		return "", errors.New("platform: audit entry requires an actor")
 	}
@@ -166,7 +166,7 @@ func (a *AuditLog) List(ctx context.Context, targetTenant *tenant.ID, limit int)
 	var out []AuditRow
 	for rows.Next() {
 		var r AuditRow
-		if err := rows.Scan(&r.ID, &r.ActorUserID, &r.ActorOrg, &r.Action,
+		if err := rows.Scan(&r.ID, &r.InvokerID, &r.ActorOrg, &r.Action,
 			&r.TargetTenantID, &r.Reason, &r.CreatedAt); err != nil {
 			return nil, err
 		}

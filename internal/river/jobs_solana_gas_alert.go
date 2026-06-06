@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/internal/db"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/riverqueue/river"

@@ -23,7 +23,7 @@ import (
 // admission deny path to reject suspended accounts is a SEPARATE slice; the
 // foreground gates on IsSuspended.
 
-// SetPaymentMethodVerified records whether (owner, credit_type) has a verified
+// SetPaymentMethodVerified records whether (payer, credit_type) has a verified
 // payment method. When verified is true, verified_at is stamped with now; when
 // false, verified_at is cleared. Upserts the settings row (prepaid default) if
 // one does not yet exist.
@@ -31,7 +31,7 @@ import (
 // NOTE: this only RECORDS the flag. The actual $1 auth-and-void verification
 // charge (needing a Charger.AuthorizeAndVoid capability) is out of this slice;
 // a caller flips this after running that flow successfully.
-func (s *CreditsService) SetPaymentMethodVerified(ctx context.Context, owner identity.OwnerOrgID, creditType string, verified bool) error {
+func (s *CreditsService) SetPaymentMethodVerified(ctx context.Context, payer identity.TenantSubjectID, creditType string, verified bool) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("credits service not initialized")
 	}
@@ -40,7 +40,7 @@ func (s *CreditsService) SetPaymentMethodVerified(ctx context.Context, owner ide
 		return err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 	now := s.now()
 
 	tx, err := s.db.BeginTenantTx(ctx)
@@ -62,17 +62,17 @@ func (s *CreditsService) SetPaymentMethodVerified(ctx context.Context, owner ide
 		upd = upd.Set("verified_at = NULL")
 	}
 	if _, err := upd.
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 		Exec(ctx); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// Suspend marks (owner, credit_type) suspended: stamps suspended_at=now and
+// Suspend marks (payer, credit_type) suspended: stamps suspended_at=now and
 // records suspend_reason. Upserts the settings row if one does not yet exist.
 // Admission-deny-on-suspended wiring is a separate slice.
-func (s *CreditsService) Suspend(ctx context.Context, owner identity.OwnerOrgID, creditType, reason string) error {
+func (s *CreditsService) Suspend(ctx context.Context, payer identity.TenantSubjectID, creditType, reason string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("credits service not initialized")
 	}
@@ -81,7 +81,7 @@ func (s *CreditsService) Suspend(ctx context.Context, owner identity.OwnerOrgID,
 		return err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 	now := s.now()
 	reason = strings.TrimSpace(reason)
 
@@ -104,16 +104,16 @@ func (s *CreditsService) Suspend(ctx context.Context, owner identity.OwnerOrgID,
 		upd = upd.Set("suspend_reason = NULL")
 	}
 	if _, err := upd.
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 		Exec(ctx); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// Resume clears the suspension on (owner, credit_type): nulls suspended_at and
+// Resume clears the suspension on (payer, credit_type): nulls suspended_at and
 // suspend_reason. No-op (other than touching updated_at) if not suspended.
-func (s *CreditsService) Resume(ctx context.Context, owner identity.OwnerOrgID, creditType string) error {
+func (s *CreditsService) Resume(ctx context.Context, payer identity.TenantSubjectID, creditType string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("credits service not initialized")
 	}
@@ -122,7 +122,7 @@ func (s *CreditsService) Resume(ctx context.Context, owner identity.OwnerOrgID, 
 		return err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 	now := s.now()
 
 	tx, err := s.db.BeginTenantTx(ctx)
@@ -139,27 +139,27 @@ func (s *CreditsService) Resume(ctx context.Context, owner identity.OwnerOrgID, 
 		Set("suspended_at = NULL").
 		Set("suspend_reason = NULL").
 		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 		Exec(ctx); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// IsSuspended reports whether (owner, credit_type) is currently suspended
-// (suspended_at set). An owner with no settings row is not suspended.
-func (s *CreditsService) IsSuspended(ctx context.Context, owner identity.OwnerOrgID, creditType string) (bool, error) {
-	settings, err := s.GetAccountSettings(ctx, owner, creditType)
+// IsSuspended reports whether (payer, credit_type) is currently suspended
+// (suspended_at set). An payer with no settings row is not suspended.
+func (s *CreditsService) IsSuspended(ctx context.Context, payer identity.TenantSubjectID, creditType string) (bool, error) {
+	settings, err := s.GetAccountSettings(ctx, payer, creditType)
 	if err != nil {
 		return false, err
 	}
 	return settings.SuspendedAt != nil, nil
 }
 
-// IsPaymentMethodVerified reports whether (owner, credit_type) has a verified
-// payment method. An owner with no settings row is not verified.
-func (s *CreditsService) IsPaymentMethodVerified(ctx context.Context, owner identity.OwnerOrgID, creditType string) (bool, error) {
-	settings, err := s.GetAccountSettings(ctx, owner, creditType)
+// IsPaymentMethodVerified reports whether (payer, credit_type) has a verified
+// payment method. An payer with no settings row is not verified.
+func (s *CreditsService) IsPaymentMethodVerified(ctx context.Context, payer identity.TenantSubjectID, creditType string) (bool, error) {
+	settings, err := s.GetAccountSettings(ctx, payer, creditType)
 	if err != nil {
 		return false, err
 	}
@@ -169,8 +169,8 @@ func (s *CreditsService) IsPaymentMethodVerified(ctx context.Context, owner iden
 // ArrearsRequiresVerification reports whether an account is on a credit line
 // (arrears) but has NOT verified a payment method (#299 PM-on-file gate). When
 // true, admission should deny credit-line spend until a method is verified.
-func (s *CreditsService) ArrearsRequiresVerification(ctx context.Context, owner identity.OwnerOrgID, creditType string) (bool, error) {
-	settings, err := s.GetAccountSettings(ctx, owner, creditType)
+func (s *CreditsService) ArrearsRequiresVerification(ctx context.Context, payer identity.TenantSubjectID, creditType string) (bool, error) {
+	settings, err := s.GetAccountSettings(ctx, payer, creditType)
 	if err != nil {
 		return false, err
 	}

@@ -75,4 +75,4 @@ LIMIT 50;
 "
 
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
-  psql -U admin -d doujins_db -v ON_ERROR_STOP=1 -c "$SQL"
+  psql -U admin -d openrails_db -v ON_ERROR_STOP=1 -c "$SQL"

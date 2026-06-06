@@ -3,7 +3,7 @@ package subscriptions
 import (
 	"bytes"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 // CreatePlanParams are the inputs for create_plan (discriminator 7).

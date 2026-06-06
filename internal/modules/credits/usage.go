@@ -19,10 +19,10 @@ import (
 // host supplies the final Amount (in the credit type's smallest unit); OpenRails
 // records the event AND debits the ledger atomically.
 type RecordUsageParams struct {
-	// Owner is the owner org BILLED for this usage (the payer). When nil it is
-	// resolved from UserID (self-hosted/personal case), never synthesized.
-	Owner      *identity.OwnerOrgID
-	UserID     string // actor (attribution only)
+	// Payer is the payer org BILLED for this usage (the payer). When nil it is
+	// resolved from InvokerID (self-hosted/personal case), never synthesized.
+	Payer      *identity.TenantSubjectID
+	InvokerID  string // invoker (attribution only)
 	CreditType string
 	EventType  string // metered endpoint / model, e.g. "gpt-4o"
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
@@ -40,7 +40,7 @@ type RecordUsageParams struct {
 
 // RecordUsage durably records a metered usage event AND debits the credit ledger
 // in ONE transaction (issue #289). Idempotent on
-// (tenant, owner, event_type, source, source_id): a replayed request returns the
+// (tenant, payer, event_type, source, source_id): a replayed request returns the
 // existing event and never double-charges. Concurrency-safe: the balance row is
 // locked FOR UPDATE before the idempotency check, so two concurrent identical
 // records serialize and the second sees the first's event.
@@ -71,7 +71,7 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	if !ct.IsActive {
 		return nil, ErrCreditTypeInactive
 	}
-	owner, err := resolveOwner(params.Owner, params.UserID)
+	payer, err := resolvePayer(params.Payer, params.InvokerID)
 	if err != nil {
 		return nil, err
 	}
@@ -83,18 +83,18 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	defer func() { _ = tx.Rollback() }()
 
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 	now := s.now()
 
-	// Serialize per (tenant, owner, credit_type) so the idempotency check below
+	// Serialize per (tenant, payer, credit_type) so the idempotency check below
 	// can't race a concurrent identical record into a double charge.
-	if _, err := s.lockBalance(ctx, tx, owner, params.UserID, ct.ID); err != nil {
+	if _, err := s.lockBalance(ctx, tx, payer, params.InvokerID, ct.ID); err != nil {
 		return nil, err
 	}
 
 	existing := new(models.UsageEvent)
 	err = tx.NewSelect().Model(existing).
-		Where("tenant_id = ? AND owner_id = ?", tenantID, ownerID).
+		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, ownerID).
 		Where("event_type = ?", params.EventType).
 		Where("source = ? AND source_id = ?", params.Source, params.SourceID).
 		Limit(1).
@@ -112,7 +112,7 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	// amount exceeds available balance.
 	var debitID *uuid.UUID
 	if params.Amount > 0 {
-		balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, tx, ct, owner, params.UserID, params.Source, params.SourceID, params.Amount)
+		balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, tx, ct, payer, params.InvokerID, params.Source, params.SourceID, params.Amount)
 		if derr != nil {
 			return nil, derr
 		}
@@ -130,8 +130,8 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	ev := &models.UsageEvent{
 		ID:                  uuidutil.NewV7(),
 		TenantID:            tenantID,
-		OwnerID:             ownerID,
-		UserID:              params.UserID,
+		TenantSubjectID:     ownerID,
+		InvokerID:           params.InvokerID,
 		CreditTypeID:        ct.ID,
 		EventType:           params.EventType,
 		Dimensions:          params.Dimensions,
@@ -163,18 +163,18 @@ type UsageRollupRow struct {
 	Dimensions  map[string]int64 `json:"dimensions"`
 }
 
-// AggregateUsage rolls up an owner's usage_events over [from, to) grouped by
+// AggregateUsage rolls up an payer's usage_events over [from, to) grouped by
 // event_type, with summed dimensions. RLS-scoped to the request tenant. This is
 // the rollup layer — it is NEVER called on the per-request admission hot path.
-func (s *CreditsService) AggregateUsage(ctx context.Context, owner identity.OwnerOrgID, from, to time.Time) ([]UsageRollupRow, error) {
+func (s *CreditsService) AggregateUsage(ctx context.Context, payer identity.TenantSubjectID, from, to time.Time) ([]UsageRollupRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
-	if owner.IsZero() {
-		return nil, fmt.Errorf("owner required")
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 
 	type totalRow struct {
 		EventType   string `bun:"event_type"`
@@ -196,7 +196,7 @@ func (s *CreditsService) AggregateUsage(ctx context.Context, owner identity.Owne
 			ColumnExpr("COALESCE(SUM(amount), 0) AS total_amount").
 			ColumnExpr("COUNT(*) AS event_count").
 			Where("tenant_id = ?", tenantID).
-			Where("owner_id = ?", ownerID).
+			Where("tenant_subject_id = ?", ownerID).
 			Where("occurred_at >= ? AND occurred_at < ?", from.UTC(), to.UTC()).
 			GroupExpr("event_type").
 			Scan(ctx, &totals); err != nil {
@@ -219,7 +219,7 @@ func (s *CreditsService) AggregateUsage(ctx context.Context, owner identity.Owne
 			ColumnExpr("COALESCE(SUM((d.value)::bigint), 0) AS total").
 			Join("CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d").
 			Where("ue.tenant_id = ?", tenantID).
-			Where("ue.owner_id = ?", ownerID).
+			Where("ue.tenant_subject_id = ?", ownerID).
 			Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from.UTC(), to.UTC()).
 			GroupExpr("ue.event_type, d.key").
 			Scan(ctx, &dims); err != nil {

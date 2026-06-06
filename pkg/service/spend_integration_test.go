@@ -25,7 +25,7 @@ import (
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-func authzEnv(t *testing.T) (*billingservice.Service, *credits.CreditsService, identity.OwnerOrgID, string, context.Context) {
+func authzEnv(t *testing.T) (*billingservice.Service, *credits.CreditsService, identity.TenantSubjectID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
@@ -62,62 +62,62 @@ func authzEnv(t *testing.T) (*billingservice.Service, *credits.CreditsService, i
 	}).Exec(ctx)
 	require.NoError(t, err)
 
-	owner := identity.OwnerOrgIDFromString(uuid.NewString())
-	ownerID := owner.UUID()
+	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	ownerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
 	})
-	return svc, credits.NewCreditsService(dbi), owner, ctName, ctx
+	return svc, credits.NewCreditsService(dbi), payer, ctName, ctx
 }
 
 func TestAuthorizeSpend_PrepaidBalanceGate(t *testing.T) {
-	svc, cs, owner, ct, ctx := authzEnv(t)
-	_, err := cs.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
+	svc, cs, payer, ct, ctx := authzEnv(t)
+	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 
-	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{OwnerID: &owner, CreditType: ct, Invoker: "user:a", EstimateCents: 500})
+	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: &payer, CreditType: ct, Invoker: "user:a", EstimateCents: 500})
 	require.NoError(t, err)
 	require.True(t, ok.Allowed)
 	require.Equal(t, int64(1000), ok.AvailableCents)
 
-	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{OwnerID: &owner, CreditType: ct, Invoker: "user:a", EstimateCents: 1500})
+	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: &payer, CreditType: ct, Invoker: "user:a", EstimateCents: 1500})
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, billingservice.DenyInsufficientBalance, deny.DenyCode)
 }
 
 func TestAuthorizeSpend_DailyCapDeny(t *testing.T) {
-	svc, cs, owner, ct, ctx := authzEnv(t)
-	_, err := cs.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 100000, Source: "seed"})
+	svc, cs, payer, ct, ctx := authzEnv(t)
+	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 100000, Source: "seed"})
 	require.NoError(t, err)
 	cap := int64(1000)
-	require.NoError(t, svc.SetCreditAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{MaxSpendPerDayCents: &cap}))
-	_, err = cs.Withdraw(ctx, credits.CreditWithdrawParams{OwnerID: &owner, UserID: "user:a", CreditType: ct, Amount: 800, Source: "usage"})
+	require.NoError(t, svc.SetCreditAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{MaxSpendPerDayCents: &cap}))
+	_, err = cs.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, InvokerID: "user:a", CreditType: ct, Amount: 800, Source: "usage"})
 	require.NoError(t, err)
 
-	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{OwnerID: &owner, CreditType: ct, Invoker: "user:a", EstimateCents: 300})
+	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: &payer, CreditType: ct, Invoker: "user:a", EstimateCents: 300})
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, credits.DenyDailyCap, deny.DenyCode)
 	require.Greater(t, deny.RetryAfterSeconds, int64(0))
 
-	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{OwnerID: &owner, CreditType: ct, Invoker: "user:a", EstimateCents: 100})
+	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: &payer, CreditType: ct, Invoker: "user:a", EstimateCents: 100})
 	require.NoError(t, err)
 	require.True(t, ok.Allowed)
 }
 
 func TestGetCreditAccount_Snapshot(t *testing.T) {
-	svc, cs, owner, ct, ctx := authzEnv(t)
-	_, err := cs.Deposit(ctx, credits.CreditDepositParams{OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 5000, Source: "seed"})
+	svc, cs, payer, ct, ctx := authzEnv(t)
+	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 5000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = cs.Hold(ctx, &owner, "user:a", ct, 1500, "usage", "h1", time.Now().Add(time.Hour).UTC())
+	_, err = cs.Hold(ctx, &payer, "user:a", ct, 1500, "usage", "h1", time.Now().Add(time.Hour).UTC())
 	require.NoError(t, err)
 
-	snap, err := svc.GetCreditAccount(ctx, owner, ct)
+	snap, err := svc.GetCreditAccount(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(5000), snap.BalanceCents)
 	require.Equal(t, int64(1500), snap.HeldCents)

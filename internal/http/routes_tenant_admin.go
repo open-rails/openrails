@@ -69,7 +69,7 @@ func (s *Server) auditTenantMutation(c *gin.Context, action string, target *tena
 	}
 	uc, _ := ginauth.UserContextFromGin(c)
 	if _, err := s.platformAudit.Record(c.Request.Context(), platform.AuditEntry{
-		ActorUserID:    uc.UserID,
+		InvokerID:      uc.UserID,
 		ActorOrg:       uc.Org,
 		Action:         action,
 		TargetTenantID: target,

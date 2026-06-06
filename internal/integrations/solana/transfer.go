@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	solanago "github.com/doujins-org/solana-go"
-	"github.com/doujins-org/solana-go/programs/system"
-	"github.com/doujins-org/solana-go/programs/token"
-	"github.com/doujins-org/solana-go/rpc"
+	solanago "github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/programs/system"
+	"github.com/gagliardetto/solana-go/programs/token"
+	"github.com/gagliardetto/solana-go/rpc"
 	log "github.com/sirupsen/logrus"
 )
 

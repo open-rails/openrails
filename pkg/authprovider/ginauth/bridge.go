@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/doujins-org/ginapi/response"
 	"github.com/gin-gonic/gin"
+	"github.com/open-rails/openrails/internal/http/response"
 
 	"github.com/open-rails/openrails/pkg/billingauth"
 )

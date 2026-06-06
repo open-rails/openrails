@@ -21,8 +21,8 @@ type Charger interface {
 }
 
 type ChargeRequest struct {
-	Owner           identity.OwnerOrgID
-	UserID          string
+	Payer           identity.TenantSubjectID
+	InvokerID       string
 	PaymentMethodID uuid.UUID
 	AmountCents     int64
 	IdempotencyKey  string
@@ -37,14 +37,14 @@ type ChargeResult struct {
 // Alerter delivers a low-balance notification. Implemented by the notification
 // layer; faked in tests (#240).
 type Alerter interface {
-	LowBalanceAlert(ctx context.Context, owner identity.OwnerOrgID, creditType string, available, threshold int64) error
+	LowBalanceAlert(ctx context.Context, payer identity.TenantSubjectID, creditType string, available, threshold int64) error
 }
 
 // moneyInAccount is a scanned (settings ⨝ balance ⨝ credit_type) row for the
 // money-in workers.
 type moneyInAccount struct {
 	TenantID        uuid.UUID  `bun:"tenant_id"`
-	OwnerID         uuid.UUID  `bun:"owner_id"`
+	TenantSubjectID uuid.UUID  `bun:"tenant_subject_id"`
 	CreditTypeID    uuid.UUID  `bun:"credit_type_id"`
 	CreditTypeName  string     `bun:"credit_type_name"`
 	Available       int64      `bun:"available"`
@@ -62,12 +62,12 @@ func (s *CreditsService) belowThresholdAccounts(ctx context.Context) ([]moneyInA
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	var rows []moneyInAccount
 	err := s.db.Q(ctx).NewSelect().
-		ColumnExpr("s.tenant_id, s.owner_id, s.credit_type_id, ct.name AS credit_type_name").
+		ColumnExpr("s.tenant_id, s.tenant_subject_id, s.credit_type_id, ct.name AS credit_type_name").
 		ColumnExpr("(COALESCE(b.balance,0) - COALESCE(b.held_balance,0)) AS available").
 		ColumnExpr("s.low_balance_threshold_cents, s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at").
 		TableExpr("billing.credit_account_settings AS s").
 		Join("JOIN billing.credit_types AS ct ON ct.id = s.credit_type_id").
-		Join("LEFT JOIN billing.user_credit_balances AS b ON b.tenant_id = s.tenant_id AND b.owner_id = s.owner_id AND b.credit_type_id = s.credit_type_id").
+		Join("LEFT JOIN billing.user_credit_balances AS b ON b.tenant_id = s.tenant_id AND b.tenant_subject_id = s.tenant_subject_id AND b.credit_type_id = s.credit_type_id").
 		Where("s.tenant_id = ?", tenantID).
 		Where("s.low_balance_threshold_cents IS NOT NULL").
 		Where("(COALESCE(b.balance,0) - COALESCE(b.held_balance,0)) < s.low_balance_threshold_cents").
@@ -95,8 +95,8 @@ func (s *CreditsService) RunLowBalanceAlerts(ctx context.Context, alerter Alerte
 		if r.LastAlertAt != nil && now.Sub(*r.LastAlertAt) < cooldown {
 			continue
 		}
-		owner := identity.OwnerOrgID(r.OwnerID)
-		if err := alerter.LowBalanceAlert(ctx, owner, r.CreditTypeName, r.Available, r.Threshold); err != nil {
+		payer := identity.TenantSubjectID(r.TenantSubjectID)
+		if err := alerter.LowBalanceAlert(ctx, payer, r.CreditTypeName, r.Available, r.Threshold); err != nil {
 			continue // best-effort; try again next tick
 		}
 		if err := s.stampMoneyInTimestamp(ctx, r, "last_alert_at", now); err != nil {
@@ -149,20 +149,20 @@ func (s *CreditsService) RunAutoTopups(ctx context.Context, charger Charger, coo
 // skipped entirely; the Charger also receives the idempotency key so a retry
 // after a charge-but-before-deposit crash does not double-charge.
 func (s *CreditsService) topUpAccount(ctx context.Context, charger Charger, r moneyInAccount, cooldown time.Duration, now time.Time) (bool, error) {
-	owner := identity.OwnerOrgID(r.OwnerID)
+	payer := identity.TenantSubjectID(r.TenantSubjectID)
 	bucket := now.Truncate(max(cooldown, time.Minute)).Unix()
-	episode := fmt.Sprintf("autotopup:%s:%s:%d", r.OwnerID, r.CreditTypeID, bucket)
+	episode := fmt.Sprintf("autotopup:%s:%s:%d", r.TenantSubjectID, r.CreditTypeID, bucket)
 	depositSourceID := uuid.NewSHA1(uuid.Nil, []byte(episode))
 
 	// If this episode already deposited, we're done (idempotent).
-	existing, err := s.GetTransactionBySource(ctx, owner.UUID().String(), r.CreditTypeName, "deposit", "auto_topup", depositSourceID.String())
+	existing, err := s.GetTransactionBySource(ctx, payer.UUID().String(), r.CreditTypeName, "deposit", "auto_topup", depositSourceID.String())
 	if err == nil && existing != nil {
 		return false, nil
 	}
 
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
-		Owner:           owner,
-		UserID:          owner.UUID().String(),
+		Payer:           payer,
+		InvokerID:       payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
 		AmountCents:     *r.TopupAmount,
 		IdempotencyKey:  episode,
@@ -179,8 +179,8 @@ func (s *CreditsService) topUpAccount(ctx context.Context, charger Charger, r mo
 	}
 
 	if _, err := s.Deposit(ctx, CreditDepositParams{
-		OwnerID:                   &owner,
-		UserID:                    owner.UUID().String(),
+		TenantSubjectID:           &payer,
+		InvokerID:                 payer.UUID().String(),
 		CreditType:                r.CreditTypeName,
 		Amount:                    *r.TopupAmount,
 		Source:                    "auto_topup",
@@ -201,7 +201,7 @@ func (s *CreditsService) stampMoneyInTimestamp(ctx context.Context, r moneyInAcc
 		Model((*models.CreditAccountSettings)(nil)).
 		Set("? = ?", bun.Ident(column), now).
 		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", r.TenantID, r.OwnerID, r.CreditTypeID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", r.TenantID, r.TenantSubjectID, r.CreditTypeID).
 		Exec(ctx)
 	return err
 }

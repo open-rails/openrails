@@ -7,7 +7,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// TierPolicy is a per-owner, per-tier THROUGHPUT policy for the admission check
+// TierPolicy is a per-payer, per-tier THROUGHPUT policy for the admission check
 // (issue #298). The money axis stays in CreditAccountSettings; this holds the
 // rate-limit windows. Rolling money-budget windows (#304) extend this.
 type TierPolicy struct {
@@ -15,10 +15,10 @@ type TierPolicy struct {
 
 	ID       uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	// OwnerID the policy belongs to. The all-zero uuid is the reserved sentinel
-	// for tenant-wide (tenant->owner) defaults; a real owner id is owner->actor.
-	OwnerID uuid.UUID `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
-	// Tier name (e.g. "free", "tier_1"); the policy applies to actors at this tier.
+	// TenantSubjectID the policy belongs to. The all-zero uuid is the reserved sentinel
+	// for tenant-wide defaults; a real payer id scopes policy to that payer.
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	// Tier name (e.g. "free", "tier_1"); the policy applies to invokers at this tier.
 	Tier string `bun:"tier,notnull" json:"tier"`
 	// Policy is the throughput windows: {"windows":[{"unit","window_seconds","max"}]}.
 	Policy        ThroughputPolicy `bun:"policy,type:jsonb,nullzero" json:"policy"`

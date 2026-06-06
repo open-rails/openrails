@@ -23,11 +23,11 @@ func TestValidateJWKSURI_SSRFAllowlist(t *testing.T) {
 	dev := cpWithEnv("development")
 
 	// Public https is always fine.
-	require.NoError(t, prod.validateJWKSURI("https://doujins.example/.well-known/jwks.json"))
-	require.NoError(t, dev.validateJWKSURI("https://doujins.example/jwks"))
+	require.NoError(t, prod.validateJWKSURI("https://issuer.example/.well-known/jwks.json"))
+	require.NoError(t, dev.validateJWKSURI("https://issuer.example/jwks"))
 
 	// http is rejected in production, allowed outside it (httptest/local).
-	require.Error(t, prod.validateJWKSURI("http://doujins.example/jwks"))
+	require.Error(t, prod.validateJWKSURI("http://issuer.example/jwks"))
 	require.NoError(t, dev.validateJWKSURI("http://127.0.0.1:8080/jwks"))
 
 	// Private/loopback/link-local hosts are rejected in production (SSRF).

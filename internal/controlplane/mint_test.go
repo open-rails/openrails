@@ -2,7 +2,7 @@ package controlplane
 
 import (
 	"context"
-	"crypto"
+	"crypto/rsa"
 	"errors"
 	"testing"
 	"time"
@@ -49,7 +49,7 @@ func newMintControlPlane(t *testing.T) (*ControlPlane, *authhttp.Verifier) {
 		}),
 	)
 	require.NoError(t, v.AddIssuer(testDelegatedIssuer, []string{canonicalAudience}, authhttp.IssuerOptions{
-		RawKeys: map[string]crypto.PublicKey{testDelegatedKID: signer.PublicKey()},
+		RawKeys: map[string]*rsa.PublicKey{testDelegatedKID: signer.PublicKey()},
 	}))
 	return cp, v
 }

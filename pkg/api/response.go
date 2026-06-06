@@ -134,10 +134,9 @@ type PaymentRefundsList struct {
 	Data   []PaymentObject `json:"data"`
 }
 
-// List is a Stripe-style list response with offset/limit pagination. It is a
-// gin-free drop-in for github.com/doujins-org/ginapi/response.List (that package
-// transitively imports gin via its *gin.Context helpers); using this keeps the
-// handler path off gin so pkg/embedded stays gin-free (#285).
+// List is a Stripe-style list response with offset/limit pagination. It mirrors
+// the Gin response package shape without importing Gin, keeping pkg/embedded
+// usable from pure net/http callers (#285).
 type List[T any] struct {
 	Object  string `json:"object"`   // Always "list"
 	Data    []T    `json:"data"`     // The items
@@ -147,8 +146,7 @@ type List[T any] struct {
 	HasMore bool   `json:"has_more"` // More items available
 }
 
-// NewList creates a List response with has_more calculated automatically. It is
-// byte-for-byte JSON-compatible with ginapi/response.NewList.
+// NewList creates a List response with has_more calculated automatically.
 func NewList[T any](data []T, total int64, limit, offset int) List[T] {
 	if data == nil {
 		data = []T{}

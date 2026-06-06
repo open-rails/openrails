@@ -43,7 +43,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	tenantID := uuid.NewString()
 	ctName := "cf_" + uuid.NewString()
 	ctID := uuid.New()
-	owner := identity.OwnerOrgIDFromString(uuid.NewString())
+	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 	now := time.Now().UTC().Truncate(time.Second)
 
 	// Seed tenant + a tenant-scoped credit type as super (super bypasses RLS).
@@ -86,23 +86,23 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	// Deposit 1000 — exercises BeginTenantTx + GetCreditTypeByName under RLS.
 	depSrc := uuid.New()
 	_, err = svc.DepositCredits(tctx, billingservice.DepositCreditsRequest{
-		OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ctName, Amount: 1000, Source: "test", SourceID: &depSrc,
+		TenantSubjectID: &payer, UserID: payer.UUID().String(), CreditType: ctName, Amount: 1000, Source: "test", SourceID: &depSrc,
 	})
 	require.NoError(t, err, "DepositCredits must work under openrails_app (GUC set)")
 
-	acct, err := svc.GetCreditAccount(tctx, owner, ctName)
+	acct, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
 	require.Equal(t, int64(1000), acct.BalanceCents)
 
 	// Hold 600.
 	hold, err := svc.HoldCredits(tctx, billingservice.HoldCreditsRequest{
-		OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ctName, Amount: 600,
+		TenantSubjectID: &payer, UserID: payer.UUID().String(), CreditType: ctName, Amount: 600,
 		Source: "test", SourceID: uuid.NewString(), ExpiresAt: now.Add(time.Hour),
 	})
 	require.NoError(t, err, "HoldCredits must work under openrails_app")
 	require.NotNil(t, hold)
 
-	held, err := svc.GetCreditAccount(tctx, owner, ctName)
+	held, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
 	require.Equal(t, int64(600), held.HeldCents)
 	require.Equal(t, int64(400), held.AvailableCents)
@@ -111,7 +111,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	_, err = svc.CaptureHold(tctx, billingservice.CaptureHoldRequest{HoldID: hold.ID, Amount: 400})
 	require.NoError(t, err, "CaptureHold must work under openrails_app")
 
-	final, err := svc.GetCreditAccount(tctx, owner, ctName)
+	final, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
 	require.Equal(t, int64(600), final.BalanceCents, "1000 - 400 captured = 600")
 	require.Equal(t, int64(0), final.HeldCents, "hold fully resolved")
@@ -120,15 +120,15 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	// mode + an outstanding cap, read it back, and list the org's usage.
 	arrears := "arrears"
 	var cap int64 = 5000
-	require.NoError(t, svc.SetCreditAccountSettings(tctx, owner, ctName, credits.AccountSettingsInput{
+	require.NoError(t, svc.SetCreditAccountSettings(tctx, payer, ctName, credits.AccountSettingsInput{
 		BillingMode: &arrears, MaxOutstandingOwedCents: &cap,
 	}), "SetCreditAccountSettings must work under openrails_app")
 
-	settings, err := svc.GetCreditAccountSettings(tctx, owner, ctName)
+	settings, err := svc.GetCreditAccountSettings(tctx, payer, ctName)
 	require.NoError(t, err)
 	require.Equal(t, "arrears", settings.BillingMode, "settings read back the configured mode")
 
-	txns, total, err := svc.GetOwnerCreditTransactions(tctx, owner, ctName, 50, 0)
+	txns, total, err := svc.GetOwnerCreditTransactions(tctx, payer, ctName, 50, 0)
 	require.NoError(t, err)
 	require.Greater(t, total, 0, "org has credit transactions (deposit/hold/capture)")
 	require.NotEmpty(t, txns)

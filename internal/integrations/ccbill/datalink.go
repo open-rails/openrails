@@ -95,7 +95,7 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 
 		// Set proper headers
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("User-Agent", "DoujinsApp/1.0")
+		req.Header.Set("User-Agent", "OpenRails/1.0")
 
 		resp, err = c.HTTPClient.Do(req)
 		if err != nil {

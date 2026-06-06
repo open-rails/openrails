@@ -11,7 +11,7 @@ import (
 // registerSelfServiceRoutes mounts the browser-direct self-service billing
 // surface on the PUBLIC API engine under /v1/self/*, authenticated by a
 // browser's DELEGATED ACCESS TOKEN (issue #222 browser-tier foundation, the
-// backend prerequisite for doujins #253 / hentai0 #142 / cozy-art #46).
+// backend prerequisite for browser-direct self-service consumers.
 //
 // A tenant's host frontend mints a short-lived AuthKit delegated access token
 // (aud=openrails, tenant, delegated_sub, openrails:self:* perms) for the

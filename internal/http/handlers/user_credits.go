@@ -173,7 +173,7 @@ func parseTimeParam(v string) (time.Time, error) {
 // event_type (endpoint/model) over a [from, to) window, with summed per-dimension
 // counts (issue #289). The acting user is the delegated token's subject
 // (r.GetUser()); their owner org is that subject's personal org
-// (identity.OwnerOrgIDFromString), matching how the self-service surface resolves
+// (identity.TenantSubjectIDFromString), matching how the self-service surface resolves
 // the payer. from/to accept RFC3339 timestamps or plain YYYY-MM-DD dates; when
 // omitted the window defaults to the current calendar month [firstOfMonthUTC, now).
 func GetMyUsage(r *httprequest.Request) {
@@ -182,7 +182,7 @@ func GetMyUsage(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	owner := identity.OwnerOrgIDFromString(user.ID)
+	owner := identity.TenantSubjectIDFromString(user.ID)
 	if owner.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "owner could not be resolved from subject")
 		return
@@ -218,7 +218,7 @@ func GetMyUsage(r *httprequest.Request) {
 // GetMyInvoices lists the authenticated owner's finalized monthly invoices,
 // newest period first, paginated via limit/offset query params (issue #303). The
 // acting user is the delegated token's subject (r.GetUser()); their owner org is
-// that subject's personal org (identity.OwnerOrgIDFromString), matching how the
+// that subject's personal org (identity.TenantSubjectIDFromString), matching how the
 // rest of the self-service surface resolves the payer (mirrors GetMyUsage).
 func GetMyInvoices(r *httprequest.Request) {
 	user := r.GetUser()
@@ -226,7 +226,7 @@ func GetMyInvoices(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	owner := identity.OwnerOrgIDFromString(user.ID)
+	owner := identity.TenantSubjectIDFromString(user.ID)
 	if owner.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "owner could not be resolved from subject")
 		return
@@ -264,7 +264,7 @@ func GetMyInvoice(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	owner := identity.OwnerOrgIDFromString(user.ID)
+	owner := identity.TenantSubjectIDFromString(user.ID)
 	if owner.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "owner could not be resolved from subject")
 		return

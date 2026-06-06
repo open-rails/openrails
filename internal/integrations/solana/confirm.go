@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	solanago "github.com/doujins-org/solana-go"
-	"github.com/doujins-org/solana-go/rpc"
+	solanago "github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/rpc"
 )
 
 // TransactionOutcome is the resolved on-chain result of a transaction once it

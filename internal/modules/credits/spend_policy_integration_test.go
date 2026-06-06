@@ -21,9 +21,9 @@ import (
 )
 
 // spendTestEnv connects to the integration DB, verifies the #237 schema, and
-// seeds a fresh credit type + owner. It returns the service, the owner org, the
+// seeds a fresh credit type + payer. It returns the service, the payer org, the
 // credit-type name, and a cleanup-registered context.
-func spendTestEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.OwnerOrgID, string, context.Context) {
+func spendTestEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.TenantSubjectID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
@@ -53,59 +53,59 @@ func spendTestEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.Owne
 	}).Exec(ctx)
 	require.NoError(t, err)
 
-	owner := identity.OwnerOrgIDFromString(uuid.NewString())
-	require.False(t, owner.IsZero())
-	ownerID := owner.UUID()
+	payer := identity.TenantSubjectIDFromString(uuid.NewString())
+	require.False(t, payer.IsZero())
+	ownerID := payer.UUID()
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditSpendLimit)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("owner_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditSpendLimit)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
 	})
 
 	svc := credits.NewCreditsService(dbi)
-	// Fund the owner generously so balance is never the binding constraint here.
+	// Fund the payer generously so balance is never the binding constraint here.
 	_, err = svc.Deposit(ctx, credits.CreditDepositParams{
-		OwnerID: &owner, UserID: ownerID.String(), CreditType: ctName, Amount: 1_000_000, Source: "test_seed",
+		TenantSubjectID: &payer, InvokerID: ownerID.String(), CreditType: ctName, Amount: 1_000_000, Source: "test_seed",
 	})
 	require.NoError(t, err)
-	return svc, bunDB, owner, ctName, ctx
+	return svc, bunDB, payer, ctName, ctx
 }
 
 func TestSpendPolicy_DefaultsAllow(t *testing.T) {
-	svc, _, owner, ct, ctx := spendTestEnv(t)
+	svc, _, payer, ct, ctx := spendTestEnv(t)
 	// No settings row -> prepaid defaults, no caps.
-	s, err := svc.GetAccountSettings(ctx, owner, ct)
+	s, err := svc.GetAccountSettings(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, credits.BillingModePrepaid, s.BillingMode)
 	require.True(t, s.HardStopOnBreach)
 	require.NotNil(t, s.DefaultCreditExpiryDays)
 	require.Equal(t, 365, *s.DefaultCreditExpiryDays)
 
-	dec, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:alice", 999_999)
+	dec, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:alice", 999_999)
 	require.NoError(t, err)
 	require.True(t, dec.Allowed)
 	require.Empty(t, dec.DenyCode)
 }
 
 func TestSpendPolicy_DailyCap(t *testing.T) {
-	svc, _, owner, ct, ctx := spendTestEnv(t)
+	svc, _, payer, ct, ctx := spendTestEnv(t)
 	cap := int64(1000)
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{MaxSpendPerDayCents: &cap})
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{MaxSpendPerDayCents: &cap})
 	require.NoError(t, err)
 
 	// Spend 500 (settled withdrawal).
-	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{OwnerID: &owner, UserID: "user:a", CreditType: ct, Amount: 500, Source: "usage"})
+	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, InvokerID: "user:a", CreditType: ct, Amount: 500, Source: "usage"})
 	require.NoError(t, err)
 
-	allow, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:a", 400) // 500+400 <= 1000
+	allow, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:a", 400) // 500+400 <= 1000
 	require.NoError(t, err)
 	require.True(t, allow.Allowed, "%+v", allow)
 
-	deny, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:a", 600) // 500+600 > 1000
+	deny, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:a", 600) // 500+600 > 1000
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, credits.DenyDailyCap, deny.DenyCode)
@@ -113,89 +113,89 @@ func TestSpendPolicy_DailyCap(t *testing.T) {
 
 	// Active hold counts toward the window too (in-flight exposure).
 	exp := time.Now().Add(time.Hour).UTC()
-	_, err = svc.Hold(ctx, &owner, "user:a", ct, 300, "usage", "req-hold-1", exp) // window now 800
+	_, err = svc.Hold(ctx, &payer, "user:a", ct, 300, "usage", "req-hold-1", exp) // window now 800
 	require.NoError(t, err)
-	deny2, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:a", 300) // 800+300 > 1000
+	deny2, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:a", 300) // 800+300 > 1000
 	require.NoError(t, err)
 	require.False(t, deny2.Allowed)
-	allow2, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:a", 200) // 800+200 == 1000
+	allow2, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:a", 200) // 800+200 == 1000
 	require.NoError(t, err)
 	require.True(t, allow2.Allowed)
 }
 
 func TestSpendPolicy_PerInvokerCap(t *testing.T) {
-	svc, _, owner, ct, ctx := spendTestEnv(t)
+	svc, _, payer, ct, ctx := spendTestEnv(t)
 	day := int64(100)
-	_, err := svc.SetSpendLimit(ctx, owner, ct, "user:alice", &day, nil)
+	_, err := svc.SetSpendLimit(ctx, payer, ct, "user:alice", &day, nil)
 	require.NoError(t, err)
 
 	// alice spends 80; bob spends 80 (bob has no limit).
-	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{OwnerID: &owner, UserID: "user:alice", CreditType: ct, Amount: 80, Source: "usage"})
+	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, InvokerID: "user:alice", CreditType: ct, Amount: 80, Source: "usage"})
 	require.NoError(t, err)
-	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{OwnerID: &owner, UserID: "user:bob", CreditType: ct, Amount: 80, Source: "usage"})
+	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, InvokerID: "user:bob", CreditType: ct, Amount: 80, Source: "usage"})
 	require.NoError(t, err)
 
-	deny, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:alice", 30) // 80+30 > 100
+	deny, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:alice", 30) // 80+30 > 100
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, credits.DenyInvokerDailyCap, deny.DenyCode)
 
-	allow, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:alice", 20) // 80+20 == 100
+	allow, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:alice", 20) // 80+20 == 100
 	require.NoError(t, err)
 	require.True(t, allow.Allowed)
 
 	// bob has no per-invoker limit and there's no org cap -> allowed even for a big estimate.
-	bob, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:bob", 100_000)
+	bob, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:bob", 100_000)
 	require.NoError(t, err)
 	require.True(t, bob.Allowed, "%+v", bob)
 }
 
 func TestSpendPolicy_OutstandingCeiling(t *testing.T) {
-	svc, _, owner, ct, ctx := spendTestEnv(t)
+	svc, _, payer, ct, ctx := spendTestEnv(t)
 	ceil := int64(1000)
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
 		BillingMode: strptr(credits.BillingModeArrears), MaxOutstandingOwedCents: &ceil,
 	})
 	require.NoError(t, err)
 
 	// Reserve 800 in active holds -> exposure 800.
 	exp := time.Now().Add(time.Hour).UTC()
-	_, err = svc.Hold(ctx, &owner, "user:a", ct, 800, "usage", "req-out-1", exp)
+	_, err = svc.Hold(ctx, &payer, "user:a", ct, 800, "usage", "req-out-1", exp)
 	require.NoError(t, err)
 
-	deny, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:a", 300) // 800+300 > 1000
+	deny, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:a", 300) // 800+300 > 1000
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, credits.DenyOutstandingCap, deny.DenyCode)
 
-	allow, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:a", 200) // 800+200 == 1000
+	allow, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:a", 200) // 800+200 == 1000
 	require.NoError(t, err)
 	require.True(t, allow.Allowed)
 }
 
 func TestSpendPolicy_WarnOnlyDoesNotBlock(t *testing.T) {
-	svc, _, owner, ct, ctx := spendTestEnv(t)
+	svc, _, payer, ct, ctx := spendTestEnv(t)
 	cap := int64(100)
 	hard := false
-	_, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
 		MaxSpendPerDayCents: &cap, HardStopOnBreach: &hard,
 	})
 	require.NoError(t, err)
-	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{OwnerID: &owner, UserID: "user:a", CreditType: ct, Amount: 100, Source: "usage"})
+	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, InvokerID: "user:a", CreditType: ct, Amount: 100, Source: "usage"})
 	require.NoError(t, err)
 
-	dec, err := svc.CheckSpendAllowed(ctx, owner, ct, "user:a", 50) // over cap but warn-only
+	dec, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:a", 50) // over cap but warn-only
 	require.NoError(t, err)
 	require.True(t, dec.Allowed, "warn-only should allow")
 	require.Equal(t, credits.DenyDailyCap, dec.DenyCode, "warn-only still reports the breach")
 }
 
 func TestSpendPolicy_SettingsRoundTrip(t *testing.T) {
-	svc, _, owner, ct, ctx := spendTestEnv(t)
+	svc, _, payer, ct, ctx := spendTestEnv(t)
 	day, mon := int64(5000), int64(100000)
 	thr := int64(2000)
 	pct := 90
-	out, err := svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{
+	out, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
 		BillingMode: strptr(credits.BillingModeArrears), MaxSpendPerDayCents: &day,
 		MaxSpendPerMonthCents: &mon, LowBalanceThreshold: &thr, AlertThresholdPct: &pct,
 	})
@@ -204,22 +204,22 @@ func TestSpendPolicy_SettingsRoundTrip(t *testing.T) {
 	require.Equal(t, int64(5000), *out.MaxSpendPerDayCents)
 	require.Equal(t, 90, out.AlertThresholdPct)
 
-	got, err := svc.GetAccountSettings(ctx, owner, ct)
+	got, err := svc.GetAccountSettings(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(100000), *got.MaxSpendPerMonthCents)
 	require.Equal(t, int64(2000), *got.LowBalanceThreshold)
 
 	// Update one field; others persist.
 	day2 := int64(7000)
-	_, err = svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{MaxSpendPerDayCents: &day2})
+	_, err = svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{MaxSpendPerDayCents: &day2})
 	require.NoError(t, err)
-	got2, err := svc.GetAccountSettings(ctx, owner, ct)
+	got2, err := svc.GetAccountSettings(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(7000), *got2.MaxSpendPerDayCents)
 	require.Equal(t, credits.BillingModeArrears, got2.BillingMode, "unset field must persist")
 
 	// Invalid billing mode rejected.
-	_, err = svc.UpsertAccountSettings(ctx, owner, ct, credits.AccountSettingsInput{BillingMode: strptr("weird")})
+	_, err = svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr("weird")})
 	require.Error(t, err)
 }
 

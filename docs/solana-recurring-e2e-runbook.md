@@ -1,6 +1,6 @@
 # Solana recurring — end-to-end validation runbook (#263)
 
-How to validate the full recurring-Solana flow against the doujins docker-compose
+How to validate the full recurring-Solana flow against the host app docker-compose
 stack on devnet, plus what is already validated and what each step needs.
 
 ## What is already validated on devnet (no stack required)
@@ -30,7 +30,7 @@ These cover the on-chain mechanics + the new confirm path. The service layer
 
 ## Full-stack e2e (the remaining #263 work) — procedure + prerequisites
 
-The doujins stack (`~/doujins/docker-compose.yaml`) pins the **published** image
+The host stack (`~/openrails-host/docker-compose.yaml`) pins the **published** image
 `openrails/openrails:v0.10.2`, so testing local changes needs a locally-built
 image overridden in.
 
@@ -43,7 +43,7 @@ work (e.g. `internal/controlplane/catalog_provider_solana.go` referencing
 not-yet-added symbols) breaks the full build; wait until the tree compiles.
 
 ### 2. Override the stack onto the local image + devnet
-Create `~/doujins/docker-compose.override.yaml`:
+Create `~/openrails-host/docker-compose.override.yaml`:
 ```yaml
 services:
   openrails:
@@ -66,7 +66,7 @@ if connections reset).
   attaches the plan handle to the price's Solana config.
 
 ### 4. Drive the subscribe → confirm → cancel flow
-Browser (doujins/hentai0) or API directly:
+Browser (host apps) or API directly:
 1. `POST /v1/self/checkout` `{price_id, mode:"subscription", payment:{processor:"solana", wallet}}`
    → `next_action: solana_sign_transactions [base64...]`.
 2. Wallet signs + sends each tx (first-timer: init then subscribe).
@@ -87,7 +87,7 @@ Browser (doujins/hentai0) or API directly:
 ## Browser wallet-signing e2e (#275) — runbook
 
 The API-level e2e above can sign the returned base64 txns with a test keypair.
-The *true* browser e2e instead drives the **doujins React frontend** and has a
+The *true* browser e2e instead drives the **host React frontend** and has a
 **real wallet extension approve the transactions** — the one thing the headless
 service-layer tests can't prove (the wallet adapter -> `signAllTransactions` ->
 `POST .../confirm` round trip through the UI). It is **manual** by nature: a
@@ -105,17 +105,17 @@ limits" below).
 ### 1–3. Bring up the stack + plan
 Identical to the full-stack steps above:
 1. `cd ~/openrails && docker build -t openrails:local .` (needs a green `go build ./...`).
-2. `~/doujins/docker-compose.override.yaml` pinning `image: openrails:local` +
+2. `~/openrails-host/docker-compose.override.yaml` pinning `image: openrails:local` +
    `SOLANA_NETWORK: devnet` / `SOLANA_RPC_URL: https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
    then `docker compose up -d postgres openrails`.
 3. Seed the tenant cranker secret `solana/private_key` and publish a USDC plan
    (`POST /v1/admin/solana/recurring/plans` with `token_symbol:"USDC"`,
    `period_hours`, `price_id`).
-4. Bring up the doujins frontend pointed at the local OpenRails
-   (`cd ~/doujins/frontend && pnpm dev`, default `http://localhost:13000`).
+4. Bring up the host-app frontend pointed at the local OpenRails
+   (`cd ~/openrails-host/frontend && pnpm dev`, default `http://localhost:13000`).
 
-### 4. Walk the subscribe → sign → confirm → cancel flow in the doujins UI
-1. Log into doujins as a test user; open the premium/subscribe entry point for
+### 4. Walk the subscribe → sign → confirm → cancel flow in the host UI
+1. Log into host-app as a test user; open the premium/subscribe entry point for
    the price tied to the published plan.
 2. Pick **Solana / wallet** as the payment method and connect the devnet wallet
    (the subscriber keypair from step 0).
@@ -155,9 +155,9 @@ be reliably driven by Playwright without one of:
   stub that auto-signs with the subscriber keypair and skips the popup), or
 - a pre-unlocked extension + `@synthetixio/synpress`-style extension automation.
 
-A Playwright **skeleton** that drives the doujins frontend up to the
+A Playwright **skeleton** that drives the host-app frontend up to the
 wallet-approval boundary lives at
-`~/doujins/frontend/e2e/premium/solana-subscribe.skeleton.spec.ts` (separate
+`~/openrails-host/frontend/e2e/premium/solana-subscribe.skeleton.spec.ts` (separate
 repo — not committed by the OpenRails workflow). It loads the subscribe entry
 point, selects Solana, and asserts the checkout call returns
 `solana_sign_transactions`; it then **stops at the wallet popup** and is

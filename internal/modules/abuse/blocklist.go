@@ -68,8 +68,8 @@ func NewBlocklistService(database *db.DB) *BlocklistService {
 // is scoped to that owner org. reason is an optional free-form note.
 //
 // Add is idempotent on (tenant, kind, value): re-adding the same identifier is a
-// no-op (the existing row — and its owner scoping — is left untouched).
-func (s *BlocklistService) Add(ctx context.Context, owner *identity.OwnerOrgID, kind, value, reason string) error {
+// no-op (the existing row and its payer scoping are left untouched).
+func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjectID, kind, value, reason string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("blocklist service not initialized")
 	}
@@ -83,10 +83,10 @@ func (s *BlocklistService) Add(ctx context.Context, owner *identity.OwnerOrgID, 
 	}
 
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	var ownerID *uuid.UUID
-	if owner != nil && !owner.IsZero() {
-		id := owner.UUID()
-		ownerID = &id
+	var payerOrgID *uuid.UUID
+	if payer != nil && !payer.IsZero() {
+		id := payer.UUID()
+		payerOrgID = &id
 	}
 	var reasonPtr *string
 	if r := strings.TrimSpace(reason); r != "" {
@@ -94,13 +94,13 @@ func (s *BlocklistService) Add(ctx context.Context, owner *identity.OwnerOrgID, 
 	}
 
 	entry := &models.PaymentBlocklistEntry{
-		ID:        uuidutil.NewV7(),
-		TenantID:  tenantID,
-		OwnerID:   ownerID,
-		Kind:      kind,
-		Value:     value,
-		Reason:    reasonPtr,
-		CreatedAt: time.Now().UTC(),
+		ID:              uuidutil.NewV7(),
+		TenantID:        tenantID,
+		TenantSubjectID: payerOrgID,
+		Kind:            kind,
+		Value:           value,
+		Reason:          reasonPtr,
+		CreatedAt:       time.Now().UTC(),
 	}
 
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {

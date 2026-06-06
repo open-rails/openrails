@@ -39,7 +39,7 @@ container on the e2e network):
 
 ```sh
 OAT=$(docker compose exec -T openrails /app/billing-server \
-  --config /app/config/openrails.config.yaml mint-operator-oat \
+  --config /app/config/openrails.config.yaml mint-operator-oat --tenant default \
   | grep -o '"oat_secret":"[^"]*"' | cut -d'"' -f4)
 
 docker run --rm --network e2e_default \

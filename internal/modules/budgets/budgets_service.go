@@ -1,6 +1,6 @@
 // Package budgets implements the rolling-window money-budget engine (issue #304).
 //
-// A delegated user (actor) under an owner org is capped to a money budget over
+// A delegated user (invoker) under an payer org is capped to a money budget over
 // one or more ROLLING windows (e.g. "$2 per 4h, $5 per week"). For each window
 // the engine computes used / reserved / remaining and an allow/deny decision plus
 // a retry hint. The windows are PASSED IN by the caller — this package does NOT
@@ -38,10 +38,10 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// ErrOwnerRequired is returned when a budget operation is given a zero owner org
-// id. Like the credits engine, the owner is supplied by the caller and is never
+// ErrOwnerRequired is returned when a budget operation is given a zero payer org
+// id. Like the credits engine, the payer is supplied by the caller and is never
 // synthesized.
-var ErrOwnerRequired = errors.New("owner_id required")
+var ErrOwnerRequired = errors.New("tenant_subject_id required")
 
 // ErrReservationNotFound is returned by Capture/Release when no active
 // reservation with the given id exists for the request tenant.
@@ -106,26 +106,26 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 	return clockwork.NewRealClock()
 }
 
-// Check computes per-window used/reserved/remaining for an actor and returns the
+// Check computes per-window used/reserved/remaining for an invoker and returns the
 // allow/deny decision for requestedMillicents WITHOUT writing anything. allowed
 // is true iff every window can absorb the request.
-func (s *Service) Check(ctx context.Context, owner identity.OwnerOrgID, actor string, windows []BudgetWindow, requestedMillicents int64) ([]WindowStatus, bool, error) {
+func (s *Service) Check(ctx context.Context, payer identity.TenantSubjectID, invoker string, windows []BudgetWindow, requestedMillicents int64) ([]WindowStatus, bool, error) {
 	if s == nil || s.db == nil {
 		return nil, false, fmt.Errorf("budgets service not initialized")
 	}
-	if owner.IsZero() {
+	if payer.IsZero() {
 		return nil, false, ErrOwnerRequired
 	}
-	actor = strings.TrimSpace(actor)
-	if actor == "" {
-		return nil, false, fmt.Errorf("actor required")
+	invoker = strings.TrimSpace(invoker)
+	if invoker == "" {
+		return nil, false, fmt.Errorf("invoker required")
 	}
 
 	var statuses []WindowStatus
 	var allowed bool
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		statuses, allowed, e = s.computeWindows(ctx, s.db.Q(ctx), owner, actor, windows, requestedMillicents)
+		statuses, allowed, e = s.computeWindows(ctx, s.db.Q(ctx), payer, invoker, windows, requestedMillicents)
 		return e
 	})
 	if err != nil {
@@ -134,25 +134,25 @@ func (s *Service) Check(ctx context.Context, owner identity.OwnerOrgID, actor st
 	return statuses, allowed, nil
 }
 
-// Reserve idempotently reserves amountMillicents against the actor's windows.
+// Reserve idempotently reserves amountMillicents against the invoker's windows.
 //
-// It is idempotent on (tenant, owner, actor, source, source_id): if a matching
+// It is idempotent on (tenant, payer, invoker, source, source_id): if a matching
 // reservation row already exists it is returned as-is (allowed=true), regardless
 // of the current window state. Otherwise it runs Check within the same
 // transaction; if every window allows the request it inserts an "active"
 // reservation and returns allowed=true, else it inserts nothing and returns
 // allowed=false. The in-window rows are SELECTed and the insert performed in one
 // tx so the decision and the write are consistent.
-func (s *Service) Reserve(ctx context.Context, owner identity.OwnerOrgID, actor string, windows []BudgetWindow, amountMillicents int64, source, sourceID string, ttl time.Duration) (uuid.UUID, []WindowStatus, bool, error) {
+func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, invoker string, windows []BudgetWindow, amountMillicents int64, source, sourceID string, ttl time.Duration) (uuid.UUID, []WindowStatus, bool, error) {
 	if s == nil || s.db == nil {
 		return uuid.Nil, nil, false, fmt.Errorf("budgets service not initialized")
 	}
-	if owner.IsZero() {
+	if payer.IsZero() {
 		return uuid.Nil, nil, false, ErrOwnerRequired
 	}
-	actor = strings.TrimSpace(actor)
-	if actor == "" {
-		return uuid.Nil, nil, false, fmt.Errorf("actor required")
+	invoker = strings.TrimSpace(invoker)
+	if invoker == "" {
+		return uuid.Nil, nil, false, fmt.Errorf("invoker required")
 	}
 	source = strings.TrimSpace(source)
 	sourceID = strings.TrimSpace(sourceID)
@@ -164,7 +164,7 @@ func (s *Service) Reserve(ctx context.Context, owner identity.OwnerOrgID, actor 
 	}
 
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 
 	tx, err := s.db.BeginTenantTx(ctx)
 	if err != nil {
@@ -176,15 +176,15 @@ func (s *Service) Reserve(ctx context.Context, owner identity.OwnerOrgID, actor 
 	existing := new(models.BudgetReservation)
 	err = tx.NewSelect().
 		Model(existing).
-		Where("tenant_id = ? AND owner_id = ?", tenantID, ownerID).
-		Where("actor = ?", actor).
+		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, ownerID).
+		Where("invoker_id = ?", invoker).
 		Where("source = ? AND source_id = ?", source, sourceID).
 		Limit(1).
 		Scan(ctx)
 	if err == nil {
 		// Report the current window state alongside the existing reservation; the
 		// reservation already exists, so the decision is allowed.
-		statuses, _, cerr := s.computeWindows(ctx, tx, owner, actor, windows, amountMillicents)
+		statuses, _, cerr := s.computeWindows(ctx, tx, payer, invoker, windows, amountMillicents)
 		if cerr != nil {
 			return uuid.Nil, nil, false, cerr
 		}
@@ -197,7 +197,7 @@ func (s *Service) Reserve(ctx context.Context, owner identity.OwnerOrgID, actor 
 		return uuid.Nil, nil, false, err
 	}
 
-	statuses, allowed, err := s.computeWindows(ctx, tx, owner, actor, windows, amountMillicents)
+	statuses, allowed, err := s.computeWindows(ctx, tx, payer, invoker, windows, amountMillicents)
 	if err != nil {
 		return uuid.Nil, nil, false, err
 	}
@@ -213,8 +213,8 @@ func (s *Service) Reserve(ctx context.Context, owner identity.OwnerOrgID, actor 
 	res := &models.BudgetReservation{
 		ID:               uuidutil.NewV7(),
 		TenantID:         tenantID,
-		OwnerID:          ownerID,
-		Actor:            actor,
+		TenantSubjectID:  ownerID,
+		InvokerID:        invoker,
 		AmountMillicents: amountMillicents,
 		Status:           "active",
 		Source:           source,
@@ -230,7 +230,7 @@ func (s *Service) Reserve(ctx context.Context, owner identity.OwnerOrgID, actor 
 	}
 	// Recompute so the returned statuses reflect the just-inserted reservation
 	// (the caller sees this reservation already counted against `reserved`).
-	statuses, _, err = s.computeWindows(ctx, tx, owner, actor, windows, amountMillicents)
+	statuses, _, err = s.computeWindows(ctx, tx, payer, invoker, windows, amountMillicents)
 	if err != nil {
 		return uuid.Nil, nil, false, err
 	}
@@ -296,10 +296,10 @@ func (s *Service) Release(ctx context.Context, reservationID uuid.UUID) error {
 // computeWindows runs the per-window aggregation on the supplied queryable handle
 // (a tx during Reserve, the pinned conn during Check). q must already be
 // tenant-scoped (BeginTenantTx / RunInTenantConn) so RLS constrains the rows.
-func (s *Service) computeWindows(ctx context.Context, q bun.IDB, owner identity.OwnerOrgID, actor string, windows []BudgetWindow, requestedMillicents int64) ([]WindowStatus, bool, error) {
+func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.TenantSubjectID, invoker string, windows []BudgetWindow, requestedMillicents int64) ([]WindowStatus, bool, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 
 	statuses := make([]WindowStatus, 0, len(windows))
 	allAllowed := true
@@ -322,7 +322,7 @@ func (s *Service) computeWindows(ctx context.Context, q bun.IDB, owner identity.
 			ColumnExpr("COALESCE(SUM(amount_millicents) FILTER (WHERE status = 'active'), 0) AS reserved").
 			ColumnExpr("MIN(created_at) FILTER (WHERE status IN ('active','captured')) AS oldest").
 			Where("tenant_id = ?", tenantID).
-			Where("owner_id = ? AND actor = ?", ownerID, actor).
+			Where("tenant_subject_id = ? AND invoker_id = ?", ownerID, invoker).
 			Where("created_at >= ?", windowStart).
 			Where("status IN ('active','captured')").
 			Scan(ctx, &agg)

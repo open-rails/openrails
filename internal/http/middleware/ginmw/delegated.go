@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/doujins-org/ginapi/response"
 	"github.com/gin-gonic/gin"
 	authcore "github.com/open-rails/authkit/core"
+	"github.com/open-rails/openrails/internal/http/response"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -35,7 +35,7 @@ type DelegatedResolver interface {
 
 // DelegatedSelfRequired authenticates a tenant-scoped self-service route with a
 // browser-direct DELEGATED ACCESS TOKEN (issue #222 browser-tier foundation; the
-// backend prerequisite for doujins #253 / hentai0 #142 / cozy-art #46).
+// backend prerequisite for browser-direct self-service consumers.
 //
 // A tenant's host frontend mints a short-lived delegated access token for the
 // logged-in end-user (canonical claims minted by AuthKit: `aud` includes
@@ -100,8 +100,11 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 		// delegated subject. We populate BOTH the gin value and the request
 		// context the existing authprovider helpers read.
 		uc := authprovider.UserContext{
-			UserID: resolved.DelegatedSubject,
-			Org:    resolved.Tenant,
+			UserID:        resolved.DelegatedSubject,
+			Email:         resolved.Email,
+			EmailVerified: resolved.EmailVerified,
+			Username:      resolved.Username,
+			Org:           resolved.Tenant,
 		}
 		ctx = authprovider.SetUserContext(ctx, uc)
 		c.Request = c.Request.WithContext(ctx)

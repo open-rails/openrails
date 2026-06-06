@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 var (

@@ -251,41 +251,47 @@ Authorization: Bearer <openrails_oat_...>
 ```
 
 The OAT is resolved through the OpenRails-owned AuthKit control plane: its owning
-org determines the acting tenant, and its granted permissions gate each route. The
-canonical permission vocabulary is colon-form `openrails:<resource>:<action>`:
+org maps to an OpenRails tenant, its AuthKit resource scopes constrain where it
+may act, and its granted permissions gate what it may do. Every service OAT must
+carry `resources: [{kind:"openrails.tenant", id:"<tenant_uuid>"}]`. Payer-scoped
+OATs additionally carry `{kind:"openrails.tenant_subject", id:"<authkit_org_uuid>"}`
+and may only act for that exact `tenant_subject_id`; tenant-wide OATs omit the payer
+resource. The canonical permission vocabulary is colon-form
+`openrails:<resource>:<action>`:
 
 | Route | Required permission |
 |-------|---------------------|
 | `GET /v1/service/users/{user_id}/entitlements` | `openrails:entitlements:read` |
-| `GET /v1/service/users/{user_id}/credits`, `GET /v1/service/credits/users/{user_id}`, `GET /v1/service/credits/transactions/lookup`, `GET /v1/service/credit-types` | `openrails:credits:read` |
+| `GET /v1/service/invokers/{invoker_id}/credits`, `GET /v1/service/credits/invokers/{invoker_id}`, `GET /v1/service/credits/transactions/lookup`, `GET /v1/service/credit-types` | `openrails:credits:read` |
 | `POST /v1/service/credits/{deposit,withdraw,hold}`, `.../hold(s)/{id}/{capture,release}` | `openrails:credits:write` |
 | `POST/PATCH /v1/service/credit-types*` (definition writes) | `openrails:catalog:write` |
 
-`openrails:admin` satisfies any of the above. Embedded hosts skip HTTP entirely and
-call the in-process `pkg/service` facade after authorizing the action themselves.
+`openrails:admin` satisfies any permission check, but not resource-scope checks.
+Embedded hosts skip HTTP entirely and call the in-process `pkg/service` facade
+after authorizing the action themselves.
 
 ### GET /v1/service/users/{user_id}/entitlements
 Returns active entitlements for the user at the current time. Optional query param `at` (RFC3339) to query
 entitlements at a specific time. Response: array of entitlement records.
 
-### GET /v1/service/credits/users/{user_id}
-Returns credit balance summary for a user. Optional query param `type` (defaults to `api_credits`, which must exist in `billing.credit_types`).
+### GET /v1/service/credits/invokers/{invoker_id}
+Returns credit balance summary for an invoker. Optional query params: `tenant_subject_id` and `type` (defaults to `api_credits`, which must exist in `billing.credit_types`).
 Response: `{ type, balance, held_balance }`.
 
 ### POST /v1/service/credits/deposit
-Deposit/grant credits. Body: `{ user_id, credit_type, amount, source, source_id?, expires_at?, description? }` where `expires_at` is epoch seconds.
-Returns a `CreditTransaction`. If `source_id` is provided, deposits are idempotent per `(user_id, credit_type, source, source_id)`.
+Deposit/grant credits. Body: `{ tenant_subject_id, invoker_id, credit_type, amount, source, source_id?, expires_at?, description? }` where `expires_at` is epoch seconds.
+Returns a `CreditTransaction`. If `source_id` is provided, deposits are idempotent per `(tenant_subject_id, credit_type, source, source_id)`.
 
 ### POST /v1/service/credits/withdraw
-Withdraw credits. Body: `{ user_id, credit_type, amount, source, source_id? }`.
+Withdraw credits. Body: `{ tenant_subject_id, invoker_id, credit_type, amount, source, source_id? }`.
 Returns a `CreditTransaction`. On insufficient credits, returns 402 with `insufficient_credits`.
 
 ### POST /v1/service/credits/hold
-Reserve credits for long-running jobs. Body: `{ user_id, credit_type, amount, source, source_id, expires_at }` (epoch seconds).
+Reserve credits for long-running jobs. Body: `{ tenant_subject_id, invoker_id, credit_type, amount, source, source_id, expires_at }` (epoch seconds).
 Returns a `CreditTransaction` with `transaction_type='hold'` and `status='active'`. The returned `id` is the durable identifier you later use to capture or release the hold. On insufficient credits, returns 402.
 
 Idempotency:
-- Hold creation is idempotent per `(user_id, credit_type, source, source_id)`; retries return the existing hold transaction.
+- Hold creation is idempotent per `(tenant_subject_id, credit_type, source, source_id)`; retries return the existing hold transaction.
 
 ### POST /v1/service/credits/holds/{id}/capture
 Capture a hold: `{ amount }` (amount <= hold). Updates the same `CreditTransaction` row to `status='captured'`, setting `captured_amount` and `amount` (negative).
@@ -297,7 +303,7 @@ Release a hold without spending credits. Response `{ ok: true }`.
 Lookup a single credit transaction by its idempotency key.
 
 Query params:
-- `user_id` (required)
+- `invoker_id` (required)
 - `credit_type` (required)
 - `source` (required)
 - `source_id` (required)

@@ -85,13 +85,13 @@ cors_origins:
 # ALONGSIDE cors_origins (additive union, exact-match only — never a wildcard).
 # A browser preflight from any listed origin succeeds; unlisted origins are denied.
 # tenant_cors:
-#   doujins:
+#   tenant-a:
 #     allowed_origins:
-#       - "https://app.doujins.com"
-#       - "https://doujins.com"
-#   hentai0:
+#       - "https://app.example.com"
+#       - "https://portal.example.com"
+#   tenant-b:
 #     allowed_origins:
-#       - "https://hentai0.com"
+#       - "https://media.example.com"
 
 # =============================================================================
 # STORE/MERCHANT BRANDING
@@ -123,7 +123,7 @@ db:
   # Option 2: Atomic parameters (preferred for Kubernetes/Vault)
   host: "localhost"
   port: "5432"
-  database: "doujins_db"
+  database: "openrails_db"
   username: "admin"
   # password: set via DB_PASSWORD env var
   sslmode: "disable"

@@ -14,11 +14,11 @@ import (
 type Invoice struct {
 	bun.BaseModel `bun:"table:billing.invoices,alias:inv"`
 
-	ID           uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
-	TenantID     uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	OwnerID      uuid.UUID `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
-	CreditTypeID uuid.UUID `bun:"credit_type_id,type:uuid,notnull" json:"credit_type_id"`
-	Currency     string    `bun:"currency,notnull" json:"currency"`
+	ID              uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	TenantID        uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	CreditTypeID    uuid.UUID `bun:"credit_type_id,type:uuid,notnull" json:"credit_type_id"`
+	Currency        string    `bun:"currency,notnull" json:"currency"`
 
 	PeriodFrom time.Time `bun:"period_from,notnull" json:"period_from"`
 	PeriodTo   time.Time `bun:"period_to,notnull" json:"period_to"`

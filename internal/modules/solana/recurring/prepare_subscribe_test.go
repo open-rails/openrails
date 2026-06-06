@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 // fakePrepareRPC is a minimal prepareRPC for exercising the read-after-write

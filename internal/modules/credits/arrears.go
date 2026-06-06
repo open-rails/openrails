@@ -24,10 +24,10 @@ const (
 
 // AccrueOwed records postpaid usage against an arrears account: instead of
 // withdrawing prepaid balance, the cost is added to outstanding_owed_cents and a
-// ledger row is written. Idempotent on (owner, credit_type, source, source_id).
-// The owner's outstanding ceiling is enforced separately at authorize time
+// ledger row is written. Idempotent on (payer, credit_type, source, source_id).
+// The payer's outstanding ceiling is enforced separately at authorize time
 // (CheckSpendAllowed); this is the settlement side. (#241)
-func (s *CreditsService) AccrueOwed(ctx context.Context, owner identity.OwnerOrgID, creditType, source, sourceID string, amount int64) (*models.CreditTransaction, error) {
+func (s *CreditsService) AccrueOwed(ctx context.Context, payer identity.TenantSubjectID, creditType, source, sourceID string, amount int64) (*models.CreditTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
@@ -44,7 +44,7 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, owner identity.OwnerOrg
 		return nil, err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 	now := s.now()
 
 	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
@@ -56,7 +56,7 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, owner identity.OwnerOrg
 	// Idempotency.
 	existing := new(models.CreditTransaction)
 	err = tx.NewSelect().Model(existing).
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 		Where("transaction_type = ?", txOwedAccrual).
 		Where("source = ? AND source_id = ?", source, sourceID).
 		Limit(1).Scan(ctx)
@@ -73,13 +73,13 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, owner identity.OwnerOrg
 	if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
 		Set("outstanding_owed_cents = outstanding_owed_cents + ?", amount).
 		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 		Exec(ctx); err != nil {
 		return nil, err
 	}
 
 	trx := &models.CreditTransaction{
-		ID: uuidutil.NewV7(), TenantID: tenantID, OwnerID: ownerID, UserID: ownerID.String(),
+		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, InvokerID: ownerID.String(),
 		CreditTypeID: ct.ID, Amount: amount, TransactionType: txOwedAccrual, Status: "posted",
 		Source: source, SourceID: &sourceID, CreatedAt: now, UpdatedAt: now,
 	}
@@ -89,22 +89,22 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, owner identity.OwnerOrg
 	return trx, tx.Commit()
 }
 
-// ensureSettingsRowTx inserts a default settings row for (owner, credit_type) if
+// ensureSettingsRowTx inserts a default settings row for (payer, credit_type) if
 // one does not exist, using the given billing mode. No-op when the row exists.
 func (s *CreditsService) ensureSettingsRowTx(ctx context.Context, tx bun.Tx, tenantID, ownerID, creditTypeID uuid.UUID, mode string, now time.Time) error {
 	row := &models.CreditAccountSettings{
-		ID: uuidutil.NewV7(), TenantID: tenantID, OwnerID: ownerID, CreditTypeID: creditTypeID,
+		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, CreditTypeID: creditTypeID,
 		BillingMode: mode, HardStopOnBreach: true, AlertThresholdPct: 80,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	_, err := tx.NewInsert().Model(row).
-		On("CONFLICT (tenant_id, owner_id, credit_type_id) DO NOTHING").Exec(ctx)
+		On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id) DO NOTHING").Exec(ctx)
 	return err
 }
 
-// GetOutstandingOwed returns the current outstanding owed for (owner, credit_type).
-func (s *CreditsService) GetOutstandingOwed(ctx context.Context, owner identity.OwnerOrgID, creditType string) (int64, error) {
-	settings, err := s.GetAccountSettings(ctx, owner, creditType)
+// GetOutstandingOwed returns the current outstanding owed for (payer, credit_type).
+func (s *CreditsService) GetOutstandingOwed(ctx context.Context, payer identity.TenantSubjectID, creditType string) (int64, error) {
+	settings, err := s.GetAccountSettings(ctx, payer, creditType)
 	if err != nil {
 		return 0, err
 	}
@@ -114,7 +114,7 @@ func (s *CreditsService) GetOutstandingOwed(ctx context.Context, owner identity.
 // arrearsAccount is a scanned arrears-account row for the charge job.
 type arrearsAccount struct {
 	TenantID        uuid.UUID  `bun:"tenant_id"`
-	OwnerID         uuid.UUID  `bun:"owner_id"`
+	TenantSubjectID uuid.UUID  `bun:"tenant_subject_id"`
 	CreditTypeID    uuid.UUID  `bun:"credit_type_id"`
 	CreditTypeName  string     `bun:"credit_type_name"`
 	Owed            int64      `bun:"outstanding_owed_cents"`
@@ -125,7 +125,7 @@ type arrearsAccount struct {
 // the card on file. When minThresholdCents > 0 only accounts owing at least that
 // much are charged (the threshold trigger, e.g. $500); minThresholdCents <= 0
 // charges every account with owed > 0 (the month-end sweep). The charge is
-// idempotent per (owner, credit_type, owed-snapshot). On success the owed is
+// idempotent per (payer, credit_type, owed-snapshot). On success the owed is
 // reduced by the charged amount and an owed_payment row is recorded; declines
 // leave the owed in place for the next run. Returns the number of accounts
 // successfully charged. (#241)
@@ -138,7 +138,7 @@ func (s *CreditsService) ChargeOutstanding(ctx context.Context, charger Charger,
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	q := s.db.Q(ctx).NewSelect().
-		ColumnExpr("s.tenant_id, s.owner_id, s.credit_type_id, ct.name AS credit_type_name, s.outstanding_owed_cents, s.auto_topup_payment_method_id").
+		ColumnExpr("s.tenant_id, s.tenant_subject_id, s.credit_type_id, ct.name AS credit_type_name, s.outstanding_owed_cents, s.auto_topup_payment_method_id").
 		TableExpr("billing.credit_account_settings AS s").
 		Join("JOIN billing.credit_types AS ct ON ct.id = s.credit_type_id").
 		Where("s.tenant_id = ?", tenantID).
@@ -167,16 +167,16 @@ func (s *CreditsService) ChargeOutstanding(ctx context.Context, charger Charger,
 }
 
 func (s *CreditsService) chargeOneOutstanding(ctx context.Context, charger Charger, r arrearsAccount) (bool, error) {
-	owner := identity.OwnerOrgID(r.OwnerID)
+	payer := identity.TenantSubjectID(r.TenantSubjectID)
 	snapshot := r.Owed
 	if snapshot <= 0 || r.PaymentMethodID == nil {
 		return false, nil
 	}
-	key := fmt.Sprintf("arrears:%s:%s:%d", r.OwnerID, r.CreditTypeID, snapshot)
+	key := fmt.Sprintf("arrears:%s:%s:%d", r.TenantSubjectID, r.CreditTypeID, snapshot)
 
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
-		Owner:           owner,
-		UserID:          owner.UUID().String(),
+		Payer:           payer,
+		InvokerID:       payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
 		AmountCents:     snapshot,
 		IdempotencyKey:  key,
@@ -201,7 +201,7 @@ func (s *CreditsService) chargeOneOutstanding(ctx context.Context, charger Charg
 	upd, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
 		Set("outstanding_owed_cents = GREATEST(0, outstanding_owed_cents - ?)", snapshot).
 		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", r.TenantID, r.OwnerID, r.CreditTypeID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", r.TenantID, r.TenantSubjectID, r.CreditTypeID).
 		Where("outstanding_owed_cents >= ?", snapshot).
 		Exec(ctx)
 	if err != nil {
@@ -214,7 +214,7 @@ func (s *CreditsService) chargeOneOutstanding(ctx context.Context, charger Charg
 
 	sid := key
 	trx := &models.CreditTransaction{
-		ID: uuidutil.NewV7(), TenantID: r.TenantID, OwnerID: r.OwnerID, UserID: r.OwnerID.String(),
+		ID: uuidutil.NewV7(), TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, InvokerID: r.TenantSubjectID.String(),
 		CreditTypeID: r.CreditTypeID, Amount: -snapshot, TransactionType: txOwedPayment, Status: "posted",
 		Source: "arrears_charge", SourceID: &sid, CreatedAt: now, UpdatedAt: now,
 	}

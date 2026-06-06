@@ -226,7 +226,7 @@ func federatedMultiIssuer(t *testing.T, pool *pgxpool.Pool) {
 	ctx := context.Background()
 	cp := newFedControlPlane(t, pool)
 
-	// Tenant A has TWO issuers (doujins + hentai0 analogue): distinct keys, one
+	// Tenant A has TWO issuers (multiple host apps analogue): distinct keys, one
 	// tenant, shared users. Tenant B has its own issuer.
 	sgA1, _ := jwtkit.NewRSASigner(2048, "a1-kid")
 	sgA2, _ := jwtkit.NewRSASigner(2048, "a2-kid")

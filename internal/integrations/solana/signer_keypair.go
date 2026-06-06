@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 

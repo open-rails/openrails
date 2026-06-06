@@ -1,6 +1,6 @@
 // Package identity provides the explicit, mutually-distinct identity types that
-// OpenRails billing uses so that admin authority, the payer/billing owner, and
-// the usage actor can never be confused (issue #221).
+// OpenRails billing uses so that admin authority, the payer account, and the
+// invoking principal can never be confused.
 //
 // # THE THREE-WAY IDENTITY SPLIT
 //
@@ -18,20 +18,19 @@
 //     not redefine the operator-org type — that authority lives in
 //     internal/controlplane — it only documents where it sits in the split.
 //
-//  2. OwnerOrgID (the payer / billing owner — #221). The org that OWNS a credit
-//     balance, is billed for usage, and against which invoices and credit
-//     reservations are recorded. Every account is org-backed: an individual
-//     user's balance is owned by THAT user's personal AuthKit org, and team orgs
-//     use the same owner primitive. Bills and balances belong to OwnerOrgIDs.
-//     The owner org id is supplied by the caller at write time — it is the real
-//     owner AuthKit org id, never a synthesized stand-in.
+//  2. TenantSubjectID. The AuthKit org/personal-org whose credit balance is charged,
+//     against which invoices and credit reservations are recorded. Every account
+//     is org-backed: an individual user's balance is paid by that user's personal
+//     AuthKit org, and team orgs use the same payer primitive. Bills and
+//     balances belong to TenantSubjectIDs. The payer org id is supplied by the caller
+//     at write time — it is the real AuthKit org id, never a synthesized stand-in.
 //
-//  3. ActorUserID (who CAUSED the usage — #221). The user / OpenRails-issued
-//     OAT / delegated platform user / system that caused usage inside an owner
-//     org. Actors cause usage; they are NOT the financial account owner. Actor
-//     identity is attribution + budgets, not ownership.
+//  3. InvokerID. The user / OpenRails-issued OAT / delegated platform user /
+//     system principal that invoked a billable operation for a payer org.
+//     Invokers cause usage; they are NOT the financial account owner. Invoker
+//     identity is attribution + budget scoping, not ownership.
 //
-// Mnemonic: the OperatorOrg administers; the OwnerOrgID pays; the ActorUserID
+// Mnemonic: the OperatorOrg administers; the TenantSubjectID pays; the InvokerID
 // spends. Bills and balances belong to orgs; users and credentials cause usage
 // inside orgs.
 package identity
@@ -42,46 +41,46 @@ import (
 	"github.com/google/uuid"
 )
 
-// OwnerOrgID is the org that OWNS a credit balance / is billed (#221). It is a
-// distinct type from any actor or operator identity precisely so the compiler
-// rejects passing the wrong one. The value is the real owner AuthKit org id,
+// TenantSubjectID is the AuthKit org/personal-org that owns a credit balance and is
+// billed. It is a distinct type from any invoker or operator identity precisely
+// so the compiler rejects passing the wrong one. The value is the real AuthKit org id,
 // supplied by the caller at write time — there is no synthesized placeholder.
-type OwnerOrgID uuid.UUID
+type TenantSubjectID uuid.UUID
 
-// ActorUserID is the user / OAT / delegated principal that CAUSED usage (#221).
+// InvokerID is the user / OAT / delegated principal that invoked usage.
 // It is attribution + budgeting, never ownership. Stored as the existing free
 // -form user_id text (may be a uuid string, a username, or a system actor key),
 // so it is a string-backed type rather than uuid-backed.
-type ActorUserID string
+type InvokerID string
 
-// String returns the canonical string form of the owner org id.
-func (id OwnerOrgID) String() string { return uuid.UUID(id).String() }
+// String returns the canonical string form of the payer org id.
+func (id TenantSubjectID) String() string { return uuid.UUID(id).String() }
 
 // UUID returns the underlying uuid.UUID for use in queries.
-func (id OwnerOrgID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id TenantSubjectID) UUID() uuid.UUID { return uuid.UUID(id) }
 
-// IsZero reports whether the owner id is unset.
-func (id OwnerOrgID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
+// IsZero reports whether the payer org id is unset.
+func (id TenantSubjectID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
 
-// String returns the actor user id as a plain string.
-func (a ActorUserID) String() string { return string(a) }
+// String returns the invoker id as a plain string.
+func (a InvokerID) String() string { return string(a) }
 
-// IsZero reports whether the actor id is empty.
-func (a ActorUserID) IsZero() bool { return strings.TrimSpace(string(a)) == "" }
+// IsZero reports whether the invoker id is empty.
+func (a InvokerID) IsZero() bool { return strings.TrimSpace(string(a)) == "" }
 
-// OwnerOrgIDFromString parses s as the canonical owner AuthKit org id. It is the
-// caller-side resolution used by self-hosted / single-tenant callers whose owner
+// TenantSubjectIDFromString parses s as the canonical payer AuthKit org id. It is the
+// caller-side resolution used by self-hosted / single-tenant callers whose payer
 // org id is the user's own personal-org / account UUID: the caller passes the
-// authenticated subject and gets back the OwnerOrgID. An empty or non-UUID input
-// yields the zero OwnerOrgID (which callers must treat as "no owner resolved").
-func OwnerOrgIDFromString(s string) OwnerOrgID {
+// authenticated subject and gets back the TenantSubjectID. An empty or non-UUID input
+// yields the zero TenantSubjectID (which callers must treat as "no payer resolved").
+func TenantSubjectIDFromString(s string) TenantSubjectID {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return OwnerOrgID(uuid.Nil)
+		return TenantSubjectID(uuid.Nil)
 	}
 	id, err := uuid.Parse(s)
 	if err != nil {
-		return OwnerOrgID(uuid.Nil)
+		return TenantSubjectID(uuid.Nil)
 	}
-	return OwnerOrgID(id)
+	return TenantSubjectID(id)
 }

@@ -138,7 +138,11 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 					name = n
 				}
 			}
-			oat, secret, merr := core.MintOrgAccessToken(ctx, slug, name, OperatorRolePermissions(), "", nil)
+			oat, secret, merr := core.MintOrgAccessTokenWithOptions(ctx, slug, authcore.OrgAccessTokenMintOptions{
+				Name:        name,
+				Permissions: OperatorRolePermissions(),
+				Resources:   []authcore.OrgAccessTokenResource{TenantResource(tenant.DefaultID)},
+			})
 			if merr != nil {
 				return nil, fmt.Errorf("controlplane: mint initial operator OAT: %w", merr)
 			}

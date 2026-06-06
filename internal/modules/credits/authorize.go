@@ -16,11 +16,11 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (owner org), the
-// invoker (canonical actor for per-invoker caps), the credit type, the estimated
+// AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (payer org), the
+// invoker (canonical invoker for per-invoker caps), the credit type, the estimated
 // charge, and the idempotency-keyed source coordinates of the hold.
 type AuthorizeHoldInput struct {
-	Owner         identity.OwnerOrgID
+	Payer         identity.TenantSubjectID
 	Invoker       string // canonical: 'oat:<key_id>', 'user:<id>', '<issuer>:<sub>'
 	CreditType    string
 	EstimateCents int64
@@ -53,7 +53,7 @@ type AuthorizeHoldResult struct {
 // separately: the balance row is locked FOR UPDATE at the top of the tx, and the
 // policy evaluation (which counts active holds + windowed spend) and the hold
 // insert both run while that lock is held. Two concurrent authorizes on the same
-// (tenant, owner, credit_type) therefore serialize on the row lock — the second
+// (tenant, payer, credit_type) therefore serialize on the row lock — the second
 // sees the first's held_balance and active-hold exposure, so they cannot both
 // pass on the same available balance.
 func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInput) (*AuthorizeHoldResult, error) {
@@ -64,8 +64,8 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 	if in.CreditType == "" {
 		return nil, fmt.Errorf("credit_type required")
 	}
-	if in.Owner.IsZero() {
-		return nil, fmt.Errorf("owner required")
+	if in.Payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
 	}
 	if in.EstimateCents < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
@@ -97,7 +97,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		}
 
 		tenantID := tenant.FromContextOrDefault(ctx).UUID()
-		ownerID := in.Owner.UUID()
+		ownerID := in.Payer.UUID()
 		now := s.now()
 
 		// Idempotency: an existing hold for these coordinates short-circuits — return
@@ -106,12 +106,12 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		existing := new(models.CreditTransaction)
 		ierr := tx.NewSelect().Model(existing).
 			Where("transaction_type = 'hold'").
-			Where("tenant_id = ? AND owner_id = ?", tenantID, ownerID).
+			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, ownerID).
 			Where("credit_type_id = ?", ct.ID).
 			Where("source = ? AND source_id = ?", in.Source, in.SourceID).
 			Limit(1).Scan(ctx)
 		if ierr == nil {
-			snap, serr := txSvc.snapshotTx(ctx, in.Owner, in.CreditType)
+			snap, serr := txSvc.snapshotTx(ctx, in.Payer, in.CreditType)
 			if serr != nil {
 				return serr
 			}
@@ -129,20 +129,20 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		}
 
 		// Lock the balance row FOR UPDATE up front: every subsequent read/decision in
-		// this tx is serialized behind it for the same (tenant, owner, credit_type).
-		bal, lerr := txSvc.lockBalance(ctx, tx, in.Owner, in.Owner.UUID().String(), ct.ID)
+		// this tx is serialized behind it for the same (tenant, payer, credit_type).
+		bal, lerr := txSvc.lockBalance(ctx, tx, in.Payer, in.Payer.UUID().String(), ct.ID)
 		if lerr != nil {
 			return lerr
 		}
 		available := bal.Balance - bal.HeldBalance
 
-		settings, serr := txSvc.GetAccountSettings(ctx, in.Owner, in.CreditType)
+		settings, serr := txSvc.GetAccountSettings(ctx, in.Payer, in.CreditType)
 		if serr != nil {
 			return serr
 		}
 
 		// Spend policy (per-invoker + org caps + outstanding ceiling).
-		dec, derr := txSvc.CheckSpendAllowed(ctx, in.Owner, in.CreditType, strings.TrimSpace(in.Invoker), in.EstimateCents)
+		dec, derr := txSvc.CheckSpendAllowed(ctx, in.Payer, in.CreditType, strings.TrimSpace(in.Invoker), in.EstimateCents)
 		if derr != nil {
 			return derr
 		}
@@ -173,7 +173,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 			Set("held_balance = ?", bal.HeldBalance+amount).
 			Set("updated_at = ?", now).
-			Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 			Exec(ctx); err != nil {
 			return err
 		}
@@ -184,8 +184,8 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		hold := &models.CreditTransaction{
 			ID:              uuidutil.NewV7(),
 			TenantID:        tenantID,
-			OwnerID:         ownerID,
-			UserID:          strings.TrimSpace(in.Invoker),
+			TenantSubjectID: ownerID,
+			InvokerID:       strings.TrimSpace(in.Invoker),
 			CreditTypeID:    ct.ID,
 			Amount:          0,
 			Source:          in.Source,
@@ -221,12 +221,12 @@ type accountSnapshot struct {
 }
 
 // snapshotTx reads the balance + settings snapshot using the (tx-scoped) service.
-func (s *CreditsService) snapshotTx(ctx context.Context, owner identity.OwnerOrgID, creditType string) (accountSnapshot, error) {
-	bal, err := s.GetBalanceForOwner(ctx, owner, creditType)
+func (s *CreditsService) snapshotTx(ctx context.Context, payer identity.TenantSubjectID, creditType string) (accountSnapshot, error) {
+	bal, err := s.GetBalanceForPayer(ctx, payer, creditType)
 	if err != nil {
 		return accountSnapshot{}, err
 	}
-	settings, err := s.GetAccountSettings(ctx, owner, creditType)
+	settings, err := s.GetAccountSettings(ctx, payer, creditType)
 	if err != nil {
 		return accountSnapshot{}, err
 	}

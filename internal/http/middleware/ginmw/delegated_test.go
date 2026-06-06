@@ -34,9 +34,12 @@ func newDelegatedTestRouter(resolver DelegatedResolver, perm string) *gin.Engine
 		tid, _ := tenant.FromContext(c.Request.Context())
 		uc, _ := ginauth.UserContextFromGin(c)
 		c.JSON(http.StatusOK, gin.H{
-			"tenant":  tid.String(),
-			"subject": resolved.DelegatedSubject,
-			"user_id": uc.UserID,
+			"tenant":         tid.String(),
+			"subject":        resolved.DelegatedSubject,
+			"user_id":        uc.UserID,
+			"email":          uc.Email,
+			"email_verified": uc.EmailVerified,
+			"username":       uc.Username,
 		})
 	})
 	return r
@@ -60,6 +63,9 @@ func TestDelegatedSelfRequired_SucceedsAndBindsActingUser(t *testing.T) {
 			TenantSlug:       tenant.DefaultSlug,
 			DelegatedSubject: "user-123",
 			Permissions:      []string{controlplane.PermSelfBillingRead},
+			Email:            "user@example.test",
+			EmailVerified:    true,
+			Username:         "user123",
 		},
 	}
 	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
@@ -69,6 +75,8 @@ func TestDelegatedSelfRequired_SucceedsAndBindsActingUser(t *testing.T) {
 	// scope to this user.
 	require.Contains(t, w.Body.String(), tenant.DefaultID.String())
 	require.Contains(t, w.Body.String(), "user-123")
+	require.Contains(t, w.Body.String(), "user@example.test")
+	require.Contains(t, w.Body.String(), "user123")
 }
 
 func TestDelegatedSelfRequired_DeniesMissingPermission(t *testing.T) {

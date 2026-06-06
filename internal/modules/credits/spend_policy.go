@@ -136,14 +136,14 @@ func monthWindow(now time.Time) (start, reset time.Time) {
 	return
 }
 
-// DefaultAccountSettings returns the implicit policy for an owner that has no
+// DefaultAccountSettings returns the implicit policy for an payer that has no
 // explicit settings row: prepaid, no caps, hard-stop on, 80% alerts, 365-day
 // default expiry. Used by GetAccountSettings and the enforcement path so an
 // unconfigured account "just works" (prepaid, balance-gated only).
-func DefaultAccountSettings(owner identity.OwnerOrgID, creditTypeID uuid.UUID) *models.CreditAccountSettings {
+func DefaultAccountSettings(payer identity.TenantSubjectID, creditTypeID uuid.UUID) *models.CreditAccountSettings {
 	days := 365
 	return &models.CreditAccountSettings{
-		OwnerID:                 owner.UUID(),
+		TenantSubjectID:         payer.UUID(),
 		CreditTypeID:            creditTypeID,
 		BillingMode:             BillingModePrepaid,
 		HardStopOnBreach:        true,
@@ -152,10 +152,10 @@ func DefaultAccountSettings(owner identity.OwnerOrgID, creditTypeID uuid.UUID) *
 	}
 }
 
-// GetAccountSettings returns the stored settings for (owner, credit_type), or a
+// GetAccountSettings returns the stored settings for (payer, credit_type), or a
 // DefaultAccountSettings value when none exists (never nil, never an error for a
 // missing row).
-func (s *CreditsService) GetAccountSettings(ctx context.Context, owner identity.OwnerOrgID, creditType string) (*models.CreditAccountSettings, error) {
+func (s *CreditsService) GetAccountSettings(ctx context.Context, payer identity.TenantSubjectID, creditType string) (*models.CreditAccountSettings, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
@@ -166,20 +166,20 @@ func (s *CreditsService) GetAccountSettings(ctx context.Context, owner identity.
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	out := new(models.CreditAccountSettings)
 	err = s.db.Q(ctx).NewSelect().Model(out).
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, owner.UUID(), ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payer.UUID(), ct.ID).
 		Limit(1).Scan(ctx)
 	if err == nil {
 		return out, nil
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		d := DefaultAccountSettings(owner, ct.ID)
+		d := DefaultAccountSettings(payer, ct.ID)
 		d.TenantID = tenantID
 		return d, nil
 	}
 	return nil, err
 }
 
-// AccountSettingsInput is the upsert payload for an owner's spend policy. Only
+// AccountSettingsInput is the upsert payload for an payer's spend policy. Only
 // non-nil fields are written; nil fields keep their default / existing value.
 type AccountSettingsInput struct {
 	BillingMode             *string
@@ -195,9 +195,9 @@ type AccountSettingsInput struct {
 	AlertThresholdPct       *int
 }
 
-// UpsertAccountSettings creates or updates the spend policy for (owner,
+// UpsertAccountSettings creates or updates the spend policy for (payer,
 // credit_type). Validates the billing mode and alert threshold.
-func (s *CreditsService) UpsertAccountSettings(ctx context.Context, owner identity.OwnerOrgID, creditType string, in AccountSettingsInput) (*models.CreditAccountSettings, error) {
+func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identity.TenantSubjectID, creditType string, in AccountSettingsInput) (*models.CreditAccountSettings, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
@@ -218,7 +218,7 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, owner identi
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	now := s.now()
 
-	cur, err := s.GetAccountSettings(ctx, owner, creditType)
+	cur, err := s.GetAccountSettings(ctx, payer, creditType)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +258,7 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, owner identi
 	}
 
 	cur.TenantID = tenantID
-	cur.OwnerID = owner.UUID()
+	cur.TenantSubjectID = payer.UUID()
 	cur.CreditTypeID = ct.ID
 	cur.UpdatedAt = now
 	if cur.ID == uuid.Nil {
@@ -267,7 +267,7 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, owner identi
 	}
 
 	_, err = s.db.Q(ctx).NewInsert().Model(cur).
-		On("CONFLICT (tenant_id, owner_id, credit_type_id) DO UPDATE").
+		On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id) DO UPDATE").
 		Set("billing_mode = EXCLUDED.billing_mode").
 		Set("max_spend_per_day_cents = EXCLUDED.max_spend_per_day_cents").
 		Set("max_spend_per_month_cents = EXCLUDED.max_spend_per_month_cents").
@@ -284,7 +284,7 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, owner identi
 	if err != nil {
 		return nil, err
 	}
-	return s.GetAccountSettings(ctx, owner, creditType)
+	return s.GetAccountSettings(ctx, payer, creditType)
 }
 
 func nilIfNeg(v *int64) *int64 {
@@ -294,10 +294,10 @@ func nilIfNeg(v *int64) *int64 {
 	return v
 }
 
-// SetSpendLimit upserts a per-invoker sub-limit under (owner, credit_type).
-// A nil day/month cap clears that cap. invoker is a canonical actor string
+// SetSpendLimit upserts a per-invoker sub-limit under (payer, credit_type).
+// A nil day/month cap clears that cap. invoker is a canonical invoker string
 // ('oat:<key_id>', 'user:<id>', '<issuer>:<sub>').
-func (s *CreditsService) SetSpendLimit(ctx context.Context, owner identity.OwnerOrgID, creditType, invoker string, maxDay, maxMonth *int64) (*models.CreditSpendLimit, error) {
+func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.TenantSubjectID, creditType, invoker string, maxDay, maxMonth *int64) (*models.CreditSpendLimit, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
@@ -314,16 +314,16 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, owner identity.Owner
 	row := &models.CreditSpendLimit{
 		ID:                    uuidutil.NewV7(),
 		TenantID:              tenantID,
-		OwnerID:               owner.UUID(),
+		TenantSubjectID:       payer.UUID(),
 		CreditTypeID:          ct.ID,
-		Invoker:               invoker,
+		InvokerID:             invoker,
 		MaxSpendPerDayCents:   nilIfNeg(maxDay),
 		MaxSpendPerMonthCents: nilIfNeg(maxMonth),
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
 	_, err = s.db.Q(ctx).NewInsert().Model(row).
-		On("CONFLICT (tenant_id, owner_id, credit_type_id, invoker) DO UPDATE").
+		On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id, invoker_id) DO UPDATE").
 		Set("max_spend_per_day_cents = EXCLUDED.max_spend_per_day_cents").
 		Set("max_spend_per_month_cents = EXCLUDED.max_spend_per_month_cents").
 		Set("updated_at = EXCLUDED.updated_at").
@@ -337,7 +337,7 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, owner identity.Owner
 func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, invoker string) (*models.CreditSpendLimit, error) {
 	row := new(models.CreditSpendLimit)
 	err := s.db.Q(ctx).NewSelect().Model(row).
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ? AND invoker = ?", tenantID, ownerID, creditTypeID, invoker).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ? AND invoker_id = ?", tenantID, ownerID, creditTypeID, invoker).
 		Limit(1).Scan(ctx)
 	if err == nil {
 		return row, nil
@@ -351,8 +351,8 @@ func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, ownerID, c
 // spentInWindow sums spend counted against a rate cap since `since`:
 // settled spend (withdrawals + captured holds) PLUS currently-active holds
 // created in the window (so concurrent in-flight holds can't overshoot a cap).
-// When actor is non-empty the sum is scoped to that invoker/actor.
-func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, since time.Time, actor string) (int64, error) {
+// When invoker is non-empty the sum is scoped to that invoker.
+func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, since time.Time, invoker string) (int64, error) {
 	q := s.db.Q(ctx).NewSelect().
 		Model((*models.CreditTransaction)(nil)).
 		ColumnExpr("COALESCE(SUM("+
@@ -361,10 +361,10 @@ func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, c
 			"WHEN transaction_type = 'hold' AND status = 'captured' THEN -amount "+
 			"WHEN transaction_type = 'hold' AND status = 'active' THEN COALESCE(authorized_amount, 0) "+
 			"ELSE 0 END), 0)").
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
 		Where("created_at >= ?", since)
-	if actor != "" {
-		q = q.Where("user_id = ?", actor)
+	if invoker != "" {
+		q = q.Where("invoker_id = ?", invoker)
 	}
 	var total int64
 	if err := q.Scan(ctx, &total); err != nil {
@@ -373,25 +373,25 @@ func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, c
 	return total, nil
 }
 
-// activeHoldsTotal sums all currently-active hold authorizations for an owner
+// activeHoldsTotal sums all currently-active hold authorizations for an payer
 // (current reservation exposure, regardless of window).
 func (s *CreditsService) activeHoldsTotal(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID) (int64, error) {
 	var total int64
 	err := s.db.Q(ctx).NewSelect().
 		Model((*models.CreditTransaction)(nil)).
 		ColumnExpr("COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)").
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
 		Where("transaction_type = 'hold' AND status = 'active'").
 		Scan(ctx, &total)
 	return total, err
 }
 
-// CheckSpendAllowed evaluates the spend policy for (owner, credit_type, invoker)
+// CheckSpendAllowed evaluates the spend policy for (payer, credit_type, invoker)
 // against an estimated charge, WITHOUT moving money. It enforces, in order:
 // per-invoker daily/monthly caps, org daily/monthly caps, and the outstanding
 // exposure ceiling (settled owed + active holds + this estimate). The balance
 // itself is enforced separately by Hold.
-func (s *CreditsService) CheckSpendAllowed(ctx context.Context, owner identity.OwnerOrgID, creditType, invoker string, estimateCents int64) (SpendDecision, error) {
+func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.TenantSubjectID, creditType, invoker string, estimateCents int64) (SpendDecision, error) {
 	if s == nil || s.db == nil {
 		return SpendDecision{}, fmt.Errorf("credits service not initialized")
 	}
@@ -399,12 +399,12 @@ func (s *CreditsService) CheckSpendAllowed(ctx context.Context, owner identity.O
 	if err != nil {
 		return SpendDecision{}, err
 	}
-	settings, err := s.GetAccountSettings(ctx, owner, creditType)
+	settings, err := s.GetAccountSettings(ctx, payer, creditType)
 	if err != nil {
 		return SpendDecision{}, err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 	now := s.now()
 	dayStart, dayReset := dayWindow(now)
 	monStart, monReset := monthWindow(now)

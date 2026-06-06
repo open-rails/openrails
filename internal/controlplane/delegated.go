@@ -2,10 +2,12 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	authcore "github.com/open-rails/authkit/core"
 	authhttp "github.com/open-rails/authkit/http"
 
@@ -27,12 +29,15 @@ type ResolvedDelegated struct {
 	TenantID tenant.ID
 	// TenantSlug is the resolved tenant's slug.
 	TenantSlug string
+	// TenantSubjectID is the durable OpenRails payable subject for
+	// (TenantID, Issuer, DelegatedSubject).
+	TenantSubjectID uuid.UUID
 	// DelegatedSubject is the acting end-user id (`delegated_sub`). This is the
 	// user the self-service handlers scope every read/write to. There is NEVER a
 	// normal `sub` on a delegated access token.
 	//
 	// SHARED-USER-NAMESPACE REQUIREMENT (issue #259): for a federated tenant whose
-	// users are shared across multiple issuers (e.g. doujins + hentai0 = distinct
+	// users are shared across multiple issuers (e.g. multiple host apps = distinct
 	// issuers, one tenant, one user set), `delegated_sub` MUST be the tenant's
 	// CANONICAL user id (the shared AuthKit subject) so a token from EITHER issuer
 	// resolves to the SAME OpenRails billing account. OpenRails cannot detect a
@@ -49,6 +54,12 @@ type ResolvedDelegated struct {
 	// `openrails:self:*` (self) and `openrails:tenant:*` (tenant-admin) catalogs
 	// (#259). Enforced at verify time; never service/operator grants.
 	Permissions []string
+	// Email/Username are optional non-authoritative identity fields from delegated
+	// token attributes. They are for hosted checkout/contact metadata only;
+	// authorization remains delegated_sub + permissions.
+	Email         string
+	EmailVerified bool
+	Username      string
 }
 
 // HasPermission reports whether the resolved delegated token grants perm.
@@ -240,12 +251,45 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 		tenLbl = tslug
 	}
 
+	tenantSubjectID, err := c.TouchTenantSubject(ctx, tid, issuer, subject)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ResolvedDelegated{
 		Tenant:           tenLbl,
 		TenantID:         tid,
 		TenantSlug:       tslug,
+		TenantSubjectID:  tenantSubjectID,
 		DelegatedSubject: subject,
 		Issuer:           issuer,
 		Permissions:      append([]string(nil), principal.Permissions...),
+		Email:            delegatedStringAttribute(principal.Attributes, "email"),
+		EmailVerified:    delegatedBoolAttribute(principal.Attributes, "email_verified"),
+		Username:         delegatedStringAttribute(principal.Attributes, "username"),
 	}, nil
+}
+
+func delegatedStringAttribute(attrs map[string]json.RawMessage, key string) string {
+	raw, ok := attrs[key]
+	if !ok || len(raw) == 0 {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func delegatedBoolAttribute(attrs map[string]json.RawMessage, key string) bool {
+	raw, ok := attrs[key]
+	if !ok || len(raw) == 0 {
+		return false
+	}
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	return value
 }

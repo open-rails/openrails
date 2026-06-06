@@ -38,7 +38,7 @@ var (
 
 // personalOwnerID returns the owner org id for the self-hosted / single-tenant
 // personal case: the user's own account/personal-org UUID. HARDCUT (#221): this
-// matches credits.resolveOwner / identity.OwnerOrgIDFromString — the owner is the
+// matches credits.resolveOwner / identity.PayerOrgIDFromString — the owner is the
 // caller-provided personal-org id, never a synthesized stand-in. Test user ids
 // are UUIDs, so the owner is simply the parsed subject.
 func personalOwnerID(userID string) uuid.UUID {

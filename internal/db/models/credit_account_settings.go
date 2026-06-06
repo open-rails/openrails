@@ -7,16 +7,16 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// CreditAccountSettings is the per-(tenant, owner org, credit_type) spend policy
+// CreditAccountSettings is the per-(tenant, payer org, credit_type) spend policy
 // and money-in configuration (issue #237). Tensorhub sets these; OpenRails
 // stores and enforces them. NULL cap columns mean "no cap".
 type CreditAccountSettings struct {
 	bun.BaseModel `bun:"table:billing.credit_account_settings,alias:cas"`
 
-	ID           uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
-	TenantID     uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	OwnerID      uuid.UUID `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
-	CreditTypeID uuid.UUID `bun:"credit_type_id,notnull,type:uuid" json:"credit_type_id"`
+	ID              uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	TenantID        uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	CreditTypeID    uuid.UUID `bun:"credit_type_id,notnull,type:uuid" json:"credit_type_id"`
 
 	// Policy.
 	BillingMode             string     `bun:"billing_mode,notnull" json:"billing_mode"`
@@ -48,18 +48,18 @@ type CreditAccountSettings struct {
 	UpdatedAt time.Time `bun:"updated_at,notnull" json:"updated_at"`
 }
 
-// CreditSpendLimit is an optional per-invoker spend cap under an owner org
-// (issue #237 per_invoker_caps / #246). The invoker string is matched against
-// credit_transactions.user_id (the actor that caused usage), in one of the
+// CreditSpendLimit is an optional per-invoker spend cap under a payer org
+// (issue #237 per_invoker_caps / #246). The invoker_id string is matched against
+// credit_transactions.invoker_id (the principal that caused usage), in one of the
 // canonical forms: 'oat:<key_id>', 'user:<user_id>', or '<issuer>:<sub>'.
 type CreditSpendLimit struct {
 	bun.BaseModel `bun:"table:billing.credit_spend_limits,alias:csl"`
 
 	ID                    uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	TenantID              uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	OwnerID               uuid.UUID `bun:"owner_id,type:uuid,nullzero" json:"owner_id"`
+	TenantSubjectID       uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
 	CreditTypeID          uuid.UUID `bun:"credit_type_id,notnull,type:uuid" json:"credit_type_id"`
-	Invoker               string    `bun:"invoker,notnull" json:"invoker"`
+	InvokerID             string    `bun:"invoker_id,notnull" json:"invoker_id"`
 	MaxSpendPerDayCents   *int64    `bun:"max_spend_per_day_cents,nullzero" json:"max_spend_per_day_cents,omitempty"`
 	MaxSpendPerMonthCents *int64    `bun:"max_spend_per_month_cents,nullzero" json:"max_spend_per_month_cents,omitempty"`
 	CreatedAt             time.Time `bun:"created_at,notnull" json:"created_at"`

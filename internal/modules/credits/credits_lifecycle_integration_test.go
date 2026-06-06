@@ -68,9 +68,9 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("user_id = ?", userID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("user_id = ?", userID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("invoker_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("invoker_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("invoker_id = ?", userID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", creditTypeID).Exec(ctx)
 	})
 
@@ -78,7 +78,7 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 
 	// Seed spendable credits (creates a credit block).
 	_, err = creditsSvc.Deposit(ctx, credits.CreditDepositParams{
-		UserID:     userID,
+		InvokerID:  userID,
 		CreditType: creditTypeName,
 		Amount:     1000,
 		Source:     "test_deposit",

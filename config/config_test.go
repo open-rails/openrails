@@ -115,7 +115,7 @@ func TestLoad_MobiusProcessorRequiresExplicitType(t *testing.T) {
 
 func TestValidateCaptchaRequiresKeysWhenEnabled(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
-	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/doujins_db?sslmode=disable"
+	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
 	cfg.Captcha.Enabled = true
 	cfg.Captcha.Provider = CaptchaProviderTurnstile
 	cfg.Captcha.SiteKey = ""
@@ -181,7 +181,7 @@ func TestValidateCaptchaRejectsInvalidSettings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := GetDefaultBillingConfig()
-			cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/doujins_db?sslmode=disable"
+			cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
 			cfg.Captcha.Enabled = true
 			cfg.Captcha.Provider = CaptchaProviderTurnstile
 			cfg.Captcha.SiteKey = "site-key"
@@ -577,11 +577,11 @@ func TestGetDefaultBillingConfig_FeatureFlags(t *testing.T) {
 
 func TestAllowedCORSOrigins_UnionsGlobalAndTenantOrigins(t *testing.T) {
 	cfg := &Config{
-		CorsOrigins: []string{"https://app.example.com", "https://app.example.com"}, // dup
+		CorsOrigins: []string{"https://admin.example.com", "https://admin.example.com"}, // dup
 		TenantCORS: map[string]*TenantCORSConfig{
-			"doujins": {AllowedOrigins: []string{"https://app.doujins.com", "https://doujins.com"}},
-			"hentai0": {AllowedOrigins: []string{"https://hentai0.com", "https://app.example.com"}}, // dup w/ global
-			"empty":   nil,
+			"tenant-a": {AllowedOrigins: []string{"https://media.example.com", "https://admin.example.com"}}, // dup w/ global
+			"tenant-b": {AllowedOrigins: []string{"https://app.example.com", "https://portal.example.com"}},
+			"empty":    nil,
 		},
 	}
 
@@ -589,10 +589,10 @@ func TestAllowedCORSOrigins_UnionsGlobalAndTenantOrigins(t *testing.T) {
 
 	// Global origin first, de-duplicated; tenant origins follow in slug order.
 	assert.Equal(t, []string{
+		"https://admin.example.com",
+		"https://media.example.com",
 		"https://app.example.com",
-		"https://app.doujins.com",
-		"https://doujins.com",
-		"https://hentai0.com",
+		"https://portal.example.com",
 	}, got)
 }
 

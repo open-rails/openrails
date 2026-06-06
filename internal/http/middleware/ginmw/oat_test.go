@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
@@ -47,6 +48,44 @@ func doOATRequest(r *gin.Engine, withAuth bool) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	return w
+}
+
+func TestRequireOATPayerScope(t *testing.T) {
+	payer := uuid.New()
+	resolver := fakeOATResolver{
+		looksLikeOAT: true,
+		resolved: &controlplane.ResolvedOAT{
+			OrgSlug:     "operator",
+			TenantID:    tenant.DefaultID,
+			Permissions: []string{controlplane.PermCreditsSpend},
+			Resources: []authcore.OrgAccessTokenResource{
+				controlplane.TenantResource(tenant.DefaultID),
+				controlplane.TenantSubjectResource(payer),
+			},
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/svc", OATRequired(resolver), func(c *gin.Context) {
+		if !RequireOATPayerScope(c, payer) {
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	w := doOATRequest(r, true)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	r = gin.New()
+	r.GET("/svc", OATRequired(resolver), func(c *gin.Context) {
+		if !RequireOATPayerScope(c, uuid.New()) {
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	w = doOATRequest(r, true)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "oat_payer_scope_denied")
 }
 
 func TestOATRequired_SucceedsForCorrectTenantAndPermission(t *testing.T) {

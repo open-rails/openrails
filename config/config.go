@@ -138,9 +138,20 @@ type Config struct {
 	FeatureFlags *FeatureFlags                `koanf:"feature_flags,omitempty"`
 	Encryption   *EncryptionConfig            `koanf:"encryption,omitempty"`
 	Vault        *VaultConfig                 `koanf:"vault,omitempty"`
+	// TenantBootstrap points OpenRails at an optional declarative tenant manifest.
+	// Standalone deployments mount this YAML file and OpenRails idempotently
+	// reconciles tenants, trusted delegated issuers, and named runtime OAT outputs
+	// at startup.
+	TenantBootstrap *TenantBootstrapConfig `koanf:"tenant_bootstrap,omitempty"`
 	// BillingHotPath configures the degraded-mode behavior of the per-invocation
 	// billing authorize call (issue #248). EXPLICIT, never a silent default.
 	BillingHotPath *BillingHotPathConfig `koanf:"billing_hot_path,omitempty"`
+}
+
+// TenantBootstrapConfig configures the optional declarative tenant bootstrap
+// manifest. Empty File disables the feature.
+type TenantBootstrapConfig struct {
+	File string `koanf:"file,omitempty"`
 }
 
 // Billing hot-path fail policies (issue #248). The per-invocation authorize/hold
@@ -563,7 +574,7 @@ type RedisConfig struct {
 type TenantCORSConfig struct {
 	// AllowedOrigins is the exact set of browser origins (scheme+host+port) on
 	// this tenant's domain that may call OpenRails directly. Exact-match only; no
-	// wildcards. Example: ["https://app.doujins.com", "https://doujins.com"].
+	// wildcards. Example: ["https://app.example.com", "https://portal.example.com"].
 	AllowedOrigins []string `koanf:"allowed_origins,omitempty"`
 }
 
@@ -1433,7 +1444,7 @@ func assembleDBURL(cfg *Config) {
 	if cfg.DB.Password == "admin_password" {
 		warnings = append(warnings, "DB password")
 	}
-	if cfg.DB.Database == "doujins_db" {
+	if cfg.DB.Database == "openrails_db" {
 		warnings = append(warnings, "DB database name")
 	}
 
@@ -1473,7 +1484,7 @@ func GetDefaultBillingConfig() *Config {
 		DB: &DBConfig{
 			Host:     "localhost",
 			Port:     "5432",
-			Database: "doujins_db",
+			Database: "openrails_db",
 			Username: "admin",
 			Password: "admin_password",
 			SSLMode:  "disable",
@@ -1668,6 +1679,9 @@ func Load(configPath string) (*Config, error) {
 		}
 		if s == "auth_expected_audience" {
 			return "auth.expected_audience"
+		}
+		if s == "openrails_tenants_file" || s == "tenant_bootstrap_file" {
+			return "tenant_bootstrap.file"
 		}
 
 		// Special case: CORS_ORIGINS -> cors_origins (top-level, not cors.origins)

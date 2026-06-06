@@ -20,7 +20,7 @@ import (
 // the service usage rollup (#311) so the tensorhub platform's /budget-usage +
 // revenue analytics can be served from OpenRails as the billing source of truth.
 type CaptureUsageEventParams struct {
-	PayerOrgID          uuid.UUID
+	TenantSubjectID     uuid.UUID
 	InvokerID           string
 	CreditTypeID        uuid.UUID
 	EventType           string // the metered model/endpoint, e.g. "owner/endpoint"
@@ -52,7 +52,7 @@ func (s *CreditsService) InsertCaptureUsageEvent(ctx context.Context, p CaptureU
 		ev := &models.UsageEvent{
 			ID:                  uuidutil.NewV7(),
 			TenantID:            tenant.FromContextOrDefault(ctx).UUID(),
-			PayerOrgID:          p.PayerOrgID,
+			TenantSubjectID:     p.TenantSubjectID,
 			InvokerID:           p.InvokerID,
 			CreditTypeID:        p.CreditTypeID,
 			EventType:           p.EventType,
@@ -66,7 +66,7 @@ func (s *CreditsService) InsertCaptureUsageEvent(ctx context.Context, p CaptureU
 			CreatedAt:           now,
 		}
 		_, err := s.db.Q(ctx).NewInsert().Model(ev).
-			On("CONFLICT (tenant_id, payer_org_id, event_type, source, source_id) DO NOTHING").
+			On("CONFLICT (tenant_id, tenant_subject_id, event_type, source, source_id) DO NOTHING").
 			Exec(ctx)
 		return err
 	})
@@ -93,7 +93,7 @@ var serviceUsageGroupExpr = map[string]string{
 // ServiceUsageRollup returns per-dimension-VALUE spend for a payer org over
 // [from, to), grouped by group_by. Service-scoped (any payer), for the platform
 // usage/revenue surfaces — NOT the hot admission path.
-func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.PayerOrgID, from, to time.Time, groupBy string) ([]ServiceUsageRollupRow, error) {
+func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.TenantSubjectID, from, to time.Time, groupBy string) ([]ServiceUsageRollupRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
@@ -112,7 +112,7 @@ func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.
 			ColumnExpr("COUNT(*) AS event_count").
 			ColumnExpr("COALESCE(SUM(ue.amount), 0) AS total_amount").
 			Where("ue.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-			Where("ue.payer_org_id = ?", payer.UUID()).
+			Where("ue.tenant_subject_id = ?", payer.UUID()).
 			Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from.UTC(), to.UTC()).
 			GroupExpr("COALESCE("+keyExpr+", '')").
 			OrderExpr("total_amount DESC").

@@ -15,7 +15,7 @@ import (
 )
 
 // These tests pin the SELF-SERVICE route table (RegisterSelfServiceRoutes) for
-// the browser-direct `/v1/self/*` surface that doujins/hentai0 call with
+// the browser-direct `/v1/self/*` surface that host apps call with
 // delegated tokens (issues #215/#216 consumer gap). The gap closed here: resume,
 // change-tier, and update-subscription-payment-method were previously mounted
 // ONLY on the legacy login-JWT `/me/*` group, so a browser holding a delegated

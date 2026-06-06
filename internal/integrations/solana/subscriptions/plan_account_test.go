@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 // buildPlanBlob assembles a synthetic Plan account in the exact on-chain byte

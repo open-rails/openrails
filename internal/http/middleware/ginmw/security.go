@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/doujins-org/ginapi/response"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/open-rails/openrails/internal/http/response"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/http/middleware"

@@ -3,7 +3,7 @@ package solana
 import (
 	"fmt"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 // GenerateReference creates a new random public key and returns it as a base58 string.

@@ -76,30 +76,30 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			break
 		}
 
-		// HARDCUT (#221/#223): credit rows are owner+tenant-scoped. Expiry rolls up
-		// per (tenant, owner, credit_type); user_id is carried for actor attribution
+		// HARDCUT (#221/#223): credit rows are payer+tenant-scoped. Expiry rolls up
+		// per (tenant, payer, credit_type); invoker_id is carried for invoker attribution
 		// only and is not part of the balance key.
 		type key struct {
-			TenantID     uuid.UUID
-			OwnerID      uuid.UUID
-			CreditTypeID uuid.UUID
+			TenantID        uuid.UUID
+			TenantSubjectID uuid.UUID
+			CreditTypeID    uuid.UUID
 		}
 		expiredTotals := make(map[key]int64)
-		// actorFor preserves a representative user_id per key for attribution on any
+		// invokerFor preserves a representative invoker_id per key for attribution on any
 		// balance/transaction row this job has to create.
-		actorFor := make(map[key]string)
+		invokerFor := make(map[key]string)
 		for i := range blocks {
 			if blocks[i].RemainingAmount <= 0 {
 				continue
 			}
 			k := key{
-				TenantID:     blocks[i].TenantID,
-				OwnerID:      blocks[i].OwnerID,
-				CreditTypeID: blocks[i].CreditTypeID,
+				TenantID:        blocks[i].TenantID,
+				TenantSubjectID: blocks[i].TenantSubjectID,
+				CreditTypeID:    blocks[i].CreditTypeID,
 			}
 			expiredTotals[k] += blocks[i].RemainingAmount
-			if _, ok := actorFor[k]; !ok {
-				actorFor[k] = blocks[i].UserID
+			if _, ok := invokerFor[k]; !ok {
+				invokerFor[k] = blocks[i].InvokerID
 			}
 			blocks[i].RemainingAmount = 0
 			if _, err := tx.NewUpdate().Model(&blocks[i]).
@@ -118,7 +118,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			bal := new(models.UserCreditBalance)
 			err := tx.NewSelect().
 				Model(bal).
-				Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", k.TenantID, k.OwnerID, k.CreditTypeID).
+				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
 				For("UPDATE").
 				Scan(ctx)
 			if err != nil && !errorsIsNoRows(err) {
@@ -127,15 +127,15 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			}
 			if errorsIsNoRows(err) {
 				bal = &models.UserCreditBalance{
-					ID:           uuidutil.NewV7(),
-					TenantID:     k.TenantID,
-					OwnerID:      k.OwnerID,
-					UserID:       actorFor[k],
-					CreditTypeID: k.CreditTypeID,
-					Balance:      0,
-					HeldBalance:  0,
-					CreatedAt:    now,
-					UpdatedAt:    now,
+					ID:              uuidutil.NewV7(),
+					TenantID:        k.TenantID,
+					TenantSubjectID: k.TenantSubjectID,
+					InvokerID:       invokerFor[k],
+					CreditTypeID:    k.CreditTypeID,
+					Balance:         0,
+					HeldBalance:     0,
+					CreatedAt:       now,
+					UpdatedAt:       now,
 				}
 				if _, err := tx.NewInsert().Model(bal).Exec(ctx); err != nil {
 					_ = tx.Rollback()
@@ -151,7 +151,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
 				Set("balance = ?", newBalance).
 				Set("updated_at = ?", now).
-				Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", k.TenantID, k.OwnerID, k.CreditTypeID).
+				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
 				Exec(ctx); err != nil {
 				_ = tx.Rollback()
 				return err
@@ -160,8 +160,8 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			trx := &models.CreditTransaction{
 				ID:              uuidutil.NewV7(),
 				TenantID:        k.TenantID,
-				OwnerID:         k.OwnerID,
-				UserID:          actorFor[k],
+				TenantSubjectID: k.TenantSubjectID,
+				InvokerID:       invokerFor[k],
 				CreditTypeID:    k.CreditTypeID,
 				Amount:          -amount,
 				BalanceAfter:    &newBalance,

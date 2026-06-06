@@ -14,21 +14,21 @@ import (
 // HeldBalanceDrift is a balance row whose stored held_balance disagrees with the
 // sum of its currently-active holds.
 type HeldBalanceDrift struct {
-	TenantID     uuid.UUID `bun:"tenant_id" json:"tenant_id"`
-	OwnerID      uuid.UUID `bun:"owner_id" json:"owner_id"`
-	CreditTypeID uuid.UUID `bun:"credit_type_id" json:"credit_type_id"`
-	Stored       int64     `bun:"stored" json:"stored_held_balance"`
-	Computed     int64     `bun:"computed" json:"computed_held_balance"`
+	TenantID        uuid.UUID `bun:"tenant_id" json:"tenant_id"`
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id" json:"tenant_subject_id"`
+	CreditTypeID    uuid.UUID `bun:"credit_type_id" json:"credit_type_id"`
+	Stored          int64     `bun:"stored" json:"stored_held_balance"`
+	Computed        int64     `bun:"computed" json:"computed_held_balance"`
 }
 
 // BalanceAnomaly flags a balance row that violates a hard invariant.
 type BalanceAnomaly struct {
-	TenantID     uuid.UUID `bun:"tenant_id" json:"tenant_id"`
-	OwnerID      uuid.UUID `bun:"owner_id" json:"owner_id"`
-	CreditTypeID uuid.UUID `bun:"credit_type_id" json:"credit_type_id"`
-	Balance      int64     `bun:"balance" json:"balance"`
-	HeldBalance  int64     `bun:"held_balance" json:"held_balance"`
-	Reason       string    `json:"reason"`
+	TenantID        uuid.UUID `bun:"tenant_id" json:"tenant_id"`
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id" json:"tenant_subject_id"`
+	CreditTypeID    uuid.UUID `bun:"credit_type_id" json:"credit_type_id"`
+	Balance         int64     `bun:"balance" json:"balance"`
+	HeldBalance     int64     `bun:"held_balance" json:"held_balance"`
+	Reason          string    `json:"reason"`
 }
 
 // ReconcileReport is the alert-only output of Reconcile. Empty slices mean the
@@ -43,10 +43,10 @@ type ReconcileReport struct {
 // OrphanedHold is an active hold that has passed its expiry and should have been
 // released by HoldExpiryWorker.
 type OrphanedHold struct {
-	ID        uuid.UUID  `json:"id"`
-	OwnerID   uuid.UUID  `json:"owner_id"`
-	Amount    int64      `json:"authorized_amount"`
-	ExpiresAt *time.Time `json:"expires_at"`
+	ID              uuid.UUID  `json:"id"`
+	TenantSubjectID uuid.UUID  `json:"tenant_subject_id"`
+	Amount          int64      `json:"authorized_amount"`
+	ExpiresAt       *time.Time `json:"expires_at"`
 }
 
 // Reconcile runs all alert-only consistency checks and returns a report. It
@@ -99,14 +99,14 @@ func (s *CreditsService) FindOrphanedExpiredHolds(ctx context.Context) ([]Orphan
 		if holds[i].Authorized != nil {
 			amt = *holds[i].Authorized
 		}
-		out = append(out, OrphanedHold{ID: holds[i].ID, OwnerID: holds[i].OwnerID, Amount: amt, ExpiresAt: holds[i].ExpiresAt})
+		out = append(out, OrphanedHold{ID: holds[i].ID, TenantSubjectID: holds[i].TenantSubjectID, Amount: amt, ExpiresAt: holds[i].ExpiresAt})
 	}
 	return out, nil
 }
 
 const activeHoldSumSubquery = `COALESCE((SELECT SUM(COALESCE(t.authorized_amount,0)) ` +
 	`FROM billing.credit_transactions t ` +
-	`WHERE t.tenant_id = b.tenant_id AND t.owner_id = b.owner_id AND t.credit_type_id = b.credit_type_id ` +
+	`WHERE t.tenant_id = b.tenant_id AND t.tenant_subject_id = b.tenant_subject_id AND t.credit_type_id = b.credit_type_id ` +
 	`AND t.transaction_type = 'hold' AND t.status = 'active'), 0)`
 
 // FindHeldBalanceDrift returns balance rows whose stored held_balance differs
@@ -115,7 +115,7 @@ func (s *CreditsService) FindHeldBalanceDrift(ctx context.Context) ([]HeldBalanc
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	var rows []HeldBalanceDrift
 	err := s.db.Q(ctx).NewSelect().
-		ColumnExpr("b.tenant_id, b.owner_id, b.credit_type_id, b.held_balance AS stored").
+		ColumnExpr("b.tenant_id, b.tenant_subject_id, b.credit_type_id, b.held_balance AS stored").
 		ColumnExpr(activeHoldSumSubquery+" AS computed").
 		TableExpr("billing.user_credit_balances AS b").
 		Where("b.tenant_id = ?", tenantID).
@@ -130,7 +130,7 @@ func (s *CreditsService) FindBalanceAnomalies(ctx context.Context) ([]BalanceAno
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	var rows []BalanceAnomaly
 	err := s.db.Q(ctx).NewSelect().
-		ColumnExpr("b.tenant_id, b.owner_id, b.credit_type_id, b.balance, b.held_balance").
+		ColumnExpr("b.tenant_id, b.tenant_subject_id, b.credit_type_id, b.balance, b.held_balance").
 		TableExpr("billing.user_credit_balances AS b").
 		Where("b.tenant_id = ?", tenantID).
 		Where("b.balance < 0 OR b.held_balance < 0 OR b.held_balance > b.balance").
@@ -151,10 +151,10 @@ func (s *CreditsService) FindBalanceAnomalies(ctx context.Context) ([]BalanceAno
 	return rows, nil
 }
 
-// RepairHeldBalance recomputes held_balance for (owner, credit_type) from the sum
+// RepairHeldBalance recomputes held_balance for (payer, credit_type) from the sum
 // of active holds and writes it. This is the safe auto-repair for HeldBalanceDrift
 // (the active holds are the source of truth). Returns the corrected value.
-func (s *CreditsService) RepairHeldBalance(ctx context.Context, owner identity.OwnerOrgID, creditType string) (int64, error) {
+func (s *CreditsService) RepairHeldBalance(ctx context.Context, payer identity.TenantSubjectID, creditType string) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("credits service not initialized")
 	}
@@ -163,7 +163,7 @@ func (s *CreditsService) RepairHeldBalance(ctx context.Context, owner identity.O
 		return 0, err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := owner.UUID()
+	ownerID := payer.UUID()
 	computed, err := s.activeHoldsTotal(ctx, tenantID, ownerID, ct.ID)
 	if err != nil {
 		return 0, err
@@ -171,7 +171,7 @@ func (s *CreditsService) RepairHeldBalance(ctx context.Context, owner identity.O
 	_, err = s.db.Q(ctx).NewUpdate().Model((*models.UserCreditBalance)(nil)).
 		Set("held_balance = ?", computed).
 		Set("updated_at = ?", s.now()).
-		Where("tenant_id = ? AND owner_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 		Exec(ctx)
 	if err != nil {
 		return 0, err

@@ -10,20 +10,17 @@ import (
 )
 
 type serviceAdmitRequest struct {
-	Payer         string                           `json:"payer"`
-	OwnerID       string                           `json:"owner_id"`
-	OwnerOrgID    string                           `json:"owner_org_id"`
-	Actor         string                           `json:"actor"`
-	Invoker       string                           `json:"invoker"`
-	Tier          string                           `json:"tier"`
-	Model         string                           `json:"model"`
-	Amounts       map[string]int64                 `json:"amounts"`
-	CreditType    string                           `json:"credit_type"`
-	EstimateCents int64                            `json:"estimate_cents"`
-	RequestID     string                           `json:"request_id"`
-	Source        string                           `json:"source"`
-	ExpiresAt     *int64                           `json:"expires_at"`
-	BlockChecks   []billingservice.AdmitBlockCheck `json:"block_checks"`
+	TenantSubjectID string                           `json:"tenant_subject_id"`
+	InvokerID       string                           `json:"invoker_id"`
+	Tier            string                           `json:"tier"`
+	Model           string                           `json:"model"`
+	Amounts         map[string]int64                 `json:"amounts"`
+	CreditType      string                           `json:"credit_type"`
+	EstimateCents   int64                            `json:"estimate_cents"`
+	RequestID       string                           `json:"request_id"`
+	Source          string                           `json:"source"`
+	ExpiresAt       *int64                           `json:"expires_at"`
+	BlockChecks     []billingservice.AdmitBlockCheck `json:"block_checks"`
 }
 
 // ServiceAdmit is the unified admission endpoint (issue #298): throughput +
@@ -39,18 +36,13 @@ func ServiceAdmit(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "estimate_cents must be >= 0")
 		return
 	}
-	actor := strings.TrimSpace(req.Actor)
-	if actor == "" {
-		actor = strings.TrimSpace(req.Invoker)
-	}
-
-	payerRaw := strings.TrimSpace(req.Payer)
-	if payerRaw == "" {
-		payerRaw = req.OwnerID
-	}
-	payer, err := parseServiceOwnerOrgID(payerRaw, req.OwnerOrgID)
+	invoker := strings.TrimSpace(req.InvokerID)
+	payer, err := parseServiceTenantSubjectID(req.TenantSubjectID)
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "payer required")
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		return
+	}
+	if !requireServiceTenantSubjectScope(r, *payer) {
 		return
 	}
 
@@ -61,16 +53,16 @@ func ServiceAdmit(r *httprequest.Request) {
 	}
 
 	in := billingservice.AdmitInput{
-		Owner:         *payer,
-		Actor:         actor,
-		Tier:          req.Tier,
-		Model:         req.Model,
-		Amounts:       req.Amounts,
-		CreditType:    req.CreditType,
-		EstimateCents: req.EstimateCents,
-		Source:        req.Source,
-		SourceID:      req.RequestID,
-		BlockChecks:   req.BlockChecks,
+		TenantSubjectID: *payer,
+		InvokerID:       invoker,
+		Tier:            req.Tier,
+		Model:           req.Model,
+		Amounts:         req.Amounts,
+		CreditType:      req.CreditType,
+		EstimateCents:   req.EstimateCents,
+		Source:          req.Source,
+		SourceID:        req.RequestID,
+		BlockChecks:     req.BlockChecks,
 	}
 	if req.ExpiresAt != nil {
 		in.ExpiresAtUnix = *req.ExpiresAt
@@ -106,17 +98,16 @@ func ServiceAdmit(r *httprequest.Request) {
 	}
 }
 
-// ServiceGetBudget returns the actor's rolling money-budget windows (#304
-// introspection) for a host's /status dashboard. owner + actor + tier are query
-// params; the tenant is pinned from the OAT.
+// ServiceGetBudget returns the invoker's rolling money-budget windows (#304
+// introspection) for a host's /status dashboard. tenant_subject_id + invoker_id + tier are
+// query params; the tenant is pinned from the OAT.
 func ServiceGetBudget(r *httprequest.Request) {
-	ownerRaw := strings.TrimSpace(r.Query("owner"))
-	if ownerRaw == "" {
-		ownerRaw = strings.TrimSpace(r.Query("owner_id"))
-	}
-	payer, err := parseServiceOwnerOrgID(ownerRaw, "")
+	payer, err := parseServiceTenantSubjectID(r.Query("tenant_subject_id"))
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "owner required")
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		return
+	}
+	if !requireServiceTenantSubjectScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -124,7 +115,8 @@ func ServiceGetBudget(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, r.Query("actor"), r.Query("tier"))
+	invoker := r.Query("invoker_id")
+	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, invoker, r.Query("tier"))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget lookup failed")
 		return
@@ -133,25 +125,23 @@ func ServiceGetBudget(r *httprequest.Request) {
 }
 
 type serviceTierPolicyRequest struct {
-	Payer   string `json:"payer"`
-	OwnerID string `json:"owner_id"`
+	TenantSubjectID string `json:"tenant_subject_id"`
 	billingservice.TierPolicyInput
 }
 
-// ServiceSetTierPolicy upserts a per-owner tier policy (#298 tier admin API):
+// ServiceSetTierPolicy upserts a per-payer tier policy (#298 tier admin API):
 // throughput windows + entitled endpoints + rolling money-budget windows.
 func ServiceSetTierPolicy(r *httprequest.Request) {
 	var req serviceTierPolicyRequest
 	if !r.BindJSON(&req) {
 		return
 	}
-	ownerRaw := strings.TrimSpace(req.Payer)
-	if ownerRaw == "" {
-		ownerRaw = strings.TrimSpace(req.OwnerID)
-	}
-	payer, err := parseServiceOwnerOrgID(ownerRaw, "")
+	payer, err := parseServiceTenantSubjectID(req.TenantSubjectID)
 	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "payer required")
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		return
+	}
+	if !requireServiceTenantSubjectScope(r, *payer) {
 		return
 	}
 	svc, err := billingservice.New(r.State)

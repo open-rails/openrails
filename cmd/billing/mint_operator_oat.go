@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	authcore "github.com/open-rails/authkit/core"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/embedded"
@@ -61,7 +62,32 @@ func mintOperatorOAT(cmd *cobra.Command, _ []string) error {
 		name = "openrails-operator-manual"
 	}
 
-	oat, token, err := cp.Core().MintOrgAccessToken(ctx, org, name, controlplane.OperatorRolePermissions(), "", nil)
+	permissions, err := cmd.Flags().GetStringSlice("permission")
+	if err != nil {
+		return fmt.Errorf("read permission flags: %w", err)
+	}
+	for i := range permissions {
+		permissions[i] = strings.TrimSpace(permissions[i])
+	}
+	if len(permissions) == 0 {
+		permissions = controlplane.OperatorRolePermissions()
+	}
+
+	tenantRef, err := cmd.Flags().GetString("tenant")
+	if err != nil {
+		return fmt.Errorf("read tenant flag: %w", err)
+	}
+	tenantID, tenantSlug, tenantResource, err := cp.TenantScope(ctx, tenantRef)
+	if err != nil {
+		return fmt.Errorf("resolve tenant %q: %w", tenantRef, err)
+	}
+
+	resources := []authcore.OrgAccessTokenResource{tenantResource}
+	oat, token, err := cp.Core().MintOrgAccessTokenWithOptions(ctx, org, authcore.OrgAccessTokenMintOptions{
+		Name:        name,
+		Permissions: permissions,
+		Resources:   resources,
+	})
 	if err != nil {
 		return fmt.Errorf("mint operator oat: %w", err)
 	}
@@ -69,8 +95,11 @@ func mintOperatorOAT(cmd *cobra.Command, _ []string) error {
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
 		"org":         org,
 		"name":        name,
+		"tenant":      tenantSlug,
+		"tenant_id":   tenantID.String(),
 		"oat_key_id":  oat.KeyID,
 		"oat_secret":  token,
 		"permissions": oat.Permissions,
+		"resources":   oat.Resources,
 	})
 }

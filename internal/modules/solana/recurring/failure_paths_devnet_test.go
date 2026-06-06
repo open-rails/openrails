@@ -33,8 +33,8 @@ import (
 	"testing"
 	"time"
 
-	solanago "github.com/doujins-org/solana-go"
-	"github.com/doujins-org/solana-go/programs/token"
+	solanago "github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/programs/token"
 	"github.com/open-rails/openrails/internal/billing/declinecode"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/pkg/tenant"

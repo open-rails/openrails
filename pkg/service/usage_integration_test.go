@@ -18,49 +18,49 @@ import (
 
 // TestGetUsage_Breakdown proves the facade method backing GET /v1/self/usage
 // returns the per-event_type rollup (summed amount, event count, summed
-// dimensions) for a seeded owner over a window (issue #289). It mirrors the
+// dimensions) for a seeded payer over a window (issue #289). It mirrors the
 // credits-package usage rollup test but exercises the public service facade the
 // HTTP handler calls.
 func TestGetUsage_Breakdown(t *testing.T) {
-	svc, cs, owner, ct, ctx := authzEnv(t)
+	svc, cs, payer, ct, ctx := authzEnv(t)
 
 	// Separate connection used only to clean up the usage_events rows this test
-	// writes, scoped by owner.
+	// writes, scoped by payer.
 	cleanupDB := bun.NewDB(
 		sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.SharedPostgresDSN(t)))),
 		pgdialect.New(),
 	)
 	models.RegisterModels(cleanupDB)
 	t.Cleanup(func() {
-		_, _ = cleanupDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("owner_id = ?", owner.UUID()).Exec(ctx)
+		_, _ = cleanupDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
 		_ = cleanupDB.Close()
 	})
 
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
-		OwnerID: &owner, UserID: owner.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed",
+		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
 	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Owner: &owner, UserID: "user:a", CreditType: ct, EventType: "gpt-4o",
+		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 100, "output_tokens": 50},
 		Amount:     5_000, Source: "req", SourceID: "u1",
 	})
 	require.NoError(t, err)
 	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Owner: &owner, UserID: "user:a", CreditType: ct, EventType: "gpt-4o",
+		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 60, "output_tokens": 30},
 		Amount:     3_000, Source: "req", SourceID: "u2",
 	})
 	require.NoError(t, err)
 	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Owner: &owner, UserID: "user:a", CreditType: ct, EventType: "embeddings",
+		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "embeddings",
 		Dimensions: map[string]int64{"input_tokens": 200},
 		Amount:     1_000, Source: "req", SourceID: "u3",
 	})
 	require.NoError(t, err)
 
-	rows, err := svc.GetUsage(ctx, owner, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	rows, err := svc.GetUsage(ctx, payer, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 
@@ -81,7 +81,7 @@ func TestGetUsage_Breakdown(t *testing.T) {
 	require.Equal(t, int64(200), e.Dimensions["input_tokens"])
 
 	// A window before any usage returns no rows.
-	empty, err := svc.GetUsage(ctx, owner, time.Now().Add(-72*time.Hour), time.Now().Add(-48*time.Hour))
+	empty, err := svc.GetUsage(ctx, payer, time.Now().Add(-72*time.Hour), time.Now().Add(-48*time.Hour))
 	require.NoError(t, err)
 	require.Empty(t, empty)
 }

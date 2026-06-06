@@ -3,7 +3,7 @@ package subscriptions
 import (
 	"testing"
 
-	solanago "github.com/doujins-org/solana-go"
+	solanago "github.com/gagliardetto/solana-go"
 )
 
 func mustKey(t *testing.T) solanago.PublicKey {

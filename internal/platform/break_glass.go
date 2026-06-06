@@ -31,7 +31,7 @@ var ErrBreakGlassNotFound = errors.New("platform: break-glass grant not found")
 // BreakGlassGrant is a time-boxed elevation record.
 type BreakGlassGrant struct {
 	ID             string     `json:"id"`
-	ActorUserID    string     `json:"actor_user_id"`
+	InvokerID      string     `json:"actor_user_id"`
 	TargetTenantID string     `json:"target_tenant_id,omitempty"`
 	Justification  string     `json:"justification"`
 	GrantedAt      time.Time  `json:"granted_at"`
@@ -71,7 +71,7 @@ func NewBreakGlass(pool *pgxpool.Pool, audit *AuditLog) (*BreakGlass, error) {
 
 // GrantRequest parameterizes a break-glass elevation.
 type GrantRequest struct {
-	ActorUserID   string
+	InvokerID     string
 	ActorOrg      string
 	TargetTenant  *tenant.ID // nil for a platform-wide elevation
 	Justification string
@@ -88,7 +88,7 @@ func (b *BreakGlass) Grant(ctx context.Context, req GrantRequest) (*BreakGlassGr
 	if b == nil || b.pool == nil {
 		return nil, errors.New("platform: break-glass not configured")
 	}
-	actor := strings.TrimSpace(req.ActorUserID)
+	actor := strings.TrimSpace(req.InvokerID)
 	if actor == "" {
 		return nil, errors.New("platform: break-glass requires an actor")
 	}
@@ -122,7 +122,7 @@ func (b *BreakGlass) Grant(ctx context.Context, req GrantRequest) (*BreakGlassGr
 		RETURNING id::text, actor_user_id, COALESCE(target_tenant_id::text,''),
 		          justification, granted_at, expires_at, revoked_at
 	`, actor, targetID, just, now, expires).Scan(
-		&g.ID, &g.ActorUserID, &target, &g.Justification, &g.GrantedAt, &g.ExpiresAt, &g.RevokedAt)
+		&g.ID, &g.InvokerID, &target, &g.Justification, &g.GrantedAt, &g.ExpiresAt, &g.RevokedAt)
 	if err != nil {
 		return nil, fmt.Errorf("platform: insert break-glass grant: %w", err)
 	}
@@ -130,7 +130,7 @@ func (b *BreakGlass) Grant(ctx context.Context, req GrantRequest) (*BreakGlassGr
 
 	// Audit the grant (cross-tenant record, survives tenant delete).
 	if _, aerr := b.audit.Record(ctx, AuditEntry{
-		ActorUserID:    actor,
+		InvokerID:      actor,
 		ActorOrg:       req.ActorOrg,
 		Action:         ActionBreakGlassGrant,
 		TargetTenantID: req.TargetTenant,
@@ -185,10 +185,10 @@ func (b *BreakGlass) Revoke(ctx context.Context, id, actorUserID, actorOrg strin
 		return nil // already revoked: idempotent
 	}
 	if _, aerr := b.audit.Record(ctx, AuditEntry{
-		ActorUserID: strings.TrimSpace(actorUserID),
-		ActorOrg:    actorOrg,
-		Action:      ActionBreakGlassRevoke,
-		Detail:      map[string]any{"grant_id": id},
+		InvokerID: strings.TrimSpace(actorUserID),
+		ActorOrg:  actorOrg,
+		Action:    ActionBreakGlassRevoke,
+		Detail:    map[string]any{"grant_id": id},
 	}); aerr != nil {
 		return fmt.Errorf("platform: audit break-glass revoke: %w", aerr)
 	}
@@ -253,7 +253,7 @@ func scanGrants(rows pgx.Rows) ([]BreakGlassGrant, error) {
 	var out []BreakGlassGrant
 	for rows.Next() {
 		var g BreakGlassGrant
-		if err := rows.Scan(&g.ID, &g.ActorUserID, &g.TargetTenantID,
+		if err := rows.Scan(&g.ID, &g.InvokerID, &g.TargetTenantID,
 			&g.Justification, &g.GrantedAt, &g.ExpiresAt, &g.RevokedAt); err != nil {
 			return nil, err
 		}

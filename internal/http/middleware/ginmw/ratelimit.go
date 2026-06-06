@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/doujins-org/ginapi/response"
 	"github.com/gin-gonic/gin"
+	"github.com/open-rails/openrails/internal/http/response"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
