@@ -84,7 +84,7 @@ type ServiceUsageRollupRow struct {
 // "endpoint" groups by event_type (the metered model/endpoint); the rest read
 // the string grouping dimensions stashed in metadata at capture time.
 var serviceUsageGroupExpr = map[string]string{
-	"endpoint": "ue.event_type",
+	"endpoint": "ue.metadata->>'endpoint_name'",
 	"function": "ue.metadata->>'function_name'",
 	"tier":     "ue.metadata->>'availability_tier'",
 	"user":     "ue.metadata->>'delegated_user_id'",
