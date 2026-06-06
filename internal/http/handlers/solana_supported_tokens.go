@@ -29,6 +29,20 @@ type SupportedTokensResponse struct {
 	Tokens []TokenInfo `json:"tokens"`
 }
 
+type SolanaRuntimeConfigResponse struct {
+	Network         string      `json:"network"`
+	Chain           string      `json:"chain"`
+	RPCURL          string      `json:"rpcUrl,omitempty"`
+	ExplorerCluster string      `json:"explorerCluster,omitempty"`
+	PreferredToken  string      `json:"preferredToken"`
+	Tokens          []TokenInfo `json:"tokens"`
+	Features        struct {
+		SolanaPay                       bool `json:"solanaPay"`
+		RecurringSubscriptions          bool `json:"recurringSubscriptions"`
+		SolanaPayRecurringSubscriptions bool `json:"solanaPayRecurringSubscriptions"`
+	} `json:"features"`
+}
+
 type TokenInfo struct {
 	Symbol   string  `json:"symbol"`
 	Name     string  `json:"name"`
@@ -173,6 +187,84 @@ func GetSupportedTokens(r *httprequest.Request) {
 	}
 
 	r.SuccessJSON(SupportedTokensResponse{Tokens: tokens})
+}
+
+func GetSolanaConfig(r *httprequest.Request) {
+	cfg := r.State.Config
+	if cfg == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
+		return
+	}
+	solanaProc := cfg.GetSolanaProcessor()
+	if solanaProc == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
+		return
+	}
+
+	network := normalizeSolanaNetwork(solanaProc.Network)
+	tokenMap := normalizeTokenMap(solanaProc.Tokens)
+	if len(tokenMap) == 0 {
+		tokenMap = normalizeTokenMap(config.TokensForNetwork(network))
+	}
+
+	symbols := make([]string, 0, len(tokenMap))
+	for symbol := range tokenMap {
+		symbols = append(symbols, symbol)
+	}
+	sort.Strings(symbols)
+
+	tokens := make([]TokenInfo, 0, len(symbols))
+	for _, symbol := range symbols {
+		t := tokenMap[symbol]
+		name := t.Name
+		if name == "" {
+			name = symbol
+		}
+		tokens = append(tokens, TokenInfo{
+			Symbol:            symbol,
+			Name:              name,
+			Mint:              strings.TrimSpace(t.Mint),
+			Decimals:          t.Decimals,
+			Preferred:         symbol == config.PreferredStablecoin,
+			RecurringEligible: recurring.IsRecurringStablecoinSymbol(symbol),
+		})
+	}
+
+	resp := SolanaRuntimeConfigResponse{
+		Network:         network,
+		Chain:           "solana:" + network,
+		RPCURL:          strings.TrimSpace(solanaProc.RPCEndpoint),
+		ExplorerCluster: explorerCluster(network),
+		PreferredToken:  config.PreferredStablecoin,
+		Tokens:          tokens,
+	}
+	resp.Features.SolanaPay = true
+	resp.Features.RecurringSubscriptions = true
+	// Some wallets reject Solana Pay transaction requests that require a merchant
+	// co-signer; keep recurring subscriptions on the connected-wallet flow.
+	resp.Features.SolanaPayRecurringSubscriptions = false
+
+	r.SuccessJSON(resp)
+}
+
+func normalizeSolanaNetwork(network string) string {
+	switch strings.ToLower(strings.TrimSpace(network)) {
+	case "devnet":
+		return "devnet"
+	case "testnet":
+		return "testnet"
+	default:
+		return "mainnet"
+	}
+}
+
+func explorerCluster(network string) string {
+	switch strings.ToLower(strings.TrimSpace(network)) {
+	case "devnet", "testnet":
+		return strings.ToLower(strings.TrimSpace(network))
+	default:
+		return ""
+	}
 }
 
 func normalizeTokenMap(tokens map[string]config.SolanaToken) map[string]config.SolanaToken {

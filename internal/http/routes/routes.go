@@ -89,6 +89,7 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 
 	group.Handle(http.MethodGet, "/products", h(httphandlers.GetProducts), optional)
 	group.Handle(http.MethodGet, "/prices", h(httphandlers.GetPrices), optional)
+	group.Handle(http.MethodGet, "/solana/config", h(httphandlers.GetSolanaConfig))
 	group.Handle(http.MethodGet, "/solana/tokens", h(httphandlers.GetSupportedTokens))
 
 	checkout := group.Group("/checkout", required)

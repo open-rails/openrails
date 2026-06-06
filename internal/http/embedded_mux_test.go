@@ -45,6 +45,11 @@ func TestEmbeddedMuxAssembles(t *testing.T) {
 	require.NotEqual(t, http.StatusNotFound, rec.Code, "route not registered")
 	require.NotEqual(t, http.StatusUnauthorized, rec.Code, "public route should not require auth")
 
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/solana/config", nil))
+	require.NotEqual(t, http.StatusNotFound, rec.Code, "route not registered")
+	require.NotEqual(t, http.StatusUnauthorized, rec.Code, "public route should not require auth")
+
 	// Required-auth route without a credential -> 401 from the neutral requiredMW.
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/me/status", nil))

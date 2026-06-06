@@ -1,0 +1,55 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/app"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
+)
+
+func TestGetSolanaConfig(t *testing.T) {
+	runtime := &app.Runtime{
+		Config: &config.Config{
+			Processors: map[string]*config.ProcessorConfig{
+				"solana": {
+					Network:     "devnet",
+					RPCEndpoint: "https://api.devnet.solana.com",
+					Tokens: map[string]config.TokenConfig{
+						"USDC": {
+							Name:     "Dev USDC",
+							Mint:     "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ",
+							Decimals: 6,
+						},
+					},
+				},
+			},
+		},
+	}
+	recorder := httptest.NewRecorder()
+	req := httprequest.NewHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/solana/config", nil), runtime)
+
+	GetSolanaConfig(req)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response SolanaRuntimeConfigResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, "devnet", response.Network)
+	require.Equal(t, "solana:devnet", response.Chain)
+	require.Equal(t, "https://api.devnet.solana.com", response.RPCURL)
+	require.Equal(t, "devnet", response.ExplorerCluster)
+	require.Equal(t, config.PreferredStablecoin, response.PreferredToken)
+	require.True(t, response.Features.SolanaPay)
+	require.True(t, response.Features.RecurringSubscriptions)
+	require.False(t, response.Features.SolanaPayRecurringSubscriptions)
+	require.Len(t, response.Tokens, 1)
+	require.Equal(t, "USDC", response.Tokens[0].Symbol)
+	require.Equal(t, "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ", response.Tokens[0].Mint)
+	require.True(t, response.Tokens[0].Preferred)
+	require.True(t, response.Tokens[0].RecurringEligible)
+}
