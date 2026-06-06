@@ -79,12 +79,12 @@ func TestAuthorizeSpend_PrepaidBalanceGate(t *testing.T) {
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 
-	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: &payer, CreditType: ct, Invoker: "user:a", EstimateCents: 500})
+	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, InvokerID: "user:a", EstimateCents: 500})
 	require.NoError(t, err)
 	require.True(t, ok.Allowed)
 	require.Equal(t, int64(1000), ok.AvailableCents)
 
-	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: &payer, CreditType: ct, Invoker: "user:a", EstimateCents: 1500})
+	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, InvokerID: "user:a", EstimateCents: 1500})
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, billingservice.DenyInsufficientBalance, deny.DenyCode)
@@ -99,13 +99,13 @@ func TestAuthorizeSpend_DailyCapDeny(t *testing.T) {
 	_, err = cs.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, InvokerID: "user:a", CreditType: ct, Amount: 800, Source: "usage"})
 	require.NoError(t, err)
 
-	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: &payer, CreditType: ct, Invoker: "user:a", EstimateCents: 300})
+	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, InvokerID: "user:a", EstimateCents: 300})
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, credits.DenyDailyCap, deny.DenyCode)
 	require.Greater(t, deny.RetryAfterSeconds, int64(0))
 
-	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: &payer, CreditType: ct, Invoker: "user:a", EstimateCents: 100})
+	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, InvokerID: "user:a", EstimateCents: 100})
 	require.NoError(t, err)
 	require.True(t, ok.Allowed)
 }

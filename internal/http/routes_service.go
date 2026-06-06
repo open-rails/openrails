@@ -11,7 +11,7 @@ import (
 // registerServiceRoutes mounts the server-to-server billing surface on the PUBLIC
 // API engine under /v1/service/*, authenticated by OpenRails-issued tenant service tokens
 // (issue #222). This REPLACES the retired private/mTLS listener entirely: there is
-// no separate trust surface or port — machine callers present an service token as a Bearer
+// no separate trust surface or port — machine callers present a service token as a Bearer
 // token on the one public tenant API.
 //
 // Mounted only when the OpenRails-owned AuthKit control plane is configured (it is

@@ -84,7 +84,7 @@ func mintDelegatedTokenHandler(minter DelegatedMinter) gin.HandlerFunc {
 		}
 
 		minted, err := minter.MintDelegatedAccessToken(c.Request.Context(), controlplane.MintDelegatedParams{
-			// Tenant is bound to the service token's owning org slug — the SAME value the
+			// Tenant is bound to the service token's owning tenant slug — the SAME value the
 			// delegated verifier maps back to this tenant. Body cannot override it.
 			Tenant:           serviceToken.AuthKitTenantSlug,
 			DelegatedSubject: req.DelegatedSub,

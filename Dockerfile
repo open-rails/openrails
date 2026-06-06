@@ -14,7 +14,6 @@ ENV GIT_TERMINAL_PROMPT=0
 
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
-COPY --from=authkit . /authkit
 
 # Download dependencies with cache mount for Go modules (with retry)
 # GitHub token is optional since all dependencies are public
@@ -82,7 +81,7 @@ ENV GIN_MODE=release \
     TZ=UTC
 
 # Expose the single public port. Server-to-server calls use OpenRails-issued
-# OATs on this same port — there is no separate private/mTLS service port (#222).
+# service tokens on this same port; there is no separate private/mTLS service port (#222).
 EXPOSE 2053
 
 # Health check

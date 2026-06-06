@@ -32,10 +32,10 @@ func TestRegisterServiceRoutes_NotMountedWithoutControlPlane(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
-func TestRegisterServiceRoutes_OATAuthGatesMountedSurface(t *testing.T) {
+func TestRegisterServiceRoutes_ServiceTokenAuthGatesMountedSurface(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Mount the service surface with an service token middleware that always rejects
+	// Mount the service surface with a service token middleware that always rejects
 	// (modelling "no valid service token presented"). This proves the public service surface
 	// is service token-gated rather than an open or certificate-trusted listener. We mount
 	// the routes directly because building a Server with a real control plane

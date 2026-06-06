@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
+	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -84,4 +86,118 @@ func TestGetUsage_Breakdown(t *testing.T) {
 	empty, err := svc.GetUsage(ctx, payer, time.Now().Add(-72*time.Hour), time.Now().Add(-48*time.Hour))
 	require.NoError(t, err)
 	require.Empty(t, empty)
+}
+
+func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
+	svc, cs, payer, ct, ctx := authzEnv(t)
+
+	cleanupDB := bun.NewDB(
+		sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.SharedPostgresDSN(t)))),
+		pgdialect.New(),
+	)
+	models.RegisterModels(cleanupDB)
+	t.Cleanup(func() {
+		_, _ = cleanupDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
+		_ = cleanupDB.Close()
+	})
+
+	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
+		TenantSubjectID: &payer,
+		InvokerID:       payer.UUID().String(),
+		CreditType:      ct,
+		Amount:          10_000,
+		Source:          "seed",
+	})
+	require.NoError(t, err)
+
+	capture := func(amount int64, holdSource, usageSourceID string, metadata map[string]any) {
+		t.Helper()
+		hold, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
+			TenantSubjectID: &payer,
+			InvokerID:       payer.UUID().String(),
+			CreditType:      ct,
+			Amount:          amount,
+			Source:          "hold",
+			SourceID:        holdSource,
+			ExpiresAt:       time.Now().Add(time.Hour).UTC(),
+		})
+		require.NoError(t, err)
+		_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
+			HoldID:    hold.ID,
+			Amount:    amount,
+			EventType: "endpoint.capture",
+			Metadata:  metadata,
+			Source:    "capture",
+			SourceID:  usageSourceID,
+		})
+		require.NoError(t, err)
+	}
+
+	capture(1_000, uuid.NewString(), "usage-replay", map[string]any{
+		"endpoint_name":     "ep-a",
+		"function_name":     "txt2img",
+		"availability_tier": "fast",
+		"delegated_user_id": "u1",
+	})
+	capture(2_000, uuid.NewString(), "usage-replay", map[string]any{
+		"endpoint_name":     "ep-a",
+		"function_name":     "txt2img",
+		"availability_tier": "fast",
+		"delegated_user_id": "u1",
+	})
+	capture(3_000, uuid.NewString(), "usage-unique", map[string]any{
+		"endpoint_name":     "ep-b",
+		"function_name":     "img2img",
+		"availability_tier": "batch",
+		"delegated_user_id": "u2",
+	})
+
+	account, err := svc.GetCreditAccount(ctx, payer, ct)
+	require.NoError(t, err)
+	require.Equal(t, int64(4_000), account.BalanceCents, "three captures debit exactly their captured amounts")
+
+	usageEventCount, err := cleanupDB.NewSelect().
+		Model((*models.UsageEvent)(nil)).
+		Where("tenant_subject_id = ?", payer.UUID()).
+		Where("event_type = ?", "endpoint.capture").
+		Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, usageEventCount, "duplicate usage source_id is idempotent")
+
+	captureCount, err := cleanupDB.NewSelect().
+		Model((*models.CreditTransaction)(nil)).
+		Where("tenant_subject_id = ?", payer.UUID()).
+		Where("transaction_type = ?", "hold").
+		Where("status = ?", "captured").
+		Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 3, captureCount)
+
+	ledgerCount, err := cleanupDB.NewSelect().
+		Model((*models.CreditTransaction)(nil)).
+		Where("tenant_subject_id = ?", payer.UUID()).
+		Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 4, ledgerCount, "usage analytics must not create extra ledger debits")
+
+	assertRollup := func(groupBy string, want map[string]int64) {
+		t.Helper()
+		rows, err := svc.ServiceUsageRollup(ctx, billingservice.ServiceUsageRollupRequest{
+			TenantSubjectID: &payer,
+			From:            time.Now().Add(-time.Hour),
+			To:              time.Now().Add(time.Hour),
+			GroupBy:         groupBy,
+		})
+		require.NoError(t, err)
+		got := make(map[string]int64, len(rows))
+		for _, row := range rows {
+			got[row.Key] = row.TotalAmount
+		}
+		require.Equal(t, want, got)
+	}
+
+	assertRollup("endpoint", map[string]int64{"ep-a": 1_000, "ep-b": 3_000})
+	assertRollup("function", map[string]int64{"txt2img": 1_000, "img2img": 3_000})
+	assertRollup("tier", map[string]int64{"fast": 1_000, "batch": 3_000})
+	assertRollup("user", map[string]int64{"u1": 1_000, "u2": 3_000})
 }

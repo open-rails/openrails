@@ -437,9 +437,9 @@
         "[x] CaptureHold emits a usage_event (no second debit): serviceCaptureRequest + pkg/service CaptureHoldRequest carry event_type/dimensions/metadata/source/source_id; pkg/service.CaptureHold calls credits.InsertCaptureUsageEvent (service_usage.go) after capture, linked via credit_transaction_id, idempotent ON CONFLICT (tenant,payer,event_type,source,source_id). Best-effort (capture never fails on usage-insert error).",
         "[x] CreditsService.ServiceUsageRollup(payer, from, to, groupBy) in service_usage.go: groups usage_events by event_type (endpoint) or metadata->>{function_name|availability_tier|delegated_user_id}; sums amount; tenant-scoped via RunInTenantConn.",
         "[x] route POST /v1/service/usage/rollup (credits:read operator service token) -> ServiceUsageRollup handler (tenant_subject_id + from/to unix + group_by); payer-scope checked.",
-        "[ ] unit/integration tests: capture writes exactly one usage_event (no double debit); rollup groups by each dimension + sums captured amount. (Deferred; will be exercised by the tensorhub marco-polo e2e end-to-end.)"
+        "[x] unit/integration tests: capture writes exactly one usage_event (no double debit); rollup groups by each dimension + sums captured amount. Validated with `go test -tags=integration ./pkg/service -run TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup -count=1 -v`."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 312,
@@ -452,8 +452,8 @@
         "[ ] Ensure OpenRails closed registration means no native-user registration and no public tenant registration; tenants are manifest/bootstrap-created only.",
         "[ ] Register Doujins and Hentai0 as tenant issuers under the same OpenRails tenant using OIDC fields `issuer`, `jwks_uri`, and allowed `audiences`.",
         "[ ] Resolve browser/admin delegated JWTs as delegated users, not native OpenRails users. Persist only minimal delegated user references if OpenRails needs a billing/audit row.",
-        "[ ] Keep service/service token tokens separate from delegated JWTs and native sessions in middleware principal types.",
-        "[ ] Update OpenRails docs to state: tenant = OpenRails customer/integration boundary; delegated user = external OIDC subject; service token/service token = opaque server-to-server credential.",
+        "[ ] Keep service tokens separate from delegated JWTs and native sessions in middleware principal types.",
+        "[ ] Update OpenRails docs to state: tenant = OpenRails customer/integration boundary; delegated user = external OIDC subject; service token = opaque server-to-server credential.",
         "[ ] Add tests proving old operator-org/org config is rejected and the new tenant/delegated-user model is the only supported path."
       ],
       "completed": false
@@ -498,11 +498,11 @@
       "name": "OpenRails service tokens as tenant-owned server-to-server credentials",
       "description": "Align OpenRails service token handling with the new AuthKit service-token model and OAuth-style client-credentials separation. Service tokens are opaque tenant-owned credentials used by Doujins/Hentai0/Tensorhub servers for server-to-server calls such as entitlement reads; they are not delegated users, browser JWTs, or native user sessions.\n\n## Authorization contract\n\nA resolved service token supplies tenant, permissions/scopes, and resource scopes. OpenRails interprets OpenRails-specific resource kinds such as tenant and payer resources. Permissions say what the token may do; resources say where it may do it.\n\n## Server-to-server-only boundary\n\nService tokens are not browser credentials and do not represent delegated users. They authorize backend services: Doujins/Hentai0/Cozy backend entitlement reads, Tensorhub reserve/capture/release balance operations, and deploy/bootstrap automation. Browser/direct membership and balance actions use delegated JWTs instead.",
       "tasks": [
-        "[ ] Rename OpenRails AuthKit-facing service token resolution code to consume AuthKit service-token/tenant-service-token contracts after the AuthKit hard cut.",
-        "[ ] Preserve OpenRails public `service token` terminology only where it specifically means OpenRails Access Token; remove AuthKit tenantanization-access-token wording.",
+        "[x] Rename OpenRails AuthKit-facing service token resolution code to consume AuthKit service-token/tenant-service-token contracts after the AuthKit hard cut.",
+        "[x] Preserve OpenRails public `service token` terminology for server-to-server credentials and remove old AuthKit access-token wording.",
         "[ ] Ensure runtime app tokens for Doujins and Hentai0 are minted by OpenRails/bootstrap and written to deployment-configured Vault outputs, never requested by the apps at startup.",
         "[ ] Keep token output permissions and resource scopes manifest-driven and arbitrary; examples may use entitlement-read, but code must not hardcode that as the only possible runtime token.",
-        "[ ] Ensure service-token principals cannot access delegated-user/browser endpoints unless explicitly designed, and delegated JWTs cannot use service-token routes.",
+        "[x] Ensure service-token principals cannot access delegated-user/browser endpoints unless explicitly designed, and delegated JWTs cannot use service-token routes.",
         "[ ] Audit entitlement reads, credits, account/balance, admin, and bootstrap flows for correct principal-type checks.",
         "[ ] Add tests for service-token entitlement read, wrong resource scope denial, missing permission denial, delegated JWT rejected on service route, and service token rejected on delegated-user route.",
         "[ ] Update compose/GitOps docs to state Doujins/Hentai0 receive server-to-server OpenRails tokens from Vault/env injection, not by calling OpenRails registration APIs.",

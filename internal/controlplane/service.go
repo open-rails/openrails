@@ -65,7 +65,7 @@ const delegatedIssuerJWKSCacheTTL = time.Hour
 
 func registrationMode(locked bool) authcore.RegistrationMode {
 	if locked {
-		return authcore.RegistrationModeBootstrapOnly
+		return authcore.RegistrationModeAdminBootstrapOnly
 	}
 	return authcore.RegistrationModeOpen
 }

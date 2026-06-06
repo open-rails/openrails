@@ -31,7 +31,7 @@ func TestResolvedServiceTokenAllowsTenantSubjectScopes(t *testing.T) {
 	require.False(t, subjectScoped.AllowsTenantSubject(other))
 }
 
-func TestValidateOATResourcesRequiresTenantAndKnownKinds(t *testing.T) {
+func TestValidateServiceTokenResourcesRequiresTenantAndKnownKinds(t *testing.T) {
 	require.ErrorIs(t, validateServiceTokenResources(tenant.DefaultID, nil), ErrServiceTokenScopeDenied)
 	require.ErrorIs(t, validateServiceTokenResources(tenant.DefaultID, []authcore.ServiceTokenResource{
 		TenantSubjectResource(uuid.New()),

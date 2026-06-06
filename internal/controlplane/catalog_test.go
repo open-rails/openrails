@@ -101,7 +101,7 @@ func TestCatalogNames_StableOrder(t *testing.T) {
 	}
 }
 
-func TestAnyLiveOAT(t *testing.T) {
+func TestAnyLiveServiceToken(t *testing.T) {
 	now := time.Now()
 	revoked := &now
 	if anyLiveServiceToken(nil) {
@@ -136,7 +136,7 @@ func TestOperatorRoleExcludesPlatformSuperadmin(t *testing.T) {
 
 // TestCreditsSpendPermission_GateSemantics proves the billing:spend (#246) gate:
 // the operator role holds credits:spend by default (member role default-grant),
-// an service token WITHOUT it fails the spend gate while still passing credits:write, and
+// a service token WITHOUT it fails the spend gate while still passing credits:write, and
 // PermAdmin satisfies it.
 func TestCreditsSpendPermission_GateSemantics(t *testing.T) {
 	// Default-grant: the operator role includes billing:spend.
@@ -153,7 +153,7 @@ func TestCreditsSpendPermission_GateSemantics(t *testing.T) {
 		t.Fatalf("write-only service token must still pass the write gate")
 	}
 
-	// An service token holding billing:spend passes the spend gate.
+	// A service token holding billing:spend passes the spend gate.
 	spender := &ResolvedServiceToken{Permissions: []string{PermCreditsWrite, PermCreditsSpend}}
 	if !spender.HasPermission(PermCreditsSpend) {
 		t.Fatalf("service token holding %q must pass the spend gate", PermCreditsSpend)

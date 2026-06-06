@@ -154,6 +154,12 @@ func TestDelegatedVerify_RejectsNoPermissions(t *testing.T) {
 	require.Error(t, err, "a delegated token with no permissions is rejected")
 }
 
+func TestDelegatedVerify_RejectsServiceTokenCredential(t *testing.T) {
+	v, _ := newTestDelegatedVerifier(t)
+	_, _, err := v.VerifyDelegatedAccess("openrails_st_keyid_secret")
+	require.Error(t, err, "service tokens must not verify as delegated browser tokens")
+}
+
 // IsSelfPermission must accept exactly the four self-service permissions and
 // reject operator/server-to-server grants.
 func TestIsSelfPermission(t *testing.T) {

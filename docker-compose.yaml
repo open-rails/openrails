@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       # Bootstrap SQL runs automatically during first initialization
       - ./migrations/bootstrap/001_postgres_init.sql:/docker-entrypoint-initdb.d/001_postgres_init.sql:ro
     command:
@@ -115,17 +115,18 @@ services:
         condition: service_healthy
     restart: "no"
     environment:
-      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-analytics_user}"
-      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-analytics_password}"
+      BOOTSTRAP_CLICKHOUSE_USER: "${CLICKHOUSE_USER:-analytics_user}"
+      BOOTSTRAP_CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-analytics_password}"
     entrypoint: ["/bin/sh"]
     command:
       - "-c"
       - |
+        set -eu
         # Wait a bit extra for cluster coordination to be fully ready
         sleep 5
 
         # Run bootstrap SQL as default admin user (has all privileges)
-        cat <<'SQL_EOF' | sed "s/{CLICKHOUSE_USER}/$${CLICKHOUSE_USER}/g" | sed "s/{CLICKHOUSE_PASSWORD}/$${CLICKHOUSE_PASSWORD}/g" | clickhouse-client --host clickhouse --multiquery
+        cat <<'SQL_EOF' | sed "s/{CLICKHOUSE_USER}/$${BOOTSTRAP_CLICKHOUSE_USER}/g" | sed "s/{CLICKHOUSE_PASSWORD}/$${BOOTSTRAP_CLICKHOUSE_PASSWORD}/g" | clickhouse-client --host clickhouse --user default --multiquery
         -- Create database across cluster
         CREATE DATABASE IF NOT EXISTS analytics ON CLUSTER openrails;
 
@@ -169,16 +170,16 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      # Database connection via host-exposed ports (same as local dev)
-      DB_HOST: "host.docker.internal"
+      # Database connection over the compose network.
+      DB_HOST: "postgres"
       DB_PORT: "5432"
       DB_DATABASE: "openrails_db"
       DB_USERNAME: "admin"
       DB_PASSWORD: "${DB_PASSWORD:-admin_password}"
       DB_SSLMODE: "disable"
-      # ClickHouse connection via host-exposed ports
-      CLICKHOUSE_HTTP_ADDR: "http://host.docker.internal:8123"
-      CLICKHOUSE_CLIENT_ADDR: "host.docker.internal:9002"
+      # ClickHouse connection over the compose network.
+      CLICKHOUSE_HTTP_ADDR: "http://clickhouse:8123"
+      CLICKHOUSE_CLIENT_ADDR: "clickhouse:9000"
       CLICKHOUSE_DB: "analytics"
       CLICKHOUSE_USER: "${CLICKHOUSE_USER:-analytics_user}"
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-analytics_password}"

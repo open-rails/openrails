@@ -24,12 +24,12 @@ import (
 
 // fakeServiceTokenResolver implements ginmw.ServiceTokenResolver for the mint route tests.
 type fakeServiceTokenResolver struct {
-	looksLikeOAT bool
-	resolved     *controlplane.ResolvedServiceToken
-	err          error
+	looksLikeServiceToken bool
+	resolved              *controlplane.ResolvedServiceToken
+	err                   error
 }
 
-func (f fakeServiceTokenResolver) LooksLikeServiceToken(string) bool { return f.looksLikeOAT }
+func (f fakeServiceTokenResolver) LooksLikeServiceToken(string) bool { return f.looksLikeServiceToken }
 func (f fakeServiceTokenResolver) ResolveServiceToken(context.Context, string) (*controlplane.ResolvedServiceToken, error) {
 	return f.resolved, f.err
 }
@@ -73,7 +73,7 @@ func postMint(e *gin.Engine, withAuth bool, body string) *httptest.ResponseRecor
 	return w
 }
 
-func operatorOAT(org string) *controlplane.ResolvedServiceToken {
+func operatorServiceToken(org string) *controlplane.ResolvedServiceToken {
 	return &controlplane.ResolvedServiceToken{
 		AuthKitTenantSlug: org,
 		TenantSlug:        org,
@@ -81,11 +81,11 @@ func operatorOAT(org string) *controlplane.ResolvedServiceToken {
 	}
 }
 
-// Happy path: an service token holding PermSelfMint mints a token; the response carries the
+// Happy path: a service token holding PermSelfMint mints a token; the response carries the
 // token + RFC3339 expiry, and the minter was called with the service token's tenant.
 func TestMintRoute_SucceedsAndReturnsToken(t *testing.T) {
 	minter := &recordingMinter{}
-	resolver := fakeServiceTokenResolver{looksLikeOAT: true, resolved: operatorOAT("acme-org")}
+	resolver := fakeServiceTokenResolver{looksLikeServiceToken: true, resolved: operatorServiceToken("acme-org")}
 	e := newMintRouter(t, resolver, minter)
 
 	w := postMint(e, true, `{"delegated_sub":"user-42","permissions":["openrails:self:billing:read"],"ttl_seconds":120}`)
@@ -112,7 +112,7 @@ func TestMintRoute_SucceedsAndReturnsToken(t *testing.T) {
 // `tenant`/`org` is ignored. The handler never reads tenant from the body.
 func TestMintRoute_BodyCannotOverrideTenant(t *testing.T) {
 	minter := &recordingMinter{}
-	resolver := fakeServiceTokenResolver{looksLikeOAT: true, resolved: operatorOAT("caller-org")}
+	resolver := fakeServiceTokenResolver{looksLikeServiceToken: true, resolved: operatorServiceToken("caller-org")}
 	e := newMintRouter(t, resolver, minter)
 
 	// Attacker tries to smuggle a different tenant in the body.
@@ -123,10 +123,10 @@ func TestMintRoute_BodyCannotOverrideTenant(t *testing.T) {
 
 // (5) Calling without a valid service token is rejected: the service token gate runs before the
 // handler, so no mint happens.
-func TestMintRoute_RejectedWithoutOAT(t *testing.T) {
+func TestMintRoute_RejectedWithoutServiceToken(t *testing.T) {
 	minter := &recordingMinter{}
-	// Resolver reports the credential is not an service token at all.
-	resolver := fakeServiceTokenResolver{looksLikeOAT: false}
+	// Resolver reports the credential is not a service token at all.
+	resolver := fakeServiceTokenResolver{looksLikeServiceToken: false}
 	e := newMintRouter(t, resolver, minter)
 
 	w := postMint(e, false, `{"delegated_sub":"u1","permissions":["openrails:self:billing:read"]}`)
@@ -134,7 +134,7 @@ func TestMintRoute_RejectedWithoutOAT(t *testing.T) {
 	require.False(t, minter.called, "no token may be minted without a valid service token")
 }
 
-// An service token lacking PermSelfMint is forbidden: the per-route permission gate blocks
+// A service token lacking PermSelfMint is forbidden: the per-route permission gate blocks
 // it before the handler.
 func TestMintRoute_RejectedWithoutMintPermission(t *testing.T) {
 	minter := &recordingMinter{}
@@ -142,7 +142,7 @@ func TestMintRoute_RejectedWithoutMintPermission(t *testing.T) {
 		AuthKitTenantSlug: "acme-org",
 		Permissions:       []string{controlplane.PermCreditsWrite}, // no self:mint
 	}
-	resolver := fakeServiceTokenResolver{looksLikeOAT: true, resolved: serviceToken}
+	resolver := fakeServiceTokenResolver{looksLikeServiceToken: true, resolved: serviceToken}
 	e := newMintRouter(t, resolver, minter)
 
 	w := postMint(e, true, `{"delegated_sub":"u1","permissions":["openrails:self:billing:read"]}`)
@@ -153,7 +153,7 @@ func TestMintRoute_RejectedWithoutMintPermission(t *testing.T) {
 // A forbidden (non-self) requested permission surfaces as 403 from the handler.
 func TestMintRoute_ForbiddenPermissionRejected(t *testing.T) {
 	minter := &recordingMinter{retErr: &controlplane.ErrMintForbiddenPermission{Permission: "openrails:credits:write"}}
-	resolver := fakeServiceTokenResolver{looksLikeOAT: true, resolved: operatorOAT("acme-org")}
+	resolver := fakeServiceTokenResolver{looksLikeServiceToken: true, resolved: operatorServiceToken("acme-org")}
 	e := newMintRouter(t, resolver, minter)
 
 	w := postMint(e, true, `{"delegated_sub":"u1","permissions":["openrails:credits:write"]}`)
@@ -164,7 +164,7 @@ func TestMintRoute_ForbiddenPermissionRejected(t *testing.T) {
 // A missing delegated_sub fails request binding (delegated_sub is required).
 func TestMintRoute_MissingSubjectRejected(t *testing.T) {
 	minter := &recordingMinter{}
-	resolver := fakeServiceTokenResolver{looksLikeOAT: true, resolved: operatorOAT("acme-org")}
+	resolver := fakeServiceTokenResolver{looksLikeServiceToken: true, resolved: operatorServiceToken("acme-org")}
 	e := newMintRouter(t, resolver, minter)
 
 	w := postMint(e, true, `{"permissions":["openrails:self:billing:read"]}`)
@@ -174,7 +174,7 @@ func TestMintRoute_MissingSubjectRejected(t *testing.T) {
 
 // The mint route is not mounted when no minter is wired (verifier-only mode).
 func TestMintRoute_NotMountedWithoutMinter(t *testing.T) {
-	resolver := fakeServiceTokenResolver{looksLikeOAT: true, resolved: operatorOAT("acme-org")}
+	resolver := fakeServiceTokenResolver{looksLikeServiceToken: true, resolved: operatorServiceToken("acme-org")}
 	e := newMintRouter(t, resolver, nil)
 
 	w := postMint(e, true, `{"delegated_sub":"u1","permissions":["openrails:self:billing:read"]}`)

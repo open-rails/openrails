@@ -77,6 +77,6 @@ COMMENT ON COLUMN billing.tenant_delegated_issuers.jwks_uri IS
 COMMENT ON COLUMN billing.tenant_delegated_issuers.enabled IS
     'Per-issuer kill-switch. Only enabled rows are loaded into the live verifier; disabling evicts without affecting sibling issuers of the same tenant.';
 
--- Application role needs DML (it manages issuers via the OAT-gated route and
+-- Application role needs DML (it manages issuers via the service-token-gated route and
 -- reloads the verifier). The role + default privileges are created in 050.
 GRANT SELECT, INSERT, UPDATE, DELETE ON billing.tenant_delegated_issuers TO openrails_app;

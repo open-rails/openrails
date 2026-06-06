@@ -13,47 +13,46 @@
 SET lock_timeout      = '10s';
 SET statement_timeout = '300s';
 
-ALTER TABLE billing.user_credit_balances
-    RENAME COLUMN owner_id TO tenant_subject_id;
-ALTER TABLE billing.user_credit_balances
-    RENAME COLUMN user_id TO invoker_id;
-
-ALTER TABLE billing.credit_transactions
-    RENAME COLUMN owner_id TO tenant_subject_id;
-ALTER TABLE billing.credit_transactions
-    RENAME COLUMN user_id TO invoker_id;
-
-ALTER TABLE billing.credit_blocks
-    RENAME COLUMN owner_id TO tenant_subject_id;
-ALTER TABLE billing.credit_blocks
-    RENAME COLUMN user_id TO invoker_id;
-
-ALTER TABLE billing.credit_account_settings
-    RENAME COLUMN owner_id TO tenant_subject_id;
-
-ALTER TABLE billing.credit_spend_limits
-    RENAME COLUMN owner_id TO tenant_subject_id;
-ALTER TABLE billing.credit_spend_limits
-    RENAME COLUMN invoker TO invoker_id;
-
-ALTER TABLE billing.usage_events
-    RENAME COLUMN owner_id TO tenant_subject_id;
-ALTER TABLE billing.usage_events
-    RENAME COLUMN user_id TO invoker_id;
-
-ALTER TABLE billing.invoices
-    RENAME COLUMN owner_id TO tenant_subject_id;
-
-ALTER TABLE billing.tier_policies
-    RENAME COLUMN owner_id TO tenant_subject_id;
-
-ALTER TABLE billing.payment_blocklist
-    RENAME COLUMN owner_id TO tenant_subject_id;
-
-ALTER TABLE billing.budget_reservations
-    RENAME COLUMN owner_id TO tenant_subject_id;
-ALTER TABLE billing.budget_reservations
-    RENAME COLUMN actor TO invoker_id;
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN
+        SELECT *
+        FROM (VALUES
+            ('user_credit_balances', 'owner_id', 'tenant_subject_id'),
+            ('user_credit_balances', 'user_id', 'invoker_id'),
+            ('credit_transactions', 'owner_id', 'tenant_subject_id'),
+            ('credit_transactions', 'user_id', 'invoker_id'),
+            ('credit_blocks', 'owner_id', 'tenant_subject_id'),
+            ('credit_blocks', 'user_id', 'invoker_id'),
+            ('credit_account_settings', 'owner_id', 'tenant_subject_id'),
+            ('credit_spend_limits', 'owner_id', 'tenant_subject_id'),
+            ('credit_spend_limits', 'invoker', 'invoker_id'),
+            ('usage_events', 'owner_id', 'tenant_subject_id'),
+            ('usage_events', 'user_id', 'invoker_id'),
+            ('invoices', 'owner_id', 'tenant_subject_id'),
+            ('tier_policies', 'owner_id', 'tenant_subject_id'),
+            ('payment_blocklist', 'owner_id', 'tenant_subject_id'),
+            ('budget_reservations', 'owner_id', 'tenant_subject_id'),
+            ('budget_reservations', 'actor', 'invoker_id')
+        ) AS v(table_name, old_column, new_column)
+    LOOP
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'billing'
+              AND table_name = r.table_name
+              AND column_name = r.old_column
+        ) AND NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'billing'
+              AND table_name = r.table_name
+              AND column_name = r.new_column
+        ) THEN
+            EXECUTE format('ALTER TABLE billing.%I RENAME COLUMN %I TO %I', r.table_name, r.old_column, r.new_column);
+        END IF;
+    END LOOP;
+END $$;
 
 ALTER INDEX IF EXISTS billing.uq_user_credit_balances_owner_type RENAME TO uq_user_credit_balances_payer_type;
 ALTER INDEX IF EXISTS billing.uniq_credit_hold_idem_owner RENAME TO uniq_credit_hold_idem_payer;

@@ -89,7 +89,7 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 		Resources:   resources,
 	})
 	if err != nil {
-		return fmt.Errorf("mint operator serviceToken: %w", err)
+		return fmt.Errorf("mint operator service token: %w", err)
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{

@@ -101,7 +101,7 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 		Resources:   resources,
 	})
 	if err != nil {
-		return fmt.Errorf("mint tenant subject serviceToken: %w", err)
+		return fmt.Errorf("mint tenant subject service token: %w", err)
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{

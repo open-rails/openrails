@@ -28,7 +28,7 @@ const (
 type ResolvedServiceToken struct {
 	// AuthKitTenantSlug is the AuthKit tenant that owns the service token.
 	AuthKitTenantSlug string
-	// TenantID is the OpenRails tenant (#223) the owning org administers.
+	// TenantID is the OpenRails tenant (#223) the service token administers.
 	TenantID tenant.ID
 	// TenantSlug is the resolved tenant's slug.
 	TenantSlug string
@@ -116,7 +116,7 @@ func (c *ControlPlane) TenantScope(ctx context.Context, ref string) (tenant.ID, 
 }
 
 // TokenPrefix returns the configured service token brand prefix (e.g. "openrails"), used to
-// recognize and parse presented service tokens. Empty -> bare "oat_" marker.
+// recognize and parse presented service tokens. Empty -> bare "st_" marker.
 func (c *ControlPlane) TokenPrefix() string {
 	if c == nil || c.cfg == nil || c.cfg.Auth == nil || c.cfg.Auth.ControlPlane == nil {
 		return ""
@@ -134,13 +134,13 @@ func (c *ControlPlane) LooksLikeServiceToken(token string) bool {
 // ResolveServiceToken validates a presented service token string end-to-end:
 //
 //   - parses the <prefix>_st_<key_id>_<secret> shape,
-//   - resolves key id + secret hash via AuthKit core (owning org, permissions,
-//     expiry, revocation, org-deleted) — returns authcore.ErrAccessTokenExpired /
+//   - resolves key id + secret hash via AuthKit core (owning tenant, permissions,
+//     expiry, revocation, tenant-deleted) — returns authcore.ErrAccessTokenExpired /
 //     ErrAccessTokenRevoked / ErrInvalidAccessToken on those conditions,
 //   - maps the owning AuthKit tenant slug -> OpenRails tenant (#223) via the
 //     billing.tenants directory (authkit_tenant_slug).
 //
-// A cross-tenant or unknown org (no tenant directory row) yields
+// A cross-tenant or unknown service-token tenant (no tenant directory row) yields
 // ErrServiceTokenTenantUnresolved so the caller can reject the request.
 func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*ResolvedServiceToken, error) {
 	if c == nil || c.Core() == nil {
@@ -177,11 +177,11 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 // any OpenRails tenant (no billing.tenants row, or the tenant is suspended/
 // deleted). Treated as an authorization failure: the service token cannot act on any
 // tenant surface.
-var ErrServiceTokenTenantUnresolved = errors.New("controlplane: serviceToken owning org maps to no active tenant")
+var ErrServiceTokenTenantUnresolved = errors.New("controlplane: service token owning tenant maps to no active tenant")
 
 // ErrServiceTokenScopeDenied indicates an otherwise valid service token lacks the required
 // OpenRails tenant resource scope or carries unknown OpenRails resource kinds.
-var ErrServiceTokenScopeDenied = errors.New("controlplane: serviceToken resource scope denied")
+var ErrServiceTokenScopeDenied = errors.New("controlplane: service token resource scope denied")
 
 func validateServiceTokenResources(tid tenant.ID, resources []authcore.ServiceTokenResource) error {
 	if !hasResource(resources, ResourceKindTenant, tid.String()) {

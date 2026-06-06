@@ -46,9 +46,16 @@ func newDelegatedTestRouter(resolver DelegatedResolver, perm string) *gin.Engine
 }
 
 func doDelegatedRequest(r *gin.Engine, withAuth bool) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodGet, "/self", nil)
 	if withAuth {
-		req.Header.Set("Authorization", "Bearer eyJ.delegated.jwt")
+		return doDelegatedBearerRequest(r, "eyJ.delegated.jwt")
+	}
+	return doDelegatedBearerRequest(r, "")
+}
+
+func doDelegatedBearerRequest(r *gin.Engine, token string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/self", nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -134,6 +141,14 @@ func TestDelegatedSelfRequired_DeniesNormalSubOrInvalid(t *testing.T) {
 	resolver := fakeDelegatedResolver{err: controlplane.ErrDelegatedInvalid}
 	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
 	w := doDelegatedRequest(r, true)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Contains(t, w.Body.String(), "delegated_token_invalid")
+}
+
+func TestDelegatedSelfRequired_DeniesServiceTokenCredential(t *testing.T) {
+	resolver := fakeDelegatedResolver{err: controlplane.ErrDelegatedInvalid}
+	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
+	w := doDelegatedBearerRequest(r, "openrails_st_keyid_secret")
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Contains(t, w.Body.String(), "delegated_token_invalid")
 }

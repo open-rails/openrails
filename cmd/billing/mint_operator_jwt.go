@@ -17,7 +17,7 @@ import (
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
-// mintOperatorJWT mints a real, JWKS-verifiable, ORG-SCOPED user access token
+// mintOperatorJWT mints a real, JWKS-verifiable, tenant-scoped user access token
 // (NOT an opaque service token) for the operator tenant, so that the standalone server's
 // JWT verifier accepts it on the /v1/admin/* surface (OperatorAdminRequired
 // checks the `org` + `org_roles` claims). It is the e2e provisioning bridge:
@@ -26,7 +26,7 @@ import (
 //
 // It idempotently ensures the operator tenant + role exist (control-plane
 // bootstrap), creates (or reuses) a test user, makes them an operator-org
-// member, assigns them the operator role, then issues an org access token via
+// member, assigns them the operator role, then issues a tenant-scoped JWT via
 // AuthKit core. The result verifies against the control plane's own JWKS when
 // the control-plane issuer is in the server's auth.issuers.
 func mintOperatorJWT(cmd *cobra.Command, _ []string) error {

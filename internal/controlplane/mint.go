@@ -90,7 +90,7 @@ type MintedDelegatedToken struct {
 // DelegatedSelfRequired middleware for the same tenant + delegated_sub.
 //
 // Authorization to CALL this is the caller's responsibility: it must be gated by
-// an service token holding PermSelfMint, and the caller MUST pass the service token's resolved tenant
+// a service token holding PermSelfMint, and the caller MUST pass the service token's resolved tenant
 // as p.Tenant (never a body-supplied tenant). This method enforces the remaining
 // invariants: a non-empty subject, at least one permission, and that EVERY
 // requested permission is an `openrails:self:*` self-service permission.

@@ -9,8 +9,8 @@
 -- last_alert_at for low-balance alerts #240, last_topup_at for auto-top-up #239).
 --
 -- credit_spend_limits holds OPTIONAL per-invoker sub-limits (issue #237
--- per_invoker_caps + #246 invoker granularity): an org can cap a specific OAT
--- ('oat:<key_id>'), member ('user:<id>'), or delegated user ('issuer:sub').
+-- per_invoker_caps + #246 invoker granularity): a tenant can cap a specific
+-- service token ('serviceToken:<key_id>'), member ('user:<id>'), or delegated user ('issuer:sub').
 -- The invoker string is matched against credit_transactions.user_id (the ACTOR
 -- that caused usage), which the metering caller stamps with the canonical
 -- invoker form.

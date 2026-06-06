@@ -15,7 +15,7 @@ import (
 // service token-authenticated server-to-server billing operations live (issue #222). It
 // REPLACES the retired private/mTLS service listener: machine callers present an
 // OpenRails-issued tenant service token as a Bearer token against this public surface. The
-// acting tenant is bound by the service token's owning org, not the URL.
+// acting tenant is bound by the service token's owning tenant, not the URL.
 const ServiceRoutePrefix = "/service"
 
 // SelfRoutePrefix is the path under the tenant-scoped public API where
@@ -45,7 +45,7 @@ func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFu
 // RegisterServiceRoutes mounts the server-to-server billing surface on a
 // tenant-scoped PUBLIC route group authenticated by OpenRails-issued tenant service tokens
 // (issue #222). This replaces the retired private/mTLS listener and its
-// certificate-scope model: every operation is gated by an service token permission from the
+// certificate-scope model: every operation is gated by a service token permission from the
 // canonical colon-form OpenRails permission catalog, and the acting tenant is the
 // service token's owning tenant (pinned by ServiceTokenRequired before any tenant-owned DB access).
 //
@@ -65,7 +65,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	}
 
 	// Browser-tier delegated-token MINT (issue #222). A host backend authenticated
-	// by an service token holding PermSelfMint asks OpenRails to mint a short-lived,
+	// by a service token holding PermSelfMint asks OpenRails to mint a short-lived,
 	// user-scoped delegated access token (for its OWN tenant) to hand to a browser
 	// for the /v1/self/* surface. Mounted only when a minter is wired (control
 	// plane present); the service token gate + per-route permission keep it server-to-server.
@@ -82,7 +82,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	}
 
 	// FEDERATED issuer management (issue #259). The service token remains the ROOT
-	// tenant-management credential: a host backend authenticated by an service token holding
+	// tenant-management credential: a host backend authenticated by a service token holding
 	// PermAdmin for its tenant registers/rotates/disables the issuer + JWKS URL it
 	// self-signs aud=openrails browser tokens with. The tenant is bound from the
 	// service token (never the body), so a caller can only manage its OWN tenant's issuers.

@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -47,6 +48,8 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	ctx := context.Background()
 
 	userID := uuid.New().String()
+	tenantSubjectID := personalOwnerID(userID)
+	tenantSubject := identity.TenantSubjectID(tenantSubjectID)
 	creditTypeName := "svc_test_credits_" + uuid.NewString()
 
 	// Seed a credit type and starting balance.
@@ -63,14 +66,15 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.NoError(t, err)
 
 	ucb := &models.UserCreditBalance{
-		ID:           uuid.New(),
-		OwnerID:      personalOwnerID(userID),
-		UserID:       userID,
-		CreditTypeID: ct.ID,
-		Balance:      10_000,
-		HeldBalance:  0,
-		CreatedAt:    time.Now().UTC(),
-		UpdatedAt:    time.Now().UTC(),
+		ID:              uuid.New(),
+		TenantID:        tenant.DefaultID.UUID(),
+		TenantSubjectID: tenantSubjectID,
+		InvokerID:       userID,
+		CreditTypeID:    ct.ID,
+		Balance:         10_000,
+		HeldBalance:     0,
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
 	}
 	_, err = suite.BunDB.NewInsert().Model(ucb).Exec(ctx)
 	require.NoError(t, err)
@@ -111,39 +115,41 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	}}
 	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver), nil, nil)
 
-	withOAT := func(req *http.Request) {
+	withServiceToken := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
 	}
 
 	// 1) Create hold via Service facade, release via service HTTP.
 	hold1, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
-		UserID:     userID,
-		CreditType: creditTypeName,
-		Amount:     123,
-		Source:     "svc_test",
-		SourceID:   "hold-1",
-		ExpiresAt:  time.Now().Add(10 * time.Minute).UTC(),
+		TenantSubjectID: &tenantSubject,
+		InvokerID:       userID,
+		CreditType:      creditTypeName,
+		Amount:          123,
+		Source:          "svc_test",
+		SourceID:        "hold-1",
+		ExpiresAt:       time.Now().Add(10 * time.Minute).UTC(),
 	})
 	require.NoError(t, err)
 	require.NotEqual(t, uuid.Nil, hold1.ID)
 
 	reqRelease := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold/"+hold1.ID.String()+"/release", nil)
-	withOAT(reqRelease)
+	withServiceToken(reqRelease)
 	wRelease := httptest.NewRecorder()
 	router.ServeHTTP(wRelease, reqRelease)
 	require.Equal(t, http.StatusOK, wRelease.Code)
 
 	// 2) Create hold via service HTTP, capture via Service facade.
 	bodyHold, _ := json.Marshal(map[string]any{
-		"user_id":     userID,
-		"credit_type": creditTypeName,
-		"amount":      456,
-		"source":      "svc_test",
-		"source_id":   "hold-2",
-		"expires_at":  time.Now().Add(10 * time.Minute).Unix(),
+		"tenant_subject_id": tenantSubjectID.String(),
+		"invoker_id":        userID,
+		"credit_type":       creditTypeName,
+		"amount":            456,
+		"source":            "svc_test",
+		"source_id":         "hold-2",
+		"expires_at":        time.Now().Add(10 * time.Minute).Unix(),
 	})
 	reqHold := httptest.NewRequest(http.MethodPost, "/v1/service/credits/hold", bytes.NewReader(bodyHold))
-	withOAT(reqHold)
+	withServiceToken(reqHold)
 	reqHold.Header.Set("Content-Type", "application/json")
 	wHold := httptest.NewRecorder()
 	router.ServeHTTP(wHold, reqHold)
@@ -167,7 +173,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Contains(t, ents, "premium-1")
 
 	reqEnt := httptest.NewRequest(http.MethodGet, "/v1/service/users/"+userID+"/entitlements", nil)
-	withOAT(reqEnt)
+	withServiceToken(reqEnt)
 	wEnt := httptest.NewRecorder()
 	router.ServeHTTP(wEnt, reqEnt)
 	require.Equal(t, http.StatusOK, wEnt.Code)
