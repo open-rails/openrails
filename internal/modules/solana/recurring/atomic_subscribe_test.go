@@ -50,7 +50,7 @@ func newSubscribeSvc(t *testing.T, rpc prepareRPC) (*PrepareSubscribeService, so
 	signer := solana.NewKeypairSigner(subSecrets{key: merchant.String()}, 0)
 	// The Submitter must resolve the SAME merchant address the signer co-signs with.
 	submitter := NewSignerSubmitter(signer, nil)
-	return NewPrepareSubscribeService(submitter, signer, rpc, "mainnet"), merchant.PublicKey()
+	return NewPrepareSubscribeService(submitter, signer, rpc, "devnet", testSolanaTokens()), merchant.PublicKey()
 }
 
 func newSubscribeInput(t *testing.T) PrepareSubscribeInput {
@@ -99,6 +99,23 @@ func TestPrepareSubscribe_AtomicCosignedBundle(t *testing.T) {
 	if signed != 1 {
 		t.Errorf("exactly one slot (the cranker) should be pre-signed, got %d", signed)
 	}
+}
+
+func TestPrepareSubscribe_InitTransactionHasUnsignedSignatureSlots(t *testing.T) {
+	orig := authorityReadBackoff
+	authorityReadBackoff = 0
+	defer func() { authorityReadBackoff = orig }()
+
+	svc, _ := newSubscribeSvc(t, subFakeRPCAbsent{balance: 50_000_000})
+	res, err := svc.Prepare(context.Background(), newSubscribeInput(t))
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if res.Step != "init" {
+		t.Fatalf("Step = %q, want init", res.Step)
+	}
+	tx := decodeTx(t, res.Transactions[0])
+	assertUnsignedSignatureSlots(t, tx)
 }
 
 // Pre-flight: balance below the first-period amount returns the typed

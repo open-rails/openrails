@@ -67,7 +67,7 @@ func newTierChangeSvc(t *testing.T) *PrepareTierChangeService {
 		t.Fatal(err)
 	}
 	signer := solana.NewKeypairSigner(tierChangeSecrets{key: merchant.String()}, 0)
-	return NewPrepareTierChangeService(signer, tcFakeRPC{initID: 42}, "mainnet")
+	return NewPrepareTierChangeService(signer, tcFakeRPC{initID: 42}, "devnet", testSolanaTokens())
 }
 
 func decodeTx(t *testing.T, b64 string) *solanago.Transaction {
@@ -138,11 +138,7 @@ func TestPrepareTierChange_Downgrade(t *testing.T) {
 	if int(tx.Message.Header.NumRequiredSignatures) != 1 {
 		t.Fatalf("downgrade has a single signer (subscriber), got %d", tx.Message.Header.NumRequiredSignatures)
 	}
-	for _, s := range tx.Signatures {
-		if !s.IsZero() {
-			t.Error("downgrade tx must be fully UNSIGNED (wallet signs)")
-		}
-	}
+	assertUnsignedSignatureSlots(t, tx)
 }
 
 func TestPrepareTierChange_RejectsBadInput(t *testing.T) {

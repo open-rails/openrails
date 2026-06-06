@@ -2,7 +2,6 @@ package recurring
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -389,11 +388,7 @@ func (s *PrepareSubscribeService) buildUnsignedTxBase64(ctx context.Context, pay
 	if err != nil {
 		return "", fmt.Errorf("recurring: build transaction: %w", err)
 	}
-	raw, err := tx.MarshalBinary()
-	if err != nil {
-		return "", fmt.Errorf("recurring: serialize transaction: %w", err)
-	}
-	return base64.StdEncoding.EncodeToString(raw), nil
+	return marshalUnsignedTxBase64(tx)
 }
 
 // readInitID reads the i64 LE initId from the SubscriptionAuthority account data.

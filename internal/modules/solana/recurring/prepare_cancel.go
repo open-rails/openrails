@@ -2,7 +2,6 @@ package recurring
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 
 	solanago "github.com/doujins-org/solana-go"
@@ -134,9 +133,5 @@ func (s *PrepareCancelService) buildUnsignedTxBase64(ctx context.Context, payer 
 	if err != nil {
 		return "", fmt.Errorf("recurring: build transaction: %w", err)
 	}
-	raw, err := tx.MarshalBinary()
-	if err != nil {
-		return "", fmt.Errorf("recurring: serialize transaction: %w", err)
-	}
-	return base64.StdEncoding.EncodeToString(raw), nil
+	return marshalUnsignedTxBase64(tx)
 }
