@@ -18,7 +18,7 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/lib/pq v1.10.9
-	github.com/open-rails/authkit v0.12.3
+	github.com/open-rails/authkit v0.12.5
 	github.com/open-rails/migratekit v0.7.15
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/riverqueue/river v0.26.0
@@ -33,8 +33,6 @@ require (
 	github.com/uptrace/bun/driver/pgdriver v1.2.15
 	github.com/uptrace/bun/extra/bundebug v1.2.15
 )
-
-replace github.com/open-rails/authkit => ../authkit
 
 require (
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
