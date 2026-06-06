@@ -503,14 +503,14 @@
         "[x] Ensure runtime app tokens for Doujins and Hentai0 are minted by OpenRails/bootstrap and written to deployment-configured Vault outputs, never requested by the apps at startup.",
         "[x] Keep token output permissions and resource scopes manifest-driven and arbitrary; examples may use entitlement-read, but code must not hardcode that as the only possible runtime token.",
         "[x] Ensure service-token principals cannot access delegated-user/browser endpoints unless explicitly designed, and delegated JWTs cannot use service-token routes.",
-        "[ ] Audit entitlement reads, credits, account/balance, admin, and bootstrap flows for correct principal-type checks.",
+        "[x] Audit entitlement reads, credits, account/balance, admin, and bootstrap flows for correct principal-type checks.",
         "[x] Add tests for service-token entitlement read, wrong resource scope denial, missing permission denial, delegated JWT rejected on service route, and service token rejected on delegated-user route.",
         "[x] Update compose/GitOps docs to state Doujins/Hentai0 receive server-to-server OpenRails tokens from Vault/env injection, not by calling OpenRails registration APIs.",
         "[x] Enforce and document service-token routes as server-to-server only; service tokens must not be accepted for delegated-user browser/self routes.",
         "[x] Add examples for Doujins/Hentai0/Cozy entitlement-read service tokens and Tensorhub balance reserve/capture/release service tokens.",
         "[x] Add tests proving delegated JWTs are rejected on service-token-only reserve/capture/release routes, and service tokens are rejected on frontend/direct self routes."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 316,
