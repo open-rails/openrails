@@ -128,7 +128,7 @@ func (c *ControlPlane) TokenPrefix() string {
 // by the service token middleware to route a Bearer credential to service token validation rather
 // than JWT verification.
 func (c *ControlPlane) LooksLikeServiceToken(token string) bool {
-	return authcore.HasServiceServiceTokenPrefix(c.TokenPrefix(), strings.TrimSpace(token))
+	return authcore.HasServiceTokenPrefix(c.TokenPrefix(), strings.TrimSpace(token))
 }
 
 // ResolveServiceToken validates a presented service token string end-to-end:

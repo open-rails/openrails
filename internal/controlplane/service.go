@@ -63,6 +63,13 @@ type ControlPlane struct {
 // verifier also refetches on-demand when a presented `kid` is unknown.
 const delegatedIssuerJWKSCacheTTL = time.Hour
 
+func registrationMode(locked bool) authcore.RegistrationMode {
+	if locked {
+		return authcore.RegistrationModeBootstrapOnly
+	}
+	return authcore.RegistrationModeOpen
+}
+
 // New builds the OpenRails-owned AuthKit control plane from config and a pgx
 // pool. The pool must point at the database that holds AuthKit's `profiles.*`
 // schema (in self-hosted mode this is the same database OpenRails uses). The
@@ -138,10 +145,10 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 			{Name: OperatorRole, Permissions: OperatorRolePermissions()},
 		},
 		// Self-hosted locked-down posture (#47 switches): no public user
-		// self-registration, no public org onboarding/management. Embedded
-		// bootstrap/core calls (CreateTenant/AssignRole/MintOAT) are unaffected.
-		PublicRegistrationDisabled:     locked,
-		PublicTenantManagementDisabled: locked,
+		// self-registration, no public tenant onboarding/management. Embedded
+		// bootstrap/core calls (CreateTenant/AssignRole/MintServiceToken) are unaffected.
+		NativeUserRegistrationMode: registrationMode(locked),
+		TenantRegistrationMode:     registrationMode(locked),
 	}
 
 	authSvc, err := authhttp.NewService(coreCfg)
