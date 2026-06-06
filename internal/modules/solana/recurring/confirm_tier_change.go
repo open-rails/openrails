@@ -8,6 +8,7 @@ import (
 	solanago "github.com/doujins-org/solana-go"
 	"github.com/doujins-org/solana-go/rpc"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -122,6 +123,7 @@ type ConfirmTierChangeService struct {
 	lifecycle  tierChangeLifecycle
 	store      tierChangeStore
 	network    string
+	tokens     map[string]config.SolanaToken
 	commitment rpc.CommitmentType
 	timeout    time.Duration
 	now        func() time.Time
@@ -130,12 +132,13 @@ type ConfirmTierChangeService struct {
 // NewConfirmTierChangeService builds a ConfirmTierChangeService. It confirms to
 // the Confirmed commitment with the RPC client's default watch timeout. network
 // ("mainnet"/"devnet") resolves the recurring mint for the new row.
-func NewConfirmTierChangeService(rpcClient tierChangeConfirmRPC, lifecycle tierChangeLifecycle, store tierChangeStore, network string) *ConfirmTierChangeService {
+func NewConfirmTierChangeService(rpcClient tierChangeConfirmRPC, lifecycle tierChangeLifecycle, store tierChangeStore, network string, tokens ...map[string]config.SolanaToken) *ConfirmTierChangeService {
 	return &ConfirmTierChangeService{
 		rpc:        rpcClient,
 		lifecycle:  lifecycle,
 		store:      store,
 		network:    network,
+		tokens:     normalizeRecurringTokens(firstTokenMap(tokens)),
 		commitment: rpc.CommitmentConfirmed,
 		timeout:    0, // 0 -> RPCClient.WatchTransaction default
 		now:        time.Now,
@@ -294,7 +297,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 // same-group change).
 func (s *ConfirmTierChangeService) buildNewRow(oldRow *models.SolanaSubscription, newSubID uuid.UUID, in ConfirmTierChangeInput, newPDA string, nextPullAt time.Time) (*models.SolanaSubscription, error) {
 	mintStr := oldRow.Mint
-	if resolved, _, rerr := ResolveRecurringMint(in.NewMintSymbol, s.network); rerr == nil && resolved != "" {
+	if resolved, _, rerr := ResolveRecurringMintFromTokens(in.NewMintSymbol, s.tokens); rerr == nil && resolved != "" {
 		mintStr = resolved
 	}
 

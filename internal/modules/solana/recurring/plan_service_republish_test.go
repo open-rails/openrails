@@ -52,7 +52,7 @@ func buildPlanBlob(owner, mint solanago.PublicKey, amount, periodHours uint64, c
 
 func devnetUSDCMint(t *testing.T) solanago.PublicKey {
 	t.Helper()
-	mintStr, _, err := ResolveRecurringMint("USDC", "devnet")
+	mintStr, _, err := ResolveRecurringMintFromTokens("USDC", testSolanaTokens())
 	if err != nil {
 		t.Fatalf("resolve devnet USDC mint: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestPublishPlanIdempotentRepublish(t *testing.T) {
 
 	sub := &fakeSubmitter{merchant: merchant}
 	reader := fakePlanReader{data: buildPlanBlob(merchant, mint, amount, periodHours, createdAt)}
-	svc := NewPlanServiceWithReader(sub, reader, "devnet")
+	svc := NewPlanServiceWithReader(sub, reader, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
 		TenantID:        tenant.ID{},
@@ -117,7 +117,7 @@ func TestPublishPlanRepublishDifferingTermsRejected(t *testing.T) {
 	// On-chain plan has amount 5_000_000; the re-publish requests 10_000_000.
 	reader := fakePlanReader{data: buildPlanBlob(merchant, mint, 5_000_000, 720, 1_717_200_000)}
 	sub := &fakeSubmitter{merchant: merchant}
-	svc := NewPlanServiceWithReader(sub, reader, "devnet")
+	svc := NewPlanServiceWithReader(sub, reader, "devnet", testSolanaTokens())
 
 	_, err := svc.PublishPlan(context.Background(), PublishPlanInput{
 		TenantID:        tenant.ID{},
@@ -145,7 +145,7 @@ func TestPublishPlanAbsentPDAProceeds(t *testing.T) {
 
 	reader := fakePlanReader{data: nil} // PDA does not exist
 	sub := &fakeSubmitter{merchant: merchant}
-	svc := NewPlanServiceWithReader(sub, reader, "devnet")
+	svc := NewPlanServiceWithReader(sub, reader, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
 		TenantID:        tenant.ID{},
@@ -170,7 +170,7 @@ func TestPublishPlanPeriodBoundValidation(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
 	merchant := merchantKey.PublicKey()
 	sub := &fakeSubmitter{merchant: merchant}
-	svc := NewPlanService(sub, "devnet")
+	svc := NewPlanService(sub, "devnet", testSolanaTokens())
 
 	for _, period := range []uint64{0, maxPeriodHours + 1} {
 		_, err := svc.PublishPlan(context.Background(), PublishPlanInput{

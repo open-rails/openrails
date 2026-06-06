@@ -8,6 +8,7 @@ import (
 
 	solanago "github.com/doujins-org/solana-go"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -46,6 +47,7 @@ type EnrollService struct {
 	rpc       balanceChecker
 	submitter Submitter // for MerchantAddress
 	network   string
+	tokens    map[string]config.SolanaToken
 	now       func() time.Time
 }
 
@@ -53,8 +55,8 @@ type EnrollService struct {
 // of confirm (#286): the first pull is bundled into the atomic subscribe tx, so
 // confirm only verifies + creates the membership. Recurring rebills still use
 // CrankService elsewhere.
-func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, rpc balanceChecker, submitter Submitter, network string) *EnrollService {
-	return &EnrollService{lifecycle: lifecycle, repo: repo, rpc: rpc, submitter: submitter, network: network, now: time.Now}
+func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, rpc balanceChecker, submitter Submitter, network string, tokens ...map[string]config.SolanaToken) *EnrollService {
+	return &EnrollService{lifecycle: lifecycle, repo: repo, rpc: rpc, submitter: submitter, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
 }
 
 // EnrollInput describes a confirmed wallet enrollment to activate.
@@ -100,7 +102,7 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 	if err != nil {
 		return nil, fmt.Errorf("recurring: resolve merchant: %w", err)
 	}
-	mintStr, _, err := ResolveRecurringMint(in.MintSymbol, s.network)
+	mintStr, _, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
 	if err != nil {
 		return nil, err
 	}

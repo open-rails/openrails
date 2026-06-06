@@ -10,6 +10,7 @@ import (
 	"time"
 
 	solanago "github.com/doujins-org/solana-go"
+	"github.com/open-rails/openrails/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -98,13 +99,14 @@ type PrepareSubscribeService struct {
 	signer  solanaint.Signer
 	rpc     prepareRPC
 	network string
+	tokens  map[string]config.SolanaToken
 }
 
 // NewPrepareSubscribeService builds a PrepareSubscribeService. signer is the
 // cranker key used to pre-sign the atomic subscribe bundle's transfer slot (#286)
 // and MUST be the same key the Submitter resolves as the merchant address.
-func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rpc prepareRPC, network string) *PrepareSubscribeService {
-	return &PrepareSubscribeService{submitter: submitter, signer: signer, rpc: rpc, network: network}
+func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rpc prepareRPC, network string, tokens ...map[string]config.SolanaToken) *PrepareSubscribeService {
+	return &PrepareSubscribeService{submitter: submitter, signer: signer, rpc: rpc, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens))}
 }
 
 // PrepareSubscribeInput describes the plan + subscriber to enroll. Plan terms are
@@ -160,7 +162,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		return nil, fmt.Errorf("recurring: invalid plan terms (amount/period)")
 	}
 
-	mintStr, _, err := ResolveRecurringMint(in.MintSymbol, s.network)
+	mintStr, _, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
 	if err != nil {
 		return nil, err
 	}

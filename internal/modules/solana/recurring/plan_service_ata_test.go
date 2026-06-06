@@ -5,9 +5,18 @@ import (
 	"testing"
 
 	solanago "github.com/doujins-org/solana-go"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
+
+const testDevnetUSDCMint = "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ"
+
+func testSolanaTokens() map[string]config.SolanaToken {
+	return map[string]config.SolanaToken{
+		"USDC": {Mint: testDevnetUSDCMint, Decimals: 6},
+	}
+}
 
 // fakeSubmitter captures every submitted instruction set so tests can assert on
 // the on-chain effects PublishPlan produces without a live signer/RPC.
@@ -55,7 +64,7 @@ func TestPublishPlanEnsuresMerchantReceivingATA(t *testing.T) {
 	}
 	merchant := merchantKey.PublicKey()
 	sub := &fakeSubmitter{merchant: merchant}
-	svc := NewPlanService(sub, "devnet")
+	svc := NewPlanService(sub, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
 		TenantID:        tenant.ID{},
@@ -98,7 +107,7 @@ func TestPublishPlanEnsuresColdReceivingWalletATA(t *testing.T) {
 	cold := coldKey.PublicKey()
 
 	sub := &fakeSubmitter{merchant: merchant}
-	svc := NewPlanService(sub, "devnet")
+	svc := NewPlanService(sub, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
 		TenantID:        tenant.ID{},

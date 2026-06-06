@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	solanago "github.com/doujins-org/solana-go"
+	"github.com/open-rails/openrails/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -40,11 +41,12 @@ type PrepareTierChangeService struct {
 	signer  solanaint.Signer // the cranker: provides the merchant address + co-signs upgrades
 	rpc     tierChangeRPC
 	network string
+	tokens  map[string]config.SolanaToken
 }
 
 // NewPrepareTierChangeService builds a PrepareTierChangeService.
-func NewPrepareTierChangeService(signer solanaint.Signer, rpc tierChangeRPC, network string) *PrepareTierChangeService {
-	return &PrepareTierChangeService{signer: signer, rpc: rpc, network: network}
+func NewPrepareTierChangeService(signer solanaint.Signer, rpc tierChangeRPC, network string, tokens ...map[string]config.SolanaToken) *PrepareTierChangeService {
+	return &PrepareTierChangeService{signer: signer, rpc: rpc, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens))}
 }
 
 // PrepareTierChangeInput describes the old subscription + the new plan. New-plan
@@ -105,7 +107,7 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		return nil, fmt.Errorf("recurring: upgrade requires a non-zero prorated first charge")
 	}
 
-	mintStr, _, err := ResolveRecurringMint(in.MintSymbol, s.network)
+	mintStr, _, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
 	if err != nil {
 		return nil, err
 	}

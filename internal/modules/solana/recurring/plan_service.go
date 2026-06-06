@@ -8,6 +8,7 @@ import (
 	"time"
 
 	solanago "github.com/doujins-org/solana-go"
+	"github.com/open-rails/openrails/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -62,6 +63,7 @@ type PlanService struct {
 	submitter Submitter
 	reader    planReader // optional; enables the idempotent re-publish guard
 	network   string     // "mainnet" | "devnet"
+	tokens    map[string]config.SolanaToken
 	now       func() time.Time
 }
 
@@ -69,16 +71,16 @@ type PlanService struct {
 // re-publish guard is disabled (no plan reader); prefer NewPlanServiceWithReader
 // in production so a re-publish of an already-created plan is a no-op rather than
 // a loud on-chain create_plan failure.
-func NewPlanService(submitter Submitter, network string) *PlanService {
-	return &PlanService{submitter: submitter, network: network, now: time.Now}
+func NewPlanService(submitter Submitter, network string, tokens ...map[string]config.SolanaToken) *PlanService {
+	return &PlanService{submitter: submitter, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
 }
 
 // NewPlanServiceWithReader builds a PlanService that reads the Plan PDA back
 // before submitting create_plan, so a re-publish with MATCHING terms is an
 // idempotent no-op and a re-publish with DIFFERING terms is rejected (plans are
 // immutable on-chain — see PublishPlan).
-func NewPlanServiceWithReader(submitter Submitter, reader planReader, network string) *PlanService {
-	return &PlanService{submitter: submitter, reader: reader, network: network, now: time.Now}
+func NewPlanServiceWithReader(submitter Submitter, reader planReader, network string, tokens ...map[string]config.SolanaToken) *PlanService {
+	return &PlanService{submitter: submitter, reader: reader, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens)), now: time.Now}
 }
 
 // MerchantAddress returns the tenant's on-chain merchant (cranker) address — the
@@ -86,6 +88,10 @@ func NewPlanServiceWithReader(submitter Submitter, reader planReader, network st
 // price's plan PDA for an idempotent find-or-attach read-back before publishing.
 func (s *PlanService) MerchantAddress(ctx context.Context, tenantID tenant.ID) (solanago.PublicKey, error) {
 	return s.submitter.MerchantAddress(ctx, tenantID)
+}
+
+func (s *PlanService) ResolveMint(symbol string) (string, int, error) {
+	return ResolveRecurringMintFromTokens(symbol, s.tokens)
 }
 
 // PublishPlanInput describes a recurring plan to publish on-chain.
@@ -179,7 +185,7 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		}
 	}
 	symbol := normalizeSymbol(in.TokenSymbol)
-	mintStr, _, err := ResolveRecurringMint(symbol, s.network)
+	mintStr, _, err := ResolveRecurringMintFromTokens(symbol, s.tokens)
 	if err != nil {
 		return nil, err // not recurring-eligible / no mint for network
 	}

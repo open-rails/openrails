@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"strconv"
@@ -68,8 +69,9 @@ func (a *solanaAdapter) planService() (*recurring.PlanService, bool) {
 // UUID (first 8 bytes, big-endian). Determinism makes re-apply idempotent: the
 // same price always derives the same plan PDA, so find-or-attach re-attaches
 // rather than duplicating.
-func solanaPlanID(priceID uuid.UUID) uint64 {
-	return binary.BigEndian.Uint64(priceID[:8])
+func solanaPlanID(priceID uuid.UUID, mint string) uint64 {
+	sum := sha256.Sum256([]byte(priceID.String() + ":" + strings.TrimSpace(mint)))
+	return binary.BigEndian.Uint64(sum[:8])
 }
 
 func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
@@ -89,8 +91,12 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		return nil, fmt.Errorf("solana create-mode requires a positive unit_amount (stablecoin base units)")
 	}
 
-	planID := solanaPlanID(in.PriceID)
 	symbol := strings.ToUpper(strings.TrimSpace(in.Currency))
+	mint, _, err := plan.ResolveMint(symbol)
+	if err != nil {
+		return nil, err
+	}
+	planID := solanaPlanID(in.PriceID, mint)
 	periodHours := uint64(*in.BillingCycleDays) * 24
 
 	// Idempotent find-or-attach: create_plan fails on an already-occupied PDA, so

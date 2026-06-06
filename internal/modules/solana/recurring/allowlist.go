@@ -59,6 +59,14 @@ func (e ErrTokenNotRecurringEligible) Error() string {
 // without a configured mint for the network all return an error, so a caller can
 // never publish a plan against an ineligible or misconfigured mint.
 func ResolveRecurringMint(symbol, network string) (mint string, decimals int, err error) {
+	return ResolveRecurringMintFromTokens(symbol, config.TokensForNetwork(network))
+}
+
+// ResolveRecurringMintFromTokens validates that symbol is recurring-eligible and
+// resolves it from the runtime-configured token map. Production callers must use
+// this so deployed token config is the source of truth; hard-coded network
+// defaults are only used by legacy tests/helpers that call ResolveRecurringMint.
+func ResolveRecurringMintFromTokens(symbol string, tokens map[string]config.SolanaToken) (mint string, decimals int, err error) {
 	sym := strings.ToUpper(strings.TrimSpace(symbol))
 	if sym == "" {
 		return "", 0, fmt.Errorf("recurring: token symbol is required")
@@ -66,12 +74,30 @@ func ResolveRecurringMint(symbol, network string) (mint string, decimals int, er
 	if !IsRecurringStablecoinSymbol(sym) {
 		return "", 0, ErrTokenNotRecurringEligible{Symbol: sym}
 	}
-	tokens := config.TokensForNetwork(network)
 	tok, ok := tokens[sym]
 	if !ok || strings.TrimSpace(tok.Mint) == "" {
-		return "", 0, fmt.Errorf("recurring: token %q has no configured mint on network %q", sym, network)
+		return "", 0, fmt.Errorf("recurring: token %q has no configured mint", sym)
 	}
 	return tok.Mint, tok.Decimals, nil
+}
+
+func normalizeRecurringTokens(tokens map[string]config.SolanaToken) map[string]config.SolanaToken {
+	normalized := make(map[string]config.SolanaToken, len(tokens))
+	for symbol, token := range tokens {
+		s := strings.ToUpper(strings.TrimSpace(symbol))
+		if s == "" {
+			continue
+		}
+		normalized[s] = token
+	}
+	return normalized
+}
+
+func firstTokenMap(tokens []map[string]config.SolanaToken) map[string]config.SolanaToken {
+	if len(tokens) == 0 {
+		return nil
+	}
+	return tokens[0]
 }
 
 // ValidateRecurringMint confirms that the supplied mint matches the configured

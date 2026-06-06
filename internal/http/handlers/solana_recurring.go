@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -615,8 +616,10 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		email = *user.Email
 	}
 	network := ""
+	var tokens map[string]config.SolanaToken
 	if pc := r.State.Config.GetSolanaProcessor(); pc != nil {
 		network = pc.Network
+		tokens = pc.Tokens
 	}
 
 	svc := recurring.NewConfirmTierChangeService(
@@ -624,6 +627,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		r.State.SubscriptionLifecycleService,
 		dbrepo.NewSolanaSubscriptionRepo(r.State.DB),
 		network,
+		tokens,
 	)
 	result, err := svc.Confirm(r.Request.Context(), recurring.ConfirmTierChangeInput{
 		Signature:            req.Signature,

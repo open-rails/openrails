@@ -66,10 +66,13 @@ func TestSolanaAdapter_UpdateIsNoOp(t *testing.T) {
 
 func TestSolanaPlanID_Deterministic(t *testing.T) {
 	id := uuid.New()
-	if solanaPlanID(id) != solanaPlanID(id) {
+	if solanaPlanID(id, "mint-a") != solanaPlanID(id, "mint-a") {
 		t.Error("solanaPlanID must be deterministic for a given price id")
 	}
-	if solanaPlanID(id) == solanaPlanID(uuid.New()) {
+	if solanaPlanID(id, "mint-a") == solanaPlanID(uuid.New(), "mint-a") {
 		t.Error("solanaPlanID should differ across distinct price ids")
+	}
+	if solanaPlanID(id, "mint-a") == solanaPlanID(id, "mint-b") {
+		t.Error("solanaPlanID should differ across distinct configured mints")
 	}
 }

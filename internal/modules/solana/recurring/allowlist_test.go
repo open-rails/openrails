@@ -3,6 +3,8 @@ package recurring
 import (
 	"errors"
 	"testing"
+
+	"github.com/open-rails/openrails/config"
 )
 
 func TestIsRecurringStablecoinSymbol(t *testing.T) {
@@ -56,6 +58,22 @@ func TestResolveRecurringMint(t *testing.T) {
 	var typed ErrTokenNotRecurringEligible
 	if !errors.As(err, &typed) {
 		t.Errorf("expected ErrTokenNotRecurringEligible for PYUSD, got %T", err)
+	}
+}
+
+func TestResolveRecurringMintFromTokensUsesConfiguredMint(t *testing.T) {
+	const configuredMint = "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ"
+	mint, decimals, err := ResolveRecurringMintFromTokens("USDC", map[string]config.SolanaToken{
+		"USDC": {Mint: configuredMint, Decimals: 6},
+	})
+	if err != nil {
+		t.Fatalf("ResolveRecurringMintFromTokens: %v", err)
+	}
+	if mint != configuredMint {
+		t.Fatalf("mint = %s, want configured mint %s", mint, configuredMint)
+	}
+	if decimals != 6 {
+		t.Fatalf("decimals = %d, want 6", decimals)
 	}
 }
 
