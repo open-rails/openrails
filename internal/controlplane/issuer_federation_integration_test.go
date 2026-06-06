@@ -241,6 +241,31 @@ func TestFederatedDelegatedTokens(t *testing.T) {
 	})
 }
 
+func TestTouchTenantSubjectIsIdempotentPerOIDCTuple(t *testing.T) {
+	ctx := context.Background()
+	pool := newFedTestPool(t)
+	cp := newFedControlPlane(t, pool)
+
+	first, err := cp.TouchTenantSubject(ctx, fedTenantA, "https://doujins.test", "user-1")
+	require.NoError(t, err)
+	second, err := cp.TouchTenantSubject(ctx, fedTenantA, " https://doujins.test ", " user-1 ")
+	require.NoError(t, err)
+	require.Equal(t, first, second, "same tenant/issuer/subject tuple must resolve to the same payable subject")
+
+	otherIssuer, err := cp.TouchTenantSubject(ctx, fedTenantA, "https://hentai0.test", "user-1")
+	require.NoError(t, err)
+	require.NotEqual(t, first, otherIssuer, "issuer is part of the payable subject key")
+
+	var count int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*)
+		  FROM billing.tenant_subjects
+		 WHERE tenant_id = $1
+		   AND subject = 'user-1'
+	`, fedTenantA.String()).Scan(&count))
+	require.Equal(t, 2, count)
+}
+
 func federatedMultiIssuer(t *testing.T, pool *pgxpool.Pool) {
 	ctx := context.Background()
 	cp := newFedControlPlane(t, pool)

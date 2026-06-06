@@ -46,12 +46,17 @@ func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string) (*contr
 
 func newSelfRouter(t *testing.T, perms []string) *gin.Engine {
 	t.Helper()
+	return newSelfRouterWithResolver(t, fakeDelegatedResolver{permissions: perms})
+}
+
+func newSelfRouterWithResolver(t *testing.T, resolver ginmw.DelegatedResolver) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	group := e.Group("/v1/self")
 	// rt==nil: TenantDBConn is skipped, and the wrapped handlers are never
 	// reached on the 401/403 paths these tests assert.
-	RegisterSelfServiceRoutes(group, nil, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms}))
+	RegisterSelfServiceRoutes(group, nil, ginmw.DelegatedSelfRequired(resolver))
 	return e
 }
 
@@ -65,10 +70,18 @@ func newTenantAdminRouter(t *testing.T, perms []string) *gin.Engine {
 }
 
 func doSelf(e *gin.Engine, method, path string, withAuth bool) *httptest.ResponseRecorder {
+	token := ""
+	if withAuth {
+		token = "delegated.jwt.token"
+	}
+	return doSelfBearer(e, method, path, token)
+}
+
+func doSelfBearer(e *gin.Engine, method, path, token string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader("{}"))
 	req.Header.Set("Content-Type", "application/json")
-	if withAuth {
-		req.Header.Set("Authorization", "Bearer delegated.jwt.token")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
@@ -143,6 +156,13 @@ func TestSelfService_ResumeRejectedWithoutToken(t *testing.T) {
 	e := newSelfRouter(t, []string{controlplane.PermSelfSubscriptionCancel})
 	w := doSelf(e, http.MethodPost, "/v1/self/subscriptions/sub_123/resume", false)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestSelfService_RejectsServiceTokenCredential(t *testing.T) {
+	e := newSelfRouterWithResolver(t, fakeDelegatedResolver{err: controlplane.ErrDelegatedInvalid})
+	w := doSelfBearer(e, http.MethodPost, "/v1/self/subscriptions/sub_123/resume", "openrails_st_keyid_secret")
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Contains(t, w.Body.String(), "delegated_token_invalid")
 }
 
 func TestTenantAdmin_OperationalListsMountedAndGated(t *testing.T) {

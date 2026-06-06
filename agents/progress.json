@@ -489,9 +489,9 @@
         "[x] Add tests for valid Doujins issuer, valid Hentai0 issuer, same `sub` under two issuers, wrong audience, unknown issuer, disabled issuer, stale/rotated JWKS key, and delegated user not appearing as native user. Validated via delegated verifier, middleware, self/tenant-admin route tests, and federated issuer integration tests.",
         "[x] Update docs explaining delegated JWTs are for browser/admin direct calls, while service tokens are for server-to-server calls.",
         "[x] Add OpenRails route/principal tests showing frontend/direct self/admin operations accept delegated JWTs and reject service tokens unless a route is explicitly server-to-server.",
-        "[ ] Document delegated JWT examples for Cozy/Doujins/Hentai0 membership UI and Tensorhub tenant balance UI."
+        "[x] Document delegated JWT examples for Cozy/Doujins/Hentai0 membership UI and Tensorhub tenant balance UI."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 315,
@@ -504,10 +504,10 @@
         "[x] Keep token output permissions and resource scopes manifest-driven and arbitrary; examples may use entitlement-read, but code must not hardcode that as the only possible runtime token.",
         "[x] Ensure service-token principals cannot access delegated-user/browser endpoints unless explicitly designed, and delegated JWTs cannot use service-token routes.",
         "[ ] Audit entitlement reads, credits, account/balance, admin, and bootstrap flows for correct principal-type checks.",
-        "[ ] Add tests for service-token entitlement read, wrong resource scope denial, missing permission denial, delegated JWT rejected on service route, and service token rejected on delegated-user route.",
+        "[x] Add tests for service-token entitlement read, wrong resource scope denial, missing permission denial, delegated JWT rejected on service route, and service token rejected on delegated-user route.",
         "[x] Update compose/GitOps docs to state Doujins/Hentai0 receive server-to-server OpenRails tokens from Vault/env injection, not by calling OpenRails registration APIs.",
         "[x] Enforce and document service-token routes as server-to-server only; service tokens must not be accepted for delegated-user browser/self routes.",
-        "[ ] Add examples for Doujins/Hentai0/Cozy entitlement-read service tokens and Tensorhub balance reserve/capture/release service tokens.",
+        "[x] Add examples for Doujins/Hentai0/Cozy entitlement-read service tokens and Tensorhub balance reserve/capture/release service tokens.",
         "[x] Add tests proving delegated JWTs are rejected on service-token-only reserve/capture/release routes, and service tokens are rejected on frontend/direct self routes."
       ],
       "completed": false
@@ -534,7 +534,7 @@
       "tasks": [
         "[x] Inventory remaining OpenRails payable identity names. Credit/account/budget/usage/invoice service surfaces were converted in this slice; older self-service commerce tables still use `user_id` and need a separate route/service hard cut.",
         "[ ] Produce a hard-cut rename/model map from payer/account/delegated-user/user-like payable fields to durable `tenant_subject_id` references wherever the field means payable identity.",
-        "[ ] Add or normalize the OpenRails `tenant_subjects` table keyed by `(tenant_id, issuer, subject)` with minimal columns: `id`, `tenant_id`, `issuer`, `subject`, `created_at`, `last_seen_at`.",
+        "[x] Add or normalize the OpenRails `tenant_subjects` table keyed by `(tenant_id, issuer, subject)` with minimal columns: `id`, `tenant_id`, `issuer`, `subject`, `created_at`, `last_seen_at`.",
         "[ ] Do not introduce a separate OpenRails `accounts` table unless a later issue proves a distinct non-subject payable identity exists.",
         "[ ] Update entitlements so they reference `tenant_subject_id` plus entitlement timing/metadata; remove repeated `tenant_id`, tenant-subject/payer-account/account/delegated-user payable FKs, and `subject_type` fields from the target model.",
         "[ ] Update balances, payments, subscriptions, usage events, credits, account/balance operations, and relevant APIs to reference `tenant_subject_id` instead of repeated tenant/payer/account/delegated-user strings.",
@@ -542,7 +542,7 @@
         "[x] Rename OpenRails resource scope from `openrails.tenant_subject` to `openrails.tenant_subject` and update the tenant-subject-scoped token CLI to scope by tenant subject UUID.",
         "[ ] Update API request/response JSON, Go structs, service clients, OpenAPI/docs, logs, errors, and test fixtures to use `tenant_subject_id` and OIDC `issuer`/`subject` only.",
         "[ ] Update database migrations/columns for unambiguous tenant-subject references; do not create compatibility views or fallback parsing.",
-        "[ ] Ensure tenant-subject creation/touch is idempotent when a valid delegated JWT or trusted service flow references `(tenant_id, issuer, subject)`.",
+        "[x] Ensure tenant-subject creation/touch is idempotent when a valid delegated JWT or trusted service flow references `(tenant_id, issuer, subject)`.",
         "[ ] Ensure billing can associate balances/money owed/entitlements with tenant subjects regardless of whether the upstream system sees that subject as a native user, delegated user, tenant/company, or service principal.",
         "[ ] Update Doujins/Hentai0/Tensorhub consumers after the hard cut so no caller sends `tenant_subject_id`, `payer_account_id`, `account_id`, payable `delegated_user_id`, `subject_type`, or old org/user terminology.",
         "[ ] Add negative tests proving old `tenant_subject_id` / `payer_account_id` / `account_id` / payable `delegated_user_id` / `subject_type` JSON/config/resource kinds are rejected."

@@ -10,10 +10,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // These tests exercise the HTTP MINT route (POST /v1/service/delegated-tokens)
@@ -166,6 +169,51 @@ func TestCreditServiceRoutesRejectDelegatedJWTs(t *testing.T) {
 			require.Contains(t, w.Body.String(), "openrails-issued service token required")
 		})
 	}
+}
+
+func TestServiceEntitlementRouteRequiresEntitlementReadPermission(t *testing.T) {
+	e := newMintRouter(t, fakeServiceTokenResolver{
+		looksLikeServiceToken: true,
+		resolved: &controlplane.ResolvedServiceToken{
+			AuthKitTenantSlug: "acme-org",
+			Permissions:       []string{controlplane.PermCreditsRead},
+		},
+	}, nil)
+	w := doServiceRoute(e, http.MethodGet, "/v1/service/users/not-a-uuid/entitlements", "openrails_st_keyid_secret", "")
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "service_token_permission_required")
+
+	e = newMintRouter(t, fakeServiceTokenResolver{
+		looksLikeServiceToken: true,
+		resolved: &controlplane.ResolvedServiceToken{
+			AuthKitTenantSlug: "acme-org",
+			Permissions:       []string{controlplane.PermEntitlementsRead},
+		},
+	}, nil)
+	w = doServiceRoute(e, http.MethodGet, "/v1/service/users/not-a-uuid/entitlements", "openrails_st_keyid_secret", "")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "invalid user_id format")
+}
+
+func TestServiceCreditBalanceRouteRejectsWrongTenantSubjectScope(t *testing.T) {
+	target := uuid.New()
+	other := uuid.New()
+	e := newMintRouter(t, fakeServiceTokenResolver{
+		looksLikeServiceToken: true,
+		resolved: &controlplane.ResolvedServiceToken{
+			AuthKitTenantSlug: "acme-org",
+			TenantID:          tenant.DefaultID,
+			Permissions:       []string{controlplane.PermCreditsRead},
+			Resources: []authcore.ServiceTokenResource{
+				controlplane.TenantResource(tenant.DefaultID),
+				controlplane.TenantSubjectResource(other),
+			},
+		},
+	}, nil)
+
+	w := doServiceRoute(e, http.MethodGet, "/v1/service/credits/balance?tenant_subject_id="+target.String(), "openrails_st_keyid_secret", "")
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "service_token_tenant_subject_scope_denied")
 }
 
 // A service token lacking PermSelfMint is forbidden: the per-route permission gate blocks

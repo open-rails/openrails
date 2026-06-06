@@ -52,6 +52,21 @@ and audit references; it does not create OpenRails-native users for delegated
 subjects. Service tokens are opaque AuthKit-owned server credentials and are
 rejected by delegated self/admin routes.
 
+Delegated JWT examples:
+
+- Doujins/Hentai0 membership UI: the host frontend presents a short-lived token
+  signed by its registered tenant issuer with `aud: "openrails-app"`,
+  `delegated_sub: "<canonical-user-id>"`, and permissions such as
+  `openrails:self:billing:read`, `openrails:self:checkout:create`, or
+  `openrails:self:subscriptions:cancel` for `/v1/self/*`.
+- Cozy Art tenant-admin membership UI: an admin browser token is signed by the
+  Cozy issuer with `delegated_sub: "<admin-subject>"` and
+  `openrails:tenant:*` permissions for `/v1/tenant-admin/*`.
+- Tensorhub tenant balance UI: Cozy Art can present a delegated JWT whose
+  subject is the upstream tenant/company subject, with self billing permission,
+  to read its own balance through browser/direct OpenRails routes. Backend
+  reserve/capture/release remains service-token-only.
+
 ## Health & Service Banner
 
 ### GET /
@@ -271,6 +286,17 @@ Subject-scoped tokens additionally carry
 for that exact `tenant_subject_id`; tenant-wide tokens omit the tenant-subject
 resource. The canonical permission vocabulary is colon-form
 `openrails:<resource>:<action>`:
+
+Service-token examples:
+
+- Doujins/Hentai0/Cozy backend entitlement read: permission
+  `openrails:entitlements:read`, resource `openrails.tenant=<tenant_uuid>`,
+  route `GET /v1/service/users/{user_id}/entitlements`.
+- Tensorhub balance reserve/capture/release: permissions
+  `openrails:credits:read`, `openrails:credits:write`, and
+  `openrails:credits:spend`; resources include
+  `openrails.tenant=<tenant_uuid>` and, for payer-scoped tokens,
+  `openrails.tenant_subject=<tenant_subject_uuid>`.
 
 | Route | Required permission |
 |-------|---------------------|
