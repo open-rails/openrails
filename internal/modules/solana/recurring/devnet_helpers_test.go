@@ -41,6 +41,7 @@ import (
 	"github.com/gagliardetto/solana-go/programs/token"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -50,6 +51,24 @@ import (
 
 // devnetUSDCMintStr is the devnet USDC mint (must match config DefaultDevnetTokens).
 const devnetUSDCMintStr = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+
+// newDevnetPlanService builds a PlanService wired with the devnet token map, the
+// same way production wiring supplies runtime-configured tokens. Without it the
+// service has no USDC mint and PublishPlan fails with "no configured mint".
+func newDevnetPlanService(submitter Submitter) *PlanService {
+	return NewPlanService(submitter, "devnet", config.TokensForNetwork("devnet"))
+}
+
+// newDevnetPrepareSubscribeService / newDevnetPrepareTierChangeService likewise
+// wire the devnet token map; both resolve the USDC mint via the configured
+// tokens, so an empty map fails with "no configured mint".
+func newDevnetPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rc *solanaint.RPCClient) *PrepareSubscribeService {
+	return NewPrepareSubscribeService(submitter, signer, rc, "devnet", config.TokensForNetwork("devnet"))
+}
+
+func newDevnetPrepareTierChangeService(signer solanaint.Signer, rc *solanaint.RPCClient) *PrepareTierChangeService {
+	return NewPrepareTierChangeService(signer, rc, "devnet", config.TokensForNetwork("devnet"))
+}
 
 // devnetEnv returns the named env var or skips the test when it is unset.
 func devnetEnv(t *testing.T, name string) string {

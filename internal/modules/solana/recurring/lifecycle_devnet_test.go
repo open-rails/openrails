@@ -62,8 +62,8 @@ func TestDevnetLifecycle(t *testing.T) {
 
 		signer := newMerchantSigner(merchant)
 		submitter := NewSignerSubmitter(signer, rc)
-		planSvc := NewPlanService(submitter, "devnet")
-		prepSvc := NewPrepareSubscribeService(submitter, signer, rc, "devnet")
+		planSvc := newDevnetPlanService(submitter)
+		prepSvc := newDevnetPrepareSubscribeService(submitter, signer, rc)
 
 		sub := freshFundedSubscriber(ctx, t, rc, raw, merchant, funder, usdc, 30_000_000, 2_000_000)
 
@@ -108,8 +108,8 @@ func TestDevnetLifecycle(t *testing.T) {
 
 		signer := newMerchantSigner(merchant)
 		submitter := NewSignerSubmitter(signer, rc)
-		planSvc := NewPlanService(submitter, "devnet")
-		prepSvc := NewPrepareSubscribeService(submitter, signer, rc, "devnet")
+		planSvc := newDevnetPlanService(submitter)
+		prepSvc := newDevnetPrepareSubscribeService(submitter, signer, rc)
 		crankSvc := NewCrankService(submitter)
 		eventAuth, _, err := subscriptions.DeriveEventAuthority()
 		require.NoError(t, err)

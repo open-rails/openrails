@@ -48,9 +48,9 @@ func TestDevnetTierChange(t *testing.T) {
 
 	signer := newMerchantSigner(merchant)
 	submitter := NewSignerSubmitter(signer, rc)
-	planSvc := NewPlanService(submitter, "devnet")
-	prepSvc := NewPrepareSubscribeService(submitter, signer, rc, "devnet")
-	tierSvc := NewPrepareTierChangeService(signer, rc, "devnet")
+	planSvc := newDevnetPlanService(submitter)
+	prepSvc := newDevnetPrepareSubscribeService(submitter, signer, rc)
+	tierSvc := newDevnetPrepareTierChangeService(signer, rc)
 
 	const lowTier = uint64(1_000_000)  // 1 USDC plan A
 	const highTier = uint64(2_000_000) // 2 USDC plan B

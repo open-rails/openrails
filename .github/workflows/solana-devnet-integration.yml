@@ -68,7 +68,7 @@ jobs:
             echo "HELIUS_API_KEY, SOLANA_DEVNET_PAYER_KEY and SOLANA_DEVNET_SUBSCRIBER_KEY secrets are required" >&2
             exit 1
           fi
-          go test -tags devnet -run TestDevnetLifecycle -v -timeout 480s ./internal/modules/solana/recurring/...
+          go test -tags devnet -run 'TestDevnetLifecycle/FastPlan' -v -timeout 480s ./internal/modules/solana/recurring/...
 
   # Multi-HOUR (~3h) real recurring rebill: publishes period_hours=1, subscribes,
   # pulls, WAITS for the on-chain period to roll over (~1h), pulls a SECOND time.

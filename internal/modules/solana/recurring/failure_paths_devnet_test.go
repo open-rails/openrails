@@ -54,8 +54,8 @@ func TestDevnetFailurePaths(t *testing.T) {
 
 	signer := newMerchantSigner(merchant)
 	submitter := NewSignerSubmitter(signer, rc)
-	planSvc := NewPlanService(submitter, "devnet")
-	prepSvc := NewPrepareSubscribeService(submitter, signer, rc, "devnet")
+	planSvc := newDevnetPlanService(submitter)
+	prepSvc := newDevnetPrepareSubscribeService(submitter, signer, rc)
 	crankSvc := NewCrankService(submitter)
 
 	// sendAsSubscriber builds an unsigned (subscriber = fee payer) tx and

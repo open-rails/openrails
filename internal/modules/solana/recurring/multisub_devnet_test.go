@@ -52,8 +52,8 @@ func TestDevnetMultiSub(t *testing.T) {
 
 		signer := newMerchantSigner(merchant)
 		submitter := NewSignerSubmitter(signer, rc)
-		planSvc := NewPlanService(submitter, "devnet")
-		prepSvc := NewPrepareSubscribeService(submitter, signer, rc, "devnet")
+		planSvc := newDevnetPlanService(submitter)
+		prepSvc := newDevnetPrepareSubscribeService(submitter, signer, rc)
 
 		// 3 USDC: two atomic subscribes pull 1 each (period 1 of A + of B) + headroom.
 		sub := freshFundedSubscriber(ctx, t, rc, raw, merchant, funder, usdc, 50_000_000, 3_000_000)
@@ -97,8 +97,8 @@ func TestDevnetMultiSub(t *testing.T) {
 
 		signer := newMerchantSigner(merchant)
 		submitter := NewSignerSubmitter(signer, rc)
-		planSvc := NewPlanService(submitter, "devnet")
-		prepSvc := NewPrepareSubscribeService(submitter, signer, rc, "devnet")
+		planSvc := newDevnetPlanService(submitter)
+		prepSvc := newDevnetPrepareSubscribeService(submitter, signer, rc)
 		crankSvc := NewCrankService(submitter)
 		eventAuth, _, err := subscriptions.DeriveEventAuthority()
 		require.NoError(t, err)
