@@ -39,11 +39,36 @@ func (r *EntitlementRepo) IsEntitled(ctx context.Context, userID, entitlement st
 	return q.Exists(ctx)
 }
 
+func (r *EntitlementRepo) IsTenantSubjectEntitled(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
+	q := r.db.Q(ctx).NewSelect().
+		Model((*models.Entitlement)(nil)).
+		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
+		Where("ent.tenant_subject_id = ?", tenantSubjectID).
+		Where("ent.entitlement = ?", entitlement).
+		Where("ent.start_at <= ?", at).
+		Where("(ent.end_at IS NULL OR ent.end_at > ?)", at).
+		Where("ent.revoked_at IS NULL").
+		Where("ent.deleted_at IS NULL")
+	return q.Exists(ctx)
+}
+
 func (r *EntitlementRepo) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
 	q := r.db.Q(ctx).NewSelect().
 		Model((*models.Entitlement)(nil)).
 		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("ent.user_id = ?", userID).
+		Where("ent.entitlement = ?", entitlement).
+		Where("ent.revoked_at IS NULL AND ent.end_at IS NULL").
+		Where("ent.start_at <= ?", at).
+		Where("ent.deleted_at IS NULL")
+	return q.Exists(ctx)
+}
+
+func (r *EntitlementRepo) HasActiveIndefiniteByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
+	q := r.db.Q(ctx).NewSelect().
+		Model((*models.Entitlement)(nil)).
+		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
+		Where("ent.tenant_subject_id = ?", tenantSubjectID).
 		Where("ent.entitlement = ?", entitlement).
 		Where("ent.revoked_at IS NULL AND ent.end_at IS NULL").
 		Where("ent.start_at <= ?", at).
@@ -68,12 +93,49 @@ func (r *EntitlementRepo) GetLatestActive(ctx context.Context, userID, entitleme
 	return &ent, nil
 }
 
+func (r *EntitlementRepo) GetLatestActiveByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string) (*models.Entitlement, error) {
+	var ent models.Entitlement
+	err := r.db.Q(ctx).NewSelect().
+		Model(&ent).
+		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
+		Where("ent.tenant_subject_id = ? AND ent.entitlement = ?", tenantSubjectID, entitlement).
+		Where("ent.revoked_at IS NULL").
+		Where("ent.deleted_at IS NULL").
+		OrderExpr("ent.start_at DESC").
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ent, nil
+}
+
 func (r *EntitlementRepo) GetLatestFiniteActive(ctx context.Context, userID, entitlement string, at time.Time) (*models.Entitlement, error) {
 	var ent models.Entitlement
 	err := r.db.Q(ctx).NewSelect().
 		Model(&ent).
 		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 		Where("ent.user_id = ? AND ent.entitlement = ?", userID, entitlement).
+		Where("ent.revoked_at IS NULL").
+		Where("ent.deleted_at IS NULL").
+		Where("ent.end_at IS NOT NULL").
+		Where("ent.start_at <= ?", at).
+		Where("ent.end_at > ?", at).
+		OrderExpr("ent.end_at DESC").
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ent, nil
+}
+
+func (r *EntitlementRepo) GetLatestFiniteActiveByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
+	var ent models.Entitlement
+	err := r.db.Q(ctx).NewSelect().
+		Model(&ent).
+		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
+		Where("ent.tenant_subject_id = ? AND ent.entitlement = ?", tenantSubjectID, entitlement).
 		Where("ent.revoked_at IS NULL").
 		Where("ent.deleted_at IS NULL").
 		Where("ent.end_at IS NOT NULL").

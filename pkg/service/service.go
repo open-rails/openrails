@@ -433,6 +433,53 @@ func (s *Service) ListActiveEntitlementsForTenantSubject(ctx context.Context, te
 	return s.entitlementService().ListActiveEntitlementsByTenantSubject(ctx, tenantSubjectID.UUID(), at.UTC())
 }
 
+func (s *Service) IsTenantSubjectEntitled(ctx context.Context, tenantSubjectID identity.TenantSubjectID, entitlement string, at time.Time) (bool, error) {
+	if tenantSubjectID.IsZero() {
+		return false, fmt.Errorf("tenant_subject_id required")
+	}
+	entitlement = strings.TrimSpace(entitlement)
+	if entitlement == "" {
+		return false, fmt.Errorf("entitlement required")
+	}
+	if at.IsZero() {
+		at = s.now().UTC()
+	}
+	return s.entitlementService().IsTenantSubjectEntitled(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
+}
+
+func (s *Service) HasActiveIndefiniteEntitlementForTenantSubject(ctx context.Context, tenantSubjectID identity.TenantSubjectID, entitlement string, at time.Time) (bool, error) {
+	if tenantSubjectID.IsZero() {
+		return false, fmt.Errorf("tenant_subject_id required")
+	}
+	entitlement = strings.TrimSpace(entitlement)
+	if entitlement == "" {
+		return false, fmt.Errorf("entitlement required")
+	}
+	if at.IsZero() {
+		at = s.now().UTC()
+	}
+	return s.entitlementService().HasActiveIndefiniteByTenantSubject(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
+}
+
+func (s *Service) LatestFiniteEntitlementWindowForTenantSubject(ctx context.Context, tenantSubjectID identity.TenantSubjectID, entitlement string, at time.Time) (*EntitlementRecord, error) {
+	if tenantSubjectID.IsZero() {
+		return nil, fmt.Errorf("tenant_subject_id required")
+	}
+	entitlement = strings.TrimSpace(entitlement)
+	if entitlement == "" {
+		return nil, fmt.Errorf("entitlement required")
+	}
+	if at.IsZero() {
+		at = s.now().UTC()
+	}
+	ent, err := s.entitlementService().LatestFiniteWindowByTenantSubject(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
+	if err != nil {
+		return nil, err
+	}
+	record := entitlementRecordFromEntitlement(ent)
+	return &record, nil
+}
+
 type EntitlementRecord struct {
 	ID              uuid.UUID
 	TenantSubjectID uuid.UUID

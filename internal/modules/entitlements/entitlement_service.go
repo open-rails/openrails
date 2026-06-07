@@ -73,8 +73,16 @@ func (s *EntitlementService) IsEntitled(ctx context.Context, userID, entitlement
 	return s.repo.IsEntitled(ctx, userID, entitlement, at)
 }
 
+func (s *EntitlementService) IsTenantSubjectEntitled(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
+	return s.repo.IsTenantSubjectEntitled(ctx, tenantSubjectID, entitlement, at)
+}
+
 func (s *EntitlementService) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
 	return s.repo.HasActiveIndefinite(ctx, userID, entitlement, at)
+}
+
+func (s *EntitlementService) HasActiveIndefiniteByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
+	return s.repo.HasActiveIndefiniteByTenantSubject(ctx, tenantSubjectID, entitlement, at)
 }
 
 func (s *EntitlementService) ExistsBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID, entitlement string) (bool, error) {
@@ -83,6 +91,10 @@ func (s *EntitlementService) ExistsBySource(ctx context.Context, sourceType mode
 
 func (s *EntitlementService) LatestFiniteWindow(ctx context.Context, userID, entitlement string, at time.Time) (*models.Entitlement, error) {
 	return s.repo.GetLatestFiniteActive(ctx, userID, entitlement, at)
+}
+
+func (s *EntitlementService) LatestFiniteWindowByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
+	return s.repo.GetLatestFiniteActiveByTenantSubject(ctx, tenantSubjectID, entitlement, at)
 }
 
 func (s *EntitlementService) ListByUser(ctx context.Context, userID string) ([]models.Entitlement, error) {

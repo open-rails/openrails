@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -175,4 +176,91 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 	ok, err := r.IsEntitled(ctx, userID, entName, now.Add(time.Second))
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+
+	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	bunDB := bun.NewDB(sqlDB, pgdialect.New())
+	models.RegisterModels(bunDB)
+
+	ctx := context.Background()
+	require.NoError(t, bunDB.PingContext(ctx))
+
+	dbi, err := db.NewWithBun(bunDB)
+	require.NoError(t, err)
+
+	r := NewEntitlementRepo(dbi)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	tenantSubjectID := uuid.New()
+	otherTenantSubjectID := uuid.New()
+	userID := uuid.New().String()
+	entName := "premium_tenant_subject_" + uuid.New().String()
+	finiteSourceID := uuid.New()
+	indefiniteSourceID := uuid.New()
+
+	_, err = bunDB.NewRaw(
+		`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject) VALUES (?, ?, ?, ?)`,
+		tenantSubjectID,
+		tenant.FromContextOrDefault(ctx).UUID(),
+		"https://issuer.example",
+		"subject-"+tenantSubjectID.String(),
+	).Exec(ctx)
+	require.NoError(t, err)
+
+	finiteStart := now.Add(-24 * time.Hour)
+	finiteEnd := now.Add(24 * time.Hour)
+	finite := &models.Entitlement{
+		ID:              uuid.New(),
+		TenantSubjectID: tenantSubjectID,
+		UserID:          userID,
+		Entitlement:     entName,
+		StartAt:         finiteStart,
+		EndAt:           &finiteEnd,
+		SourceType:      models.EntitlementSourceOneOff,
+		SourceID:        &finiteSourceID,
+		CreatedAt:       finiteStart,
+		UpdatedAt:       finiteStart,
+	}
+	require.NoError(t, r.Insert(ctx, finite))
+
+	indefiniteName := entName + "_indefinite"
+	indefinite := &models.Entitlement{
+		ID:              uuid.New(),
+		TenantSubjectID: tenantSubjectID,
+		UserID:          userID,
+		Entitlement:     indefiniteName,
+		StartAt:         finiteStart,
+		SourceType:      models.EntitlementSourceAdmin,
+		SourceID:        &indefiniteSourceID,
+		CreatedAt:       finiteStart,
+		UpdatedAt:       finiteStart,
+	}
+	require.NoError(t, r.Insert(ctx, indefinite))
+
+	t.Cleanup(func() {
+		_, _ = bunDB.NewDelete().
+			Model((*models.Entitlement)(nil)).
+			Where("user_id = ? AND entitlement IN (?)", userID, bun.In([]string{entName, indefiniteName})).
+			Exec(ctx)
+	})
+
+	ok, err := r.IsTenantSubjectEntitled(ctx, tenantSubjectID, entName, now)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = r.IsTenantSubjectEntitled(ctx, otherTenantSubjectID, entName, now)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	ok, err = r.HasActiveIndefiniteByTenantSubject(ctx, tenantSubjectID, indefiniteName, now)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	latest, err := r.GetLatestFiniteActiveByTenantSubject(ctx, tenantSubjectID, entName, now)
+	require.NoError(t, err)
+	require.Equal(t, finite.ID, latest.ID)
 }
