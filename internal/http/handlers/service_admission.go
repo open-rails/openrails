@@ -21,6 +21,8 @@ type serviceAdmitRequest struct {
 	Source          string                           `json:"source"`
 	ExpiresAt       *int64                           `json:"expires_at"`
 	BlockChecks     []billingservice.AdmitBlockCheck `json:"block_checks"`
+	// #404: per-tenant fixed-window throughput the host wants OpenRails to enforce.
+	TenantThroughput []billingservice.AdmitThroughputWindow `json:"tenant_throughput"`
 }
 
 // ServiceAdmit is the unified admission endpoint (issue #298): throughput +
@@ -60,9 +62,10 @@ func ServiceAdmit(r *httprequest.Request) {
 		Amounts:         req.Amounts,
 		CreditType:      req.CreditType,
 		EstimateCents:   req.EstimateCents,
-		Source:          req.Source,
-		SourceID:        req.RequestID,
-		BlockChecks:     req.BlockChecks,
+		Source:           req.Source,
+		SourceID:         req.RequestID,
+		BlockChecks:      req.BlockChecks,
+		TenantThroughput: req.TenantThroughput,
 	}
 	if req.ExpiresAt != nil {
 		in.ExpiresAtUnix = *req.ExpiresAt

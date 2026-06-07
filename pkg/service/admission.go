@@ -33,6 +33,20 @@ type AdmitInput struct {
 	SourceID        string
 	ExpiresAtUnix   int64
 	BlockChecks     []AdmitBlockCheck
+	// TenantThroughput is the host's per-TENANT fixed-window throughput policy
+	// (#404). When set, OpenRails enforces these tenant-scoped windows on the
+	// invoke path BEFORE the per-invoker policy + any hold, so the host (tensorhub)
+	// no longer rate-limits invokes locally. Empty = no tenant throughput limit.
+	TenantThroughput []AdmitThroughputWindow
+}
+
+// AdmitThroughputWindow is one caller-supplied tenant fixed-window throughput
+// limit (#404): at most Max units of Unit per WindowSeconds. Unit defaults to
+// "request".
+type AdmitThroughputWindow struct {
+	Unit          string `json:"unit"`
+	WindowSeconds int64  `json:"window_seconds"`
+	Max           int64  `json:"max"`
 }
 
 // AdmitWindowDTO is a throughput window's state for x-ratelimit-* headers.
@@ -88,6 +102,40 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	bl := abuse.NewBlocklistService(s.rt.DB)
 	bsvc := budgets.NewService(s.rt.DB)
 	adm := admission.NewAdmitter(lim, s.creditsService(), store, bl, bsvc)
+
+	// #404: tenant-scoped throughput. The host passes its per-tenant RPM/RPD
+	// windows; OpenRails enforces them on the invoke path BEFORE the per-invoker
+	// policy + any credit hold, so a tenant breach places no hold and the host
+	// stops rate-limiting invokes locally.
+	if len(in.TenantThroughput) > 0 {
+		windows := make([]ratelimit.Limit, 0, len(in.TenantThroughput))
+		for _, w := range in.TenantThroughput {
+			if w.Max <= 0 || w.WindowSeconds <= 0 {
+				continue
+			}
+			unit := w.Unit
+			if unit == "" {
+				unit = "request"
+			}
+			windows = append(windows, ratelimit.Limit{Unit: unit, Window: time.Duration(w.WindowSeconds) * time.Second, Max: w.Max})
+		}
+		if len(windows) > 0 {
+			tdec, err := lim.Check(ctx, "tenant:"+in.TenantSubjectID.UUID().String(), ratelimit.Policy{Windows: windows}, map[string]int64{"request": 1})
+			if err != nil {
+				return nil, err
+			}
+			if !tdec.Allowed {
+				res := &AdmitResult{Allowed: false, BlockedBy: "throughput", BlockedUnit: tdec.BlockedUnit}
+				for _, w := range tdec.Windows {
+					res.Windows = append(res.Windows, AdmitWindowDTO{Unit: w.Unit, Limit: w.Limit, Remaining: w.Remaining, ResetAfterSeconds: int64(w.ResetAfter / time.Second)})
+					if w.Unit == tdec.BlockedUnit {
+						res.RetryAfterSeconds = int64(w.ResetAfter / time.Second)
+					}
+				}
+				return res, nil
+			}
+		}
+	}
 
 	var exp time.Time
 	switch {
