@@ -46,17 +46,17 @@ Run OpenRails as its own HTTP service. Your frontend and backend call it over HT
 its database and workers.
 
 ```bash
-task docker-up            # Postgres + Garnet(Redis) + ClickHouse + billing, zero-config
+task docker-up            # Postgres + Garnet(Redis) + ClickHouse + OpenRails, zero-config
 curl http://localhost:2053/health
 ```
 
 - **Public API** on `:2053` — user billing routes, admin routes, and webhooks.
 - **Server-to-server** calls hit `/v1/service/*` on the same port, authenticated with an
-  OpenRails-issued **Operator Access Token** (`Authorization: Bearer <openrails_st_...>`).
+  OpenRails-issued **service token** (`Authorization: Bearer <openrails_st_...>`).
 - Your services authorize the user, then call OpenRails to hold/capture/release credits or
   read entitlements.
 
-This is the right mode when billing is a separate microservice, or when non-Go services
+This is the right mode when OpenRails is a separate service, or when non-Go services
 need to call it. See [docs/api/endpoints.md](docs/api/endpoints.md) for the full HTTP API.
 
 ### 2. Embedded library (single binary)
@@ -108,7 +108,7 @@ import (
 )
 
 cfg, _ := config.Load()
-billing, err := embedded.New(embedded.Options{
+openrails, err := embedded.New(embedded.Options{
     Config:       cfg,
     PGXPool:      myPool,   // share your pools, or omit to let OpenRails connect from cfg
     Redis:        myRedis,
@@ -117,28 +117,28 @@ billing, err := embedded.New(embedded.Options{
 if err != nil {
     log.Fatal(err)
 }
-defer billing.Close(ctx)
+defer openrails.Close(ctx)
 
 // Background workers: renewals, dunning, credit/hold expiry, reconciliation.
-go billing.RunWorkers(ctx)
+go openrails.RunWorkers(ctx)
 
-// Mount the billing surface anywhere. Routes live under /billing/v1/*.
+// Mount the OpenRails surface anywhere.
 //   user routes  → products, prices, checkout, subscriptions, payments, credits
 //   admin routes → subscription/payment/user management, metrics  (admin-gated)
 //   webhooks     → processor callbacks
-handler := billing.NewHTTPHandler(embedded.HTTPHandlerOptions{
+handler := openrails.NewHTTPHandler(embedded.HTTPHandlerOptions{
     IncludeUser:     true,
     IncludeAdmin:    true,
     IncludeWebhooks: true,
 })
 mux := http.NewServeMux()
-mux.Handle("/billing/v1/", handler) // plain net/http; or gin.WrapH(handler) / chi r.Mount
+mux.Handle("/openrails/v1/", handler) // plain net/http; or gin.WrapH(handler) / chi r.Mount
 ```
 
-**c. Call billing in-process** (no HTTP) for your hot paths — e.g. metered usage:
+**c. Call OpenRails in-process** (no HTTP) for your hot paths — e.g. metered usage:
 
 ```go
-svc, _ := billing.Service()
+svc, _ := openrails.Service()
 
 // Pre-authorize before doing expensive work…
 hold, _ := svc.HoldCredits(ctx, service.HoldCreditsRequest{
@@ -189,8 +189,8 @@ Zero-config against the bundled compose stack. Override with a `config.yaml` (re
 ## Developer tasks
 
 ```bash
-task dev      # run locally (go run ./cmd/billing server)
-task build    # → bin/billing
+task dev      # run locally
+task build    # -> bin/openrails
 task test
 task docker-up / docker-down / docker-logs
 ```

@@ -466,7 +466,7 @@ feature_flags:
 #                            idempotently on recovery (reconciliation #243 is the
 #                            backstop). NEVER silently grants unbounded free usage.
 #
-# Environment variable: BILLING_HOT_PATH_FAIL_POLICY=fail_closed|fail_open
+# Environment variable: OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY=fail_closed|fail_open
 #
 # billing_hot_path:
 #   fail_policy: "fail_closed"

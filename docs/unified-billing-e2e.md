@@ -39,7 +39,7 @@ Run against `~/cozy/e2e` (openrails:2053 is not host-published, so run from a
 container on the e2e network):
 
 ```sh
-SERVICE_TOKEN=$(docker compose exec -T openrails /app/billing-server \
+SERVICE_TOKEN=$(docker compose exec -T openrails /usr/local/bin/openrails \
   --config /app/config/openrails.config.yaml mint-operator-service-token --tenant default \
   | grep -o '"service_token_secret":"[^"]*"' | cut -d'"' -f4)
 

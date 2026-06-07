@@ -1706,6 +1706,9 @@ func Load(configPath string) (*Config, error) {
 		if s == "openrails_tenants_file" || s == "tenant_bootstrap_file" {
 			return "tenant_bootstrap.file"
 		}
+		if s == "openrails_billing_hot_path_fail_policy" || s == "billing_hot_path_fail_policy" {
+			return "billing_hot_path.fail_policy"
+		}
 
 		// Special case: CORS_ORIGINS -> cors_origins (top-level, not cors.origins)
 		if s == "cors_origins" {

@@ -11,7 +11,7 @@ if [ -f "$ROOT_DIR/.env" ]; then
 fi
 
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.yaml}"
-BILLING_LOCAL_URL="${BILLING_LOCAL_URL:-http://localhost:2053}"
+OPENRAILS_LOCAL_URL="${OPENRAILS_LOCAL_URL:-${BILLING_LOCAL_URL:-http://localhost:2053}}"
 COMPOSE_PROFILES="${COMPOSE_PROFILES:-all}"
 
 require() {
@@ -36,7 +36,7 @@ if [ -z "${CLOUDFLARED_PUBLIC_HOSTNAME:-}" ]; then
   exit 1
 fi
 if [ -z "${PROCESSORS_MOBIUS_WEBHOOK_SECRET:-}" ]; then
-  echo "Missing PROCESSORS_MOBIUS_WEBHOOK_SECRET (billing will reject unsigned webhooks)" >&2
+  echo "Missing PROCESSORS_MOBIUS_WEBHOOK_SECRET (OpenRails will reject unsigned webhooks)" >&2
   exit 1
 fi
 
@@ -51,21 +51,21 @@ for p in "${PROFILES[@]}"; do
 done
 docker compose -f "$COMPOSE_FILE" "${PROFILE_ARGS[@]}" up -d
 
-echo "2) Waiting for billing health..."
+echo "2) Waiting for OpenRails health..."
 for i in {1..60}; do
-  if curl -fsS "$BILLING_LOCAL_URL/health/live" >/dev/null 2>&1; then
-    echo "  billing is up: $BILLING_LOCAL_URL"
+  if curl -fsS "$OPENRAILS_LOCAL_URL/health/live" >/dev/null 2>&1; then
+    echo "  OpenRails is up: $OPENRAILS_LOCAL_URL"
     break
   fi
   sleep 1
   if [ "$i" -eq 60 ]; then
-    echo "Billing did not become healthy in time: $BILLING_LOCAL_URL/health/live" >&2
+    echo "OpenRails did not become healthy in time: $OPENRAILS_LOCAL_URL/health/live" >&2
     exit 1
   fi
 done
 
 echo "3) Starting cloudflared tunnel in background..."
-cloudflared tunnel run --token "$CLOUDFLARED_TUNNEL_TOKEN" >/tmp/cloudflared-billing-webhooks.log 2>&1 &
+cloudflared tunnel run --token "$CLOUDFLARED_TUNNEL_TOKEN" >/tmp/cloudflared-openrails-webhooks.log 2>&1 &
 TUNNEL_PID="$!"
 
 cleanup() {
@@ -98,7 +98,7 @@ echo "      $PUBLIC_BASE/v1/webhooks/mobius"
 echo "  - Use tokenization harness (if env=dev):"
 echo "      $PUBLIC_BASE/debug/mobius/tokenization?mode=real"
 echo ""
-echo "Cloudflared logs: /tmp/cloudflared-billing-webhooks.log"
+echo "Cloudflared logs: /tmp/cloudflared-openrails-webhooks.log"
 echo "Leave this running while testing. Ctrl+C to stop."
 
 wait "$TUNNEL_PID"

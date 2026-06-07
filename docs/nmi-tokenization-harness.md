@@ -16,7 +16,7 @@ Set (example):
 - `PROCESSORS_<PROVIDER>_TOKENIZATION_KEY=...` (public)
 - `PROCESSORS_<PROVIDER>_TOKENIZATION_URL=...` (Collect.js script URL)
 
-Then start the billing server normally.
+Then start OpenRails normally.
 
 ## Open the harness
 

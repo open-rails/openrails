@@ -35,7 +35,7 @@ if [ -n "$E2E_RUN_ID" ]; then
   FILTER_BY_RUN="true"
 fi
 
-echo "Dumping local billing rows..."
+echo "Dumping local OpenRails rows..."
 echo "  E2E_RUN_ID:  ${E2E_RUN_ID:-<not set>}"
 echo "  E2E_USER_ID: ${E2E_USER_ID:-<not set>}"
 echo ""

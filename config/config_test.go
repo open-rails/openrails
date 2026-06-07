@@ -45,6 +45,13 @@ func TestLoad_EnvMapping(t *testing.T) {
 		}
 	})
 
+	t.Run("maps canonical OpenRails hot-path env vars", func(t *testing.T) {
+		t.Setenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY", "fail_open")
+
+		cfg, err := Load("nonexistent-config.yaml")
+		assert.NoError(t, err)
+		assert.Equal(t, "fail_open", cfg.BillingHotPath.FailPolicy)
+	})
 }
 
 func TestLoad_ConfigFileAndEnvPrecedence(t *testing.T) {

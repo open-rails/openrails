@@ -20,7 +20,7 @@
 #     sh scripts/unified_billing_e2e.sh
 #
 # In ~/cozy/e2e: mint the service token with
-#   docker compose exec -T openrails /app/billing-server \
+#   docker compose exec -T openrails /usr/local/bin/openrails \
 #     --config /app/config/openrails.config.yaml mint-operator-service-token
 # then run this from a container ON the e2e_default network (openrails:2053 is
 # not host-published):

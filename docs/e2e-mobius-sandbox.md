@@ -61,10 +61,10 @@ task docker-up-e2e-sandbox
 ```
 
 This starts:
-- Postgres (billing)
+- Postgres (OpenRails)
 - Garnet/Redis
 - ClickHouse (+ bootstrap)
-- billing migrations + billing server
+- OpenRails migrations + OpenRails server
 - AuthKit devserver issuer (`issuer:8080`, exposed on `http://localhost:8080`)
 
 ## 3) Start a deterministic webhook hostname

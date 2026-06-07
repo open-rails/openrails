@@ -46,7 +46,7 @@ COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     mkdir -p bin && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -o bin/billing ./cmd/billing
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -o bin/openrails ./cmd/billing
 
 
 # Stage 2: production
@@ -63,11 +63,9 @@ RUN addgroup -g 1001 -S billing && \
     mkdir -p /var/lib/openrails/spool && \
     chown -R billing:billing /var/lib/openrails
 
-# Copy binary and migrations from builder stage. The executable is named
-# openrails in the runtime image even though the Go package is still cmd/billing.
-COPY --from=builder /app/bin/billing /usr/local/bin/openrails
+# Copy binary and migrations from builder stage.
+COPY --from=builder /app/bin/openrails /usr/local/bin/openrails
 COPY --from=builder /app/migrations ./migrations/
-RUN ln -sf /usr/local/bin/openrails /usr/local/bin/billing-server
 
 # Configuration files must be mounted at runtime; none are baked into the image.
 
