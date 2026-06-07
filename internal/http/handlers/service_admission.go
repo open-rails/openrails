@@ -124,6 +124,43 @@ func ServiceGetBudget(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"windows": windows})
 }
 
+type serviceBudgetCheckRequest struct {
+	TenantSubjectID     string                                  `json:"tenant_subject_id"`
+	InvokerID           string                                  `json:"invoker_id"`
+	Windows             []billingservice.BudgetCheckWindowInput `json:"windows"`
+	RequestedMillicents int64                                   `json:"requested_millicents"`
+}
+
+// ServiceBudgetCheck computes rolling money-budget windows for (payer, invoker)
+// against CALLER-SUPPLIED windows (the host owns the budget policy; OpenRails
+// owns the spend actuals) WITHOUT reserving. Powers the tensorhub delegated
+// budget-window display (#410). Operator service token, credits:read.
+func ServiceBudgetCheck(r *httprequest.Request) {
+	var req serviceBudgetCheckRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	payer, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
+		return
+	}
+	if !requireServiceTenantSubjectScope(r, *payer) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, req.InvokerID, req.Windows, req.RequestedMillicents)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "budget check failed")
+		return
+	}
+	r.SuccessJSON(map[string]any{"windows": windows})
+}
+
 type serviceTierPolicyRequest struct {
 	TenantSubjectID string `json:"tenant_subject_id"`
 	billingservice.TierPolicyInput

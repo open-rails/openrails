@@ -93,8 +93,10 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 		issuers.POST("/disable", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), disableDelegatedIssuerHandler(issuerAdmin))
 	}
 
+	tenantSubjects := group.Group("/tenant-subjects/:tenant_subject_id")
+	tenantSubjects.GET("/entitlements", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetTenantSubjectEntitlements))
+
 	users := group.Group("/users/:user_id")
-	users.GET("/entitlements", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserEntitlements))
 	users.GET("/product-access", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
 
 	invokers := group.Group("/invokers/:invoker_id")
@@ -116,6 +118,9 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	group.POST("/admit", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmit))
 	// Budget introspection (#304): rolling money-budget windows for a host /status.
 	group.GET("/budget", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetBudget))
+	// #410: budget-window status against caller-supplied windows (host owns the
+	// policy, OpenRails owns the actuals) — powers the tensorhub delegated display.
+	group.POST("/budget/check", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceBudgetCheck))
 	// Tier policy admin (#298): configure a tier's throughput + entitled endpoints + money budgets.
 	group.PUT("/tier-policies", creditsWrite, wrap(httphandlers.ServiceSetTierPolicy))
 

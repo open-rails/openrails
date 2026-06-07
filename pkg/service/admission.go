@@ -194,6 +194,50 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.TenantSubject
 	return out, nil
 }
 
+// BudgetCheckWindowInput is a caller-supplied rolling budget window for
+// BudgetCheck (the host owns the budget policy; OpenRails owns the actuals).
+type BudgetCheckWindowInput struct {
+	Key             string `json:"key"`
+	WindowSeconds   int64  `json:"window_seconds"`
+	LimitMillicents int64  `json:"limit_millicents"`
+}
+
+// BudgetCheck computes per-window used/reserved/remaining for (payer, invoker)
+// against CALLER-SUPPLIED windows WITHOUT reserving. Unlike BudgetStatus it does
+// NOT read an OpenRails tier policy — the host (tensorhub) owns the platform
+// budget policy and passes the windows; OpenRails owns the spend actuals
+// (billing.budget_reservations). Powers the tensorhub delegated budget-window
+// display (#410) so it no longer reads tensorhub-local money tables.
+func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectID, invoker string, windows []BudgetCheckWindowInput, requestedMillicents int64) ([]AdmitBudgetWindowDTO, error) {
+	if s == nil || s.rt == nil {
+		return nil, fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	bw := make([]budgets.BudgetWindow, 0, len(windows))
+	for _, w := range windows {
+		bw = append(bw, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMillicents: w.LimitMillicents})
+	}
+	bsvc := budgets.NewService(s.rt.DB)
+	statuses, _, err := bsvc.Check(ctx, payer, invoker, bw, requestedMillicents)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AdmitBudgetWindowDTO, 0, len(statuses))
+	for _, w := range statuses {
+		rs := int64(time.Until(w.ResetAt) / time.Second)
+		if rs < 0 {
+			rs = 0
+		}
+		out = append(out, AdmitBudgetWindowDTO{
+			Key: w.Key, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
+			Remaining: w.Remaining, ResetAfterSeconds: rs, Allowed: w.Allowed,
+		})
+	}
+	return out, nil
+}
+
 // TierWindowInput / TierBudgetWindowInput / TierPolicyInput configure a tier's
 // policy via the admin endpoint (#298: tier admin API).
 type TierWindowInput struct {
