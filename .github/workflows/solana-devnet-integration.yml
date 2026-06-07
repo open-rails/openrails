@@ -30,6 +30,12 @@ on:
         type: boolean
         default: false
 
+# Run the JavaScript-based actions (checkout, setup-go, cache) on Node.js 24.
+# Those actions still declare the Node 20 runtime, which GitHub deprecates on
+# 2026-06-16; this opts into the new runtime ahead of the cutover.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # Fast (~8 min) real-USDC publish -> subscribe -> crank -> cancel against the
   # production service layer. This is the one that runs on the daily schedule.

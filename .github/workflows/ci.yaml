@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ master ]
 
+# Run the JavaScript-based actions (checkout, setup-go) on Node.js 24. Those
+# actions still declare the Node 20 runtime, which GitHub deprecates on
+# 2026-06-16; this opts into the new runtime ahead of the cutover.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
