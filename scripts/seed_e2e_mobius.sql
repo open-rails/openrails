@@ -26,8 +26,8 @@ SET display_name = EXCLUDED.display_name,
     status = 'active',
     updated_at = current_timestamp;
 
--- Create price (idempotent by financial-substance unique constraint). There is
--- no price slug: a price's identity is (product, amount, currency, cycle).
+-- Create recurring price (idempotent by financial-substance unique constraint).
+-- There is no price slug: a price's identity is (product, amount, currency, cycle).
 WITH p AS (
   SELECT id AS product_id FROM billing.products WHERE slug = 'e2e_mobius'
 )
@@ -45,11 +45,43 @@ SET processors = EXCLUDED.processors,
     status = 'active',
     updated_at = current_timestamp;
 
+-- Create one-off price used to prove saved-vault manual charges through
+-- OpenRails checkout. PostgreSQL UNIQUE constraints treat NULL billing cycles as
+-- distinct, so do this as UPDATE-or-INSERT instead of ON CONFLICT.
+WITH p AS (
+  SELECT id AS product_id FROM billing.products WHERE slug = 'e2e_mobius'
+), updated AS (
+  UPDATE billing.prices price
+  SET processors = jsonb_build_object('mobius', jsonb_build_object('provider', 'mobius')),
+      status = 'active',
+      updated_at = current_timestamp
+  FROM p
+  WHERE price.product_id = p.product_id
+    AND price.amount = 499
+    AND price.currency = 'usd'
+    AND price.billing_cycle_days IS NULL
+  RETURNING price.id
+)
+INSERT INTO billing.prices (product_id, amount, currency, billing_cycle_days, processors, status)
+SELECT
+  p.product_id,
+  499,
+  'usd',
+  NULL,
+  jsonb_build_object('mobius', jsonb_build_object('provider', 'mobius')),
+  'active'
+FROM p
+WHERE NOT EXISTS (SELECT 1 FROM updated);
+
 -- Output IDs for copy/paste.
 SELECT 'product_id' AS key, id::text AS value FROM billing.products WHERE slug='e2e_mobius'
 UNION ALL
-SELECT 'price_id' AS key, id::text AS value
+SELECT 'recurring_price_id' AS key, id::text AS value
 FROM billing.prices
 WHERE product_id = (SELECT id FROM billing.products WHERE slug='e2e_mobius')
-  AND amount = 999 AND currency='usd' AND billing_cycle_days=1;
-
+  AND amount = 999 AND currency='usd' AND billing_cycle_days=1
+UNION ALL
+SELECT 'one_off_price_id' AS key, id::text AS value
+FROM billing.prices
+WHERE product_id = (SELECT id FROM billing.products WHERE slug='e2e_mobius')
+  AND amount = 499 AND currency='usd' AND billing_cycle_days IS NULL;

@@ -70,7 +70,7 @@ tasks:
       - bash scripts/mint_jwt.sh
 
   seed-e2e-mobius:
-    desc: Seed a minimal Mobius/NMI catalog (1 product + 1 price w/ plan_id) into local Postgres
+    desc: Seed a minimal Mobius/NMI catalog (1 product + recurring and one-off prices) into local Postgres
     cmds:
       - bash scripts/seed_e2e_mobius.sh
 
@@ -88,6 +88,11 @@ tasks:
     desc: Start compose + start cloudflared + send signed test webhook (requires cloudflared + env vars)
     cmds:
       - bash scripts/mobius_sandbox_e2e.sh
+
+  e2e-mobius-live:
+    desc: Run the self-verifying live Mobius/NMI payment lifecycle E2E harness
+    cmds:
+      - bash scripts/mobius_live_lifecycle_e2e.sh
 
   test:
     desc: Run tests

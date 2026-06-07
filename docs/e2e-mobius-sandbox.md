@@ -1,6 +1,38 @@
 # Mobius/NMI Sandbox E2E Runbook (OpenRails)
 
-This runbook exercises the **real** Mobius/NMI sandbox end-to-end:
+This runbook exercises the **real** Mobius/NMI sandbox end-to-end. Prefer the
+self-verifying harness first; use the manual steps below only when debugging a
+specific portal/tunnel/browser problem.
+
+```bash
+task e2e-mobius-live
+```
+
+The harness starts the compose E2E stack, seeds the Mobius catalog, mints a JWT,
+uses real Collect.js tokenization, saves a card in OpenRails, charges the saved
+vault through one-off checkout, creates a saved-card subscription checkout,
+verifies local DB state, queries NMI remotely, and cancels the subscription.
+
+Required environment:
+
+- `PROCESSORS_MOBIUS_SECURITY_KEY`
+- `PROCESSORS_MOBIUS_TOKENIZATION_KEY`
+- `PROCESSORS_MOBIUS_TOKENIZATION_URL`
+- `PROCESSORS_MOBIUS_WEBHOOK_SECRET`
+- `E2E_MOBIUS_PLAN_ID`
+
+Optional environment:
+
+- `MOBIUS_E2E_BASE_URL` defaults to `http://localhost:2053`.
+- `MOBIUS_E2E_TOKENIZATION_BASE_URL` defaults to `MOBIUS_E2E_BASE_URL`.
+- `MOBIUS_E2E_START_COMPOSE` defaults to `true`.
+- `MOBIUS_E2E_BUILD` defaults to `true`; set to `false` for faster reruns
+  against an already-current compose image.
+- `MOBIUS_E2E_START_TUNNEL` defaults to `false`; set it to `true` when your
+  Collect.js tokenization key requires the Cloudflared HTTPS origin.
+- `AUTHKIT_DEV_MINT_SECRET` defaults to the compose issuer's local dev secret.
+
+The manual flow below covers the same surfaces:
 - browser-side tokenization (Collect.js) → `payment_token`
 - create vault/payment method in billing
 - create a subscription purchase (NMI recurring)
@@ -115,7 +147,7 @@ Keep those exported for the remaining steps.
 Open (over Cloudflared HTTPS):
 
 ```
-https://$CLOUDFLARED_PUBLIC_HOSTNAME/debug/mobius/tokenization?mode=real
+https://$CLOUDFLARED_PUBLIC_HOSTNAME/debug/nmi/tokenization?mode=real&provider=mobius
 ```
 
 1. Generate `payment_token`.
