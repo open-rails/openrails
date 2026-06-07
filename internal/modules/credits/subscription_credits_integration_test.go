@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -91,9 +92,10 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	}).Exec(ctx)
 	require.NoError(t, err)
 
+	seedTenantSubject(t, ctx, bunDB, identity.TenantSubjectIDFromString(userID).UUID())
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		InvokerID:               userID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -255,9 +257,10 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	}).Exec(ctx)
 	require.NoError(t, err)
 
+	seedTenantSubject(t, ctx, bunDB, identity.TenantSubjectIDFromString(userID).UUID())
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		InvokerID:               userID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,

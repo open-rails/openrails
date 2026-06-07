@@ -243,7 +243,7 @@ type VaultConfig struct {
 	UseTransitForSolana bool `koanf:"use_transit_for_solana,omitempty"`
 	// SecretCacheTTLSeconds is the in-process per-(tenant,name) secret cache TTL.
 	// Workers/handlers resolve a tenant's secret once per TTL window instead of
-	// hitting the backend per row/request. 0 uses the default (45s); negative
+	// hitting the backend per row/request. 0 uses the default (15m); negative
 	// disables caching. A rotation (Put/Delete in this process) invalidates the
 	// entry immediately; cross-process rotations take effect within one TTL.
 	SecretCacheTTLSeconds int `koanf:"secret_cache_ttl_seconds,omitempty"`

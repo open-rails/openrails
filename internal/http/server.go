@@ -185,7 +185,7 @@ func New(deps Dependencies) (*Server, error) {
 			if verr != nil {
 				return nil, fmt.Errorf("vault login: %w", verr)
 			}
-			secretStore = tenancy.NewVaultSecretStore(kvMount, vault.NewKVv2Adapter(vclient, kvMount))
+			secretStore = tenancy.NewVaultSecretStore(kvMount, vault.NewKVv2Adapter(vclient, kvMount), tenancy.NewDBTenantSlugResolver(deps.ControlPlane.Pool()))
 			if vc.UseTransitForSolana {
 				tMount := vc.TransitMount
 				if tMount == "" {
@@ -225,9 +225,9 @@ func New(deps Dependencies) (*Server, error) {
 			}
 		}
 
-		// Front the chosen store with an in-process TTL cache (#251) so workers and
-		// hot paths resolve a tenant's secret once per window instead of per row /
-		// request. Default 45s; a rotation through this node invalidates immediately.
+		// Front the chosen store with an in-process TTL cache (#251/#322) so workers
+		// and hot paths resolve a tenant's secret once per window instead of per row /
+		// request. Default ~15m; a rotation through this node invalidates immediately.
 		// Negative TTL disables it (NewCachedSecretStore returns the store unchanged).
 		secretCacheTTL := tenancy.DefaultSecretCacheTTL
 		if deps.Config != nil && deps.Config.Vault != nil && deps.Config.Vault.SecretCacheTTLSeconds != 0 {
@@ -240,6 +240,12 @@ func New(deps Dependencies) (*Server, error) {
 			return nil, fmt.Errorf("build tenancy service: %w", terr)
 		}
 		s.tenancy = tsvc
+		if deps.Runtime != nil {
+			deps.Runtime.Tenancy = tsvc
+			if deps.Runtime.CheckoutService != nil {
+				deps.Runtime.CheckoutService.SetTenantSecretStore(secretStore)
+			}
+		}
 
 		// Single-install bridge (#253): a global-config Solana private key is seeded
 		// only into the default tenant's secret store as solana/private_key. Named

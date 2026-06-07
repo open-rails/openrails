@@ -2,23 +2,28 @@
 
 OpenRails resolves per-tenant processor secrets (Stripe keys, webhook signing
 secrets, Solana keys) through `tenancy.TenantSecretStore`, addressed by
-`(tenant_id, name)`. Three backends ship behind one interface:
+`(tenant_id, name)` in code. Vault stores use the stable tenant slug in the
+physical path so manual operator writes are deterministic and readable. Three
+backends ship behind one interface:
 
 | Backend | Selected when | At rest |
 |---|---|---|
 | `dbSecretStore` + `encryptedSecretStore` | **default / self-hosted** (no Vault config) | `billing.tenant_secrets`, envelope-encrypted (master key wraps per-tenant DEK in `billing.tenant_deks`) |
-| `vaultSecretStore` (KV-v2) | `vault.enabled: true` | Vault KV-v2 at `secret/openrails/tenants/<tenant-id>/<name>` |
+| `vaultSecretStore` (KV-v2) | `vault.enabled: true` | Vault KV-v2 at `secret/openrails/tenants/<tenant-slug>/<name>` |
 | `memSecretStore` | tests | in-process |
 
 All three are fronted by an in-process **TTL cache** (`cachedSecretStore`,
-default 45s, `vault.secret_cache_ttl_seconds`) so a worker scanning many rows for
-one tenant resolves the secret once per window. A rotation *through this node*
-invalidates the entry immediately; a rotation on another node converges within one
-TTL. Set the TTL negative to disable.
+default 15 minutes, `vault.secret_cache_ttl_seconds`) so a worker or webhook
+handler resolves a tenant's secret once per window instead of per row/request. A
+rotation *through this node* invalidates the entry immediately; an out-of-band
+admin Vault write or rotation on another node converges within one TTL. Set the
+TTL negative to disable. Vault WebSocket/event notifications are not required for
+the baseline design.
 
-> **Addressing is identical across backends.** Switching to Vault changes neither
-> the secret *names* (`stripe/secret_key`, `stripe/webhook_signing_secret`, …) nor
-> any caller. Only `server.go` wiring changes.
+> **Caller addressing is identical across backends.** Switching to Vault changes
+> neither the code-level `(tenant_id, name)` calls nor the secret *names*
+> (`stripe/secret_key`, `stripe/webhook_signing_secret`, …). Only the physical
+> Vault path uses `<tenant-slug>`.
 
 ## Self-hosted is unchanged
 
@@ -55,20 +60,95 @@ vault:
   kv_mount: secret            # KV-v2 mount (default "secret")
   transit_mount: transit      # only if use_transit_for_solana
   use_transit_for_solana: true
-  secret_cache_ttl_seconds: 45
+  secret_cache_ttl_seconds: 900
 ```
 
 The app authenticates **once** as itself (AppRole / K8s service-account JWT) and
-is the trusted broker; tenant isolation is enforced in code by the `(tenant_id,
-name)` path, not by per-tenant Vault auth. The token is renewed in the background
-and re-acquired on expiry.
+is the trusted broker; tenant isolation is enforced in code by resolving the
+tenant id to its stable slug and using the `(tenant_slug, name)` Vault path, not
+by per-tenant Vault auth. The token is renewed in the background and re-acquired
+on expiry.
 
 A suggested per-tenant policy (future BYO-key self-service) scopes an operator to
 only its subtree:
 
 ```hcl
-path "secret/data/openrails/tenants/<tenant-id>/*"     { capabilities = ["read"] }
-path "secret/metadata/openrails/tenants/<tenant-id>/*" { capabilities = ["list"] }
+path "secret/data/openrails/tenants/<tenant-slug>/*"     { capabilities = ["read"] }
+path "secret/metadata/openrails/tenants/<tenant-slug>/*" { capabilities = ["list"] }
+```
+
+## Canonical secret names and paths
+
+OpenRails owns the secret names. Vault-backed installs store each value under the
+KV-v2 field `value`:
+
+| Secret | Vault path example | Tenant dashboard writable |
+|---|---|---|
+| Stripe API key | `secret/openrails/tenants/cozy-art/stripe/secret_key` | yes |
+| Stripe webhook signing secret | `secret/openrails/tenants/cozy-art/stripe/webhook_signing_secret` | yes |
+| Stripe thin-event signing secret | `secret/openrails/tenants/cozy-art/stripe/webhook_signing_secret_thin` | yes |
+| Mobius/NMI production key | `secret/openrails/tenants/doujins/nmi/mobius/production_key` | yes |
+| CCBill account config JSON | `secret/openrails/tenants/doujins/ccbill/account_config` | yes |
+| Solana signing keypair | `secret/openrails/tenants/default/solana/private_key` | no |
+
+`solana/private_key` remains an OpenRails internal/platform-admin secret for
+signing compatibility. It is in the canonical registry so platform tools and
+startup seed paths can still address it, but delegated tenant-admin APIs do not
+expose it as a writable dashboard secret.
+
+## Manual placement examples
+
+An operator can preprovision provider credentials before a tenant ever opens a
+dashboard:
+
+```sh
+vault kv put secret/openrails/tenants/doujins/nmi/mobius/production_key value="$MOBIUS_PRODUCTION_KEY"
+vault kv put secret/openrails/tenants/doujins/ccbill/account_config value='{"client_acc_num":"...","client_sub_acc":"...","salt":"..."}'
+vault kv put secret/openrails/tenants/tensorhub/stripe/secret_key value="$STRIPE_SECRET_KEY"
+vault kv put secret/openrails/tenants/tensorhub/stripe/webhook_signing_secret value="$STRIPE_WEBHOOK_SECRET"
+```
+
+OpenRails discovers those values lazily by tenant slug on first use or status
+read, then keeps the value in memory until the cache TTL expires. No app restart
+is required for out-of-band Vault writes; convergence is bounded by
+`vault.secret_cache_ttl_seconds`.
+
+## Tenant-admin write-only API examples
+
+Dashboard callers use tenant-signed delegated access tokens with the exact
+tenant-secret permissions from the control-plane catalog. These endpoints never
+return plaintext secret values.
+
+List configured status:
+
+```sh
+curl -H "Authorization: Bearer $DELEGATED_ADMIN_JWT" \
+  "$OPENRAILS_URL/v1/tenant-admin/secrets"
+```
+
+Validate before saving:
+
+```sh
+curl -X PUT "$OPENRAILS_URL/v1/tenant-admin/secrets/stripe/secret_key" \
+  -H "Authorization: Bearer $DELEGATED_ADMIN_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"value":"sk_live_...","validate_only":true}'
+```
+
+Save and validate:
+
+```sh
+curl -X PUT "$OPENRAILS_URL/v1/tenant-admin/secrets/stripe/secret_key" \
+  -H "Authorization: Bearer $DELEGATED_ADMIN_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"value":"sk_live_...","save_and_validate":true}'
+```
+
+Delete a configured secret:
+
+```sh
+curl -X DELETE "$OPENRAILS_URL/v1/tenant-admin/secrets/stripe/webhook_signing_secret" \
+  -H "Authorization: Bearer $DELEGATED_ADMIN_JWT"
 ```
 
 ## Migration: move DB-stored secrets into Vault
@@ -81,8 +161,8 @@ managed Vault:
    envelope-encrypted, so decrypt through OpenRails rather than reading the column
    raw — enumerate with `Service` / `TenantSecretStore.List(tenant)` then `Get`
    each name (returns plaintext via the encryptor). Do NOT `SELECT value` directly.
-3. **Write** each into Vault at the SAME address:
-   `vault kv put secret/openrails/tenants/<tenant-id>/<name> value=<plaintext>`
+3. **Write** each into Vault at the canonical slug address:
+   `vault kv put secret/openrails/tenants/<tenant-slug>/<name> value=<plaintext>`
    (the store keys the value under `"value"`). Start with the `default` tenant.
 4. **Flip** `vault.enabled: true` and restart. The store now resolves from Vault;
    names and callers are unchanged.
@@ -95,10 +175,10 @@ managed Vault:
 ## Rotation (KV-v2 versions)
 
 - Rotate via the admin credential API (`RotateCredential` → `Put`) or directly:
-  `vault kv put secret/openrails/tenants/<id>/<name> value=<new>`. KV-v2 keeps the
+  `vault kv put secret/openrails/tenants/<tenant-slug>/<name> value=<new>`. KV-v2 keeps the
   prior version; OpenRails always reads the latest.
 - A rotation through an OpenRails node refreshes that node's cache immediately;
-  other nodes pick it up within one cache TTL (default 45s). For an instant
+  other nodes pick it up within one cache TTL (default 15m). For an instant
   cluster-wide cutover, set `secret_cache_ttl_seconds` low or roll the nodes.
 - **Solana signing key:** rotating `solana/private_key` changes the tenant's
   on-chain merchant/signer identity. It **forces a plan re-publish and re-enroll**

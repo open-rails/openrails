@@ -91,6 +91,7 @@ type CheckoutService struct {
 	VaultService         *vault.VaultService
 	IdempotencyService   checkoutIdempotencyStore
 	NMIClients           map[string]*nmi.NMIClient
+	TenantSecrets        tenantSecretGetter
 	// ProcessorCustomerService maps app users to processor customer ids so we
 	// reuse a single Stripe customer per user (issue #212) and can record the
 	// mapping at checkout time instead of relying solely on webhooks.
@@ -422,8 +423,7 @@ func (s *CheckoutService) processCCBillSubscription(
 	user *UserIdentity,
 	price *models.Price,
 ) (*CheckoutResponse, error) {
-	// Validate CCBill configuration
-	ccbillProc, err := requireCCBillProcessorConfig(s.Config)
+	ccbillClient, err := s.resolveCCBillClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -444,8 +444,6 @@ func (s *CheckoutService) processCCBillSubscription(
 		return nil, errors.New("username required for CCBill payments")
 	}
 
-	// Generate FlexForm URL
-	ccbillClient := ccbill.NewClient(ccbillProc.ToCCBillConfig(), s.Config.IsTestMode())
 	flexFormParams := &ccbill.GenerateFlexFormURLParams{
 		Username:      user.Username,
 		Email:         *user.Email,
@@ -487,8 +485,7 @@ func (s *CheckoutService) processCCBillUpgrade(
 	newPrice *models.Price,
 	existingSub *models.Subscription,
 ) (*CheckoutResponse, error) {
-	// Validate CCBill configuration
-	ccbillProc, err := requireCCBillProcessorConfig(s.Config)
+	ccbillClient, err := s.resolveCCBillClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -517,8 +514,6 @@ func (s *CheckoutService) processCCBillUpgrade(
 		return nil, errors.New("username required for CCBill payments")
 	}
 
-	// Generate upgrade FlexForm URL
-	ccbillClient := ccbill.NewClient(ccbillProc.ToCCBillConfig(), s.Config.IsTestMode())
 	upgradeParams := &ccbill.GenerateUpgradeFlexFormURLParams{
 		Username:               user.Username,
 		Email:                  *user.Email,
@@ -575,9 +570,9 @@ func (s *CheckoutService) processNMISubscription(
 		return nil, err
 	}
 
-	client, ok := s.NMIClients[provider]
-	if !ok {
-		return nil, fmt.Errorf("NMI provider '%s' is not configured", provider)
+	client, err := s.resolveNMIClient(ctx, provider)
+	if err != nil {
+		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
 	}
 
 	// Get idempotency key (client-provided or generated)
@@ -1554,9 +1549,9 @@ func (s *CheckoutService) processUpgrade(
 	newPeriodEnd := now.AddDate(0, 0, cycleDays)
 	startDate, _ := buildNMIFutureStartDate(newPeriodEnd, now)
 
-	client, ok := s.NMIClients[provider]
-	if !ok {
-		err := fmt.Errorf("NMI provider '%s' is not configured", provider)
+	client, err := s.resolveNMIClient(ctx, provider)
+	if err != nil {
+		err := fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
@@ -1954,9 +1949,9 @@ func (s *CheckoutService) CalculateProration(
 
 // cancelNMISubscription cancels a subscription at NMI
 func (s *CheckoutService) cancelNMISubscription(ctx context.Context, sub *models.Subscription, provider string) error {
-	client, ok := s.NMIClients[provider]
-	if !ok {
-		return fmt.Errorf("NMI provider '%s' is not configured", provider)
+	client, err := s.resolveNMIClient(ctx, provider)
+	if err != nil {
+		return fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
 	}
 
 	return client.DeleteRecurringSubscription(sub.ProcessorSubscriptionID)

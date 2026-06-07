@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -55,6 +56,11 @@ func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identi
 		UpdatedAt:       now,
 	}
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		// Materialize the payable tenant_subjects row so the tier_policies FK
+		// (migration 076) is satisfied on a subject's first policy write (#317).
+		if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Q(ctx), tenantID, payer.UUID().String()); err != nil {
+			return err
+		}
 		_, err := s.db.Q(ctx).NewInsert().Model(row).
 			On("CONFLICT (tenant_id, tenant_subject_id, tier) DO UPDATE").
 			Set("policy = EXCLUDED.policy").

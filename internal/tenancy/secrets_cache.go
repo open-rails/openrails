@@ -9,10 +9,10 @@ import (
 )
 
 // DefaultSecretCacheTTL is the in-process secret cache TTL used when a managed
-// deployment enables caching without specifying a window. Short enough that a
-// cross-process rotation is picked up quickly, long enough that a worker scanning
-// many rows for one tenant resolves the secret once, not per row.
-const DefaultSecretCacheTTL = 45 * time.Second
+// deployment enables caching without specifying a window. It keeps hot paths
+// such as tenant webhook verification from reading Vault per request while still
+// letting out-of-band admin Vault writes converge without a process restart.
+const DefaultSecretCacheTTL = 15 * time.Minute
 
 // cachedSecretStore is a TTL-bounded, in-process read-through cache in front of
 // any TenantSecretStore (issue #251). It exists so the recurring pull worker and

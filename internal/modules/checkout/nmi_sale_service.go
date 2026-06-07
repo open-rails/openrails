@@ -37,6 +37,7 @@ type CheckoutNMISaleService struct {
 	VaultService     *vault.VaultService
 	IdempotencyStore checkoutIdempotencyStore
 	NMIClients       map[string]*nmi.NMIClient
+	ResolveNMIClient func(context.Context, string) (*nmi.NMIClient, error)
 }
 
 func NewCheckoutNMISaleService(
@@ -62,9 +63,9 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		return nil, errors.New("processor is required")
 	}
 
-	client, ok := s.NMIClients[provider]
-	if !ok {
-		return nil, fmt.Errorf("NMI provider '%s' is not configured", provider)
+	client, err := s.nmiClient(ctx, provider)
+	if err != nil {
+		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
 	}
 	orderID := nmiSaleOrderID(idempotencyKey, req.Metadata)
 
@@ -170,6 +171,17 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 	}
 
 	return s.completeNMISaleRegistration(ctx, req, user, price, provider, completedAttempt.TransactionID, idempotencyKey, idempOp, orderID)
+}
+
+func (s *CheckoutNMISaleService) nmiClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
+	if s.ResolveNMIClient != nil {
+		return s.ResolveNMIClient(ctx, provider)
+	}
+	client, ok := s.NMIClients[provider]
+	if !ok || client == nil {
+		return nil, fmt.Errorf("missing client")
+	}
+	return client, nil
 }
 
 func (s *CheckoutNMISaleService) completeNMISaleRegistration(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, provider string, transactionID string, idempotencyKey string, idempOp string, orderID string) (*CheckoutResponse, error) {

@@ -121,6 +121,10 @@ const (
 	PermTenantCreditsWrite       = "openrails:tenant:credits:write"
 	PermTenantPaymentsWrite      = "openrails:tenant:payments:write"
 	PermTenantSubscriptionsWrite = "openrails:tenant:subscriptions:write"
+	PermTenantSecretsList        = "openrails:tenant:secrets:list"
+	PermTenantSecretsWrite       = "openrails:tenant:secrets:write"
+	PermTenantSecretsDelete      = "openrails:tenant:secrets:delete"
+	PermTenantSecretsTest        = "openrails:tenant:secrets:test"
 	// PermTenantMetricsRead lets a tenant admin read THEIR OWN tenant's analytics
 	// metrics (revenue/subscriptions/processors/churn) via the browser-direct
 	// tenant-admin surface. The metrics are tenant-scoped at the query layer
@@ -158,6 +162,10 @@ var catalogEntries = []Permission{
 	{Name: PermSelfSubscriptionCancel, Description: "Self-service: cancel your own subscriptions."},
 	{Name: PermSelfPaymentMethods, Description: "Self-service: manage your own payment methods."},
 	{Name: PermSelfMint, Description: "Mint short-lived, user-scoped delegated access tokens for your own tenant (server-to-server, browser tier)."},
+	{Name: PermTenantSecretsList, Description: "Tenant admin: list configured tenant-secret status without plaintext."},
+	{Name: PermTenantSecretsWrite, Description: "Tenant admin: create or rotate write-only tenant secrets."},
+	{Name: PermTenantSecretsDelete, Description: "Tenant admin: delete tenant secrets."},
+	{Name: PermTenantSecretsTest, Description: "Tenant admin: validate tenant secrets without reading plaintext."},
 	{Name: PermPlatformSuperadmin, Description: "Platform superadmin: administer ANY tenant across the managed-hosting platform (cross-tenant control plane). Seeded ONLY to the platform tenant, never to per-tenant operator tenants (issue #226)."},
 }
 
@@ -199,6 +207,10 @@ var tenantCatalog = map[string]struct{}{
 	PermTenantCreditsWrite:       {},
 	PermTenantPaymentsWrite:      {},
 	PermTenantSubscriptionsWrite: {},
+	PermTenantSecretsList:        {},
+	PermTenantSecretsWrite:       {},
+	PermTenantSecretsDelete:      {},
+	PermTenantSecretsTest:        {},
 	PermTenantMetricsRead:        {},
 }
 
@@ -210,6 +222,10 @@ func TenantCatalogNames() []string {
 		PermTenantCreditsWrite,
 		PermTenantPaymentsWrite,
 		PermTenantSubscriptionsWrite,
+		PermTenantSecretsList,
+		PermTenantSecretsWrite,
+		PermTenantSecretsDelete,
+		PermTenantSecretsTest,
 		PermTenantMetricsRead,
 	}
 }

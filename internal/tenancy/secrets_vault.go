@@ -7,6 +7,9 @@ import (
 	"path"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -32,10 +35,51 @@ type VaultKV interface {
 	ListSecrets(ctx context.Context, path string) ([]string, error)
 }
 
+// TenantSlugResolver resolves OpenRails' stable tenant slug for a tenant id.
+// Vault paths use slugs so operator-written paths are deterministic and human
+// readable; DB/RLS/audit paths continue to use tenant ids.
+type TenantSlugResolver interface {
+	TenantSlug(ctx context.Context, tenantID tenant.ID) (string, error)
+}
+
+type dbTenantSlugResolver struct {
+	pool *pgxpool.Pool
+}
+
+// NewDBTenantSlugResolver resolves tenant slugs from billing.tenants.
+func NewDBTenantSlugResolver(pool *pgxpool.Pool) TenantSlugResolver {
+	return dbTenantSlugResolver{pool: pool}
+}
+
+func (r dbTenantSlugResolver) TenantSlug(ctx context.Context, tenantID tenant.ID) (string, error) {
+	if r.pool == nil {
+		return "", fmt.Errorf("%w: tenant slug resolver has no database pool", ErrSecretBackendUnavailable)
+	}
+	if tenantID.IsZero() {
+		return "", validateSecretRef(tenantID, "x")
+	}
+	var slug string
+	err := r.pool.QueryRow(ctx, `
+		SELECT slug FROM billing.tenants
+		 WHERE id = $1::uuid AND deleted_at IS NULL
+	`, tenantID.String()).Scan(&slug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrTenantNotFound
+		}
+		return "", fmt.Errorf("tenancy: resolve tenant slug for secret path: %w", errors.Join(ErrSecretBackendUnavailable, err))
+	}
+	slug = strings.TrimSpace(strings.ToLower(slug))
+	if slug == "" {
+		return "", fmt.Errorf("tenancy: resolved empty tenant slug for %s", tenantID.String())
+	}
+	return slug, nil
+}
+
 // vaultSecretStore resolves the SAME (tenant, name) addressing as the DB-backed
 // store to a tenant-scoped Vault KV path:
 //
-//	<mount>/openrails/tenants/<tenant-id>/<name>
+//	<mount>/openrails/tenants/<tenant-slug>/<name>
 //
 // One tenant's secrets are therefore physically isolated under its own path
 // prefix, and a Vault policy can grant a tenant operator read/write to ONLY its
@@ -46,25 +90,33 @@ type VaultKV interface {
 // backed store remains the dev / self-hosted default, so nothing here is required
 // to build or run the rest of OpenRails.
 type vaultSecretStore struct {
-	mount  string
-	client VaultKV
+	mount    string
+	client   VaultKV
+	resolver TenantSlugResolver
 }
 
 // NewVaultSecretStore returns a Vault-backed TenantSecretStore. mount is the KV-v2
 // mount path (e.g. "secret"). client may be nil — in that case the store is a
 // documented stub that fails closed with ErrVaultNotConfigured, which is the
 // state until a managed deployment injects a live VaultKV.
-func NewVaultSecretStore(mount string, client VaultKV) TenantSecretStore {
+func NewVaultSecretStore(mount string, client VaultKV, resolver TenantSlugResolver) TenantSecretStore {
 	mount = strings.Trim(strings.TrimSpace(mount), "/")
 	if mount == "" {
 		mount = "secret"
 	}
-	return &vaultSecretStore{mount: mount, client: client}
+	return &vaultSecretStore{mount: mount, client: client, resolver: resolver}
 }
 
 // pathFor builds the tenant-scoped Vault path for a (tenant, name) pair.
-func (v *vaultSecretStore) pathFor(tenantID tenant.ID, name string) string {
-	return path.Join(v.mount, "openrails", "tenants", tenantID.String(), name)
+func (v *vaultSecretStore) pathFor(ctx context.Context, tenantID tenant.ID, name string) (string, error) {
+	if v.resolver == nil {
+		return "", fmt.Errorf("%w: vault-backed secret store requires a tenant slug resolver", ErrSecretBackendUnavailable)
+	}
+	slug, err := v.resolver.TenantSlug(ctx, tenantID)
+	if err != nil {
+		return "", err
+	}
+	return path.Join(v.mount, "openrails", "tenants", slug, cleanSecretName(name)), nil
 }
 
 func (v *vaultSecretStore) Get(ctx context.Context, tenantID tenant.ID, name string) (Secret, error) {
@@ -74,7 +126,11 @@ func (v *vaultSecretStore) Get(ctx context.Context, tenantID tenant.ID, name str
 	if v.client == nil {
 		return Secret{}, ErrVaultNotConfigured
 	}
-	data, err := v.client.ReadSecret(ctx, v.pathFor(tenantID, name))
+	vpath, err := v.pathFor(ctx, tenantID, name)
+	if err != nil {
+		return Secret{}, err
+	}
+	data, err := v.client.ReadSecret(ctx, vpath)
 	if err != nil {
 		// A read error is an OPERATIONAL failure (Vault unreachable / sealed /
 		// permission). Absence is signalled by missing "value" below, NOT by an
@@ -95,7 +151,11 @@ func (v *vaultSecretStore) Put(ctx context.Context, tenantID tenant.ID, name, va
 	if v.client == nil {
 		return Secret{}, ErrVaultNotConfigured
 	}
-	if err := v.client.WriteSecret(ctx, v.pathFor(tenantID, name), map[string]string{"value": value}); err != nil {
+	vpath, err := v.pathFor(ctx, tenantID, name)
+	if err != nil {
+		return Secret{}, err
+	}
+	if err := v.client.WriteSecret(ctx, vpath, map[string]string{"value": value}); err != nil {
 		return Secret{}, fmt.Errorf("tenancy: vault write %q: %w", name, errors.Join(ErrSecretBackendUnavailable, err))
 	}
 	return Secret{Name: name, Value: value, Version: 1}, nil
@@ -108,7 +168,11 @@ func (v *vaultSecretStore) Delete(ctx context.Context, tenantID tenant.ID, name 
 	if v.client == nil {
 		return ErrVaultNotConfigured
 	}
-	if err := v.client.DeleteSecret(ctx, v.pathFor(tenantID, name)); err != nil {
+	vpath, err := v.pathFor(ctx, tenantID, name)
+	if err != nil {
+		return err
+	}
+	if err := v.client.DeleteSecret(ctx, vpath); err != nil {
 		return fmt.Errorf("tenancy: vault delete %q: %w", name, errors.Join(ErrSecretBackendUnavailable, err))
 	}
 	return nil
@@ -121,7 +185,14 @@ func (v *vaultSecretStore) List(ctx context.Context, tenantID tenant.ID) ([]stri
 	if v.client == nil {
 		return nil, ErrVaultNotConfigured
 	}
-	prefix := path.Join(v.mount, "openrails", "tenants", tenantID.String())
+	if v.resolver == nil {
+		return nil, fmt.Errorf("%w: vault-backed secret store requires a tenant slug resolver", ErrSecretBackendUnavailable)
+	}
+	slug, err := v.resolver.TenantSlug(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	prefix := path.Join(v.mount, "openrails", "tenants", slug)
 	names, err := v.client.ListSecrets(ctx, prefix)
 	if err != nil {
 		return nil, fmt.Errorf("tenancy: vault list: %w", errors.Join(ErrSecretBackendUnavailable, err))

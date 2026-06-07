@@ -27,6 +27,11 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		"openrails:self:payment-methods:manage",
 		// Browser-tier delegated-token MINT capability (server-to-server, #222).
 		"openrails:self:mint",
+		// Tenant-admin write-only secret management (#323).
+		PermTenantSecretsList,
+		PermTenantSecretsWrite,
+		PermTenantSecretsDelete,
+		PermTenantSecretsTest,
 		// Cross-tenant managed-hosting platform superadmin (#226). It is in the
 		// catalog (a valid grantable permission) but is NOT seeded into operator
 		// orgs — see TestOperatorRolePermissions_ExcludesPlatformSuperadmin.

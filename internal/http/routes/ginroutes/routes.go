@@ -305,6 +305,10 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	payWrite := ginmw.RequireDelegatedPermission(controlplane.PermTenantPaymentsWrite)
 	subWrite := ginmw.RequireDelegatedPermission(controlplane.PermTenantSubscriptionsWrite)
 	metricsRead := ginmw.RequireDelegatedPermission(controlplane.PermTenantMetricsRead)
+	secretsList := ginmw.RequireDelegatedPermission(controlplane.PermTenantSecretsList)
+	secretsWrite := ginmw.RequireDelegatedPermission(controlplane.PermTenantSecretsWrite)
+	secretsDelete := ginmw.RequireDelegatedPermission(controlplane.PermTenantSecretsDelete)
+	secretsTest := ginmw.RequireDelegatedPermission(controlplane.PermTenantSecretsTest)
 
 	// Tenant metrics (issue #259 + #232): a tenant admin reads THEIR OWN tenant's
 	// analytics. The metrics queries are tenant-scoped to the request's tenant
@@ -317,6 +321,13 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	metrics.GET("/subscriptions", metricsRead, wrap(httphandlers.GetAdminMetricsSubscriptions))
 	metrics.GET("/processors", metricsRead, wrap(httphandlers.GetAdminMetricsProcessors))
 	metrics.GET("/churn", metricsRead, wrap(httphandlers.GetAdminMetricsChurn))
+
+	secretGroup := group.Group("/secrets")
+	secretGroup.GET("", secretsList, tenantSecretListHandler(rt))
+	secretGroup.GET("/registry", secretsList, tenantSecretRegistryHandler())
+	secretGroup.PUT("/*name", secretsWrite, tenantSecretPutHandler(rt))
+	secretGroup.DELETE("/*name", secretsDelete, tenantSecretDeleteHandler(rt))
+	secretGroup.POST("/validate/*name", secretsTest, tenantSecretValidateHandler(rt))
 
 	// Tenant-wide operational lists. They reuse admin handlers, but the delegated
 	// middleware pins the tenant before RLS-aware queries run.

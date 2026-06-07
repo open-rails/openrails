@@ -92,6 +92,12 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, payer identity.TenantSu
 // ensureSettingsRowTx inserts a default settings row for (payer, credit_type) if
 // one does not exist, using the given billing mode. No-op when the row exists.
 func (s *CreditsService) ensureSettingsRowTx(ctx context.Context, tx bun.Tx, tenantID, ownerID, creditTypeID uuid.UUID, mode string, now time.Time) error {
+	// Materialize the payable tenant_subjects row so the credit_account_settings
+	// FK (migration 076) is satisfied — this is the shared choke point for
+	// settings writes (suspend/resume/verify/graduate/arrears) (#317).
+	if err := ensureTenantSubject(ctx, tx, tenantID, ownerID); err != nil {
+		return err
+	}
 	row := &models.CreditAccountSettings{
 		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, CreditTypeID: creditTypeID,
 		BillingMode: mode, HardStopOnBreach: true, AlertThresholdPct: 80,

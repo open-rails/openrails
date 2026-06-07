@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -29,7 +30,69 @@ const (
 	// SecretStripeWebhookSigningThin is the tenant's Stripe "thin" Event
 	// Destination signing secret (a single endpoint may receive both).
 	SecretStripeWebhookSigningThin = "stripe/webhook_signing_secret_thin"
+	// SecretNMIMobiusProductionKey is the tenant's Mobius/NMI production key.
+	SecretNMIMobiusProductionKey = "nmi/mobius/production_key"
+	// SecretCCBillAccountConfig is the tenant's CCBill account/config payload.
+	// Store as an OpenRails-owned JSON string until the CCBill adapter grows a
+	// typed multi-field secret.
+	SecretCCBillAccountConfig = "ccbill/account_config"
+	// SecretSolanaPrivateKey is the tenant's Solana signing keypair. This is
+	// OpenRails-owned and intentionally not tenant-writable through self-service
+	// APIs.
+	SecretSolanaPrivateKey = "solana/private_key"
 )
+
+// SecretDefinition describes one OpenRails-owned tenant secret. It is the
+// canonical registry used by status APIs, docs, validation, and runbooks.
+type SecretDefinition struct {
+	Name              string `json:"name"`
+	Provider          string `json:"provider"`
+	Purpose           string `json:"purpose"`
+	DisplayLabel      string `json:"display_label"`
+	ManualVault       bool   `json:"manual_vault"`
+	TenantWritable    bool   `json:"tenant_writable"`
+	Validation        string `json:"validation"`
+	PlaintextReadable bool   `json:"plaintext_readable"`
+}
+
+var tenantSecretRegistry = []SecretDefinition{
+	{Name: SecretStripeSecretKey, Provider: "stripe", Purpose: "api_key", DisplayLabel: "Stripe secret key", ManualVault: true, TenantWritable: true, Validation: "stripe_balance_check"},
+	{Name: SecretStripeWebhookSigning, Provider: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe webhook signing secret", ManualVault: true, TenantWritable: true, Validation: "format"},
+	{Name: SecretStripeWebhookSigningThin, Provider: "stripe", Purpose: "webhook_signing", DisplayLabel: "Stripe thin event signing secret", ManualVault: true, TenantWritable: true, Validation: "format"},
+	{Name: SecretNMIMobiusProductionKey, Provider: "nmi", Purpose: "mobius_production_key", DisplayLabel: "Mobius/NMI production key", ManualVault: true, TenantWritable: true, Validation: "presence"},
+	{Name: SecretCCBillAccountConfig, Provider: "ccbill", Purpose: "account_config", DisplayLabel: "CCBill account configuration", ManualVault: true, TenantWritable: true, Validation: "presence"},
+	{Name: SecretSolanaPrivateKey, Provider: "solana", Purpose: "signing_keypair", DisplayLabel: "Solana signing keypair", ManualVault: true, TenantWritable: false, Validation: "presence"},
+}
+
+// TenantSecretRegistry returns the canonical OpenRails tenant-secret registry.
+func TenantSecretRegistry() []SecretDefinition {
+	out := make([]SecretDefinition, len(tenantSecretRegistry))
+	copy(out, tenantSecretRegistry)
+	return out
+}
+
+// SecretDefinitionFor returns a registry entry by stable secret name.
+func SecretDefinitionFor(name string) (SecretDefinition, bool) {
+	name = cleanSecretName(name)
+	for _, d := range tenantSecretRegistry {
+		if d.Name == name {
+			return d, true
+		}
+	}
+	return SecretDefinition{}, false
+}
+
+// TenantSecretStatus is the read-only dashboard/admin view of a tenant secret.
+// It never contains plaintext.
+type TenantSecretStatus struct {
+	SecretDefinition
+	Configured    bool       `json:"configured"`
+	Version       int        `json:"version,omitempty"`
+	LastRotatedAt *time.Time `json:"last_rotated_at,omitempty"`
+	ValidatedAt   *time.Time `json:"validated_at,omitempty"`
+	LastErrorCode string     `json:"last_error_code,omitempty"`
+	LastActor     string     `json:"last_actor,omitempty"`
+}
 
 // ErrSecretNotFound is returned by a TenantSecretStore when no secret exists for
 // the (tenant, name) pair. This is a TERMINAL condition for that (tenant, name):
@@ -93,8 +156,12 @@ func validateSecretRef(tenantID tenant.ID, name string) error {
 	if tenantID.IsZero() {
 		return fmt.Errorf("tenancy: secret access requires a tenant id")
 	}
-	if strings.TrimSpace(name) == "" {
+	if cleanSecretName(name) == "" {
 		return fmt.Errorf("tenancy: secret access requires a name")
 	}
 	return nil
+}
+
+func cleanSecretName(name string) string {
+	return strings.Trim(strings.TrimSpace(name), "/")
 }

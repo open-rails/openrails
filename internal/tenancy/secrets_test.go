@@ -106,6 +106,83 @@ func TestMemSecretStore_ZeroTenantRejected(t *testing.T) {
 	}
 }
 
+func TestServiceCredentialManagement_WriteOnlyStatusAndDelete(t *testing.T) {
+	ctx := context.Background()
+	id := tenant.DefaultID
+	store := NewMemorySecretStore()
+	svc := &Service{secrets: store}
+
+	sec, err := svc.PutCredential(ctx, id, SecretStripeWebhookSigning, "whsec_123", "put", "admin-1")
+	if err != nil {
+		t.Fatalf("put credential: %v", err)
+	}
+	if sec.Value != "whsec_123" || sec.Version != 1 {
+		t.Fatalf("stored secret = %+v", sec)
+	}
+
+	statuses, err := svc.ListSecretStatuses(ctx, id)
+	if err != nil {
+		t.Fatalf("list statuses: %v", err)
+	}
+	found := false
+	for _, st := range statuses {
+		if st.Name != SecretStripeWebhookSigning {
+			continue
+		}
+		found = true
+		if !st.Configured || st.Version != 1 {
+			t.Fatalf("status = %+v, want configured version 1", st)
+		}
+		if st.LastActor != "" || st.LastErrorCode != "" {
+			t.Fatalf("in-memory status should not invent audit plaintext/detail: %+v", st)
+		}
+	}
+	if !found {
+		t.Fatalf("status for %s not found", SecretStripeWebhookSigning)
+	}
+
+	if err := svc.DeleteCredential(ctx, id, SecretStripeWebhookSigning, "admin-1"); err != nil {
+		t.Fatalf("delete credential: %v", err)
+	}
+	if _, err := store.Get(ctx, id, SecretStripeWebhookSigning); !errors.Is(err, ErrSecretNotFound) {
+		t.Fatalf("get after delete = %v, want ErrSecretNotFound", err)
+	}
+}
+
+func TestServiceCredentialManagement_ValidateOnlyDoesNotSave(t *testing.T) {
+	ctx := context.Background()
+	id := tenant.DefaultID
+	store := NewMemorySecretStore()
+	svc := &Service{secrets: store}
+
+	called := false
+	err := svc.ValidateCredential(ctx, id, SecretStripeSecretKey, "sk_test_123", "admin-1", func(context.Context, string) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("validate supplied credential: %v", err)
+	}
+	if !called {
+		t.Fatal("stripe tester was not called")
+	}
+	if _, err := store.Get(ctx, id, SecretStripeSecretKey); !errors.Is(err, ErrSecretNotFound) {
+		t.Fatalf("validate-only saved secret: %v", err)
+	}
+}
+
+func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.T) {
+	ctx := context.Background()
+	svc := &Service{secrets: NewMemorySecretStore()}
+
+	if _, err := svc.PutCredential(ctx, tenant.DefaultID, "unknown/provider_key", "secret", "put", "admin-1"); err == nil {
+		t.Fatal("unknown secret should be rejected")
+	}
+	if _, err := svc.PutCredential(ctx, tenant.DefaultID, SecretStripeSecretKey, "not-stripe", "put", "admin-1"); err == nil {
+		t.Fatal("invalid Stripe secret should be rejected")
+	}
+}
+
 // fakeVaultKV is an in-memory VaultKV for unit-testing the Vault adapter WITHOUT
 // a live Vault.
 type fakeVaultKV struct {
@@ -113,6 +190,12 @@ type fakeVaultKV struct {
 }
 
 func newFakeVaultKV() *fakeVaultKV { return &fakeVaultKV{data: map[string]map[string]string{}} }
+
+type staticTenantSlugResolver map[string]string
+
+func (s staticTenantSlugResolver) TenantSlug(_ context.Context, id tenant.ID) (string, error) {
+	return s[id.String()], nil
+}
 
 func (f *fakeVaultKV) ReadSecret(_ context.Context, path string) (map[string]string, error) {
 	d, ok := f.data[path]
@@ -135,7 +218,7 @@ func (f *fakeVaultKV) ListSecrets(_ context.Context, _ string) ([]string, error)
 
 func TestVaultSecretStore_StubFailsClosed(t *testing.T) {
 	ctx := context.Background()
-	store := NewVaultSecretStore("secret", nil) // no live client
+	store := NewVaultSecretStore("secret", nil, staticTenantSlugResolver{tenant.DefaultID.String(): tenant.DefaultSlug}) // no live client
 	id := tenant.DefaultID
 	if _, err := store.Get(ctx, id, SecretStripeSecretKey); !errors.Is(err, ErrVaultNotConfigured) {
 		t.Fatalf("stub Get = %v, want ErrVaultNotConfigured", err)
@@ -148,7 +231,7 @@ func TestVaultSecretStore_StubFailsClosed(t *testing.T) {
 func TestVaultSecretStore_RoundTripWithFakeClient(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeVaultKV()
-	store := NewVaultSecretStore("secret", fake)
+	store := NewVaultSecretStore("secret", fake, staticTenantSlugResolver{tenant.DefaultID.String(): "cozy-art"})
 	id := tenant.DefaultID
 
 	if _, err := store.Put(ctx, id, SecretStripeSecretKey, "sk_live"); err != nil {
@@ -166,7 +249,7 @@ func TestVaultSecretStore_RoundTripWithFakeClient(t *testing.T) {
 		t.Fatalf("expected one vault path, got %d", len(fake.data))
 	}
 	for p := range fake.data {
-		if want := "secret/openrails/tenants/" + id.String() + "/" + SecretStripeSecretKey; p != want {
+		if want := "secret/openrails/tenants/cozy-art/" + SecretStripeSecretKey; p != want {
 			t.Fatalf("vault path = %q, want %q", p, want)
 		}
 	}

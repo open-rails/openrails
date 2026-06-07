@@ -56,6 +56,13 @@ func (s *Service) PutCredential(ctx context.Context, id tenant.ID, name, value, 
 	if s.secrets == nil {
 		return Secret{}, errors.New("tenancy: no secret store configured")
 	}
+	name = cleanSecretName(name)
+	if _, ok := SecretDefinitionFor(name); !ok {
+		return Secret{}, fmt.Errorf("tenancy: unknown tenant secret %q", name)
+	}
+	if err := validateSecretValueLocal(name, value); err != nil {
+		return Secret{}, fmt.Errorf("tenancy: validate tenant secret %q: %w", name, err)
+	}
 	sec, err := s.secrets.Put(ctx, id, name, value)
 	if err != nil {
 		return Secret{}, err
@@ -78,23 +85,7 @@ func (s *Service) RotateCredential(ctx context.Context, id tenant.ID, name, valu
 // verification function (so this stays testable without a live Stripe); when nil,
 // a default real Stripe balance check is used. It records a "test" audit row.
 func (s *Service) TestStripeCredential(ctx context.Context, id tenant.ID, tester func(ctx context.Context, secretKey string) error) error {
-	creds, err := s.LoadStripeCredentials(ctx, id)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(creds.SecretKey) == "" {
-		return ErrSecretNotFound
-	}
-	if tester == nil {
-		tester = defaultStripeBalanceCheck
-	}
-	terr := tester(ctx, creds.SecretKey)
-	detail := "ok"
-	if terr != nil {
-		detail = "failed: " + terr.Error()
-	}
-	s.audit(ctx, id, SecretStripeSecretKey, "test", "", detail)
-	return terr
+	return s.ValidateCredential(ctx, id, SecretStripeSecretKey, "", "", tester)
 }
 
 // audit best-effort appends a credential audit row. A failure to audit must not

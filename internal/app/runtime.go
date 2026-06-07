@@ -32,6 +32,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/services/health"
+	"github.com/open-rails/openrails/internal/tenancy"
 )
 
 // Runtime aggregates infrastructure clients and application services.
@@ -83,6 +84,7 @@ type Runtime struct {
 	CreditsService           *credits.CreditsService
 	CreditTypeService        *credits.CreditTypeService
 	ProcessorCustomerService *payments.ProcessorCustomerService
+	Tenancy                  *tenancy.Service
 
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller

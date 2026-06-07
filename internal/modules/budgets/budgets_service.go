@@ -32,6 +32,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -171,6 +172,12 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, i
 		return uuid.Nil, nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// Materialize the payable tenant_subjects row so the budget_reservations FK
+	// (migration 076) is satisfied on a subject's first reservation (#317).
+	if _, err := repo.EnsureTenantSubjectID(ctx, tx, tenantID, ownerID.String()); err != nil {
+		return uuid.Nil, nil, false, err
+	}
 
 	// Idempotency: a replayed Reserve returns the existing row verbatim.
 	existing := new(models.BudgetReservation)

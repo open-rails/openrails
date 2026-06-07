@@ -50,7 +50,10 @@ func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
 	group.POST("/:id/delete", s.tenantDeleteHandler())
 
 	// Per-tenant processor credential management (issue #225): rotate + test.
+	group.GET("/:id/credentials", s.tenantListCredentialsHandler())
 	group.PUT("/:id/credentials/*name", s.tenantPutCredentialHandler())
+	group.DELETE("/:id/credentials/*name", s.tenantDeleteCredentialHandler())
+	group.POST("/:id/credentials/validate/*name", s.tenantValidateCredentialHandler())
 	group.POST("/:id/credentials/test-stripe", s.tenantTestStripeHandler())
 
 	log.WithField("prefix", StandaloneV1Prefix+TenantAdminPrefix).
@@ -264,6 +267,63 @@ func (s *Server) tenantPutCredentialHandler() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) tenantListCredentialsHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := tenantIDParam(c)
+		if !ok {
+			return
+		}
+		statuses, err := s.tenancy.ListSecretStatuses(c.Request.Context(), id)
+		if err != nil {
+			s.tenantSecretErr(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": statuses})
+	}
+}
+
+func (s *Server) tenantDeleteCredentialHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := tenantIDParam(c)
+		if !ok {
+			return
+		}
+		name := strings.TrimPrefix(c.Param("name"), "/")
+		if strings.TrimSpace(name) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "credential name is required"})
+			return
+		}
+		if err := s.tenancy.DeleteCredential(c.Request.Context(), id, name, "operator"); err != nil {
+			s.tenantSecretErr(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"name": name, "configured": false})
+	}
+}
+
+func (s *Server) tenantValidateCredentialHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := tenantIDParam(c)
+		if !ok {
+			return
+		}
+		name := strings.TrimPrefix(c.Param("name"), "/")
+		if strings.TrimSpace(name) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "credential name is required"})
+			return
+		}
+		var body struct {
+			Value string `json:"value"`
+		}
+		_ = c.ShouldBindJSON(&body)
+		if err := s.tenancy.ValidateCredential(c.Request.Context(), id, name, body.Value, "operator", nil); err != nil {
+			s.tenantSecretErr(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"name": name, "validated": true})
+	}
+}
+
 func (s *Server) tenantTestStripeHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := tenantIDParam(c)
@@ -281,6 +341,18 @@ func (s *Server) tenantTestStripeHandler() gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
+}
+
+func (s *Server) tenantSecretErr(c *gin.Context, err error) {
+	if errors.Is(err, tenancy.ErrSecretBackendUnavailable) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "secret backend unavailable"})
+		return
+	}
+	if errors.Is(err, tenancy.ErrSecretNotFound) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "secret not configured"})
+		return
+	}
+	s.tenantErr(c, err)
 }
 
 func (s *Server) tenantErr(c *gin.Context, err error) {

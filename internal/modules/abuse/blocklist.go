@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -104,6 +105,13 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjec
 	}
 
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		// Owner-scoped blocks reference a payable tenant subject; materialize its
+		// tenant_subjects row so the payment_blocklist FK (migration 076) holds (#317).
+		if payerOrgID != nil {
+			if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Q(ctx), tenantID, payerOrgID.String()); err != nil {
+				return err
+			}
+		}
 		_, err := s.db.Q(ctx).NewInsert().
 			Model(entry).
 			On("CONFLICT (tenant_id, kind, value) DO NOTHING").

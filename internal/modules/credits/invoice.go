@@ -33,6 +33,11 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 	if !to.After(from) {
 		return nil, fmt.Errorf("invalid period: to must be after from")
 	}
+	// Materialize the payable tenant_subjects row so the invoices FK (migration
+	// 076) is satisfied even if no prior credit op touched this subject (#317).
+	if err := ensureTenantSubject(ctx, s.db.Q(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
+		return nil, err
+	}
 	ct, err := s.GetCreditTypeByName(ctx, creditType)
 	if err != nil {
 		return nil, err

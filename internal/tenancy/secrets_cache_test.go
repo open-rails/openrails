@@ -199,7 +199,7 @@ func (e errVaultKV) ListSecrets(context.Context, string) ([]string, error)      
 
 func TestVaultSecretStore_UnreachableIsBackendUnavailableNotAbsent(t *testing.T) {
 	ctx := context.Background()
-	store := NewVaultSecretStore("secret", errVaultKV{err: errors.New("dial tcp: connection refused")})
+	store := NewVaultSecretStore("secret", errVaultKV{err: errors.New("dial tcp: connection refused")}, staticTenantSlugResolver{tenant.DefaultID.String(): tenant.DefaultSlug})
 	_, err := store.Get(ctx, tenant.DefaultID, SecretStripeSecretKey)
 	if !errors.Is(err, ErrSecretBackendUnavailable) {
 		t.Fatalf("unreachable Get = %v, want wraps ErrSecretBackendUnavailable", err)
@@ -211,7 +211,7 @@ func TestVaultSecretStore_UnreachableIsBackendUnavailableNotAbsent(t *testing.T)
 
 func TestVaultSecretStore_AbsentIsNotFound(t *testing.T) {
 	ctx := context.Background()
-	store := NewVaultSecretStore("secret", newFakeVaultKV()) // empty store -> no value
+	store := NewVaultSecretStore("secret", newFakeVaultKV(), staticTenantSlugResolver{tenant.DefaultID.String(): tenant.DefaultSlug}) // empty store -> no value
 	_, err := store.Get(ctx, tenant.DefaultID, SecretStripeSecretKey)
 	if !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("absent Get = %v, want ErrSecretNotFound", err)
@@ -227,7 +227,7 @@ func TestVaultSecretStore_StubWrapsBackendUnavailable(t *testing.T) {
 	if !errors.Is(ErrVaultNotConfigured, ErrSecretBackendUnavailable) {
 		t.Fatal("ErrVaultNotConfigured must wrap ErrSecretBackendUnavailable")
 	}
-	_, err := NewVaultSecretStore("secret", nil).Get(context.Background(), tenant.DefaultID, SecretStripeSecretKey)
+	_, err := NewVaultSecretStore("secret", nil, staticTenantSlugResolver{tenant.DefaultID.String(): tenant.DefaultSlug}).Get(context.Background(), tenant.DefaultID, SecretStripeSecretKey)
 	if !errors.Is(err, ErrSecretBackendUnavailable) {
 		t.Fatalf("stub Get = %v, want wraps ErrSecretBackendUnavailable", err)
 	}

@@ -201,6 +201,11 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
+	// Materialize the payable tenant_subjects row so the credit_account_settings
+	// FK (migration 076) is satisfied on a subject's first settings write (#317).
+	if err := ensureTenantSubject(ctx, s.db.Q(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
+		return nil, err
+	}
 	if in.BillingMode != nil {
 		m := strings.ToLower(strings.TrimSpace(*in.BillingMode))
 		if m != BillingModePrepaid && m != BillingModeArrears {
@@ -300,6 +305,11 @@ func nilIfNeg(v *int64) *int64 {
 func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.TenantSubjectID, creditType, invoker string, maxDay, maxMonth *int64) (*models.CreditSpendLimit, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
+	}
+	// Materialize the payable tenant_subjects row so the credit_spend_limits FK
+	// (migration 076) is satisfied on a subject's first spend-limit write (#317).
+	if err := ensureTenantSubject(ctx, s.db.Q(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
+		return nil, err
 	}
 	invoker = strings.TrimSpace(invoker)
 	if invoker == "" {

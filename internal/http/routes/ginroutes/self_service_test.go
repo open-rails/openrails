@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
+	"github.com/open-rails/openrails/internal/tenancy"
 )
 
 // These tests pin the SELF-SERVICE route table (RegisterSelfServiceRoutes) for
@@ -184,5 +185,63 @@ func TestTenantAdmin_OperationalListsMountedAndGated(t *testing.T) {
 			require.Equal(t, http.StatusForbidden, w.Code,
 				"%s must be mounted and gated (403, not 404): %s", tc.name, w.Body.String())
 		})
+	}
+}
+
+func TestTenantAdmin_SecretRoutesMountedAndGated(t *testing.T) {
+	readless := []string{controlplane.PermTenantBillingRead}
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"secret-status", http.MethodGet, "/v1/tenant-admin/secrets"},
+		{"secret-registry", http.MethodGet, "/v1/tenant-admin/secrets/registry"},
+		{"secret-put", http.MethodPut, "/v1/tenant-admin/secrets/stripe/secret_key"},
+		{"secret-delete", http.MethodDelete, "/v1/tenant-admin/secrets/stripe/secret_key"},
+		{"secret-validate", http.MethodPost, "/v1/tenant-admin/secrets/validate/stripe/secret_key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTenantAdminRouter(t, readless)
+			w := doSelf(e, tc.method, tc.path, true)
+			require.Equal(t, http.StatusForbidden, w.Code,
+				"%s must be mounted and gated (403, not 404): %s", tc.name, w.Body.String())
+		})
+	}
+}
+
+func TestTenantAdmin_SecretPermissionsAreDistinct(t *testing.T) {
+	cases := []struct {
+		name   string
+		perms  []string
+		method string
+		path   string
+	}{
+		{"list", []string{controlplane.PermTenantSecretsList}, http.MethodGet, "/v1/tenant-admin/secrets"},
+		{"registry", []string{controlplane.PermTenantSecretsList}, http.MethodGet, "/v1/tenant-admin/secrets/registry"},
+		{"write", []string{controlplane.PermTenantSecretsWrite}, http.MethodPut, "/v1/tenant-admin/secrets/stripe/secret_key"},
+		{"delete", []string{controlplane.PermTenantSecretsDelete}, http.MethodDelete, "/v1/tenant-admin/secrets/stripe/secret_key"},
+		{"test", []string{controlplane.PermTenantSecretsTest}, http.MethodPost, "/v1/tenant-admin/secrets/validate/stripe/secret_key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTenantAdminRouter(t, tc.perms)
+			w := doSelf(e, tc.method, tc.path, true)
+			require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
+			require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
+		})
+	}
+}
+
+func TestTenantAdmin_WritableRegistryExcludesOpenRailsInternalSecrets(t *testing.T) {
+	require.True(t, tenantSecretWritable(tenancy.SecretStripeSecretKey))
+	require.False(t, tenantSecretWritable(tenancy.SecretSolanaPrivateKey))
+
+	registry := tenantWritableSecretRegistry()
+	for _, def := range registry {
+		require.True(t, def.TenantWritable, "tenant-admin registry exposed non-writable secret %s", def.Name)
+		require.NotEqual(t, tenancy.SecretSolanaPrivateKey, def.Name)
 	}
 }

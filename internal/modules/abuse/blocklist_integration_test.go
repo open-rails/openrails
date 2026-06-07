@@ -118,8 +118,8 @@ func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
 	require.NoError(t, bunDB.NewSelect().Model(entry).
 		Where("kind = ? AND value = ?", abuse.KindProcessorCustomer, value).
 		Limit(1).Scan(ctx))
-	require.NotNil(t, entry.OwnerID)
-	require.Equal(t, owner.UUID(), *entry.OwnerID)
+	require.NotNil(t, entry.TenantSubjectID)
+	require.Equal(t, owner.UUID(), *entry.TenantSubjectID)
 
 	// Remove clears it.
 	require.NoError(t, svc.Remove(ctx, abuse.KindProcessorCustomer, value))
