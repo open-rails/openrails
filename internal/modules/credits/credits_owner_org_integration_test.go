@@ -101,6 +101,7 @@ func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
 	require.NoError(t, err)
 
 	payer := uuid.New()
+	seedTenantSubject(t, ctx, bunDB, payer)
 
 	// tenant_subject_id has no default: an insert that leaves it unset must be rejected.
 	_, err = bunDB.ExecContext(ctx,
@@ -144,6 +145,7 @@ func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
 	require.NoError(t, err)
 
 	payer := uuid.New()
+	seedTenantSubject(t, ctx, bunDB, payer)
 
 	// First row in the default tenant.
 	_, err = bunDB.ExecContext(ctx,
