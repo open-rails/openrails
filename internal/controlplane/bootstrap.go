@@ -29,7 +29,7 @@ type BootstrapResult struct {
 // BootstrapOptions parameterizes the control-plane bootstrap.
 type BootstrapOptions struct {
 	// OperatorTenantSlug is the AuthKit tenant slug that operates the default tenant.
-	// When empty, falls back to auth.operator_tenant_slug, then "operator".
+	// When empty, defaults to "operator".
 	OperatorTenantSlug string
 
 	// InitialAdminUserID, when set, is assigned the operator role in the
@@ -64,9 +64,6 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	}
 
 	slug := strings.ToLower(strings.TrimSpace(opts.OperatorTenantSlug))
-	if slug == "" && c.cfg != nil && c.cfg.Auth != nil {
-		slug = strings.ToLower(strings.TrimSpace(c.cfg.Auth.OperatorTenantSlug))
-	}
 	if slug == "" {
 		slug = "operator"
 	}

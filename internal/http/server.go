@@ -63,7 +63,7 @@ type Server struct {
 
 	// tenancy is the tenant provisioning + lifecycle + per-tenant secret service
 	// (issue #225). Built only when the control plane is present (it owns the
-	// billing.* control-plane pool and the operator-org provisioner). nil in
+	// billing.* control-plane pool and the operator-tenant provisioner). nil in
 	// verifier-only mode: the tenant webhook + provisioning admin routes are then
 	// not mounted and the single default tenant continues via the global webhook.
 	tenancy *tenancy.Service
@@ -154,7 +154,7 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Build the tenant provisioning/lifecycle/secret service when the control
 	// plane is present (issue #225). It reuses the control plane's pgx pool (the
-	// OpenRails-owned billing.* control-plane DB) and operator-org provisioner. The
+	// OpenRails-owned billing.* control-plane DB) and operator-tenant provisioner. The
 	// DB-backed secret store is the self-hosted default and needs no live Vault; a
 	// managed deployment swaps in the Vault-backed store with the same addressing.
 	if deps.ControlPlane != nil && deps.ControlPlane.Pool() != nil {

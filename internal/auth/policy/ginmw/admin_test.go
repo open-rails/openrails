@@ -15,14 +15,14 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-// TestOperatorAdminRequired_OperatorTenantMode focuses on the operator-org branch,
+// TestOperatorAdminRequired_OperatorTenantMode focuses on the operator tenant branch,
 // which is the ONLY admin-authority path after the hardcut (the legacy
 // global-`admin` DB fallback has been removed).
 func TestOperatorAdminRequired_OperatorTenantMode(t *testing.T) {
 	cfg := &config.Config{
 		Auth: &config.AuthConfig{
-			OperatorTenantSlug:       "acme",
 			OperatorTenantAdminRoles: []string{"admin", "owner"},
+			ControlPlane:             &config.ControlPlaneConfig{Enabled: true},
 		},
 	}
 
@@ -48,7 +48,7 @@ func TestOperatorAdminRequired_OperatorTenantMode(t *testing.T) {
 			wantBody:   "operator_tenant_required",
 		},
 		{
-			name: "user has org but it does not match operator slug -> 403 operator_tenant_mismatch",
+			name: "user has tenant but it does not match operator slug -> 403 operator_tenant_mismatch",
 			uc: authprovider.UserContext{
 				UserID:      "user-1",
 				Tenant:      "globex",
@@ -58,29 +58,29 @@ func TestOperatorAdminRequired_OperatorTenantMode(t *testing.T) {
 			wantBody:   "operator_tenant_mismatch",
 		},
 		{
-			name: "user in correct org but lacks admin role -> 403 operator_tenant_role_required",
+			name: "user in correct tenant but lacks admin role -> 403 operator_tenant_role_required",
 			uc: authprovider.UserContext{
 				UserID:      "user-1",
-				Tenant:      "acme",
+				Tenant:      "operator",
 				TenantRoles: []string{"member", "viewer"},
 			},
 			wantStatus: http.StatusForbidden,
 			wantBody:   "operator_tenant_role_required",
 		},
 		{
-			name: "user in correct org with admin role -> 200 (passes through)",
+			name: "user in correct tenant with admin role -> 200 (passes through)",
 			uc: authprovider.UserContext{
 				UserID:      "user-1",
-				Tenant:      "acme",
+				Tenant:      "operator",
 				TenantRoles: []string{"admin"},
 			},
 			wantStatus: http.StatusOK,
 		},
 		{
-			name: "user in correct org with owner role -> 200 (default admin-equivalent set)",
+			name: "user in correct tenant with owner role -> 200 (default admin-equivalent set)",
 			uc: authprovider.UserContext{
 				UserID:      "user-1",
-				Tenant:      "acme",
+				Tenant:      "operator",
 				TenantRoles: []string{"owner"},
 			},
 			wantStatus: http.StatusOK,
@@ -89,16 +89,16 @@ func TestOperatorAdminRequired_OperatorTenantMode(t *testing.T) {
 			name: "case-insensitive role match -> 200",
 			uc: authprovider.UserContext{
 				UserID:      "user-1",
-				Tenant:      "acme",
+				Tenant:      "operator",
 				TenantRoles: []string{"ADMIN"},
 			},
 			wantStatus: http.StatusOK,
 		},
 		{
-			name: "case-insensitive org match -> 200",
+			name: "case-insensitive tenant match -> 200",
 			uc: authprovider.UserContext{
 				UserID:      "user-1",
-				Tenant:      "Acme",
+				Tenant:      "Operator",
 				TenantRoles: []string{"admin"},
 			},
 			wantStatus: http.StatusOK,
@@ -139,16 +139,14 @@ func TestOperatorAdminRequired_OperatorTenantMode(t *testing.T) {
 	}
 }
 
-// TestOperatorAdminRequired_NoOperatorTenantFailsClosed proves the hardcut: with no
-// operator tenant configured there is NO DB-role fallback — OperatorAdminRequired
+// TestOperatorAdminRequired_NoControlPlaneFailsClosed proves the hardcut: with no
+// operator tenant authority there is NO DB-role fallback — OperatorAdminRequired
 // fails closed with admin_required WITHOUT consulting profiles.user_roles (db ==
 // nil here, so any DB consultation would panic). Authority comes from the
-// operator-org permission layer (OperatorPermissionRequired) at the route.
+// operator-tenant permission layer (OperatorPermissionRequired) at the route.
 func TestOperatorAdminRequired_NoOperatorTenantFailsClosed(t *testing.T) {
 	cfg := &config.Config{
-		Auth: &config.AuthConfig{
-			ControlPlane: &config.ControlPlaneConfig{Enabled: true},
-		},
+		Auth: &config.AuthConfig{},
 	}
 
 	rr := httptest.NewRecorder()
@@ -160,7 +158,7 @@ func TestOperatorAdminRequired_NoOperatorTenantFailsClosed(t *testing.T) {
 	OperatorAdminRequired(cfg, nil)(c)
 
 	if !c.IsAborted() {
-		t.Fatal("expected no-operator-org config to abort (fail closed), but it passed through")
+		t.Fatal("expected no-operator-tenant config to abort (fail closed), but it passed through")
 	}
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("status: got %d want 403", rr.Code)

@@ -17,16 +17,13 @@ var ErrNoControlPlane = errors.New("controlplane: not configured")
 // gated by the operator tenant + the OpenRails permission catalog, evaluated at
 // request time.
 //
-// orgSlug should be the operator tenant for the resolved tenant; when empty it
-// falls back to auth.operator_tenant_slug.
+// orgSlug should be the operator tenant for the resolved tenant. An empty slug
+// falls back to the bootstrap default.
 func (c *ControlPlane) HasOperatorPermission(ctx context.Context, orgSlug, userID, perm string) (bool, error) {
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
 	slug := strings.ToLower(strings.TrimSpace(orgSlug))
-	if slug == "" && c.cfg != nil && c.cfg.Auth != nil {
-		slug = strings.ToLower(strings.TrimSpace(c.cfg.Auth.OperatorTenantSlug))
-	}
 	if slug == "" {
 		slug = "operator"
 	}

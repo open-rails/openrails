@@ -37,7 +37,7 @@ type PlatformSuperadminChecker interface {
 }
 
 // IsOperatorAdmin reports whether the given UserContext is an OpenRails billing
-// admin. HARDCUT (#221/#224): admin authority is the operator-org permission
+// admin. HARDCUT (#221/#224): admin authority is the operator-tenant permission
 // model ONLY. The legacy global-admin fallback (the live `admin` role in
 // profiles.user_roles / profiles.roles) has been REMOVED — there is no DB-role
 // path.
@@ -52,7 +52,7 @@ func IsOperatorAdmin(ctx context.Context, cfg *config.Config, db bun.IDB, uc aut
 	if cfg == nil || !cfg.Auth.OperatorTenantEnabled() {
 		return false, nil
 	}
-	operatorSlug := strings.TrimSpace(cfg.Auth.OperatorTenantSlug)
+	operatorSlug := cfg.Auth.EffectiveOperatorTenantSlug()
 	if !strings.EqualFold(strings.TrimSpace(uc.Tenant), operatorSlug) {
 		return false, nil
 	}

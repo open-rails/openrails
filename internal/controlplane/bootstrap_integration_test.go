@@ -101,8 +101,7 @@ func newEnabledControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	cfg := &config.Config{
 		Env: "test",
 		Auth: &config.AuthConfig{
-			ExpectedAudience:   "openrails-app",
-			OperatorTenantSlug: "operator",
+			ExpectedAudience: "openrails-app",
 			ControlPlane: &config.ControlPlaneConfig{
 				Enabled:     true,
 				Issuer:      "https://billing.test",
@@ -223,8 +222,7 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
 	cfg := &config.Config{
 		Env: "test",
 		Auth: &config.AuthConfig{
-			ExpectedAudience:   "openrails-app",
-			OperatorTenantSlug: "operator",
+			ExpectedAudience: "openrails-app",
 			ControlPlane: &config.ControlPlaneConfig{
 				Enabled:            true,
 				Issuer:             "https://billing.test",

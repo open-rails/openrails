@@ -320,7 +320,7 @@ func (suite *TestContainerSuite) runDatabaseMigrations() {
 	// profiles.users (missing columns authkit later expects, e.g. phone_number)
 	// or a role_id() with a different return type shadows authkit's own
 	// migration-managed definitions and breaks the migration run. Admin authority
-	// in the integration suite comes from operator-org JWT claims, not DB roles
+	// in the integration suite comes from operator-tenant JWT claims, not DB roles
 	// (see test_helpers.go), so no profiles.roles seeding is needed either.
 
 	// Run all migrations using the migrate package

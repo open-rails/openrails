@@ -113,6 +113,30 @@ func TestLoad_MobiusProcessorRequiresExplicitType(t *testing.T) {
 	assert.ErrorContains(t, err, "processor 'mobius' must declare a type")
 }
 
+func TestLoad_RejectsDeprecatedAuthOperatorTenantConfig(t *testing.T) {
+	t.Run("file", func(t *testing.T) {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "config.yaml")
+		err := os.WriteFile(cfgPath, []byte(`
+auth:
+  operator_tenant_slug: operator
+`), 0o600)
+		assert.NoError(t, err)
+
+		_, err = Load(cfgPath)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "auth.operator_tenant_slug is no longer supported")
+	})
+
+	t.Run("env", func(t *testing.T) {
+		t.Setenv("AUTH_OPERATOR_TENANT_ADMIN_ROLES", `["admin"]`)
+
+		_, err := Load("nonexistent-config.yaml")
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "auth.operator_tenant_admin_roles is no longer supported")
+	})
+}
+
 func TestValidateCaptchaRequiresKeysWhenEnabled(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"

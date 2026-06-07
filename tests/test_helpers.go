@@ -20,9 +20,9 @@ import (
 	server "github.com/open-rails/openrails/internal/http"
 )
 
-// testOperatorTenantSlug is the legacy config field value the integration suite
-// configures (config.Auth.OperatorTenantSlug). HARDCUT (#224): admin authority is
-// bootstrap-managed only, so admin tokens must carry configured admin claims.
+// testOperatorTenantSlug is the operator tenant used by the older verifier/admin
+// integration harness. HARDCUT (#224): admin authority is bootstrap-managed only,
+// so admin tokens must carry configured admin claims.
 const testOperatorTenantSlug = "operator"
 
 var (
@@ -175,7 +175,7 @@ func setupTestSuiteWithAdminAuth(t *testing.T) (*TestContainerSuite, string, str
 	return suite, token, userID
 }
 
-// CreateAdminToken creates a JWT token with operator-org admin authority for the
+// CreateAdminToken creates a JWT token with operator-tenant admin authority for the
 // given user ID. Use this when you need an admin token for a specific user ID.
 func CreateAdminToken(t *testing.T, userID string) string {
 	t.Helper()

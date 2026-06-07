@@ -29,9 +29,9 @@ func userContext(r *request.Request) (billingauth.UserContext, bool) {
 }
 
 // OperatorAdminRequiredMW is the framework-neutral analogue of
-// OperatorAdminRequired (issue #282). Same authority model: operator-org slug +
-// admin-equivalent tenant roles ONLY (no global-admin fallback). `db` is unused and
-// retained for call-site symmetry; pass nil.
+// OperatorAdminRequired (issue #282). Same authority model: operator-tenant slug
+// + admin-equivalent tenant roles ONLY (no global-admin fallback). `db` is unused
+// and retained for call-site symmetry; pass nil.
 func OperatorAdminRequiredMW(cfg *config.Config, db bun.IDB) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
@@ -46,7 +46,7 @@ func OperatorAdminRequiredMW(cfg *config.Config, db bun.IDB) router.Middleware {
 				r.AbortJSON(http.StatusForbidden, "admin_required")
 				return
 			}
-			operatorSlug := strings.TrimSpace(cfg.Auth.OperatorTenantSlug)
+			operatorSlug := cfg.Auth.EffectiveOperatorTenantSlug()
 			if strings.TrimSpace(uc.Tenant) == "" {
 				log.WithField("user_id", uc.UserID).Warn("operator admin denied: tenant claim missing")
 				r.AbortJSON(http.StatusForbidden, "operator_tenant_required")
@@ -77,7 +77,7 @@ func OperatorAdminRequiredMW(cfg *config.Config, db bun.IDB) router.Middleware {
 }
 
 // OperatorPermissionRequiredMW is the framework-neutral analogue of
-// OperatorPermissionRequired (issue #282). It evaluates a LIVE operator-org
+// OperatorPermissionRequired (issue #282). It evaluates a LIVE operator-tenant
 // permission. A nil checker is a config error and fails closed with 500.
 func OperatorPermissionRequiredMW(checker OperatorPermissionChecker, perm string) router.Middleware {
 	return func(next router.Handler) router.Handler {

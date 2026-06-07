@@ -6,7 +6,7 @@
 //
 //   - mounts only the AuthKit route groups it intentionally exposes (NOT the
 //     full DefaultAPI surface),
-//   - runs with public user registration and public org management disabled,
+//   - runs with public user registration and public tenant management disabled,
 //   - bootstraps the default tenant's operator tenant, OpenRails roles, the
 //     `openrails:*` permission catalog, and an initial operator service token through
 //     in-process AuthKit CORE calls (CreateTenant / DefineRole / AssignRole /

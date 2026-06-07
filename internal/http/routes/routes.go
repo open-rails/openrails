@@ -19,7 +19,7 @@ type Options struct {
 	Authenticator billingauth.Authenticator
 
 	// OperatorPermissionChecker, when set, makes the operator tenant the LIVE
-	// authority for admin routes (#224): after the operator-org gate, admin
+	// authority for admin routes (#224): after the operator-tenant gate, admin
 	// routes additionally require the openrails:admin permission evaluated live
 	// against the operator tenant. nil in verifier-only mode (legacy gate only).
 	OperatorPermissionChecker authpolicy.OperatorPermissionChecker

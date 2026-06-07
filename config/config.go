@@ -567,7 +567,7 @@ type RedisConfig struct {
 	DB       int    `koanf:"db"`
 }
 
-// AuthConfig holds JWT verification configuration for billing service.
+// AuthConfig holds JWT verification configuration for OpenRails.
 // Billing is a JWT verifier (not issuer) - it validates tokens issued by your IdP.
 // TenantCORSConfig holds the browser-direct CORS policy for a single tenant
 // (issue #222 browser tier).
@@ -625,19 +625,11 @@ type AuthConfig struct {
 	Issuers          []string `koanf:"issuers"`           // List of expected token issuers (e.g., ["https://issuer.example.com"])
 	ExpectedAudience string   `koanf:"expected_audience"` // Accept token only if it contains this audience (e.g., "openrails-app")
 
-	// OperatorTenantSlug, when set, switches admin auth (all /admin/* routes) from
-	// the global "admin" role check to an AuthKit-org-claim check:
-	// the caller must have UserContext.Tenant == OperatorTenantSlug AND hold one of
-	// OperatorTenantAdminRoles within that org. When empty (default), the
-	// global "admin" role check from profiles.user_roles is used.
-	//
-	// Use this for multi-org AuthKit deployments where a single org owns the
-	// billing operator role. For single-org AuthKit deployments and self-hosted
-	// instances with one customer, leave this unset.
+	// Deprecated internal compatibility fields for pre-manifest admin tests.
+	// External config files/env must not set auth.operator_tenant_slug or
+	// auth.operator_tenant_admin_roles; Load rejects those keys.
 	OperatorTenantSlug string `koanf:"operator_tenant_slug,omitempty"`
 
-	// OperatorTenantAdminRoles is the list of TenantRoles considered admin-equivalent
-	// when OperatorTenantSlug is set. Defaults to ["admin", "owner"].
 	OperatorTenantAdminRoles []string `koanf:"operator_tenant_admin_roles,omitempty"`
 
 	// ControlPlane configures OpenRails' OpenRails-owned AuthKit control plane
@@ -679,7 +671,7 @@ type ControlPlaneConfig struct {
 	TokenPrefix string `koanf:"token_prefix,omitempty"`
 
 	// LockedDown selects the self-hosted, locked-down posture: public user
-	// registration and public org management are disabled, and only the
+	// registration and public tenant management are disabled, and only the
 	// intentional AuthKit route groups are mounted (never DefaultAPI). Defaults
 	// to true when Enabled — hosted-SaaS mode must explicitly opt out.
 	LockedDown *bool `koanf:"locked_down,omitempty"`
@@ -717,8 +709,8 @@ func (c *AuthConfig) ControlPlaneEnabled() bool {
 }
 
 // LockedDownEnabled reports whether the control plane runs in the self-hosted,
-// locked-down posture (public registration + org management disabled, selective
-// route mounting). Defaults to true when the control plane is enabled.
+// locked-down posture (public registration + tenant management disabled,
+// selective route mounting). Defaults to true when the control plane is enabled.
 func (cp *ControlPlaneConfig) LockedDownEnabled() bool {
 	if cp == nil {
 		return false
@@ -729,9 +721,28 @@ func (cp *ControlPlaneConfig) LockedDownEnabled() bool {
 	return *cp.LockedDown
 }
 
-// OperatorTenantEnabled reports whether OperatorTenantSlug is set (multi-org admin mode).
+// OperatorTenantEnabled reports whether operator-tenant admin authority is available.
 func (c *AuthConfig) OperatorTenantEnabled() bool {
-	return c != nil && strings.TrimSpace(c.OperatorTenantSlug) != ""
+	if c == nil {
+		return false
+	}
+	return strings.TrimSpace(c.OperatorTenantSlug) != "" || c.ControlPlaneEnabled()
+}
+
+// EffectiveOperatorTenantSlug returns the operator tenant slug used by internal
+// admin gates. Control-plane deployments default to "operator"; external config
+// files must not set the deprecated auth.operator_tenant_slug key.
+func (c *AuthConfig) EffectiveOperatorTenantSlug() string {
+	if c == nil {
+		return ""
+	}
+	if slug := strings.ToLower(strings.TrimSpace(c.OperatorTenantSlug)); slug != "" {
+		return slug
+	}
+	if c.ControlPlaneEnabled() {
+		return "operator"
+	}
+	return ""
 }
 
 // EffectiveOperatorTenantAdminRoles returns OperatorTenantAdminRoles or the default set.
@@ -740,6 +751,18 @@ func (c *AuthConfig) EffectiveOperatorTenantAdminRoles() []string {
 		return []string{"admin", "owner"}
 	}
 	return c.OperatorTenantAdminRoles
+}
+
+func rejectDeprecatedConfigKeys(k *koanf.Koanf) error {
+	for _, key := range []string{
+		"auth.operator_tenant_slug",
+		"auth.operator_tenant_admin_roles",
+	} {
+		if k.Exists(key) {
+			return fmt.Errorf("%s is no longer supported; use tenant_bootstrap.file and manifest-declared tenants, issuers, service_tokens, permissions, resources, and outputs", key)
+		}
+	}
+	return nil
 }
 
 type SolanaConfig struct {
@@ -1756,6 +1779,9 @@ func Load(configPath string) (*Config, error) {
 
 	if err := k.Load(env.ProviderWithValue("", ".", envCallbackWithValue), nil); err != nil {
 		return nil, fmt.Errorf("loading environment variables: %w", err)
+	}
+	if err := rejectDeprecatedConfigKeys(k); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
 	// Unmarshal into config struct (overlay onto defaults)

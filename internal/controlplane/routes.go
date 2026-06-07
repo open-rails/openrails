@@ -16,7 +16,7 @@ import (
 //
 // NOT mounted by default in locked-down mode:
 //   - RouteRegister (public user self-registration — disabled in self-hosted).
-//   - RouteOrganizations (public org onboarding/management — owned by OpenRails
+//   - RouteOrganizations (public tenant onboarding/management — owned by OpenRails
 //     product routes + in-process core calls instead).
 //   - RouteAdmin (AuthKit's own admin surface — OpenRails owns admin routes).
 //   - RouteSolana / RouteOIDCBrowser / RouteFederation / 2FA / verification —

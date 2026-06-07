@@ -101,7 +101,7 @@ func OperatorPermissionRequired(checker policy.OperatorPermissionChecker, perm s
 	}
 }
 
-// OperatorAdminRequired ensures the caller is an admin under the operator-org
+// OperatorAdminRequired ensures the caller is an admin under the operator-tenant
 // permission model. HARDCUT (#221/#224): the legacy global-`admin`-role fallback
 // against profiles.user_roles has been REMOVED. Authority is the operator tenant +
 // its admin-equivalent roles ONLY.
@@ -125,7 +125,7 @@ func OperatorAdminRequired(cfg *config.Config, db bun.IDB) gin.HandlerFunc {
 			return
 		}
 
-		operatorSlug := strings.TrimSpace(cfg.Auth.OperatorTenantSlug)
+		operatorSlug := cfg.Auth.EffectiveOperatorTenantSlug()
 		if strings.TrimSpace(uc.Tenant) == "" {
 			log.WithField("user_id", uc.UserID).Warn("operator admin denied: tenant claim missing")
 			response.ForbiddenWithMessage(c, "operator_tenant_required")

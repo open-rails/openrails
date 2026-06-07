@@ -58,7 +58,7 @@ func (o Options) withDefaults() Options {
 type Assembler struct {
 	Cfg     *config.Config
 	Runtime *app.Runtime
-	// OperatorChecker is the live operator-org permission checker (#224), held as
+	// OperatorChecker is the live operator-tenant permission checker (#224), held as
 	// the neutral authpolicy.OperatorPermissionChecker interface so this core
 	// package imports neither internal/controlplane nor AuthKit (#284). nil in
 	// verifier-only mode. The concrete *controlplane.ControlPlane satisfies it.

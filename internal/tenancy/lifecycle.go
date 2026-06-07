@@ -75,7 +75,7 @@ var ErrExportRequired = errors.New("tenancy: export required before delete")
 
 // Service is the tenant provisioning + lifecycle service (issue #225). It owns
 // the billing.tenants directory rows and per-tenant secrets, and delegates
-// operator-org/service token creation to the control plane via TenantProvisioner.
+// operator-tenant/service-token creation to the control plane via TenantProvisioner.
 type Service struct {
 	pool    *pgxpool.Pool
 	orgs    TenantProvisioner // optional: nil disables org linking (DB-only mode)
