@@ -6,6 +6,8 @@
 package ginreq
 
 import (
+	"bytes"
+	"io"
 	"mime/multipart"
 
 	"github.com/gin-gonic/gin"
@@ -27,16 +29,30 @@ type ginTransport struct{ c *gin.Context }
 func (g ginTransport) WriteJSON(code int, body any) { g.c.JSON(code, body) }
 func (g ginTransport) AbortJSON(code int, body any) { g.c.AbortWithStatusJSON(code, body) }
 func (g ginTransport) Bind(data any) error          { return g.c.Bind(data) }
-func (g ginTransport) BindJSON(data any) error      { return g.c.ShouldBindJSON(data) }
-func (g ginTransport) BindQuery(data any) error     { return g.c.ShouldBindQuery(data) }
-func (g ginTransport) BindURI(data any) error       { return g.c.ShouldBindUri(data) }
-func (g ginTransport) Param(key string) string      { return g.c.Param(key) }
-func (g ginTransport) Query(key string) string      { return g.c.Query(key) }
-func (g ginTransport) Get(key string) (any, bool)   { return g.c.Get(key) }
-func (g ginTransport) Set(key string, value any)    { g.c.Set(key, value) }
-func (g ginTransport) Next()                        { g.c.Next() }
-func (g ginTransport) Header(key string) string     { return g.c.GetHeader(key) }
-func (g ginTransport) SetHeader(key, value string)  { g.c.Header(key, value) }
+func (g ginTransport) BindJSON(data any) error {
+	raw, err := io.ReadAll(g.c.Request.Body)
+	if err != nil {
+		return err
+	}
+	if err := request.RejectLegacyPayableJSONFields(raw); err != nil {
+		g.c.Request.Body = io.NopCloser(bytes.NewReader(raw))
+		return err
+	}
+	g.c.Request.Body = io.NopCloser(bytes.NewReader(raw))
+	if g.c.Request.ContentLength >= 0 {
+		g.c.Request.ContentLength = int64(len(raw))
+	}
+	return g.c.ShouldBindJSON(data)
+}
+func (g ginTransport) BindQuery(data any) error    { return g.c.ShouldBindQuery(data) }
+func (g ginTransport) BindURI(data any) error      { return g.c.ShouldBindUri(data) }
+func (g ginTransport) Param(key string) string     { return g.c.Param(key) }
+func (g ginTransport) Query(key string) string     { return g.c.Query(key) }
+func (g ginTransport) Get(key string) (any, bool)  { return g.c.Get(key) }
+func (g ginTransport) Set(key string, value any)   { g.c.Set(key, value) }
+func (g ginTransport) Next()                       { g.c.Next() }
+func (g ginTransport) Header(key string) string    { return g.c.GetHeader(key) }
+func (g ginTransport) SetHeader(key, value string) { g.c.Header(key, value) }
 func (g ginTransport) Redirect(code int, location string) {
 	g.c.Redirect(code, location)
 }

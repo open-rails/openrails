@@ -557,7 +557,7 @@
         "[x] Update the Doujins consumer after the hard cut: AuthKit entitlement enrichment now queries OpenRails by OIDC `issuer` + `subject` through `/v1/service/tenant-subjects/by-external-subject/entitlements`, and direct compose startup validated the service-token route.",
         "[x] Update Tensorhub consumers after the hard cut: bumped AuthKit to v0.12.5, migrated service-token parsing/resolution to `cozy_st_`, switched runtime source/scopes to `service_token` / `service_token_scopes`, kept OpenRails calls on `tenant_subject_id`, and validated `task build`, compile-only `go test ./... -run '^$'`, plus focused identity/authz/API/orchestrator OpenRails tests.",
         "[x] Add negative tests proving legacy service-token resource kinds are rejected: `tenant_subject_id`, `payer_account_id`, `account_id`, payable `delegated_user_id`, `subject_type`, `openrails.payer_account`, `openrails.account`, and `openrails.delegated_user` now fail `validateServiceTokenResources` with `ErrServiceTokenScopeDenied`.",
-        "[ ] Add remaining negative tests proving old payable JSON/config fields such as `payer_account_id`, `account_id`, payable `delegated_user_id`, and `subject_type` are rejected on request/config surfaces."
+        "[x] Add remaining negative tests proving old payable JSON/config fields are rejected on request/config surfaces: top-level JSON request bodies now reject `payer_account_id`, `account_id`, payable `delegated_user_id`, `subject_type`, `owner_id`, and `payer` in both net/http and gin transports while nested metadata stays allowed; config files/env-derived keys now reject the retired payable identity keys with `tenant_subject_id` / `invoker_id` guidance."
       ],
       "completed": false
     }

@@ -159,6 +159,37 @@ auth:
 	})
 }
 
+func TestLoad_RejectsDeprecatedPayableIdentityConfig(t *testing.T) {
+	t.Run("file", func(t *testing.T) {
+		for _, field := range []string{
+			"payer_account_id",
+			"account_id",
+			"delegated_user_id",
+			"subject_type",
+			"owner_id",
+		} {
+			t.Run(field, func(t *testing.T) {
+				dir := t.TempDir()
+				cfgPath := filepath.Join(dir, "config.yaml")
+				err := os.WriteFile(cfgPath, []byte(field+": old\n"), 0o600)
+				assert.NoError(t, err)
+
+				_, err = Load(cfgPath)
+				assert.Error(t, err)
+				assert.ErrorContains(t, err, field+" is no longer supported")
+			})
+		}
+	})
+
+	t.Run("env", func(t *testing.T) {
+		t.Setenv("PAYER_ACCOUNT_ID", "old")
+
+		_, err := Load("nonexistent-config.yaml")
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "payer.account_id is no longer supported")
+	})
+}
+
 func TestValidateCaptchaRequiresKeysWhenEnabled(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"

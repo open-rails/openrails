@@ -758,6 +758,15 @@ func rejectDeprecatedConfigKeys(k *koanf.Koanf) error {
 		"auth.operator_tenant_slug":        "use tenant_bootstrap.file and manifest-declared tenants, issuers, service_tokens, permissions, resources, and outputs",
 		"auth.operator_tenant_admin_roles": "use tenant_bootstrap.file and manifest-declared tenants, issuers, service_tokens, permissions, resources, and outputs",
 		"auth.control_plane.org_mode":      "use auth.control_plane.tenant_mode",
+		"payer_account_id":                 "use tenant_subject_id and invoker_id",
+		"payer.account_id":                 "use tenant_subject_id and invoker_id",
+		"account_id":                       "use tenant_subject_id and invoker_id",
+		"delegated_user_id":                "use tenant_subject_id and invoker_id",
+		"delegated.user_id":                "use tenant_subject_id and invoker_id",
+		"subject_type":                     "use tenant_subject_id and invoker_id",
+		"subject.type":                     "use tenant_subject_id and invoker_id",
+		"owner_id":                         "use tenant_subject_id and invoker_id",
+		"owner.id":                         "use tenant_subject_id and invoker_id",
 	}
 	for key, replacement := range deprecated {
 		if k.Exists(key) {
