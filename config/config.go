@@ -681,6 +681,11 @@ type ControlPlaneConfig struct {
 	// "openrails-bootstrap-admin".
 	BootstrapAdminServiceTokenName string `koanf:"bootstrap_admin_service_token_name,omitempty"`
 
+	// OperatorServiceTokenName is a deprecated compatibility field for older
+	// committed OpenRails call sites. It is intentionally not loadable from
+	// config; new deployments use BootstrapAdminServiceTokenName.
+	OperatorServiceTokenName string `koanf:"-"`
+
 	// PlatformTenantSlug is the AuthKit tenant slug for the managed-hosting PLATFORM
 	// superadmin org (issue #226), DISTINCT from any tenant operator tenant. The
 	// platform tenant holds the openrails-platform-superadmin role with the
@@ -709,6 +714,24 @@ func (c *AuthConfig) ControlPlaneEnabled() bool {
 	return c != nil && c.ControlPlane != nil && c.ControlPlane.Enabled
 }
 
+// OperatorTenantEnabled is a deprecated compatibility shim for pre-#312 call
+// sites that still compile against the operator-tenant helper names.
+func (c *AuthConfig) OperatorTenantEnabled() bool {
+	return c.ControlPlaneEnabled()
+}
+
+// EffectiveOperatorTenantSlug is a deprecated compatibility shim for pre-#312
+// call sites. Deprecated operator-tenant config keys are still rejected by Load.
+func (c *AuthConfig) EffectiveOperatorTenantSlug() string {
+	return "operator"
+}
+
+// EffectiveOperatorTenantAdminRoles is a deprecated compatibility shim for
+// pre-#312 call sites. New admin authorization uses live openrails:admin grants.
+func (c *AuthConfig) EffectiveOperatorTenantAdminRoles() []string {
+	return []string{"owner", "admin"}
+}
+
 // UserRegistrationOpen reports whether public native-user self-registration is
 // enabled (default false = restricted to admin/bootstrap).
 func (cp *ControlPlaneConfig) UserRegistrationOpen() bool {
@@ -730,7 +753,6 @@ func (cp *ControlPlaneConfig) SelfHostedPosture() bool {
 	}
 	return !(cp.PublicUserRegistration && cp.PublicTenantRegistration)
 }
-
 
 func rejectDeprecatedConfigKeys(k *koanf.Koanf) error {
 	deprecated := map[string]string{
