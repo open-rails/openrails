@@ -69,11 +69,11 @@ func parseServiceTenantSubjectID(raw string) (*billingidentity.TenantSubjectID, 
 	if err != nil || id == uuid.Nil {
 		return nil, errors.New("invalid tenant_subject_id")
 	}
-	payer := billingidentity.TenantSubjectID(id)
-	return &payer, nil
+	tenantSubject := billingidentity.TenantSubjectID(id)
+	return &tenantSubject, nil
 }
 
-func requireServiceTenantSubjectScope(r *httprequest.Request, payer billingidentity.TenantSubjectID) bool {
+func requireServiceTenantSubjectScope(r *httprequest.Request, tenantSubject billingidentity.TenantSubjectID) bool {
 	v, ok := r.Get(ginmw.ServiceTokenContextKey)
 	if !ok {
 		r.ErrorJSON(http.StatusUnauthorized, "service token required")
@@ -84,7 +84,7 @@ func requireServiceTenantSubjectScope(r *httprequest.Request, payer billingident
 		r.ErrorJSON(http.StatusInternalServerError, "service token state invalid")
 		return false
 	}
-	if !resolved.AllowsTenantSubject(payer.UUID()) {
+	if !resolved.AllowsTenantSubject(tenantSubject.UUID()) {
 		r.ErrorJSON(http.StatusForbidden, "service_token_tenant_subject_scope_denied")
 		return false
 	}
@@ -92,8 +92,9 @@ func requireServiceTenantSubjectScope(r *httprequest.Request, payer billingident
 }
 
 // serviceAuthorizeRequest is the body of POST /v1/service/credits/authorize
-// (issue #235/#247). payer = the tenant subject billed; invoker = the canonical invoker
-// for per-(payer,invoker) sub-budgets; estimate_cents = the upper-bound charge;
+// (issue #235/#247). tenant_subject_id is the subject billed; invoker_id is the
+// canonical caller for per-(tenant_subject_id, invoker_id) sub-budgets;
+// estimate_cents = the upper-bound charge;
 // request_id = the idempotency key for the placed hold.
 type serviceAuthorizeRequest struct {
 	TenantSubjectID string `json:"tenant_subject_id"`
@@ -105,7 +106,7 @@ type serviceAuthorizeRequest struct {
 }
 
 // serviceAuthorizeResponse mirrors the unified authorize contract: the policy
-// decision + the payer's real available/outstanding + the placed reservation.
+// decision + the tenant subject's real available/outstanding + the placed reservation.
 type serviceAuthorizeResponse struct {
 	Allowed             bool       `json:"allowed"`
 	DenyCode            string     `json:"deny_code,omitempty"`
@@ -122,14 +123,14 @@ type serviceAuthorizeResponse struct {
 // available-balance gate) and the hold are run in ONE transaction so two
 // concurrent authorizes cannot both pass on the same balance.
 //
-// PAYER AUTHORIZATION (issue #246): the acting TENANT is bound by the service token
+// TENANT-SUBJECT AUTHORIZATION (issue #246): the acting TENANT is bound by the service token
 // (middleware.ServiceTokenRequired pinned it onto the context; RegisterServiceRoutes then
-// pinned the RLS connection), NEVER by the body. The payer (tenant subject) is read
+// pinned the RLS connection), NEVER by the body. The tenant subject is read
 // from the body but every credit query runs RLS-scoped to the service token's tenant, so a
-// payer outside the service token's tenant is structurally unreachable (its rows carry a
+// tenant subject outside the service token's tenant is structurally unreachable (its rows carry a
 // different tenant_id and are invisible — fail closed). The route additionally
 // requires PermCreditsSpend (billing:spend), the explicit "may you draw down this
-// payer's balance" gate.
+// tenant subject's balance" gate.
 func ServiceAuthorizeCredits(r *httprequest.Request) {
 	var req serviceAuthorizeRequest
 	if !r.BindJSON(&req) {
@@ -145,16 +146,16 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 		return
 	}
 
-	payer, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubject, err := parseServiceTenantSubjectID(req.TenantSubjectID)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid payer")
+		r.ErrorJSON(http.StatusBadRequest, "invalid tenant_subject_id")
 		return
 	}
-	if payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "payer required")
+	if tenantSubject == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *payer) {
+	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
 		return
 	}
 
@@ -164,7 +165,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	}
 
 	out, err := svc.AuthorizeAndHold(r.Request.Context(), billingservice.AuthorizeAndHoldRequest{
-		TenantSubjectID: *payer,
+		TenantSubjectID: *tenantSubject,
 		InvokerID:       req.InvokerID,
 		CreditType:      req.CreditType,
 		EstimateCents:   req.EstimateCents,
@@ -192,7 +193,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	})
 }
 
-// serviceBalanceResponse is the payer balance snapshot served by
+// serviceBalanceResponse is the tenant-subject balance snapshot served by
 // GET /v1/service/credits/balance (issue #235/#247).
 type serviceBalanceResponse struct {
 	TenantSubjectID      uuid.UUID `json:"tenant_subject_id"`
@@ -204,9 +205,9 @@ type serviceBalanceResponse struct {
 	OutstandingOwedCents int64     `json:"outstanding_owed_cents"`
 }
 
-// ServiceGetCreditsBalance returns the payer's REAL balance snapshot (issue
+// ServiceGetCreditsBalance returns the tenant subject's REAL balance snapshot (issue
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
-// Tenant-bound by the service token (RLS); payer supplied via ?tenant_subject_id=.
+// Tenant-bound by the service token (RLS); tenant subject supplied via ?tenant_subject_id=.
 func ServiceGetCreditsBalance(r *httprequest.Request) {
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
 	if creditType == "" {
@@ -215,16 +216,16 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 	if creditType == "" {
 		creditType = "api_credits"
 	}
-	payer, err := parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
+	tenantSubject, err := parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid payer")
+		r.ErrorJSON(http.StatusBadRequest, "invalid tenant_subject_id")
 		return
 	}
-	if payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "payer required")
+	if tenantSubject == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *payer) {
+	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -232,7 +233,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	snap, err := svc.GetCreditAccount(r.Request.Context(), *payer, creditType)
+	snap, err := svc.GetCreditAccount(r.Request.Context(), *tenantSubject, creditType)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -253,9 +254,9 @@ func serviceQueryTenantSubject(r *httprequest.Request) (*identity.TenantSubjectI
 	return parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
 }
 
-// serviceAccountSettingsRequest is the PUT body for configuring an org's credit
+// serviceAccountSettingsRequest is the PUT body for configuring a tenant subject's credit
 // billing account (issue #242). All settings are optional pointers (only the
-// supplied fields are changed); payer + credit_type identify the account.
+// supplied fields are changed); tenant_subject_id + credit_type identify the account.
 type serviceAccountSettingsRequest struct {
 	TenantSubjectID         string  `json:"tenant_subject_id"`
 	CreditType              string  `json:"credit_type"`
@@ -273,7 +274,7 @@ type serviceAccountSettingsRequest struct {
 }
 
 // ServiceSetCreditAccountSettings (PUT /v1/service/credits/account-settings)
-// configures an org's billing account: prepaid vs arrears mode, spend caps,
+// configures a tenant subject's billing account: prepaid vs arrears mode, spend caps,
 // auto-top-up, and expiry default (issue #242). Tensorhub's billing-admin surface
 // proxies to this with its service service token; OpenRails owns the settings.
 func ServiceSetCreditAccountSettings(r *httprequest.Request) {
@@ -281,12 +282,12 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	payer, err := parseServiceTenantSubjectID(req.TenantSubjectID)
-	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "payer required")
+	tenantSubject, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	if err != nil || tenantSubject == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *payer) {
+	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
 		return
 	}
 	creditType := strings.TrimSpace(req.CreditType)
@@ -315,11 +316,11 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.SetCreditAccountSettings(r.Request.Context(), *payer, creditType, in); err != nil {
+	if err := svc.SetCreditAccountSettings(r.Request.Context(), *tenantSubject, creditType, in); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), *payer, creditType)
+	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), *tenantSubject, creditType)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -328,18 +329,18 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 }
 
 // ServiceGetCreditAccountSettings (GET /v1/service/credits/account-settings)
-// reads an org's current billing-account settings (issue #242).
+// reads a tenant subject's current billing-account settings (issue #242).
 func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
 	if creditType == "" {
 		creditType = "api_credits"
 	}
-	payer, err := serviceQueryTenantSubject(r)
-	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "payer required")
+	tenantSubject, err := serviceQueryTenantSubject(r)
+	if err != nil || tenantSubject == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *payer) {
+	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -347,7 +348,7 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), *payer, creditType)
+	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), *tenantSubject, creditType)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -356,19 +357,19 @@ func ServiceGetCreditAccountSettings(r *httprequest.Request) {
 }
 
 // ServiceListTenantSubjectCreditTransactions (GET /v1/service/credits/transactions)
-// lists an org's credit transactions (usage history) for the billing-account
-// admin surface (issue #242). Query: payer, credit_type, limit, offset.
+// lists a tenant subject's credit transactions (usage history) for the billing-account
+// admin surface (issue #242). Query: tenant_subject_id, credit_type, limit, offset.
 func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
 	if creditType == "" {
 		creditType = "api_credits"
 	}
-	payer, err := serviceQueryTenantSubject(r)
-	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "payer required")
+	tenantSubject, err := serviceQueryTenantSubject(r)
+	if err != nil || tenantSubject == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *payer) {
+	if !requireServiceTenantSubjectScope(r, *tenantSubject) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
@@ -378,7 +379,7 @@ func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	items, total, err := svc.GetTenantSubjectCreditTransactions(r.Request.Context(), *payer, creditType, limit, offset)
+	items, total, err := svc.GetTenantSubjectCreditTransactions(r.Request.Context(), *tenantSubject, creditType, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -419,7 +420,7 @@ type serviceEndpointRevenueRequest struct {
 }
 
 // ServiceEndpointRevenue returns per-day revenue for an endpoint (by usage_event
-// metadata endpoint_name) across all payers in the tenant (#410) — powers
+// metadata endpoint_name) across all tenant subjects in the tenant (#410) — powers
 // tensorhub endpoint revenue analytics. Operator service token, credits:read.
 func ServiceEndpointRevenue(r *httprequest.Request) {
 	var req serviceEndpointRevenueRequest
@@ -456,20 +457,20 @@ func ServiceUsageRollup(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	payerOrgID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubjectID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	if payerOrgID == nil {
+	if tenantSubjectID == nil {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *payerOrgID) {
+	if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
 		return
 	}
 	rows, err := svc.ServiceUsageRollup(r.Request.Context(), billingservice.ServiceUsageRollupRequest{
-		TenantSubjectID: payerOrgID,
+		TenantSubjectID: tenantSubjectID,
 		From:            time.Unix(req.From, 0).UTC(),
 		To:              time.Unix(req.To, 0).UTC(),
 		GroupBy:         req.GroupBy,
@@ -492,16 +493,16 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		return
 	}
 
-	payerOrgID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubjectID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	if payerOrgID == nil {
+	if tenantSubjectID == nil {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *payerOrgID) {
+	if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
 		return
 	}
 
@@ -512,7 +513,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	}
 
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
-		TenantSubjectID: payerOrgID,
+		TenantSubjectID: tenantSubjectID,
 		InvokerID:       req.InvokerID,
 		CreditType:      req.CreditType,
 		Amount:          req.Amount,
@@ -542,20 +543,20 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	payerOrgID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubjectID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	if payerOrgID == nil {
+	if tenantSubjectID == nil {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *payerOrgID) {
+	if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
 		return
 	}
 	trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
-		TenantSubjectID: payerOrgID,
+		TenantSubjectID: tenantSubjectID,
 		InvokerID:       req.InvokerID,
 		CreditType:      req.CreditType,
 		Amount:          req.Amount,
@@ -587,20 +588,20 @@ func ServiceHoldCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	payerOrgID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
+	tenantSubjectID, err := parseServiceTenantSubjectID(req.TenantSubjectID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	if payerOrgID == nil {
+	if tenantSubjectID == nil {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
-	if !requireServiceTenantSubjectScope(r, *payerOrgID) {
+	if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
 		return
 	}
 	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
-		TenantSubjectID: payerOrgID,
+		TenantSubjectID: tenantSubjectID,
 		InvokerID:       req.InvokerID,
 		CreditType:      req.CreditType,
 		Amount:          req.Amount,
@@ -686,18 +687,18 @@ func ServiceGetInvokerCredits(r *httprequest.Request) {
 	if creditType == "" {
 		creditType = "api_credits"
 	}
-	payerOrgID, err := parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
+	tenantSubjectID, err := parseServiceTenantSubjectID(r.Request.URL.Query().Get("tenant_subject_id"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 	var balance int64
 	var heldBalance int64
-	if payerOrgID != nil {
-		if !requireServiceTenantSubjectScope(r, *payerOrgID) {
+	if tenantSubjectID != nil {
+		if !requireServiceTenantSubjectScope(r, *tenantSubjectID) {
 			return
 		}
-		bal, err := r.State.CreditsService.GetBalanceForTenantSubject(r.Request.Context(), *payerOrgID, creditType)
+		bal, err := r.State.CreditsService.GetBalanceForTenantSubject(r.Request.Context(), *tenantSubjectID, creditType)
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance

@@ -549,6 +549,7 @@
         "[ ] For billable actions where the caller differs from the charged/payable entity, use an optional `invoker_tenant_subject_id` or service-token principal reference; do not reintroduce generic actor/org/user vocabulary.",
         "[x] Rename OpenRails resource scope from `openrails.tenant_subject` to `openrails.tenant_subject` and update the tenant-subject-scoped token CLI to scope by tenant subject UUID.",
         "[ ] Update API request/response JSON, Go structs, service clients, OpenAPI/docs, logs, errors, and test fixtures to use `tenant_subject_id` and OIDC `issuer`/`subject` only.",
+        "[x] Cleaned the service credit/account HTTP handler surface so tenant-subject routes no longer expose stale `payer required`, `invalid payer`, org-account comments, or `payerOrgID` local names; focused handler/route tests pass.",
         "[x] Updated the service entitlement API docs, route tests, service facade parity integration test, and stale credit integration fixtures from removed `OwnerID`/`UserID` model fields to `TenantSubjectID`/`InvokerID` where those rows represent payable identity plus invoker attribution.",
         "[ ] Update database migrations/columns for unambiguous tenant-subject references; do not create compatibility views or fallback parsing.",
         "[x] Fixed non-cluster ClickHouse migration validation by rewriting all `ReplicatedReplacingMergeTree(..., '{replica}', ...)` engines, including suffixed table paths, to single-node `ReplacingMergeTree` engines under testcontainers.",
