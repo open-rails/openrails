@@ -109,10 +109,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		return nil, errors.New("controlplane: issued_audiences/expected_audiences are required (or set auth.expected_audience)")
 	}
 
-	// Tenants are always a supported primitive (authkit issue 60); operator
-	// bootstrap + tenant-management require the "multi" core mode, so pass it
-	// unconditionally. There is no host-facing tenant_mode config anymore.
-	tenantMode := "multi"
+	// (authkit issue 60) Tenants are always a supported primitive — no tenant-mode
+	// config or core flag.
 
 	// Build the signing KeySource ONCE and inject it into the core config, so the
 	// active signer the control plane MINTS with and the public keys the delegated
@@ -131,7 +129,6 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		BaseURL:            issuer,
 		IssuedAudiences:    issued,
 		ExpectedAudiences:  expected,
-		TenantMode:         tenantMode,
 		ServiceTokenPrefix: strings.TrimSpace(cp.TokenPrefix),
 		Environment:        strings.TrimSpace(cfg.Env),
 		PermissionCatalog:  Catalog(),
@@ -157,7 +154,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts ONLY this control plane's own delegated tokens with the
 	// canonical `openrails` audience and `openrails:self:*` permissions.
-	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), expected, tenantMode, strings.TrimSpace(cp.TokenPrefix))
+	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), expected, strings.TrimSpace(cp.TokenPrefix))
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
 	}

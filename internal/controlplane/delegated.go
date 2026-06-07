@@ -111,7 +111,7 @@ func (c *ControlPlane) DelegatedVerifier() *authhttp.Verifier {
 // verifier trusts BOTH the self-issuer (deprecated, migration window) AND every
 // registered+enabled tenant issuer. The self-issuer seed is retired once all
 // tenants self-sign.
-func newDelegatedVerifier(coreSvc *authcore.Service, expectedAudiences []string, tenantMode, tokenPrefix string) (*authhttp.Verifier, error) {
+func newDelegatedVerifier(coreSvc *authcore.Service, expectedAudiences []string, tokenPrefix string) (*authhttp.Verifier, error) {
 	if coreSvc == nil {
 		return nil, ErrDelegatedNotConfigured
 	}
@@ -122,7 +122,6 @@ func newDelegatedVerifier(coreSvc *authcore.Service, expectedAudiences []string,
 	}
 
 	v := authhttp.NewVerifier(
-		authhttp.WithTenantMode(tenantMode),
 		authhttp.WithServiceTokenPrefix(tokenPrefix),
 		// Enforce that every permission on a browser token belongs to the
 		// {self-service, tenant-admin} catalog (issue #259). A token carrying an
