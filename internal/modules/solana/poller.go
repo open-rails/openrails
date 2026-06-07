@@ -17,6 +17,7 @@ import (
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/pkg/identity"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
@@ -740,7 +741,7 @@ func solanaPaymentMatchesPending(payment *models.Payment, reference string, pend
 	if err != nil {
 		return false
 	}
-	if payment.TenantSubjectID.String() != pending.UserID || payment.PriceID != priceID || payment.Amount != pending.Amount || !strings.EqualFold(payment.Currency, pending.Currency) {
+	if payment.TenantSubjectID != identity.TenantSubjectIDFromString(pending.UserID).UUID() || payment.PriceID != priceID || payment.Amount != pending.Amount || !strings.EqualFold(payment.Currency, pending.Currency) {
 		return false
 	}
 	if strings.TrimSpace(fmt.Sprint(payment.Metadata["solana_reference"])) != strings.TrimSpace(reference) {
