@@ -570,6 +570,7 @@
       "tasks": [
         "[ ] Inventory the current bootstrap paths: tenant manifest v2 in `internal/bootstrap`, startup `tenant_bootstrap.file` handling, and catalog-as-code in `pkg/catalog` plus `billing catalog apply`.",
         "[ ] Design a unified manifest schema with `version`, `tenants[]`, tenant `issuers[]`, `service_tokens[]`, and catalog declarations for tier groups, products, prices, entitlements, providers, and provider links; do not include tenant region/webhook fields unless a real OpenRails feature needs them.",
+        "[ ] Keep issuer `enabled` as an optional explicit disable field: omitted or `true` means register/update enabled issuer, while `enabled: false` disables an existing issuer without deleting it; examples should omit `enabled: true` unless teaching the field.",
         "[ ] Model catalog declarations as a top-level `catalogs[]` section. Do not add `tenants[].catalogs` unless OpenRails gains a real tenant-to-catalog attachment feature; if a catalog needs tenant ownership/scope, declare that once on the catalog itself.",
         "[ ] Preserve existing catalog manifest compatibility where practical, or provide a deterministic migration path from current `billing_catalog.yaml` files into the unified bootstrap file.",
         "[ ] Preserve the current catalog identity rules unless explicitly changed: products are keyed by slug and prices are identified by financial substance rather than a separate price slug.",
