@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/goccy/go-yaml"
-	vaultapi "github.com/hashicorp/vault/api"
 	authcore "github.com/open-rails/authkit/core"
 	log "github.com/sirupsen/logrus"
 
@@ -38,7 +36,6 @@ type ManifestTenant struct {
 	WebhookHost          string                        `yaml:"webhook_host"`
 	WebhookPath          string                        `yaml:"webhook_path"`
 	Issuers              []ManifestIssuer              `yaml:"issuers"`
-	ServiceTokens        []ManifestServiceToken        `yaml:"service_tokens"`
 	ServiceJWTPrincipals []ManifestServiceJWTPrincipal `yaml:"service_jwt_principals"`
 }
 
@@ -47,13 +44,6 @@ type ManifestIssuer struct {
 	JWKSURI   string   `yaml:"jwks_uri"`
 	Audiences []string `yaml:"audiences"`
 	Enabled   *bool    `yaml:"enabled"`
-}
-
-type ManifestServiceToken struct {
-	Name        string             `yaml:"name"`
-	Permissions []string           `yaml:"permissions"`
-	Resources   []ManifestResource `yaml:"resources"`
-	Outputs     []ManifestOutput   `yaml:"outputs"`
 }
 
 type ManifestServiceJWTPrincipal struct {
@@ -69,30 +59,13 @@ type ManifestResource struct {
 	ID   string `yaml:"id"`
 }
 
-type ManifestOutput struct {
-	File  *ManifestFileOutput  `yaml:"file"`
-	Vault *ManifestVaultOutput `yaml:"vault"`
-}
-
-type ManifestFileOutput struct {
-	Path string `yaml:"path"`
-}
-
-type ManifestVaultOutput struct {
-	Address string `yaml:"address"`
-	Token   string `yaml:"token"`
-	Mount   string `yaml:"mount"`
-	Path    string `yaml:"path"`
-	Field   string `yaml:"field"`
-}
-
 type TenantManifestReconcileOptions struct {
 	AsyncIssuers bool
 }
 
 // ReconcileTenantManifest loads cfg.tenant_bootstrap.file, if configured, and
-// applies the deployment-declared tenant state. Tenant rows and service-token
-// outputs are reconciled synchronously. Issuer registration is retried in the background
+// applies the deployment-declared tenant state. Tenant rows and service-JWT grants
+// are reconciled synchronously. Issuer registration is retried in the background
 // because registration validates JWKS reachability, and app pods may not be
 // reachable yet during OpenRails startup.
 func ReconcileTenantManifest(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane) error {
@@ -156,11 +129,6 @@ func ReconcileTenantManifestData(ctx context.Context, cfg *config.Config, cp *co
 			"tenant_id": tn.ID.String(),
 		}).Info("tenant bootstrap: tenant ensured")
 
-		for _, token := range mt.ServiceTokens {
-			if err := ensureManifestServiceToken(ctx, cfg, cp, tn.AuthKitTenantSlug, tn.ID, tn.Slug, token); err != nil {
-				return fmt.Errorf("tenant bootstrap: service token %q for tenant %q: %w", token.Name, tn.Slug, err)
-			}
-		}
 		for _, principal := range mt.ServiceJWTPrincipals {
 			if err := ensureManifestServiceJWTGrant(ctx, cp, tn.ID, tn.Slug, principal); err != nil {
 				return fmt.Errorf("tenant bootstrap: service JWT principal %q for tenant %q: %w", principal.Subject, tn.Slug, err)
@@ -245,52 +213,6 @@ func loadTenantManifest(path string) (*TenantManifest, error) {
 	return &manifest, nil
 }
 
-func ensureManifestServiceToken(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, ownerSlug string, tenantID tenant.ID, tenantSlug string, token ManifestServiceToken) error {
-	name := strings.TrimSpace(token.Name)
-	if name == "" {
-		return errors.New("name is required")
-	}
-	ownerSlug = strings.TrimSpace(ownerSlug)
-	if ownerSlug == "" {
-		return errors.New("service token owner is required")
-	}
-	if len(token.Outputs) == 0 {
-		return errors.New("at least one service token output is required")
-	}
-
-	if existing, err := readExistingServiceTokenOutput(ctx, cfg, token.Outputs); err != nil {
-		return err
-	} else if strings.TrimSpace(existing) != "" {
-		if err := writeServiceTokenOutputs(ctx, cfg, token.Outputs, existing); err != nil {
-			return err
-		}
-		log.WithFields(log.Fields{"tenant": tenantSlug, "service_token": name}).Info("tenant bootstrap: service token output already populated")
-		return nil
-	}
-
-	permissions := cleanStrings(token.Permissions)
-	if len(permissions) == 0 {
-		return fmt.Errorf("permissions are required for service token %q", name)
-	}
-	resources, err := resolveManifestResources(token.Resources, tenantID, tenantSlug)
-	if err != nil {
-		return err
-	}
-	created, secret, err := cp.Core().MintServiceTokenWithOptions(ctx, ownerSlug, authcore.ServiceTokenMintOptions{
-		Name:        name,
-		Permissions: permissions,
-		Resources:   resources,
-	})
-	if err != nil {
-		return err
-	}
-	if err := writeServiceTokenOutputs(ctx, cfg, token.Outputs, secret); err != nil {
-		return err
-	}
-	log.WithFields(log.Fields{"tenant": tenantSlug, "service_token": name, "token_key_id": created.KeyID}).Info("tenant bootstrap: service token minted and output written")
-	return nil
-}
-
 func resolveManifestResources(in []ManifestResource, tenantID tenant.ID, tenantSlug string) ([]authcore.ServiceTokenResource, error) {
 	if len(in) == 0 {
 		return []authcore.ServiceTokenResource{controlplane.TenantResource(tenantID)}, nil
@@ -311,76 +233,6 @@ func resolveManifestResources(in []ManifestResource, tenantID tenant.ID, tenantS
 		out = append(out, authcore.ServiceTokenResource{Kind: kind, ID: id})
 	}
 	return out, nil
-}
-
-func readExistingServiceTokenOutput(ctx context.Context, cfg *config.Config, outputs []ManifestOutput) (string, error) {
-	for _, out := range outputs {
-		token, err := readOneServiceTokenOutput(ctx, cfg, out)
-		if err != nil || strings.TrimSpace(token) != "" {
-			return token, err
-		}
-	}
-	return "", nil
-}
-
-func readOneServiceTokenOutput(ctx context.Context, cfg *config.Config, out ManifestOutput) (string, error) {
-	if out.File != nil && strings.TrimSpace(out.File.Path) != "" {
-		raw, err := os.ReadFile(out.File.Path)
-		if err == nil {
-			return strings.TrimSpace(string(raw)), nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return "", err
-		}
-	}
-	if out.Vault != nil && strings.TrimSpace(out.Vault.Path) != "" && strings.TrimSpace(out.Vault.Field) != "" {
-		data, err := readVaultData(ctx, cfg, *out.Vault)
-		if err != nil {
-			return "", err
-		}
-		if v, ok := data[strings.TrimSpace(out.Vault.Field)].(string); ok {
-			return strings.TrimSpace(v), nil
-		}
-	}
-	return "", nil
-}
-
-func writeServiceTokenOutputs(ctx context.Context, cfg *config.Config, outputs []ManifestOutput, token string) error {
-	for _, out := range outputs {
-		if err := writeOneServiceTokenOutput(ctx, cfg, out, token); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func writeOneServiceTokenOutput(ctx context.Context, cfg *config.Config, out ManifestOutput, token string) error {
-	wrote := false
-	if out.File != nil && strings.TrimSpace(out.File.Path) != "" {
-		path := strings.TrimSpace(out.File.Path)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-			return err
-		}
-		wrote = true
-	}
-	if out.Vault != nil && strings.TrimSpace(out.Vault.Path) != "" && strings.TrimSpace(out.Vault.Field) != "" {
-		data, err := readVaultData(ctx, cfg, *out.Vault)
-		if err != nil {
-			return err
-		}
-		data[strings.TrimSpace(out.Vault.Field)] = token
-		if err := writeVaultData(ctx, cfg, *out.Vault, data); err != nil {
-			return err
-		}
-		wrote = true
-	}
-	if !wrote {
-		return errors.New("service token output requires file.path or vault.path/vault.field")
-	}
-	return nil
 }
 
 func reconcileManifestIssuersUntilReady(ctx context.Context, cp *controlplane.ControlPlane, manifest *TenantManifest) {
@@ -459,72 +311,4 @@ func cleanStrings(in []string) []string {
 		}
 	}
 	return out
-}
-
-func vaultClient(cfg *config.Config, out ManifestVaultOutput) (*vaultapi.Client, string, error) {
-	address := strings.TrimSpace(out.Address)
-	token := strings.TrimSpace(out.Token)
-	mount := strings.Trim(strings.TrimSpace(out.Mount), "/")
-	if cfg != nil && cfg.Vault != nil {
-		if address == "" {
-			address = strings.TrimSpace(cfg.Vault.Address)
-		}
-		if token == "" {
-			token = strings.TrimSpace(cfg.Vault.Token)
-		}
-		if mount == "" {
-			mount = strings.Trim(strings.TrimSpace(cfg.Vault.KVMount), "/")
-		}
-	}
-	if address == "" {
-		address = strings.TrimSpace(os.Getenv("VAULT_ADDR"))
-	}
-	if token == "" {
-		token = strings.TrimSpace(os.Getenv("VAULT_TOKEN"))
-	}
-	if mount == "" {
-		mount = strings.Trim(strings.TrimSpace(os.Getenv("VAULT_KV_MOUNT")), "/")
-	}
-	if mount == "" {
-		mount = "secret"
-	}
-	if address == "" || token == "" {
-		return nil, "", errors.New("vault service token output requires VAULT_ADDR and VAULT_TOKEN")
-	}
-	vcfg := vaultapi.DefaultConfig()
-	vcfg.Address = address
-	client, err := vaultapi.NewClient(vcfg)
-	if err != nil {
-		return nil, "", err
-	}
-	client.SetToken(token)
-	return client, mount, nil
-}
-
-func readVaultData(ctx context.Context, cfg *config.Config, out ManifestVaultOutput) (map[string]any, error) {
-	client, mount, err := vaultClient(cfg, out)
-	if err != nil {
-		return nil, err
-	}
-	secret, err := client.Logical().ReadWithContext(ctx, mount+"/data/"+strings.Trim(strings.TrimSpace(out.Path), "/"))
-	if err != nil {
-		return nil, err
-	}
-	if secret == nil || secret.Data == nil {
-		return map[string]any{}, nil
-	}
-	data, ok := secret.Data["data"].(map[string]any)
-	if !ok || data == nil {
-		return map[string]any{}, nil
-	}
-	return data, nil
-}
-
-func writeVaultData(ctx context.Context, cfg *config.Config, out ManifestVaultOutput, data map[string]any) error {
-	client, mount, err := vaultClient(cfg, out)
-	if err != nil {
-		return err
-	}
-	_, err = client.Logical().WriteWithContext(ctx, mount+"/data/"+strings.Trim(strings.TrimSpace(out.Path), "/"), map[string]any{"data": data})
-	return err
 }

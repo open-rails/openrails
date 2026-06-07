@@ -153,25 +153,6 @@ func validateTenantManifestShape(m *TenantManifest) error {
 				return fmt.Errorf("tenant %q issuer %q audiences are required", slug, issuer.Issuer)
 			}
 		}
-		for _, token := range t.ServiceTokens {
-			if strings.TrimSpace(token.Name) == "" {
-				return fmt.Errorf("tenant %q service token name is required", slug)
-			}
-			if len(cleanStrings(token.Permissions)) == 0 {
-				return fmt.Errorf("tenant %q service token %q permissions are required", slug, token.Name)
-			}
-			if len(token.Outputs) == 0 {
-				return fmt.Errorf("tenant %q service token %q outputs are required", slug, token.Name)
-			}
-			if err := validateManifestResources(slug, "service token "+token.Name, token.Resources); err != nil {
-				return err
-			}
-			for _, out := range token.Outputs {
-				if err := validateManifestOutput(slug, token.Name, out); err != nil {
-					return err
-				}
-			}
-		}
 		for _, principal := range t.ServiceJWTPrincipals {
 			if strings.TrimSpace(principal.Issuer) == "" {
 				return fmt.Errorf("tenant %q service_jwt_principal issuer is required", slug)
@@ -206,26 +187,6 @@ func validateManifestResources(tenantSlug, owner string, resources []ManifestRes
 		if strings.TrimSpace(r.Kind) == "" || strings.TrimSpace(r.ID) == "" {
 			return fmt.Errorf("tenant %q %s resource kind and id are required", tenantSlug, owner)
 		}
-	}
-	return nil
-}
-
-func validateManifestOutput(tenantSlug, tokenName string, out ManifestOutput) error {
-	targets := 0
-	if out.File != nil {
-		targets++
-		if strings.TrimSpace(out.File.Path) == "" {
-			return fmt.Errorf("tenant %q service token %q file output path is required", tenantSlug, tokenName)
-		}
-	}
-	if out.Vault != nil {
-		targets++
-		if strings.TrimSpace(out.Vault.Path) == "" || strings.TrimSpace(out.Vault.Field) == "" {
-			return fmt.Errorf("tenant %q service token %q vault output path and field are required", tenantSlug, tokenName)
-		}
-	}
-	if targets != 1 {
-		return fmt.Errorf("tenant %q service token %q output must declare exactly one target", tenantSlug, tokenName)
 	}
 	return nil
 }

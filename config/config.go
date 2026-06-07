@@ -756,8 +756,8 @@ func (cp *ControlPlaneConfig) SelfHostedPosture() bool {
 
 func rejectDeprecatedConfigKeys(k *koanf.Koanf) error {
 	deprecated := map[string]string{
-		"auth.operator_tenant_slug":        "use /etc/openrails/bootstrap.yaml with manifest-declared tenants, issuers, service_jwt_principals, generated service_tokens, permissions, resources, and outputs",
-		"auth.operator_tenant_admin_roles": "use /etc/openrails/bootstrap.yaml with manifest-declared tenants, issuers, service_jwt_principals, generated service_tokens, permissions, resources, and outputs",
+		"auth.operator_tenant_slug":        "use /etc/openrails/bootstrap.yaml with manifest-declared tenants, issuers, service_jwt_principals, permissions, and resources",
+		"auth.operator_tenant_admin_roles": "use /etc/openrails/bootstrap.yaml with manifest-declared tenants, issuers, service_jwt_principals, permissions, and resources",
 		"auth.control_plane.org_mode":      "removed; tenants are always supported. Use public_user_registration + public_tenant_registration",
 		"auth.control_plane.tenant_mode":   "removed; tenants are always supported (authkit issue 60). Use public_user_registration + public_tenant_registration",
 		"auth.control_plane.locked_down":   "use auth.control_plane.public_user_registration + public_tenant_registration (both default false = restricted)",

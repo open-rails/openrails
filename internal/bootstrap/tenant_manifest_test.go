@@ -1,14 +1,10 @@
 package bootstrap
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
@@ -26,6 +22,26 @@ tenants:
 	_, err := loadTenantManifest(path)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "operator_tenant_slug")
+}
+
+func TestLoadTenantManifestRejectsServiceTokens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tenants.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+version: 2
+tenants:
+  - slug: cozy-art
+    name: Cozy Art
+    service_tokens:
+      - name: runtime
+        permissions: [openrails:admin]
+        outputs:
+          - file:
+              path: /tmp/openrails-runtime-token
+`), 0o600))
+
+	_, err := loadTenantManifest(path)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "service_tokens")
 }
 
 func TestLoadTenantManifestRequiresVersion2(t *testing.T) {
@@ -150,16 +166,16 @@ tenants:
 			want: "audiences are required",
 		},
 		{
-			name: "invalid service token output target",
+			name: "service tokens removed",
 			body: base(`
-    service_tokens:
-      - name: runtime
-        permissions: [openrails:admin]
+	    service_tokens:
+	      - name: runtime
+	        permissions: [openrails:admin]
         outputs:
-          - vault:
-              path: openrails/runtime
-`),
-			want: "vault output path and field are required",
+	          - vault:
+	              path: openrails/runtime
+	`),
+			want: "service_tokens",
 		},
 		{
 			name: "invalid resource shape",
@@ -236,35 +252,4 @@ catalogs:
 			require.Contains(t, err.Error(), tc.want)
 		})
 	}
-}
-
-func TestVaultServiceTokenOutputPreservesExistingFields(t *testing.T) {
-	data := map[string]any{"token": "preserved-token", "other": "keep"}
-	var writeBody map[string]map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "root", r.Header.Get("X-Vault-Token"))
-		require.Equal(t, "/v1/secret/data/openrails/runtime", r.URL.Path)
-		switch r.Method {
-		case http.MethodGet:
-			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"data": data}}))
-		case http.MethodPut:
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&writeBody))
-			data = writeBody["data"]
-			w.WriteHeader(http.StatusOK)
-		default:
-			t.Fatalf("unexpected method %s", r.Method)
-		}
-	}))
-	t.Cleanup(srv.Close)
-
-	cfg := &config.Config{Vault: &config.VaultConfig{Address: srv.URL, Token: "root", KVMount: "secret"}}
-	outputs := []ManifestOutput{{Vault: &ManifestVaultOutput{Path: "openrails/runtime", Field: "token"}}}
-
-	existing, err := readExistingServiceTokenOutput(t.Context(), cfg, outputs)
-	require.NoError(t, err)
-	require.Equal(t, "preserved-token", existing)
-
-	require.NoError(t, writeServiceTokenOutputs(t.Context(), cfg, outputs, existing))
-	require.Equal(t, "preserved-token", writeBody["data"]["token"])
-	require.Equal(t, "keep", writeBody["data"]["other"])
 }

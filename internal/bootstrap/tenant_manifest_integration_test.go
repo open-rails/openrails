@@ -80,23 +80,19 @@ CREATE TABLE IF NOT EXISTS billing.service_jwt_grants (
 );
 `
 
-func TestReconcileTenantManifestEnsuresTenantsTokensAndIssuers(t *testing.T) {
+func TestReconcileTenantManifestEnsuresTenantsServiceJWTGrantsAndIssuers(t *testing.T) {
 	ctx := context.Background()
 	pool := newTenantManifestTestPool(t)
 	cp := newTenantManifestControlPlane(t, pool)
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "tenants.yaml")
-	tokenPath := filepath.Join(dir, "runtime.token")
 
-	writeTenantManifest(t, manifestPath, tokenPath, "starter", "us-west", "/hooks/v1")
+	writeTenantManifest(t, manifestPath, "starter", "us-west", "/hooks/v1")
 	require.NoError(t, ReconcileTenantManifest(ctx, tenantManifestConfig(manifestPath), cp))
-
-	firstToken := strings.TrimSpace(readFile(t, tokenPath))
-	require.True(t, authcore.HasServiceTokenPrefix("openrails", firstToken))
 
 	var tenantID, billingTier, region, webhookPath, authkitTenantSlug string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT id::text, billing_tier, region, webhook_path, authkit_tenant_slug
+			SELECT id::text, billing_tier, region, webhook_path, authkit_tenant_slug
 		  FROM billing.tenants
 		 WHERE slug = 'cozy-art'
 	`).Scan(&tenantID, &billingTier, &region, &webhookPath, &authkitTenantSlug))
@@ -107,18 +103,14 @@ func TestReconcileTenantManifestEnsuresTenantsTokensAndIssuers(t *testing.T) {
 
 	serviceTokens, err := cp.Core().ListServiceTokens(ctx, "tenant-cozy-art")
 	require.NoError(t, err)
-	require.Len(t, serviceTokens, 1)
-	require.ElementsMatch(t, []string{controlplane.PermEntitlementsRead, controlplane.PermCreditsRead}, serviceTokens[0].Permissions)
-	require.Contains(t, resourceIDs(serviceTokens[0].Resources, controlplane.ResourceKindTenant), tenantID)
-	require.Contains(t, resourceIDs(serviceTokens[0].Resources, "custom.resource"), "alpha")
+	require.Empty(t, serviceTokens, "bootstrap manifests must not mint generated service tokens")
 	assertServiceJWTGrantRow(t, pool, tenantID, "https://doujins.example", "service:doujins-runtime", []string{controlplane.PermEntitlementsRead}, true)
 
-	writeTenantManifest(t, manifestPath, tokenPath, "pro", "us-east", "/hooks/v2")
+	writeTenantManifest(t, manifestPath, "pro", "us-east", "/hooks/v2")
 	require.NoError(t, ReconcileTenantManifest(ctx, tenantManifestConfig(manifestPath), cp))
-	require.Equal(t, firstToken, strings.TrimSpace(readFile(t, tokenPath)), "existing non-empty token output must be preserved")
 
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT billing_tier, region, webhook_path
+			SELECT billing_tier, region, webhook_path
 		  FROM billing.tenants
 		 WHERE slug = 'cozy-art'
 	`).Scan(&billingTier, &region, &webhookPath))
@@ -128,7 +120,7 @@ func TestReconcileTenantManifestEnsuresTenantsTokensAndIssuers(t *testing.T) {
 
 	serviceTokens, err = cp.Core().ListServiceTokens(ctx, "tenant-cozy-art")
 	require.NoError(t, err)
-	require.Len(t, serviceTokens, 1, "idempotent reconcile must not mint duplicate service tokens")
+	require.Empty(t, serviceTokens, "idempotent reconcile must not mint generated service tokens")
 
 	issuer1 := newJWKS(t, "issuer-kid-1")
 	issuer2 := newJWKS(t, "issuer-kid-2")
@@ -160,8 +152,7 @@ func TestReconcileTenantManifestSerializesConcurrentReplicas(t *testing.T) {
 	cp := newTenantManifestControlPlane(t, pool)
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "tenants.yaml")
-	tokenPath := filepath.Join(dir, "runtime.token")
-	writeTenantManifest(t, manifestPath, tokenPath, "starter", "us-west", "/hooks/v1")
+	writeTenantManifest(t, manifestPath, "starter", "us-west", "/hooks/v1")
 
 	start := make(chan struct{})
 	var successes atomic.Int32
@@ -184,7 +175,7 @@ func TestReconcileTenantManifestSerializesConcurrentReplicas(t *testing.T) {
 
 	serviceTokens, err := cp.Core().ListServiceTokens(ctx, "tenant-cozy-art")
 	require.NoError(t, err)
-	require.Len(t, serviceTokens, 1, "advisory lock plus output preservation should avoid duplicate token minting")
+	require.Empty(t, serviceTokens, "bootstrap manifests must not mint generated service tokens")
 }
 
 func newTenantManifestTestPool(t *testing.T) *pgxpool.Pool {
@@ -290,7 +281,7 @@ func tenantManifestConfig(path string) *config.Config {
 	return &config.Config{TenantBootstrap: &config.TenantBootstrapConfig{File: path}}
 }
 
-func writeTenantManifest(t *testing.T, manifestPath, tokenPath, tier, region, webhookPath string) {
+func writeTenantManifest(t *testing.T, manifestPath, tier, region, webhookPath string) {
 	t.Helper()
 	body := fmt.Sprintf(`
 version: 2
@@ -301,25 +292,12 @@ tenants:
     region: %s
     webhook_host: cozy.example
     webhook_path: %s
-    service_tokens:
-      - name: runtime
-        permissions:
-          - %s
-          - %s
-        resources:
-          - kind: %s
-            id: $tenant
-          - kind: custom.resource
-            id: alpha
-        outputs:
-          - file:
-              path: %s
     service_jwt_principals:
       - issuer: https://doujins.example
         subject: service:doujins-runtime
         permissions:
           - %s
-`, tier, region, webhookPath, controlplane.PermEntitlementsRead, controlplane.PermCreditsRead, controlplane.ResourceKindTenant, tokenPath, controlplane.PermEntitlementsRead)
+`, tier, region, webhookPath, controlplane.PermEntitlementsRead)
 	require.NoError(t, os.WriteFile(manifestPath, []byte(body), 0o600))
 }
 
@@ -335,13 +313,6 @@ func newJWKS(t *testing.T, kid string) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
-}
-
-func readFile(t *testing.T, path string) string {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	require.NoError(t, err)
-	return string(raw)
 }
 
 func resourceIDs(resources []authcore.ServiceTokenResource, kind string) []string {

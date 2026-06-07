@@ -146,15 +146,6 @@ tenants:
           - openrails:credits:write
           - openrails:credits:spend
 
-    service_tokens:
-      - name: generated-admin-token
-        permissions: [openrails:admin]
-        outputs:
-          - vault:
-              mount: secret
-              path: openrails/doujins/admin
-              field: service_token
-
 catalogs:
   - name: default
     default_currency: usd
@@ -180,21 +171,17 @@ catalogs:
 - `tenants[].service_jwt_principals[]` grants server-side authorization to
   caller-minted first-party service JWTs. The JWT must still request
   permissions, but OpenRails intersects those requests with this grant.
-- `tenants[].service_tokens[]` mints generated opaque AuthKit service tokens for
-  scripts, third-party clients, and explicit generated-token use cases.
-  `resources` is optional; omitted means the containing tenant-wide resource
-  scope. Explicit resources are only needed for narrowed scopes such as one
-  `openrails.tenant_subject`.
-- `outputs[]` writes generated token secrets to deployment-owned targets such as
-  Vault KV fields or mounted files. Non-empty outputs are preserved during
-  `bootstrap apply`; rotation is an explicit deploy action.
+- Bootstrap YAML does not mint generated opaque service-token secrets and does
+  not write service-token material to Vault KV or mounted files. Non-OIDC
+  clients and break-glass/admin scripts must use an explicit operator/admin token
+  minting flow outside bootstrap.
 - `catalogs[]` uses the existing catalog-as-code schema. Bootstrap applies it
   additively: missing products/prices are not removed by omission.
 
 Delegated JWTs are for browser/direct self-service or tenant-admin operations.
-Generated service tokens and first-party service JWTs are for backend calls such
-as entitlement reads and credit reserve/capture/release flows, and must not be
-accepted by delegated browser routes.
+First-party service JWTs are for backend calls such as entitlement reads and
+credit reserve/capture/release flows, and must not be accepted by delegated
+browser routes.
 
 ## Remaining / needs live infrastructure
 
@@ -207,6 +194,6 @@ accepted by delegated browser routes.
   account-status webhooks) and a webhook **delivery monitor** (alert on N
   consecutive failures) are scoped by #225 but not implemented in this increment.
 - Tenant **onboarding** (configure tenant issuers, grant service-JWT principals,
-  or mint generated service tokens for non-OIDC callers) reuses the
-  bootstrap/control-plane paths. Token output locations are
-  deployment wiring, not durable OpenRails domain state.
+  or mint generated service tokens for non-OIDC callers) reuses bootstrap and
+  control-plane functionality, but generated service-token minting is an explicit
+  operator/admin action outside YAML bootstrap.

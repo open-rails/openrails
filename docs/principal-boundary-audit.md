@@ -55,11 +55,11 @@ tenant — evaluated at request time by the control plane — or present a
 deployment-minted admin service token carrying `openrails:admin`. There is NO
 separate "operator"/"admin"/"platform" AuthKit *tenant* acting as the admin
 authority, no JWT role-claim gate, and no global-admin DB fallback. The default
-tenant hosts its own admin role; bootstrap (`openrails billing bootstrap-tenants`
-/ the manifest path) seeds that role and an initial admin service token under the
-default tenant's own org. `/v1/admin/*` (and `/v1/admin/tenants/*`) fail closed
-when no control plane is wired (verifier-only mode), because there is then no
-live authority to evaluate.
+tenant hosts its own admin role. Initial generated admin service tokens are
+minted only through explicit operator/admin token-minting commands, not through
+declarative bootstrap YAML. `/v1/admin/*` (and `/v1/admin/tenants/*`) fail
+closed when no control plane is wired (verifier-only mode), because there is then
+no live authority to evaluate.
 
 Canonical identity vocabulary lives in
 `docs/authkit-tenant-oidc-glossary.md`. New docs and route examples should use
