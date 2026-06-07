@@ -35,7 +35,7 @@ func (c *ControlPlane) MountedRouteGroups() []authhttp.RouteGroup {
 	if c == nil {
 		return nil
 	}
-	if c.LockedDown() {
+	if c.SelfHostedPosture() {
 		out := make([]authhttp.RouteGroup, len(IntentionalRouteGroups))
 		copy(out, IntentionalRouteGroups)
 		return out
@@ -53,7 +53,7 @@ func (c *ControlPlane) RouteSpecs() []authhttp.RouteSpec {
 		return nil
 	}
 	routes := c.authSvc.Routes()
-	if c.LockedDown() {
+	if c.SelfHostedPosture() {
 		return routes.Groups(IntentionalRouteGroups...)
 	}
 	return routes.DefaultAPI()

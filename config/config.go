@@ -625,12 +625,12 @@ type AuthConfig struct {
 	Issuers          []string `koanf:"issuers"`           // List of expected token issuers (e.g., ["https://issuer.example.com"])
 	ExpectedAudience string   `koanf:"expected_audience"` // Accept token only if it contains this audience (e.g., "openrails-app")
 
-	// Deprecated internal compatibility fields for pre-manifest admin tests.
-	// External config files/env must not set auth.operator_tenant_slug or
-	// auth.operator_tenant_admin_roles; Load rejects those keys.
-	OperatorTenantSlug string `koanf:"operator_tenant_slug,omitempty"`
-
-	OperatorTenantAdminRoles []string `koanf:"operator_tenant_admin_roles,omitempty"`
+	// HARDCUT (#312): there is no `auth.operator_tenant_slug` /
+	// `auth.operator_tenant_admin_roles`. Admin authority is the LIVE
+	// openrails:admin permission held in the caller's OWN tenant (or carried on a
+	// deployment-minted admin service token) — deployment authority, not
+	// membership in a separate "operator" AuthKit tenant. Load rejects the
+	// deprecated keys.
 
 	// ControlPlane configures OpenRails' OpenRails-owned AuthKit control plane
 	// (issue #224). When nil/disabled, OpenRails behaves as a pure JWT verifier
@@ -661,24 +661,25 @@ type ControlPlaneConfig struct {
 	IssuedAudiences   []string `koanf:"issued_audiences,omitempty"`
 	ExpectedAudiences []string `koanf:"expected_audiences,omitempty"`
 
-	// TenantMode is the AuthKit tenant mode ("single" or "multi"). Operator
-	// bootstrap and tenant-management HTTP routes require "multi". Defaults to
-	// "multi" when Enabled so the operator tenant and its service tokens exist.
-	TenantMode string `koanf:"tenant_mode,omitempty"`
-
 	// TokenPrefix is the brand prefix for minted service tokens (e.g. "openrails" ->
 	// `openrails_st_<key_id>_<secret>`). Empty -> bare service-token marker.
 	TokenPrefix string `koanf:"token_prefix,omitempty"`
 
-	// LockedDown selects the self-hosted, locked-down posture: public user
-	// registration and public tenant management are disabled, and only the
-	// intentional AuthKit route groups are mounted (never DefaultAPI). Defaults
-	// to true when Enabled — hosted-SaaS mode must explicitly opt out.
-	LockedDown *bool `koanf:"locked_down,omitempty"`
+	// PublicUserRegistration enables public native-user self-registration. Default
+	// false (restricted: admin/bootstrap-only). Maps to authkit
+	// NativeUserRegistrationMode. (authkit issue 60 — independent registration axes.)
+	PublicUserRegistration bool `koanf:"public_user_registration,omitempty"`
 
-	// OperatorServiceTokenName is the human-readable name of the initial operator service token
-	// minted at bootstrap. Defaults to "openrails-bootstrap-operator".
-	OperatorServiceTokenName string `koanf:"operator_service_token_name,omitempty"`
+	// PublicTenantRegistration enables public tenant onboarding/management. Default
+	// false (restricted). Maps to authkit TenantRegistrationMode. Independent of
+	// PublicUserRegistration — restrict either, both (the typical self-hosted
+	// posture), or neither.
+	PublicTenantRegistration bool `koanf:"public_tenant_registration,omitempty"`
+
+	// BootstrapAdminServiceTokenName is the human-readable name of the initial
+	// deployment admin service token minted at bootstrap (#312). Defaults to
+	// "openrails-bootstrap-admin".
+	BootstrapAdminServiceTokenName string `koanf:"bootstrap_admin_service_token_name,omitempty"`
 
 	// PlatformTenantSlug is the AuthKit tenant slug for the managed-hosting PLATFORM
 	// superadmin org (issue #226), DISTINCT from any tenant operator tenant. The
@@ -708,56 +709,36 @@ func (c *AuthConfig) ControlPlaneEnabled() bool {
 	return c != nil && c.ControlPlane != nil && c.ControlPlane.Enabled
 }
 
-// LockedDownEnabled reports whether the control plane runs in the self-hosted,
-// locked-down posture (public registration + tenant management disabled,
-// selective route mounting). Defaults to true when the control plane is enabled.
-func (cp *ControlPlaneConfig) LockedDownEnabled() bool {
+// UserRegistrationOpen reports whether public native-user self-registration is
+// enabled (default false = restricted to admin/bootstrap).
+func (cp *ControlPlaneConfig) UserRegistrationOpen() bool {
+	return cp != nil && cp.PublicUserRegistration
+}
+
+// TenantRegistrationOpen reports whether public tenant onboarding/management is
+// enabled (default false = restricted to admin/bootstrap).
+func (cp *ControlPlaneConfig) TenantRegistrationOpen() bool {
+	return cp != nil && cp.PublicTenantRegistration
+}
+
+// SelfHostedPosture reports whether to mount only the intentional AuthKit route
+// groups (self-hosted) rather than the full hosted-SaaS DefaultAPI surface. True
+// unless BOTH registration axes are public (the fully-open hosted-SaaS posture).
+func (cp *ControlPlaneConfig) SelfHostedPosture() bool {
 	if cp == nil {
-		return false
-	}
-	if cp.LockedDown == nil {
 		return true
 	}
-	return *cp.LockedDown
+	return !(cp.PublicUserRegistration && cp.PublicTenantRegistration)
 }
 
-// OperatorTenantEnabled reports whether operator-tenant admin authority is available.
-func (c *AuthConfig) OperatorTenantEnabled() bool {
-	if c == nil {
-		return false
-	}
-	return strings.TrimSpace(c.OperatorTenantSlug) != "" || c.ControlPlaneEnabled()
-}
-
-// EffectiveOperatorTenantSlug returns the operator tenant slug used by internal
-// admin gates. Control-plane deployments default to "operator"; external config
-// files must not set the deprecated auth.operator_tenant_slug key.
-func (c *AuthConfig) EffectiveOperatorTenantSlug() string {
-	if c == nil {
-		return ""
-	}
-	if slug := strings.ToLower(strings.TrimSpace(c.OperatorTenantSlug)); slug != "" {
-		return slug
-	}
-	if c.ControlPlaneEnabled() {
-		return "operator"
-	}
-	return ""
-}
-
-// EffectiveOperatorTenantAdminRoles returns OperatorTenantAdminRoles or the default set.
-func (c *AuthConfig) EffectiveOperatorTenantAdminRoles() []string {
-	if c == nil || len(c.OperatorTenantAdminRoles) == 0 {
-		return []string{"admin", "owner"}
-	}
-	return c.OperatorTenantAdminRoles
-}
 
 func rejectDeprecatedConfigKeys(k *koanf.Koanf) error {
 	deprecated := map[string]string{
 		"auth.operator_tenant_slug":        "use tenant_bootstrap.file and manifest-declared tenants, issuers, service_tokens, permissions, resources, and outputs",
 		"auth.operator_tenant_admin_roles": "use tenant_bootstrap.file and manifest-declared tenants, issuers, service_tokens, permissions, resources, and outputs",
-		"auth.control_plane.org_mode":      "use auth.control_plane.tenant_mode",
+		"auth.control_plane.org_mode":      "removed; tenants are always supported. Use public_user_registration + public_tenant_registration",
+		"auth.control_plane.tenant_mode":   "removed; tenants are always supported (authkit issue 60). Use public_user_registration + public_tenant_registration",
+		"auth.control_plane.locked_down":   "use auth.control_plane.public_user_registration + public_tenant_registration (both default false = restricted)",
 		"payer_account_id":                 "use tenant_subject_id and invoker_id",
 		"payer.account_id":                 "use tenant_subject_id and invoker_id",
 		"account_id":                       "use tenant_subject_id and invoker_id",

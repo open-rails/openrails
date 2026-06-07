@@ -24,6 +24,6 @@ func (s *Server) registerControlPlaneAuthRoutes(e *gin.Engine) {
 	log.WithFields(log.Fields{
 		"prefix":      ControlPlaneAuthPrefix,
 		"routes":      n,
-		"locked_down": s.controlPlane.LockedDown(),
+		"self_hosted": s.controlPlane.SelfHostedPosture(),
 	}).Info("control plane: mounted selective AuthKit route groups")
 }

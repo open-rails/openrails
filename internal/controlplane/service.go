@@ -109,13 +109,10 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		return nil, errors.New("controlplane: issued_audiences/expected_audiences are required (or set auth.expected_audience)")
 	}
 
-	tenantMode := strings.ToLower(strings.TrimSpace(cp.TenantMode))
-	if tenantMode == "" {
-		// Operator bootstrap + tenant-management routes require multi mode.
-		tenantMode = "multi"
-	}
-
-	locked := cp.LockedDownEnabled()
+	// Tenants are always a supported primitive (authkit issue 60); operator
+	// bootstrap + tenant-management require the "multi" core mode, so pass it
+	// unconditionally. There is no host-facing tenant_mode config anymore.
+	tenantMode := "multi"
 
 	// Build the signing KeySource ONCE and inject it into the core config, so the
 	// active signer the control plane MINTS with and the public keys the delegated
@@ -147,8 +144,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		// Self-hosted locked-down posture (#47 switches): no public user
 		// self-registration, no public tenant onboarding/management. Embedded
 		// bootstrap/core calls (CreateTenant/AssignRole/MintServiceToken) are unaffected.
-		NativeUserRegistrationMode: registrationMode(locked),
-		TenantRegistrationMode:     registrationMode(locked),
+		NativeUserRegistrationMode: registrationMode(!cp.UserRegistrationOpen()),
+		TenantRegistrationMode:     registrationMode(!cp.TenantRegistrationOpen()),
 	}
 
 	authSvc, err := authhttp.NewService(coreCfg)
@@ -216,11 +213,12 @@ func (c *ControlPlane) Pool() *pgxpool.Pool {
 	return c.pool
 }
 
-// LockedDown reports whether this control plane runs in the locked-down,
-// self-hosted posture.
-func (c *ControlPlane) LockedDown() bool {
+// SelfHostedPosture reports whether this control plane mounts only the
+// intentional AuthKit route groups (self-hosted) rather than the full hosted-SaaS
+// DefaultAPI surface. True unless BOTH registration axes are public.
+func (c *ControlPlane) SelfHostedPosture() bool {
 	if c == nil || c.cfg == nil || c.cfg.Auth == nil || c.cfg.Auth.ControlPlane == nil {
-		return false
+		return true
 	}
-	return c.cfg.Auth.ControlPlane.LockedDownEnabled()
+	return c.cfg.Auth.ControlPlane.SelfHostedPosture()
 }

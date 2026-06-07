@@ -60,23 +60,27 @@ func TestControlPlaneEnabled(t *testing.T) {
 	}
 }
 
-func TestLockedDownEnabled_DefaultsTrue(t *testing.T) {
-	var cp *config.ControlPlaneConfig
-	if cp.LockedDownEnabled() {
-		t.Error("nil control plane config should not be locked down")
+func TestRegistrationControls_DefaultRestricted(t *testing.T) {
+	// Independent registration axes (authkit issue 60). Defaults: both restricted
+	// (closed registration); route posture is self-hosted unless BOTH are public.
+	cp := &config.ControlPlaneConfig{} // omit both -> restricted
+	if cp.UserRegistrationOpen() || cp.TenantRegistrationOpen() {
+		t.Error("unset registration flags should default to restricted (false)")
 	}
-	cp = &config.ControlPlaneConfig{} // LockedDown unset -> default true
-	if !cp.LockedDownEnabled() {
-		t.Error("unset LockedDown should default to locked-down=true")
+	if !cp.SelfHostedPosture() {
+		t.Error("restricted registration should yield self-hosted posture")
 	}
-	f := false
-	cp.LockedDown = &f
-	if cp.LockedDownEnabled() {
-		t.Error("explicit LockedDown=false should opt out of locked-down mode")
+	// Only user registration public: still self-hosted (not both).
+	cp.PublicUserRegistration = true
+	if !cp.UserRegistrationOpen() || cp.TenantRegistrationOpen() {
+		t.Error("expected user-reg open, tenant-reg restricted")
 	}
-	tr := true
-	cp.LockedDown = &tr
-	if !cp.LockedDownEnabled() {
-		t.Error("explicit LockedDown=true should be locked-down")
+	if !cp.SelfHostedPosture() {
+		t.Error("one axis public should remain self-hosted posture")
+	}
+	// Both public: full hosted-SaaS posture.
+	cp.PublicTenantRegistration = true
+	if cp.SelfHostedPosture() {
+		t.Error("both axes public should drop the self-hosted posture")
 	}
 }
