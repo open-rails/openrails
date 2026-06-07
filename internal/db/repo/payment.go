@@ -39,6 +39,9 @@ const internalNMISubscriptionAttemptMetadataKey = "nmi_subscription_order_id"
 func NewPaymentRepo(d *db.DB) *PaymentRepo { return &PaymentRepo{db: d} }
 
 func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error {
+	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, payment.TenantSubjectID); err != nil {
+		return err
+	}
 	res, err := r.db.Q(ctx).NewInsert().Model(payment).Exec(ctx)
 	if err != nil {
 		return err
@@ -54,6 +57,9 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 }
 
 func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
+	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, payment.TenantSubjectID); err != nil {
+		return false, err
+	}
 	res, err := r.db.Q(ctx).
 		NewInsert().
 		Model(payment).
@@ -109,8 +115,12 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 }
 
 func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, err
+	}
 	payments := []*models.Payment{}
-	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.user_id = ?", userID)
+	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.tenant_subject_id = ?", tsid)
 	q = excludeInternalPaymentAttempts(q)
 	if err := q.OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
 		return nil, err
@@ -316,17 +326,21 @@ func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemp
 }
 
 func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, 0, err
+	}
 	payments := []*models.Payment{}
 	offset := (page - 1) * pageSize
 
-	countQ := r.db.Q(ctx).NewSelect().Model((*models.Payment)(nil)).Where("purch.user_id = ?", userID)
+	countQ := r.db.Q(ctx).NewSelect().Model((*models.Payment)(nil)).Where("purch.tenant_subject_id = ?", tsid)
 	countQ = excludeInternalPaymentAttempts(countQ)
 	count, err := countQ.Count(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.user_id = ?", userID)
+	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.tenant_subject_id = ?", tsid)
 	q = excludeInternalPaymentAttempts(q)
 	if err := q.OrderExpr("purch.purchased_at DESC").Limit(pageSize).Offset(offset).Scan(ctx); err != nil {
 		return nil, 0, err
@@ -343,7 +357,11 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 	q = q.Relation("Price").Relation("Price.Product").Relation("Subscription")
 
 	if opts.Filters.UserID != "" {
-		q = q.Where("purch.user_id = ?", opts.Filters.UserID)
+		tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, opts.Filters.UserID)
+		if err != nil {
+			return nil, 0, err
+		}
+		q = q.Where("purch.tenant_subject_id = ?", tsid)
 	}
 	if opts.Filters.PriceID != uuid.Nil {
 		q = q.Where("purch.price_id = ?", opts.Filters.PriceID)
@@ -397,14 +415,18 @@ func excludeInternalPaymentAttempts(q *bun.SelectQuery) *bun.SelectQuery {
 }
 
 func (r *PaymentRepo) GetLatestByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (*models.Payment, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, err
+	}
 	payment := new(models.Payment)
 	q := r.db.Q(ctx).
 		NewSelect().
 		Model(payment).
-		Where("purch.user_id = ?", userID).
+		Where("purch.tenant_subject_id = ?", tsid).
 		Where("purch.processor = ?", processor)
 	q = excludeInternalPaymentAttempts(q)
-	err := q.OrderExpr("purch.purchased_at DESC").
+	err = q.OrderExpr("purch.purchased_at DESC").
 		Limit(1).
 		Scan(ctx)
 	if err != nil {
@@ -450,11 +472,16 @@ func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string
 		return 0, 0, fmt.Errorf("user_id is required")
 	}
 
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return 0, 0, err
+	}
+
 	// Successful payments (positive amount)
 	successQ := r.db.Q(ctx).
 		NewSelect().
 		Model((*models.Payment)(nil)).
-		Where("purch.user_id = ?", userID).
+		Where("purch.tenant_subject_id = ?", tsid).
 		Where("purch.processor = ?", processor).
 		Where("purch.amount > 0").
 		Where("COALESCE(purch.status::text, 'completed') = ?", "completed")
@@ -468,7 +495,7 @@ func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string
 	failedQ := r.db.Q(ctx).
 		NewSelect().
 		Model((*models.Payment)(nil)).
-		Where("purch.user_id = ?", userID).
+		Where("purch.tenant_subject_id = ?", tsid).
 		Where("purch.processor = ?", processor).
 		Where("COALESCE(purch.status::text, 'completed') = ?", "failed")
 	failedQ = excludeInternalPaymentAttempts(failedQ)

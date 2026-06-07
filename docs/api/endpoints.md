@@ -41,16 +41,16 @@ List endpoints use a Stripe-like envelope:
 | Delegated self routes (`/v1/self/*`) | `Authorization: Bearer <delegated JWT>` signed by a registered tenant issuer; token must carry OIDC `iss`, `sub` via AuthKit `delegated_sub`, accepted `aud`, and `openrails:self:*` permissions |
 | Delegated tenant-admin routes (`/v1/tenant-admin/*`) | Same delegated JWT shape, with `openrails:tenant:*` permissions |
 | Legacy user/admin routes (`/v1/checkout`, `/v1/me/*`, `/v1/admin/*`) | Host JWT auth where still mounted by the embedding deployment |
-| Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <OpenRails-issued service token>`; each route requires an `openrails:*` permission (see Service API section) |
+| Service API (`/v1/service/*`, same public port) | `Authorization: Bearer <generated service token or first-party service JWT>`; each route requires an `openrails:*` permission (see Service API section) |
 | Webhooks (`/v1/webhooks/:provider`) | Provider-specific verification (see notes) |
 
-Delegated JWTs and service tokens are intentionally different credentials.
+Delegated JWTs and machine credentials are intentionally different credentials.
 Delegated JWTs are browser/direct-user credentials verified through OIDC issuer,
 JWKS, audience, expiry, and permission checks. OpenRails stores/touches only the
 minimal payable tenant subject `(tenant_id, issuer, subject)` needed for billing
 and audit references; it does not create OpenRails-native users for delegated
-subjects. Service tokens are opaque AuthKit-owned server credentials and are
-rejected by delegated self/admin routes.
+subjects. Generated service tokens and first-party service JWTs are backend
+credentials and are rejected by delegated self/admin routes.
 
 Delegated JWT examples:
 
@@ -65,7 +65,7 @@ Delegated JWT examples:
 - Tensorhub tenant balance UI: Cozy Art can present a delegated JWT whose
   subject is the upstream tenant/company subject, with self billing permission,
   to read its own balance through browser/direct OpenRails routes. Backend
-  reserve/capture/release remains service-token-only.
+  reserve/capture/release remains machine-credential-only.
 
 ## Health & Service Banner
 
@@ -266,36 +266,47 @@ Lists credit transactions for the credit type (including hold lifecycle rows). Q
 ### POST /v1/me/portal
 Creates a Stripe customer portal session. Response `{ "url": "https://..." }`.
 
-## Service API (`/v1/service/*`, service-token-authenticated)
+## Service API (`/v1/service/*`, machine-credential-authenticated)
 
 Server-to-server endpoints. They live on the SAME public port as everything else
 (issue #222) — there is no private port, mTLS listener, or API key. Machine callers
-present an OpenRails-issued tenant service token:
+present one of:
 
 ```
 Authorization: Bearer <openrails_st_...>
+Authorization: Bearer <service-jwt-signed-by-registered-tenant-issuer>
 ```
 
-The service token is resolved through the OpenRails-owned AuthKit control plane:
-its owning tenant maps to an OpenRails tenant, its AuthKit resource scopes
-constrain where it may act, and its granted permissions gate what it may do.
-Every service token must carry
+Generated service tokens are resolved through the OpenRails-owned AuthKit control
+plane: their owning tenant maps to an OpenRails tenant, AuthKit resource scopes
+constrain where they may act, and granted permissions gate what they may do.
+Every generated service token must carry
 `resources: [{kind:"openrails.tenant", id:"<tenant_uuid>"}]`.
 Subject-scoped tokens additionally carry
 `{kind:"openrails.tenant_subject", id:"<tenant_subject_uuid>"}` and may only act
 for that exact `tenant_subject_id`; tenant-wide tokens omit the tenant-subject
-resource. The canonical permission vocabulary is colon-form
+resource.
+
+First-party service JWTs are signed by a registered tenant issuer and must carry
+standard JWT/OIDC claims plus `token_use=service`, `jti`, a maximum 15-minute
+lifetime, accepted `aud`, and requested `permissions`. OpenRails does not trust
+those permissions blindly: it loads the `service_jwt_principals[]` grant for
+`(tenant, issuer, subject)` and intersects requested permissions/resources with
+that server-side grant.
+
+The canonical permission vocabulary is colon-form
 `openrails:<resource>:<action>`:
 
-Service-token examples:
+Machine-credential examples:
 
-- Doujins/Hentai0/Cozy backend entitlement read: permission
-  `openrails:entitlements:read`, resource `openrails.tenant=<tenant_uuid>`,
-  route `GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements`.
+- Doujins/Hentai0/Cozy backend entitlement read: first-party service JWT subject
+  such as `service:doujins-runtime`, permission `openrails:entitlements:read`,
+  resource `openrails.tenant=<tenant_uuid>`, route
+  `GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements`.
 - Tensorhub balance reserve/capture/release: permissions
   `openrails:credits:read`, `openrails:credits:write`, and
-  `openrails:credits:spend`; resources include
-  `openrails.tenant=<tenant_uuid>` and, for payer-scoped tokens,
+  `openrails:credits:spend`; resources include `openrails.tenant=<tenant_uuid>`
+  and, for payer-scoped generated tokens or service-JWT grants,
   `openrails.tenant_subject=<tenant_subject_uuid>`.
 
 | Route | Required permission |
@@ -312,7 +323,8 @@ after authorizing the action themselves.
 Terminology for this surface is defined in
 `docs/authkit-tenant-oidc-glossary.md`: OpenRails tenant = integration/customer
 boundary, delegated user = external OIDC `issuer` + `subject`, tenant subject =
-payable identity, service token = opaque server-to-server credential.
+payable identity, generated service token/service JWT = server-to-server
+credentials.
 
 ### GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements
 Returns active entitlements for the payable tenant subject at the current time.
@@ -531,7 +543,7 @@ Initiates a refund via the underlying processor's API and records it in the data
 **Response:** Returns the created refund payment object on success.
 
 ### GET /v1/admin/users/{user_id}
-Returns the user's billing profile: `{ user_id, subscription, entitlements, payments }`.
+Returns the user's billing profile: `{ tenant_subject_id, subscription, entitlements, payments }`. The `{user_id}` path segment is the external subject the admin addresses; it is resolved to the payable `tenant_subject_id` internally (#317), and the response identifies the payable entity by `tenant_subject_id`.
 
 ### GET /v1/admin/users/{user_id}/nmi
 Returns billing detail for the user's active NMI-backed subscription. Returns 404 if the user has no active

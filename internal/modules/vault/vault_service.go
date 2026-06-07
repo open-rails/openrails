@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -166,7 +167,7 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 
 	pm := &models.PaymentMethod{
 		ID:                   uuidutil.NewV7(),
-		UserID:               userID,
+		TenantSubjectID:      identity.TenantSubjectIDFromString(userID).UUID(),
 		Processor:            models.Processor(processor),
 		VaultID:              nmiResponse.CustomerVaultID,
 		InitialTransactionID: "",
@@ -330,9 +331,9 @@ func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
 
 // DeleteVault deletes the vault remotely after ensuring no active subscriptions use it; deactivates locally
 func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod) error {
-	subs, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.UserID, 1, 1000)
+	subs, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.TenantSubjectID.String(), 1, 1000)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"vault_id": pm.VaultID, "user_id": pm.UserID}).Error("Failed to check subscriptions for vault")
+		log.WithError(err).WithFields(log.Fields{"vault_id": pm.VaultID, "user_id": pm.TenantSubjectID.String()}).Error("Failed to check subscriptions for vault")
 		return fmt.Errorf("failed to check vault usage: %w", err)
 	}
 

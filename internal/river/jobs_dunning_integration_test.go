@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -103,7 +104,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	billingID := "bill_" + uuid.New().String()
 	paymentMethod := &models.PaymentMethod{
 		ID:                   paymentMethodID,
-		UserID:               userID,
+		TenantSubjectID:      identity.TenantSubjectIDFromString(userID).UUID(),
 		Processor:            models.ProcessorMobius,
 		VaultID:              "vault_" + uuid.New().String(),
 		BillingID:            &billingID,
@@ -120,7 +121,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	sub := &models.Subscription{
 		ID:                      subID,
-		UserID:                  userID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusPastDue,

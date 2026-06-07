@@ -8,12 +8,13 @@ examples, and tests.
 
 | Term | Meaning |
 |---|---|
-| OpenRails tenant | The OpenRails customer/integration boundary. It scopes billing data, service tokens, tenant issuers, credit balances, usage, and invoices. |
+| OpenRails tenant | The OpenRails customer/integration boundary. It scopes billing data, machine credentials, tenant issuers, credit balances, usage, and invoices. |
 | Tenant issuer | An OIDC issuer trusted for one OpenRails tenant. It is registered with `issuer`, `jwks_uri`, accepted `audiences`, and `enabled`. |
 | Delegated user | A verified external OIDC subject from a tenant issuer. OpenRails stores only the minimal `(tenant_id, issuer, subject)` reference when it needs billing/audit identity. |
 | Tenant subject | The payable OpenRails identity row: `billing.tenant_subjects(id, tenant_id, issuer, subject)`. A subject may represent a person, company, upstream tenant, service, or delegated principal. |
 | Invoker | The principal that caused usage when it differs from the payable tenant subject. Use `invoker_id` for attribution and budget caps. |
-| Service token | An opaque AuthKit/OpenRails server-to-server credential (`openrails_st_...`) owned by a registered client/issuer and scoped by OpenRails resources. |
+| Generated service token | An opaque AuthKit/OpenRails server-to-server credential (`openrails_st_...`) minted by OpenRails for non-OIDC clients, scripts, and explicit generated-token use cases. |
+| Service JWT | A first-party OIDC server-to-server JWT minted by a tenant's own AuthKit issuer with `token_use=service`, short expiry, `jti`, `permissions`, and `aud=openrails`; OpenRails intersects requested permissions/resources with a server-side grant. |
 | Bootstrap authority | A deploy/operator action that runs manifests and one-shot bootstrap commands. It is not a billable tenant subject and should not be modeled as a customer tenant. |
 
 ## Patterns
@@ -32,18 +33,20 @@ examples, and tests.
 
 ### Doujins/Hentai0 backend entitlement read
 
-1. Bootstrap mints an opaque service token with
+1. Bootstrap registers the Doujins/Hentai0 issuer and a `service_jwt_principals[]`
+   grant such as `sub=service:doujins-runtime` with
    `openrails:entitlements:read`.
-2. The token carries `openrails.tenant=<tenant_uuid>` and optionally
-   `openrails.tenant_subject=<tenant_subject_uuid>`.
+2. The backend mints a 15-minute service JWT from its own AuthKit issuer with
+   `aud=openrails`, `token_use=service`, `jti`, and requested permissions.
 3. The backend calls
    `GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements`.
-4. OpenRails validates the service token, permission, tenant resource, and
-   tenant-subject resource scope before returning entitlement rows.
+4. OpenRails verifies the issuer/JWKS/claims, loads the server-side grant, then
+   intersects requested permissions/resources before returning entitlement rows.
 
 ### Tensorhub usage billing
 
-1. Tensorhub is authorized as a service-token caller for an OpenRails tenant.
+1. Tensorhub is authorized as a generated service-token caller or service-JWT
+   principal for an OpenRails tenant.
 2. A payer is a `tenant_subject_id`; the caller/invoker is an `invoker_id`.
 3. Reserve, hold, capture, usage rollup, invoice, and budget APIs use the
    tenant subject directly. OpenRails never derives the payer from `user_id`,
@@ -58,21 +61,22 @@ tenants:
       - issuer: https://doujins.example
         jwks_uri: https://doujins.example/.well-known/jwks.json
         audiences: ["openrails"]
-        enabled: true
-    service_tokens:
-      - name: tensorhub-runtime
+    service_jwt_principals:
+      - issuer: https://doujins.example
+        subject: service:doujins-runtime
         permissions:
-          - openrails:credits:read
-          - openrails:credits:write
-          - openrails:credits:spend
+          - openrails:entitlements:read
         resources:
           - kind: openrails.tenant
-            id: 00000000-0000-0000-0000-000000000001
-        outputs:
-          - vault_mount: secret
-            vault_path: openrails/tensorhub/runtime
-            vault_field: token
+            id: $tenant
 ```
 
-Use this vocabulary in new OpenRails surfaces. Legacy `user_id` fields remain
-only where older subscription/payment/admin flows have not yet been hard-cut.
+Use this vocabulary in all OpenRails surfaces. The `user_id` column has been
+hard-cut from every payable billing table (subscriptions, payments,
+payment_methods, processor_customers, checkout_sessions, product_access_grants,
+admin_grants, notification_queue, entitlements) — they reference
+`tenant_subject_id` and recover `(tenant_id, issuer, subject)` by joining
+`billing.tenant_subjects`. Billing API responses expose `tenant_subject_id`, not
+`user_id`. For a self-service identity the tenant subject id equals the user's
+UUID (issuer `openrails:self`); external/delegated subjects resolve to their own
+`tenant_subjects` row.

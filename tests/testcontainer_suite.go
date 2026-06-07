@@ -236,10 +236,11 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 		Auth: &config.AuthConfig{
 			Issuers:          []string{jwksIssuer},
 			ExpectedAudience: "test-app",
-			// HARDCUT (#224): admin authority is bootstrap-managed ONLY. Admin
-			// callers must present configured admin claims; there is no
-			// global-admin DB fallback.
-			OperatorTenantSlug: testOperatorTenantSlug,
+			// HARDCUT (#312): admin authority is the LIVE openrails:admin permission
+			// held in the caller's OWN tenant (control-plane evaluated), or a
+			// deployment-minted admin service token — NOT a claim-based operator
+			// tenant. Admin-route integration tests therefore require the embedded
+			// control plane wired with the test admin granted openrails:admin.
 		},
 		// All payment processor configs use the unified Processors map
 		Processors: map[string]*config.ProcessorConfig{

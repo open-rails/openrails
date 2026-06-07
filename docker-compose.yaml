@@ -207,8 +207,8 @@ services:
         condition: service_healthy
     ports:
       # Single public API surface. Server-to-server callers authenticate with
-      # OpenRails-issued tenant service tokens on this same port (issue #222) — there is no
-      # separate private/mTLS service port.
+      # generated service tokens or first-party service JWTs on this same port
+      # (issue #222) — there is no separate private/mTLS service port.
       - "127.0.0.1:2053:2053"  # API (public + admin + service token service routes)
     environment:
       # Service runtime mode
@@ -218,11 +218,10 @@ services:
       # For docker-compose E2E sandbox, the default issuer is the in-network `issuer` service (profile: e2e-sandbox).
       AUTH_ISSUERS: '${AUTH_ISSUERS:-["http://issuer:8080"]}'
       AUTH_EXPECTED_AUDIENCE: "${AUTH_EXPECTED_AUDIENCE:-openrails-app}"
-      # Optional closed-registration tenant manifest. To use the checked-in
-      # Doujins/Hentai0 local-stack example, mount
-      # ./config/tenants.local-stack.example.yaml at /etc/openrails/tenants.yaml
-      # and set OPENRAILS_TENANTS_FILE=/etc/openrails/tenants.yaml.
-      OPENRAILS_TENANTS_FILE: "${OPENRAILS_TENANTS_FILE:-}"
+      # Closed-registration provisioning is explicit:
+      #   billing bootstrap apply -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
+      # The checked-in Doujins/Hentai0 local-stack example is a unified
+      # bootstrap manifest for /etc/openrails/bootstrap.yaml.
 
       # Processor env passthrough (for local sandbox/E2E)
       PROCESSORS_MOBIUS_TYPE: "nmi"

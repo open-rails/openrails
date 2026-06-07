@@ -138,10 +138,10 @@ type Config struct {
 	FeatureFlags *FeatureFlags                `koanf:"feature_flags,omitempty"`
 	Encryption   *EncryptionConfig            `koanf:"encryption,omitempty"`
 	Vault        *VaultConfig                 `koanf:"vault,omitempty"`
-	// TenantBootstrap points OpenRails at an optional declarative tenant manifest.
-	// Standalone deployments mount this YAML file and OpenRails idempotently
-	// reconciles tenants, trusted OIDC issuers, and named runtime service-token
-	// outputs at startup or through the bootstrap-tenants command.
+	// TenantBootstrap is the legacy tenant-only manifest input used by the
+	// bootstrap-tenants command. New deployments should run
+	// `bootstrap apply -f /etc/openrails/bootstrap.yaml` with the unified tenant
+	// + catalog manifest instead of auto-applying tenant provisioning at startup.
 	TenantBootstrap *TenantBootstrapConfig `koanf:"tenant_bootstrap,omitempty"`
 	// BillingHotPath configures the degraded-mode behavior of the per-invocation
 	// billing authorize call (issue #248). EXPLICIT, never a silent default.
@@ -756,8 +756,8 @@ func (cp *ControlPlaneConfig) SelfHostedPosture() bool {
 
 func rejectDeprecatedConfigKeys(k *koanf.Koanf) error {
 	deprecated := map[string]string{
-		"auth.operator_tenant_slug":        "use tenant_bootstrap.file and manifest-declared tenants, issuers, service_tokens, permissions, resources, and outputs",
-		"auth.operator_tenant_admin_roles": "use tenant_bootstrap.file and manifest-declared tenants, issuers, service_tokens, permissions, resources, and outputs",
+		"auth.operator_tenant_slug":        "use /etc/openrails/bootstrap.yaml with manifest-declared tenants, issuers, service_jwt_principals, generated service_tokens, permissions, resources, and outputs",
+		"auth.operator_tenant_admin_roles": "use /etc/openrails/bootstrap.yaml with manifest-declared tenants, issuers, service_jwt_principals, generated service_tokens, permissions, resources, and outputs",
 		"auth.control_plane.org_mode":      "removed; tenants are always supported. Use public_user_registration + public_tenant_registration",
 		"auth.control_plane.tenant_mode":   "removed; tenants are always supported (authkit issue 60). Use public_user_registration + public_tenant_registration",
 		"auth.control_plane.locked_down":   "use auth.control_plane.public_user_registration + public_tenant_registration (both default false = restricted)",

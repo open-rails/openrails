@@ -13,10 +13,13 @@ import (
 type AdminGrant struct {
 	bun.BaseModel `bun:"table:billing.admin_grants,alias:ag"`
 
-	ID        uuid.UUID  `bun:"id,pk,type:uuid,default:uuidv7()" json:"id"`
-	UserID    string     `bun:"user_id,notnull" json:"user_id"`                        // User receiving the grant
-	PriceID   *uuid.UUID `bun:"price_id,type:uuid,nullzero" json:"price_id,omitempty"` // Optional: Price/Product being granted
-	GrantedBy string     `bun:"granted_by,notnull" json:"granted_by"`                  // Admin user ID who made the grant
+	ID uuid.UUID `bun:"id,pk,type:uuid,default:uuidv7()" json:"id"`
+	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// Additive during the hard-cut rollout; writers populate it and readers move to
+	// it before user_id is dropped. Join billing.tenant_subjects for issuer/subject.
+	TenantSubjectID uuid.UUID  `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
+	PriceID         *uuid.UUID `bun:"price_id,type:uuid,nullzero" json:"price_id,omitempty"` // Optional: Price/Product being granted
+	GrantedBy       string     `bun:"granted_by,notnull" json:"granted_by"`                  // Admin user ID who made the grant
 
 	// Reason for the grant (e.g., "comp", "contest_winner", "refund_compensation", "partnership", "manual_payment")
 	Reason string `bun:"reason,notnull" json:"reason"`

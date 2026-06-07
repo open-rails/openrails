@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -41,7 +42,7 @@ func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t 
 
 	var payment models.Payment
 	require.NoError(t, bunDB.NewSelect().Model(&payment).Where("transaction_id = ?", ids.transactionID).Scan(ctx))
-	require.Equal(t, ids.userID, payment.UserID)
+	require.Equal(t, ids.userID, payment.TenantSubjectID.String())
 	require.Equal(t, ids.subscriptionID, *payment.SubscriptionID)
 
 	exists, err := bunDB.NewSelect().Model((*models.Entitlement)(nil)).
@@ -153,7 +154,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	require.NoError(t, err)
 	subscription := &models.Subscription{
 		ID:                       subscriptionID,
-		UserID:                   userID,
+		TenantSubjectID:          identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:                productID,
 		PriceID:                  priceID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),

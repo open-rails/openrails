@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 )
@@ -111,7 +112,7 @@ func (s *SubscriptionLifecycleService) dispatchNotifications(ctx context.Context
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"notification_id": notification.ID,
 				"event_type":      notification.EventType,
-				"user_id":         notification.UserID,
+				"user_id":         notification.TenantSubjectID.String(),
 			}).Error("failed to deliver notification email")
 		}
 	}
@@ -196,7 +197,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			return nil, nil, fmt.Errorf("failed to check existing subscription by processor subscription ID: %w", err)
 		}
 		if err == nil && found.Status == models.StatusPending {
-			if found.UserID != params.UserID || found.ProductID != price.ProductID {
+			if found.TenantSubjectID.String() != params.UserID || found.ProductID != price.ProductID {
 				return nil, nil, fmt.Errorf("processor subscription belongs to a different pending subscription")
 			}
 			existingPendingSub = found
@@ -211,7 +212,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
 		}
 		if err == nil {
-			if existingPayment.UserID != params.UserID {
+			if existingPayment.TenantSubjectID.String() != params.UserID {
 				return nil, nil, fmt.Errorf("payment transaction belongs to a different user")
 			}
 			if existingPayment.PriceID != price.ID {
@@ -235,7 +236,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to load subscription for duplicate payment transaction: %w", err)
 			}
-			if existingSubscription.UserID != params.UserID {
+			if existingSubscription.TenantSubjectID.String() != params.UserID {
 				return nil, nil, fmt.Errorf("payment transaction subscription belongs to a different user")
 			}
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -322,7 +323,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id":           existingPendingSub.ID,
-			"user_id":                   existingPendingSub.UserID,
+			"user_id":                   existingPendingSub.TenantSubjectID.String(),
 			"price_id":                  existingPendingSub.PriceID,
 			"processor":                 existingPendingSub.Processor,
 			"processor_subscription_id": existingPendingSub.ProcessorSubscriptionID,
@@ -333,7 +334,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	} else {
 		subscription = &models.Subscription{
 			ID:                       uuidutil.NewV7(),
-			UserID:                   params.UserID,
+			TenantSubjectID:          identity.TenantSubjectIDFromString(params.UserID).UUID(),
 			ProductID:                price.ProductID,
 			PriceID:                  price.ID,
 			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
@@ -361,7 +362,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id":           subscription.ID,
-			"user_id":                   subscription.UserID,
+			"user_id":                   subscription.TenantSubjectID.String(),
 			"price_id":                  subscription.PriceID,
 			"processor":                 subscription.Processor,
 			"processor_subscription_id": subscription.ProcessorSubscriptionID,
@@ -388,7 +389,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id": subscription.ID,
-			"user_id":         subscription.UserID,
+			"user_id":         subscription.TenantSubjectID.String(),
 			"entitlements":    entNames,
 		}).Info("Preparing to grant subscription entitlements")
 
@@ -400,7 +401,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			if existsBySource {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"subscription_id": subscription.ID,
-					"user_id":         subscription.UserID,
+					"user_id":         subscription.TenantSubjectID.String(),
 					"entitlement":     ent,
 				}).Info("Entitlement already granted for subscription; skipping")
 				continue
@@ -409,7 +410,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			notBefore := periodStartsAt.UTC()
 			endAt := periodEndsAt.UTC()
 			window, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-				UserID:      subscription.UserID,
+				UserID:      subscription.TenantSubjectID.String(),
 				Entitlement: ent,
 				NotBefore:   &notBefore,
 				EndAt:       &endAt,
@@ -419,7 +420,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			if err != nil {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"subscription_id": subscription.ID,
-					"user_id":         subscription.UserID,
+					"user_id":         subscription.TenantSubjectID.String(),
 					"entitlement":     ent,
 				}).WithError(err).Error("Failed to grant subscription entitlement")
 				return nil, nil, fmt.Errorf("failed to grant entitlement %s: %w", ent, err)
@@ -427,14 +428,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			if window == nil {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"subscription_id": subscription.ID,
-					"user_id":         subscription.UserID,
+					"user_id":         subscription.TenantSubjectID.String(),
 					"entitlement":     ent,
 				}).Info("Subscription entitlement already covered by canonical timeline")
 				continue
 			}
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
-				"user_id":         subscription.UserID,
+				"user_id":         subscription.TenantSubjectID.String(),
 				"entitlement":     ent,
 				"window_start":    window.StartAt,
 				"window_end":      window.EndAt,
@@ -443,9 +444,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	notification := &models.NotificationQueue{
-		ID:        uuidutil.NewV7(),
-		UserID:    subscription.UserID,
-		EventType: models.NotificationPremiumStarted,
+		ID:              uuidutil.NewV7(),
+		TenantSubjectID: subscription.TenantSubjectID,
+		EventType:       models.NotificationPremiumStarted,
 	}
 	if err := notificationRepo.Create(ctx, notification); err != nil {
 		log.WithContext(ctx).WithError(err).Error("failed to create membership started notification")
@@ -467,7 +468,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 		payment := &models.Payment{
 			ID:                       uuidutil.NewV7(),
-			UserID:                   subscription.UserID,
+			TenantSubjectID:          subscription.TenantSubjectID,
 			PriceID:                  price.ID,
 			SubscriptionID:           &subscription.ID,
 			Processor:                params.Processor,
@@ -485,14 +486,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"transaction_id":  params.TransactionID,
 				"subscription_id": subscription.ID,
-				"user_id":         subscription.UserID,
+				"user_id":         subscription.TenantSubjectID.String(),
 			}).Error("failed to create payment record for new membership")
 			return nil, nil, fmt.Errorf("failed to create payment record for new membership: %w", err)
 		} else {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"transaction_id":  params.TransactionID,
 				"subscription_id": subscription.ID,
-				"user_id":         subscription.UserID,
+				"user_id":         subscription.TenantSubjectID.String(),
 				"amount_cents":    amount,
 				"currency":        currency,
 			}).Info("Recorded payment for membership creation")
@@ -548,7 +549,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		// Capture values for Payment creation after transaction
 		subscriptionID = subscription.ID
-		userID = subscription.UserID
+		userID = subscription.TenantSubjectID.String()
 
 		// Check for scheduled downgrade
 		var price *models.Price
@@ -580,7 +581,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
-				"user_id":         subscription.UserID,
+				"user_id":         subscription.TenantSubjectID.String(),
 				"old_price_id":    subscription.PriceID,
 				"new_price_id":    price.ID,
 				"old_product":     oldProduct.DisplayName,
@@ -626,7 +627,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			now := s.now().UTC()
 			payment := &models.Payment{
 				ID:                       uuidutil.NewV7(),
-				UserID:                   subscription.UserID,
+				TenantSubjectID:          subscription.TenantSubjectID,
 				PriceID:                  price.ID,
 				SubscriptionID:           &subscription.ID,
 				Processor:                params.Processor,
@@ -652,7 +653,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				if existingPayment.SubscriptionID == nil || *existingPayment.SubscriptionID != subscription.ID {
 					return fmt.Errorf("duplicate renewal payment marker belongs to a different subscription")
 				}
-				if existingPayment.UserID != subscription.UserID {
+				if existingPayment.TenantSubjectID.String() != subscription.TenantSubjectID.String() {
 					return fmt.Errorf("duplicate renewal payment marker belongs to a different user")
 				}
 				if existingPayment.PriceID != price.ID {
@@ -709,7 +710,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		renewalApplied = true
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id":           subscription.ID,
-			"user_id":                   subscription.UserID,
+			"user_id":                   subscription.TenantSubjectID.String(),
 			"price_id":                  price.ID,
 			"processor":                 subscription.Processor,
 			"processor_subscription_id": subscription.ProcessorSubscriptionID,
@@ -741,7 +742,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				grace := models.EntitlementSourceGrace
 				sid := subscription.ID
 				if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-					UserID:      subscription.UserID,
+					UserID:      subscription.TenantSubjectID.String(),
 					Entitlement: entName,
 					SourceType:  &grace,
 					SourceID:    &sid,
@@ -751,7 +752,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				}
 
 				if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-					UserID:      subscription.UserID,
+					UserID:      subscription.TenantSubjectID.String(),
 					Entitlement: entName,
 					NotBefore:   &notBefore,
 					EndAt:       &endAt,
@@ -786,7 +787,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 					st := models.EntitlementSourceSubscription
 					sid := subscription.ID
 					if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-						UserID:      subscription.UserID,
+						UserID:      subscription.TenantSubjectID.String(),
 						Entitlement: entName,
 						SourceType:  &st,
 						SourceID:    &sid,
@@ -819,10 +820,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		}
 
 		notification := &models.NotificationQueue{
-			ID:        uuidutil.NewV7(),
-			UserID:    subscription.UserID,
-			EventType: eventType,
-			Data:      notifData,
+			ID:              uuidutil.NewV7(),
+			TenantSubjectID: subscription.TenantSubjectID,
+			EventType:       eventType,
+			Data:            notifData,
 		}
 		if err := notificationRepo.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create membership renewed notification")
@@ -844,7 +845,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 	// Log the charge success event to ClickHouse
 	if s.EventLogService != nil {
-		sub := &models.Subscription{ID: subscriptionID, UserID: userID}
+		sub := &models.Subscription{ID: subscriptionID, TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID()}
 		if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, params.Processor, params.TransactionID, params.Amount, params.Currency, s.now(), map[string]interface{}{"renewal": true}); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
@@ -952,7 +953,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 
 		for _, entName := range entNames {
 			if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-				UserID:      subscription.UserID,
+				UserID:      subscription.TenantSubjectID.String(),
 				Entitlement: entName,
 				SourceType:  &graceSource,
 				SourceID:    &subID,
@@ -962,7 +963,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 			}
 
 			if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-				UserID:      subscription.UserID,
+				UserID:      subscription.TenantSubjectID.String(),
 				Entitlement: entName,
 				NotBefore:   &notBefore,
 				EndAt:       &endAt,
@@ -982,7 +983,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id":           reactivated.ID,
-		"user_id":                   reactivated.UserID,
+		"user_id":                   reactivated.TenantSubjectID.String(),
 		"processor":                 reactivated.Processor,
 		"processor_subscription_id": reactivated.ProcessorSubscriptionID,
 		"current_period_ends_at":    reactivated.CurrentPeriodEndsAt,
@@ -1048,7 +1049,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 
 		// Capture values for event logging after transaction
 		subscriptionID = subscription.ID
-		userID = subscription.UserID
+		userID = subscription.TenantSubjectID.String()
 		processor = subscription.Processor
 
 		// Update subscription status
@@ -1083,7 +1084,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id": subscription.ID,
-			"user_id":         subscription.UserID,
+			"user_id":         subscription.TenantSubjectID.String(),
 			"status":          subscription.Status,
 			"ended_at":        subscription.EndedAt,
 			"period_end":      subscription.CurrentPeriodEndsAt,
@@ -1113,7 +1114,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 				revokeReason = models.EntitlementRevokeChargeback
 			}
 
-			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.UserID, subscription.ID, revokeReason, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.TenantSubjectID.String(), subscription.ID, revokeReason, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 					"subscription_id": subscription.ID,
 				}).Error("failed to revoke entitlements during cancellation")
@@ -1131,10 +1132,10 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		}
 
 		notification := &models.NotificationQueue{
-			ID:        uuidutil.NewV7(),
-			UserID:    subscription.UserID,
-			EventType: models.NotificationPremiumEnded,
-			Data:      map[string]any{"reason": string(reason)},
+			ID:              uuidutil.NewV7(),
+			TenantSubjectID: subscription.TenantSubjectID,
+			EventType:       models.NotificationPremiumEnded,
+			Data:            map[string]any{"reason": string(reason)},
 		}
 		if err := notificationRepo.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create membership ended notification")
@@ -1239,7 +1240,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id": subscription.ID,
-			"user_id":         subscription.UserID,
+			"user_id":         subscription.TenantSubjectID.String(),
 		}).Info("Marked subscription as expired")
 
 		// Revoke entitlements
@@ -1252,7 +1253,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 				sid := subscription.ID
 				for _, entName := range names {
 					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-						UserID:      subscription.UserID,
+						UserID:      subscription.TenantSubjectID.String(),
 						Entitlement: entName,
 						SourceType:  &st,
 						SourceID:    &sid,
@@ -1275,7 +1276,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 				sid := subscription.ID
 				for _, entName := range graceNames {
 					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-						UserID:      subscription.UserID,
+						UserID:      subscription.TenantSubjectID.String(),
 						Entitlement: entName,
 						SourceType:  &st,
 						SourceID:    &sid,
@@ -1291,10 +1292,10 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		}
 
 		notification := &models.NotificationQueue{
-			ID:        uuidutil.NewV7(),
-			UserID:    subscription.UserID,
-			EventType: models.NotificationPremiumEnded,
-			Data:      map[string]any{"reason": string(PremiumEndReasonExpired)},
+			ID:              uuidutil.NewV7(),
+			TenantSubjectID: subscription.TenantSubjectID,
+			EventType:       models.NotificationPremiumEnded,
+			Data:            map[string]any{"reason": string(PremiumEndReasonExpired)},
 		}
 		if err := notificationRepo.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create membership expired notification")
@@ -1363,7 +1364,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 		// Capture values for event logging
 		subscriptionID = subscription.ID
-		userID = subscription.UserID
+		userID = subscription.TenantSubjectID.String()
 
 		now := s.now()
 
@@ -1371,7 +1372,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		if dunningMode == config.DunningModeOff {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
-				"user_id":         subscription.UserID,
+				"user_id":         subscription.TenantSubjectID.String(),
 			}).Warn("Dunning mode is 'off'; immediately cancelling subscription (no recovery)")
 
 			expired := models.CancelTypeExpired
@@ -1438,7 +1439,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 							notBefore = paidEnd
 						}
 						_, err := entSvc.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-							UserID:      subscription.UserID,
+							UserID:      subscription.TenantSubjectID.String(),
 							Entitlement: entName,
 							NotBefore:   &notBefore,
 							EndAt:       &graceUntil,
@@ -1464,7 +1465,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id": subscription.ID,
-			"user_id":         subscription.UserID,
+			"user_id":         subscription.TenantSubjectID.String(),
 			"status":          subscription.Status,
 			"retry_attempts":  subscription.RetryAttempts,
 			"next_retry_at":   subscription.NextRetryAt,
@@ -1489,7 +1490,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 					sid := subscription.ID
 					for _, entName := range names {
 						if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-							UserID:      subscription.UserID,
+							UserID:      subscription.TenantSubjectID.String(),
 							Entitlement: entName,
 							SourceType:  &st,
 							SourceID:    &sid,
@@ -1515,7 +1516,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 					sid := subscription.ID
 					for _, entName := range graceNames {
 						if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-							UserID:      subscription.UserID,
+							UserID:      subscription.TenantSubjectID.String(),
 							Entitlement: entName,
 							SourceType:  &st,
 							SourceID:    &sid,
@@ -1542,10 +1543,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		}
 
 		notification := &models.NotificationQueue{
-			ID:        uuidutil.NewV7(),
-			UserID:    subscription.UserID,
-			EventType: eventType,
-			Data:      data,
+			ID:              uuidutil.NewV7(),
+			TenantSubjectID: subscription.TenantSubjectID,
+			EventType:       eventType,
+			Data:            data,
 		}
 		if err := notificationRepo.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create payment failed notification")

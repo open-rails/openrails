@@ -67,14 +67,27 @@ func Load(path string) (*Manifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read catalog manifest: %w", err)
 	}
+	return Parse(raw)
+}
+
+// Parse parses and validates a catalog manifest from YAML bytes.
+func Parse(raw []byte) (*Manifest, error) {
 	var m Manifest
-	if err := yaml.Unmarshal(raw, &m); err != nil {
+	if err := yaml.UnmarshalWithOptions(raw, &m, yaml.DisallowUnknownField()); err != nil {
 		return nil, fmt.Errorf("parse catalog manifest: %w", err)
 	}
-	if err := m.validate(); err != nil {
+	if err := m.Validate(); err != nil {
 		return nil, err
 	}
 	return &m, nil
+}
+
+// Validate normalizes and validates a manifest in place.
+func (m *Manifest) Validate() error {
+	if m == nil {
+		return errors.New("catalog manifest is required")
+	}
+	return m.validate()
 }
 
 func (m *Manifest) validate() error {

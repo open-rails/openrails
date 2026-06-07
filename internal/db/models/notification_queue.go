@@ -38,12 +38,15 @@ const (
 type NotificationQueue struct {
 	bun.BaseModel `bun:"table:billing.notification_queue,alias:nq"`
 
-	ID        uuid.UUID             `bun:"id,pk,type:uuid" json:"id"`
-	UserID    string                `bun:"user_id,notnull" json:"user_id"`
-	EventType NotificationEventType `bun:"event_type,notnull" json:"event_type"`
-	Data      map[string]any        `bun:"data,type:jsonb" json:"data,omitempty"`
-	Seen      bool                  `bun:"seen,notnull,default:false" json:"seen"` // Whether user has seen this notification
-	CreatedAt time.Time             `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// Additive during the hard-cut rollout; writers populate it and readers move to
+	// it before user_id is dropped. Join billing.tenant_subjects for issuer/subject.
+	TenantSubjectID uuid.UUID             `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
+	EventType       NotificationEventType `bun:"event_type,notnull" json:"event_type"`
+	Data            map[string]any        `bun:"data,type:jsonb" json:"data,omitempty"`
+	Seen            bool                  `bun:"seen,notnull,default:false" json:"seen"` // Whether user has seen this notification
+	CreatedAt       time.Time             `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
 }
 
 // IsSeen checks if the notification has been seen by the user

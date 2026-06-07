@@ -193,14 +193,14 @@ func (s *FeatureService) ListProductFeatures(ctx context.Context, productID uuid
 // window/source fields that Stripe lacks. Feature is populated when a matching
 // feature definition exists for the window's lookup_key.
 type ActiveEntitlement struct {
-	ID         uuid.UUID                    `json:"id"`
-	UserID     string                       `json:"user_id"`
-	LookupKey  string                       `json:"lookup_key"`
-	Feature    *models.EntitlementFeature   `json:"feature,omitempty"`
-	StartAt    time.Time                    `json:"start_at"`
-	EndAt      *time.Time                   `json:"end_at,omitempty"`
-	SourceType models.EntitlementSourceType `json:"source_type"`
-	SourceID   *uuid.UUID                   `json:"source_id,omitempty"`
+	ID              uuid.UUID                    `json:"id"`
+	TenantSubjectID string                       `json:"tenant_subject_id"`
+	LookupKey       string                       `json:"lookup_key"`
+	Feature         *models.EntitlementFeature   `json:"feature,omitempty"`
+	StartAt         time.Time                    `json:"start_at"`
+	EndAt           *time.Time                   `json:"end_at,omitempty"`
+	SourceType      models.EntitlementSourceType `json:"source_type"`
+	SourceID        *uuid.UUID                   `json:"source_id,omitempty"`
 }
 
 // GetActiveEntitlements resolves a user's active entitlement windows at `at` into
@@ -250,14 +250,14 @@ func (s *FeatureService) GetActiveEntitlements(ctx context.Context, userID strin
 	out := make([]ActiveEntitlement, 0, len(windows))
 	for _, w := range windows {
 		ae := ActiveEntitlement{
-			ID:         w.ID,
-			UserID:     w.UserID,
-			LookupKey:  w.Entitlement,
-			Feature:    byKey[w.Entitlement],
-			StartAt:    w.StartAt,
-			EndAt:      w.EndAt,
-			SourceType: w.SourceType,
-			SourceID:   w.SourceID,
+			ID:              w.ID,
+			TenantSubjectID: w.TenantSubjectID.String(),
+			LookupKey:       w.Entitlement,
+			Feature:         byKey[w.Entitlement],
+			StartAt:         w.StartAt,
+			EndAt:           w.EndAt,
+			SourceType:      w.SourceType,
+			SourceID:        w.SourceID,
 		}
 		out = append(out, ae)
 	}

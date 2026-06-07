@@ -58,34 +58,34 @@ func (o Options) withDefaults() Options {
 type Assembler struct {
 	Cfg     *config.Config
 	Runtime *app.Runtime
-	// OperatorChecker is the live operator-tenant permission checker (#224), held as
-	// the neutral authpolicy.OperatorPermissionChecker interface so this core
-	// package imports neither internal/controlplane nor AuthKit (#284). nil in
-	// verifier-only mode. The concrete *controlplane.ControlPlane satisfies it.
-	OperatorChecker authpolicy.OperatorPermissionChecker
-	CaptchaStore    *captcha.ChallengeStore
-	Authenticator   billingauth.Authenticator
+	// AdminChecker is the live admin permission checker (#312), held as the neutral
+	// authpolicy.AdminPermissionChecker interface so this core package imports
+	// neither internal/controlplane nor AuthKit (#284). nil in verifier-only mode.
+	// The concrete *controlplane.ControlPlane satisfies it.
+	AdminChecker  authpolicy.AdminPermissionChecker
+	CaptchaStore  *captcha.ChallengeStore
+	Authenticator billingauth.Authenticator
 }
 
 // FromApp builds an Assembler from the gin-free application graph (the same
 // inputs the gin Server derives its embedded surface from). The control plane,
 // when present, is read off app.App.ControlPlane (held as `any`) via an interface
-// type assertion to the neutral OperatorPermissionChecker — no controlplane
-// import on the embedded request path (#284).
+// type assertion to the neutral AdminPermissionChecker — no controlplane import
+// on the embedded request path (#284).
 func FromApp(a *app.App) *Assembler {
 	if a == nil {
 		return nil
 	}
-	var checker authpolicy.OperatorPermissionChecker
-	if c, ok := a.ControlPlane.(authpolicy.OperatorPermissionChecker); ok {
+	var checker authpolicy.AdminPermissionChecker
+	if c, ok := a.ControlPlane.(authpolicy.AdminPermissionChecker); ok {
 		checker = c
 	}
 	return &Assembler{
-		Cfg:             a.Config,
-		Runtime:         a.Runtime,
-		OperatorChecker: checker,
-		CaptchaStore:    captcha.NewChallengeStore(a.RedisClient),
-		Authenticator:   a.Authenticator,
+		Cfg:           a.Config,
+		Runtime:       a.Runtime,
+		AdminChecker:  checker,
+		CaptchaStore:  captcha.NewChallengeStore(a.RedisClient),
+		Authenticator: a.Authenticator,
 	}
 }
 
@@ -115,8 +115,8 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 		adminOpts := httproutes.Options{
 			Authenticator: s.Authenticator,
 		}
-		if s.OperatorChecker != nil {
-			adminOpts.OperatorPermissionChecker = s.OperatorChecker
+		if s.AdminChecker != nil {
+			adminOpts.AdminPermissionChecker = s.AdminChecker
 		}
 		httproutes.RegisterAdminRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/admin", s.Runtime), s.Runtime, adminOpts)
 	}

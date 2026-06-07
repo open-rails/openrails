@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // TestProduct represents a seeded product with its prices
@@ -529,7 +530,7 @@ func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID u
 
 	sub := &models.Subscription{
 		ID:                      uuid.New(),
-		UserID:                  userID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:               price.ProductID,
 		PriceID:                 priceID,
 		Status:                  status,
@@ -593,7 +594,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 
 	sub := &models.Subscription{
 		ID:                      uuid.New(),
-		UserID:                  opts.UserID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(opts.UserID).UUID(),
 		ProductID:               price.ProductID,
 		PriceID:                 opts.PriceID,
 		Status:                  opts.Status,
@@ -635,7 +636,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
-		UserID:               userID,
+		TenantSubjectID:      identity.TenantSubjectIDFromString(userID).UUID(),
 		Processor:            models.ProcessorMobius,
 		VaultID:              "vault-" + uuid.New().String()[:8],
 		BillingID:            strPtr("billing-" + uuid.New().String()[:8]),
@@ -683,7 +684,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
-		UserID:               opts.UserID,
+		TenantSubjectID:      identity.TenantSubjectIDFromString(opts.UserID).UUID(),
 		Processor:            opts.Processor,
 		VaultID:              opts.VaultID,
 		BillingID:            strPtrOrNil(opts.BillingID),
@@ -709,16 +710,16 @@ func (suite *TestContainerSuite) CreateTestPayment(userID string, priceID uuid.U
 	now := time.Now()
 
 	payment := &models.Payment{
-		ID:             uuid.New(),
-		UserID:         userID,
-		PriceID:        priceID,
-		SubscriptionID: subscriptionID,
-		Processor:      models.ProcessorMobius,
-		TransactionID:  "txn-" + uuid.New().String()[:8],
-		Amount:         999, // Amount in cents ($9.99)
-		Currency:       "usd",
-		PurchasedAt:    now,
-		CreatedAt:      now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		PriceID:         priceID,
+		SubscriptionID:  subscriptionID,
+		Processor:       models.ProcessorMobius,
+		TransactionID:   "txn-" + uuid.New().String()[:8],
+		Amount:          999, // Amount in cents ($9.99)
+		Currency:        "usd",
+		PurchasedAt:     now,
+		CreatedAt:       now,
 	}
 
 	_, err := suite.BunDB.NewInsert().Model(payment).Exec(ctx)
@@ -763,7 +764,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 
 	payment := &models.Payment{
 		ID:                uuid.New(),
-		UserID:            opts.UserID,
+		TenantSubjectID:   identity.TenantSubjectIDFromString(opts.UserID).UUID(),
 		PriceID:           opts.PriceID,
 		SubscriptionID:    opts.SubscriptionID,
 		RefundedPaymentID: opts.RefundedPaymentID,
@@ -792,12 +793,12 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 		switch sourceType {
 		case models.EntitlementSourceAdmin:
 			adminGrant := &models.AdminGrant{
-				ID:           uuid.New(),
-				UserID:       userID,
-				GrantedBy:    "test-admin",
-				Reason:       "test_admin_entitlement",
-				DurationDays: nil,
-				CreatedAt:    now,
+				ID:              uuid.New(),
+				TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+				GrantedBy:       "test-admin",
+				Reason:          "test_admin_entitlement",
+				DurationDays:    nil,
+				CreatedAt:       now,
 			}
 			_, err := suite.BunDB.NewInsert().Model(adminGrant).Exec(ctx)
 			require.NoError(suite.t, err, "Failed to create test admin_grant source")
@@ -816,15 +817,15 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 	}
 
 	ent := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: entitlementName,
-		StartAt:     now,
-		EndAt:       endAt,
-		SourceID:    sourceID,
-		SourceType:  sourceType,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     entitlementName,
+		StartAt:         now,
+		EndAt:           endAt,
+		SourceID:        sourceID,
+		SourceType:      sourceType,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
@@ -840,12 +841,12 @@ func (suite *TestContainerSuite) CreateTestNotification(userID string, eventType
 	now := time.Now()
 
 	notif := &models.NotificationQueue{
-		ID:        uuid.New(),
-		UserID:    userID,
-		EventType: eventType,
-		Data:      data,
-		Seen:      false,
-		CreatedAt: now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		EventType:       eventType,
+		Data:            data,
+		Seen:            false,
+		CreatedAt:       now,
 	}
 
 	_, err := suite.BunDB.NewInsert().Model(notif).Exec(ctx)

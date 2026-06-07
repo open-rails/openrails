@@ -135,7 +135,7 @@ func (s *CreditsService) GrantSubscriptionCredits(ctx context.Context, params Gr
 		}
 
 		if _, err := s.depositTx(ctx, tx, ct, CreditDepositParams{
-			InvokerID:  sub.UserID,
+			InvokerID:  sub.TenantSubjectID.String(),
 			CreditType: creditTypeName,
 			Amount:     spec.Amount,
 			Source:     strings.TrimSpace(params.Source),

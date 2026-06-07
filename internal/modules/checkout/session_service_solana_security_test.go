@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,11 +22,11 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
-		ID:       uuid.New(),
-		UserID:   "user_123",
-		PriceID:  uuid.New(),
-		Amount:   1000,
-		Currency: "eur",
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+		PriceID:         uuid.New(),
+		Amount:          1000,
+		Currency:        "eur",
 	}
 	payment := &CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
@@ -46,11 +47,11 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 		solanaTransactionService: &stubSolanaTransactionService{},
 	}
 	session := &models.CheckoutSession{
-		ID:       uuid.New(),
-		UserID:   "user_123",
-		PriceID:  uuid.New(),
-		Amount:   0,
-		Currency: "usd",
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+		PriceID:         uuid.New(),
+		Amount:          0,
+		Currency:        "usd",
 	}
 	payment := &CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
@@ -73,12 +74,12 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 	}
 	ref := "11111111111111111111111111111112"
 	session := &models.CheckoutSession{
-		ID:        uuid.New(),
-		UserID:    "user_123",
-		PriceID:   uuid.New(),
-		Amount:    1000,
-		Currency:  "usd",
-		Reference: &ref,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+		PriceID:         uuid.New(),
+		Amount:          1000,
+		Currency:        "usd",
+		Reference:       &ref,
 		ProcessorState: map[string]any{
 			"token_symbol": "USDC",
 			"token_mint":   devnetUSDCMint,
@@ -87,7 +88,7 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 	}
 	req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-	_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.UserID})
+	_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.TenantSubjectID.String()})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 	require.Contains(t, err.Error(), "token_amount missing or invalid")
@@ -107,12 +108,12 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 
 		ref := "11111111111111111111111111111112"
 		session := &models.CheckoutSession{
-			ID:        uuid.New(),
-			UserID:    "user_123",
-			PriceID:   uuid.New(),
-			Amount:    1000,
-			Currency:  "usd",
-			Reference: &ref,
+			ID:              uuid.New(),
+			TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+			PriceID:         uuid.New(),
+			Amount:          1000,
+			Currency:        "usd",
+			Reference:       &ref,
 			ProcessorState: map[string]any{
 				"token_symbol": "USDC",
 				"token_mint":   devnetUSDCMint,
@@ -121,7 +122,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		}
 		req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.UserID})
+		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.TenantSubjectID.String()})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 		require.Contains(t, err.Error(), "recipient missing")
@@ -131,11 +132,11 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		t.Parallel()
 
 		session := &models.CheckoutSession{
-			ID:       uuid.New(),
-			UserID:   "user_123",
-			PriceID:  uuid.New(),
-			Amount:   1000,
-			Currency: "usd",
+			ID:              uuid.New(),
+			TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+			PriceID:         uuid.New(),
+			Amount:          1000,
+			Currency:        "usd",
 			ProcessorState: map[string]any{
 				"token_symbol": "USDC",
 				"token_mint":   devnetUSDCMint,
@@ -145,7 +146,7 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		}
 		req := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: testSignature}}
 
-		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.UserID})
+		_, err := svc.confirmSolanaSession(context.Background(), session, req, &UserIdentity{ID: session.TenantSubjectID.String()})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 		require.Contains(t, err.Error(), "reference missing")
@@ -252,13 +253,14 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 
 	ref := "11111111111111111111111111111112"
 	priceID := uuid.New()
+	tenantSubjectID := uuid.New()
 	session := &models.CheckoutSession{
-		ID:        uuid.New(),
-		UserID:    "user_123",
-		PriceID:   priceID,
-		Amount:    10000,
-		Currency:  "usd",
-		Reference: &ref,
+		ID:              uuid.New(),
+		TenantSubjectID: tenantSubjectID,
+		PriceID:         priceID,
+		Amount:          10000,
+		Currency:        "usd",
+		Reference:       &ref,
 		ProcessorState: map[string]any{
 			"token_symbol": "USDC",
 			"token_mint":   devnetUSDCMint,
@@ -269,7 +271,7 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 
 	req, err := solanaBuildRequestFromSession(session, "payer_wallet", "USDC")
 	require.NoError(t, err)
-	require.Equal(t, "user_123", req.UserID)
+	require.Equal(t, tenantSubjectID.String(), req.UserID)
 	require.Equal(t, priceID, req.PriceID)
 	require.Equal(t, "USDC", req.TokenSymbol)
 	require.Equal(t, "payer_wallet", req.UserWallet)

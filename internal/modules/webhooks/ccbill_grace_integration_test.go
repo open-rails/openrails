@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -77,7 +78,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		UserID:                  userID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -93,15 +94,15 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 
 	// Paid subscription entitlement window [periodStart, paidEnd)
 	paidEnt := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     periodStart,
-		EndAt:       &paidEnd,
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &subID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         periodStart,
+		EndAt:           &paidEnd,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &subID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	_, err = bunDB.NewInsert().Model(paidEnt).Exec(ctx)
 	require.NoError(t, err)
@@ -221,7 +222,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		UserID:                  userID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -236,45 +237,45 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	paidEnt := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     periodStart,
-		EndAt:       &paidEnd,
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &subID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         periodStart,
+		EndAt:           &paidEnd,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &subID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	_, err = bunDB.NewInsert().Model(paidEnt).Exec(ctx)
 	require.NoError(t, err)
 
 	graceEnd := now.Add(2 * 24 * time.Hour)
 	graceActive := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     paidEnd,
-		EndAt:       &graceEnd,
-		SourceType:  models.EntitlementSourceGrace,
-		SourceID:    &subID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         paidEnd,
+		EndAt:           &graceEnd,
+		SourceType:      models.EntitlementSourceGrace,
+		SourceID:        &subID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	_, err = bunDB.NewInsert().Model(graceActive).Exec(ctx)
 	require.NoError(t, err)
 
 	graceFutureEnd := graceEnd.Add(24 * time.Hour)
 	graceFuture := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     graceEnd,
-		EndAt:       &graceFutureEnd,
-		SourceType:  models.EntitlementSourceGrace,
-		SourceID:    &subID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         graceEnd,
+		EndAt:           &graceFutureEnd,
+		SourceType:      models.EntitlementSourceGrace,
+		SourceID:        &subID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	_, err = bunDB.NewInsert().Model(graceFuture).Exec(ctx)
 	require.NoError(t, err)

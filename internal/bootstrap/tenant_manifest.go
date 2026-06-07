@@ -31,14 +31,15 @@ type TenantManifest struct {
 }
 
 type ManifestTenant struct {
-	Slug          string                 `yaml:"slug"`
-	Name          string                 `yaml:"name"`
-	BillingTier   string                 `yaml:"billing_tier"`
-	Region        string                 `yaml:"region"`
-	WebhookHost   string                 `yaml:"webhook_host"`
-	WebhookPath   string                 `yaml:"webhook_path"`
-	Issuers       []ManifestIssuer       `yaml:"issuers"`
-	ServiceTokens []ManifestServiceToken `yaml:"service_tokens"`
+	Slug                 string                        `yaml:"slug"`
+	Name                 string                        `yaml:"name"`
+	BillingTier          string                        `yaml:"billing_tier"`
+	Region               string                        `yaml:"region"`
+	WebhookHost          string                        `yaml:"webhook_host"`
+	WebhookPath          string                        `yaml:"webhook_path"`
+	Issuers              []ManifestIssuer              `yaml:"issuers"`
+	ServiceTokens        []ManifestServiceToken        `yaml:"service_tokens"`
+	ServiceJWTPrincipals []ManifestServiceJWTPrincipal `yaml:"service_jwt_principals"`
 }
 
 type ManifestIssuer struct {
@@ -53,6 +54,14 @@ type ManifestServiceToken struct {
 	Permissions []string           `yaml:"permissions"`
 	Resources   []ManifestResource `yaml:"resources"`
 	Outputs     []ManifestOutput   `yaml:"outputs"`
+}
+
+type ManifestServiceJWTPrincipal struct {
+	Issuer      string             `yaml:"issuer"`
+	Subject     string             `yaml:"subject"`
+	Permissions []string           `yaml:"permissions"`
+	Resources   []ManifestResource `yaml:"resources"`
+	Enabled     *bool              `yaml:"enabled"`
 }
 
 type ManifestResource struct {
@@ -77,6 +86,10 @@ type ManifestVaultOutput struct {
 	Field   string `yaml:"field"`
 }
 
+type TenantManifestReconcileOptions struct {
+	AsyncIssuers bool
+}
+
 // ReconcileTenantManifest loads cfg.tenant_bootstrap.file, if configured, and
 // applies the deployment-declared tenant state. Tenant rows and service-token
 // outputs are reconciled synchronously. Issuer registration is retried in the background
@@ -87,20 +100,37 @@ func ReconcileTenantManifest(ctx context.Context, cfg *config.Config, cp *contro
 	if path == "" {
 		return nil
 	}
+	return ReconcileTenantManifestFile(ctx, cfg, cp, path, TenantManifestReconcileOptions{AsyncIssuers: true})
+}
+
+func ReconcileTenantManifestFile(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, path string, opts TenantManifestReconcileOptions) error {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return fmt.Errorf("tenant bootstrap manifest configured but control plane is not enabled")
+	}
+	manifest, err := loadTenantManifest(path)
+	if err != nil {
+		return err
+	}
+	return ReconcileTenantManifestData(ctx, cfg, cp, manifest, opts)
+}
+
+func ReconcileTenantManifestData(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *TenantManifest, opts TenantManifestReconcileOptions) error {
+	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
+		return fmt.Errorf("tenant bootstrap manifest configured but control plane is not enabled")
+	}
+	if manifest == nil {
+		return fmt.Errorf("tenant bootstrap manifest is required")
+	}
+	if manifest.Version != 2 {
+		return fmt.Errorf("tenant bootstrap: manifest version must be 2")
 	}
 	if err := lockTenantManifestBootstrap(ctx, cp); err != nil {
 		return err
 	}
 	defer unlockTenantManifestBootstrap(context.Background(), cp)
 
-	manifest, err := loadTenantManifest(path)
-	if err != nil {
-		return err
-	}
 	if len(manifest.Tenants) == 0 {
-		log.WithField("file", path).Info("tenant bootstrap manifest has no tenants")
+		log.Info("tenant bootstrap manifest has no tenants")
 		return nil
 	}
 
@@ -131,10 +161,50 @@ func ReconcileTenantManifest(ctx context.Context, cfg *config.Config, cp *contro
 				return fmt.Errorf("tenant bootstrap: service token %q for tenant %q: %w", token.Name, tn.Slug, err)
 			}
 		}
+		for _, principal := range mt.ServiceJWTPrincipals {
+			if err := ensureManifestServiceJWTGrant(ctx, cp, tn.ID, tn.Slug, principal); err != nil {
+				return fmt.Errorf("tenant bootstrap: service JWT principal %q for tenant %q: %w", principal.Subject, tn.Slug, err)
+			}
+		}
 	}
 
-	go reconcileManifestIssuersUntilReady(ctx, cp, manifest)
+	if opts.AsyncIssuers {
+		go reconcileManifestIssuersUntilReady(ctx, cp, manifest)
+	} else if ok := reconcileManifestIssuersOnce(ctx, cp, manifest); !ok {
+		return fmt.Errorf("tenant bootstrap: issuer reconciliation did not converge")
+	}
 	return nil
+}
+
+func ensureManifestServiceJWTGrant(ctx context.Context, cp *controlplane.ControlPlane, tenantID tenant.ID, tenantSlug string, principal ManifestServiceJWTPrincipal) error {
+	issuer := strings.TrimSpace(principal.Issuer)
+	if issuer == "" {
+		return errors.New("issuer is required")
+	}
+	subject := strings.TrimSpace(principal.Subject)
+	if subject == "" {
+		return errors.New("subject is required")
+	}
+	permissions := cleanStrings(principal.Permissions)
+	if len(permissions) == 0 {
+		return fmt.Errorf("permissions are required for service JWT principal %q", subject)
+	}
+	resources, err := resolveManifestResources(principal.Resources, tenantID, tenantSlug)
+	if err != nil {
+		return err
+	}
+	enabled := true
+	if principal.Enabled != nil {
+		enabled = *principal.Enabled
+	}
+	return cp.UpsertServiceJWTGrant(ctx, controlplane.ServiceJWTGrant{
+		TenantID:    tenantID,
+		Issuer:      issuer,
+		Subject:     subject,
+		Permissions: permissions,
+		Resources:   resources,
+		Enabled:     enabled,
+	})
 }
 
 func lockTenantManifestBootstrap(ctx context.Context, cp *controlplane.ControlPlane) error {
@@ -223,7 +293,7 @@ func ensureManifestServiceToken(ctx context.Context, cfg *config.Config, cp *con
 
 func resolveManifestResources(in []ManifestResource, tenantID tenant.ID, tenantSlug string) ([]authcore.ServiceTokenResource, error) {
 	if len(in) == 0 {
-		return nil, errors.New("resources are required for service token")
+		return []authcore.ServiceTokenResource{controlplane.TenantResource(tenantID)}, nil
 	}
 	out := make([]authcore.ServiceTokenResource, 0, len(in))
 	for _, r := range in {

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
@@ -35,19 +36,18 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("control plane is not enabled")
 	}
 
-	operatorOrg, err := cmd.Flags().GetString("org")
+	bootstrapOrg, err := cmd.Flags().GetString("org")
 	if err != nil {
 		return fmt.Errorf("read org flag: %w", err)
 	}
-	operatorOrg = strings.ToLower(strings.TrimSpace(operatorOrg))
-	if operatorOrg == "" && cfg != nil && cfg.Auth != nil {
-		operatorOrg = strings.ToLower(strings.TrimSpace(cfg.Auth.OperatorTenantSlug))
-	}
-	if operatorOrg == "" {
-		operatorOrg = "operator"
+	bootstrapOrg = strings.ToLower(strings.TrimSpace(bootstrapOrg))
+	if bootstrapOrg == "" {
+		// HARDCUT (#312): service tokens are minted under the default tenant's own
+		// AuthKit org — there is no separate "operator" tenant.
+		bootstrapOrg = tenant.DefaultSlug
 	}
 	if _, err := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		OperatorTenantSlug:      operatorOrg,
+		BootstrapTenantSlug:     bootstrapOrg,
 		MintInitialServiceToken: false,
 	}); err != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", err)
@@ -95,7 +95,7 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 		tenantResource,
 		controlplane.TenantSubjectResource(tenantSubjectID),
 	}
-	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, operatorOrg, authcore.ServiceTokenMintOptions{
+	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, bootstrapOrg, authcore.ServiceTokenMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,
@@ -105,7 +105,7 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":                  operatorOrg,
+		"org":                  bootstrapOrg,
 		"name":                 name,
 		"tenant":               tenantSlug,
 		"tenant_id":            tenantID.String(),

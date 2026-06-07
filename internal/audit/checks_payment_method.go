@@ -32,7 +32,7 @@ func (c *CheckActiveSubscriptionFailedPaymentMethod) Run(ctx context.Context, db
 	err := db.NewRaw(`
 		SELECT
 			sub.id as sub_id,
-			sub.user_id,
+			sub.tenant_subject_id::text AS user_id,
 			pm.id as pm_id,
 			pm.failure_reason
 		FROM billing.subscriptions sub
@@ -97,7 +97,7 @@ func (c *CheckExpiredCardActiveSubscription) Run(ctx context.Context, db bun.IDB
 	err := db.NewRaw(`
 		SELECT
 			sub.id as sub_id,
-			sub.user_id,
+			sub.tenant_subject_id::text AS user_id,
 			pm.id as pm_id,
 			pm.expiry_date,
 			pm.last_four,
@@ -164,7 +164,7 @@ func (c *CheckOrphanPaymentMethodReference) Run(ctx context.Context, db bun.IDB,
 
 	var results []result
 	err := db.NewRaw(`
-		SELECT sub.id as sub_id, sub.user_id, sub.payment_method_id
+		SELECT sub.id as sub_id, sub.tenant_subject_id::text AS user_id, sub.payment_method_id
 		FROM billing.subscriptions sub
 		LEFT JOIN billing.payment_methods pm ON sub.payment_method_id = pm.id
 		WHERE sub.payment_method_id IS NOT NULL
@@ -222,7 +222,7 @@ func (c *CheckProcessorMismatch) Run(ctx context.Context, db bun.IDB, opts Optio
 	err := db.NewRaw(`
 		SELECT
 			sub.id as sub_id,
-			sub.user_id,
+			sub.tenant_subject_id::text AS user_id,
 			sub.processor as sub_processor,
 			pm.processor as pm_processor,
 			pm.id as pm_id

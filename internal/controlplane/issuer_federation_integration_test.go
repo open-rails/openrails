@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	authcore "github.com/open-rails/authkit/core"
 	authhttp "github.com/open-rails/authkit/http"
 	jwtkit "github.com/open-rails/authkit/jwt"
 	"github.com/stretchr/testify/require"
@@ -63,6 +65,18 @@ CREATE TABLE IF NOT EXISTS billing.tenant_subjects (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     CONSTRAINT uq_fed_tenant_subject UNIQUE (tenant_id, issuer, subject)
+);
+CREATE TABLE IF NOT EXISTS billing.service_jwt_grants (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id   UUID NOT NULL REFERENCES billing.tenants (id) ON DELETE CASCADE,
+    issuer      TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    permissions TEXT[] NOT NULL DEFAULT '{}',
+    resources   JSONB NOT NULL DEFAULT '[]'::jsonb,
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CONSTRAINT uq_fed_service_jwt_grant UNIQUE (tenant_id, issuer, subject)
 );
 `
 
@@ -264,6 +278,153 @@ func TestTouchTenantSubjectIsIdempotentPerOIDCTuple(t *testing.T) {
 		   AND subject = 'user-1'
 	`, fedTenantA.String()).Scan(&count))
 	require.Equal(t, 2, count)
+}
+
+func TestFederatedServiceJWTs(t *testing.T) {
+	ctx := context.Background()
+	pool := newFedTestPool(t)
+	cp := newFedControlPlane(t, pool)
+
+	signer, err := jwtkit.NewRSASigner(2048, "service-kid")
+	require.NoError(t, err)
+	issuer := "https://service.example"
+	subject := "service:doujins-runtime"
+	registerIssuerRow(t, pool, fedTenantA, issuer, jwksServer(t, signer).URL, true)
+	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
+
+	require.NoError(t, cp.UpsertServiceJWTGrant(ctx, ServiceJWTGrant{
+		TenantID:    fedTenantA,
+		Issuer:      issuer,
+		Subject:     subject,
+		Permissions: []string{PermEntitlementsRead, PermCreditsRead},
+		Resources:   []authcore.ServiceTokenResource{TenantResource(fedTenantA)},
+		Enabled:     true,
+	}))
+
+	token := mintServiceJWT(t, signer, issuer, subject, []string{PermEntitlementsRead, PermCreditsWrite}, []string{"openrails"})
+	resolved, err := cp.ResolveServiceJWT(ctx, token)
+	require.NoError(t, err)
+	require.Equal(t, fedTenantA, resolved.TenantID)
+	require.Equal(t, "tenant-a", resolved.TenantSlug)
+	require.ElementsMatch(t, []string{PermEntitlementsRead}, resolved.Permissions, "JWT-requested permissions must be intersected with the server-side grant")
+	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindTenant), fedTenantA.String())
+
+	_, err = cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, issuer, "service:unknown", []string{PermEntitlementsRead}, []string{"openrails"}))
+	require.ErrorIs(t, err, ErrServiceTokenScopeDenied)
+
+	_, err = cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, issuer, subject, []string{PermCreditsWrite}, []string{"openrails"}))
+	require.ErrorIs(t, err, ErrServiceTokenScopeDenied)
+
+	_, err = cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, issuer, subject, []string{PermEntitlementsRead}, []string{"wrong-audience"}))
+	require.Error(t, err)
+
+	_, err = cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, "https://unregistered-service.example", subject, []string{PermEntitlementsRead}, []string{"openrails"}))
+	require.Error(t, err)
+
+	for _, service := range []struct {
+		name        string
+		subject     string
+		permissions []string
+	}{
+		{name: "hentai0 entitlement read", subject: "service:hentai0-runtime", permissions: []string{PermEntitlementsRead}},
+		{name: "tensorhub credits", subject: "service:tensorhub-runtime", permissions: []string{PermCreditsRead, PermCreditsWrite}},
+	} {
+		t.Run(service.name, func(t *testing.T) {
+			require.NoError(t, cp.UpsertServiceJWTGrant(ctx, ServiceJWTGrant{
+				TenantID:    fedTenantA,
+				Issuer:      issuer,
+				Subject:     service.subject,
+				Permissions: service.permissions,
+				Resources:   []authcore.ServiceTokenResource{TenantResource(fedTenantA)},
+				Enabled:     true,
+			}))
+			resolved, err := cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, issuer, service.subject, service.permissions, []string{"openrails"}))
+			require.NoError(t, err)
+			require.Equal(t, fedTenantA, resolved.TenantID)
+			require.ElementsMatch(t, service.permissions, resolved.Permissions)
+		})
+	}
+
+	_, err = pool.Exec(ctx, `UPDATE billing.tenant_delegated_issuers SET enabled = FALSE WHERE issuer = $1`, issuer)
+	require.NoError(t, err)
+	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
+	_, err = cp.ResolveServiceJWT(ctx, token)
+	require.Error(t, err)
+}
+
+func TestFederatedServiceJWTClaimRejections(t *testing.T) {
+	ctx := context.Background()
+	pool := newFedTestPool(t)
+	cp := newFedControlPlane(t, pool)
+
+	signer, err := jwtkit.NewRSASigner(2048, "service-claim-kid")
+	require.NoError(t, err)
+	issuer := "https://service-claims.example"
+	subject := "service:hentai0-runtime"
+	registerIssuerRow(t, pool, fedTenantA, issuer, jwksServer(t, signer).URL, true)
+	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
+	require.NoError(t, cp.UpsertServiceJWTGrant(ctx, ServiceJWTGrant{
+		TenantID:    fedTenantA,
+		Issuer:      issuer,
+		Subject:     subject,
+		Permissions: []string{PermEntitlementsRead},
+		Resources:   []authcore.ServiceTokenResource{TenantResource(fedTenantA)},
+		Enabled:     true,
+	}))
+
+	now := time.Now().UTC()
+	base := jwt.MapClaims{
+		"iss":         issuer,
+		"sub":         subject,
+		"aud":         []string{"openrails"},
+		"iat":         now.Unix(),
+		"nbf":         now.Add(-time.Second).Unix(),
+		"exp":         now.Add(5 * time.Minute).Unix(),
+		"jti":         "claim-test",
+		"token_use":   authcore.ServiceJWTTokenUse,
+		"permissions": []string{PermEntitlementsRead},
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(jwt.MapClaims)
+	}{
+		{name: "missing token_use", mutate: func(c jwt.MapClaims) { delete(c, "token_use") }},
+		{name: "missing jti", mutate: func(c jwt.MapClaims) { delete(c, "jti") }},
+		{name: "missing iat", mutate: func(c jwt.MapClaims) { delete(c, "iat") }},
+		{name: "missing nbf", mutate: func(c jwt.MapClaims) { delete(c, "nbf") }},
+		{name: "expired", mutate: func(c jwt.MapClaims) { c["exp"] = now.Add(-time.Minute).Unix() }},
+		{name: "excessive lifetime", mutate: func(c jwt.MapClaims) { c["exp"] = now.Add(30 * time.Minute).Unix() }},
+		{name: "delegated_sub present", mutate: func(c jwt.MapClaims) { c["delegated_sub"] = "user-1" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			claims := cloneClaims(base)
+			tc.mutate(claims)
+			token, err := signer.SignWithHeaders(ctx, claims, map[string]any{"typ": authcore.ServiceJWTType})
+			require.NoError(t, err)
+			_, err = cp.ResolveServiceJWT(ctx, token)
+			require.Error(t, err)
+		})
+	}
+}
+
+func mintServiceJWT(t *testing.T, signer *jwtkit.RSASigner, issuer, subject string, permissions, audiences []string) string {
+	t.Helper()
+	token, _, err := authcore.MintServiceJWT(context.Background(), signer, issuer, authcore.ServiceJWTMintOptions{
+		Subject:     subject,
+		Audiences:   audiences,
+		Permissions: permissions,
+	})
+	require.NoError(t, err)
+	return token
+}
+
+func cloneClaims(in jwt.MapClaims) jwt.MapClaims {
+	out := make(jwt.MapClaims, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func federatedMultiIssuer(t *testing.T, pool *pgxpool.Pool) {

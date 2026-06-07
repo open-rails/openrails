@@ -6,8 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -30,19 +33,25 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 		return fmt.Errorf("invalid processor customer args")
 	}
 	now := time.Now().UTC()
+	// Resolve the payable tenant subject for this (tenant, user) so the row carries
+	// tenant_subject_id alongside the legacy user_id (#317).
+	tenantSubjectID, err := repo.EnsureTenantSubjectID(ctx, s.DB.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return err
+	}
 	// id is a NOT NULL uuid pk; bun sends the struct's zero value rather than
 	// falling back to the column's uuidv7() default, so generate it explicitly.
 	// Without this every insert ships id=000…0 and the second distinct
-	// (tenant_id, user_id, processor) row collides on the pk (the ON CONFLICT below
-	// covers the tenant-scoped (tenant_id, user_id, processor) unique).
-	_, err := s.DB.Q(ctx).NewInsert().Model(&models.ProcessorCustomer{
-		ID:         uuidutil.NewV7(),
-		UserID:     userID,
-		Processor:  processor,
-		CustomerID: customerID,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}).On("CONFLICT (tenant_id, user_id, processor) DO UPDATE").
+	// (tenant_id, tenant_subject_id, processor) row collides on the pk (the ON CONFLICT below
+	// covers the tenant-scoped (tenant_id, tenant_subject_id, processor) unique).
+	_, err = s.DB.Q(ctx).NewInsert().Model(&models.ProcessorCustomer{
+		ID:              uuidutil.NewV7(),
+		TenantSubjectID: tenantSubjectID,
+		Processor:       processor,
+		CustomerID:      customerID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}).On("CONFLICT (tenant_id, tenant_subject_id, processor) DO UPDATE").
 		Set("customer_id = EXCLUDED.customer_id").
 		Set("updated_at = EXCLUDED.updated_at").
 		Exec(ctx)
@@ -58,10 +67,14 @@ func (s *ProcessorCustomerService) GetCustomerID(ctx context.Context, userID, pr
 	if userID == "" || processor == "" {
 		return "", fmt.Errorf("invalid processor customer args")
 	}
+	tsid, err := repo.ResolveTenantSubjectID(ctx, s.DB.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return "", err
+	}
 	var customerID string
-	err := s.DB.Q(ctx).NewSelect().Model((*models.ProcessorCustomer)(nil)).
+	err = s.DB.Q(ctx).NewSelect().Model((*models.ProcessorCustomer)(nil)).
 		Column("customer_id").
-		Where("user_id = ? AND processor = ?", userID, processor).
+		Where("tenant_subject_id = ? AND processor = ?", tsid, processor).
 		Scan(ctx, &customerID)
 	if err != nil {
 		return "", err
@@ -83,7 +96,7 @@ func (s *ProcessorCustomerService) GetUserIDByCustomerID(ctx context.Context, pr
 	}
 	var userID string
 	err := s.DB.Q(ctx).NewSelect().Model((*models.ProcessorCustomer)(nil)).
-		Column("user_id").
+		ColumnExpr("tenant_subject_id::text").
 		Where("customer_id = ? AND processor = ?", customerID, processor).
 		Order("updated_at DESC").
 		Limit(1).

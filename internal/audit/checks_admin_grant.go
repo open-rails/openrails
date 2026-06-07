@@ -35,14 +35,14 @@ func (c *CheckAdminGrantMissingEntitlements) Run(ctx context.Context, db bun.IDB
 	err := db.NewRaw(`
 		SELECT
 			ag.id as grant_id,
-			ag.user_id,
+			ag.tenant_subject_id::text AS user_id,
 			ag.entitlement,
 			ag.granted_at,
 			ag.expires_at,
 			ag.revoked_at
 		FROM billing.admin_grants ag
 		LEFT JOIN billing.entitlements ent ON
-			ag.user_id = ent.user_id
+			ag.tenant_subject_id = ent.tenant_subject_id
 			AND ag.entitlement = ent.entitlement
 			AND ent.source_type = ?
 			AND ent.source_id = ag.id
@@ -104,7 +104,7 @@ func (c *CheckOrphanAdminEntitlements) Run(ctx context.Context, db bun.IDB, opts
 	err := db.NewRaw(`
 		SELECT
 			ent.id as ent_id,
-			ent.user_id,
+			ent.tenant_subject_id::text AS user_id,
 			ent.entitlement,
 			ent.source_id
 		FROM billing.entitlements ent
@@ -169,7 +169,7 @@ func (c *CheckRevokedAdminGrantActiveEntitlement) Run(ctx context.Context, db bu
 	err := db.NewRaw(`
 		SELECT
 			ent.id as ent_id,
-			ent.user_id,
+			ent.tenant_subject_id::text AS user_id,
 			ent.entitlement,
 			ag.id as grant_id,
 			ag.revoked_at
@@ -236,7 +236,7 @@ func (c *CheckExpiredAdminGrantActiveEntitlement) Run(ctx context.Context, db bu
 	err := db.NewRaw(`
 		SELECT
 			ent.id as ent_id,
-			ent.user_id,
+			ent.tenant_subject_id::text AS user_id,
 			ent.entitlement,
 			ag.id as grant_id,
 			ag.expires_at

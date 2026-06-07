@@ -9,6 +9,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 )
 
 // P-E-1: Completed one-off payment missing entitlements
@@ -34,7 +35,11 @@ func (c *CheckCompletedPaymentMissingEntitlements) Run(ctx context.Context, db b
 		Where("purch.amount > 0") // Exclude refunds (negative amounts)
 
 	if opts.UserID != "" {
-		q = q.Where("purch.user_id = ?", opts.UserID)
+		tsid, err := repo.ResolveTenantSubjectID(ctx, db, uuid.Nil, opts.UserID)
+		if err != nil {
+			return nil, err
+		}
+		q = q.Where("purch.tenant_subject_id = ?", tsid)
 	}
 	if opts.Since != nil {
 		q = q.Where("purch.created_at >= ?", opts.Since)
@@ -73,7 +78,7 @@ func (c *CheckCompletedPaymentMissingEntitlements) Run(ctx context.Context, db b
 				Severity:       c.Severity(),
 				EntityType:     EntityPayment,
 				EntityID:       payment.ID,
-				UserID:         payment.UserID,
+				UserID:         payment.TenantSubjectID.String(),
 				Description:    fmt.Sprintf("Completed one-off payment %s for product '%s' has no entitlements granted", payment.ID, product.Slug),
 				Recommendation: fmt.Sprintf("Grant entitlements from product.entitlements_spec with source_type=one_off, source_id=%s", payment.ID),
 				AutoFixable:    true,
@@ -115,7 +120,7 @@ func (c *CheckOrphanOneOffEntitlements) Run(ctx context.Context, db bun.IDB, opt
 	err := db.NewRaw(`
 		SELECT
 			ent.id as ent_id,
-			ent.user_id,
+			ent.tenant_subject_id::text AS user_id,
 			ent.entitlement,
 			ent.source_id,
 			CASE WHEN purch.id IS NOT NULL THEN true ELSE false END as payment_exists,
@@ -199,7 +204,7 @@ func (c *CheckRefundedPaymentActiveEntitlements) Run(ctx context.Context, db bun
 		)
 		SELECT
 			purch.id as payment_id,
-			purch.user_id,
+			purch.tenant_subject_id::text AS user_id,
 			purch.amount as original_amount,
 			COALESCE(rt.total_refunded, 0) as refunded_amount,
 			ent.id as ent_id,

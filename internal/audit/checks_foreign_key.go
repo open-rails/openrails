@@ -33,7 +33,7 @@ func (c *CheckOrphanSubscriptionProduct) Run(ctx context.Context, db bun.IDB, op
 	err := db.NewRaw(`
 		SELECT
 			sub.id as sub_id,
-			sub.user_id,
+			sub.tenant_subject_id::text AS user_id,
 			sub.product_id,
 			CASE WHEN prod.id IS NOT NULL THEN true ELSE false END as prod_exists,
 			(prod.status = 'active') as prod_active
@@ -100,7 +100,7 @@ func (c *CheckOrphanSubscriptionPrice) Run(ctx context.Context, db bun.IDB, opts
 	err := db.NewRaw(`
 		SELECT
 			sub.id as sub_id,
-			sub.user_id,
+			sub.tenant_subject_id::text AS user_id,
 			sub.price_id,
 			CASE WHEN price.id IS NOT NULL THEN true ELSE false END as price_exists,
 			(price.status = 'active') as price_active
@@ -166,7 +166,7 @@ func (c *CheckPriceProductMismatch) Run(ctx context.Context, db bun.IDB, opts Op
 	err := db.NewRaw(`
 		SELECT
 			sub.id as sub_id,
-			sub.user_id,
+			sub.tenant_subject_id::text AS user_id,
 			sub.product_id as sub_product_id,
 			price.product_id as price_product_id
 		FROM billing.subscriptions sub
@@ -224,7 +224,7 @@ func (c *CheckPaymentOrphanSubscription) Run(ctx context.Context, db bun.IDB, op
 	err := db.NewRaw(`
 		SELECT
 			purch.id as payment_id,
-			purch.user_id,
+			purch.tenant_subject_id::text AS user_id,
 			purch.subscription_id
 		FROM billing.payments purch
 		LEFT JOIN billing.subscriptions sub ON purch.subscription_id = sub.id
@@ -284,7 +284,7 @@ func (c *CheckEntitlementOrphanSource) Run(ctx context.Context, db bun.IDB, opts
 	err := db.NewRaw(`
 		SELECT
 			ent.id as ent_id,
-			ent.user_id,
+			ent.tenant_subject_id::text AS user_id,
 			ent.entitlement,
 			ent.source_type,
 			ent.source_id
@@ -327,7 +327,7 @@ func (c *CheckEntitlementOrphanSource) Run(ctx context.Context, db bun.IDB, opts
 	err = db.NewRaw(`
 		SELECT
 			ent.id as ent_id,
-			ent.user_id,
+			ent.tenant_subject_id::text AS user_id,
 			ent.entitlement,
 			ent.source_type,
 			ent.source_id

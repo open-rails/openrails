@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -98,7 +99,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	periodStart := now
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		UserID:                  userID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,

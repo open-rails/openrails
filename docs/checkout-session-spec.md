@@ -162,7 +162,7 @@ that duration defines the entitlement window for the one-off purchase.
 
 ### checkout_sessions (proposed)
 - `id` (public id: `cs_...`)
-- `user_id`
+- `tenant_subject_id` (payable identity FK → `billing.tenant_subjects`; #317)
 - `price_id`
 - `mode` (`one_off|subscription`)
 - `processor` (`solana|mobius|ccbill|stripe`)

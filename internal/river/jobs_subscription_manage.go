@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
@@ -86,7 +87,7 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 			return nil
 		}
 		// Verify ownership
-		if sub.UserID != userID {
+		if sub.TenantSubjectID.String() != userID {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"user_id":         userID,
 				"subscription_id": job.Args.SubscriptionID,
@@ -170,7 +171,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 			return nil
 		}
 		// Verify ownership
-		if sub.UserID != userID {
+		if sub.TenantSubjectID.String() != userID {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"user_id":         userID,
 				"subscription_id": job.Args.SubscriptionID,
@@ -180,9 +181,13 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 	} else {
 		// Fallback to active subscription lookup
 		sub = new(models.Subscription)
+		tsid, terr := repo.ResolveTenantSubjectID(ctx, w.DB.Q(ctx), uuid.Nil, userID)
+		if terr != nil {
+			return terr
+		}
 		err = w.DB.Q(ctx).NewSelect().
 			Model(sub).
-			Where("sub.user_id = ?", userID).
+			Where("sub.tenant_subject_id = ?", tsid).
 			Where("sub.status = ?", models.StatusCancelled).
 			Where("(sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > ?)", now).
 			OrderExpr("sub.created_at DESC").

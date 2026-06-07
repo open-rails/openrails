@@ -107,11 +107,69 @@ authority as the rest of `/v1/admin` (`openrails:admin`):
 | `PUT /v1/admin/tenants/:id/credentials/:name` | Rotate a per-tenant credential (`{"value":"..."}`) |
 | `POST /v1/admin/tenants/:id/credentials/test-stripe` | Test the tenant's Stripe key (no charge) |
 
-## Closed-registration tenant manifest
+## Unified bootstrap manifest
 
 Closed-registration deployments should bootstrap tenants through the deploy
-pipeline, not by modeling bootstrap authority as an AuthKit tenant. Set
-`tenant_bootstrap.file` or `OPENRAILS_TENANTS_FILE` to a tenant manifest v2 file:
+pipeline, not by modeling bootstrap authority as an AuthKit tenant. New
+deployments should use one explicit provisioning step after migrations:
+
+```sh
+billing migrate up -c /etc/openrails/config.yaml
+billing bootstrap apply -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
+billing run-server -c /etc/openrails/config.yaml
+```
+
+`/etc/openrails/config.yaml` is runtime infrastructure config. The separate
+`/etc/openrails/bootstrap.yaml` file is desired tenant/catalog provisioning
+state and is applied by an init job or operator command, not by normal API
+replicas on startup.
+
+The unified manifest shape is:
+
+```yaml
+version: 1
+
+tenants:
+  - slug: doujins
+    name: Doujins
+    issuers:
+      - issuer: https://auth.doujins.com
+        jwks_uri: https://auth.doujins.com/.well-known/jwks.json
+        audiences: [openrails]
+
+    service_jwt_principals:
+      - issuer: https://auth.doujins.com
+        subject: service:doujins-runtime
+        permissions:
+          - openrails:entitlements:read
+          - openrails:credits:read
+          - openrails:credits:write
+          - openrails:credits:spend
+
+    service_tokens:
+      - name: generated-admin-token
+        permissions: [openrails:admin]
+        outputs:
+          - vault:
+              mount: secret
+              path: openrails/doujins/admin
+              field: service_token
+
+catalogs:
+  - name: default
+    default_currency: usd
+    default_providers: [nmi]
+    tier_groups:
+      - slug: plans
+        display_name: Plans
+        products:
+          - slug: starter
+            display_name: Starter
+            tier_rank: 1
+            prices:
+              - unit_amount: 1000
+                interval: month
+```
 
 - `tenants[].issuers[]` registers tenant-owned OIDC issuers with exact
   `issuer`, `jwks_uri`, accepted `audiences`, and optional `enabled`.
@@ -119,18 +177,24 @@ pipeline, not by modeling bootstrap authority as an AuthKit tenant. Set
   validates `iss`, `aud`, `kid`/JWKS signature, expiry, and delegated
   `openrails:self:*` or `openrails:tenant:*` permissions, then touches the
   minimal payable tenant subject `(tenant_id, issuer, subject)`.
-- `tenants[].service_tokens[]` mints opaque AuthKit service tokens for
-  server-to-server callers. Permissions and resources come from the manifest;
-  OpenRails only interprets `openrails.tenant` and
-  `openrails.tenant_subject` resource scopes at request time.
-- `outputs[]` writes runtime tokens to deployment-owned targets such as Vault KV
-  fields or mounted files. Non-empty outputs are preserved on startup; rotation
-  is an explicit deploy action.
+- `tenants[].service_jwt_principals[]` grants server-side authorization to
+  caller-minted first-party service JWTs. The JWT must still request
+  permissions, but OpenRails intersects those requests with this grant.
+- `tenants[].service_tokens[]` mints generated opaque AuthKit service tokens for
+  scripts, third-party clients, and explicit generated-token use cases.
+  `resources` is optional; omitted means the containing tenant-wide resource
+  scope. Explicit resources are only needed for narrowed scopes such as one
+  `openrails.tenant_subject`.
+- `outputs[]` writes generated token secrets to deployment-owned targets such as
+  Vault KV fields or mounted files. Non-empty outputs are preserved during
+  `bootstrap apply`; rotation is an explicit deploy action.
+- `catalogs[]` uses the existing catalog-as-code schema. Bootstrap applies it
+  additively: missing products/prices are not removed by omission.
 
 Delegated JWTs are for browser/direct self-service or tenant-admin operations.
-Service tokens are for backend calls such as entitlement reads and credit
-reserve/capture/release flows, and must not be accepted by delegated browser
-routes.
+Generated service tokens and first-party service JWTs are for backend calls such
+as entitlement reads and credit reserve/capture/release flows, and must not be
+accepted by delegated browser routes.
 
 ## Remaining / needs live infrastructure
 
@@ -142,6 +206,7 @@ routes.
 - **Stripe Connect** onboarding (`accounts.create`, hosted onboarding,
   account-status webhooks) and a webhook **delivery monitor** (alert on N
   consecutive failures) are scoped by #225 but not implemented in this increment.
-- Tenant **onboarding** (configure tenant issuers and mint runtime service
-  tokens) reuses the bootstrap/control-plane paths. Token output locations are
+- Tenant **onboarding** (configure tenant issuers, grant service-JWT principals,
+  or mint generated service tokens for non-OIDC callers) reuses the
+  bootstrap/control-plane paths. Token output locations are
   deployment wiring, not durable OpenRails domain state.

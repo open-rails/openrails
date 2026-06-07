@@ -10,27 +10,28 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // ProductAccessGrantResponse is the application-facing view of a durable product
 // access grant (issue #250), enriched with product metadata so host apps can
 // build a purchased-library view without querying the catalog or payment history.
 type ProductAccessGrantResponse struct {
-	ID           string     `json:"id"`
-	UserID       string     `json:"user_id"`
-	ProductID    string     `json:"product_id"`
-	ProductSlug  string     `json:"product_slug,omitempty"`
-	ProductName  string     `json:"product_name,omitempty"`
-	SourceType   string     `json:"source_type"`
-	SourceID     string     `json:"source_id,omitempty"`
-	PaymentID    *string    `json:"payment_id,omitempty"`
-	Status       string     `json:"status"`
-	StartsAt     time.Time  `json:"starts_at"`
-	EndsAt       *time.Time `json:"ends_at,omitempty"`
-	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
-	RevokeReason *string    `json:"revoke_reason,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID              string     `json:"id"`
+	TenantSubjectID string     `json:"tenant_subject_id"`
+	ProductID       string     `json:"product_id"`
+	ProductSlug     string     `json:"product_slug,omitempty"`
+	ProductName     string     `json:"product_name,omitempty"`
+	SourceType      string     `json:"source_type"`
+	SourceID        string     `json:"source_id,omitempty"`
+	PaymentID       *string    `json:"payment_id,omitempty"`
+	Status          string     `json:"status"`
+	StartsAt        time.Time  `json:"starts_at"`
+	EndsAt          *time.Time `json:"ends_at,omitempty"`
+	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
+	RevokeReason    *string    `json:"revoke_reason,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type productAccessPath struct {
@@ -60,17 +61,17 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 	for i := range grants {
 		g := grants[i]
 		resp := ProductAccessGrantResponse{
-			ID:         g.ID.String(),
-			UserID:     g.UserID,
-			ProductID:  g.ProductID.String(),
-			SourceType: string(g.SourceType),
-			SourceID:   g.SourceID,
-			Status:     string(g.Status),
-			StartsAt:   g.StartsAt,
-			EndsAt:     g.EndsAt,
-			RevokedAt:  g.RevokedAt,
-			CreatedAt:  g.CreatedAt,
-			UpdatedAt:  g.UpdatedAt,
+			ID:              g.ID.String(),
+			TenantSubjectID: g.TenantSubjectID.String(),
+			ProductID:       g.ProductID.String(),
+			SourceType:      string(g.SourceType),
+			SourceID:        g.SourceID,
+			Status:          string(g.Status),
+			StartsAt:        g.StartsAt,
+			EndsAt:          g.EndsAt,
+			RevokedAt:       g.RevokedAt,
+			CreatedAt:       g.CreatedAt,
+			UpdatedAt:       g.UpdatedAt,
 		}
 		if g.PaymentID != nil {
 			pid := g.PaymentID.String()
@@ -161,13 +162,13 @@ func GetMyProductAccess(r *httprequest.Request) {
 
 // productAccessCheckResponse is the typed payload for has-access checks.
 type productAccessCheckResponse struct {
-	UserID    string `json:"user_id"`
-	ProductID string `json:"product_id"`
-	HasAccess bool   `json:"has_access"`
+	TenantSubjectID string `json:"tenant_subject_id"`
+	ProductID       string `json:"product_id"`
+	HasAccess       bool   `json:"has_access"`
 }
 
 func newProductAccessCheck(productID uuid.UUID, userID string, has bool) productAccessCheckResponse {
-	return productAccessCheckResponse{UserID: userID, ProductID: productID.String(), HasAccess: has}
+	return productAccessCheckResponse{TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID().String(), ProductID: productID.String(), HasAccess: has}
 }
 
 // --- service token service (GET /v1/service/users/:user_id/product-access) ---
@@ -308,7 +309,7 @@ func RevokeAdminProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load grant")
 		return
 	}
-	if grant == nil || grant.UserID != path.UserID {
+	if grant == nil || grant.TenantSubjectID.String() != path.UserID {
 		r.ErrorJSON(http.StatusNotFound, "grant not found for this user")
 		return
 	}

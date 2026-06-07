@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
@@ -47,29 +48,29 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 
 	// Create a subscription-sourced entitlement window [t0, t1)
 	subEnt := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: entName,
-		StartAt:     t0,
-		EndAt:       &t1,
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &subID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     entName,
+		StartAt:         t0,
+		EndAt:           &t1,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &subID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	require.NoError(t, r.Insert(ctx, subEnt))
 
 	// Create a scheduled admin window [t1, t2)
 	adminEnt := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: entName,
-		StartAt:     t1,
-		EndAt:       &t2,
-		SourceType:  models.EntitlementSourceAdmin,
-		SourceID:    &adminGrantID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     entName,
+		StartAt:         t1,
+		EndAt:           &t2,
+		SourceType:      models.EntitlementSourceAdmin,
+		SourceID:        &adminGrantID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	require.NoError(t, r.Insert(ctx, adminEnt))
 
@@ -122,28 +123,28 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 	futureEnd := activeEnd.Add(10 * 24 * time.Hour)
 
 	active := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: entName,
-		StartAt:     activeStart,
-		EndAt:       &activeEnd,
-		SourceType:  models.EntitlementSourceOneOff,
-		SourceID:    &paymentID,
-		CreatedAt:   activeStart,
-		UpdatedAt:   activeStart,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     entName,
+		StartAt:         activeStart,
+		EndAt:           &activeEnd,
+		SourceType:      models.EntitlementSourceOneOff,
+		SourceID:        &paymentID,
+		CreatedAt:       activeStart,
+		UpdatedAt:       activeStart,
 	}
 	require.NoError(t, r.Insert(ctx, active))
 
 	future := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: entName,
-		StartAt:     activeEnd,
-		EndAt:       &futureEnd,
-		SourceType:  models.EntitlementSourceOneOff,
-		SourceID:    &paymentID,
-		CreatedAt:   activeStart,
-		UpdatedAt:   activeStart,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     entName,
+		StartAt:         activeEnd,
+		EndAt:           &futureEnd,
+		SourceType:      models.EntitlementSourceOneOff,
+		SourceID:        &paymentID,
+		CreatedAt:       activeStart,
+		UpdatedAt:       activeStart,
 	}
 	require.NoError(t, r.Insert(ctx, future))
 
@@ -216,7 +217,6 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 	finite := &models.Entitlement{
 		ID:              uuid.New(),
 		TenantSubjectID: tenantSubjectID,
-		UserID:          userID,
 		Entitlement:     entName,
 		StartAt:         finiteStart,
 		EndAt:           &finiteEnd,
@@ -231,7 +231,6 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 	indefinite := &models.Entitlement{
 		ID:              uuid.New(),
 		TenantSubjectID: tenantSubjectID,
-		UserID:          userID,
 		Entitlement:     indefiniteName,
 		StartAt:         finiteStart,
 		SourceType:      models.EntitlementSourceAdmin,

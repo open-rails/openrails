@@ -100,15 +100,16 @@ tenant-scoped):
 
 ### Schema hardening — deferred follow-up migrations
 
-1. Add tenant-scoped **UNIQUE** replacements and retire the old global uniques
-   in lockstep with all writers being tenant-aware. Affected uniques today:
-   - `processor_customers (user_id, processor)` and `(processor, customer_id)`
-   - credit balance and ledger uniqueness, now keyed by
+1. Tenant-scoped **UNIQUE** replacements (done in migration 039; the payable
+   identity column moved from `user_id` to `tenant_subject_id` in #317 migration
+   078, which recreated these uniques and dropped `user_id`). Affected uniques:
+   - `processor_customers (tenant_id, tenant_subject_id, processor)` and `(tenant_id, processor, customer_id)`
+   - credit balance and ledger uniqueness, keyed by
      `(tenant_subject_id, credit_type_id)` plus idempotency coordinates
-   - `payment_methods (user_id, vault_id)` / `(processor, vault_id)`
-   - `subscriptions` lifecycle-owner uniques
-   - `entitlements` overlap-exclusion + `uniq_entitlements_active`
-   - `payments (processor, transaction_id)`, checkout/rebill uniques
+   - `payment_methods (tenant_id, tenant_subject_id, vault_id)` / `(tenant_id, processor, vault_id)`
+   - `subscriptions` lifecycle-owner uniques (now on `tenant_subject_id`)
+   - `entitlements` overlap-exclusion + active-window uniques (on `tenant_subject_id`)
+   - `payments (tenant_id, processor, transaction_id)`, checkout/rebill uniques
    - **provider identities** (`processor`, external customer/transaction ids)
      must become tenant-scoped per #223.
 2. Enforce `tenant_id NOT NULL` once every writer stamps it and every reader

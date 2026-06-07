@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
@@ -17,10 +18,10 @@ type adminUserPath struct {
 }
 
 type adminUserBillingProfile struct {
-	UserID       string               `json:"user_id"`
-	Subscription *models.Subscription `json:"subscription,omitempty"`
-	Entitlements []models.Entitlement `json:"entitlements"`
-	Payments     []*models.Payment    `json:"payments"`
+	TenantSubjectID string               `json:"tenant_subject_id"`
+	Subscription    *models.Subscription `json:"subscription,omitempty"`
+	Entitlements    []models.Entitlement `json:"entitlements"`
+	Payments        []*models.Payment    `json:"payments"`
 }
 
 type adminSubscriptionPath struct {
@@ -71,7 +72,7 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	}
 	ctx := r.Request.Context()
 	now := time.Now()
-	profile := adminUserBillingProfile{UserID: path.UserID, Entitlements: []models.Entitlement{}, Payments: []*models.Payment{}}
+	profile := adminUserBillingProfile{TenantSubjectID: identity.TenantSubjectIDFromString(path.UserID).UUID().String(), Entitlements: []models.Entitlement{}, Payments: []*models.Payment{}}
 	if r.State.SubscriptionService != nil {
 		sub, err := r.State.SubscriptionService.GetActiveSubscription(ctx, path.UserID)
 		if err == nil {

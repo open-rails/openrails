@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -13,10 +14,10 @@ func ptrTime(t time.Time) *time.Time { return &t }
 
 func baseSub(processor models.Processor, status models.SubscriptionStatus) *models.Subscription {
 	return &models.Subscription{
-		ID:        uuid.New(),
-		UserID:    "user_1",
-		Processor: processor,
-		Status:    status,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString("user_1").UUID(),
+		Processor:       processor,
+		Status:          status,
 	}
 }
 

@@ -53,8 +53,11 @@ type ProductAccessGrant struct {
 	// default lets single-tenant inserts fall back to the resolved tenant.
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 
-	UserID    string    `bun:"user_id,notnull" json:"user_id"`
-	ProductID uuid.UUID `bun:"product_id,type:uuid,notnull" json:"product_id"`
+	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// Additive during the hard-cut rollout; writers populate it and readers move to
+	// it before user_id is dropped. Join billing.tenant_subjects for issuer/subject.
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
+	ProductID       uuid.UUID `bun:"product_id,type:uuid,notnull" json:"product_id"`
 
 	SourceType ProductAccessSourceType `bun:"source_type,notnull" json:"source_type"`
 	// SourceID is the idempotency key component (payment id, admin grant id,

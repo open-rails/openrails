@@ -56,7 +56,7 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 	p := new(models.Payment)
 	require.NoError(t, suite.BunDB.NewSelect().Model(p).Where("purch.id = ?", paymentID).Scan(req.Context()))
 
-	require.Equal(t, userID, p.UserID)
+	require.Equal(t, userID, p.TenantSubjectID.String())
 	require.Equal(t, lifetimePriceID, p.PriceID)
 	require.Equal(t, models.ProcessorManual, p.Processor)
 	require.Equal(t, int64(1500), p.Amount)

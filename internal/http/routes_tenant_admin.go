@@ -17,13 +17,14 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// TenantAdminPrefix is the operator-gated tenant provisioning/lifecycle API
-// (issue #225). It is gated by the SAME operator-admin authority as the rest of
-// /v1/admin: only the operator tenant (with openrails:admin) may provision, suspend,
-// resume, delete, or change a tenant's tier or processor credentials.
+// TenantAdminPrefix is the admin-gated tenant provisioning/lifecycle API
+// (issue #225). It is gated by the SAME admin authority as the rest of /v1/admin
+// (#312): only a caller holding the LIVE openrails:admin permission in their own
+// tenant may provision, suspend, resume, delete, or change a tenant's tier or
+// processor credentials.
 const TenantAdminPrefix = "/admin/tenants"
 
-// registerTenantAdminRoutes mounts the operator-gated tenant provisioning API.
+// registerTenantAdminRoutes mounts the admin-gated tenant provisioning API.
 // No-op without the tenancy service (verifier-only mode).
 func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
 	if s.tenancy == nil {
@@ -31,11 +32,14 @@ func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
 	}
 	group := e.Group(StandaloneV1Prefix + TenantAdminPrefix)
 	group.Use(s.authProvider.Required())
-	group.Use(policyginmw.OperatorAdminRequired(s.cfg, s.runtime.DB.GetDB()))
+	// HARDCUT (#312): tenant provisioning is gated by the LIVE openrails:admin
+	// permission held in the caller's own tenant — not a claim-based operator
+	// tenant. A nil checker (verifier-only mode) fails closed.
+	var adminChecker authpolicy.AdminPermissionChecker
 	if s.controlPlane != nil {
-		group.Use(policyginmw.OperatorPermissionRequired(
-			authpolicy.OperatorPermissionChecker(s.controlPlane), controlplane.PermAdmin))
+		adminChecker = s.controlPlane
 	}
+	group.Use(policyginmw.AdminPermissionRequired(adminChecker, controlplane.PermAdmin))
 
 	group.POST("", s.tenantProvisionHandler())
 	group.GET("/:id", s.tenantGetHandler())
@@ -50,7 +54,7 @@ func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
 	group.POST("/:id/credentials/test-stripe", s.tenantTestStripeHandler())
 
 	log.WithField("prefix", StandaloneV1Prefix+TenantAdminPrefix).
-		Info("operator-gated tenant provisioning routes registered")
+		Info("admin-gated tenant provisioning routes registered")
 }
 
 // auditTenantMutation records a cross-tenant platform audit row for a tenant

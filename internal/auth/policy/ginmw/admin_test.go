@@ -1,13 +1,15 @@
 package ginmw
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/pkg/authprovider"
 )
 
@@ -15,117 +17,82 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-// TestOperatorAdminRequired_OperatorTenantMode focuses on the operator tenant branch,
-// which is the ONLY admin-authority path after the hardcut (the legacy
-// global-`admin` DB fallback has been removed).
-func TestOperatorAdminRequired_OperatorTenantMode(t *testing.T) {
-	cfg := &config.Config{
-		Auth: &config.AuthConfig{
-			OperatorTenantAdminRoles: []string{"admin", "owner"},
-			ControlPlane:             &config.ControlPlaneConfig{Enabled: true},
-		},
+const permAdmin = "openrails:admin"
+
+// fakeAdminChecker is a test double for the live policy.AdminPermissionChecker.
+type fakeAdminChecker struct {
+	allow map[string]bool // "tenant|user|perm" -> true
+	err   error
+}
+
+func (f fakeAdminChecker) HasAdminPermission(_ context.Context, tenantSlug, userID, perm string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
 	}
+	return f.allow[tenantSlug+"|"+userID+"|"+perm], nil
+}
+
+// TestAdminPermissionRequired covers the #312 hardcut: admin authority is the
+// LIVE openrails:admin permission held in the CALLER'S OWN tenant — there is no
+// claim-based operator-tenant gate and no JWT-role fallback.
+func TestAdminPermissionRequired(t *testing.T) {
+	checker := fakeAdminChecker{allow: map[string]bool{
+		"acme|user-1|" + permAdmin: true,
+	}}
 
 	cases := []struct {
 		name       string
+		checker    policy.AdminPermissionChecker
 		uc         authprovider.UserContext
 		wantStatus int
-		wantBody   string // substring check
+		wantBody   string
 	}{
 		{
-			name:       "no user context attached -> 401",
-			uc:         authprovider.UserContext{}, // empty UserID
+			name:       "no user context -> 401",
+			checker:    checker,
+			uc:         authprovider.UserContext{},
 			wantStatus: http.StatusUnauthorized,
 			wantBody:   "authentication required",
 		},
 		{
-			name: "user has no tenant claim -> 403 operator_tenant_required",
-			uc: authprovider.UserContext{
-				UserID: "user-1",
-				// Tenant and TenantRoles intentionally empty
-			},
+			name:       "nil checker -> 500 (verifier-only mode fails closed)",
+			checker:    nil,
+			uc:         authprovider.UserContext{UserID: "user-1", Tenant: "acme"},
+			wantStatus: http.StatusInternalServerError,
+			wantBody:   "authorization unavailable",
+		},
+		{
+			name:       "authenticated but lacks live admin permission -> 403",
+			checker:    checker,
+			uc:         authprovider.UserContext{UserID: "user-1", Tenant: "globex"},
 			wantStatus: http.StatusForbidden,
-			wantBody:   "operator_tenant_required",
+			wantBody:   "admin_permission_required",
 		},
 		{
-			name: "user has tenant but it does not match operator slug -> 403 operator_tenant_mismatch",
-			uc: authprovider.UserContext{
-				UserID:      "user-1",
-				Tenant:      "globex",
-				TenantRoles: []string{"admin"},
-			},
-			wantStatus: http.StatusForbidden,
-			wantBody:   "operator_tenant_mismatch",
-		},
-		{
-			name: "user in correct tenant but lacks admin role -> 403 operator_tenant_role_required",
-			uc: authprovider.UserContext{
-				UserID:      "user-1",
-				Tenant:      "operator",
-				TenantRoles: []string{"member", "viewer"},
-			},
-			wantStatus: http.StatusForbidden,
-			wantBody:   "operator_tenant_role_required",
-		},
-		{
-			name: "user in correct tenant with admin role -> 200 (passes through)",
-			uc: authprovider.UserContext{
-				UserID:      "user-1",
-				Tenant:      "operator",
-				TenantRoles: []string{"admin"},
-			},
+			name:       "holds live admin permission in own tenant -> 200",
+			checker:    checker,
+			uc:         authprovider.UserContext{UserID: "user-1", Tenant: "acme"},
 			wantStatus: http.StatusOK,
 		},
 		{
-			name: "user in correct tenant with owner role -> 200 (default admin-equivalent set)",
-			uc: authprovider.UserContext{
-				UserID:      "user-1",
-				Tenant:      "operator",
-				TenantRoles: []string{"owner"},
-			},
-			wantStatus: http.StatusOK,
-		},
-		{
-			name: "case-insensitive role match -> 200",
-			uc: authprovider.UserContext{
-				UserID:      "user-1",
-				Tenant:      "operator",
-				TenantRoles: []string{"ADMIN"},
-			},
-			wantStatus: http.StatusOK,
-		},
-		{
-			name: "case-insensitive tenant match -> 200",
-			uc: authprovider.UserContext{
-				UserID:      "user-1",
-				Tenant:      "Operator",
-				TenantRoles: []string{"admin"},
-			},
-			wantStatus: http.StatusOK,
+			name:       "checker error -> 500",
+			checker:    fakeAdminChecker{err: errors.New("authkit down")},
+			uc:         authprovider.UserContext{UserID: "user-1", Tenant: "acme"},
+			wantStatus: http.StatusInternalServerError,
+			wantBody:   "failed to check permission",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rr := httptest.NewRecorder()
-			c, engine := gin.CreateTestContext(rr)
-
-			// Attach UserContext to the gin context the way real auth middleware would.
+			c, _ := gin.CreateTestContext(rr)
 			c.Set("billing.user_context", tc.uc)
+			c.Request = httptest.NewRequest(http.MethodGet, "/admin/test", nil)
 
-			// Build a real request because the middleware reads c.Request.Context().
-			req := httptest.NewRequest(http.MethodGet, "/admin/test", nil)
-			c.Request = req
+			AdminPermissionRequired(tc.checker, permAdmin)(c)
 
-			handler := OperatorAdminRequired(cfg, nil)
-			handler(c)
-
-			// If the middleware did not abort, call a stub final handler.
 			if !c.IsAborted() {
-				engine.GET("/admin/test", func(c *gin.Context) {
-					c.String(http.StatusOK, "ok")
-				})
-				// Pretend the next handler ran successfully.
 				c.String(http.StatusOK, "ok")
 			}
 
@@ -136,35 +103,6 @@ func TestOperatorAdminRequired_OperatorTenantMode(t *testing.T) {
 				t.Errorf("body %q does not contain %q", rr.Body.String(), tc.wantBody)
 			}
 		})
-	}
-}
-
-// TestOperatorAdminRequired_NoControlPlaneFailsClosed proves the hardcut: with no
-// operator tenant authority there is NO DB-role fallback — OperatorAdminRequired
-// fails closed with admin_required WITHOUT consulting profiles.user_roles (db ==
-// nil here, so any DB consultation would panic). Authority comes from the
-// operator-tenant permission layer (OperatorPermissionRequired) at the route.
-func TestOperatorAdminRequired_NoOperatorTenantFailsClosed(t *testing.T) {
-	cfg := &config.Config{
-		Auth: &config.AuthConfig{},
-	}
-
-	rr := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rr)
-	c.Set("billing.user_context", authprovider.UserContext{UserID: "global-admin-user"})
-	c.Request = httptest.NewRequest(http.MethodGet, "/admin/test", nil)
-
-	// db is nil: if the middleware fell through to a DB role check it would panic.
-	OperatorAdminRequired(cfg, nil)(c)
-
-	if !c.IsAborted() {
-		t.Fatal("expected no-operator-tenant config to abort (fail closed), but it passed through")
-	}
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status: got %d want 403", rr.Code)
-	}
-	if !contains(rr.Body.String(), "admin_required") {
-		t.Errorf("body %q does not contain admin_required", rr.Body.String())
 	}
 }
 

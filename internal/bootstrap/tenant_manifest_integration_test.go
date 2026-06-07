@@ -4,6 +4,7 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -64,6 +65,19 @@ CREATE TABLE IF NOT EXISTS billing.tenant_delegated_issuers (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     CONSTRAINT tenant_delegated_issuers_issuer_unique UNIQUE (issuer)
 );
+
+CREATE TABLE IF NOT EXISTS billing.service_jwt_grants (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id   UUID NOT NULL REFERENCES billing.tenants (id) ON DELETE CASCADE,
+    issuer      TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    permissions TEXT[] NOT NULL DEFAULT '{}',
+    resources   JSONB NOT NULL DEFAULT '[]'::jsonb,
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CONSTRAINT service_jwt_grants_tenant_issuer_subject_unique UNIQUE (tenant_id, issuer, subject)
+);
 `
 
 func TestReconcileTenantManifestEnsuresTenantsTokensAndIssuers(t *testing.T) {
@@ -97,6 +111,7 @@ func TestReconcileTenantManifestEnsuresTenantsTokensAndIssuers(t *testing.T) {
 	require.ElementsMatch(t, []string{controlplane.PermEntitlementsRead, controlplane.PermCreditsRead}, serviceTokens[0].Permissions)
 	require.Contains(t, resourceIDs(serviceTokens[0].Resources, controlplane.ResourceKindTenant), tenantID)
 	require.Contains(t, resourceIDs(serviceTokens[0].Resources, "custom.resource"), "alpha")
+	assertServiceJWTGrantRow(t, pool, tenantID, "https://doujins.example", "service:doujins-runtime", []string{controlplane.PermEntitlementsRead}, true)
 
 	writeTenantManifest(t, manifestPath, tokenPath, "pro", "us-east", "/hooks/v2")
 	require.NoError(t, ReconcileTenantManifest(ctx, tenantManifestConfig(manifestPath), cp))
@@ -261,7 +276,6 @@ func newTenantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlpla
 			ControlPlane: &config.ControlPlaneConfig{
 				Enabled:     true,
 				Issuer:      "https://openrails.test",
-				TenantMode:  "multi",
 				TokenPrefix: "openrails",
 			},
 		},
@@ -300,7 +314,12 @@ tenants:
         outputs:
           - file:
               path: %s
-`, tier, region, webhookPath, controlplane.PermEntitlementsRead, controlplane.PermCreditsRead, controlplane.ResourceKindTenant, tokenPath)
+    service_jwt_principals:
+      - issuer: https://doujins.example
+        subject: service:doujins-runtime
+        permissions:
+          - %s
+`, tier, region, webhookPath, controlplane.PermEntitlementsRead, controlplane.PermCreditsRead, controlplane.ResourceKindTenant, tokenPath, controlplane.PermEntitlementsRead)
 	require.NoError(t, os.WriteFile(manifestPath, []byte(body), 0o600))
 }
 
@@ -349,5 +368,26 @@ func assertIssuerRow(t *testing.T, pool *pgxpool.Pool, issuer, jwksURI string, a
 	`, issuer).Scan(&gotJWKS, &gotAudiences, &gotEnabled))
 	require.Equal(t, jwksURI, gotJWKS)
 	require.ElementsMatch(t, audiences, gotAudiences)
+	require.Equal(t, enabled, gotEnabled)
+}
+
+func assertServiceJWTGrantRow(t *testing.T, pool *pgxpool.Pool, tenantID, issuer, subject string, permissions []string, enabled bool) {
+	t.Helper()
+	var (
+		gotPermissions []string
+		rawResources   []byte
+		gotEnabled     bool
+	)
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		SELECT permissions, resources, enabled
+		  FROM billing.service_jwt_grants
+		 WHERE tenant_id = $1
+		   AND issuer = $2
+		   AND subject = $3
+	`, tenantID, issuer, subject).Scan(&gotPermissions, &rawResources, &gotEnabled))
+	var gotResources []authcore.ServiceTokenResource
+	require.NoError(t, json.Unmarshal(rawResources, &gotResources))
+	require.ElementsMatch(t, permissions, gotPermissions)
+	require.Contains(t, resourceIDs(gotResources, controlplane.ResourceKindTenant), tenantID)
 	require.Equal(t, enabled, gotEnabled)
 }

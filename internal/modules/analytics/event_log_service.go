@@ -928,7 +928,7 @@ func (s *EventLogService) LogAdminSubscriptionCancellation(ctx context.Context, 
 
 	return s.LogSubscriptionEvent(ctx, SubscriptionEventData{
 		SubscriptionID:          subscription.ID,
-		UserID:                  subscription.UserID,
+		UserID:                  subscription.TenantSubjectID.String(),
 		EventType:               PaymentEventSubscriptionCancelled,
 		Status:                  string(subscription.Status),
 		CancelType:              cancelType,
@@ -966,7 +966,7 @@ func (s *EventLogService) LogLifecycleChargeSuccess(ctx context.Context, sub *mo
 	metadata["subscription_id"] = sub.ID.String()
 	return s.LogPaymentEvent(ctx, PaymentEventData{
 		SubscriptionID:         &sub.ID,
-		UserID:                 sub.UserID,
+		UserID:                 sub.TenantSubjectID.String(),
 		EventType:              PaymentEventChargeSuccess,
 		Processor:              string(processor),
 		ProcessorTransactionID: txnID,

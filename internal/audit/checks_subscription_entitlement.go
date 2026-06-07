@@ -9,6 +9,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 )
 
 // S-E-1: Active subscription missing entitlements
@@ -35,7 +36,11 @@ func (c *CheckActiveSubscriptionMissingEntitlements) Run(ctx context.Context, db
 		Where("sub.status = ?", models.StatusActive)
 
 	if opts.UserID != "" {
-		q = q.Where("sub.user_id = ?", opts.UserID)
+		tsid, err := repo.ResolveTenantSubjectID(ctx, db, uuid.Nil, opts.UserID)
+		if err != nil {
+			return nil, err
+		}
+		q = q.Where("sub.tenant_subject_id = ?", tsid)
 	}
 	if opts.Since != nil {
 		q = q.Where("sub.created_at >= ?", opts.Since)
@@ -61,7 +66,7 @@ func (c *CheckActiveSubscriptionMissingEntitlements) Run(ctx context.Context, db
 			var count int
 			count, err := db.NewSelect().
 				Model((*models.Entitlement)(nil)).
-				Where("user_id = ?", sub.UserID).
+				Where("tenant_subject_id = ?", sub.TenantSubjectID).
 				Where("entitlement = ?", entName).
 				Where("source_type = ?", models.EntitlementSourceSubscription).
 				Where("source_id = ?", sub.ID).
@@ -80,7 +85,7 @@ func (c *CheckActiveSubscriptionMissingEntitlements) Run(ctx context.Context, db
 					Severity:       c.Severity(),
 					EntityType:     EntitySubscription,
 					EntityID:       sub.ID,
-					UserID:         sub.UserID,
+					UserID:         sub.TenantSubjectID.String(),
 					Description:    fmt.Sprintf("Active subscription missing entitlement '%s' from product '%s'", entName, product.Slug),
 					Recommendation: fmt.Sprintf("Grant entitlement '%s' with source_type=subscription, source_id=%s", entName, sub.ID),
 					AutoFixable:    true,
@@ -123,7 +128,7 @@ func (c *CheckOrphanSubscriptionEntitlements) Run(ctx context.Context, db bun.ID
 	q := db.NewRaw(`
 		SELECT
 			ent.id as entitlement_id,
-			ent.user_id,
+			ent.tenant_subject_id::text AS user_id,
 			ent.entitlement,
 			ent.source_id,
 			sub.status as sub_status
@@ -198,7 +203,7 @@ func (c *CheckCancelledSubscriptionActiveEntitlements) Run(ctx context.Context, 
 	err := db.NewRaw(`
 		SELECT
 			sub.id as sub_id,
-			sub.user_id,
+			sub.tenant_subject_id::text AS user_id,
 			sub.ended_at,
 			ent.id as ent_id,
 			ent.entitlement
@@ -266,7 +271,7 @@ func (c *CheckWrongEntitlementEndDate) Run(ctx context.Context, db bun.IDB, opts
 	err := db.NewRaw(`
 		SELECT
 			sub.id as sub_id,
-			sub.user_id,
+			sub.tenant_subject_id::text AS user_id,
 			sub.current_period_ends_at as period_ends_at,
 			ent.id as ent_id,
 			ent.entitlement,
@@ -342,16 +347,16 @@ func (c *CheckEntitlementSourceMismatch) Run(ctx context.Context, db bun.IDB, op
 	err := db.NewRaw(`
 		SELECT
 			ent.id as ent_id,
-			ent.user_id as ent_user_id,
+			ent.tenant_subject_id::text AS ent_user_id,
 			ent.entitlement,
 			ent.source_id,
-			sub.user_id as sub_user_id
+			sub.tenant_subject_id::text AS sub_user_id
 		FROM billing.entitlements ent
 		LEFT JOIN billing.subscriptions sub ON ent.source_id = sub.id
 		WHERE ent.source_type = 'subscription'
 		  AND ent.source_id IS NOT NULL
 		  AND ent.deleted_at IS NULL
-		  AND (sub.id IS NULL OR sub.user_id != ent.user_id)
+		  AND (sub.id IS NULL OR sub.tenant_subject_id != ent.tenant_subject_id)
 	`).Scan(ctx, &results)
 
 	if err != nil {

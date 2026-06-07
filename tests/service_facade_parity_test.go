@@ -32,11 +32,28 @@ import (
 type stubServiceTokenResolver struct {
 	permissions []string
 	resources   []authcore.ServiceTokenResource
+	serviceJWT  bool
 }
 
-func (s stubServiceTokenResolver) LooksLikeServiceToken(token string) bool { return token != "" }
+func (s stubServiceTokenResolver) LooksLikeServiceToken(token string) bool {
+	return token != "" && !s.serviceJWT
+}
 
 func (s stubServiceTokenResolver) ResolveServiceToken(_ context.Context, token string) (*controlplane.ResolvedServiceToken, error) {
+	if token == "" || s.serviceJWT {
+		return nil, authcore.ErrInvalidAccessToken
+	}
+	return s.resolved()
+}
+
+func (s stubServiceTokenResolver) ResolveServiceJWT(_ context.Context, token string) (*controlplane.ResolvedServiceToken, error) {
+	if token == "" || !s.serviceJWT {
+		return nil, authcore.ErrInvalidServiceJWT
+	}
+	return s.resolved()
+}
+
+func (s stubServiceTokenResolver) resolved() (*controlplane.ResolvedServiceToken, error) {
 	return &controlplane.ResolvedServiceToken{
 		AuthKitTenantSlug: "operator",
 		TenantID:          tenant.DefaultID,
@@ -100,7 +117,6 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		ID:              uuid.New(),
 		TenantID:        tenant.DefaultID.UUID(),
 		TenantSubjectID: tenantSubjectID,
-		UserID:          userID,
 		Entitlement:     "premium-1",
 		StartAt:         time.Now().Add(-1 * time.Hour).UTC(),
 		EndAt:           nil,
@@ -112,16 +128,16 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	_, err = suite.BunDB.NewInsert().Model(ent).Exec(ctx)
 	require.NoError(t, err)
 	legacyOnlyEnt := &models.Entitlement{
-		ID:          uuid.New(),
-		TenantID:    tenant.DefaultID.UUID(),
-		UserID:      userID,
-		Entitlement: "legacy-user-only",
-		StartAt:     time.Now().Add(-1 * time.Hour).UTC(),
-		EndAt:       nil,
-		SourceID:    &entSourceID,
-		SourceType:  models.EntitlementSourceAdmin,
-		CreatedAt:   time.Now().UTC(),
-		UpdatedAt:   time.Now().UTC(),
+		ID:              uuid.New(),
+		TenantID:        tenant.DefaultID.UUID(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "legacy-user-only",
+		StartAt:         time.Now().Add(-1 * time.Hour).UTC(),
+		EndAt:           nil,
+		SourceID:        &entSourceID,
+		SourceType:      models.EntitlementSourceAdmin,
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
 	}
 	_, err = suite.BunDB.NewInsert().Model(legacyOnlyEnt).Exec(ctx)
 	require.NoError(t, err)
@@ -228,4 +244,38 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Empty(t, entResp[0].UserID)
 	require.Equal(t, "premium-1", entResp[0].Entitlement)
 	require.NotContains(t, wEnt.Body.String(), "legacy-user-only")
+
+	// 4) The same real service routes accept a resolved first-party service JWT
+	// principal; no OpenRails-generated runtime token is needed on these paths.
+	jwtRouter := gin.New()
+	jwtRouter.Use(ginmw.ResolveTenant())
+	jwtGroup := jwtRouter.Group("/v1/service")
+	jwtResolver := resolver
+	jwtResolver.serviceJWT = true
+	httproutes.RegisterServiceRoutes(jwtGroup, suite.App.Runtime, ginmw.ServiceTokenRequired(jwtResolver), nil, nil)
+	withServiceJWT := func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer eyJ.service.jwt")
+	}
+
+	reqJWTEnt := httptest.NewRequest(http.MethodGet, "/v1/service/tenant-subjects/"+tenantSubjectID.String()+"/entitlements", nil)
+	withServiceJWT(reqJWTEnt)
+	wJWTEnt := httptest.NewRecorder()
+	jwtRouter.ServeHTTP(wJWTEnt, reqJWTEnt)
+	require.Equal(t, http.StatusOK, wJWTEnt.Code)
+	require.Contains(t, wJWTEnt.Body.String(), "premium-1")
+
+	reqJWTBalance := httptest.NewRequest(http.MethodGet, "/v1/service/credits/balance?tenant_subject_id="+tenantSubjectID.String()+"&credit_type="+creditTypeName, nil)
+	withServiceJWT(reqJWTBalance)
+	wJWTBalance := httptest.NewRecorder()
+	jwtRouter.ServeHTTP(wJWTBalance, reqJWTBalance)
+	require.Equal(t, http.StatusOK, wJWTBalance.Code)
+	var balanceResp struct {
+		TenantSubjectID string `json:"tenant_subject_id"`
+		BalanceCents    int64  `json:"balance_cents"`
+		HeldCents       int64  `json:"held_cents"`
+	}
+	require.NoError(t, json.Unmarshal(wJWTBalance.Body.Bytes(), &balanceResp))
+	require.Equal(t, tenantSubjectID.String(), balanceResp.TenantSubjectID)
+	require.Equal(t, int64(9_889), balanceResp.BalanceCents)
+	require.Equal(t, int64(0), balanceResp.HeldCents)
 }

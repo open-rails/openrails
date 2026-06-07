@@ -40,6 +40,19 @@ type ApplyPlan struct {
 	Groups []GroupPlan
 }
 
+// PlanOptions controls how the manifest is compared to the live catalog.
+type PlanOptions struct {
+	// ArchiveMissingProducts archives active products in a declared tier group
+	// when they are absent from the manifest. The standalone catalog apply command
+	// keeps this terraform-style convergence behavior; unified bootstrap uses
+	// additive/upsert semantics and leaves omitted products alone.
+	ArchiveMissingProducts bool
+	// ArchiveMissingPrices archives active prices for a declared product when
+	// their financial identity is absent from the manifest. Disabled for unified
+	// bootstrap's additive/upsert semantics.
+	ArchiveMissingPrices bool
+}
+
 // GroupPlan is the diff for one tier group.
 type GroupPlan struct {
 	Slug     string
@@ -76,6 +89,12 @@ type PricePlan struct {
 // by applier. It performs only reads (GetProductBySlug, ListProducts,
 // ListPricesByProduct).
 func Plan(ctx context.Context, applier Applier, m *Manifest) (*ApplyPlan, error) {
+	return PlanWithOptions(ctx, applier, m, PlanOptions{ArchiveMissingProducts: true, ArchiveMissingPrices: true})
+}
+
+// PlanWithOptions computes the convergence diff using explicit reconciliation
+// semantics.
+func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts PlanOptions) (*ApplyPlan, error) {
 	plan := &ApplyPlan{}
 	for _, group := range m.TierGroups {
 		gp := GroupPlan{Slug: group.Slug}
@@ -83,28 +102,30 @@ func Plan(ctx context.Context, applier Applier, m *Manifest) (*ApplyPlan, error)
 		declared := make(map[string]struct{}, len(group.Products))
 		for _, product := range group.Products {
 			declared[product.Slug] = struct{}{}
-			pp, err := planProduct(ctx, applier, m, group, product)
+			pp, err := planProduct(ctx, applier, m, group, product, opts)
 			if err != nil {
 				return nil, err
 			}
 			gp.Products = append(gp.Products, *pp)
 		}
 
-		// Products dropped from the manifest -> archive. Scope to active products
-		// in this tier group.
-		existing, _, err := applier.ListProducts(ctx, billingservice.ListProductsOptions{
-			ActiveOnly: true,
-			TierGroup:  group.Slug,
-			Limit:      1000,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("list active products for tier group %s: %w", group.Slug, err)
-		}
-		for i := range existing {
-			if _, ok := declared[existing[i].Slug]; ok {
-				continue
+		if opts.ArchiveMissingProducts {
+			// Products dropped from the manifest -> archive. Scope to active products
+			// in this tier group.
+			existing, _, err := applier.ListProducts(ctx, billingservice.ListProductsOptions{
+				ActiveOnly: true,
+				TierGroup:  group.Slug,
+				Limit:      1000,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("list active products for tier group %s: %w", group.Slug, err)
 			}
-			gp.RemovedProducts = append(gp.RemovedProducts, existing[i])
+			for i := range existing {
+				if _, ok := declared[existing[i].Slug]; ok {
+					continue
+				}
+				gp.RemovedProducts = append(gp.RemovedProducts, existing[i])
+			}
 		}
 
 		plan.Groups = append(plan.Groups, gp)
@@ -112,7 +133,7 @@ func Plan(ctx context.Context, applier Applier, m *Manifest) (*ApplyPlan, error)
 	return plan, nil
 }
 
-func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGroup, product Product) (*ProductPlan, error) {
+func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGroup, product Product, opts PlanOptions) (*ProductPlan, error) {
 	entitlements := entitlementsSpec(product.Entitlements)
 	tierGroup := group.Slug
 	desiredStatus := product.Status
@@ -137,7 +158,7 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 			TierRank:         product.TierRank,
 			Status:           toModelStatus(desiredStatus),
 		}
-		if err := planPrices(ctx, applier, m, product, nil, pp); err != nil {
+		if err := planPrices(ctx, applier, m, product, nil, pp, opts); err != nil {
 			return nil, err
 		}
 		return pp, nil
@@ -164,7 +185,7 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 		pp.Action = ProductUpdate
 	}
 
-	if err := planPrices(ctx, applier, m, product, existing, pp); err != nil {
+	if err := planPrices(ctx, applier, m, product, existing, pp, opts); err != nil {
 		return nil, err
 	}
 	return pp, nil
@@ -205,7 +226,7 @@ func productUnchanged(existing *billingservice.CatalogProduct, product Product, 
 // matched). Any ACTIVE OpenRails price whose financial identity is not declared
 // -> archive. existing is the matched OpenRails product (nil when the product
 // is being created, in which case no OpenRails prices can exist yet).
-func planPrices(ctx context.Context, applier Applier, m *Manifest, product Product, existing *billingservice.CatalogProduct, pp *ProductPlan) error {
+func planPrices(ctx context.Context, applier Applier, m *Manifest, product Product, existing *billingservice.CatalogProduct, pp *ProductPlan, opts PlanOptions) error {
 	var current []billingservice.CatalogPrice
 	if existing != nil && existing.ID != uuid.Nil {
 		var err error
@@ -260,20 +281,22 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		})
 	}
 
-	// Archive any ACTIVE OpenRails price not claimed by a declared price.
-	for i := range current {
-		c := &current[i]
-		if _, ok := claimed[c.ID]; ok {
-			continue
+	if opts.ArchiveMissingPrices {
+		// Archive any ACTIVE OpenRails price not claimed by a declared price.
+		for i := range current {
+			c := &current[i]
+			if _, ok := claimed[c.ID]; ok {
+				continue
+			}
+			if string(c.Status) != StatusActive {
+				continue
+			}
+			pp.Prices = append(pp.Prices, PricePlan{
+				Label:      PriceLabel(product.Slug, Price{Currency: c.Currency, UnitAmount: c.UnitAmount}),
+				Action:     PriceArchive,
+				ExistingID: c.ID,
+			})
 		}
-		if string(c.Status) != StatusActive {
-			continue
-		}
-		pp.Prices = append(pp.Prices, PricePlan{
-			Label:      PriceLabel(product.Slug, Price{Currency: c.Currency, UnitAmount: c.UnitAmount}),
-			Action:     PriceArchive,
-			ExistingID: c.ID,
-		})
 	}
 	return nil
 }

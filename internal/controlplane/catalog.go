@@ -7,15 +7,15 @@
 //   - mounts only the AuthKit route groups it intentionally exposes (NOT the
 //     full DefaultAPI surface),
 //   - runs with public user registration and public tenant management disabled,
-//   - bootstraps the default tenant's operator tenant, OpenRails roles, the
-//     `openrails:*` permission catalog, and an initial operator service token through
-//     in-process AuthKit CORE calls (CreateTenant / DefineRole / AssignRole /
-//     MintServiceToken) — never raw SQL or a private HTTP route.
+//   - bootstraps the default tenant's own AuthKit org, OpenRails roles, the
+//     `openrails:*` permission catalog, and an initial deployment admin service
+//     token through in-process AuthKit CORE calls (CreateTenant / DefineRole /
+//     AssignRole / MintServiceToken) — never raw SQL or a private HTTP route.
 //
-// This package establishes admin authority via the operator tenant + permission
-// catalog (the #221/#222 direction). It coordinates with #223's tenant
-// primitive: the default tenant (tenant.DefaultSlug) maps to one OpenRails-owned
-// AuthKit operator tenant.
+// HARDCUT (#312): admin authority is the LIVE openrails:admin permission held in
+// the caller's OWN tenant (or carried on a deployment-minted admin service
+// token) — deployment authority, NOT membership in a separate "operator" AuthKit
+// tenant. The default tenant (tenant.DefaultSlug) hosts its own admin role.
 package controlplane
 
 import (
@@ -248,20 +248,24 @@ func CatalogNames() []string {
 	return out
 }
 
-// Operator-role identity. The operator role is granted every OpenRails
-// permission EXCEPT the platform-superadmin capability, and is the admin
-// authority for ONE tenant's operator tenant.
+// Admin-role identity. The admin role is granted every OpenRails permission
+// EXCEPT the platform-superadmin capability, and is the per-tenant admin
+// authority (#312). HARDCUT: it is seeded under each tenant's OWN AuthKit org —
+// there is no separate "operator" AuthKit tenant. The AuthKit role identifier is
+// kept stable ("openrails-operator") to avoid re-seeding existing deployments.
 const (
-	// OperatorRole is the OpenRails role seeded in a tenant's operator tenant. It
-	// holds the full OpenRails per-tenant catalog but NOT PermPlatformSuperadmin
-	// (which is cross-tenant platform authority, seeded only to PlatformRole).
+	// OperatorRole is the OpenRails admin role seeded under a tenant's own AuthKit
+	// org. It holds the full OpenRails per-tenant catalog but NOT
+	// PermPlatformSuperadmin (cross-tenant platform authority, seeded only to
+	// PlatformRole). A caller holding this role's openrails:admin permission in
+	// their own tenant is an OpenRails admin (#312).
 	OperatorRole = "openrails-operator"
 
 	// PlatformRole is the OpenRails role seeded in the SEPARATE platform tenant
 	// (cfg.Auth.ControlPlane.PlatformTenantSlug, issue #226). It holds
 	// PermPlatformSuperadmin — the cross-tenant managed-hosting authority — and
 	// is the only role granted that permission. It is distinct from OperatorRole
-	// so that a tenant operator admin can never reach the platform surface.
+	// so that a per-tenant admin can never reach the platform surface.
 	PlatformRole = "openrails-platform-superadmin"
 )
 

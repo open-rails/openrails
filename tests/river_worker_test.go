@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // uuid is used by models for ID generation in cleanup tests
@@ -174,11 +175,11 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		// Insert an old seen notification (created 95 days ago relative to mock time)
 		userID := uuid.New().String()
 		notification := &models.NotificationQueue{
-			ID:        uuid.New(),
-			UserID:    userID,
-			EventType: models.NotificationSystemAlert,
-			Seen:      true, // Seen notifications have 90-day retention
-			CreatedAt: mockClock.Now().Add(-95 * 24 * time.Hour),
+			ID:              uuid.New(),
+			TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+			EventType:       models.NotificationSystemAlert,
+			Seen:            true, // Seen notifications have 90-day retention
+			CreatedAt:       mockClock.Now().Add(-95 * 24 * time.Hour),
 		}
 		_, err := suite.BunDB.NewInsert().Model(notification).Exec(ctx)
 		require.NoError(t, err)
@@ -209,11 +210,11 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 
 		// Insert recent notification (just created)
 		notification := &models.NotificationQueue{
-			ID:        uuid.New(),
-			UserID:    uuid.New().String(),
-			EventType: models.NotificationSystemAlert,
-			Seen:      false,
-			CreatedAt: mockClock.Now(),
+			ID:              uuid.New(),
+			TenantSubjectID: identity.TenantSubjectIDFromString(uuid.New().String()).UUID(),
+			EventType:       models.NotificationSystemAlert,
+			Seen:            false,
+			CreatedAt:       mockClock.Now(),
 		}
 		_, err := suite.BunDB.NewInsert().Model(notification).Exec(ctx)
 		require.NoError(t, err)

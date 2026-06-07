@@ -257,6 +257,33 @@ func TestPlan_PriceSetSemantics_ArchiveAndCreate(t *testing.T) {
 	}
 }
 
+func TestPlanWithOptions_AdditiveDoesNotArchiveMissingProductsOrPrices(t *testing.T) {
+	m := loadFrom(t, planManifest)
+	f := newFakeApplier()
+	craftsman := f.seedProduct("craftsman", "cozy", 2, models.CatalogStatusActive)
+	craftsman.DisplayName = "Craftsman"
+	f.seedPrice(craftsman.ID, 1200, "usd", 30, models.CatalogStatusActive) // undeclared old price
+	f.seedProduct("expert", "cozy", 3, models.CatalogStatusActive)         // undeclared product
+
+	plan, err := PlanWithOptions(context.Background(), f, m, PlanOptions{})
+	if err != nil {
+		t.Fatalf("PlanWithOptions: %v", err)
+	}
+	if len(plan.Groups) != 1 || len(plan.Groups[0].RemovedProducts) != 0 {
+		t.Fatalf("additive plan must not archive missing products: %+v", plan.Groups)
+	}
+	cp := findProduct(plan, "craftsman")
+	var archives int
+	for _, pr := range cp.Prices {
+		if pr.Action == PriceArchive {
+			archives++
+		}
+	}
+	if archives != 0 {
+		t.Fatalf("additive plan must not archive missing prices: %+v", cp.Prices)
+	}
+}
+
 func TestPlan_ReactivateArchivedDeclaredPrice(t *testing.T) {
 	m := loadFrom(t, planManifest)
 	f := newFakeApplier()

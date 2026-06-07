@@ -21,12 +21,21 @@ type fakeServiceTokenResolver struct {
 	looksLikeServiceToken bool
 	resolved              *controlplane.ResolvedServiceToken
 	err                   error
+	serviceJWTResolved    *controlplane.ResolvedServiceToken
+	serviceJWTErr         error
 }
 
 func (f fakeServiceTokenResolver) LooksLikeServiceToken(string) bool { return f.looksLikeServiceToken }
 
 func (f fakeServiceTokenResolver) ResolveServiceToken(context.Context, string) (*controlplane.ResolvedServiceToken, error) {
 	return f.resolved, f.err
+}
+
+func (f fakeServiceTokenResolver) ResolveServiceJWT(context.Context, string) (*controlplane.ResolvedServiceToken, error) {
+	if f.serviceJWTResolved != nil || f.serviceJWTErr != nil {
+		return f.serviceJWTResolved, f.serviceJWTErr
+	}
+	return nil, authcore.ErrInvalidServiceJWT
 }
 
 func newServiceTokenTestRouter(resolver ServiceTokenResolver, perm string) *gin.Engine {
@@ -93,6 +102,22 @@ func TestServiceTokenRequired_SucceedsForCorrectTenantAndPermission(t *testing.T
 		looksLikeServiceToken: true,
 		resolved: &controlplane.ResolvedServiceToken{
 			AuthKitTenantSlug: "operator",
+			TenantID:          tenant.DefaultID,
+			TenantSlug:        tenant.DefaultSlug,
+			Permissions:       []string{controlplane.PermCreditsWrite},
+		},
+	}
+	r := newServiceTokenTestRouter(resolver, controlplane.PermCreditsWrite)
+	w := doServiceTokenRequest(r, true)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), tenant.DefaultID.String())
+}
+
+func TestServiceTokenRequired_SucceedsForServiceJWT(t *testing.T) {
+	resolver := fakeServiceTokenResolver{
+		looksLikeServiceToken: false,
+		serviceJWTResolved: &controlplane.ResolvedServiceToken{
+			AuthKitTenantSlug: "cozy-art",
 			TenantID:          tenant.DefaultID,
 			TenantSlug:        tenant.DefaultSlug,
 			Permissions:       []string{controlplane.PermCreditsWrite},

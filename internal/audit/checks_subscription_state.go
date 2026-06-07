@@ -30,7 +30,7 @@ func (c *CheckActiveSubscriptionPastPeriodEnd) Run(ctx context.Context, db bun.I
 
 	var results []result
 	q := db.NewRaw(`
-		SELECT id, user_id, current_period_ends_at
+		SELECT id, tenant_subject_id::text AS user_id, current_period_ends_at
 		FROM billing.subscriptions
 		WHERE status = 'active'
 		  AND current_period_ends_at < NOW()
@@ -86,7 +86,7 @@ func (c *CheckCancelledWithoutMetadata) Run(ctx context.Context, db bun.IDB, opt
 
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, cancelled_at, cancel_type, updated_at
+		SELECT id, tenant_subject_id::text AS user_id, cancelled_at, cancel_type, updated_at
 		FROM billing.subscriptions
 		WHERE status = 'cancelled'
 		  AND (cancelled_at IS NULL OR cancel_type IS NULL)
@@ -148,7 +148,7 @@ func (c *CheckPastDueWithoutRetry) Run(ctx context.Context, db bun.IDB, opts Opt
 
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, retry_attempts
+		SELECT id, tenant_subject_id::text AS user_id, retry_attempts
 		FROM billing.subscriptions
 		WHERE status = 'past_due'
 		  AND next_retry_at IS NULL
@@ -208,7 +208,7 @@ func (c *CheckInvalidPeriodDates) Run(ctx context.Context, db bun.IDB, opts Opti
 
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, current_period_starts_at, current_period_ends_at
+		SELECT id, tenant_subject_id::text AS user_id, current_period_starts_at, current_period_ends_at
 		FROM billing.subscriptions
 		WHERE current_period_starts_at IS NOT NULL
 		  AND current_period_ends_at IS NOT NULL
@@ -264,7 +264,7 @@ func (c *CheckEndedBeforeCancelled) Run(ctx context.Context, db bun.IDB, opts Op
 
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, ended_at, cancelled_at
+		SELECT id, tenant_subject_id::text AS user_id, ended_at, cancelled_at
 		FROM billing.subscriptions
 		WHERE ended_at IS NOT NULL
 		  AND cancelled_at IS NOT NULL

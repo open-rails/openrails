@@ -24,6 +24,9 @@ var (
 )
 
 func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod) error {
+	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, m.TenantSubjectID); err != nil {
+		return err
+	}
 	res, err := r.db.Q(ctx).NewInsert().Model(m).Exec(ctx)
 	if err != nil {
 		return err
@@ -76,9 +79,13 @@ func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, err
+	}
 	methods := []*models.PaymentMethod{}
-	err := r.db.Q(ctx).NewSelect().Model(&methods).
-		Where("pm.user_id = ?", userID).
+	err = r.db.Q(ctx).NewSelect().Model(&methods).
+		Where("pm.tenant_subject_id = ?", tsid).
 		OrderExpr("pm.created_at DESC").
 		Scan(ctx)
 	if err != nil {
@@ -88,8 +95,12 @@ func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*
 }
 
 func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*models.PaymentMethod, int64, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, 0, err
+	}
 	countQuery := r.db.Q(ctx).NewSelect().Model((*models.PaymentMethod)(nil)).
-		Where("pm.user_id = ?", userID)
+		Where("pm.tenant_subject_id = ?", tsid)
 
 	total, err := countQuery.Count(ctx)
 	if err != nil {
@@ -98,7 +109,7 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 
 	methods := []*models.PaymentMethod{}
 	dataQuery := r.db.Q(ctx).NewSelect().Model(&methods).
-		Where("pm.user_id = ?", userID).
+		Where("pm.tenant_subject_id = ?", tsid).
 		Relation("Subscriptions").
 		Relation("Subscriptions.Product").
 		OrderExpr("pm.created_at DESC")
@@ -186,9 +197,13 @@ func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.Paym
 // GetNMIBackedByUserID returns all payment methods for NMI-backed processors for a user
 func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
 	nmiProcessors := processors.GetNMIBackedProcessorsList()
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, err
+	}
 	methods := []*models.PaymentMethod{}
 	if err := r.db.Q(ctx).NewSelect().Model(&methods).
-		Where("pm.user_id = ?", userID).
+		Where("pm.tenant_subject_id = ?", tsid).
 		Where("pm.processor IN (?)", bun.In(nmiProcessors)).
 		OrderExpr("pm.created_at DESC").
 		Scan(ctx); err != nil {
@@ -198,10 +213,14 @@ func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID str
 }
 
 func (r *PaymentMethodRepo) ExistsForUser(ctx context.Context, id uuid.UUID, userID string) (bool, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return false, err
+	}
 	count, err := r.db.Q(ctx).NewSelect().
 		Model((*models.PaymentMethod)(nil)).
 		Where("pm.id = ?", id).
-		Where("pm.user_id = ?", userID).
+		Where("pm.tenant_subject_id = ?", tsid).
 		Count(ctx)
 	if err != nil {
 		return false, err

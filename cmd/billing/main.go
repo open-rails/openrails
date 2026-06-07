@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/audit"
-	tenantbootstrap "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/embedded"
@@ -161,7 +160,7 @@ func main() {
 	mintOperatorJWTCmd.Flags().String("role", "", "Tenant role to assign (default openrails-operator)")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, bootstrapTenantsCmd, mintOperatorServiceTokenCmd, mintTenantSubjectServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, bootstrapTenantsCmd, newBootstrapCmd(), mintOperatorServiceTokenCmd, mintTenantSubjectServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		log.WithError(err).Fatal("Failed to execute command")
@@ -213,13 +212,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 			"service_token_secret": res.ServiceTokenSecret,
 		}).
 			Warn("control plane: initial operator service token minted; capture the secret from logs now (shown once)")
-	}
-
-	tenantBootstrapCtx, tenantBootstrapCancel := context.WithCancel(context.Background())
-	defer tenantBootstrapCancel()
-	if err := tenantbootstrap.ReconcileTenantManifest(tenantBootstrapCtx, cfg, embcp.Get(embeddedApp.App())); err != nil {
-		cleanupOnError = true
-		return fmt.Errorf("tenant manifest bootstrap: %w", err)
 	}
 
 	cleanupOnError = false
@@ -302,7 +294,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	tenantBootstrapCancel()
 	if workerCancel != nil {
 		workerCancel()
 	}

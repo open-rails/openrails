@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -78,7 +79,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		UserID:                  userID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -93,15 +94,15 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	require.NoError(t, err)
 
 	paidEnt := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     periodStart,
-		EndAt:       &paidEnd,
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &subID,
-		CreatedAt:   clock.Now().UTC(),
-		UpdatedAt:   clock.Now().UTC(),
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         periodStart,
+		EndAt:           &paidEnd,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &subID,
+		CreatedAt:       clock.Now().UTC(),
+		UpdatedAt:       clock.Now().UTC(),
 	}
 	_, err = bunDB.NewInsert().Model(paidEnt).Exec(ctx)
 	require.NoError(t, err)

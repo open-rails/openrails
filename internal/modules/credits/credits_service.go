@@ -390,6 +390,24 @@ func (s *CreditsService) getCreditTypeByNameTx(ctx context.Context, tx bun.Tx, n
 	return ct, nil
 }
 
+// ensureTenantSubject upserts the billing.tenant_subjects row for a self-service
+// subject so the credit-write FKs added in migration 076 are satisfied on a
+// subject's FIRST credit operation (deposit/hold/usage). ON CONFLICT DO NOTHING.
+func ensureTenantSubject(ctx context.Context, db bun.IDB, tenantID, tsid uuid.UUID) error {
+	if tsid == uuid.Nil {
+		return nil
+	}
+	if tenantID == uuid.Nil {
+		tenantID = tenant.FromContextOrDefault(ctx).UUID()
+	}
+	_, err := db.NewRaw(
+		`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
+		 VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+		tsid, tenantID, "openrails:self", tsid.String(),
+	).Exec(ctx)
+	return err
+}
+
 func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.CreditType, params CreditDepositParams) (*models.CreditTransaction, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
@@ -398,6 +416,9 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 		return nil, err
 	}
 	ownerID := payer.UUID()
+	if err := ensureTenantSubject(ctx, tx, tenantID, ownerID); err != nil {
+		return nil, err
+	}
 	bal, err := s.lockBalance(ctx, tx, payer, params.InvokerID, ct.ID)
 	if err != nil {
 		return nil, err
@@ -553,6 +574,9 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 		return nil, err
 	}
 	ownerID := ownerOrg.UUID()
+	if err := ensureTenantSubject(ctx, tx, tenantID, ownerID); err != nil {
+		return nil, err
+	}
 
 	// Idempotency: treat (tenant, payer, credit_type, source, source_id) as a
 	// unique key for holds. This prevents duplicate held_balance reservations on

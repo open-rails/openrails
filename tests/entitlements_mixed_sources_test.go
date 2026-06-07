@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,7 +67,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 
 	_, err = suite.BunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		UserID:                  userID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -118,11 +119,11 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 
 	// Admin manual grant: extra +5 days, should schedule after subscription end too.
 	adminGrant := &models.AdminGrant{
-		ID:        uuid.New(),
-		UserID:    userID,
-		GrantedBy: "admin",
-		Reason:    "test",
-		CreatedAt: clock.Now().UTC(),
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		GrantedBy:       "admin",
+		Reason:          "test",
+		CreatedAt:       clock.Now().UTC(),
 	}
 	_, err = suite.BunDB.NewInsert().Model(adminGrant).Exec(ctx)
 	require.NoError(t, err)
@@ -196,15 +197,15 @@ func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
 
 	// Insert an entitlement window that is currently active.
 	ent := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: entName,
-		StartAt:     now.Add(-1 * time.Hour),
-		EndAt:       nil, // active indefinitely
-		SourceType:  models.EntitlementSourceAdmin,
-		SourceID:    ptrUUID(uuid.New()),
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     entName,
+		StartAt:         now.Add(-1 * time.Hour),
+		EndAt:           nil, // active indefinitely
+		SourceType:      models.EntitlementSourceAdmin,
+		SourceID:        ptrUUID(uuid.New()),
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
 	require.NoError(t, err)

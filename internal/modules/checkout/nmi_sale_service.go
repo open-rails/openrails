@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -130,16 +131,16 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 	}
 
 	attempt, err := s.PurchaseService.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
-		ID:            uuidutil.NewV7(),
-		UserID:        user.ID,
-		PriceID:       price.ID,
-		Processor:     models.Processor(provider),
-		TransactionID: attemptTransactionID,
-		Amount:        price.Amount,
-		ListAmount:    price.Amount,
-		Currency:      price.Currency,
-		Status:        payments.PaymentStatusPendingValue,
-		Metadata:      attemptMetadata,
+		ID:              uuidutil.NewV7(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(user.ID).UUID(),
+		PriceID:         price.ID,
+		Processor:       models.Processor(provider),
+		TransactionID:   attemptTransactionID,
+		Amount:          price.Amount,
+		ListAmount:      price.Amount,
+		Currency:        price.Currency,
+		Status:          payments.PaymentStatusPendingValue,
+		Metadata:        attemptMetadata,
 	})
 	if err != nil {
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)

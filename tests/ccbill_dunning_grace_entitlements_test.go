@@ -56,7 +56,7 @@ func TestCCBillDunningGraceEntitlements(t *testing.T) {
 
 	sub := suite.GetSubscriptionByProcessorID(subID)
 	require.NotNil(t, sub)
-	require.Equal(t, userID, sub.UserID)
+	require.Equal(t, userID, sub.TenantSubjectID.String())
 	require.Equal(t, models.ProcessorCCBill, sub.Processor)
 
 	require.NotNil(t, sub.CurrentPeriodEndsAt)

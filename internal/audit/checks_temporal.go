@@ -32,7 +32,7 @@ func (c *CheckStalePendingSubscription) Run(ctx context.Context, db bun.IDB, opt
 	// 2. It's been pending for more than 24 hours after intended start
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, current_period_starts_at, created_at
+		SELECT id, tenant_subject_id::text AS user_id, current_period_starts_at, created_at
 		FROM billing.subscriptions
 		WHERE status = 'pending'
 		  AND current_period_starts_at IS NOT NULL
@@ -92,7 +92,7 @@ func (c *CheckStalePastDueMaxRetries) Run(ctx context.Context, db bun.IDB, opts 
 	// Subscriptions that have exhausted retries and should be cancelled
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, retry_attempts, current_period_ends_at
+		SELECT id, tenant_subject_id::text AS user_id, retry_attempts, current_period_ends_at
 		FROM billing.subscriptions
 		WHERE status = 'past_due'
 		  AND retry_attempts >= 5
@@ -148,7 +148,7 @@ func (c *CheckFutureDatedPayment) Run(ctx context.Context, db bun.IDB, opts Opti
 	// Allow 5 minute grace period for clock skew
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, purchased_at, amount
+		SELECT id, tenant_subject_id::text AS user_id, purchased_at, amount
 		FROM billing.payments
 		WHERE purchased_at > NOW() + INTERVAL '5 minutes'
 	`).Scan(ctx, &results)
@@ -203,7 +203,7 @@ func (c *CheckEntitlementDistantFutureStart) Run(ctx context.Context, db bun.IDB
 	// Flag entitlements that start more than 1 year in the future
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, entitlement, start_at
+		SELECT id, tenant_subject_id::text AS user_id, entitlement, start_at
 		FROM billing.entitlements
 		WHERE start_at > NOW() + INTERVAL '1 year'
 		  AND deleted_at IS NULL

@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
@@ -119,7 +120,7 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 
 	// Include payment history for this subscription
 	if s.PaymentService != nil {
-		payments, err := s.PaymentService.GetByUserID(ctx, subscription.UserID)
+		payments, err := s.PaymentService.GetByUserID(ctx, subscription.TenantSubjectID.String())
 		if err == nil {
 			// Filter to only payments for this subscription
 			for _, p := range payments {
@@ -248,10 +249,10 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 
 	// End entitlements for this subscription now
 	if s.EntitlementService != nil {
-		if err := s.EntitlementService.RevokeSourcesForSubscription(ctx, subscription.UserID, subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+		if err := s.EntitlementService.RevokeSourcesForSubscription(ctx, subscription.TenantSubjectID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 			log.WithFields(log.Fields{
 				"subscription_id": subscription.ID,
-				"user_id":         subscription.UserID,
+				"user_id":         subscription.TenantSubjectID.String(),
 				"error":           err.Error(),
 			}).Error("Failed to revoke entitlements during admin subscription cancellation")
 		}
@@ -259,15 +260,15 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 
 	// Add notification
 	notification := &models.NotificationQueue{
-		ID:        uuidutil.NewV7(),
-		UserID:    subscription.UserID,
-		EventType: models.NotificationPremiumEnded,
-		Data:      map[string]any{"reason": string(PremiumEndReasonAdmin)},
+		ID:              uuidutil.NewV7(),
+		TenantSubjectID: subscription.TenantSubjectID,
+		EventType:       models.NotificationPremiumEnded,
+		Data:            map[string]any{"reason": string(PremiumEndReasonAdmin)},
 	}
 	if err := s.NotificationService.Create(ctx, notification); err != nil {
 		log.WithFields(log.Fields{
 			"subscription_id":   subscription.ID,
-			"user_id":           subscription.UserID,
+			"user_id":           subscription.TenantSubjectID.String(),
 			"notification_type": notification.EventType,
 			"error":             err.Error(),
 		}).Error("Failed to create notification during admin subscription operation")
@@ -287,7 +288,7 @@ func (s *AdminSubscriptionService) logCancellationEvent(ctx context.Context, sub
 	if err := s.EventLogService.LogAdminSubscriptionCancellation(ctx, subscription, reason, s.now()); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"subscription_id": subscription.ID,
-			"user_id":         subscription.UserID,
+			"user_id":         subscription.TenantSubjectID.String(),
 		}).Warn("Failed to log admin subscription cancellation to ClickHouse")
 	}
 }
@@ -398,9 +399,9 @@ func (s *AdminSubscriptionService) GetAllNotifications(ctx context.Context, quer
 // SendManualNotification sends a manual notification (admin)
 func (s *AdminSubscriptionService) SendManualNotification(ctx context.Context, userID string, eventType models.NotificationEventType, message string) error {
 	notification := &models.NotificationQueue{
-		ID:        uuidutil.NewV7(),
-		UserID:    userID,
-		EventType: eventType,
+		ID:              uuidutil.NewV7(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		EventType:       eventType,
 		Data: map[string]any{
 			"message": message,
 			"source":  "admin_manual",

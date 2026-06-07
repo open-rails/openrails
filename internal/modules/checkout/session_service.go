@@ -30,6 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -395,7 +396,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	}
 	session := &models.CheckoutSession{
 		ID:              uuidutil.NewV7(),
-		UserID:          user.ID,
+		TenantSubjectID: identity.TenantSubjectIDFromString(user.ID).UUID(),
 		PriceID:         price.ID,
 		Mode:            mode,
 		Processor:       models.Processor(processor),
@@ -439,7 +440,7 @@ func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.
 	if err != nil {
 		return nil, ErrCheckoutSessionNotFound
 	}
-	if user == nil || strings.TrimSpace(user.ID) == "" || session.UserID != user.ID {
+	if user == nil || strings.TrimSpace(user.ID) == "" || session.TenantSubjectID.String() != user.ID {
 		return nil, ErrCheckoutSessionForbidden
 	}
 
@@ -459,7 +460,7 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 	if err != nil {
 		return nil, ErrCheckoutSessionNotFound
 	}
-	if user == nil || strings.TrimSpace(user.ID) == "" || session.UserID != user.ID {
+	if user == nil || strings.TrimSpace(user.ID) == "" || session.TenantSubjectID.String() != user.ID {
 		return nil, ErrCheckoutSessionForbidden
 	}
 
@@ -670,7 +671,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		if s.solanaPayService == nil {
 			return fmt.Errorf("%w: solana pay service unavailable", ErrCheckoutSessionValidation)
 		}
-		result, err := s.solanaPayService.GeneratePayment(ctx, session.UserID, session.PriceID, tokenSymbol, &session.ID)
+		result, err := s.solanaPayService.GeneratePayment(ctx, session.TenantSubjectID.String(), session.PriceID, tokenSymbol, &session.ID)
 		if err != nil {
 			return err
 		}
@@ -845,7 +846,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 		if err != nil || product == nil {
 			return fmt.Errorf("%w: product not found", ErrCheckoutSessionValidation)
 		}
-		conflict, err := s.checkoutService.CheckSubscriptionConflict(ctx, session.UserID, price, product)
+		conflict, err := s.checkoutService.CheckSubscriptionConflict(ctx, session.TenantSubjectID.String(), price, product)
 		if err != nil {
 			return fmt.Errorf("%w: failed to check existing subscriptions: %v", ErrCheckoutSessionValidation, err)
 		}
@@ -914,7 +915,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionPayRequest(ctx cont
 		if perr != nil || product == nil {
 			return fmt.Errorf("%w: product not found", ErrCheckoutSessionValidation)
 		}
-		conflict, cerr := s.checkoutService.CheckSubscriptionConflict(ctx, session.UserID, price, product)
+		conflict, cerr := s.checkoutService.CheckSubscriptionConflict(ctx, session.TenantSubjectID.String(), price, product)
 		if cerr != nil {
 			return fmt.Errorf("%w: failed to check existing subscriptions: %v", ErrCheckoutSessionValidation, cerr)
 		}
@@ -1019,7 +1020,7 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 	sig := strings.TrimSpace(req.Payment.Signature)
 	sub, err := s.solanaEnroll.ConfirmEnrollment(ctx, recurring.EnrollInput{
 		TenantID:         tenantID,
-		UserID:           session.UserID,
+		UserID:           session.TenantSubjectID.String(),
 		UserEmail:        email,
 		PriceID:          session.PriceID,
 		SubscriberWallet: wallet,
@@ -1114,7 +1115,7 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 		}
 		return nil, fmt.Errorf("failed to load subscription: %w", err)
 	}
-	if sub == nil || sub.UserID != user.ID {
+	if sub == nil || sub.TenantSubjectID.String() != user.ID {
 		// Do not leak existence of someone else's subscription.
 		return nil, fmt.Errorf("%w: subscription not found", ErrCheckoutSessionValidation)
 	}
@@ -1169,7 +1170,7 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 	expiresAt := now.Add(defaultCheckoutSessionTTL)
 	session := &models.CheckoutSession{
 		ID:              uuidutil.NewV7(),
-		UserID:          user.ID,
+		TenantSubjectID: identity.TenantSubjectIDFromString(user.ID).UUID(),
 		PriceID:         sessionPriceID,
 		Mode:            mode,
 		Processor:       models.ProcessorSolana,
@@ -1724,7 +1725,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	}
 
 	result, err := s.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		UserID:        session.UserID,
+		UserID:        session.TenantSubjectID.String(),
 		PriceID:       session.PriceID,
 		Processor:     "solana",
 		TransactionID: signature,
@@ -1771,7 +1772,7 @@ func validateSolanaPaymentMatchesSession(payment *models.Payment, session *model
 	if payment == nil || session == nil {
 		return fmt.Errorf("%w: solana payment does not match checkout session", ErrCheckoutSessionConflict)
 	}
-	if payment.UserID != session.UserID || payment.PriceID != session.PriceID || payment.Amount != session.Amount || !strings.EqualFold(payment.Currency, session.Currency) {
+	if payment.TenantSubjectID.String() != session.TenantSubjectID.String() || payment.PriceID != session.PriceID || payment.Amount != session.Amount || !strings.EqualFold(payment.Currency, session.Currency) {
 		return fmt.Errorf("%w: solana payment does not match checkout session", ErrCheckoutSessionConflict)
 	}
 	if strings.TrimSpace(fmt.Sprint(payment.Metadata["solana_reference"])) != strings.TrimSpace(reference) {
@@ -1931,7 +1932,7 @@ func (s *CheckoutSessionService) FindOpenCCBillReservation(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if session.UserID != userID || session.PriceID != priceID || session.Processor != models.ProcessorCCBill {
+	if session.TenantSubjectID.String() != userID || session.PriceID != priceID || session.Processor != models.ProcessorCCBill {
 		return nil, ErrCheckoutSessionConflict
 	}
 	if s.isTerminal(session.Status) || s.isExpired(session) {
@@ -2264,7 +2265,7 @@ func solanaBuildRequestFromSession(session *models.CheckoutSession, account, tok
 	}
 
 	return &solanamodule.PaymentTransactionBuildRequest{
-		UserID:      session.UserID,
+		UserID:      session.TenantSubjectID.String(),
 		PriceID:     session.PriceID,
 		TokenSymbol: tokenSymbol,
 		UserWallet:  account,
@@ -2604,7 +2605,7 @@ func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Conte
 	// is not funded yet the subscribe tx has not landed → stay pending.
 	sub, err := s.solanaEnroll.ConfirmEnrollment(ctx, recurring.EnrollInput{
 		TenantID:         tenantID,
-		UserID:           session.UserID,
+		UserID:           session.TenantSubjectID.String(),
 		PriceID:          session.PriceID,
 		SubscriberWallet: wallet,
 		PlanID:           terms.planID,
@@ -2668,7 +2669,7 @@ func (s *CheckoutSessionService) tierChangeConfirmInput(ctx context.Context, ses
 	out = recurring.ConfirmTierChangeInput{
 		Signature:            signature,
 		OldSubscriptionID:    subscriptionID,
-		UserID:               session.UserID,
+		UserID:               session.TenantSubjectID.String(),
 		NewPriceID:           newPriceID,
 		NewSubscriptionPDA:   prep.NewSubscriptionPDA,
 		NewPlanID:            prepIn.NewPlanID,

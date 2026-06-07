@@ -22,6 +22,9 @@ func NewCheckoutSessionRepo(d *db.DB) *CheckoutSessionRepo {
 }
 
 func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.CheckoutSession) error {
+	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, session.TenantSubjectID); err != nil {
+		return err
+	}
 	res, err := r.db.Q(ctx).NewInsert().Model(session).Exec(ctx)
 	if err != nil {
 		return err
@@ -116,13 +119,17 @@ func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference stri
 
 func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceProcessor(ctx context.Context, userID string, priceID uuid.UUID, processor models.Processor) (*models.CheckoutSession, error) {
 	session := new(models.CheckoutSession)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, err
+	}
 	openStatuses := []models.CheckoutSessionStatus{
 		models.CheckoutSessionStatusCreated,
 		models.CheckoutSessionStatusRequiresAction,
 	}
 	if err := r.db.Q(ctx).NewSelect().
 		Model(session).
-		Where("cs.user_id = ?", userID).
+		Where("cs.tenant_subject_id = ?", tsid).
 		Where("cs.price_id = ?", priceID).
 		Where("cs.processor = ?", processor).
 		Where("cs.status IN (?)", bun.In(openStatuses)).

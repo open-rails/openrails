@@ -5,7 +5,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
@@ -26,8 +28,13 @@ func adminOperationsPagination(r *httprequest.Request) (int, int) {
 func GetAdminRepairAlerts(r *httprequest.Request) {
 	limit, offset := adminOperationsPagination(r)
 	items := []*models.NotificationQueue{}
+	tsid, err := repo.ResolveTenantSubjectID(r.Request.Context(), r.State.DB.Q(r.Request.Context()), uuid.Nil, "system")
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve tenant subject")
+		return
+	}
 	q := r.State.DB.Q(r.Request.Context()).NewSelect().Model(&items).
-		Where("nq.user_id = ?", "system").
+		Where("nq.tenant_subject_id = ?", tsid).
 		Where("nq.event_type = ?", models.NotificationSystemAlert).
 		Where("nq.data ->> 'kind' = ?", "billing_ledger_repair_required")
 

@@ -12,9 +12,12 @@ import (
 type Payment struct {
 	bun.BaseModel `bun:"table:billing.payments,alias:purch"`
 
-	ID      uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
-	UserID  string    `bun:"user_id,notnull" json:"user_id"`
-	PriceID uuid.UUID `bun:"price_id,notnull" json:"price_id"`
+	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// Additive during the hard-cut rollout; writers populate it and readers move to
+	// it before user_id is dropped. Join billing.tenant_subjects for issuer/subject.
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
+	PriceID         uuid.UUID `bun:"price_id,notnull" json:"price_id"`
 
 	// Optional linkage to the subscription that generated this payment
 	SubscriptionID *uuid.UUID `bun:"subscription_id,type:uuid,nullzero" json:"subscription_id,omitempty"`

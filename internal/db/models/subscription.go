@@ -35,10 +35,13 @@ const (
 type Subscription struct {
 	bun.BaseModel `bun:"table:billing.subscriptions,alias:sub"`
 
-	ID        uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
-	UserID    string    `bun:"user_id,notnull" json:"user_id"`
-	ProductID uuid.UUID `bun:"product_id,type:uuid,notnull" json:"product_id"` // Denormalized for efficient product-based lookups
-	PriceID   uuid.UUID `bun:"price_id,type:uuid,notnull" json:"price_id"`     // Required for all subscriptions
+	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// Additive during the hard-cut rollout; writers populate it and readers move to
+	// it before user_id is dropped. Join billing.tenant_subjects for issuer/subject.
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
+	ProductID       uuid.UUID `bun:"product_id,type:uuid,notnull" json:"product_id"` // Denormalized for efficient product-based lookups
+	PriceID         uuid.UUID `bun:"price_id,type:uuid,notnull" json:"price_id"`     // Required for all subscriptions
 
 	// Scheduled tier change (for downgrades that take effect at end of period)
 	ScheduledPriceID *uuid.UUID `bun:"scheduled_price_id,type:uuid,nullzero" json:"scheduled_price_id,omitempty"`

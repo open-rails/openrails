@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // mintOperatorJWT mints a real, JWKS-verifiable, tenant-scoped user access token
@@ -52,22 +53,21 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 
 	org, _ := cmd.Flags().GetString("org")
 	org = strings.ToLower(strings.TrimSpace(org))
-	if org == "" && cfg != nil && cfg.Auth != nil {
-		org = strings.ToLower(strings.TrimSpace(cfg.Auth.OperatorTenantSlug))
-	}
 	if org == "" {
-		org = "operator"
+		// HARDCUT (#312): admin authority lives under the default tenant's own
+		// AuthKit org — there is no separate "operator" tenant.
+		org = tenant.DefaultSlug
 	}
 
 	email, _ := cmd.Flags().GetString("email")
 	email = strings.TrimSpace(email)
 	if email == "" {
-		email = "e2e-operator@openrails.test"
+		email = "e2e-admin@openrails.test"
 	}
 	username, _ := cmd.Flags().GetString("username")
 	username = strings.TrimSpace(username)
 	if username == "" {
-		username = "e2e-operator"
+		username = "e2e-admin"
 	}
 	role, _ := cmd.Flags().GetString("role")
 	role = strings.TrimSpace(role)
@@ -75,9 +75,10 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 		role = controlplane.OperatorRole
 	}
 
-	// 1. Ensure bootstrap authority tenant + role exist (idempotent bootstrap).
+	// 1. Ensure the bootstrap (default-tenant) AuthKit org + admin role exist
+	//    (idempotent bootstrap).
 	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		OperatorTenantSlug:      org,
+		BootstrapTenantSlug:     org,
 		MintInitialServiceToken: false,
 	}); berr != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", berr)

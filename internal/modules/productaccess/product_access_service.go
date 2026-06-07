@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/uptrace/bun"
 )
 
@@ -120,16 +121,16 @@ func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*
 			endsAt = &e
 		}
 		grant := &models.ProductAccessGrant{
-			UserID:     params.UserID,
-			ProductID:  params.ProductID,
-			SourceType: params.SourceType,
-			SourceID:   params.SourceID,
-			PaymentID:  params.PaymentID,
-			Status:     models.ProductAccessStatusActive,
-			StartsAt:   now,
-			EndsAt:     endsAt,
-			CreatedAt:  now,
-			UpdatedAt:  now,
+			TenantSubjectID: identity.TenantSubjectIDFromString(params.UserID).UUID(),
+			ProductID:       params.ProductID,
+			SourceType:      params.SourceType,
+			SourceID:        params.SourceID,
+			PaymentID:       params.PaymentID,
+			Status:          models.ProductAccessStatusActive,
+			StartsAt:        now,
+			EndsAt:          endsAt,
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		}
 		if err := r.Insert(ctx, grant); err != nil {
 			return fmt.Errorf("insert grant: %w", err)

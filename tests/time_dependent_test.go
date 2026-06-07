@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // =============================================================================
@@ -38,15 +39,15 @@ func TestEntitlementExpiry(t *testing.T) {
 	sourceID := uuid.New()
 
 	ent := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: entitlementName,
-		StartAt:     startTime,
-		EndAt:       &endAt,
-		SourceType:  models.EntitlementSourceOneOff,
-		SourceID:    &sourceID,
-		CreatedAt:   startTime,
-		UpdatedAt:   startTime,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     entitlementName,
+		StartAt:         startTime,
+		EndAt:           &endAt,
+		SourceType:      models.EntitlementSourceOneOff,
+		SourceID:        &sourceID,
+		CreatedAt:       startTime,
+		UpdatedAt:       startTime,
 	}
 	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
 	require.NoError(t, err)
@@ -103,15 +104,15 @@ func TestEntitlementStacking(t *testing.T) {
 	firstEnd := startTime.Add(15 * 24 * time.Hour)
 	firstSourceID := uuid.New()
 	ent1 := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: entitlementName,
-		StartAt:     startTime,
-		EndAt:       &firstEnd,
-		SourceType:  models.EntitlementSourceOneOff,
-		SourceID:    &firstSourceID,
-		CreatedAt:   startTime,
-		UpdatedAt:   startTime,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     entitlementName,
+		StartAt:         startTime,
+		EndAt:           &firstEnd,
+		SourceType:      models.EntitlementSourceOneOff,
+		SourceID:        &firstSourceID,
+		CreatedAt:       startTime,
+		UpdatedAt:       startTime,
 	}
 	_, err := suite.BunDB.NewInsert().Model(ent1).Exec(ctx)
 	require.NoError(t, err)
@@ -121,15 +122,15 @@ func TestEntitlementStacking(t *testing.T) {
 	secondEnd := secondStart.Add(15 * 24 * time.Hour) // 30 days from original start
 	secondSourceID := uuid.New()
 	ent2 := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: entitlementName,
-		StartAt:     secondStart,
-		EndAt:       &secondEnd,
-		SourceType:  models.EntitlementSourceOneOff,
-		SourceID:    &secondSourceID,
-		CreatedAt:   startTime,
-		UpdatedAt:   startTime,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     entitlementName,
+		StartAt:         secondStart,
+		EndAt:           &secondEnd,
+		SourceType:      models.EntitlementSourceOneOff,
+		SourceID:        &secondSourceID,
+		CreatedAt:       startTime,
+		UpdatedAt:       startTime,
 	}
 	_, err = suite.BunDB.NewInsert().Model(ent2).Exec(ctx)
 	require.NoError(t, err)
@@ -176,15 +177,15 @@ func TestIndefiniteEntitlement(t *testing.T) {
 
 	// Grant an indefinite entitlement (EndAt is nil)
 	ent := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: entitlementName,
-		StartAt:     startTime,
-		EndAt:       nil, // Indefinite
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &sourceID,
-		CreatedAt:   startTime,
-		UpdatedAt:   startTime,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     entitlementName,
+		StartAt:         startTime,
+		EndAt:           nil, // Indefinite
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &sourceID,
+		CreatedAt:       startTime,
+		UpdatedAt:       startTime,
 	}
 	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
 	require.NoError(t, err)
@@ -249,15 +250,15 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 
 	// Create a paid-term entitlement linked to the subscription
 	ent := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     startTime,
-		EndAt:       &periodEnd,
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &sub.ID,
-		CreatedAt:   startTime,
-		UpdatedAt:   startTime,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         startTime,
+		EndAt:           &periodEnd,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &sub.ID,
+		CreatedAt:       startTime,
+		UpdatedAt:       startTime,
 	}
 	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
 	require.NoError(t, err)
@@ -362,15 +363,15 @@ func TestAdminRevokeAccess(t *testing.T) {
 
 	// Create an indefinite entitlement linked to the subscription
 	ent := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     startTime,
-		EndAt:       nil, // Indefinite while subscription is active
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &sub.ID,
-		CreatedAt:   startTime,
-		UpdatedAt:   startTime,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         startTime,
+		EndAt:           nil, // Indefinite while subscription is active
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &sub.ID,
+		CreatedAt:       startTime,
+		UpdatedAt:       startTime,
 	}
 	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
 	require.NoError(t, err)
@@ -556,15 +557,15 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 
 	// Create an indefinite entitlement linked to the subscription
 	ent := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     startTime.Add(-30 * 24 * time.Hour),
-		EndAt:       nil, // Indefinite
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &sub.ID,
-		CreatedAt:   startTime,
-		UpdatedAt:   startTime,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         startTime.Add(-30 * 24 * time.Hour),
+		EndAt:           nil, // Indefinite
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &sub.ID,
+		CreatedAt:       startTime,
+		UpdatedAt:       startTime,
 	}
 	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
 	require.NoError(t, err)
@@ -846,14 +847,14 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 	t.Run("payment PurchasedAt uses mock clock time", func(t *testing.T) {
 		// Create a payment with TransactionID (required unique field)
 		payment := &models.Payment{
-			ID:            uuid.New(),
-			UserID:        userID,
-			PriceID:       priceID,
-			Processor:     models.ProcessorMobius,
-			TransactionID: "test-tx-" + uuid.New().String()[:8],
-			Amount:        999,
-			Currency:      "usd",
-			PurchasedAt:   mockClock.Now(),
+			ID:              uuid.New(),
+			TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+			PriceID:         priceID,
+			Processor:       models.ProcessorMobius,
+			TransactionID:   "test-tx-" + uuid.New().String()[:8],
+			Amount:          999,
+			Currency:        "usd",
+			PurchasedAt:     mockClock.Now(),
 		}
 
 		err := paymentService.Create(ctx, payment)
@@ -871,14 +872,14 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 
 		// Create another payment with unique TransactionID
 		payment := &models.Payment{
-			ID:            uuid.New(),
-			UserID:        userID,
-			PriceID:       priceID,
-			Processor:     models.ProcessorMobius,
-			TransactionID: "test-tx-" + uuid.New().String()[:8],
-			Amount:        999,
-			Currency:      "usd",
-			PurchasedAt:   mockClock.Now(),
+			ID:              uuid.New(),
+			TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+			PriceID:         priceID,
+			Processor:       models.ProcessorMobius,
+			TransactionID:   "test-tx-" + uuid.New().String()[:8],
+			Amount:          999,
+			Currency:        "usd",
+			PurchasedAt:     mockClock.Now(),
 		}
 
 		err := paymentService.Create(ctx, payment)
@@ -922,15 +923,15 @@ func TestSubscriptionExpiryAtExactBoundary(t *testing.T) {
 
 	// Create entitlement that ends exactly at period end
 	ent := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     startTime,
-		EndAt:       &periodEnd,
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &sub.ID,
-		CreatedAt:   startTime,
-		UpdatedAt:   startTime,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         startTime,
+		EndAt:           &periodEnd,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &sub.ID,
+		CreatedAt:       startTime,
+		UpdatedAt:       startTime,
 	}
 	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
 	require.NoError(t, err)
@@ -1057,12 +1058,12 @@ func TestVaultTimestamps(t *testing.T) {
 
 	// Create a payment method directly
 	pm := &models.PaymentMethod{
-		ID:        uuid.New(),
-		UserID:    userID,
-		Processor: models.ProcessorMobius,
-		VaultID:   "test-vault-" + uuid.New().String()[:8],
-		CreatedAt: mockClock.Now(),
-		UpdatedAt: mockClock.Now(),
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Processor:       models.ProcessorMobius,
+		VaultID:         "test-vault-" + uuid.New().String()[:8],
+		CreatedAt:       mockClock.Now(),
+		UpdatedAt:       mockClock.Now(),
 	}
 	_, err := suite.BunDB.NewInsert().Model(pm).Exec(ctx)
 	require.NoError(t, err)

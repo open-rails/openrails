@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 func TestAdminEntitlementGrantCreatesSourceRecord(t *testing.T) {
@@ -40,14 +41,14 @@ func TestAdminEntitlementGrantCreatesSourceRecord(t *testing.T) {
 	var ent models.Entitlement
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ent))
 
-	require.Equal(t, userID, ent.UserID)
+	require.Equal(t, userID, ent.TenantSubjectID.String())
 	require.Equal(t, "premium", ent.Entitlement)
 	require.Equal(t, models.EntitlementSourceAdmin, ent.SourceType)
 	require.NotNil(t, ent.SourceID)
 
 	var grant models.AdminGrant
 	require.NoError(t, suite.BunDB.NewSelect().Model(&grant).Where("id = ?", *ent.SourceID).Scan(req.Context()))
-	require.Equal(t, userID, grant.UserID)
+	require.Equal(t, userID, grant.TenantSubjectID.String())
 	require.Equal(t, "admin_entitlement", grant.Reason)
 	require.Nil(t, grant.PriceID)
 }
@@ -83,15 +84,15 @@ func TestAdminEntitlementAppendsAfterLatestEnd(t *testing.T) {
 	start := fixedNow
 	subEnd := fixedNow.Add(30 * 24 * time.Hour)
 	existing := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     start,
-		EndAt:       &subEnd,
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &subID,
-		CreatedAt:   fixedNow,
-		UpdatedAt:   fixedNow,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         start,
+		EndAt:           &subEnd,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &subID,
+		CreatedAt:       fixedNow,
+		UpdatedAt:       fixedNow,
 	}
 	_, err := suite.BunDB.NewInsert().Model(existing).Exec(context.Background())
 	require.NoError(t, err)

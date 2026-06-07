@@ -43,7 +43,6 @@ type Entitlement struct {
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
-	UserID          string    `bun:"user_id,notnull" json:"user_id"`
 	Entitlement     string    `bun:"entitlement,notnull" json:"entitlement"`
 
 	StartAt time.Time  `bun:"start_at,notnull" json:"start_at"`

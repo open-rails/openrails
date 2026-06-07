@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -664,16 +665,16 @@ func (s *CheckoutService) processNMISubscription(
 	}
 
 	attempt, err := s.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
-		ID:            uuidutil.NewV7(),
-		UserID:        user.ID,
-		PriceID:       price.ID,
-		Processor:     models.Processor(provider),
-		TransactionID: nmiSubscriptionAttemptTransactionID(orderID),
-		Amount:        price.Amount,
-		ListAmount:    price.Amount,
-		Currency:      price.Currency,
-		Status:        payments.PaymentStatusPendingValue,
-		Metadata:      nmiSubscriptionAttemptMetadata(idempotencyKey, orderID, "pending", "", "", subscriptionID, paymentMethodID, delayedStart, req.Metadata),
+		ID:              uuidutil.NewV7(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(user.ID).UUID(),
+		PriceID:         price.ID,
+		Processor:       models.Processor(provider),
+		TransactionID:   nmiSubscriptionAttemptTransactionID(orderID),
+		Amount:          price.Amount,
+		ListAmount:      price.Amount,
+		Currency:        price.Currency,
+		Status:          payments.PaymentStatusPendingValue,
+		Metadata:        nmiSubscriptionAttemptMetadata(idempotencyKey, orderID, "pending", "", "", subscriptionID, paymentMethodID, delayedStart, req.Metadata),
 	})
 	if err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
@@ -790,7 +791,7 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 	}
 	subscription := &models.Subscription{
 		ID:                       subscriptionID,
-		UserID:                   user.ID,
+		TenantSubjectID:          identity.TenantSubjectIDFromString(user.ID).UUID(),
 		ProductID:                price.ProductID,
 		PriceID:                  price.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
@@ -1675,7 +1676,7 @@ func (s *CheckoutService) processUpgrade(
 
 	newSubscription := &models.Subscription{
 		ID:                       newSubscriptionID,
-		UserID:                   user.ID,
+		TenantSubjectID:          identity.TenantSubjectIDFromString(user.ID).UUID(),
 		ProductID:                newPrice.ProductID,
 		PriceID:                  newPrice.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec),
@@ -1994,7 +1995,7 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
 		}
 		// Verify ownership
-		if existingSub.UserID != user.ID {
+		if existingSub.TenantSubjectID.String() != user.ID {
 			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
 		}
 	} else {
@@ -2089,7 +2090,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	var existingSub *models.Subscription
 	if req.SubscriptionID != uuid.Nil {
 		existingSub, err = s.SubscriptionService.GetByID(ctx, req.SubscriptionID)
-		if err != nil || existingSub.UserID != user.ID {
+		if err != nil || existingSub.TenantSubjectID.String() != user.ID {
 			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
 		}
 	} else {

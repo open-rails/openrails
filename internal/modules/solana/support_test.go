@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -128,10 +129,10 @@ func TestSolanaPaymentMatchesPendingRequiresSameReferenceAndSession(t *testing.T
 		Currency:  "usd",
 	}
 	payment := &models.Payment{
-		UserID:   "user_123",
-		PriceID:  priceID,
-		Amount:   1000,
-		Currency: "USD",
+		TenantSubjectID: identity.TenantSubjectIDFromString("user_123").UUID(),
+		PriceID:         priceID,
+		Amount:          1000,
+		Currency:        "USD",
 		Metadata: map[string]any{
 			"solana_reference":    "reference_123",
 			"checkout_session_id": "session_123",

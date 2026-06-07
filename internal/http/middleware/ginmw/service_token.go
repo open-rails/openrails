@@ -33,6 +33,13 @@ type ServiceTokenResolver interface {
 	ResolveServiceToken(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
 }
 
+// ServiceJWTResolver validates first-party OIDC service JWTs from registered
+// tenant issuers. Implemented by the control plane when service-JWT grants are
+// available.
+type ServiceJWTResolver interface {
+	ResolveServiceJWT(ctx context.Context, token string) (*controlplane.ResolvedServiceToken, error)
+}
+
 // ServiceTokenRequired authenticates a tenant-scoped public route with an OpenRails-issued
 // tenant service token (issue #222). It REPLACES the retired private/mTLS/api-key service
 // surface: machine/server callers (HostApps/Tensorhub reserving credits,
@@ -60,15 +67,7 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		if !resolver.LooksLikeServiceToken(token) {
-			// Not a service token (e.g. a JWT or delegated token). These public service
-			// routes accept only OpenRails-issued service tokens; reject other credentials.
-			response.UnauthorizedWithMessage(c, "openrails-issued service token required")
-			c.Abort()
-			return
-		}
-
-		resolved, err := resolver.ResolveServiceToken(c.Request.Context(), token)
+		resolved, err := resolveServiceCredential(c.Request.Context(), resolver, token)
 		if err != nil {
 			switch {
 			case errors.Is(err, authcore.ErrAccessTokenExpired):
@@ -82,6 +81,8 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 				response.ForbiddenWithMessage(c, "service_token_resource_scope_denied")
 			case errors.Is(err, authcore.ErrInvalidAccessToken):
 				response.UnauthorizedWithMessage(c, "service_token_invalid")
+			case errors.Is(err, authcore.ErrInvalidServiceJWT):
+				response.UnauthorizedWithMessage(c, "service_jwt_invalid")
 			default:
 				log.WithError(err).Warn("service token resolution failed")
 				response.UnauthorizedWithMessage(c, "service_token_invalid")
@@ -100,6 +101,16 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func resolveServiceCredential(ctx context.Context, resolver ServiceTokenResolver, token string) (*controlplane.ResolvedServiceToken, error) {
+	if resolver.LooksLikeServiceToken(token) {
+		return resolver.ResolveServiceToken(ctx, token)
+	}
+	if jwtResolver, ok := resolver.(ServiceJWTResolver); ok {
+		return jwtResolver.ResolveServiceJWT(ctx, token)
+	}
+	return nil, authcore.ErrInvalidAccessToken
 }
 
 // RequireServiceTokenTenantSubjectScope gates a route on the resolved service token's payer resource

@@ -18,11 +18,11 @@ type Options struct {
 	// neutral Required/Optional middleware for these routes (issue #282/#285).
 	Authenticator billingauth.Authenticator
 
-	// OperatorPermissionChecker, when set, makes the operator tenant the LIVE
-	// authority for admin routes (#224): after the operator-tenant gate, admin
-	// routes additionally require the openrails:admin permission evaluated live
-	// against the operator tenant. nil in verifier-only mode (legacy gate only).
-	OperatorPermissionChecker authpolicy.OperatorPermissionChecker
+	// AdminPermissionChecker is the LIVE authority for admin routes (#312): admin
+	// routes require the openrails:admin permission evaluated live against the
+	// CALLER'S OWN tenant. nil in verifier-only mode, in which case admin routes
+	// fail closed (there is no operator-tenant or role-claim fallback).
+	AdminPermissionChecker authpolicy.AdminPermissionChecker
 }
 
 // requiredMW builds the neutral "authentication required" middleware for the
@@ -132,16 +132,13 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 }
 
 func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	// HARDCUT (#312): admin authority is the LIVE openrails:admin permission held
+	// in the caller's OWN tenant — evaluated at request time by the control plane,
+	// not a claim-based operator-tenant gate. When no control plane is wired
+	// (verifier-only mode) the checker is nil and the gate fails closed.
 	mw := []router.Middleware{
 		opts.requiredMW(),
-		authpolicy.OperatorAdminRequiredMW(rt.Config, rt.DB.GetDB()),
-	}
-	// #224: when the OpenRails-owned AuthKit control plane is present, the
-	// operator tenant is the LIVE authority — require the openrails:admin permission
-	// evaluated against the operator tenant at request time. This is the forward
-	// path away from the global-admin fallback.
-	if opts.OperatorPermissionChecker != nil {
-		mw = append(mw, authpolicy.OperatorPermissionRequiredMW(opts.OperatorPermissionChecker, authpolicy.PermOperatorAdmin))
+		authpolicy.AdminPermissionRequiredMW(opts.AdminPermissionChecker, authpolicy.PermAdmin),
 	}
 	// Pin a tenant-scoped DB connection for the request so RLS constrains
 	// tenant-owned admin queries (issue #227).

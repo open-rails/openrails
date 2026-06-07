@@ -11,10 +11,10 @@ import (
 )
 
 // EnsureAuthKitTenant idempotently ensures an AuthKit tenant for tenantSlug exists and is
-// seeded with the OpenRails operator role + full permission catalog, returning
+// seeded with the OpenRails admin role + full permission catalog, returning
 // the AuthKit tenant id. It is the per-tenant analogue of Bootstrap's default-tenant
 // step (issue #225): the tenancy lifecycle service calls this to create/link a
-// new tenant's operator tenant through in-process AuthKit CORE calls — never raw
+// new tenant's own AuthKit org through in-process AuthKit CORE calls — never raw
 // AuthKit SQL or a private HTTP route.
 //
 // Re-running with the same slug returns the existing AuthKit tenant id without creating a
@@ -44,7 +44,7 @@ func (c *ControlPlane) EnsureAuthKitTenant(ctx context.Context, tenantSlug strin
 			return "", fmt.Errorf("controlplane: create tenant %q: %w", slug, cerr)
 		}
 		org = created
-		log.WithField("operator_tenant", slug).Info("controlplane: created tenant operator tenant")
+		log.WithField("tenant", slug).Info("controlplane: created tenant AuthKit org")
 	}
 
 	if err := core.DefineRole(ctx, slug, OperatorRole); err != nil {

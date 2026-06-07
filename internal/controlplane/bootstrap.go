@@ -14,11 +14,11 @@ import (
 
 // BootstrapResult reports what the idempotent bootstrap did/ensured.
 type BootstrapResult struct {
-	OperatorTenantSlug string
-	OperatorTenantID   string
+	BootstrapTenantSlug string
+	BootstrapTenantID   string
 	// TenantCreated is true if CreateTenant ran (false if the AuthKit tenant already existed).
 	TenantCreated bool
-	// ServiceTokenMinted is true if an initial operator service token was minted on this run
+	// ServiceTokenMinted is true if an initial admin service token was minted on this run
 	// (false if one already existed). When true, ServiceTokenSecret holds the one-time
 	// plaintext token — it is NOT persisted by AuthKit and cannot be recovered.
 	ServiceTokenMinted bool
@@ -28,26 +28,31 @@ type BootstrapResult struct {
 
 // BootstrapOptions parameterizes the control-plane bootstrap.
 type BootstrapOptions struct {
-	// OperatorTenantSlug is the AuthKit tenant slug that operates the default tenant.
-	// When empty, defaults to "operator".
-	OperatorTenantSlug string
+	// BootstrapTenantSlug is the AuthKit tenant slug under which the default
+	// tenant's admin role + deployment admin service token are seeded (#312). When
+	// empty, defaults to the default tenant slug ("default") — there is NO
+	// separate "operator" AuthKit tenant.
+	BootstrapTenantSlug string
 
-	// InitialAdminUserID, when set, is assigned the operator role in the
-	// operator tenant (the user must already exist and be a member, or AddMember is
-	// attempted first). Optional: self-hosted bootstrap may seed the operator service token
-	// alone and add an admin user later.
+	// InitialAdminUserID, when set, is assigned the admin role in the bootstrap
+	// tenant (the user must already exist and be a member, or AddMember is
+	// attempted first). Optional: self-hosted bootstrap may seed the admin service
+	// token alone and add an admin user later.
 	InitialAdminUserID string
 
-	// MintInitialServiceToken controls whether an operator service token is minted when none exists.
-	// Defaults to true.
+	// MintInitialServiceToken controls whether a deployment admin service token is
+	// minted when none exists. Defaults to true.
 	MintInitialServiceToken bool
 }
 
 // Bootstrap idempotently ensures the OpenRails control-plane state for the
-// DEFAULT tenant (#223): the operator AuthKit tenant exists, the OpenRails operator
-// role is defined and granted the full `openrails:*` permission catalog, the
-// default tenant directory row records the operator tenant, and (optionally) an
-// initial operator service token is minted when the org has none.
+// DEFAULT tenant (#223/#312): the default tenant's AuthKit org exists, the
+// OpenRails admin role is defined and granted the full `openrails:*` permission
+// catalog, the default tenant directory row records its AuthKit org, and
+// (optionally) an initial deployment admin service token is minted when the org
+// has none. HARDCUT (#312): there is NO separate "operator" AuthKit tenant —
+// admin authority is the openrails:admin permission held under the default
+// tenant's own org (or carried on the minted admin service token).
 //
 // It runs AFTER migrations / at startup, exclusively through in-process AuthKit
 // CORE calls (CreateTenant / DefineRole / SetRolePermissions / AssignRole /
@@ -63,75 +68,76 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		return nil, errors.New("controlplane: core service unavailable")
 	}
 
-	slug := strings.ToLower(strings.TrimSpace(opts.OperatorTenantSlug))
+	slug := strings.ToLower(strings.TrimSpace(opts.BootstrapTenantSlug))
 	if slug == "" {
-		slug = "operator"
+		slug = tenant.DefaultSlug
 	}
 
-	res := &BootstrapResult{OperatorTenantSlug: slug}
+	res := &BootstrapResult{BootstrapTenantSlug: slug}
 
-	// 1. Ensure the operator tenant exists (idempotent: resolve, else create).
+	// 1. Ensure the bootstrap (default-tenant) AuthKit org exists (idempotent:
+	//    resolve, else create).
 	org, err := core.ResolveTenantBySlug(ctx, slug)
 	if err != nil {
 		if !errors.Is(err, authcore.ErrTenantNotFound) {
-			return nil, fmt.Errorf("controlplane: resolve operator tenant %q: %w", slug, err)
+			return nil, fmt.Errorf("controlplane: resolve bootstrap tenant %q: %w", slug, err)
 		}
 		created, cerr := core.CreateTenant(ctx, slug)
 		if cerr != nil {
 			if !errors.Is(cerr, authcore.ErrOwnerSlugTaken) {
-				return nil, fmt.Errorf("controlplane: create operator tenant %q: %w", slug, cerr)
+				return nil, fmt.Errorf("controlplane: create bootstrap tenant %q: %w", slug, cerr)
 			}
 			created, cerr = core.ResolveTenantBySlug(ctx, slug)
 			if cerr != nil {
-				return nil, fmt.Errorf("controlplane: resolve concurrently-created operator tenant %q: %w", slug, cerr)
+				return nil, fmt.Errorf("controlplane: resolve concurrently-created bootstrap tenant %q: %w", slug, cerr)
 			}
 		} else {
 			res.TenantCreated = true
-			log.WithField("operator_tenant", slug).Info("controlplane: created operator tenant")
+			log.WithField("bootstrap_tenant", slug).Info("controlplane: created bootstrap tenant org")
 		}
 		org = created
 	}
-	res.OperatorTenantID = org.ID
+	res.BootstrapTenantID = org.ID
 
-	// 2. Define the operator role and seed it the full OpenRails catalog
+	// 2. Define the admin role and seed it the full OpenRails catalog
 	//    (idempotent: DefineRole upserts, SetRolePermissions replaces).
 	if err := core.DefineRole(ctx, slug, OperatorRole); err != nil {
-		return nil, fmt.Errorf("controlplane: define operator role: %w", err)
+		return nil, fmt.Errorf("controlplane: define admin role: %w", err)
 	}
 	if err := core.SetRolePermissions(ctx, slug, OperatorRole, OperatorRolePermissions()); err != nil {
-		return nil, fmt.Errorf("controlplane: seed operator role permissions: %w", err)
+		return nil, fmt.Errorf("controlplane: seed admin role permissions: %w", err)
 	}
 
-	// 3. Optionally assign the operator role to an initial admin user.
+	// 3. Optionally assign the admin role to an initial admin user.
 	if adminID := strings.TrimSpace(opts.InitialAdminUserID); adminID != "" {
 		// AddMember is idempotent (ON CONFLICT DO NOTHING semantics in AuthKit);
 		// AssignRole only succeeds once the user is a member.
 		if err := core.AddMember(ctx, slug, adminID); err != nil {
-			return nil, fmt.Errorf("controlplane: add initial admin to operator tenant: %w", err)
+			return nil, fmt.Errorf("controlplane: add initial admin to bootstrap tenant: %w", err)
 		}
 		if err := core.AssignRole(ctx, slug, adminID, OperatorRole); err != nil {
-			return nil, fmt.Errorf("controlplane: assign operator role to initial admin: %w", err)
+			return nil, fmt.Errorf("controlplane: assign admin role to initial admin: %w", err)
 		}
-		log.WithFields(log.Fields{"operator_tenant": slug, "user_id": adminID}).
-			Info("controlplane: assigned operator role to initial admin")
+		log.WithFields(log.Fields{"bootstrap_tenant": slug, "user_id": adminID}).
+			Info("controlplane: assigned admin role to initial admin")
 	}
 
-	// 4. Record the operator tenant on the DEFAULT tenant directory row so tenant
-	//    resolution / admin policy can map the default tenant -> operator tenant.
-	if err := c.recordOperatorTenantOnDefaultTenant(ctx, tenant.DefaultID, org.ID, slug); err != nil {
+	// 4. Record the default tenant's AuthKit org on the DEFAULT tenant directory
+	//    row so tenant resolution / admin policy can map the default tenant -> org.
+	if err := c.recordAuthKitTenantOnDefaultTenant(ctx, tenant.DefaultID, org.ID, slug); err != nil {
 		return nil, err
 	}
 
-	// 5. Mint an initial operator service token only when the org has none yet.
+	// 5. Mint an initial deployment admin service token only when the org has none yet.
 	if opts.MintInitialServiceToken {
 		existing, lerr := core.ListServiceTokens(ctx, slug)
 		if lerr != nil {
-			return nil, fmt.Errorf("controlplane: list operator service tokens: %w", lerr)
+			return nil, fmt.Errorf("controlplane: list admin service tokens: %w", lerr)
 		}
 		if !anyLiveServiceToken(existing) {
-			name := "openrails-bootstrap-operator"
+			name := "openrails-bootstrap-admin"
 			if c.cfg != nil && c.cfg.Auth != nil && c.cfg.Auth.ControlPlane != nil {
-				if n := strings.TrimSpace(c.cfg.Auth.ControlPlane.OperatorServiceTokenName); n != "" {
+				if n := strings.TrimSpace(c.cfg.Auth.ControlPlane.BootstrapAdminServiceTokenName); n != "" {
 					name = n
 				}
 			}
@@ -141,13 +147,13 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 				Resources:   []authcore.ServiceTokenResource{TenantResource(tenant.DefaultID)},
 			})
 			if merr != nil {
-				return nil, fmt.Errorf("controlplane: mint initial operator service token: %w", merr)
+				return nil, fmt.Errorf("controlplane: mint initial admin service token: %w", merr)
 			}
 			res.ServiceTokenMinted = true
 			res.ServiceTokenSecret = secret
 			res.ServiceTokenKeyID = serviceToken.KeyID
-			log.WithFields(log.Fields{"operator_tenant": slug, "service_token_key_id": serviceToken.KeyID}).
-				Warn("controlplane: minted initial operator service token (secret shown once)")
+			log.WithFields(log.Fields{"bootstrap_tenant": slug, "service_token_key_id": serviceToken.KeyID}).
+				Warn("controlplane: minted initial admin service token (secret shown once)")
 		}
 	}
 
@@ -245,10 +251,11 @@ func anyLiveServiceToken(toks []authcore.ServiceToken) bool {
 	return false
 }
 
-// recordOperatorTenantOnDefaultTenant writes the operator tenant id/slug onto the
-// default tenant directory row (billing.tenants). billing.* is OpenRails-owned
-// control-plane state, so this is a direct, idempotent UPDATE — not AuthKit SQL.
-func (c *ControlPlane) recordOperatorTenantOnDefaultTenant(ctx context.Context, tenantID tenant.ID, authKitTenantID, authKitTenantSlug string) error {
+// recordAuthKitTenantOnDefaultTenant writes the default tenant's AuthKit org
+// id/slug onto the default tenant directory row (billing.tenants). billing.* is
+// OpenRails-owned control-plane state, so this is a direct, idempotent UPDATE —
+// not AuthKit SQL.
+func (c *ControlPlane) recordAuthKitTenantOnDefaultTenant(ctx context.Context, tenantID tenant.ID, authKitTenantID, authKitTenantSlug string) error {
 	if c.pool == nil {
 		return errors.New("controlplane: pgx pool unavailable for tenant directory update")
 	}
@@ -261,7 +268,7 @@ func (c *ControlPlane) recordOperatorTenantOnDefaultTenant(ctx context.Context, 
 		   AND (authkit_tenant_id IS DISTINCT FROM $2 OR authkit_tenant_slug IS DISTINCT FROM $3)
 	`, tenantID.String(), authKitTenantID, authKitTenantSlug)
 	if err != nil {
-		return fmt.Errorf("controlplane: record operator tenant on default tenant: %w", err)
+		return fmt.Errorf("controlplane: record authkit tenant on default tenant: %w", err)
 	}
 	return nil
 }

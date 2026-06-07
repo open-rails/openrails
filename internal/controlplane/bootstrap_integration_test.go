@@ -105,7 +105,6 @@ func newEnabledControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 			ControlPlane: &config.ControlPlaneConfig{
 				Enabled:     true,
 				Issuer:      "https://billing.test",
-				TenantMode:  "multi",
 				TokenPrefix: "openrails",
 			},
 		},
@@ -125,22 +124,23 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	res1, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: true})
 	require.NoError(t, err)
 	require.NotNil(t, res1)
-	require.True(t, res1.TenantCreated, "first run should create the operator tenant")
-	require.True(t, res1.ServiceTokenMinted, "first run should mint the initial operator service token")
+	require.True(t, res1.TenantCreated, "first run should create the bootstrap (default) tenant org")
+	require.True(t, res1.ServiceTokenMinted, "first run should mint the initial admin service token")
 	require.NotEmpty(t, res1.ServiceTokenSecret)
-	require.NotEmpty(t, res1.OperatorTenantID)
+	require.NotEmpty(t, res1.BootstrapTenantID)
 
-	// Tenant directory records the operator tenant.
+	// HARDCUT (#312): the default tenant's own AuthKit org is recorded — there is
+	// no separate "operator" tenant.
 	var authKitTenantSlug, authKitTenantID string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT authkit_tenant_slug, authkit_tenant_id FROM billing.tenants WHERE id = $1::uuid`,
 		tenant.DefaultID.String()).Scan(&authKitTenantSlug, &authKitTenantID))
-	require.Equal(t, "operator", authKitTenantSlug)
-	require.Equal(t, res1.OperatorTenantID, authKitTenantID)
+	require.Equal(t, tenant.DefaultSlug, authKitTenantSlug)
+	require.Equal(t, res1.BootstrapTenantID, authKitTenantID)
 
-	// Operator role holds the per-tenant operator catalog (full catalog EXCEPT
-	// the cross-tenant platform-superadmin permission, #226).
-	perms, err := cp.Core().GetRolePermissions(ctx, "operator", OperatorRole)
+	// The admin role holds the per-tenant catalog (full catalog EXCEPT the
+	// cross-tenant platform-superadmin permission, #226).
+	perms, err := cp.Core().GetRolePermissions(ctx, tenant.DefaultSlug, OperatorRole)
 	require.NoError(t, err)
 	require.ElementsMatch(t, OperatorRolePermissions(), perms)
 	require.NotContains(t, perms, PermPlatformSuperadmin)
@@ -149,15 +149,15 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	res2, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: true})
 	require.NoError(t, err)
 	require.NotNil(t, res2)
-	require.False(t, res2.TenantCreated, "re-run must not recreate the operator tenant")
+	require.False(t, res2.TenantCreated, "re-run must not recreate the bootstrap tenant org")
 	require.False(t, res2.ServiceTokenMinted, "re-run must not mint a second service token")
 	require.Empty(t, res2.ServiceTokenSecret)
-	require.Equal(t, res1.OperatorTenantID, res2.OperatorTenantID)
+	require.Equal(t, res1.BootstrapTenantID, res2.BootstrapTenantID)
 
 	// Exactly one service token exists after two runs.
-	serviceTokens, err := cp.Core().ListServiceTokens(ctx, "operator")
+	serviceTokens, err := cp.Core().ListServiceTokens(ctx, tenant.DefaultSlug)
 	require.NoError(t, err)
-	require.Len(t, serviceTokens, 1, "exactly one operator service token after two bootstrap runs")
+	require.Len(t, serviceTokens, 1, "exactly one admin service token after two bootstrap runs")
 	require.ElementsMatch(t, []string{ResourceKindTenant}, resourceKinds(serviceTokens[0].Resources))
 	require.Contains(t, resourceIDs(serviceTokens[0].Resources, ResourceKindTenant), tenant.DefaultID.String())
 
@@ -226,7 +226,6 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
 			ControlPlane: &config.ControlPlaneConfig{
 				Enabled:            true,
 				Issuer:             "https://billing.test",
-				TenantMode:         "multi",
 				TokenPrefix:        "openrails",
 				PlatformTenantSlug: "openrails-platform",
 			},
@@ -264,17 +263,17 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "platform identity must hold platform superadmin")
 
-	// A tenant OPERATOR admin (operator tenant, openrails:admin) is NOT a platform
+	// A per-tenant admin (openrails:admin in their OWN tenant) is NOT a platform
 	// superadmin: HasPlatformSuperadmin evaluates the platform tenant, where they are
 	// not a member.
-	require.NoError(t, cp.Core().AddMember(ctx, "operator", tenantOperatorAdminID))
-	require.NoError(t, cp.Core().AssignRole(ctx, "operator", tenantOperatorAdminID, OperatorRole))
-	opIsAdmin, err := cp.IsOperatorAdmin(ctx, "operator", tenantOperatorAdminID)
+	require.NoError(t, cp.Core().AddMember(ctx, tenant.DefaultSlug, tenantOperatorAdminID))
+	require.NoError(t, cp.Core().AssignRole(ctx, tenant.DefaultSlug, tenantOperatorAdminID, OperatorRole))
+	opIsAdmin, err := cp.IsAdmin(ctx, tenant.DefaultSlug, tenantOperatorAdminID)
 	require.NoError(t, err)
-	require.True(t, opIsAdmin, "tenant operator admin should hold operator admin")
+	require.True(t, opIsAdmin, "per-tenant admin should hold openrails:admin in their own tenant")
 	opIsPlatform, err := cp.HasPlatformSuperadmin(ctx, tenantOperatorAdminID)
 	require.NoError(t, err)
-	require.False(t, opIsPlatform, "tenant operator admin must NOT be a platform superadmin")
+	require.False(t, opIsPlatform, "per-tenant admin must NOT be a platform superadmin")
 
 	// Idempotent re-run.
 	_, err = cp.BootstrapPlatform(ctx)

@@ -30,6 +30,9 @@ func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.Produ
 	if (grant.TenantID == uuid.UUID{}) {
 		grant.TenantID = tenant.FromContextOrDefault(ctx).UUID()
 	}
+	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), grant.TenantID, grant.TenantSubjectID); err != nil {
+		return err
+	}
 	_, err := r.db.Q(ctx).NewInsert().Model(grant).Exec(ctx)
 	return err
 }
@@ -37,11 +40,16 @@ func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.Produ
 // GetActiveBySource returns the existing grant for a (user, product, source)
 // idempotency key, or nil if none. Used to make granting idempotent.
 func (r *ProductAccessGrantRepo) GetBySource(ctx context.Context, userID string, productID uuid.UUID, sourceID string) (*models.ProductAccessGrant, error) {
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), tenantID, userID)
+	if err != nil {
+		return nil, err
+	}
 	var grant models.ProductAccessGrant
-	err := r.db.Q(ctx).NewSelect().
+	err = r.db.Q(ctx).NewSelect().
 		Model(&grant).
-		Where("pag.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("pag.user_id = ?", userID).
+		Where("pag.tenant_id = ?", tenantID).
+		Where("pag.tenant_subject_id = ?", tsid).
 		Where("pag.product_id = ?", productID).
 		Where("pag.source_id = ?", sourceID).
 		Limit(1).
@@ -58,10 +66,15 @@ func (r *ProductAccessGrantRepo) GetBySource(ctx context.Context, userID string,
 // HasActiveAccess reports whether the user has an active, in-window grant for the
 // product at time t.
 func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID string, productID uuid.UUID, at time.Time) (bool, error) {
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), tenantID, userID)
+	if err != nil {
+		return false, err
+	}
 	return r.db.Q(ctx).NewSelect().
 		Model((*models.ProductAccessGrant)(nil)).
-		Where("pag.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("pag.user_id = ?", userID).
+		Where("pag.tenant_id = ?", tenantID).
+		Where("pag.tenant_subject_id = ?", tsid).
 		Where("pag.product_id = ?", productID).
 		Where("pag.status = ?", models.ProductAccessStatusActive).
 		Where("pag.revoked_at IS NULL").
@@ -72,11 +85,16 @@ func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID str
 
 // ListActiveByUser returns the user's active, in-window grants, most recent first.
 func (r *ProductAccessGrantRepo) ListActiveByUser(ctx context.Context, userID string, at time.Time) ([]models.ProductAccessGrant, error) {
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), tenantID, userID)
+	if err != nil {
+		return nil, err
+	}
 	grants := []models.ProductAccessGrant{}
 	if err := r.db.Q(ctx).NewSelect().
 		Model(&grants).
-		Where("pag.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("pag.user_id = ?", userID).
+		Where("pag.tenant_id = ?", tenantID).
+		Where("pag.tenant_subject_id = ?", tsid).
 		Where("pag.status = ?", models.ProductAccessStatusActive).
 		Where("pag.revoked_at IS NULL").
 		Where("pag.starts_at <= ?", at).
@@ -91,11 +109,16 @@ func (r *ProductAccessGrantRepo) ListActiveByUser(ctx context.Context, userID st
 // ListByUser returns ALL of the user's grants (active + revoked), most recent
 // first. Used by admin views.
 func (r *ProductAccessGrantRepo) ListByUser(ctx context.Context, userID string) ([]models.ProductAccessGrant, error) {
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), tenantID, userID)
+	if err != nil {
+		return nil, err
+	}
 	grants := []models.ProductAccessGrant{}
 	if err := r.db.Q(ctx).NewSelect().
 		Model(&grants).
-		Where("pag.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("pag.user_id = ?", userID).
+		Where("pag.tenant_id = ?", tenantID).
+		Where("pag.tenant_subject_id = ?", tsid).
 		OrderExpr("pag.created_at DESC").
 		Scan(ctx); err != nil {
 		return nil, err

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
@@ -119,9 +120,9 @@ func (s *SubscriptionService) CancelUserSubscription(ctx context.Context, userID
 
 	// Add notification
 	notification := &models.NotificationQueue{
-		ID:        uuidutil.NewV7(),
-		UserID:    userID,
-		EventType: models.NotificationPremiumEnded,
+		ID:              uuidutil.NewV7(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		EventType:       models.NotificationPremiumEnded,
 		Data: map[string]any{
 			"reason": "user_cancel",
 		},
@@ -192,7 +193,7 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 	}
 
 	if subscription.Status == models.StatusActive || subscription.Status == models.StatusPending || subscription.Status == models.StatusPastDue {
-		_, err := s.GetActiveOrPendingByUserIDAndProductID(ctx, subscription.UserID, subscription.ProductID)
+		_, err := s.GetActiveOrPendingByUserIDAndProductID(ctx, subscription.TenantSubjectID.String(), subscription.ProductID)
 		if err == nil {
 			return ErrActiveSubscriptionExists
 		}

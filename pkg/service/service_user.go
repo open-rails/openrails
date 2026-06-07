@@ -437,7 +437,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if err != nil {
 		return nil, fmt.Errorf("subscription not found")
 	}
-	if sub.UserID != userID {
+	if sub.TenantSubjectID.String() != userID {
 		return nil, fmt.Errorf("subscription does not belong to user")
 	}
 	if !processors.IsNMIBackedProcessor(sub.Processor) {
@@ -451,7 +451,7 @@ func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID st
 	if err != nil {
 		return nil, fmt.Errorf("payment method not found")
 	}
-	if pm.UserID != userID {
+	if pm.TenantSubjectID.String() != userID {
 		return nil, fmt.Errorf("payment method does not belong to user")
 	}
 	if !processors.IsNMIBackedProcessor(pm.Processor) {
@@ -626,7 +626,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 	if err != nil {
 		return nil, fmt.Errorf("payment method not found")
 	}
-	if pm.UserID != userID {
+	if pm.TenantSubjectID.String() != userID {
 		return nil, fmt.Errorf("payment method does not belong to user")
 	}
 
@@ -677,7 +677,7 @@ func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymen
 	if err != nil {
 		return fmt.Errorf("payment method not found")
 	}
-	if pm.UserID != userID {
+	if pm.TenantSubjectID.String() != userID {
 		return fmt.Errorf("payment method does not belong to user")
 	}
 
@@ -1127,7 +1127,7 @@ func paymentFromModel(p *models.Payment) Payment {
 		Status:        "succeeded",
 		Amount:        p.Amount,
 		Currency:      p.Currency,
-		UserID:        api.FormatUserID(p.UserID),
+		UserID:        api.FormatUserID(p.TenantSubjectID.String()),
 		Processor:     string(p.Processor),
 		TransactionID: p.TransactionID,
 		Created:       api.ToUnix(p.CreatedAt),

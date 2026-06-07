@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // setupAdminTestSuite sets up the test suite for admin tests.
@@ -122,25 +123,25 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 		now := time.Now().UTC()
 		endAt := now.Add(30 * 24 * time.Hour)
 		adminGrant := &models.AdminGrant{
-			ID:           uuid.New(),
-			UserID:       userID,
-			GrantedBy:    "test-admin",
-			Reason:       "test_admin_entitlement",
-			DurationDays: nil,
-			CreatedAt:    now,
+			ID:              uuid.New(),
+			TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+			GrantedBy:       "test-admin",
+			Reason:          "test_admin_entitlement",
+			DurationDays:    nil,
+			CreatedAt:       now,
 		}
 		_, err := suite.BunDB.NewInsert().Model(adminGrant).Exec(context.Background())
 		require.NoError(t, err)
 		_, err = suite.BunDB.NewInsert().Model(&models.Entitlement{
-			ID:          uuid.New(),
-			UserID:      userID,
-			Entitlement: "premium",
-			StartAt:     now.Add(-time.Second),
-			EndAt:       &endAt,
-			SourceID:    &adminGrant.ID,
-			SourceType:  models.EntitlementSourceAdmin,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			ID:              uuid.New(),
+			TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+			Entitlement:     "premium",
+			StartAt:         now.Add(-time.Second),
+			EndAt:           &endAt,
+			SourceID:        &adminGrant.ID,
+			SourceType:      models.EntitlementSourceAdmin,
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		}).Exec(context.Background())
 		require.NoError(t, err)
 

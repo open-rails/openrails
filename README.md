@@ -51,8 +51,9 @@ curl http://localhost:2053/health
 ```
 
 - **Public API** on `:2053` — user billing routes, admin routes, and webhooks.
-- **Server-to-server** calls hit `/v1/service/*` on the same port, authenticated with an
-  OpenRails-issued **service token** (`Authorization: Bearer <openrails_st_...>`).
+- **Server-to-server** calls hit `/v1/service/*` on the same port, authenticated with a
+  generated OpenRails **service token** (`openrails_st_...`) or a first-party OIDC
+  service JWT signed by a registered tenant issuer.
 - Your services authorize the user, then call OpenRails to hold/capture/release credits or
   read entitlements.
 

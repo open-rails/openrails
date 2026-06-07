@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
@@ -39,15 +40,14 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("read org flag: %w", err)
 	}
 	org = strings.ToLower(strings.TrimSpace(org))
-	if org == "" && cfg != nil && cfg.Auth != nil {
-		org = strings.ToLower(strings.TrimSpace(cfg.Auth.OperatorTenantSlug))
-	}
 	if org == "" {
-		org = "operator"
+		// HARDCUT (#312): the deployment admin service token is minted under the
+		// default tenant's own AuthKit org — there is no separate "operator" tenant.
+		org = tenant.DefaultSlug
 	}
 
 	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		OperatorTenantSlug:      org,
+		BootstrapTenantSlug:     org,
 		MintInitialServiceToken: false,
 	}); berr != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", berr)

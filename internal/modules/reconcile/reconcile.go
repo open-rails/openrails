@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 const stripeProcessorName = "stripe"
@@ -574,17 +575,17 @@ func ensureChargePayment(
 
 	now := paymentService.Clock().Now()
 	payment := &models.Payment{
-		ID:            uuidutil.NewV7(),
-		UserID:        userID,
-		PriceID:       priceID,
-		Processor:     models.ProcessorStripe,
-		TransactionID: txnID,
-		Amount:        charge.Amount,
-		ListAmount:    charge.Amount,
-		Currency:      currency,
-		Status:        payments.PaymentStatusCompletedValue,
-		PurchasedAt:   now,
-		CreatedAt:     now,
+		ID:              uuidutil.NewV7(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		PriceID:         priceID,
+		Processor:       models.ProcessorStripe,
+		TransactionID:   txnID,
+		Amount:          charge.Amount,
+		ListAmount:      charge.Amount,
+		Currency:        currency,
+		Status:          payments.PaymentStatusCompletedValue,
+		PurchasedAt:     now,
+		CreatedAt:       now,
 		Metadata: map[string]any{
 			"source":            "stripe_reconcile_backfill",
 			"stripe_charge_id":  strings.TrimSpace(charge.ID),

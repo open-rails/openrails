@@ -36,9 +36,20 @@ import (
 
 // Runtime aggregates infrastructure clients and application services.
 type Runtime struct {
-	DB               *db.DB
-	RedisClient      *redis.Client
-	Config           *config.Config
+	DB          *db.DB
+	RedisClient *redis.Client
+	Config      *config.Config
+
+	// AdminChecker, when set, evaluates the LIVE openrails:admin permission for a
+	// caller's OWN tenant (#312). It is used by mixed public/admin read endpoints
+	// (e.g. showing inactive catalog rows to admins). nil in verifier-only mode;
+	// the control plane satisfies it. Declared as an inline interface so this
+	// package does not import internal/auth/policy (which imports app via
+	// internal/http/request, which would cycle).
+	AdminChecker interface {
+		HasAdminPermission(ctx context.Context, tenantSlug, userID, perm string) (bool, error)
+	}
+
 	Clock            clockwork.Clock
 	HealthManager    *health.ServiceHealthManager
 	CCBillClient     *ccbill.CCBillClient

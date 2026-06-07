@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -216,15 +217,15 @@ func seedCCBillActiveSubscriptionWithEntitlement(t *testing.T) (*TestContainerSu
 	endAt := now.Add(25 * 24 * time.Hour)
 	subID := created.ID
 	_, err := suite.BunDB.NewInsert().Model(&models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     startAt,
-		EndAt:       &endAt,
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &subID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         startAt,
+		EndAt:           &endAt,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &subID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}).Exec(ctx)
 	require.NoError(t, err)
 

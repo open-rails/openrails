@@ -47,12 +47,17 @@ func ShiftEntitlementTimeline(
 		return nil
 	}
 
+	tsid, err := ResolveTenantSubjectID(ctx, tx, uuid.Nil, userID)
+	if err != nil {
+		return err
+	}
+
 	q := tx.NewUpdate().
 		Model((*models.Entitlement)(nil)).
 		Set("start_at = start_at + (? * interval '1 second')", deltaSeconds).
 		Set("end_at = CASE WHEN end_at IS NULL THEN NULL ELSE end_at + (? * interval '1 second') END", deltaSeconds).
 		Set("updated_at = ?", now).
-		Where("ent.user_id = ?", userID).
+		Where("ent.tenant_subject_id = ?", tsid).
 		Where("ent.entitlement = ?", entitlement).
 		Where("ent.revoked_at IS NULL").
 		Where("ent.deleted_at IS NULL").
@@ -62,7 +67,7 @@ func ShiftEntitlementTimeline(
 		q = q.Where("ent.id NOT IN (?)", bun.In(excludeIDs))
 	}
 
-	_, err := q.Exec(ctx)
+	_, err = q.Exec(ctx)
 	return err
 }
 
@@ -106,7 +111,7 @@ func SetEntitlementEndAtTx(ctx context.Context, tx bun.Tx, id uuid.UUID, endAt *
 		}
 	}
 
-	if err := LockEntitlementTimeline(ctx, tx, ent.UserID, ent.Entitlement); err != nil {
+	if err := LockEntitlementTimeline(ctx, tx, ent.TenantSubjectID.String(), ent.Entitlement); err != nil {
 		return err
 	}
 
@@ -133,15 +138,19 @@ func SetEntitlementEndAtTx(ctx context.Context, tx bun.Tx, id uuid.UUID, endAt *
 	// - If end_at is set to NULL (indefinite), remove later windows (they would overlap).
 	if oldEnd != nil && endAt != nil && !endAt.Equal(*oldEnd) {
 		delta := endAt.Sub(*oldEnd)
-		return ShiftEntitlementTimeline(ctx, tx, ent.UserID, ent.Entitlement, *oldEnd, delta, now, []uuid.UUID{id})
+		return ShiftEntitlementTimeline(ctx, tx, ent.TenantSubjectID.String(), ent.Entitlement, *oldEnd, delta, now, []uuid.UUID{id})
 	}
 	if oldEnd != nil && endAt == nil {
 		// Indefinite terminates the timeline; delete any later windows.
-		_, err := tx.NewUpdate().
+		tsid, err := ResolveTenantSubjectID(ctx, tx, uuid.Nil, ent.TenantSubjectID.String())
+		if err != nil {
+			return err
+		}
+		_, err = tx.NewUpdate().
 			Model((*models.Entitlement)(nil)).
 			Set("deleted_at = ?", now).
 			Set("updated_at = ?", now).
-			Where("ent.user_id = ?", ent.UserID).
+			Where("ent.tenant_subject_id = ?", tsid).
 			Where("ent.entitlement = ?", ent.Entitlement).
 			Where("ent.revoked_at IS NULL").
 			Where("ent.deleted_at IS NULL").
@@ -176,7 +185,7 @@ func RevokeEntitlementNowTx(
 		return fmt.Errorf("cannot revoke entitlement: revoke_at must be after start_at")
 	}
 
-	if err := LockEntitlementTimeline(ctx, tx, ent.UserID, ent.Entitlement); err != nil {
+	if err := LockEntitlementTimeline(ctx, tx, ent.TenantSubjectID.String(), ent.Entitlement); err != nil {
 		return err
 	}
 
@@ -203,12 +212,12 @@ func RevokeEntitlementNowTx(
 	// Keep the timeline gapless by shifting later windows earlier/forward based on the change in end_at.
 	if oldEnd != nil && revokeAt.Before(*oldEnd) {
 		delta := revokeAt.Sub(*oldEnd) // negative
-		return ShiftEntitlementTimeline(ctx, tx, ent.UserID, ent.Entitlement, *oldEnd, delta, now, []uuid.UUID{id})
+		return ShiftEntitlementTimeline(ctx, tx, ent.TenantSubjectID.String(), ent.Entitlement, *oldEnd, delta, now, []uuid.UUID{id})
 	}
 	if oldEnd != nil && revokeAt.After(*oldEnd) {
 		// Revoking after the scheduled end shouldn't normally happen, but if it does, shift forward.
 		delta := revokeAt.Sub(*oldEnd)
-		return ShiftEntitlementTimeline(ctx, tx, ent.UserID, ent.Entitlement, *oldEnd, delta, now, []uuid.UUID{id})
+		return ShiftEntitlementTimeline(ctx, tx, ent.TenantSubjectID.String(), ent.Entitlement, *oldEnd, delta, now, []uuid.UUID{id})
 	}
 	if oldEnd == nil {
 		// Indefinite windows should have no later windows; nothing to shift.

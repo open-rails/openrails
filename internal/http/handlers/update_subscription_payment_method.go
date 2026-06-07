@@ -63,7 +63,7 @@ func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	if subscription.UserID != user.ID {
+	if subscription.TenantSubjectID.String() != user.ID {
 		r.ErrorJSON(http.StatusForbidden, "You don't own this subscription")
 		return
 	}

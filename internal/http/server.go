@@ -152,6 +152,14 @@ func New(deps Dependencies) (*Server, error) {
 		captchaStore:  captcha.NewChallengeStore(deps.Redis),
 	}
 
+	// Wire the live admin-permission checker onto the runtime so mixed
+	// public/admin read endpoints (e.g. catalog inactive rows) can evaluate
+	// openrails:admin for the caller's own tenant (#312). Only when the control
+	// plane is present, to avoid boxing a typed-nil pointer into the interface.
+	if deps.ControlPlane != nil && deps.Runtime != nil {
+		deps.Runtime.AdminChecker = deps.ControlPlane
+	}
+
 	// Build the tenant provisioning/lifecycle/secret service when the control
 	// plane is present (issue #225). It reuses the control plane's pgx pool (the
 	// OpenRails-owned billing.* control-plane DB) and operator-tenant provisioner. The
@@ -445,11 +453,11 @@ func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
 		CaptchaStore:  s.captchaStore,
 		Authenticator: s.embeddedAuthenticator(),
 	}
-	// Only set the live operator-permission checker when the control plane is
+	// Only set the live admin-permission checker when the control plane is
 	// actually present (#284): a nil *controlplane.ControlPlane boxed into the
-	// OperatorPermissionChecker interface would be non-nil and misfire.
+	// AdminPermissionChecker interface would be non-nil and misfire.
 	if s.controlPlane != nil {
-		asm.OperatorChecker = s.controlPlane
+		asm.AdminChecker = s.controlPlane
 	}
 	return asm.NewHTTPHandler(embedhttp.Options{
 		IncludeUser:     opts.IncludeUser,

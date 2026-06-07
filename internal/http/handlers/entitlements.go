@@ -23,7 +23,6 @@ import (
 type ServiceEntitlementRecord struct {
 	ID              string     `json:"id"`
 	TenantSubjectID string     `json:"tenant_subject_id,omitempty"`
-	UserID          string     `json:"user_id,omitempty"`
 	Entitlement     string     `json:"entitlement"`
 	StartAt         time.Time  `json:"start_at"`
 	EndAt           *time.Time `json:"end_at,omitempty"`
@@ -214,7 +213,7 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 	if r.State.Clock != nil {
 		now = r.State.Clock.Now()
 	}
-	adminGrant := &models.AdminGrant{ID: uuidutil.NewV7(), UserID: path.UserID, GrantedBy: adminUser.ID, Reason: "admin_entitlement", DurationDays: req.Days, CreatedAt: now}
+	adminGrant := &models.AdminGrant{ID: uuidutil.NewV7(), TenantSubjectID: tenantSubjectID, GrantedBy: adminUser.ID, Reason: "admin_entitlement", DurationDays: req.Days, CreatedAt: now}
 	if _, err := r.State.DB.Q(r.Request.Context()).NewInsert().Model(adminGrant).Exec(r.Request.Context()); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to create admin grant source record")
 		return
@@ -279,7 +278,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "entitlement not found")
 		return
 	}
-	if ent.UserID != path.UserID {
+	if ent.TenantSubjectID.String() != path.UserID {
 		r.ErrorJSON(http.StatusNotFound, "entitlement not found for this user")
 		return
 	}
@@ -293,7 +292,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 func serviceEntitlementRecordsFromModels(entitlements []models.Entitlement) []ServiceEntitlementRecord {
 	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
 	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), UserID: e.UserID, Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: string(e.SourceType), CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+		rec := ServiceEntitlementRecord{ID: e.ID.String(), TenantSubjectID: e.TenantSubjectID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: string(e.SourceType), CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 		if e.EndAt != nil {
 			rec.EndAt = e.EndAt
 		}

@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -375,7 +376,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	paymentID := uuidutil.NewV7()
 	payment := &models.Payment{
 		ID:                       paymentID,
-		UserID:                   req.UserID,
+		TenantSubjectID:          identity.TenantSubjectIDFromString(req.UserID).UUID(),
 		PriceID:                  price.ID,
 		SubscriptionID:           req.SubscriptionID,
 		Processor:                models.Processor(req.Processor),
@@ -402,7 +403,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		if err != nil {
 			return nil, fmt.Errorf("failed to load existing payment record: %w", err)
 		}
-		if existingPayment.UserID != req.UserID {
+		if existingPayment.TenantSubjectID.String() != req.UserID {
 			return nil, fmt.Errorf("payment transaction belongs to a different user")
 		}
 		if existingPayment.PriceID != req.PriceID {

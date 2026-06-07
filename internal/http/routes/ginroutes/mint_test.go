@@ -30,11 +30,19 @@ type fakeServiceTokenResolver struct {
 	looksLikeServiceToken bool
 	resolved              *controlplane.ResolvedServiceToken
 	err                   error
+	serviceJWTResolved    *controlplane.ResolvedServiceToken
+	serviceJWTErr         error
 }
 
 func (f fakeServiceTokenResolver) LooksLikeServiceToken(string) bool { return f.looksLikeServiceToken }
 func (f fakeServiceTokenResolver) ResolveServiceToken(context.Context, string) (*controlplane.ResolvedServiceToken, error) {
 	return f.resolved, f.err
+}
+func (f fakeServiceTokenResolver) ResolveServiceJWT(context.Context, string) (*controlplane.ResolvedServiceToken, error) {
+	if f.serviceJWTResolved != nil || f.serviceJWTErr != nil {
+		return f.serviceJWTResolved, f.serviceJWTErr
+	}
+	return nil, authcore.ErrInvalidServiceJWT
 }
 
 // recordingMinter records the params it was called with and returns a fixed token.
@@ -166,7 +174,7 @@ func TestCreditServiceRoutesRejectDelegatedJWTs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := doServiceRoute(e, tc.method, tc.path, "eyJ.delegated.jwt", `{}`)
 			require.Equal(t, http.StatusUnauthorized, w.Code)
-			require.Contains(t, w.Body.String(), "openrails-issued service token required")
+			require.Contains(t, w.Body.String(), "service_jwt_invalid")
 		})
 	}
 }
@@ -191,6 +199,22 @@ func TestServiceEntitlementRouteRequiresEntitlementReadPermission(t *testing.T) 
 		},
 	}, nil)
 	w = doServiceRoute(e, http.MethodGet, "/v1/service/tenant-subjects/not-a-uuid/entitlements", "openrails_st_keyid_secret", "")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "invalid tenant_subject_id")
+}
+
+func TestServiceEntitlementRouteAcceptsResolvedServiceJWTPrincipal(t *testing.T) {
+	e := newMintRouter(t, fakeServiceTokenResolver{
+		looksLikeServiceToken: false,
+		serviceJWTResolved: &controlplane.ResolvedServiceToken{
+			AuthKitTenantSlug: "local-stack",
+			TenantID:          tenant.DefaultID,
+			TenantSlug:        tenant.DefaultSlug,
+			Permissions:       []string{controlplane.PermEntitlementsRead},
+			Resources:         []authcore.ServiceTokenResource{controlplane.TenantResource(tenant.DefaultID)},
+		},
+	}, nil)
+	w := doServiceRoute(e, http.MethodGet, "/v1/service/tenant-subjects/not-a-uuid/entitlements", "eyJ.service.jwt", "")
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Contains(t, w.Body.String(), "invalid tenant_subject_id")
 }

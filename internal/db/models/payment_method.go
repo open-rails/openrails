@@ -12,9 +12,12 @@ import (
 type PaymentMethod struct {
 	bun.BaseModel `bun:"table:billing.payment_methods,alias:pm"`
 
-	ID        uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
-	UserID    string    `bun:"user_id,notnull" json:"user_id"`
-	Processor Processor `bun:"processor,notnull" json:"processor"` // Processor: mobius, ccbill, solana
+	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
+	// Additive during the hard-cut rollout; writers populate it and readers move to
+	// it before user_id is dropped. Join billing.tenant_subjects for issuer/subject.
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
+	Processor       Processor `bun:"processor,notnull" json:"processor"` // Processor: mobius, ccbill, solana
 
 	// Processor-specific vault/payment method identifiers
 	VaultID              string  `bun:"vault_id,notnull" json:"-"`               // Primary identifier in processor's system

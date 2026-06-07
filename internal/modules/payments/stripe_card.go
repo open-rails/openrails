@@ -9,12 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/uptrace/bun"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // StripeCardDetails is the raw card payload that appears under
@@ -216,7 +219,7 @@ func UpsertStripeCardForCustomer(
 	case errors.Is(err, sql.ErrNoRows):
 		pm = &models.PaymentMethod{
 			ID:                   uuidutil.NewV7(),
-			UserID:               userID,
+			TenantSubjectID:      identity.TenantSubjectIDFromString(userID).UUID(),
 			Processor:            models.ProcessorStripe,
 			VaultID:              vaultID,
 			InitialTransactionID: strings.TrimSpace(initialTxnID),
@@ -225,6 +228,10 @@ func UpsertStripeCardForCustomer(
 		}
 		if card.Expiry != "" {
 			pm.ExpiryDate = &card.Expiry
+		}
+		// Stamp the payable tenant subject alongside the legacy user_id (#317).
+		if pm.TenantSubjectID, err = repo.EnsureTenantSubjectID(ctx, bdb, uuid.Nil, userID); err != nil {
+			return fmt.Errorf("resolve tenant subject for stripe payment method: %w", err)
 		}
 		if _, err := bdb.NewInsert().Model(pm).Exec(ctx); err != nil {
 			return fmt.Errorf("insert stripe payment method: %w", err)

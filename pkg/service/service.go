@@ -517,7 +517,7 @@ func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID strin
 		out = append(out, EntitlementRecord{
 			ID:              e.ID,
 			TenantSubjectID: e.TenantSubjectID,
-			UserID:          e.UserID,
+			UserID:          e.TenantSubjectID.String(),
 			Entitlement:     e.Entitlement,
 			StartAt:         e.StartAt,
 			EndAt:           e.EndAt,
@@ -553,7 +553,7 @@ func (s *Service) ListActiveEntitlementRecordsForTenantSubject(ctx context.Conte
 		out = append(out, EntitlementRecord{
 			ID:              e.ID,
 			TenantSubjectID: e.TenantSubjectID,
-			UserID:          e.UserID,
+			UserID:          e.TenantSubjectID.String(),
 			Entitlement:     e.Entitlement,
 			StartAt:         e.StartAt,
 			EndAt:           e.EndAt,

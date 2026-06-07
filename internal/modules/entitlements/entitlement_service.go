@@ -189,12 +189,25 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			return err
 		}
 
+		// Resolve the payable tenant subject for this entitlement when the caller
+		// did not supply one (#317), so every window carries tenant_subject_id
+		// alongside the legacy user_id. Self-service user UUIDs resolve to a
+		// tenant_subjects row whose id IS that UUID (see repo.EnsureTenantSubjectID),
+		// converging with the credits/commerce payable identity.
+		if p.TenantSubjectID == uuid.Nil {
+			tsid, terr := repo.EnsureTenantSubjectID(ctx, tx, uuid.Nil, p.UserID)
+			if terr != nil {
+				return terr
+			}
+			p.TenantSubjectID = tsid
+		}
+
 		// If an indefinite entitlement exists, the timeline is terminal.
 		var hasIndefinite bool
 		if err := tx.NewSelect().
 			Model((*models.Entitlement)(nil)).
 			ColumnExpr("COUNT(*) > 0").
-			Where("ent.user_id = ?", p.UserID).
+			Where("ent.tenant_subject_id = ?", p.TenantSubjectID).
 			Where("ent.entitlement = ?", p.Entitlement).
 			Where("ent.revoked_at IS NULL").
 			Where("ent.deleted_at IS NULL").
@@ -206,7 +219,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			created = new(models.Entitlement)
 			if err := tx.NewSelect().
 				Model(created).
-				Where("ent.user_id = ?", p.UserID).
+				Where("ent.tenant_subject_id = ?", p.TenantSubjectID).
 				Where("ent.entitlement = ?", p.Entitlement).
 				Where("ent.revoked_at IS NULL").
 				Where("ent.deleted_at IS NULL").
@@ -223,7 +236,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		if err := tx.NewSelect().
 			Model((*models.Entitlement)(nil)).
 			ColumnExpr("MAX(ent.end_at)").
-			Where("ent.user_id = ?", p.UserID).
+			Where("ent.tenant_subject_id = ?", p.TenantSubjectID).
 			Where("ent.entitlement = ?", p.Entitlement).
 			Where("ent.revoked_at IS NULL").
 			Where("ent.deleted_at IS NULL").
@@ -256,7 +269,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 				covered := new(models.Entitlement)
 				err := tx.NewSelect().
 					Model(covered).
-					Where("ent.user_id = ?", p.UserID).
+					Where("ent.tenant_subject_id = ?", p.TenantSubjectID).
 					Where("ent.entitlement = ?", p.Entitlement).
 					Where("ent.revoked_at IS NULL").
 					Where("ent.deleted_at IS NULL").
@@ -280,7 +293,6 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		created = &models.Entitlement{
 			ID:              uuidutil.NewV7(),
 			TenantSubjectID: p.TenantSubjectID,
-			UserID:          p.UserID,
 			Entitlement:     p.Entitlement,
 			StartAt:         start,
 			EndAt:           endAt,
@@ -396,7 +408,7 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 			if err != nil {
 				return err
 			}
-			userID = ent.UserID
+			userID = ent.TenantSubjectID.String()
 			entitlement = ent.Entitlement
 			if err := repo.LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
 				return err
@@ -442,12 +454,19 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 			return err
 		}
 
+		// Filter the entitlement timeline by the payable tenant subject (#317);
+		// the lock above still serializes on the userID string key.
+		tsid, terr := repo.ResolveTenantSubjectID(ctx, tx, uuid.Nil, userID)
+		if terr != nil {
+			return terr
+		}
+
 		active := tx.NewUpdate().
 			Model((*models.Entitlement)(nil)).
 			Set("revoked_at = ?", now).
 			Set("revoke_reason = ?", &p.Reason).
 			Set("updated_at = ?", now).
-			Where("ent.user_id = ?", userID).
+			Where("ent.tenant_subject_id = ?", tsid).
 			Where("ent.entitlement = ?", entitlement).
 			Where("ent.revoked_at IS NULL").
 			Where("ent.deleted_at IS NULL").
@@ -458,7 +477,7 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 			Model((*models.Entitlement)(nil)).
 			Set("deleted_at = ?", now).
 			Set("updated_at = ?", now).
-			Where("ent.user_id = ?", userID).
+			Where("ent.tenant_subject_id = ?", tsid).
 			Where("ent.entitlement = ?", entitlement).
 			Where("ent.revoked_at IS NULL").
 			Where("ent.deleted_at IS NULL").

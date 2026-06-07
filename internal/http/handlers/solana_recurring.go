@@ -222,7 +222,7 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
 		return
 	}
-	if sub.UserID != uc.UserID {
+	if sub.TenantSubjectID.String() != uc.UserID {
 		r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		return
 	}
@@ -301,7 +301,7 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
 		return
 	}
-	if sub.UserID != uc.UserID {
+	if sub.TenantSubjectID.String() != uc.UserID {
 		r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		return
 	}
@@ -375,7 +375,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		}
 		return nil, http.StatusInternalServerError, "failed to retrieve subscription"
 	}
-	if oldSub.UserID != uc.UserID {
+	if oldSub.TenantSubjectID.String() != uc.UserID {
 		return nil, http.StatusNotFound, "subscription not found"
 	}
 	if oldSub.Processor != models.ProcessorSolana {
@@ -632,7 +632,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	result, err := svc.Confirm(r.Request.Context(), recurring.ConfirmTierChangeInput{
 		Signature:            req.Signature,
 		OldSubscriptionID:    subscriptionID,
-		UserID:               resolved.oldSub.UserID,
+		UserID:               resolved.oldSub.TenantSubjectID.String(),
 		UserEmail:            email,
 		NewPriceID:           resolved.newPrice.ID,
 		NewSubscriptionPDA:   prep.NewSubscriptionPDA,

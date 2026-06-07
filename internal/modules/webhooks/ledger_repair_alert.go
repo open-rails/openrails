@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -71,10 +72,18 @@ func recordLedgerRepairAlert(ctx context.Context, notificationService *subscript
 	}
 	notification := &models.NotificationQueue{
 		ID:        uuidutil.NewV7(),
-		UserID:    "system",
 		EventType: models.NotificationSystemAlert,
 		Data:      data,
 		CreatedAt: now.UTC(),
+	}
+	// The alert is owned by the "system" tenant subject sentinel (non-UUID), which
+	// cannot use the pure deterministic parse — resolve/materialize its row (#317).
+	if database != nil {
+		sysTSID, err := repo.EnsureTenantSubjectID(ctx, database.Q(ctx), uuid.Nil, "system")
+		if err != nil {
+			return fmt.Errorf("resolve system tenant subject for ledger repair alert: %w", err)
+		}
+		notification.TenantSubjectID = sysTSID
 	}
 	if err := notificationService.Create(ctx, notification); err != nil {
 		return fmt.Errorf("create ledger repair alert: %w", err)

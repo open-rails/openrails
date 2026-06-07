@@ -24,12 +24,16 @@ func (r *EntitlementRepo) SetEndAtTx(ctx context.Context, tx bun.Tx, id uuid.UUI
 }
 
 func (r *EntitlementRepo) IsEntitled(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return false, err
+	}
 	q := r.db.Q(ctx).NewSelect().
 		Model((*models.Entitlement)(nil)).
 		// Tenant scoping (issue #223): defaults to the default tenant when the
 		// request has not resolved one, so single-tenant runs unchanged.
 		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("ent.user_id = ?", userID).
+		Where("ent.tenant_subject_id = ?", tsid).
 		Where("ent.entitlement = ?", entitlement).
 		Where("ent.start_at <= ?", at).
 		Where("(ent.end_at IS NULL OR ent.end_at > ?)", at).
@@ -53,10 +57,14 @@ func (r *EntitlementRepo) IsTenantSubjectEntitled(ctx context.Context, tenantSub
 }
 
 func (r *EntitlementRepo) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return false, err
+	}
 	q := r.db.Q(ctx).NewSelect().
 		Model((*models.Entitlement)(nil)).
 		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("ent.user_id = ?", userID).
+		Where("ent.tenant_subject_id = ?", tsid).
 		Where("ent.entitlement = ?", entitlement).
 		Where("ent.revoked_at IS NULL AND ent.end_at IS NULL").
 		Where("ent.start_at <= ?", at).
@@ -77,11 +85,15 @@ func (r *EntitlementRepo) HasActiveIndefiniteByTenantSubject(ctx context.Context
 }
 
 func (r *EntitlementRepo) GetLatestActive(ctx context.Context, userID, entitlement string) (*models.Entitlement, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, err
+	}
 	var ent models.Entitlement
-	err := r.db.Q(ctx).NewSelect().
+	err = r.db.Q(ctx).NewSelect().
 		Model(&ent).
 		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("ent.user_id = ? AND ent.entitlement = ?", userID, entitlement).
+		Where("ent.tenant_subject_id = ? AND ent.entitlement = ?", tsid, entitlement).
 		Where("ent.revoked_at IS NULL").
 		Where("ent.deleted_at IS NULL").
 		OrderExpr("ent.start_at DESC").
@@ -111,11 +123,15 @@ func (r *EntitlementRepo) GetLatestActiveByTenantSubject(ctx context.Context, te
 }
 
 func (r *EntitlementRepo) GetLatestFiniteActive(ctx context.Context, userID, entitlement string, at time.Time) (*models.Entitlement, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, err
+	}
 	var ent models.Entitlement
-	err := r.db.Q(ctx).NewSelect().
+	err = r.db.Q(ctx).NewSelect().
 		Model(&ent).
 		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("ent.user_id = ? AND ent.entitlement = ?", userID, entitlement).
+		Where("ent.tenant_subject_id = ? AND ent.entitlement = ?", tsid, entitlement).
 		Where("ent.revoked_at IS NULL").
 		Where("ent.deleted_at IS NULL").
 		Where("ent.end_at IS NOT NULL").
@@ -178,11 +194,15 @@ func (r *EntitlementRepo) Insert(ctx context.Context, entitlement *models.Entitl
 }
 
 func (r *EntitlementRepo) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, err
+	}
 	var out []string
 	if err := r.db.Q(ctx).NewSelect().
 		Model((*models.Entitlement)(nil)).
 		ColumnExpr("DISTINCT ent.entitlement").
-		Where("ent.user_id = ?", userID).
+		Where("ent.tenant_subject_id = ?", tsid).
 		Where("ent.start_at <= ?", at).
 		Where("(ent.end_at IS NULL OR ent.end_at > ?)", at).
 		Where("ent.revoked_at IS NULL").
@@ -211,10 +231,14 @@ func (r *EntitlementRepo) ListActiveEntitlementsByTenantSubject(ctx context.Cont
 }
 
 func (r *EntitlementRepo) ListActiveRecords(ctx context.Context, userID string, at time.Time) ([]models.Entitlement, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, err
+	}
 	ents := []models.Entitlement{}
 	if err := r.db.Q(ctx).NewSelect().
 		Model(&ents).
-		Where("ent.user_id = ?", userID).
+		Where("ent.tenant_subject_id = ?", tsid).
 		Where("ent.revoked_at IS NULL").
 		Where("ent.deleted_at IS NULL").
 		Where("ent.start_at <= ?", at).
@@ -343,7 +367,7 @@ func (r *EntitlementRepo) ExtendActiveBySubscription(ctx context.Context, subscr
 				return fmt.Errorf("cannot extend end_at to %v: entitlement start_at=%v would be >= end_at", newEnd, ent.StartAt)
 			}
 
-			if err := LockEntitlementTimeline(ctx, tx, ent.UserID, ent.Entitlement); err != nil {
+			if err := LockEntitlementTimeline(ctx, tx, ent.TenantSubjectID.String(), ent.Entitlement); err != nil {
 				return err
 			}
 
@@ -353,7 +377,7 @@ func (r *EntitlementRepo) ExtendActiveBySubscription(ctx context.Context, subscr
 			// is an IMMEDIATE (non-deferrable) exclusion constraint checked per
 			// statement — so it must never be violated mid-transaction.
 			delta := newEnd.Sub(oldEnd)
-			if err := ShiftEntitlementTimeline(ctx, tx, ent.UserID, ent.Entitlement, oldEnd, delta, now, []uuid.UUID{ent.ID}); err != nil {
+			if err := ShiftEntitlementTimeline(ctx, tx, ent.TenantSubjectID.String(), ent.Entitlement, oldEnd, delta, now, []uuid.UUID{ent.ID}); err != nil {
 				return err
 			}
 
@@ -446,10 +470,14 @@ func (r *EntitlementRepo) ExistsBySource(ctx context.Context, sourceType models.
 }
 
 func (r *EntitlementRepo) ListByUser(ctx context.Context, userID string) ([]models.Entitlement, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	if err != nil {
+		return nil, err
+	}
 	ents := []models.Entitlement{}
 	if err := r.db.Q(ctx).NewSelect().
 		Model(&ents).
-		Where("ent.user_id = ?", userID).
+		Where("ent.tenant_subject_id = ?", tsid).
 		OrderExpr("ent.start_at DESC").
 		Scan(ctx); err != nil {
 		return nil, err

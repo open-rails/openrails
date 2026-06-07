@@ -11,21 +11,22 @@ import (
 // JWT/role policy explicitly rather than silently allowing or denying.
 var ErrNoControlPlane = errors.New("controlplane: not configured")
 
-// HasOperatorPermission reports whether the given user holds perm in the
-// operator tenant according to LIVE AuthKit effective-permission state (not stale
-// JWT claims). This is the #224 admin-authority primitive: admin writes are
-// gated by the operator tenant + the OpenRails permission catalog, evaluated at
-// request time.
+// HasAdminPermission reports whether the given user holds perm in the caller's
+// OWN AuthKit tenant according to LIVE AuthKit effective-permission state (not
+// stale JWT claims). This is the #312 deploy-authority primitive: admin writes
+// are gated by the openrails:admin permission held in the caller's tenant + the
+// OpenRails permission catalog, evaluated at request time — NOT by membership in
+// a separate "operator" AuthKit tenant.
 //
-// tenantSlug should be the operator tenant for the resolved tenant. An empty slug
-// falls back to the bootstrap default.
-func (c *ControlPlane) HasOperatorPermission(ctx context.Context, tenantSlug, userID, perm string) (bool, error) {
+// tenantSlug is the caller's tenant. An empty slug yields no authority (there is
+// no operator-tenant fallback): the caller must present a tenant context.
+func (c *ControlPlane) HasAdminPermission(ctx context.Context, tenantSlug, userID, perm string) (bool, error) {
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
 	slug := strings.ToLower(strings.TrimSpace(tenantSlug))
 	if slug == "" {
-		slug = "operator"
+		return false, nil
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -34,10 +35,10 @@ func (c *ControlPlane) HasOperatorPermission(ctx context.Context, tenantSlug, us
 	return c.Core().HasPermission(ctx, slug, userID, strings.TrimSpace(perm))
 }
 
-// IsOperatorAdmin reports whether the user holds the broad openrails:admin
-// permission in the operator tenant via live AuthKit state.
-func (c *ControlPlane) IsOperatorAdmin(ctx context.Context, tenantSlug, userID string) (bool, error) {
-	return c.HasOperatorPermission(ctx, tenantSlug, userID, PermAdmin)
+// IsAdmin reports whether the user holds the broad openrails:admin permission in
+// their own AuthKit tenant via live AuthKit state.
+func (c *ControlPlane) IsAdmin(ctx context.Context, tenantSlug, userID string) (bool, error) {
+	return c.HasAdminPermission(ctx, tenantSlug, userID, PermAdmin)
 }
 
 // PlatformTenantSlug returns the configured managed-hosting platform-superadmin tenant

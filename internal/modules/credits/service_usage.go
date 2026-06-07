@@ -49,6 +49,9 @@ func (s *CreditsService) InsertCaptureUsageEvent(ctx context.Context, p CaptureU
 	}
 	now := s.now()
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		if err := ensureTenantSubject(ctx, s.db.Q(ctx), tenant.FromContextOrDefault(ctx).UUID(), p.TenantSubjectID); err != nil {
+			return err
+		}
 		ev := &models.UsageEvent{
 			ID:                  uuidutil.NewV7(),
 			TenantID:            tenant.FromContextOrDefault(ctx).UUID(),

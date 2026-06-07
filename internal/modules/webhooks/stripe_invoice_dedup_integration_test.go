@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -81,17 +82,17 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	const chargeID = "ch_dedup_1"
 	const invoiceID = "in_dedup_1"
 	require.NoError(t, paymentSvc.Create(ctx, &models.Payment{
-		ID:            uuid.New(),
-		UserID:        userID,
-		PriceID:       priceID,
-		Processor:     models.ProcessorStripe,
-		TransactionID: chargeID,
-		Amount:        2900,
-		ListAmount:    2900,
-		Currency:      "usd",
-		Status:        payments.PaymentStatusCompletedValue,
-		PurchasedAt:   now,
-		CreatedAt:     now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		PriceID:         priceID,
+		Processor:       models.ProcessorStripe,
+		TransactionID:   chargeID,
+		Amount:          2900,
+		ListAmount:      2900,
+		Currency:        "usd",
+		Status:          payments.PaymentStatusCompletedValue,
+		PurchasedAt:     now,
+		CreatedAt:       now,
 		Metadata: map[string]any{
 			"source":            "stripe_reconcile_backfill",
 			"stripe_charge_id":  chargeID,
@@ -119,17 +120,17 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	// eventual success: failed rows are "failed:"-prefixed with no invoice
 	// metadata, so they never match.
 	require.NoError(t, paymentSvc.Create(ctx, &models.Payment{
-		ID:            uuid.New(),
-		UserID:        userID,
-		PriceID:       priceID,
-		Processor:     models.ProcessorStripe,
-		TransactionID: "failed:in_dedup_2",
-		Amount:        2900,
-		ListAmount:    2900,
-		Currency:      "usd",
-		Status:        payments.PaymentStatusFailedValue,
-		PurchasedAt:   now,
-		CreatedAt:     now,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		PriceID:         priceID,
+		Processor:       models.ProcessorStripe,
+		TransactionID:   "failed:in_dedup_2",
+		Amount:          2900,
+		ListAmount:      2900,
+		Currency:        "usd",
+		Status:          payments.PaymentStatusFailedValue,
+		PurchasedAt:     now,
+		CreatedAt:       now,
 	}))
 	recorded, err = svc.stripeInvoicePaymentAlreadyRecorded(ctx, stripeInvoice{ID: "in_dedup_2"})
 	require.NoError(t, err)

@@ -147,3 +147,7 @@ docker-compose.test.yml
 # agent git worktrees (never track)
 .claude/worktrees/
 .gstack/
+
+# Test/runtime-generated AuthKit keys and scratch state
+.runtime/
+**/.runtime/

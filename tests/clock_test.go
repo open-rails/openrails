@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -147,15 +148,15 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		PeriodEnd:   cancelPeriodEnd,
 	})
 	ent := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      cancelUserID,
-		Entitlement: "premium",
-		StartAt:     cancelStart,
-		EndAt:       &cancelPeriodEnd,
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &cancelSub.ID,
-		CreatedAt:   cancelStart,
-		UpdatedAt:   cancelStart,
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(cancelUserID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         cancelStart,
+		EndAt:           &cancelPeriodEnd,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &cancelSub.ID,
+		CreatedAt:       cancelStart,
+		UpdatedAt:       cancelStart,
 	}
 	_, err = suite.BunDB.NewInsert().Model(ent).Exec(ctx)
 	require.NoError(t, err)

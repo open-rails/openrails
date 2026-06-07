@@ -30,12 +30,11 @@ test_mode: true
 host: "0.0.0.0"        # Address to bind to (default: 0.0.0.0)
 port: 2053             # Public HTTP/HTTPS port (default: 2053)
 
-# Server-to-server calls (credits, entitlements) authenticate with
-# OpenRails-issued tenant service tokens on this SAME public port. There is no separate
-# private/mTLS service listener, no service port, and no API key (issue #222).
-# service tokens are minted/resolved through the OpenRails-owned AuthKit control plane;
-# see auth.control_plane.* below. Any infrastructure TLS / service mesh is
-# deployment-owned and is NOT part of OpenRails authorization.
+# Server-to-server calls (credits, entitlements) authenticate on this SAME public
+# port with either generated OpenRails service tokens or first-party OIDC service
+# JWTs from registered tenant issuers. There is no separate private/mTLS service
+# listener, no service port, and no API key (issue #222). Any infrastructure TLS
+# / service mesh is deployment-owned and is NOT part of OpenRails authorization.
 
 # =============================================================================
 # DEVELOPER TOOLS (OPTIONAL)
@@ -168,20 +167,23 @@ auth:
   # control_plane:
   #   enabled: true
   #   issuer: "https://openrails.mysite.com" # AuthKit token issuer this CP signs as
-  #   tenant_mode: "multi"                    # required for tenant service tokens
-  #   token_prefix: "openrails"               # service token brand prefix -> openrails_st_...
+  #   token_prefix: "openrails"               # generated service token brand prefix -> openrails_st_...
   #   locked_down: true                       # self-hosted posture (default true)
   #   # issued_audiences: ["openrails-app"]   # defaults to expected_audience
   #   # expected_audiences: ["openrails-app"]
 
-# Declarative tenant bootstrap for closed-registration deployments. The mounted
-# file uses tenant manifest v2: tenants, OIDC issuers, service tokens, arbitrary
-# permissions/resources, and deployment-owned output targets.
-# tenant_bootstrap:
-#   file: "/etc/openrails/tenants.yaml"
+# Declarative bootstrap for closed-registration deployments is an explicit step:
 #
-# Example tenants.yaml:
-# version: 2
+#   billing migrate up -c /etc/openrails/config.yaml
+#   billing bootstrap apply -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml
+#   billing run-server -c /etc/openrails/config.yaml
+#
+# The mounted bootstrap file uses the unified manifest shape: tenants, OIDC
+# issuers, first-party service JWT principals, optional generated service tokens,
+# and top-level catalogs.
+#
+# Example /etc/openrails/bootstrap.yaml:
+# version: 1
 # tenants:
 #   - slug: local-stack
 #     name: Local Stack
@@ -192,25 +194,23 @@ auth:
 #       - issuer: "http://hentai0:8081"
 #         jwks_uri: "http://hentai0:8081/.well-known/jwks.json"
 #         audiences: ["openrails-app"]
-#     service_tokens:
-#       - name: doujins-runtime
+#     service_jwt_principals:
+#       - issuer: "http://doujins:8080"
+#         subject: "service:doujins-runtime"
 #         permissions: ["openrails:entitlements:read"]
 #         resources:
 #           - kind: openrails.tenant
 #             id: "$tenant"
-#         outputs:
-#           - vault:
-#               mount: "secret"
-#               path: "openrails/local-stack/doujins"
-#               field: "service_token"
-#       - name: hentai0-runtime
+#       - issuer: "http://hentai0:8081"
+#         subject: "service:hentai0-runtime"
 #         permissions: ["openrails:entitlements:read"]
 #         resources:
 #           - kind: openrails.tenant
 #             id: "$tenant"
-#         outputs:
-#           - file:
-#               path: "/run/secrets/openrails_hentai0_service_token"
+# catalogs:
+#   - name: default
+#     default_currency: usd
+#     tier_groups: []
 
 # =============================================================================
 # ENCRYPTION AT REST (issue #227)

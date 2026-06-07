@@ -384,7 +384,7 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 	switch session.Mode {
 	case models.CheckoutSessionModeSolanaCancel, models.CheckoutSessionModeSolanaTierChange:
 		pending := &PendingSolanaPayment{
-			UserID:    session.UserID,
+			UserID:    session.TenantSubjectID.String(),
 			PriceID:   session.PriceID.String(),
 			SessionID: session.ID.String(),
 			Amount:    session.Amount,
@@ -402,7 +402,7 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 		// The confirmed reference is routed to ConfirmSolanaSubscribeSession, which
 		// advances init→subscribe and enrolls once the subscription PDA is funded.
 		pending := &PendingSolanaPayment{
-			UserID:    session.UserID,
+			UserID:    session.TenantSubjectID.String(),
 			PriceID:   session.PriceID.String(),
 			SessionID: session.ID.String(),
 			Amount:    session.Amount,
@@ -424,7 +424,7 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 		return nil, fmt.Errorf("checkout session %s is missing solana payment state", session.ID)
 	}
 	pending := &PendingSolanaPayment{
-		UserID:      session.UserID,
+		UserID:      session.TenantSubjectID.String(),
 		PriceID:     session.PriceID.String(),
 		SessionID:   session.ID.String(),
 		Amount:      session.Amount,
@@ -740,7 +740,7 @@ func solanaPaymentMatchesPending(payment *models.Payment, reference string, pend
 	if err != nil {
 		return false
 	}
-	if payment.UserID != pending.UserID || payment.PriceID != priceID || payment.Amount != pending.Amount || !strings.EqualFold(payment.Currency, pending.Currency) {
+	if payment.TenantSubjectID.String() != pending.UserID || payment.PriceID != priceID || payment.Amount != pending.Amount || !strings.EqualFold(payment.Currency, pending.Currency) {
 		return false
 	}
 	if strings.TrimSpace(fmt.Sprint(payment.Metadata["solana_reference"])) != strings.TrimSpace(reference) {

@@ -30,12 +30,12 @@ func (c *CheckMultipleActiveSubscriptions) Run(ctx context.Context, db bun.IDB, 
 	var results []result
 	err := db.NewRaw(`
 		SELECT
-			user_id,
+			tenant_subject_id::text AS user_id,
 			COUNT(*) as count,
 			ARRAY_AGG(id ORDER BY created_at DESC) as sub_ids
 		FROM billing.subscriptions
 		WHERE status = 'active'
-		GROUP BY user_id
+		GROUP BY tenant_subject_id
 		HAVING COUNT(*) > 1
 	`).Scan(ctx, &results)
 
@@ -99,7 +99,7 @@ func (c *CheckDuplicateChargesSamePeriod) Run(ctx context.Context, db bun.IDB, o
 		WITH payment_products AS (
 			SELECT
 				purch.id,
-				purch.user_id,
+				purch.tenant_subject_id,
 				purch.amount,
 				purch.purchased_at,
 				price.product_id,
@@ -111,7 +111,7 @@ func (c *CheckDuplicateChargesSamePeriod) Run(ctx context.Context, db bun.IDB, o
 			  AND purch.refunded_payment_id IS NULL
 		)
 		SELECT
-			user_id,
+			tenant_subject_id::text AS user_id,
 			product_id,
 			product_slug,
 			COUNT(*) as count,
@@ -120,7 +120,7 @@ func (c *CheckDuplicateChargesSamePeriod) Run(ctx context.Context, db bun.IDB, o
 			MIN(purchased_at) as first_date,
 			MAX(purchased_at) as last_date
 		FROM payment_products
-		GROUP BY user_id, product_id, product_slug, DATE_TRUNC('month', purchased_at)
+		GROUP BY tenant_subject_id, product_id, product_slug, DATE_TRUNC('month', purchased_at)
 		HAVING COUNT(*) > 1
 	`).Scan(ctx, &results)
 
@@ -185,7 +185,7 @@ func (c *CheckOverlappingEntitlementWindows) Run(ctx context.Context, db bun.IDB
 		WITH active_entitlements AS (
 			SELECT
 				id,
-				user_id,
+				tenant_subject_id,
 				entitlement,
 				start_at,
 				COALESCE(end_at, '9999-12-31'::timestamptz) as end_at
@@ -194,18 +194,18 @@ func (c *CheckOverlappingEntitlementWindows) Run(ctx context.Context, db bun.IDB
 			  AND deleted_at IS NULL
 		)
 		SELECT
-			e1.user_id,
+			e1.tenant_subject_id::text AS user_id,
 			e1.entitlement,
 			COUNT(DISTINCT e1.id) + COUNT(DISTINCT e2.id) as count,
 			ARRAY_AGG(DISTINCT e1.id) || ARRAY_AGG(DISTINCT e2.id) as ent_ids
 		FROM active_entitlements e1
 		JOIN active_entitlements e2 ON
-			e1.user_id = e2.user_id
+			e1.tenant_subject_id = e2.tenant_subject_id
 			AND e1.entitlement = e2.entitlement
 			AND e1.id < e2.id
 			AND e1.start_at < e2.end_at
 			AND e2.start_at < e1.end_at
-		GROUP BY e1.user_id, e1.entitlement
+		GROUP BY e1.tenant_subject_id, e1.entitlement
 	`).Scan(ctx, &results)
 
 	if err != nil {

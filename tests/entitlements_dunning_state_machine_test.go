@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,7 +72,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 
 	_, err = suite.BunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		UserID:                  userID,
+		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -86,15 +87,15 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.NoError(t, err)
 
 	paidEnt := &models.Entitlement{
-		ID:          uuid.New(),
-		UserID:      userID,
-		Entitlement: "premium",
-		StartAt:     periodStart,
-		EndAt:       &paidEnd,
-		SourceType:  models.EntitlementSourceSubscription,
-		SourceID:    &subID,
-		CreatedAt:   clock.Now().UTC(),
-		UpdatedAt:   clock.Now().UTC(),
+		ID:              uuid.New(),
+		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		Entitlement:     "premium",
+		StartAt:         periodStart,
+		EndAt:           &paidEnd,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &subID,
+		CreatedAt:       clock.Now().UTC(),
+		UpdatedAt:       clock.Now().UTC(),
 	}
 	_, err = suite.BunDB.NewInsert().Model(paidEnt).Exec(ctx)
 	require.NoError(t, err)

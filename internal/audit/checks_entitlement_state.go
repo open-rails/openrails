@@ -29,7 +29,7 @@ func (c *CheckRevokedWithoutReason) Run(ctx context.Context, db bun.IDB, opts Op
 
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, entitlement, revoked_at
+		SELECT id, tenant_subject_id::text AS user_id, entitlement, revoked_at
 		FROM billing.entitlements
 		WHERE revoked_at IS NOT NULL
 		  AND revoke_reason IS NULL
@@ -84,7 +84,7 @@ func (c *CheckReasonWithoutRevocation) Run(ctx context.Context, db bun.IDB, opts
 
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, entitlement, revoke_reason
+		SELECT id, tenant_subject_id::text AS user_id, entitlement, revoke_reason
 		FROM billing.entitlements
 		WHERE revoke_reason IS NOT NULL
 		  AND revoked_at IS NULL
@@ -140,7 +140,7 @@ func (c *CheckInvalidTimeWindow) Run(ctx context.Context, db bun.IDB, opts Optio
 
 	var results []result
 	err := db.NewRaw(`
-		SELECT id, user_id, entitlement, start_at, end_at
+		SELECT id, tenant_subject_id::text AS user_id, entitlement, start_at, end_at
 		FROM billing.entitlements
 		WHERE end_at IS NOT NULL
 		  AND start_at >= end_at
@@ -199,7 +199,7 @@ func (c *CheckMultipleIndefiniteEntitlements) Run(ctx context.Context, db bun.ID
 	var results []result
 	err := db.NewRaw(`
 		SELECT
-			user_id,
+			tenant_subject_id::text AS user_id,
 			entitlement,
 			COUNT(*) as count,
 			ARRAY_AGG(id ORDER BY created_at DESC) as ent_ids
@@ -207,7 +207,7 @@ func (c *CheckMultipleIndefiniteEntitlements) Run(ctx context.Context, db bun.ID
 		WHERE end_at IS NULL
 		  AND revoked_at IS NULL
 		  AND deleted_at IS NULL
-		GROUP BY user_id, entitlement
+		GROUP BY tenant_subject_id, entitlement
 		HAVING COUNT(*) > 1
 	`).Scan(ctx, &results)
 
