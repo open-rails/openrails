@@ -1,5 +1,5 @@
 {
-  "next_id": 326,
+  "next_id": 327,
   "issues": [
     {
       "id": 107,
@@ -411,6 +411,36 @@
         "[x] Validate with a live/sandbox smoke when real NMI test credentials are available: provider-hosted token -> saved card create -> `billing.payment_methods.vault_id` persisted -> list returns display metadata."
       ],
       "completed": true
+    },
+    {
+      "id": 326,
+      "name": "live-mobius-payment-lifecycle-harness",
+      "description": "Turn the existing Mobius/NMI sandbox runbook into a self-verifying compose-backed integration harness. Today OpenRails has the pieces but not the one test the production risk actually needs: a live local OpenRails stack using real Mobius/NMI test credentials, browser-hosted tokenization, OpenRails saved-card storage, saved-card checkout/charge, recurring subscription creation, webhook/query verification, and cleanup/readback. Existing coverage is split: `tests/payment_methods_test.go` and `tests/checkout_session_test.go` exercise OpenRails with a mock NMI server; `tests/nmi_integration_test.go` exercises real NMI direct API vault/sale/rebill calls mostly outside OpenRails; `docs/e2e-mobius-sandbox.md` is a useful manual runbook. This issue closes that gap with an automated harness rather than another manual checklist.",
+      "tasks": [
+        "CURRENT COVERAGE AUDIT:",
+        "[x] Confirmed existing mocked app-level tests cover `POST /v1/me/payment-methods` and `/v1/checkout` with mocked NMI.",
+        "[x] Confirmed existing live NMI tests cover configured-account sale and demo customer-vault sale/rebill direct against NMI.",
+        "[x] Confirmed existing `scripts/mobius_sandbox_e2e.sh` / `docs/e2e-mobius-sandbox.md` start the stack/tunnel and describe manual saved-card + checkout steps, but do not self-verify the lifecycle.",
+        "",
+        "HARNESS REQUIREMENTS:",
+        "[ ] Provide one repeatable command that starts the docker-compose E2E stack, waits for OpenRails readiness, applies migrations, seeds the Mobius sandbox catalog, mints a user JWT, and drives the flow against the running HTTP server.",
+        "[ ] Use real Mobius/NMI test credentials from `.env` / CI secrets; fail fast if tokenization key, security key, webhook secret, plan id, or required public HTTPS origin are missing.",
+        "[ ] Generate a real provider-hosted `payment_token` through Collect.js in a browser automation context or an equivalent PCI-safe hosted-tokenization path; do not send raw PAN/CVV to OpenRails.",
+        "[ ] Call `POST /v1/me/payment-methods`, assert HTTP 200, assert `billing.payment_methods.vault_id` is persisted, assert no raw card data is stored, and assert list/readback returns display/billing metadata.",
+        "[ ] Call `POST /v1/checkout` with the saved `payment_method_id`, assert OpenRails charges/subscribes through Mobius/NMI, and assert local payment/subscription records contain real provider transaction/subscription identifiers.",
+        "[ ] Add a one-time/manual charge verification path using the saved vault reference when supported by OpenRails' public API or a dedicated test-only command; otherwise record the missing production/API surface explicitly.",
+        "[ ] Verify remote state via NMI Query API for the provider transaction/subscription id and compare amount/currency/status to local OpenRails records.",
+        "[ ] Verify webhook ingestion with real signed Mobius/NMI webhook delivery over the deterministic public HTTPS route, including signature verification and idempotent replay behavior.",
+        "[ ] Cancel the subscription through OpenRails, verify local state transition, and verify remote cancellation/query state where the sandbox supports it.",
+        "[ ] Emit a concise machine-readable result summary with run id, local ids, provider ids, and pass/fail checks while redacting tokens, API keys, vault ids when appropriate, and any PAN/CVV/tokenization payload.",
+        "",
+        "CI / OPERATIONALIZATION:",
+        "[ ] Keep the normal unit suite independent from this live harness; gate it behind an explicit task/build tag/env such as `task e2e-mobius-live`.",
+        "[ ] Document exact CI secret names and local `.env` variables; ensure missing live credentials skip or fail with a clear message depending on explicit live mode.",
+        "[ ] Update `docs/e2e-mobius-sandbox.md` so the manual runbook points to the automated command first and keeps manual portal steps only where NMI requires them.",
+        "[ ] Add cleanup guidance for local compose volumes and remote sandbox artifacts so repeated runs do not collide."
+      ],
+      "completed": false
     },
     {
       "id": 320,
