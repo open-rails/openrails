@@ -412,6 +412,37 @@ type serviceUsageRollupRequest struct {
 	GroupBy         string `json:"group_by" binding:"required"`
 }
 
+type serviceEndpointRevenueRequest struct {
+	EndpointName string `json:"endpoint_name" binding:"required"`
+	From         int64  `json:"from" binding:"required"`
+	To           int64  `json:"to" binding:"required"`
+}
+
+// ServiceEndpointRevenue returns per-day revenue for an endpoint (by usage_event
+// metadata endpoint_name) across all payers in the tenant (#410) — powers
+// tensorhub endpoint revenue analytics. Operator service token, credits:read.
+func ServiceEndpointRevenue(r *httprequest.Request) {
+	var req serviceEndpointRevenueRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	rows, err := svc.EndpointRevenueDaily(r.Request.Context(), req.EndpointName, time.Unix(req.From, 0).UTC(), time.Unix(req.To, 0).UTC())
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	var total int64
+	for _, x := range rows {
+		total += x.AmountMillicents
+	}
+	r.SuccessJSON(map[string]any{"revenue_millicents": total, "daily": rows})
+}
+
 // ServiceUsageRollup returns per-dimension-value spend for a tenant subject over a
 // window (#311) — the OpenRails-sourced data behind the tensorhub platform's
 // /budget-usage + revenue analytics. Operator-service token, credits:read scope.

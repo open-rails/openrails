@@ -384,6 +384,27 @@ func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollup
 	return out, nil
 }
 
+// EndpointRevenueDailyRow is one day's revenue (millicents) for an endpoint.
+type EndpointRevenueDailyRow struct {
+	Date             string `json:"date"`
+	AmountMillicents int64  `json:"amount_millicents"`
+}
+
+// EndpointRevenueDaily returns per-day revenue for an endpoint (by metadata
+// endpoint_name) across all payers in the tenant over [from, to) — powers
+// tensorhub endpoint revenue analytics (#410).
+func (s *Service) EndpointRevenueDaily(ctx context.Context, endpointName string, from, to time.Time) ([]EndpointRevenueDailyRow, error) {
+	rows, err := s.creditsService().EndpointRevenueDaily(ctx, endpointName, from, to)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]EndpointRevenueDailyRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, EndpointRevenueDailyRow{Date: r.Date, AmountMillicents: r.AmountMillicents})
+	}
+	return out, nil
+}
+
 func (s *Service) ReleaseHold(ctx context.Context, holdID uuid.UUID) error {
 	if holdID == uuid.Nil {
 		return fmt.Errorf("hold_id required")

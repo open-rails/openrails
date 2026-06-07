@@ -123,3 +123,40 @@ func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.
 	}
 	return out, nil
 }
+
+// EndpointRevenueDailyRow is one day's revenue for an endpoint (millicents).
+type EndpointRevenueDailyRow struct {
+	Date             string `json:"date" bun:"date"`
+	AmountMillicents int64  `json:"amount_millicents" bun:"amount_millicents"`
+}
+
+// EndpointRevenueDaily returns per-day revenue (sum of captured usage_event
+// amounts; the credit type's smallest unit is cents, so x1000 -> millicents) for
+// an endpoint identified by metadata->>'endpoint_name', across ALL payers in the
+// tenant, over [from, to). Powers tensorhub endpoint revenue analytics (#410).
+func (s *CreditsService) EndpointRevenueDaily(ctx context.Context, endpointName string, from, to time.Time) ([]EndpointRevenueDailyRow, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("credits service not initialized")
+	}
+	endpointName = strings.TrimSpace(endpointName)
+	if endpointName == "" {
+		return nil, fmt.Errorf("endpoint_name required")
+	}
+	var out []EndpointRevenueDailyRow
+	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		return s.db.Q(ctx).NewSelect().
+			TableExpr("billing.usage_events AS ue").
+			ColumnExpr("to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date").
+			ColumnExpr("COALESCE(SUM(ue.amount), 0) * 1000 AS amount_millicents").
+			Where("ue.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
+			Where("ue.metadata->>'endpoint_name' = ?", endpointName).
+			Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from.UTC(), to.UTC()).
+			GroupExpr("1").
+			OrderExpr("1").
+			Scan(ctx, &out)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
