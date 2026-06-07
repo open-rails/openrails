@@ -10,9 +10,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	"github.com/open-rails/openrails/internal/tenancy"
+	tenantpkg "github.com/open-rails/openrails/pkg/tenant"
 )
 
 // These tests pin the SELF-SERVICE route table (RegisterSelfServiceRoutes) for
@@ -31,6 +33,7 @@ import (
 // fixed ResolvedDelegated carrying the supplied permission set.
 type fakeDelegatedResolver struct {
 	permissions []string
+	tenantID    tenantpkg.ID
 	err         error
 }
 
@@ -38,8 +41,14 @@ func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string) (*contr
 	if f.err != nil {
 		return nil, f.err
 	}
+	tenantID := f.tenantID
+	if tenantID.IsZero() {
+		tenantID = tenantpkg.DefaultID
+	}
 	return &controlplane.ResolvedDelegated{
 		Tenant:           "acme-org",
+		TenantID:         tenantID,
+		TenantSlug:       "acme-org",
 		DelegatedSubject: "user-42",
 		Permissions:      f.permissions,
 	}, nil
@@ -70,6 +79,16 @@ func newTenantAdminRouter(t *testing.T, perms []string) *gin.Engine {
 	return e
 }
 
+func newTenantAdminRouterWithRuntime(t *testing.T, perms []string, tenantID tenantpkg.ID, svc *tenancy.Service) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	group := e.Group("/v1/tenant-admin")
+	rt := &app.Runtime{Tenancy: svc}
+	RegisterTenantAdminRoutes(group, rt, ginmw.DelegatedSelfRequired(fakeDelegatedResolver{permissions: perms, tenantID: tenantID}))
+	return e
+}
+
 func doSelf(e *gin.Engine, method, path string, withAuth bool) *httptest.ResponseRecorder {
 	token := ""
 	if withAuth {
@@ -79,7 +98,11 @@ func doSelf(e *gin.Engine, method, path string, withAuth bool) *httptest.Respons
 }
 
 func doSelfBearer(e *gin.Engine, method, path, token string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, strings.NewReader("{}"))
+	return doSelfBearerBody(e, method, path, token, "{}")
+}
+
+func doSelfBearerBody(e *gin.Engine, method, path, token, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -244,4 +267,54 @@ func TestTenantAdmin_WritableRegistryExcludesOpenRailsInternalSecrets(t *testing
 		require.True(t, def.TenantWritable, "tenant-admin registry exposed non-writable secret %s", def.Name)
 		require.NotEqual(t, tenancy.SecretSolanaPrivateKey, def.Name)
 	}
+}
+
+func TestTenantAdmin_SecretRoutesWriteOnlyRuntimeBehavior(t *testing.T) {
+	store := tenancy.NewMemorySecretStore()
+	svc, err := tenancy.NewSecretManagementService(store)
+	require.NoError(t, err)
+
+	tenantA := tenantpkg.DefaultID
+	tenantB, err := tenantpkg.ParseID("22222222-2222-2222-2222-222222222222")
+	require.NoError(t, err)
+	perms := []string{
+		controlplane.PermTenantSecretsList,
+		controlplane.PermTenantSecretsWrite,
+		controlplane.PermTenantSecretsDelete,
+		controlplane.PermTenantSecretsTest,
+	}
+
+	eA := newTenantAdminRouterWithRuntime(t, perms, tenantA, svc)
+	w := doSelfBearerBody(eA, http.MethodPut, "/v1/tenant-admin/secrets/stripe/secret_key", "delegated.jwt.token", `{"value":"sk_test_route_secret"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "sk_test_route_secret")
+	got, err := store.Get(context.Background(), tenantA, tenancy.SecretStripeSecretKey)
+	require.NoError(t, err)
+	require.Equal(t, "sk_test_route_secret", got.Value)
+
+	w = doSelfBearer(eA, http.MethodGet, "/v1/tenant-admin/secrets", "delegated.jwt.token")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"configured":true`)
+	require.NotContains(t, w.Body.String(), "sk_test_route_secret")
+
+	w = doSelfBearerBody(eA, http.MethodPost, "/v1/tenant-admin/secrets/validate/nmi/mobius/production_key", "delegated.jwt.token", `{"value":"mobius-production-key"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "mobius-production-key")
+
+	w = doSelfBearerBody(eA, http.MethodPut, "/v1/tenant-admin/secrets/solana/private_key", "delegated.jwt.token", `{"value":"private"}`)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+
+	eB := newTenantAdminRouterWithRuntime(t, perms, tenantB, svc)
+	w = doSelfBearer(eB, http.MethodGet, "/v1/tenant-admin/secrets", "delegated.jwt.token")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), `"version":1`)
+	if _, err := store.Get(context.Background(), tenantB, tenancy.SecretStripeSecretKey); err == nil {
+		t.Fatal("tenant B should not see tenant A's Stripe secret")
+	}
+
+	w = doSelfBearer(eA, http.MethodDelete, "/v1/tenant-admin/secrets/stripe/secret_key", "delegated.jwt.token")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "sk_test_route_secret")
+	_, err = store.Get(context.Background(), tenantA, tenancy.SecretStripeSecretKey)
+	require.ErrorIs(t, err, tenancy.ErrSecretNotFound)
 }

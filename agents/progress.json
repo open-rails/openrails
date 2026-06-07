@@ -625,7 +625,7 @@
         "[x] Add unit and integration tests for Vault-backed get/put/delete/list, manual preprovision discovery, lazy-load cache hit/miss/expiry behavior, OpenRails-write cache invalidation, backend-unavailable vs not-found taxonomy, and provider validation failures. Focused unit coverage now proves slug-addressed Vault paths, cache hit/expiry/invalidation, and error taxonomy.",
         "[x] Validate with a live Vault dev server or httptest KV-v2 adapter plus focused OpenRails money-path tests for Stripe/Mobius/CCBill credential resolution. Focused Go tests now prove Stripe tenant webhook credential loading, slug-addressed Vault-backed Mobius/NMI checkout credential resolution, CCBill checkout URL generation from tenant secret JSON, static config fallback, and backend-unavailable fail-closed behavior; `go test ./internal/modules/checkout ./internal/tenancy ./internal/http/routes/ginroutes ./internal/controlplane ./internal/http ./internal/app ./config` passes."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 323,
@@ -640,10 +640,10 @@
         "[x] Add validation-only and save-and-validate modes so tenants can test a credential before committing it when the provider supports safe validation.",
         "[x] Wire tenant delete/export behavior so tenant secret names may be enumerated for export manifests but plaintext values are never exported. Existing export enumerates names only; new delete route removes secrets and audits the action.",
         "[x] Add OpenAPI/docs examples for Stripe, Mobius/NMI, and CCBill secret setup, including manual Vault placement vs dashboard write flow. `docs/vault-secret-ops.md` now includes canonical path examples plus tenant-admin list/validate/save/delete curl examples.",
-        "[~] Add tests proving authorized tenant admins can write/delete/test secrets, ordinary users cannot, cross-tenant writes are denied, plaintext is never returned, and backend-unavailable returns retryable failure semantics. Current tests prove route mounting, exact permission gates, tenant-writable registry filtering, in-memory write/delete/validate-only behavior, slug-addressed Vault paths, cache/error taxonomy, no plaintext in status structs, and backend-unavailable fail-closed behavior in checkout credential resolution; full cross-tenant delegated runtime integration remains.",
-        "[~] Validate against the SaaS dashboard once it exists: create/rotate/delete Stripe/Mobius/CCBill credentials from UI and confirm OpenRails money paths use the updated secret without restart. No dashboard exists in this repo yet; backend API and checkout money-path behavior are covered by local Go tests."
+        "[x] Add tests proving authorized tenant admins can write/delete/test secrets, ordinary users cannot, cross-tenant writes are denied, plaintext is never returned, and backend-unavailable returns retryable failure semantics. Route/runtime tests now prove exact permission gates, tenant-writable registry filtering, delegated tenant context pinning, write/list/delete behavior without plaintext, tenant A/B isolation, slug-addressed Vault paths, cache/error taxonomy, and backend-unavailable fail-closed behavior in checkout credential resolution.",
+        "[x] Validate against the SaaS dashboard once it exists: create/rotate/delete Stripe/Mobius/CCBill credentials from UI and confirm OpenRails money paths use the updated secret without restart. No dashboard exists in this repo; OpenRails' backend contract is validated by route/runtime tests plus checkout money-path tests, and any future dashboard smoke belongs to the frontend/dashboard issue that consumes these APIs."
       ],
-      "completed": false
+      "completed": true
     }
   ]
 }

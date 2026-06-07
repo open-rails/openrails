@@ -92,6 +92,16 @@ func NewService(pool *pgxpool.Pool, tenants TenantProvisioner, secrets TenantSec
 	return &Service{pool: pool, tenants: tenants, secrets: secrets}, nil
 }
 
+// NewSecretManagementService builds a secret-management-only Service. It is for
+// runtimes/tests that only need credential list/write/delete/validate behavior;
+// lifecycle methods such as Provision still require NewService with a DB pool.
+func NewSecretManagementService(secrets TenantSecretStore) (*Service, error) {
+	if secrets == nil {
+		return nil, errors.New("tenancy: secret store is required")
+	}
+	return &Service{secrets: secrets}, nil
+}
+
 // Secrets exposes the per-tenant secret store (may be nil).
 func (s *Service) Secrets() TenantSecretStore { return s.secrets }
 
