@@ -291,7 +291,7 @@ Service-token examples:
 
 - Doujins/Hentai0/Cozy backend entitlement read: permission
   `openrails:entitlements:read`, resource `openrails.tenant=<tenant_uuid>`,
-  route `GET /v1/service/users/{user_id}/entitlements`.
+  route `GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements`.
 - Tensorhub balance reserve/capture/release: permissions
   `openrails:credits:read`, `openrails:credits:write`, and
   `openrails:credits:spend`; resources include
@@ -300,7 +300,7 @@ Service-token examples:
 
 | Route | Required permission |
 |-------|---------------------|
-| `GET /v1/service/users/{user_id}/entitlements` | `openrails:entitlements:read` |
+| `GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements` | `openrails:entitlements:read` |
 | `GET /v1/service/invokers/{invoker_id}/credits`, `GET /v1/service/credits/invokers/{invoker_id}`, `GET /v1/service/credits/transactions/lookup`, `GET /v1/service/credit-types` | `openrails:credits:read` |
 | `POST /v1/service/credits/{deposit,withdraw,hold}`, `.../hold(s)/{id}/{capture,release}` | `openrails:credits:write` |
 | `POST/PATCH /v1/service/credit-types*` (definition writes) | `openrails:catalog:write` |
@@ -309,9 +309,10 @@ Service-token examples:
 Embedded hosts skip HTTP entirely and call the in-process `pkg/service` facade
 after authorizing the action themselves.
 
-### GET /v1/service/users/{user_id}/entitlements
-Returns active entitlements for the user at the current time. Optional query param `at` (RFC3339) to query
-entitlements at a specific time. Response: array of entitlement records.
+### GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements
+Returns active entitlements for the payable tenant subject at the current time.
+Optional query param `at` (RFC3339) queries entitlements at a specific time.
+Response: array of entitlement records with `tenant_subject_id`.
 
 ### GET /v1/service/credits/invokers/{invoker_id}
 Returns credit balance summary for an invoker. Optional query params: `tenant_subject_id` and `type` (defaults to `api_credits`, which must exist in `billing.credit_types`).

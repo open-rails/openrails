@@ -49,12 +49,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // billingE2EHarness is a small reusable driver over the service-token-authenticated public
@@ -94,6 +96,8 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 		controlplane.PermCreditsRead,
 		controlplane.PermCreditsWrite,
 		controlplane.PermCreditsSpend,
+	}, resources: []authcore.ServiceTokenResource{
+		controlplane.TenantResource(tenant.DefaultID),
 	}}
 	// nil minter + issuer-admin: the delegated-token mint/issuer routes are
 	// irrelevant to the money path.
@@ -126,16 +130,17 @@ func (h *billingE2EHarness) do(method, path string, body any) *httptest.Response
 	return w
 }
 
-// deposit funds an owner's balance via the public deposit route.
+// deposit funds a tenant subject's balance via the public deposit route.
 func (h *billingE2EHarness) deposit(userID string, amount int64) {
 	h.t.Helper()
 	srcID := uuid.New()
 	w := h.do(http.MethodPost, "/v1/service/credits/deposit", map[string]any{
-		"user_id":     userID,
-		"credit_type": h.creditType,
-		"amount":      amount,
-		"source":      "e2e_deposit",
-		"source_id":   srcID.String(),
+		"tenant_subject_id": personalOwnerID(userID).String(),
+		"invoker_id":        userID,
+		"credit_type":       h.creditType,
+		"amount":            amount,
+		"source":            "e2e_deposit",
+		"source_id":         srcID.String(),
 	})
 	require.Equal(h.t, http.StatusOK, w.Code, "deposit body: %s", w.Body.String())
 }
@@ -151,12 +156,13 @@ type holdResult struct {
 func (h *billingE2EHarness) hold(userID, source, sourceID string, amount int64) *httptest.ResponseRecorder {
 	h.t.Helper()
 	return h.do(http.MethodPost, "/v1/service/credits/hold", map[string]any{
-		"user_id":     userID,
-		"credit_type": h.creditType,
-		"amount":      amount,
-		"source":      source,
-		"source_id":   sourceID,
-		"expires_at":  time.Now().Add(15 * time.Minute).Unix(),
+		"tenant_subject_id": personalOwnerID(userID).String(),
+		"invoker_id":        userID,
+		"credit_type":       h.creditType,
+		"amount":            amount,
+		"source":            source,
+		"source_id":         sourceID,
+		"expires_at":        time.Now().Add(15 * time.Minute).Unix(),
 	})
 }
 
@@ -182,7 +188,7 @@ func (h *billingE2EHarness) release(holdID string) *httptest.ResponseRecorder {
 	return h.do(http.MethodPost, "/v1/service/credits/holds/"+holdID+"/release", nil)
 }
 
-// balance reads available + held via the public get-credits route.
+// balance reads available + held via the public tenant-subject balance route.
 type balanceView struct {
 	Balance     int64 `json:"balance"`
 	HeldBalance int64 `json:"held_balance"`
@@ -190,22 +196,25 @@ type balanceView struct {
 
 func (h *billingE2EHarness) balance(userID string) balanceView {
 	h.t.Helper()
-	w := h.do(http.MethodGet, "/v1/service/credits/users/"+userID+"?type="+h.creditType, nil)
+	w := h.do(http.MethodGet, "/v1/service/credits/balance?tenant_subject_id="+personalOwnerID(userID).String()+"&credit_type="+h.creditType, nil)
 	require.Equal(h.t, http.StatusOK, w.Code, "balance body: %s", w.Body.String())
-	var bv balanceView
-	require.NoError(h.t, json.Unmarshal(w.Body.Bytes(), &bv))
-	return bv
+	var payload struct {
+		BalanceCents int64 `json:"balance_cents"`
+		HeldCents    int64 `json:"held_cents"`
+	}
+	require.NoError(h.t, json.Unmarshal(w.Body.Bytes(), &payload))
+	return balanceView{Balance: payload.BalanceCents, HeldBalance: payload.HeldCents}
 }
 
-// ledgerRows returns all credit_transactions for an owner (= personal org of
-// userID) and this credit type, for direct ledger assertions.
+// ledgerRows returns all credit_transactions for a tenant subject and this credit
+// type, for direct ledger assertions.
 func (h *billingE2EHarness) ledgerRows(userID string) []models.CreditTransaction {
 	h.t.Helper()
 	owner := personalOwnerID(userID)
 	var rows []models.CreditTransaction
 	err := h.suite.BunDB.NewSelect().
 		Model(&rows).
-		Where("owner_id = ?", owner).
+		Where("tenant_subject_id = ?", owner).
 		Where("credit_type_id = ?", h.creditTyID).
 		Order("created_at ASC").
 		Scan(context.Background())
@@ -213,14 +222,14 @@ func (h *billingE2EHarness) ledgerRows(userID string) []models.CreditTransaction
 	return rows
 }
 
-// rawBalanceRow returns the persisted balance row for an owner, or nil.
+// rawBalanceRow returns the persisted balance row for a tenant subject, or nil.
 func (h *billingE2EHarness) rawBalanceRow(userID string) *models.UserCreditBalance {
 	h.t.Helper()
 	owner := personalOwnerID(userID)
 	bal := new(models.UserCreditBalance)
 	err := h.suite.BunDB.NewSelect().
 		Model(bal).
-		Where("owner_id = ?", owner).
+		Where("tenant_subject_id = ?", owner).
 		Where("credit_type_id = ?", h.creditTyID).
 		Limit(1).
 		Scan(context.Background())
@@ -427,12 +436,12 @@ func TestUnifiedBilling_OwnerScoping(t *testing.T) {
 	require.Equal(t, balanceView{Balance: 9_000, HeldBalance: 6_000}, h.balance(ownerB),
 		"owner B untouched by owner A's capture")
 
-	// Owner A's ledger has no rows belonging to owner B and vice versa.
+	// Tenant subject A's ledger has no rows belonging to tenant subject B and vice versa.
 	for _, r := range h.ledgerRows(ownerA) {
-		require.Equal(t, personalOwnerID(ownerA), r.OwnerID)
+		require.Equal(t, personalOwnerID(ownerA), r.TenantSubjectID)
 	}
 	for _, r := range h.ledgerRows(ownerB) {
-		require.Equal(t, personalOwnerID(ownerB), r.OwnerID)
+		require.Equal(t, personalOwnerID(ownerB), r.TenantSubjectID)
 	}
 }
 

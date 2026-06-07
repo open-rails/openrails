@@ -14,10 +14,12 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureCanFailAfterExpiry(t *testing.T) {
+func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry(t *testing.T) {
 	suite := setupTestSuite(t)
 	ctx := context.Background()
 
@@ -31,8 +33,9 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureCanFailAfterExpiry(t *t
 	expiredAt := time.Now().Add(-1 * time.Hour).UTC()
 	batch := &models.CreditBlock{
 		ID:              uuid.New(),
-		OwnerID:         personalOwnerID(userID),
-		UserID:          userID,
+		TenantID:        tenant.DefaultID.UUID(),
+		TenantSubjectID: personalOwnerID(userID),
+		InvokerID:       userID,
 		CreditTypeID:    creditType.ID,
 		OriginalAmount:  100,
 		RemainingAmount: 100,
@@ -57,15 +60,21 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureCanFailAfterExpiry(t *t
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
-	_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{HoldID: hold.ID, Amount: 50})
-	require.ErrorIs(t, err, billingservice.ErrInsufficientCredits)
+	trx, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{HoldID: hold.ID, Amount: 50})
+	require.NoError(t, err)
+	require.Equal(t, int64(-50), trx.Amount)
 
-	// Capture failure should not change hold/balance due to transaction rollback.
+	// Capture of an already-authorized hold is allowed after credit expiry; the
+	// uncovered amount accrues to outstanding owed instead of double-reserving lots.
 	holdAfter := suite.getCreditHold(hold.ID)
-	require.Equal(t, "active", holdAfter.Status)
+	require.Equal(t, "captured", holdAfter.Status)
 
 	balAfter, err := suite.App.Runtime.CreditsService.GetBalance(ctx, userID, creditTypeName)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), balAfter.Balance)
-	require.Equal(t, int64(80), balAfter.HeldBalance)
+	require.Equal(t, int64(0), balAfter.HeldBalance)
+
+	owed, err := suite.App.Runtime.CreditsService.GetOutstandingOwed(ctx, identity.TenantSubjectID(personalOwnerID(userID)), creditTypeName)
+	require.NoError(t, err)
+	require.Equal(t, int64(50), owed)
 }

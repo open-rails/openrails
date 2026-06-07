@@ -179,7 +179,7 @@ func TestServiceEntitlementRouteRequiresEntitlementReadPermission(t *testing.T) 
 			Permissions:       []string{controlplane.PermCreditsRead},
 		},
 	}, nil)
-	w := doServiceRoute(e, http.MethodGet, "/v1/service/users/not-a-uuid/entitlements", "openrails_st_keyid_secret", "")
+	w := doServiceRoute(e, http.MethodGet, "/v1/service/tenant-subjects/not-a-uuid/entitlements", "openrails_st_keyid_secret", "")
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Contains(t, w.Body.String(), "service_token_permission_required")
 
@@ -190,9 +190,21 @@ func TestServiceEntitlementRouteRequiresEntitlementReadPermission(t *testing.T) 
 			Permissions:       []string{controlplane.PermEntitlementsRead},
 		},
 	}, nil)
-	w = doServiceRoute(e, http.MethodGet, "/v1/service/users/not-a-uuid/entitlements", "openrails_st_keyid_secret", "")
+	w = doServiceRoute(e, http.MethodGet, "/v1/service/tenant-subjects/not-a-uuid/entitlements", "openrails_st_keyid_secret", "")
 	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "invalid user_id format")
+	require.Contains(t, w.Body.String(), "invalid tenant_subject_id")
+}
+
+func TestServiceEntitlementRouteRejectsOldUserPath(t *testing.T) {
+	e := newMintRouter(t, fakeServiceTokenResolver{
+		looksLikeServiceToken: true,
+		resolved: &controlplane.ResolvedServiceToken{
+			AuthKitTenantSlug: "acme-org",
+			Permissions:       []string{controlplane.PermEntitlementsRead},
+		},
+	}, nil)
+	w := doServiceRoute(e, http.MethodGet, "/v1/service/users/00000000-0000-0000-0000-000000000001/entitlements", "openrails_st_keyid_secret", "")
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestServiceCreditBalanceRouteRejectsWrongTenantSubjectScope(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
+	"regexp"
 
 	authkitpostgres "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/open-rails/migratekit"
@@ -18,6 +18,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 )
+
+var replicatedReplacingMergeTreePattern = regexp.MustCompile(`ReplicatedReplacingMergeTree\([^)]*\{replica\}'(?:,\s*([A-Za-z_][A-Za-z0-9_]*))?\)`)
 
 // RunPostgres applies all Postgres migrations:
 // 0. River (OpenRails schema, == DB.SchemaName()) - via rivermigrate
@@ -262,21 +264,13 @@ func runClickHouseMigrations(ctx context.Context, sqlDB *sql.DB, cfg *config.Cli
 func useSingleNodeClickHouseEngines(migrations []migratekit.Migration) []migratekit.Migration {
 	out := make([]migratekit.Migration, len(migrations))
 	for i, migration := range migrations {
-		migration.Content = strings.ReplaceAll(
-			migration.Content,
-			"ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', version)",
-			"ReplacingMergeTree(version)",
-		)
-		migration.Content = strings.ReplaceAll(
-			migration.Content,
-			"ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', last_updated)",
-			"ReplacingMergeTree(last_updated)",
-		)
-		migration.Content = strings.ReplaceAll(
-			migration.Content,
-			"ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}')",
-			"ReplacingMergeTree()",
-		)
+		migration.Content = replicatedReplacingMergeTreePattern.ReplaceAllStringFunc(migration.Content, func(engine string) string {
+			match := replicatedReplacingMergeTreePattern.FindStringSubmatch(engine)
+			if len(match) > 1 && match[1] != "" {
+				return "ReplacingMergeTree(" + match[1] + ")"
+			}
+			return "ReplacingMergeTree()"
+		})
 		out[i] = migration
 	}
 	return out

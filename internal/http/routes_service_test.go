@@ -26,7 +26,7 @@ func TestRegisterServiceRoutes_NotMountedWithoutControlPlane(t *testing.T) {
 	srv.registerServiceRoutes(e)
 
 	// No control plane => no service token issuer => the service surface is not mounted.
-	req := httptest.NewRequest(http.MethodGet, "/v1/service/users/user-1/entitlements", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/service/tenant-subjects/00000000-0000-0000-0000-000000000001/entitlements", nil)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	require.Equal(t, http.StatusNotFound, w.Code)

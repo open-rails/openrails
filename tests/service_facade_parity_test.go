@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	authcore "github.com/open-rails/authkit/core"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -30,6 +31,7 @@ import (
 // public service routes without standing up a full AuthKit control plane.
 type stubServiceTokenResolver struct {
 	permissions []string
+	resources   []authcore.ServiceTokenResource
 }
 
 func (s stubServiceTokenResolver) LooksLikeServiceToken(token string) bool { return token != "" }
@@ -40,6 +42,7 @@ func (s stubServiceTokenResolver) ResolveServiceToken(_ context.Context, token s
 		TenantID:          tenant.DefaultID,
 		TenantSlug:        tenant.DefaultSlug,
 		Permissions:       s.permissions,
+		Resources:         s.resources,
 	}, nil
 }
 
@@ -47,8 +50,8 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	suite := setupTestSuite(t)
 	ctx := context.Background()
 
-	userID := uuid.New().String()
-	tenantSubjectID := personalOwnerID(userID)
+	userID := "service-user-" + uuid.NewString()
+	tenantSubjectID := uuid.New()
 	tenantSubject := identity.TenantSubjectID(tenantSubjectID)
 	creditTypeName := "svc_test_credits_" + uuid.NewString()
 
@@ -63,6 +66,17 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		CreatedAt:     time.Now().UTC(),
 	}
 	_, err := suite.BunDB.NewInsert().Model(ct).Exec(ctx)
+	require.NoError(t, err)
+
+	ts := &models.TenantSubject{
+		ID:         tenantSubjectID,
+		TenantID:   tenant.DefaultID.UUID(),
+		Issuer:     "service-facade-parity",
+		Subject:    userID,
+		CreatedAt:  time.Now().UTC(),
+		LastSeenAt: time.Now().UTC(),
+	}
+	_, err = suite.BunDB.NewInsert().Model(ts).Exec(ctx)
 	require.NoError(t, err)
 
 	ucb := &models.UserCreditBalance{
@@ -107,12 +121,18 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	router := gin.New()
 	router.Use(ginmw.ResolveTenant())
 	group := router.Group("/v1/service")
-	resolver := stubServiceTokenResolver{permissions: []string{
-		controlplane.PermCreditsRead,
-		controlplane.PermCreditsWrite,
-		controlplane.PermCreditsSpend,
-		controlplane.PermEntitlementsRead,
-	}}
+	resolver := stubServiceTokenResolver{
+		permissions: []string{
+			controlplane.PermCreditsRead,
+			controlplane.PermCreditsWrite,
+			controlplane.PermCreditsSpend,
+			controlplane.PermEntitlementsRead,
+		},
+		resources: []authcore.ServiceTokenResource{
+			controlplane.TenantResource(tenant.DefaultID),
+			controlplane.TenantSubjectResource(tenantSubjectID),
+		},
+	}
 	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver), nil, nil)
 
 	withServiceToken := func(req *http.Request) {
@@ -172,7 +192,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.NoError(t, err)
 	require.Contains(t, ents, "premium-1")
 
-	reqEnt := httptest.NewRequest(http.MethodGet, "/v1/service/users/"+userID+"/entitlements", nil)
+	reqEnt := httptest.NewRequest(http.MethodGet, "/v1/service/tenant-subjects/"+tenantSubjectID.String()+"/entitlements", nil)
 	withServiceToken(reqEnt)
 	wEnt := httptest.NewRecorder()
 	router.ServeHTTP(wEnt, reqEnt)

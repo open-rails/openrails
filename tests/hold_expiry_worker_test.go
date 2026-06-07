@@ -40,14 +40,14 @@ func (suite *TestContainerSuite) createTestCreditType(name string) *models.Credi
 func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTypeID uuid.UUID, balance, heldBalance int64) *models.UserCreditBalance {
 	now := suite.GetClock().Now()
 	bal := &models.UserCreditBalance{
-		ID:           uuid.New(),
-		OwnerID:      personalOwnerID(userID),
-		UserID:       userID,
-		CreditTypeID: creditTypeID,
-		Balance:      balance,
-		HeldBalance:  heldBalance,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:              uuid.New(),
+		TenantSubjectID: personalOwnerID(userID),
+		InvokerID:       userID,
+		CreditTypeID:    creditTypeID,
+		Balance:         balance,
+		HeldBalance:     heldBalance,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	_, err := suite.BunDB.NewInsert().Model(bal).Exec(context.Background())
 	if err != nil {
@@ -64,8 +64,8 @@ func (suite *TestContainerSuite) createTestCreditHold(userID string, creditTypeI
 	sid := uuid.New().String()
 	hold := &models.CreditTransaction{
 		ID:              uuid.New(),
-		OwnerID:         personalOwnerID(userID),
-		UserID:          userID,
+		TenantSubjectID: personalOwnerID(userID),
+		InvokerID:       userID,
 		CreditTypeID:    creditTypeID,
 		Amount:          0,
 		BalanceAfter:    nil,

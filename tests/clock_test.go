@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // TestClockInTestSuite tests the clock integration with TestContainerSuite
@@ -187,8 +188,9 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	blockExpiry := mockClock.Now().Add(time.Hour)
 	block := &models.CreditBlock{
 		ID:              uuid.New(),
-		OwnerID:         personalOwnerID(creditUserID),
-		UserID:          creditUserID,
+		TenantID:        tenant.DefaultID.UUID(),
+		TenantSubjectID: personalOwnerID(creditUserID),
+		InvokerID:       creditUserID,
 		CreditTypeID:    creditType.ID,
 		OriginalAmount:  75,
 		RemainingAmount: 75,

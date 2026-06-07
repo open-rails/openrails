@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -15,17 +17,18 @@ import (
 )
 
 type ServiceEntitlementRecord struct {
-	ID           string     `json:"id"`
-	UserID       string     `json:"user_id"`
-	Entitlement  string     `json:"entitlement"`
-	StartAt      time.Time  `json:"start_at"`
-	EndAt        *time.Time `json:"end_at,omitempty"`
-	SourceID     *string    `json:"source_id,omitempty"`
-	SourceType   string     `json:"source_type"`
-	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
-	RevokeReason *string    `json:"revoke_reason,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID              string     `json:"id"`
+	TenantSubjectID string     `json:"tenant_subject_id,omitempty"`
+	UserID          string     `json:"user_id,omitempty"`
+	Entitlement     string     `json:"entitlement"`
+	StartAt         time.Time  `json:"start_at"`
+	EndAt           *time.Time `json:"end_at,omitempty"`
+	SourceID        *string    `json:"source_id,omitempty"`
+	SourceType      string     `json:"source_type"`
+	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
+	RevokeReason    *string    `json:"revoke_reason,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type adminUserEntitlementsPath struct {
@@ -42,14 +45,14 @@ type grantEntitlementRequest struct {
 	Days        *int   `json:"days,omitempty"`
 }
 
-func ServiceGetUserEntitlements(r *httprequest.Request) {
-	userID := strings.TrimSpace(r.Param("user_id"))
-	if userID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "user_id is required")
+func ServiceGetTenantSubjectEntitlements(r *httprequest.Request) {
+	tenantSubject, err := parseServiceTenantSubjectID(r.Param("tenant_subject_id"))
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, err := uuid.Parse(userID); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid user_id format")
+	if tenantSubject == nil {
+		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
 		return
 	}
 	atStr := strings.TrimSpace(r.Query("at"))
@@ -71,12 +74,54 @@ func ServiceGetUserEntitlements(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	entitlements, err := svc.ListActiveEntitlementRecords(r.Request.Context(), userID, queryTime)
+	tenantSubjectID := tenantSubject.UUID().String()
+	legacyUserID, err := entitlementUserIDForTenantSubject(r, tenantSubject.UUID())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve tenant subject")
+		return
+	}
+	entitlements, err := svc.ListActiveEntitlementRecords(r.Request.Context(), legacyUserID, queryTime)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
 		return
 	}
-	r.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements))
+	r.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements, tenantSubjectID))
+}
+
+func entitlementUserIDForTenantSubject(r *httprequest.Request, tenantSubjectID uuid.UUID) (string, error) {
+	if r == nil || r.State == nil || r.State.DB == nil {
+		return tenantSubjectID.String(), nil
+	}
+	ctx := r.Request.Context()
+
+	var subject string
+	err := r.State.DB.Q(ctx).NewSelect().
+		TableExpr("billing.tenant_subjects").
+		Column("subject").
+		Where("id = ?", tenantSubjectID).
+		Scan(ctx, &subject)
+	switch {
+	case err == nil && strings.TrimSpace(subject) != "":
+		return strings.TrimSpace(subject), nil
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return "", err
+	}
+
+	var invokerID string
+	err = r.State.DB.Q(ctx).NewSelect().
+		TableExpr("billing.user_credit_balances").
+		Column("invoker_id").
+		Where("tenant_subject_id = ?", tenantSubjectID).
+		Limit(1).
+		Scan(ctx, &invokerID)
+	switch {
+	case err == nil && strings.TrimSpace(invokerID) != "":
+		return strings.TrimSpace(invokerID), nil
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return "", err
+	default:
+		return tenantSubjectID.String(), nil
+	}
 }
 
 func GetAdminUserEntitlements(r *httprequest.Request) {
@@ -214,10 +259,10 @@ func serviceEntitlementRecordsFromModels(entitlements []models.Entitlement) []Se
 	return result
 }
 
-func serviceEntitlementRecordsFromService(entitlements []billingservice.EntitlementRecord) []ServiceEntitlementRecord {
+func serviceEntitlementRecordsFromService(entitlements []billingservice.EntitlementRecord, tenantSubjectID string) []ServiceEntitlementRecord {
 	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
 	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), UserID: e.UserID, Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+		rec := ServiceEntitlementRecord{ID: e.ID.String(), TenantSubjectID: tenantSubjectID, Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 		if e.EndAt != nil {
 			rec.EndAt = e.EndAt
 		}
