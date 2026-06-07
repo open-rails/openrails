@@ -240,11 +240,11 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 			return nil, err
 		}
 		// If the token ALSO carries a `tenant` claim, it MUST agree with the
-		// issuer's tenant — a tenant-signed token can never name a different
-		// tenant than the one its issuer is pinned to.
+		// issuer's OpenRails tenant/resource slug. Federated delegated JWTs use
+		// the AuthKit standard resource-account meaning for `tenant`, not the
+		// legacy OpenRails AuthKit bridge tenant slug.
 		if orgSlug != "" {
-			claimTID, _, cerr := c.tenantForAuthKitTenantSlug(ctx, orgSlug)
-			if cerr != nil || claimTID != tid {
+			if !strings.EqualFold(orgSlug, tslug) {
 				return nil, ErrDelegatedInvalid
 			}
 		}

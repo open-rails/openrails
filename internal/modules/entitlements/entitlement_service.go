@@ -116,8 +116,9 @@ func (s *EntitlementService) GetByID(ctx context.Context, id uuid.UUID) (*models
 }
 
 type PushNewEntitlementParams struct {
-	UserID      string
-	Entitlement string
+	UserID          string
+	TenantSubjectID uuid.UUID
+	Entitlement     string
 
 	// NotBefore allows callers to delay the start of the new window.
 	// The final start_at is max(NotBefore, tail_end, now).
@@ -191,7 +192,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		}
 		if hasIndefinite {
 			created = new(models.Entitlement)
-			return tx.NewSelect().
+			if err := tx.NewSelect().
 				Model(created).
 				Where("ent.user_id = ?", p.UserID).
 				Where("ent.entitlement = ?", p.Entitlement).
@@ -200,7 +201,10 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 				Where("ent.end_at IS NULL").
 				OrderExpr("ent.start_at ASC").
 				Limit(1).
-				Scan(ctx)
+				Scan(ctx); err != nil {
+				return err
+			}
+			return attachTenantSubjectIfMissingTx(ctx, tx, created, p.TenantSubjectID, now)
 		}
 
 		var tailEnd *time.Time
@@ -256,21 +260,22 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 					return err
 				}
 				created = covered
-				return nil
+				return attachTenantSubjectIfMissingTx(ctx, tx, created, p.TenantSubjectID, now)
 			}
 			endAt = &e
 		}
 
 		created = &models.Entitlement{
-			ID:          uuidutil.NewV7(),
-			UserID:      p.UserID,
-			Entitlement: p.Entitlement,
-			StartAt:     start,
-			EndAt:       endAt,
-			SourceType:  p.SourceType,
-			SourceID:    &p.SourceID,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			ID:              uuidutil.NewV7(),
+			TenantSubjectID: p.TenantSubjectID,
+			UserID:          p.UserID,
+			Entitlement:     p.Entitlement,
+			StartAt:         start,
+			EndAt:           endAt,
+			SourceType:      p.SourceType,
+			SourceID:        &p.SourceID,
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		}
 		_, err := tx.NewInsert().Model(created).Exec(ctx)
 		return err
@@ -279,6 +284,25 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		return nil, err
 	}
 	return created, nil
+}
+
+func attachTenantSubjectIfMissingTx(ctx context.Context, tx bun.Tx, ent *models.Entitlement, tenantSubjectID uuid.UUID, now time.Time) error {
+	if ent == nil || tenantSubjectID == uuid.Nil || ent.TenantSubjectID != uuid.Nil {
+		return nil
+	}
+	_, err := tx.NewUpdate().
+		Model((*models.Entitlement)(nil)).
+		Set("tenant_subject_id = ?", tenantSubjectID).
+		Set("updated_at = ?", now).
+		Where("ent.id = ?", ent.ID).
+		Where("ent.tenant_subject_id IS NULL").
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+	ent.TenantSubjectID = tenantSubjectID
+	ent.UpdatedAt = now
+	return nil
 }
 
 func (s *EntitlementService) ExtendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {

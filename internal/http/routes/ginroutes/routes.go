@@ -93,6 +93,11 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 		issuers.POST("/disable", ginmw.RequireServiceTokenPermission(controlplane.PermAdmin), disableDelegatedIssuerHandler(issuerAdmin))
 	}
 
+	group.GET("/tenant-subjects/by-external-subject/entitlements",
+		ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead),
+		wrap(httphandlers.ServiceGetExternalSubjectEntitlements),
+	)
+
 	tenantSubjects := group.Group("/tenant-subjects/:tenant_subject_id")
 	tenantSubjects.GET("/entitlements", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetTenantSubjectEntitlements))
 

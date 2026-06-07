@@ -288,7 +288,7 @@ func federatedMultiIssuer(t *testing.T, pool *pgxpool.Pool) {
 		issuer string
 		signer *jwtkit.RSASigner
 	}{{issA1, sgA1}, {issA2, sgA2}} {
-		tok := mintFed(t, iss.signer, iss.issuer, "shared-user-1", []string{PermSelfBillingRead}, "org-a")
+		tok := mintFed(t, iss.signer, iss.issuer, "shared-user-1", []string{PermSelfBillingRead}, "tenant-a")
 		res, err := cp.ResolveDelegated(ctx, tok)
 		require.NoError(t, err, "issuer %s", iss.issuer)
 		require.Equal(t, fedTenantA, res.TenantID)
@@ -297,7 +297,7 @@ func federatedMultiIssuer(t *testing.T, pool *pgxpool.Pool) {
 	}
 
 	// Tenant B's issuer resolves to B (distinct).
-	tokB := mintFed(t, sgB, issB, "b-user", []string{PermSelfBillingRead}, "org-b")
+	tokB := mintFed(t, sgB, issB, "b-user", []string{PermSelfBillingRead}, "tenant-b")
 	resB, err := cp.ResolveDelegated(ctx, tokB)
 	require.NoError(t, err)
 	require.Equal(t, fedTenantB, resB.TenantID)
@@ -305,7 +305,7 @@ func federatedMultiIssuer(t *testing.T, pool *pgxpool.Pool) {
 	// CROSS-TENANT: tenant A's issuer naming tenant B in its `tenant` claim is
 	// rejected — a tenant-signed token can never assert a tenant other than the
 	// one its (globally-unique) issuer is pinned to.
-	forged := mintFed(t, sgA1, issA1, "evil", []string{PermSelfBillingRead}, "org-b")
+	forged := mintFed(t, sgA1, issA1, "evil", []string{PermSelfBillingRead}, "tenant-b")
 	_, err = cp.ResolveDelegated(ctx, forged)
 	require.ErrorIs(t, err, ErrDelegatedInvalid)
 }
@@ -321,8 +321,8 @@ func federatedKillSwitch(t *testing.T, pool *pgxpool.Pool) {
 	registerIssuerRow(t, pool, fedTenantA, issA2, jwksServer(t, sgA2).URL, true)
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
 
-	tokA1 := mintFed(t, sgA1, issA1, "u", []string{PermSelfBillingRead}, "org-a")
-	tokA2 := mintFed(t, sgA2, issA2, "u", []string{PermSelfBillingRead}, "org-a")
+	tokA1 := mintFed(t, sgA1, issA1, "u", []string{PermSelfBillingRead}, "tenant-a")
+	tokA2 := mintFed(t, sgA2, issA2, "u", []string{PermSelfBillingRead}, "tenant-a")
 	_, err := cp.ResolveDelegated(ctx, tokA1)
 	require.NoError(t, err)
 
@@ -346,7 +346,7 @@ func federatedTenantAdmin(t *testing.T, pool *pgxpool.Pool) {
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
 
 	// The acting admin is the delegated_sub; the token carries a tenant-admin perm.
-	tok := mintFed(t, sg, iss, "admin-user", []string{PermTenantBillingRead, PermTenantEntitlementsWrite}, "org-a")
+	tok := mintFed(t, sg, iss, "admin-user", []string{PermTenantBillingRead, PermTenantEntitlementsWrite}, "tenant-a")
 	res, err := cp.ResolveDelegated(ctx, tok)
 	require.NoError(t, err)
 	require.Equal(t, fedTenantA, res.TenantID)
@@ -363,7 +363,7 @@ func federatedWrongAudience(t *testing.T, pool *pgxpool.Pool) {
 	registerIssuerRow(t, pool, fedTenantA, iss, jwksServer(t, sg).URL, true)
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
 
-	tok := mintFedWithAudience(t, sg, iss, "u", []string{PermSelfBillingRead}, "org-a", []string{"tensorhub"})
+	tok := mintFedWithAudience(t, sg, iss, "u", []string{PermSelfBillingRead}, "tenant-a", []string{"tensorhub"})
 	_, err := cp.ResolveDelegated(ctx, tok)
 	require.ErrorIs(t, err, ErrDelegatedInvalid)
 }
@@ -375,7 +375,7 @@ func federatedUnregistered(t *testing.T, pool *pgxpool.Pool) {
 	// A perfectly-valid signer whose issuer was never registered. Its key is not
 	// in the verifier, so it fails closed.
 	sg, _ := jwtkit.NewRSASigner(2048, "ghost-kid")
-	tok := mintFed(t, sg, "https://ghost.test", "u", []string{PermSelfBillingRead}, "org-a")
+	tok := mintFed(t, sg, "https://ghost.test", "u", []string{PermSelfBillingRead}, "tenant-a")
 	_, err := cp.ResolveDelegated(ctx, tok)
 	require.Error(t, err)
 }
@@ -392,7 +392,7 @@ func federatedGlobalUniqueness(t *testing.T, pool *pgxpool.Pool) {
 	require.NoError(t, cp.RegisterDelegatedIssuer(ctx, RegisterDelegatedIssuerParams{
 		TenantID: fedTenantA, Issuer: iss, JWKSURI: js, Audiences: []string{"openrails"},
 	}))
-	oldToken := mintFed(t, sg, iss, "rotated-user", []string{PermSelfBillingRead}, "org-a")
+	oldToken := mintFed(t, sg, iss, "rotated-user", []string{PermSelfBillingRead}, "tenant-a")
 	_, err := cp.ResolveDelegated(ctx, oldToken)
 	require.NoError(t, err)
 
@@ -409,7 +409,7 @@ func federatedGlobalUniqueness(t *testing.T, pool *pgxpool.Pool) {
 	}))
 	_, err = cp.ResolveDelegated(ctx, oldToken)
 	require.ErrorIs(t, err, ErrDelegatedInvalid)
-	newToken := mintFed(t, sg2, iss, "rotated-user", []string{PermSelfBillingRead}, "org-a")
+	newToken := mintFed(t, sg2, iss, "rotated-user", []string{PermSelfBillingRead}, "tenant-a")
 	_, err = cp.ResolveDelegated(ctx, newToken)
 	require.NoError(t, err)
 }

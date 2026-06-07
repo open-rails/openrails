@@ -1,17 +1,23 @@
 package handlers
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type ServiceEntitlementRecord struct {
@@ -80,6 +86,69 @@ func ServiceGetTenantSubjectEntitlements(r *httprequest.Request) {
 	r.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements))
 }
 
+func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
+	issuer := strings.TrimSpace(r.Query("issuer"))
+	subject := strings.TrimSpace(r.Query("subject"))
+	if issuer == "" {
+		r.ErrorJSON(http.StatusBadRequest, "issuer required")
+		return
+	}
+	if subject == "" {
+		r.ErrorJSON(http.StatusBadRequest, "subject required")
+		return
+	}
+	at, ok := serviceEntitlementQueryTime(r)
+	if !ok {
+		return
+	}
+
+	var tenantSubjectID uuid.UUID
+	err := r.State.DB.Q(r.Request.Context()).NewRaw(`
+		SELECT id
+		  FROM billing.tenant_subjects
+		 WHERE tenant_id = ?
+		   AND issuer = ?
+		   AND subject = ?
+		 LIMIT 1
+	`, tenant.FromContextOrDefault(r.Request.Context()).UUID(), issuer, subject).Scan(r.Request.Context(), &tenantSubjectID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			r.JSON(http.StatusOK, []ServiceEntitlementRecord{})
+			return
+		}
+		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve tenant subject")
+		return
+	}
+	if !requireServiceTenantSubjectScope(r, identity.TenantSubjectID(tenantSubjectID)) {
+		return
+	}
+
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	entitlements, err := svc.ListActiveEntitlementRecordsForTenantSubject(r.Request.Context(), identity.TenantSubjectID(tenantSubjectID), at)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
+		return
+	}
+	r.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements))
+}
+
+func serviceEntitlementQueryTime(r *httprequest.Request) (time.Time, bool) {
+	atStr := strings.TrimSpace(r.Query("at"))
+	if atStr != "" {
+		parsed, err := timeutil.ParseRFC3339UTC(atStr)
+		if err != nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
+			return time.Time{}, false
+		}
+		return parsed, true
+	}
+	return r.Clock.Now(), true
+}
+
 func GetAdminUserEntitlements(r *httprequest.Request) {
 	var path adminUserEntitlementsPath
 	if err := r.ShouldBindURI(&path); err != nil {
@@ -136,6 +205,11 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "days must be > 0 (or omit for indefinite)")
 		return
 	}
+	tenantSubjectID, err := tenantSubjectForAdminGrantTarget(r, path.UserID)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve target tenant subject")
+		return
+	}
 	now := time.Now()
 	if r.State.Clock != nil {
 		now = r.State.Clock.Now()
@@ -146,18 +220,42 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		return
 	}
 	var ent *models.Entitlement
-	var err error
 	if req.Days != nil {
 		d := time.Duration(*req.Days) * 24 * time.Hour
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
+		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, TenantSubjectID: tenantSubjectID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
 	} else {
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
+		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, TenantSubjectID: tenantSubjectID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrant.ID})
 	}
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
 	r.JSON(http.StatusCreated, ent)
+}
+
+func tenantSubjectForAdminGrantTarget(r *httprequest.Request, subject string) (uuid.UUID, error) {
+	value, ok := r.Get(ginmw.DelegatedContextKey)
+	if !ok {
+		return uuid.Nil, nil
+	}
+	resolved, ok := value.(*controlplane.ResolvedDelegated)
+	if !ok || resolved == nil {
+		return uuid.Nil, errors.New("delegated state invalid")
+	}
+	issuer := strings.TrimSpace(resolved.Issuer)
+	subject = strings.TrimSpace(subject)
+	if resolved.TenantID.IsZero() || issuer == "" || subject == "" {
+		return uuid.Nil, controlplane.ErrTenantSubjectInvalid
+	}
+	var id uuid.UUID
+	err := r.State.DB.Q(r.Request.Context()).NewRaw(`
+		INSERT INTO billing.tenant_subjects (tenant_id, issuer, subject)
+		VALUES (?, ?, ?)
+		ON CONFLICT (tenant_id, issuer, subject) DO UPDATE
+		   SET last_seen_at = now()
+		RETURNING id
+	`, resolved.TenantID.UUID(), issuer, subject).Scan(r.Request.Context(), &id)
+	return id, err
 }
 
 func RevokeAdminEntitlement(r *httprequest.Request) {

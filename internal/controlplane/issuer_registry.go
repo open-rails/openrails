@@ -133,8 +133,9 @@ func (c *ControlPlane) reloadDelegatedIssuers(ctx context.Context) error {
 		// take effect immediately after registry reload.
 		c.delegatedVerifier.RemoveIssuer(iss.Issuer)
 		if err := c.delegatedVerifier.AddIssuer(iss.Issuer, iss.Audiences, authhttp.IssuerOptions{
-			JWKSURI:  iss.JWKSURI,
-			CacheTTL: delegatedIssuerJWKSCacheTTL,
+			JWKSURI:                iss.JWKSURI,
+			CacheTTL:               delegatedIssuerJWKSCacheTTL,
+			TrustedResourceAccount: iss.TenantSlug,
 		}); err != nil {
 			return fmt.Errorf("controlplane: register delegated issuer %q: %w", iss.Issuer, err)
 		}
