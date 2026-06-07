@@ -14,19 +14,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-      - name: Configure private module access
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "GH_TOKEN secret is required for private module access" >&2
-            exit 1
-          fi
-          go env -w GOPRIVATE=github.com/doujins-org/*
-          go env -w GONOSUMDB=github.com/doujins-org/*
-          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-          go mod download
-          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Download modules
+        run: go mod download
       - name: Vet
         run: go vet ./...
       - name: Build
@@ -47,19 +36,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-      - name: Configure private module access
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "GH_TOKEN secret is required for private module access" >&2
-            exit 1
-          fi
-          go env -w GOPRIVATE=github.com/doujins-org/*
-          go env -w GONOSUMDB=github.com/doujins-org/*
-          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-          go mod download
-          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Download modules
+        run: go mod download
       # Integration tests self-provision their infra (Postgres/Redis/ClickHouse)
       # via testcontainers — ubuntu-latest ships with Docker, so no `services:`
       # block is needed. See internal/dbtest and tests/testcontainer_suite.go.

@@ -15,29 +15,14 @@ ENV GIT_TERMINAL_PROMPT=0
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
 
-# Download dependencies with cache mount for Go modules (with retry)
-# GitHub token is optional since all dependencies are public
+# Download dependencies with cache mount for Go modules (with retry).
+# All dependencies are public, so no authentication is required.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=secret,id=gh_token \
     set -eu; \
-    GH_TOKEN=""; \
-    if [ -f /run/secrets/gh_token ]; then \
-      GH_TOKEN=$(tr -d '\r\n' < /run/secrets/gh_token); \
-    fi; \
-    if [ -n "${GH_TOKEN}" ]; then \
-      echo "Using GitHub token for authentication"; \
-      git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"; \
-    else \
-      echo "No GitHub token provided, using public access"; \
-    fi; \
     for i in 1 2 3; do \
       go mod download && break || (echo "go mod download failed, retrying" && sleep 5); \
-    done; \
-    if [ -n "${GH_TOKEN}" ]; then \
-      git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true; \
-    fi; \
-    unset GH_TOKEN
+    done
 
 # Copy source code
 COPY . .

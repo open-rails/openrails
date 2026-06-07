@@ -7,8 +7,6 @@ name: Solana Devnet Integration
 # and on-demand instead.
 #
 # Required GitHub Actions secrets (Settings -> Secrets and variables -> Actions):
-#   GH_TOKEN                     — read access to the private doujins-org/* Go
-#                                  modules (same secret the main CI uses).
 #   HELIUS_API_KEY               — Helius devnet RPC API key.
 #   SOLANA_DEVNET_PAYER_KEY      — base58 secret key of a SOL-funded devnet payer
 #                                  (funds the subscriber's gas; in the multi-rebill
@@ -42,19 +40,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-      - name: Configure private module access
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "GH_TOKEN secret is required for private module access" >&2
-            exit 1
-          fi
-          go env -w GOPRIVATE=github.com/doujins-org/*
-          go env -w GONOSUMDB=github.com/doujins-org/*
-          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-          go mod download
-          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Download modules
+        run: go mod download
       - name: Cache Go build
         uses: actions/cache@v4
         with:
@@ -93,19 +80,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-      - name: Configure private module access
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "GH_TOKEN secret is required for private module access" >&2
-            exit 1
-          fi
-          go env -w GOPRIVATE=github.com/doujins-org/*
-          go env -w GONOSUMDB=github.com/doujins-org/*
-          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-          go mod download
-          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Download modules
+        run: go mod download
       - name: Cache Go build
         uses: actions/cache@v4
         with:

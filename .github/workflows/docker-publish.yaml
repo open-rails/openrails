@@ -60,16 +60,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Prepare GitHub token secret file
-        run: |
-          if [ -z "${{ secrets.GH_TOKEN }}" ]; then
-            echo "GH_TOKEN secret is required to fetch private Go modules." >&2
-            exit 1
-          fi
-          mkdir -p .secrets
-          printf '%s' "${{ secrets.GH_TOKEN }}" > .secrets/gh_token
-          chmod 600 .secrets/gh_token
-
       - name: Determine Docker tags
         id: meta
         run: |
@@ -89,14 +79,6 @@ jobs:
           platforms: linux/amd64
           tags: |
             ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}-x86
-          secret-files: |
-            gh_token=${{ github.workspace }}/.secrets/gh_token
-
-      - name: Cleanup secrets
-        if: always()
-        run: |
-          rm -f .secrets/gh_token
-          rmdir .secrets 2>/dev/null || true
 
   build-arm64:
     name: Build arm64 image
@@ -127,16 +109,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Prepare GitHub token secret file
-        run: |
-          if [ -z "${{ secrets.GH_TOKEN }}" ]; then
-            echo "GH_TOKEN secret is required to fetch private Go modules." >&2
-            exit 1
-          fi
-          mkdir -p .secrets
-          printf '%s' "${{ secrets.GH_TOKEN }}" > .secrets/gh_token
-          chmod 600 .secrets/gh_token
-
       - name: Determine Docker tags
         id: meta
         run: |
@@ -156,14 +128,6 @@ jobs:
           platforms: linux/arm64
           tags: |
             ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}-arm64
-          secret-files: |
-            gh_token=${{ github.workspace }}/.secrets/gh_token
-
-      - name: Cleanup secrets
-        if: always()
-        run: |
-          rm -f .secrets/gh_token
-          rmdir .secrets 2>/dev/null || true
 
   create-manifest:
     name: Create multi-arch manifest
