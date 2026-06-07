@@ -105,7 +105,7 @@ func newEnabledControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 			ControlPlane: &config.ControlPlaneConfig{
 				Enabled:     true,
 				Issuer:      "https://billing.test",
-				OrgMode:     "multi",
+				TenantMode:  "multi",
 				TokenPrefix: "openrails",
 			},
 		},
@@ -121,7 +121,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 	cp := newEnabledControlPlane(t, pool)
 
-	// First run: creates org, seeds role/perms, mints service token, records tenant.
+	// First run: creates the operator tenant, seeds role/perms, mints service token, records tenant.
 	res1, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: true})
 	require.NoError(t, err)
 	require.NotNil(t, res1)
@@ -131,12 +131,12 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.NotEmpty(t, res1.OperatorTenantID)
 
 	// Tenant directory records the operator tenant.
-	var orgSlug, orgID string
+	var authKitTenantSlug, authKitTenantID string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT authkit_tenant_slug, authkit_tenant_id FROM billing.tenants WHERE id = $1::uuid`,
-		tenant.DefaultID.String()).Scan(&orgSlug, &orgID))
-	require.Equal(t, "operator", orgSlug)
-	require.Equal(t, res1.OperatorTenantID, orgID)
+		tenant.DefaultID.String()).Scan(&authKitTenantSlug, &authKitTenantID))
+	require.Equal(t, "operator", authKitTenantSlug)
+	require.Equal(t, res1.OperatorTenantID, authKitTenantID)
 
 	// Operator role holds the per-tenant operator catalog (full catalog EXCEPT
 	// the cross-tenant platform-superadmin permission, #226).
@@ -226,7 +226,7 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
 			ControlPlane: &config.ControlPlaneConfig{
 				Enabled:            true,
 				Issuer:             "https://billing.test",
-				OrgMode:            "multi",
+				TenantMode:         "multi",
 				TokenPrefix:        "openrails",
 				PlatformTenantSlug: "openrails-platform",
 			},
@@ -281,39 +281,39 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestDelegatedTenantResolution exercises the org->tenant mapping that
+// TestDelegatedTenantResolution exercises the AuthKit-tenant -> OpenRails-tenant mapping that
 // ResolveDelegated relies on for browser-direct delegated access tokens (issue
-// #222 browser tier): an active org maps to its tenant, while an unknown or
-// suspended org is rejected as cross-tenant/unmapped. ResolveDelegated and
+// #222 browser tier): an active AuthKit tenant maps to its OpenRails tenant, while an unknown or
+// suspended AuthKit tenant is rejected as cross-tenant/unmapped. ResolveDelegated and
 // ResolveServiceToken share this exact mapping (tenantForAuthKitTenantSlug).
 func TestDelegatedTenantResolution(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
 	cp := newEnabledControlPlane(t, pool)
 
-	// A second, suspended tenant owned by a distinct org.
+	// A second, suspended tenant owned by a distinct AuthKit tenant.
 	_, err := pool.Exec(ctx, `
 		INSERT INTO billing.tenants (id, slug, name, status, authkit_tenant_slug)
 		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'Acme', 'suspended', 'acme-org')
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
-	// Map the default tenant to an active org so the happy path resolves.
+	// Map the default tenant to an active AuthKit tenant so the happy path resolves.
 	_, err = pool.Exec(ctx, `
 		UPDATE billing.tenants SET authkit_tenant_slug = 'default-org', status = 'active'
 		WHERE id = $1::uuid`, tenant.DefaultID.String())
 	require.NoError(t, err)
 
-	// Active org -> its tenant.
+	// Active AuthKit tenant -> its OpenRails tenant.
 	tid, slug, err := cp.tenantForAuthKitTenantSlug(ctx, "default-org")
 	require.NoError(t, err)
 	require.Equal(t, tenant.DefaultID, tid)
 	require.Equal(t, "default", slug)
 
-	// Suspended tenant's org -> cross-tenant/unmapped rejection.
+	// Suspended tenant's AuthKit tenant -> cross-tenant/unmapped rejection.
 	_, _, err = cp.tenantForAuthKitTenantSlug(ctx, "acme-org")
 	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
 
-	// Unknown org -> rejection.
+	// Unknown AuthKit tenant -> rejection.
 	_, _, err = cp.tenantForAuthKitTenantSlug(ctx, "nobody")
 	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
 

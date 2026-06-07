@@ -17,13 +17,13 @@ var ErrNoControlPlane = errors.New("controlplane: not configured")
 // gated by the operator tenant + the OpenRails permission catalog, evaluated at
 // request time.
 //
-// orgSlug should be the operator tenant for the resolved tenant. An empty slug
+// tenantSlug should be the operator tenant for the resolved tenant. An empty slug
 // falls back to the bootstrap default.
-func (c *ControlPlane) HasOperatorPermission(ctx context.Context, orgSlug, userID, perm string) (bool, error) {
+func (c *ControlPlane) HasOperatorPermission(ctx context.Context, tenantSlug, userID, perm string) (bool, error) {
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
-	slug := strings.ToLower(strings.TrimSpace(orgSlug))
+	slug := strings.ToLower(strings.TrimSpace(tenantSlug))
 	if slug == "" {
 		slug = "operator"
 	}
@@ -36,11 +36,11 @@ func (c *ControlPlane) HasOperatorPermission(ctx context.Context, orgSlug, userI
 
 // IsOperatorAdmin reports whether the user holds the broad openrails:admin
 // permission in the operator tenant via live AuthKit state.
-func (c *ControlPlane) IsOperatorAdmin(ctx context.Context, orgSlug, userID string) (bool, error) {
-	return c.HasOperatorPermission(ctx, orgSlug, userID, PermAdmin)
+func (c *ControlPlane) IsOperatorAdmin(ctx context.Context, tenantSlug, userID string) (bool, error) {
+	return c.HasOperatorPermission(ctx, tenantSlug, userID, PermAdmin)
 }
 
-// PlatformTenantSlug returns the configured managed-hosting platform-superadmin org
+// PlatformTenantSlug returns the configured managed-hosting platform-superadmin tenant
 // slug (issue #226), or "" when no platform tenant is configured.
 func (c *ControlPlane) PlatformTenantSlug() string {
 	if c == nil || c.cfg == nil || c.cfg.Auth == nil || c.cfg.Auth.ControlPlane == nil {
@@ -50,15 +50,15 @@ func (c *ControlPlane) PlatformTenantSlug() string {
 }
 
 // HasPlatformSuperadmin reports whether userID holds PermPlatformSuperadmin in
-// the PLATFORM org (issue #226) according to LIVE AuthKit effective-permission
+// the platform tenant (issue #226) according to LIVE AuthKit effective-permission
 // state — NOT in any tenant operator tenant. This is the cross-tenant authority
 // primitive: it is what gates the /v1/platform/* surface and break-glass.
 //
 // It ALWAYS evaluates against the configured platform tenant slug, ignoring the
 // caller's claimed org. This is what makes a tenant operator admin (who holds
 // openrails:admin in a tenant operator tenant but is NOT a member of the platform
-// org) fail the gate: their permission lives in the wrong org. When no platform
-// org is configured it returns false (the platform surface is disabled).
+// tenant) fail the gate: their permission lives in the wrong tenant. When no platform
+// tenant is configured it returns false (the platform surface is disabled).
 func (c *ControlPlane) HasPlatformSuperadmin(ctx context.Context, userID string) (bool, error) {
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane

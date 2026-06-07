@@ -19,7 +19,7 @@ import (
 
 // ControlPlane is OpenRails' in-process AuthKit control plane (issue #224). It
 // wraps an AuthKit http.Service (which exposes selectable route groups) and its
-// underlying core.Service (used for in-process org/role/service token bootstrap calls).
+// underlying core.Service (used for in-process tenant/role/service-token bootstrap calls).
 //
 // It is constructed only when auth.control_plane.enabled is true. In pure
 // verifier mode this is never built and OpenRails keeps acting as an external
@@ -109,10 +109,10 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		return nil, errors.New("controlplane: issued_audiences/expected_audiences are required (or set auth.expected_audience)")
 	}
 
-	orgMode := strings.ToLower(strings.TrimSpace(cp.OrgMode))
-	if orgMode == "" {
-		// Operator-org bootstrap + org-management routes require multi mode.
-		orgMode = "multi"
+	tenantMode := strings.ToLower(strings.TrimSpace(cp.TenantMode))
+	if tenantMode == "" {
+		// Operator bootstrap + tenant-management routes require multi mode.
+		tenantMode = "multi"
 	}
 
 	locked := cp.LockedDownEnabled()
@@ -134,13 +134,13 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		BaseURL:            issuer,
 		IssuedAudiences:    issued,
 		ExpectedAudiences:  expected,
-		TenantMode:         orgMode,
+		TenantMode:         tenantMode,
 		ServiceTokenPrefix: strings.TrimSpace(cp.TokenPrefix),
 		Environment:        strings.TrimSpace(cfg.Env),
 		PermissionCatalog:  Catalog(),
 		DefaultRoles: []authcore.DefaultRole{
-			// The operator role is also declared as a per-org DefaultRole so that
-			// AssignRole can materialize it lazily even on orgs created outside the
+			// The operator role is also declared as a per-tenant DefaultRole so that
+			// AssignRole can materialize it lazily even on tenants created outside the
 			// bootstrap path. Bootstrap still defines+sets it explicitly.
 			{Name: OperatorRole, Permissions: OperatorRolePermissions()},
 		},
@@ -160,7 +160,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts ONLY this control plane's own delegated tokens with the
 	// canonical `openrails` audience and `openrails:self:*` permissions.
-	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), expected, orgMode, strings.TrimSpace(cp.TokenPrefix))
+	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), expected, tenantMode, strings.TrimSpace(cp.TokenPrefix))
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
 	}

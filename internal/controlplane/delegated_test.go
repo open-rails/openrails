@@ -20,7 +20,7 @@ import (
 // no-`sub`
 // requirement, and the openrails:self:* permission-catalog gate. They build the
 // exact verifier configuration newDelegatedVerifier uses, so they pin the real
-// behavior without needing a database (the org->tenant mapping in
+// behavior without needing a database (the AuthKit-tenant -> OpenRails-tenant mapping in
 // ResolveDelegated reuses tenantForAuthKitTenantSlug, covered by the service token path + the
 // middleware tests).
 

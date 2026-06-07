@@ -220,11 +220,11 @@ func hasAnyResourceKind(resources []authcore.ServiceTokenResource, kind string) 
 
 // tenantForAuthKitTenantSlug maps an AuthKit tenant slug to its OpenRails tenant via the
 // billing.tenants directory. The operator tenant administers the default tenant;
-// future per-tenant orgs map to their own tenant rows. Suspended/deleted tenants
+// future AuthKit tenants map to their own tenant rows. Suspended/deleted tenants
 // are rejected.
-func (c *ControlPlane) tenantForAuthKitTenantSlug(ctx context.Context, orgSlug string) (tenant.ID, string, error) {
-	orgSlug = strings.ToLower(strings.TrimSpace(orgSlug))
-	if orgSlug == "" {
+func (c *ControlPlane) tenantForAuthKitTenantSlug(ctx context.Context, authKitTenantSlug string) (tenant.ID, string, error) {
+	authKitTenantSlug = strings.ToLower(strings.TrimSpace(authKitTenantSlug))
+	if authKitTenantSlug == "" {
 		return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
 	}
 	if c.pool == nil {
@@ -242,7 +242,7 @@ func (c *ControlPlane) tenantForAuthKitTenantSlug(ctx context.Context, orgSlug s
 		 WHERE lower(authkit_tenant_slug) = $1
 		   AND deleted_at IS NULL
 		 LIMIT 1
-	`, orgSlug).Scan(&idStr, &slug, &status)
+	`, authKitTenantSlug).Scan(&idStr, &slug, &status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return tenant.ID{}, "", ErrServiceTokenTenantUnresolved

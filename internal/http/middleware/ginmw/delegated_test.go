@@ -154,7 +154,7 @@ func TestDelegatedSelfRequired_DeniesServiceTokenCredential(t *testing.T) {
 }
 
 func TestDelegatedSelfRequired_DeniesCrossTenant(t *testing.T) {
-	// Token's org maps to no active tenant for this deployment.
+	// Token's tenant maps to no active tenant for this deployment.
 	resolver := fakeDelegatedResolver{err: controlplane.ErrServiceTokenTenantUnresolved}
 	r := newDelegatedTestRouter(resolver, controlplane.PermSelfBillingRead)
 	w := doDelegatedRequest(r, true)

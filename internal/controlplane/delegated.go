@@ -22,7 +22,7 @@ import (
 // token's `openrails:self:*` permission grants.
 type ResolvedDelegated struct {
 	// Tenant is the AuthKit tenant slug from the token's `tenant` claim. It is the
-	// org that administers the user's billing namespace; it maps to an OpenRails
+	// tenant that administers the user's billing namespace; it maps to an OpenRails
 	// tenant via the billing.tenants directory (same mapping as service tokens).
 	Tenant string
 	// TenantID is the resolved OpenRails tenant (#223).
@@ -111,7 +111,7 @@ func (c *ControlPlane) DelegatedVerifier() *authhttp.Verifier {
 // verifier trusts BOTH the self-issuer (deprecated, migration window) AND every
 // registered+enabled tenant issuer. The self-issuer seed is retired once all
 // tenants self-sign.
-func newDelegatedVerifier(coreSvc *authcore.Service, expectedAudiences []string, orgMode, tokenPrefix string) (*authhttp.Verifier, error) {
+func newDelegatedVerifier(coreSvc *authcore.Service, expectedAudiences []string, tenantMode, tokenPrefix string) (*authhttp.Verifier, error) {
 	if coreSvc == nil {
 		return nil, ErrDelegatedNotConfigured
 	}
@@ -122,7 +122,7 @@ func newDelegatedVerifier(coreSvc *authcore.Service, expectedAudiences []string,
 	}
 
 	v := authhttp.NewVerifier(
-		authhttp.WithTenantMode(orgMode),
+		authhttp.WithTenantMode(tenantMode),
 		authhttp.WithServiceTokenPrefix(tokenPrefix),
 		// Enforce that every permission on a browser token belongs to the
 		// {self-service, tenant-admin} catalog (issue #259). A token carrying an
@@ -163,7 +163,7 @@ func newDelegatedVerifier(coreSvc *authcore.Service, expectedAudiences []string,
 //
 // Returns:
 //   - authcore.ErrAccessTokenExpired for an expired token,
-//   - ErrServiceTokenTenantUnresolved when a self-issued token's org maps to no active
+//   - ErrServiceTokenTenantUnresolved when a self-issued token's tenant maps to no active
 //     tenant,
 //   - ErrDelegatedIssuerUnknown when a federated token's issuer is not
 //     registered+enabled for an active tenant (cross-tenant / unmapped),
@@ -205,12 +205,12 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 	}
 
 	issuer := strings.TrimSpace(principal.Issuer)
-	orgSlug := strings.TrimSpace(principal.Tenant)
+	authKitTenantSlug := strings.TrimSpace(principal.Tenant)
 
 	var (
 		tid    tenant.ID
 		tslug  string
-		tenLbl string // value surfaced as ResolvedDelegated.Tenant (org-slug-ish)
+		tenLbl string // value surfaced as ResolvedDelegated.Tenant
 	)
 
 	switch {
@@ -219,15 +219,15 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 		// itself signed it. The issuer carries no tenant binding of its own, so the
 		// tenant is resolved from the `tenant` claim (AuthKit tenant slug) exactly as
 		// before. This path is removed once all tenants self-sign (#259 task 11).
-		if orgSlug == "" {
+		if authKitTenantSlug == "" {
 			return nil, ErrDelegatedInvalid
 		}
 		var err error
-		tid, tslug, err = c.tenantForAuthKitTenantSlug(ctx, orgSlug)
+		tid, tslug, err = c.tenantForAuthKitTenantSlug(ctx, authKitTenantSlug)
 		if err != nil {
 			return nil, err
 		}
-		tenLbl = orgSlug
+		tenLbl = authKitTenantSlug
 
 	default:
 		// FEDERATED tenant-signed token (issue #259): the tenant is pinned from the
@@ -243,8 +243,8 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 		// issuer's OpenRails tenant/resource slug. Federated delegated JWTs use
 		// the AuthKit standard resource-account meaning for `tenant`, not the
 		// legacy OpenRails AuthKit bridge tenant slug.
-		if orgSlug != "" {
-			if !strings.EqualFold(orgSlug, tslug) {
+		if authKitTenantSlug != "" {
+			if !strings.EqualFold(authKitTenantSlug, tslug) {
 				return nil, ErrDelegatedInvalid
 			}
 		}

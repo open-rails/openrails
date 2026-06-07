@@ -76,7 +76,7 @@ func ServiceTokenRequired(resolver ServiceTokenResolver) gin.HandlerFunc {
 			case errors.Is(err, authcore.ErrAccessTokenRevoked):
 				response.UnauthorizedWithMessage(c, "service_token_revoked")
 			case errors.Is(err, controlplane.ErrServiceTokenTenantUnresolved):
-				// Owning org maps to no active tenant (cross-tenant / unmapped).
+				// Owning AuthKit tenant maps to no active OpenRails tenant.
 				response.ForbiddenWithMessage(c, "service_token_tenant_unresolved")
 			case errors.Is(err, controlplane.ErrServiceTokenScopeDenied):
 				response.ForbiddenWithMessage(c, "service_token_resource_scope_denied")

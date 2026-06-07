@@ -21,7 +21,7 @@ import (
 type TenantProvisioner interface {
 	// EnsureAuthKitTenant idempotently ensures an AuthKit tenant for the given slug
 	// exists with the OpenRails operator role + full catalog, returning its id.
-	EnsureAuthKitTenant(ctx context.Context, orgSlug string) (orgID string, err error)
+	EnsureAuthKitTenant(ctx context.Context, tenantSlug string) (authKitTenantID string, err error)
 }
 
 // TenantStatus mirrors billing.tenants.status.
@@ -78,18 +78,18 @@ var ErrExportRequired = errors.New("tenancy: export required before delete")
 // operator-tenant/service-token creation to the control plane via TenantProvisioner.
 type Service struct {
 	pool    *pgxpool.Pool
-	orgs    TenantProvisioner // optional: nil disables org linking (DB-only mode)
+	tenants TenantProvisioner // optional: nil disables AuthKit tenant linking (DB-only mode)
 	secrets TenantSecretStore
 }
 
 // NewService builds the lifecycle service. pool is required (it owns the tenant
-// directory). orgs may be nil (provision then records no operator tenant). secrets
+// directory). tenants may be nil (provision then records no operator tenant). secrets
 // may be nil (credential management disabled).
-func NewService(pool *pgxpool.Pool, orgs TenantProvisioner, secrets TenantSecretStore) (*Service, error) {
+func NewService(pool *pgxpool.Pool, tenants TenantProvisioner, secrets TenantSecretStore) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("tenancy: pgx pool is required")
 	}
-	return &Service{pool: pool, orgs: orgs, secrets: secrets}, nil
+	return &Service{pool: pool, tenants: tenants, secrets: secrets}, nil
 }
 
 // Secrets exposes the per-tenant secret store (may be nil).
@@ -102,7 +102,7 @@ func (s *Service) Secrets() TenantSecretStore { return s.secrets }
 //  3. record routing (webhook host/path) + billing tier + region.
 //
 // Re-running with the same slug returns the existing tenant (no duplicate row,
-// no duplicate org), so provisioning is safe to retry. Default-tenant seeding of
+// no duplicate AuthKit tenant), so provisioning is safe to retry. Default-tenant seeding of
 // catalog/credit definitions is left to the existing bootstrap/seed paths and is
 // not duplicated here.
 func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant, error) {
@@ -114,9 +114,9 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant,
 	if name == "" {
 		name = slug
 	}
-	orgSlug := normalizeSlug(req.OperatorTenantSlug)
-	if orgSlug == "" {
-		orgSlug = "tenant-" + slug
+	operatorTenantSlug := normalizeSlug(req.OperatorTenantSlug)
+	if operatorTenantSlug == "" {
+		operatorTenantSlug = "tenant-" + slug
 	}
 
 	// 1. Upsert the tenant directory row. ON CONFLICT(slug) DO NOTHING keeps the
@@ -137,21 +137,21 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Tenant,
 	}
 
 	// 2. Create/link the operator tenant and record it on the tenant row (idempotent).
-	if s.orgs != nil {
-		orgID, oerr := s.orgs.EnsureAuthKitTenant(ctx, orgSlug)
+	if s.tenants != nil {
+		authKitTenantID, oerr := s.tenants.EnsureAuthKitTenant(ctx, operatorTenantSlug)
 		if oerr != nil {
-			return nil, fmt.Errorf("tenancy: ensure operator tenant %q: %w", orgSlug, oerr)
+			return nil, fmt.Errorf("tenancy: ensure operator tenant %q: %w", operatorTenantSlug, oerr)
 		}
 		if _, uerr := s.pool.Exec(ctx, `
 			UPDATE billing.tenants
 			   SET authkit_tenant_id = $2, authkit_tenant_slug = $3, updated_at = current_timestamp
 			 WHERE id = $1::uuid
 			   AND (authkit_tenant_id IS DISTINCT FROM $2 OR authkit_tenant_slug IS DISTINCT FROM $3)
-		`, t.ID.String(), orgID, orgSlug); uerr != nil {
+		`, t.ID.String(), authKitTenantID, operatorTenantSlug); uerr != nil {
 			return nil, fmt.Errorf("tenancy: record operator tenant on tenant: %w", uerr)
 		}
-		t.AuthKitTenantID = orgID
-		t.AuthKitTenantSlug = orgSlug
+		t.AuthKitTenantID = authKitTenantID
+		t.AuthKitTenantSlug = operatorTenantSlug
 	}
 
 	// 3. Reconcile routing / tier / region for an already-existing row (provision

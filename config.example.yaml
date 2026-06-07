@@ -168,7 +168,7 @@ auth:
   # control_plane:
   #   enabled: true
   #   issuer: "https://openrails.mysite.com" # AuthKit token issuer this CP signs as
-  #   org_mode: "multi"                       # required for tenant service tokens
+  #   tenant_mode: "multi"                    # required for tenant service tokens
   #   token_prefix: "openrails"               # service token brand prefix -> openrails_st_...
   #   locked_down: true                       # self-hosted posture (default true)
   #   # issued_audiences: ["openrails-app"]   # defaults to expected_audience

@@ -66,7 +66,7 @@ func PlatformSuperadminRequired(checker policy.PlatformSuperadminChecker) gin.Ha
 // trusting JWT role claims.
 //
 // The caller must be authenticated (else 401). The checker resolves the operator
-// org from config when orgSlug is empty. On denial it returns 403
+// tenant from config when tenantSlug is empty. On denial it returns 403
 // "operator_permission_required". When checker is nil this middleware is a
 // configuration error and fails closed with 500.
 func OperatorPermissionRequired(checker policy.OperatorPermissionChecker, perm string) gin.HandlerFunc {

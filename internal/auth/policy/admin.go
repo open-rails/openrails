@@ -22,14 +22,14 @@ const PermOperatorAdmin = "openrails:admin"
 // in the operator tenant at request time (not from stale JWT claims). The
 // controlplane.ControlPlane satisfies this interface.
 type OperatorPermissionChecker interface {
-	HasOperatorPermission(ctx context.Context, orgSlug, userID, perm string) (bool, error)
+	HasOperatorPermission(ctx context.Context, tenantSlug, userID, perm string) (bool, error)
 }
 
 // PlatformSuperadminChecker is the live cross-tenant platform-superadmin check
 // (issue #226). It evaluates whether a user holds openrails:platform:superadmin
 // in the SEPARATE platform tenant at request time. The controlplane.ControlPlane
 // satisfies this interface. It is DISTINCT from OperatorPermissionChecker:
-// the platform check ignores the caller's claimed org and always evaluates
+// the platform check ignores the caller's claimed tenant and always evaluates
 // against the configured platform tenant, so a tenant operator admin (whose admin
 // permission lives in a tenant operator tenant) can never pass it.
 type PlatformSuperadminChecker interface {

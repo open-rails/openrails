@@ -661,10 +661,10 @@ type ControlPlaneConfig struct {
 	IssuedAudiences   []string `koanf:"issued_audiences,omitempty"`
 	ExpectedAudiences []string `koanf:"expected_audiences,omitempty"`
 
-	// OrgMode is the AuthKit tenant mode ("single" or "multi"). Operator-org
-	// bootstrap and the org-management HTTP routes require "multi". Defaults to
+	// TenantMode is the AuthKit tenant mode ("single" or "multi"). Operator
+	// bootstrap and tenant-management HTTP routes require "multi". Defaults to
 	// "multi" when Enabled so the operator tenant and its service tokens exist.
-	OrgMode string `koanf:"org_mode,omitempty"`
+	TenantMode string `koanf:"tenant_mode,omitempty"`
 
 	// TokenPrefix is the brand prefix for minted service tokens (e.g. "openrails" ->
 	// `openrails_st_<key_id>_<secret>`). Empty -> bare service-token marker.
@@ -754,12 +754,14 @@ func (c *AuthConfig) EffectiveOperatorTenantAdminRoles() []string {
 }
 
 func rejectDeprecatedConfigKeys(k *koanf.Koanf) error {
-	for _, key := range []string{
-		"auth.operator_tenant_slug",
-		"auth.operator_tenant_admin_roles",
-	} {
+	deprecated := map[string]string{
+		"auth.operator_tenant_slug":        "use tenant_bootstrap.file and manifest-declared tenants, issuers, service_tokens, permissions, resources, and outputs",
+		"auth.operator_tenant_admin_roles": "use tenant_bootstrap.file and manifest-declared tenants, issuers, service_tokens, permissions, resources, and outputs",
+		"auth.control_plane.org_mode":      "use auth.control_plane.tenant_mode",
+	}
+	for key, replacement := range deprecated {
 		if k.Exists(key) {
-			return fmt.Errorf("%s is no longer supported; use tenant_bootstrap.file and manifest-declared tenants, issuers, service_tokens, permissions, resources, and outputs", key)
+			return fmt.Errorf("%s is no longer supported; %s", key, replacement)
 		}
 	}
 	return nil

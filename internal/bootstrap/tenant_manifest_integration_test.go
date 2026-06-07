@@ -261,7 +261,7 @@ func newTenantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlpla
 			ControlPlane: &config.ControlPlaneConfig{
 				Enabled:     true,
 				Issuer:      "https://openrails.test",
-				OrgMode:     "multi",
+				TenantMode:  "multi",
 				TokenPrefix: "openrails",
 			},
 		},

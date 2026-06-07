@@ -142,6 +142,21 @@ auth:
 		assert.Error(t, err)
 		assert.ErrorContains(t, err, "auth.operator_tenant_admin_roles is no longer supported")
 	})
+
+	t.Run("control plane org mode", func(t *testing.T) {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "config.yaml")
+		err := os.WriteFile(cfgPath, []byte(`
+auth:
+  control_plane:
+    org_mode: multi
+`), 0o600)
+		assert.NoError(t, err)
+
+		_, err = Load(cfgPath)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "auth.control_plane.org_mode is no longer supported")
+	})
 }
 
 func TestValidateCaptchaRequiresKeysWhenEnabled(t *testing.T) {

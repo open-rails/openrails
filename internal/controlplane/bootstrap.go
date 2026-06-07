@@ -16,7 +16,7 @@ import (
 type BootstrapResult struct {
 	OperatorTenantSlug string
 	OperatorTenantID   string
-	// TenantCreated is true if CreateTenant ran (false if the org already existed).
+	// TenantCreated is true if CreateTenant ran (false if the AuthKit tenant already existed).
 	TenantCreated bool
 	// ServiceTokenMinted is true if an initial operator service token was minted on this run
 	// (false if one already existed). When true, ServiceTokenSecret holds the one-time
@@ -52,7 +52,7 @@ type BootstrapOptions struct {
 // It runs AFTER migrations / at startup, exclusively through in-process AuthKit
 // CORE calls (CreateTenant / DefineRole / SetRolePermissions / AssignRole /
 // MintServiceToken) — never raw AuthKit SQL or a private HTTP route. Re-running
-// it is safe: org creation, role definition, and catalog seeding are upserts;
+// it is safe: tenant creation, role definition, and catalog seeding are upserts;
 // the service token is minted only when none already exists.
 func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*BootstrapResult, error) {
 	if c == nil {
@@ -234,7 +234,7 @@ func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstra
 	return res, nil
 }
 
-// anyLiveServiceToken reports whether the org already has at least one non-revoked service token,
+// anyLiveServiceToken reports whether the AuthKit tenant already has at least one non-revoked service token,
 // so bootstrap does not mint a duplicate on re-run.
 func anyLiveServiceToken(toks []authcore.ServiceToken) bool {
 	for _, t := range toks {
@@ -248,7 +248,7 @@ func anyLiveServiceToken(toks []authcore.ServiceToken) bool {
 // recordOperatorTenantOnDefaultTenant writes the operator tenant id/slug onto the
 // default tenant directory row (billing.tenants). billing.* is OpenRails-owned
 // control-plane state, so this is a direct, idempotent UPDATE — not AuthKit SQL.
-func (c *ControlPlane) recordOperatorTenantOnDefaultTenant(ctx context.Context, tenantID tenant.ID, orgID, orgSlug string) error {
+func (c *ControlPlane) recordOperatorTenantOnDefaultTenant(ctx context.Context, tenantID tenant.ID, authKitTenantID, authKitTenantSlug string) error {
 	if c.pool == nil {
 		return errors.New("controlplane: pgx pool unavailable for tenant directory update")
 	}
@@ -259,7 +259,7 @@ func (c *ControlPlane) recordOperatorTenantOnDefaultTenant(ctx context.Context, 
 		       updated_at       = current_timestamp
 		 WHERE id = $1::uuid
 		   AND (authkit_tenant_id IS DISTINCT FROM $2 OR authkit_tenant_slug IS DISTINCT FROM $3)
-	`, tenantID.String(), orgID, orgSlug)
+	`, tenantID.String(), authKitTenantID, authKitTenantSlug)
 	if err != nil {
 		return fmt.Errorf("controlplane: record operator tenant on default tenant: %w", err)
 	}
