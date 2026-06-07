@@ -93,6 +93,10 @@ func (s *EntitlementService) ListActiveRecords(ctx context.Context, userID strin
 	return s.repo.ListActiveRecords(ctx, userID, at)
 }
 
+func (s *EntitlementService) ListActiveRecordsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]models.Entitlement, error) {
+	return s.repo.ListActiveRecordsByTenantSubject(ctx, tenantSubjectID, at)
+}
+
 func (s *EntitlementService) ListDistinctEntitlementNamesBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID) ([]string, error) {
 	return s.repo.ListDistinctEntitlementNamesBySource(ctx, sourceType, sourceID)
 }
@@ -100,6 +104,10 @@ func (s *EntitlementService) ListDistinctEntitlementNamesBySource(ctx context.Co
 // ListActiveEntitlements returns a de-duplicated list of active entitlement names for a user at a point in time.
 func (s *EntitlementService) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {
 	return s.repo.ListActiveEntitlements(ctx, userID, at)
+}
+
+func (s *EntitlementService) ListActiveEntitlementsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]string, error) {
+	return s.repo.ListActiveEntitlementsByTenantSubject(ctx, tenantSubjectID, at)
 }
 
 // GetByID retrieves an entitlement by its ID

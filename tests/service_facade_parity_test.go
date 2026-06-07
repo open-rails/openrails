@@ -97,9 +97,25 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// subscription/payment/admin-grant id); use a synthetic admin source here.
 	entSourceID := uuid.New()
 	ent := &models.Entitlement{
+		ID:              uuid.New(),
+		TenantID:        tenant.DefaultID.UUID(),
+		TenantSubjectID: tenantSubjectID,
+		UserID:          userID,
+		Entitlement:     "premium-1",
+		StartAt:         time.Now().Add(-1 * time.Hour).UTC(),
+		EndAt:           nil,
+		SourceID:        &entSourceID,
+		SourceType:      models.EntitlementSourceAdmin,
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	}
+	_, err = suite.BunDB.NewInsert().Model(ent).Exec(ctx)
+	require.NoError(t, err)
+	legacyOnlyEnt := &models.Entitlement{
 		ID:          uuid.New(),
+		TenantID:    tenant.DefaultID.UUID(),
 		UserID:      userID,
-		Entitlement: "premium-1",
+		Entitlement: "legacy-user-only",
 		StartAt:     time.Now().Add(-1 * time.Hour).UTC(),
 		EndAt:       nil,
 		SourceID:    &entSourceID,
@@ -107,7 +123,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
-	_, err = suite.BunDB.NewInsert().Model(ent).Exec(ctx)
+	_, err = suite.BunDB.NewInsert().Model(legacyOnlyEnt).Exec(ctx)
 	require.NoError(t, err)
 
 	// Build the in-process facade.
@@ -191,11 +207,25 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	ents, err := svc.ListActiveEntitlements(ctx, userID, time.Now().UTC())
 	require.NoError(t, err)
 	require.Contains(t, ents, "premium-1")
+	subjectEnts, err := svc.ListActiveEntitlementsForTenantSubject(ctx, tenantSubject, time.Now().UTC())
+	require.NoError(t, err)
+	require.Contains(t, subjectEnts, "premium-1")
 
 	reqEnt := httptest.NewRequest(http.MethodGet, "/v1/service/tenant-subjects/"+tenantSubjectID.String()+"/entitlements", nil)
 	withServiceToken(reqEnt)
 	wEnt := httptest.NewRecorder()
 	router.ServeHTTP(wEnt, reqEnt)
 	require.Equal(t, http.StatusOK, wEnt.Code)
-	require.Contains(t, wEnt.Body.String(), "premium-1")
+	var entResp []struct {
+		ID              string `json:"id"`
+		TenantSubjectID string `json:"tenant_subject_id"`
+		UserID          string `json:"user_id"`
+		Entitlement     string `json:"entitlement"`
+	}
+	require.NoError(t, json.Unmarshal(wEnt.Body.Bytes(), &entResp))
+	require.Len(t, entResp, 1)
+	require.Equal(t, tenantSubjectID.String(), entResp[0].TenantSubjectID)
+	require.Empty(t, entResp[0].UserID)
+	require.Equal(t, "premium-1", entResp[0].Entitlement)
+	require.NotContains(t, wEnt.Body.String(), "legacy-user-only")
 }

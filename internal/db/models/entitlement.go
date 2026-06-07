@@ -42,8 +42,9 @@ type Entitlement struct {
 	// default-tenant column default, so single-tenant code keeps working.
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 
-	UserID      string `bun:"user_id,notnull" json:"user_id"`
-	Entitlement string `bun:"entitlement,notnull" json:"entitlement"`
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
+	UserID          string    `bun:"user_id,notnull" json:"user_id"`
+	Entitlement     string    `bun:"entitlement,notnull" json:"entitlement"`
 
 	StartAt time.Time  `bun:"start_at,notnull" json:"start_at"`
 	EndAt   *time.Time `bun:"end_at,nullzero" json:"end_at,omitempty"`

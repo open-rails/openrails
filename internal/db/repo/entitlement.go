@@ -131,11 +131,45 @@ func (r *EntitlementRepo) ListActiveEntitlements(ctx context.Context, userID str
 	return out, nil
 }
 
+func (r *EntitlementRepo) ListActiveEntitlementsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]string, error) {
+	var out []string
+	if err := r.db.Q(ctx).NewSelect().
+		Model((*models.Entitlement)(nil)).
+		ColumnExpr("DISTINCT ent.entitlement").
+		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
+		Where("ent.tenant_subject_id = ?", tenantSubjectID).
+		Where("ent.start_at <= ?", at).
+		Where("(ent.end_at IS NULL OR ent.end_at > ?)", at).
+		Where("ent.revoked_at IS NULL").
+		Where("ent.deleted_at IS NULL").
+		Scan(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *EntitlementRepo) ListActiveRecords(ctx context.Context, userID string, at time.Time) ([]models.Entitlement, error) {
 	ents := []models.Entitlement{}
 	if err := r.db.Q(ctx).NewSelect().
 		Model(&ents).
 		Where("ent.user_id = ?", userID).
+		Where("ent.revoked_at IS NULL").
+		Where("ent.deleted_at IS NULL").
+		Where("ent.start_at <= ?", at).
+		Where("(ent.end_at IS NULL OR ent.end_at > ?)", at).
+		OrderExpr("ent.start_at ASC").
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	return ents, nil
+}
+
+func (r *EntitlementRepo) ListActiveRecordsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]models.Entitlement, error) {
+	ents := []models.Entitlement{}
+	if err := r.db.Q(ctx).NewSelect().
+		Model(&ents).
+		Where("ent.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
+		Where("ent.tenant_subject_id = ?", tenantSubjectID).
 		Where("ent.revoked_at IS NULL").
 		Where("ent.deleted_at IS NULL").
 		Where("ent.start_at <= ?", at).

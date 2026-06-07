@@ -423,18 +423,29 @@ func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at 
 	return s.entitlementService().ListActiveEntitlements(ctx, userID, at.UTC())
 }
 
+func (s *Service) ListActiveEntitlementsForTenantSubject(ctx context.Context, tenantSubjectID identity.TenantSubjectID, at time.Time) ([]string, error) {
+	if tenantSubjectID.IsZero() {
+		return nil, fmt.Errorf("tenant_subject_id required")
+	}
+	if at.IsZero() {
+		at = s.now().UTC()
+	}
+	return s.entitlementService().ListActiveEntitlementsByTenantSubject(ctx, tenantSubjectID.UUID(), at.UTC())
+}
+
 type EntitlementRecord struct {
-	ID           uuid.UUID
-	UserID       string
-	Entitlement  string
-	StartAt      time.Time
-	EndAt        *time.Time
-	SourceID     *uuid.UUID
-	SourceType   string
-	RevokedAt    *time.Time
-	RevokeReason *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID              uuid.UUID
+	TenantSubjectID uuid.UUID
+	UserID          string
+	Entitlement     string
+	StartAt         time.Time
+	EndAt           *time.Time
+	SourceID        *uuid.UUID
+	SourceType      string
+	RevokedAt       *time.Time
+	RevokeReason    *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID string, at time.Time) ([]EntitlementRecord, error) {
@@ -457,17 +468,54 @@ func (s *Service) ListActiveEntitlementRecords(ctx context.Context, userID strin
 			reason = &v
 		}
 		out = append(out, EntitlementRecord{
-			ID:           e.ID,
-			UserID:       e.UserID,
-			Entitlement:  e.Entitlement,
-			StartAt:      e.StartAt,
-			EndAt:        e.EndAt,
-			SourceID:     e.SourceID,
-			SourceType:   string(e.SourceType),
-			RevokedAt:    e.RevokedAt,
-			RevokeReason: reason,
-			CreatedAt:    e.CreatedAt,
-			UpdatedAt:    e.UpdatedAt,
+			ID:              e.ID,
+			TenantSubjectID: e.TenantSubjectID,
+			UserID:          e.UserID,
+			Entitlement:     e.Entitlement,
+			StartAt:         e.StartAt,
+			EndAt:           e.EndAt,
+			SourceID:        e.SourceID,
+			SourceType:      string(e.SourceType),
+			RevokedAt:       e.RevokedAt,
+			RevokeReason:    reason,
+			CreatedAt:       e.CreatedAt,
+			UpdatedAt:       e.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+func (s *Service) ListActiveEntitlementRecordsForTenantSubject(ctx context.Context, tenantSubjectID identity.TenantSubjectID, at time.Time) ([]EntitlementRecord, error) {
+	if tenantSubjectID.IsZero() {
+		return nil, fmt.Errorf("tenant_subject_id required")
+	}
+	if at.IsZero() {
+		at = s.now().UTC()
+	}
+	records, err := s.entitlementService().ListActiveRecordsByTenantSubject(ctx, tenantSubjectID.UUID(), at.UTC())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]EntitlementRecord, 0, len(records))
+	for _, e := range records {
+		reason := (*string)(nil)
+		if e.RevokeReason != nil {
+			v := string(*e.RevokeReason)
+			reason = &v
+		}
+		out = append(out, EntitlementRecord{
+			ID:              e.ID,
+			TenantSubjectID: e.TenantSubjectID,
+			UserID:          e.UserID,
+			Entitlement:     e.Entitlement,
+			StartAt:         e.StartAt,
+			EndAt:           e.EndAt,
+			SourceID:        e.SourceID,
+			SourceType:      string(e.SourceType),
+			RevokedAt:       e.RevokedAt,
+			RevokeReason:    reason,
+			CreatedAt:       e.CreatedAt,
+			UpdatedAt:       e.UpdatedAt,
 		})
 	}
 	return out, nil
