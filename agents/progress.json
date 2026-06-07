@@ -1,5 +1,5 @@
 {
-  "next_id": 318,
+  "next_id": 319,
   "issues": [
     {
       "id": 107,
@@ -560,6 +560,28 @@
         "[x] Update Tensorhub consumers after the hard cut: bumped AuthKit to v0.12.5, migrated service-token parsing/resolution to `cozy_st_`, switched runtime source/scopes to `service_token` / `service_token_scopes`, kept OpenRails calls on `tenant_subject_id`, and validated `task build`, compile-only `go test ./... -run '^$'`, plus focused identity/authz/API/orchestrator OpenRails tests.",
         "[x] Add negative tests proving legacy service-token resource kinds are rejected: `tenant_subject_id`, `payer_account_id`, `account_id`, payable `delegated_user_id`, `subject_type`, `openrails.payer_account`, `openrails.account`, and `openrails.delegated_user` now fail `validateServiceTokenResources` with `ErrServiceTokenScopeDenied`.",
         "[x] Add remaining negative tests proving old payable JSON/config fields are rejected on request/config surfaces: top-level JSON request bodies now reject `payer_account_id`, `account_id`, payable `delegated_user_id`, `subject_type`, `owner_id`, and `payer` in both net/http and gin transports while nested metadata stays allowed; config files/env-derived keys now reject the retired payable identity keys with `tenant_subject_id` / `invoker_id` guidance."
+      ],
+      "completed": false
+    },
+    {
+      "id": 318,
+      "name": "Unified declarative bootstrap manifest for tenants and catalog",
+      "description": "Unify OpenRails initial provisioning into a single declarative YAML bootstrap file. Today tenant/bootstrap concerns live in the tenant manifest path (`version`, `tenants`, tenant issuers, service tokens, and token outputs), while product/pricing/entitlement/provider setup lives in the separate catalog-as-code apply path. Operators should be able to declare the full deployment shape in one idempotent manifest: tenants, locations/regions, webhook locations, OIDC issuers/JWKS/audiences, service tokens and output targets, product catalog, prices, entitlements, provider mappings, and provider links.\n\nThis is not a new runtime registration flow and should not create another reconciler stack. It should consolidate the existing tenant bootstrap and catalog apply code into one explicit bootstrap surface with plan/apply behavior. Secret material should not be embedded in YAML except for output target metadata; service token secrets are minted and written to configured outputs. Catalog/provider writes must be explicit and predictable, especially when API pods load tenant bootstrap config at startup.",
+      "tasks": [
+        "[ ] Inventory the current bootstrap paths: tenant manifest v2 in `internal/bootstrap`, startup `tenant_bootstrap.file` handling, and catalog-as-code in `pkg/catalog` plus `billing catalog apply`.",
+        "[ ] Design a unified manifest schema with `version`, `tenants[]`, tenant `issuers[]`, `service_tokens[]`, locations/region/webhook settings, and catalog declarations for tier groups, products, prices, entitlements, providers, and provider links.",
+        "[ ] Decide whether catalog declarations are top-level shared objects attached to tenants, nested under each tenant, or both with clear precedence; document the operational reason for the chosen shape.",
+        "[ ] Preserve existing catalog manifest compatibility where practical, or provide a deterministic migration path from current `billing_catalog.yaml` files into the unified bootstrap file.",
+        "[ ] Preserve the current catalog identity rules unless explicitly changed: products are keyed by slug and prices are identified by financial substance rather than a separate price slug.",
+        "[ ] Define reconciliation ordering: tenants first, issuers/service tokens and outputs next, local catalog products/prices/entitlements next, then external provider sync after local catalog state is valid.",
+        "[ ] Implement a single bootstrap command surface such as `openrails bootstrap apply -f <file>` with `--dry-run`/plan output; make old tenant-bootstrap and catalog-apply commands compatibility wrappers or documented deprecated aliases.",
+        "[ ] Keep startup behavior safe: explicitly decide which parts, if any, may run automatically from `tenant_bootstrap.file` on API startup versus only through the one-shot bootstrap command; provider/catalog writes should not surprise every API pod.",
+        "[ ] Reuse existing `tenantbootstrap.ReconcileTenantManifest` and `pkg/catalog.Plan/Apply` logic behind the unified path; do not add a second catalog reconciler or duplicate token-output reconciler.",
+        "[ ] Extend config examples to show a local-stack tenant manifest plus products, prices, entitlements, providers, provider links, issuer registration, and service-token outputs in one YAML file.",
+        "[ ] Add strict manifest validation tests for unknown keys, missing tenant slug/name, invalid issuer/JWKS/audience data, invalid service-token output targets, duplicate product slugs, duplicate price financial identity, and invalid entitlement/provider config.",
+        "[ ] Add integration tests proving idempotent apply, dry-run performs no mutation, tenant/catalog ordering is correct, service-token outputs are preserved or rotated only when requested, and provider-sync plan/apply behavior is predictable.",
+        "[ ] Update operator docs and config references so new deployments use the unified bootstrap manifest as the source of truth for initial provisioning.",
+        "[ ] Validate with focused Go tests for bootstrap/catalog/CLI packages, compile-only full package coverage where useful, `task build`, and a scratch `openrails-migrate` plus bootstrap dry-run/apply path when compose dependencies are available."
       ],
       "completed": false
     }
