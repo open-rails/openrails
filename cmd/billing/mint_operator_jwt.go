@@ -18,17 +18,19 @@ import (
 )
 
 // mintOperatorJWT mints a real, JWKS-verifiable, tenant-scoped user access token
-// (NOT an opaque service token) for the operator tenant, so that the standalone server's
-// JWT verifier accepts it on the /v1/admin/* surface (OperatorAdminRequired
-// checks the `org` + `org_roles` claims). It is the e2e provisioning bridge:
+// (NOT an opaque service token) for the legacy bootstrap authority bridge, so
+// that the standalone server's JWT verifier accepts it on the /v1/admin/*
+// surface (OperatorAdminRequired checks the legacy `org` + `org_roles` claims).
+// It is the e2e provisioning bridge:
 // the admin catalog/price/solana-plan routes are gated by a JWT claim check,
 // while mint-operator-service-token only produces an opaque service token usable on /v1/service/*.
 //
-// It idempotently ensures the operator tenant + role exist (control-plane
-// bootstrap), creates (or reuses) a test user, makes them an operator-org
-// member, assigns them the operator role, then issues a tenant-scoped JWT via
-// AuthKit core. The result verifies against the control plane's own JWKS when
-// the control-plane issuer is in the server's auth.issuers.
+// It idempotently ensures the bootstrap authority tenant + role exist
+// (control-plane bootstrap), creates (or reuses) a test user, makes them a
+// legacy bridge member, assigns them the operator role, then issues a
+// tenant-scoped JWT via AuthKit core. The result verifies against the control
+// plane's own JWKS when the control-plane issuer is in the server's
+// auth.issuers.
 func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	ctx := context.Background()
@@ -73,12 +75,12 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 		role = controlplane.OperatorRole
 	}
 
-	// 1. Ensure operator tenant + role exist (idempotent bootstrap).
+	// 1. Ensure bootstrap authority tenant + role exist (idempotent bootstrap).
 	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
 		OperatorTenantSlug:      org,
 		MintInitialServiceToken: false,
 	}); berr != nil {
-		return fmt.Errorf("bootstrap operator tenant/role: %w", berr)
+		return fmt.Errorf("bootstrap authority/role: %w", berr)
 	}
 
 	// 2. Find or create the test user.
@@ -87,7 +89,7 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("ensure user: %w", err)
 	}
 
-	// 3. Make them an operator-org member + assign the operator role.
+	// 3. Make them a legacy bridge member + assign the operator role.
 	if err := core.AddMember(ctx, org, userID); err != nil {
 		return fmt.Errorf("add member: %w", err)
 	}

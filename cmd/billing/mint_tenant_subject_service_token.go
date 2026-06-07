@@ -50,7 +50,7 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 		OperatorTenantSlug:      operatorOrg,
 		MintInitialServiceToken: false,
 	}); err != nil {
-		return fmt.Errorf("bootstrap operator tenant/role: %w", err)
+		return fmt.Errorf("bootstrap authority/role: %w", err)
 	}
 
 	tenantRef, err := cmd.Flags().GetString("tenant")

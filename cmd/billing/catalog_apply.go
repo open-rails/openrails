@@ -128,7 +128,7 @@ func buildApplier(_ context.Context, cmd *cobra.Command, opts catalogApplyOption
 	svc, err := billingservice.New(application.Runtime)
 	if err != nil {
 		cleanup()
-		return nil, nil, fmt.Errorf("construct billing service: %w", err)
+		return nil, nil, fmt.Errorf("construct OpenRails service: %w", err)
 	}
 	return catalog.NewServiceApplier(svc), cleanup, nil
 }

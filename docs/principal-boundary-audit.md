@@ -41,6 +41,11 @@ or service-token route. Standalone tenant lifecycle admin routes remain behind
 the configured user auth provider plus operator/admin policy middleware; they
 are not part of the service-token server-to-server surface.
 
+Canonical identity vocabulary lives in
+`docs/authkit-tenant-oidc-glossary.md`. New docs and route examples should use
+OpenRails tenant, tenant issuer, delegated user, tenant subject, invoker, and
+service token exactly as defined there.
+
 ## Validation
 
 The following tests cover the boundary:

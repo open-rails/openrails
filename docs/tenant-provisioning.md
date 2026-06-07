@@ -4,6 +4,12 @@ This builds on the #223 tenant model (`pkg/tenant`, `billing.tenants`, migration
 039) and the #224 in-process AuthKit control plane (`internal/controlplane`). The
 implementation lives in `internal/tenancy`.
 
+Terminology note: this document uses "tenant" for the OpenRails
+customer/integration boundary. Bootstrap authority is a deploy action. Delegated
+browser/admin identities come from registered OIDC tenant issuers, and payable
+identity is `billing.tenant_subjects`; see
+`docs/authkit-tenant-oidc-glossary.md`.
+
 Migration `041_tenant_provisioning_secrets` extends `billing.tenants` with
 provisioning / routing / tier columns and adds three control-plane tables:
 `billing.tenant_secrets` (DB-backed secret store), `billing.tenant_credential_audit`

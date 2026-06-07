@@ -52,7 +52,7 @@ func Handler(e *embedded.Embedded) (http.Handler, error) {
 //
 //	router := gin.Default()
 //	api := router.Group("/billing/v1")
-//	embgin.RegisterUserRoutes(billing, api, embgin.RouteOptions{})
+//	embgin.RegisterUserRoutes(openrails, api, embgin.RouteOptions{})
 func RegisterUserRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts RouteOptions) {
 	a := e.App()
 	if a == nil {
@@ -71,7 +71,7 @@ func RegisterUserRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts Route
 //
 //	router := gin.Default()
 //	admin := router.Group("/billing/v1/admin")
-//	embgin.RegisterAdminRoutes(billing, admin, embgin.RouteOptions{})
+//	embgin.RegisterAdminRoutes(openrails, admin, embgin.RouteOptions{})
 func RegisterAdminRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts RouteOptions) {
 	a := e.App()
 	if a == nil {
@@ -90,7 +90,7 @@ func RegisterAdminRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts Rout
 //
 //	router := gin.Default()
 //	webhooks := router.Group("/billing/v1/webhooks")
-//	embgin.RegisterWebhookRoutes(billing, webhooks)
+//	embgin.RegisterWebhookRoutes(openrails, webhooks)
 func RegisterWebhookRoutes(e *embedded.Embedded, group *gin.RouterGroup) {
 	a := e.App()
 	if a == nil {

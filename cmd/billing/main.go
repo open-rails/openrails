@@ -28,7 +28,7 @@ import (
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "billing",
-		Short: "Open Rails Billing Service",
+		Short: "OpenRails server",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			configPath, err := cmd.Flags().GetString("config")
 			if err != nil {
@@ -43,7 +43,7 @@ func main() {
 			cmd.SetContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg))
 			return nil
 		},
-		Long: "Standalone Open Rails billing service for handling payments and subscriptions",
+		Long: "Standalone OpenRails server for payments, credits, usage, and subscriptions",
 	}
 
 	rootCmd.PersistentFlags().
@@ -53,7 +53,7 @@ func main() {
 		Use:     "run-server",
 		Aliases: []string{"server"},
 		RunE:    runServer,
-		Short:   "Start the billing service server",
+		Short:   "Start the OpenRails server",
 	}
 	serverCmd.Flags().Bool("no-workers", false, "Disable background workers in this server process")
 
@@ -61,7 +61,7 @@ func main() {
 		Use:     "worker",
 		Aliases: []string{"run-worker"},
 		RunE:    runWorker,
-		Short:   "Start the billing service background workers",
+		Short:   "Start OpenRails background workers",
 	}
 
 	migrateCmd := &cobra.Command{
@@ -84,7 +84,7 @@ func main() {
 
 	migratePgCmd := &cobra.Command{
 		Use:   "pg",
-		Short: "Apply all Postgres migrations (River → Billing)",
+		Short: "Apply all Postgres migrations (River and OpenRails)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			ctx := cmd.Context()
@@ -98,7 +98,7 @@ func main() {
 	migrateChCmd := &cobra.Command{
 		Use:     "ch",
 		Aliases: []string{"clickhouse"},
-		Short:   "Apply all ClickHouse migrations (Billing analytics)",
+		Short:   "Apply all ClickHouse migrations (OpenRails analytics)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			ctx := cmd.Context()
@@ -111,7 +111,7 @@ func main() {
 
 	auditCmd := &cobra.Command{
 		Use:   "audit",
-		Short: "Run consistency audit on the billing database",
+		Short: "Run consistency audit on the OpenRails database",
 		RunE:  runAudit,
 	}
 	auditCmd.Flags().String("format", "table", "Output format: table, json, csv")
@@ -135,7 +135,7 @@ func main() {
 		RunE:  mintOperatorServiceToken,
 	}
 	mintOperatorServiceTokenCmd.Flags().String("name", "openrails-operator-manual", "service token display name")
-	mintOperatorServiceTokenCmd.Flags().String("org", "", "Operator tenant slug (defaults to config/operator)")
+	mintOperatorServiceTokenCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge (defaults to config/operator)")
 	mintOperatorServiceTokenCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
 	mintOperatorServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to full operator permissions")
 
@@ -145,17 +145,17 @@ func main() {
 		RunE:  mintTenantSubjectServiceToken,
 	}
 	mintTenantSubjectServiceTokenCmd.Flags().String("name", "", "service token display name")
-	mintTenantSubjectServiceTokenCmd.Flags().String("org", "", "Operator tenant slug that owns the service token (defaults to config/operator)")
+	mintTenantSubjectServiceTokenCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge that owns the service token (defaults to config/operator)")
 	mintTenantSubjectServiceTokenCmd.Flags().String("tenant", "", "OpenRails tenant slug or id (defaults to default)")
 	mintTenantSubjectServiceTokenCmd.Flags().String("tenant-subject", "", "OpenRails tenant subject UUID to scope the service token to")
 	mintTenantSubjectServiceTokenCmd.Flags().StringSlice("permission", nil, "Permission to grant; repeat or comma-separate. Defaults to openrails:credits:spend")
 
 	mintOperatorJWTCmd := &cobra.Command{
 		Use:   "mint-operator-jwt",
-		Short: "Mint a JWKS-verifiable operator-org user JWT (for /v1/admin/* e2e provisioning)",
+		Short: "Mint a JWKS-verifiable bootstrap JWT for /v1/admin/* e2e provisioning",
 		RunE:  mintOperatorJWT,
 	}
-	mintOperatorJWTCmd.Flags().String("org", "", "Operator tenant slug (defaults to config/operator)")
+	mintOperatorJWTCmd.Flags().String("org", "", "Bootstrap authority slug for the legacy AuthKit --org bridge (defaults to config/operator)")
 	mintOperatorJWTCmd.Flags().String("email", "", "Test user email (default e2e-operator@openrails.test)")
 	mintOperatorJWTCmd.Flags().String("username", "", "Test user username (default e2e-operator)")
 	mintOperatorJWTCmd.Flags().String("role", "", "Tenant role to assign (default openrails-operator)")

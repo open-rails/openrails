@@ -1,6 +1,7 @@
-# Embedded Billing
+# Embedded OpenRails
 
-The `embedded` package allows you to integrate Open Rails Billing directly into your Go application instead of running it as a standalone service.
+The `embedded` package allows you to integrate OpenRails directly into your Go
+application instead of running it as a standalone service.
 
 ## Basic Usage
 
@@ -12,10 +13,10 @@ import (
 
 func main() {
     cfg := &config.Config{
-        // ... your billing configuration
+        // ... your OpenRails configuration
     }
 
-    billing, err := embedded.New(embedded.Options{
+    openrails, err := embedded.New(embedded.Options{
         Config:  cfg,
         PGXPool: yourPgxPool,  // Share your existing connection pool
         Redis:   yourRedis,    // Share your existing Redis client
@@ -23,12 +24,12 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    defer billing.Close(context.Background())
+    defer openrails.Close(context.Background())
 
-    // Mount billing routes on your router
+    // Mount OpenRails routes on your router
     router := gin.Default()
-    billing.RegisterUserRoutes(router.Group("/billing/v1"), embedded.RouteOptions{})
-    billing.RegisterWebhookRoutes(router.Group("/billing/v1/webhooks"))
+    openrails.RegisterUserRoutes(router.Group("/billing/v1"), embedded.RouteOptions{})
+    openrails.RegisterWebhookRoutes(router.Group("/billing/v1/webhooks"))
 }
 ```
 
@@ -45,7 +46,7 @@ River job-queue tables (`river_*`) follow these rules:
 
 ## River Integration (Background Jobs)
 
-If your application uses [River](https://riverqueue.com) for background jobs, you can share a single River client with billing instead of running separate clients.
+If your application uses [River](https://riverqueue.com) for background jobs, you can share a single River client with OpenRails instead of running separate clients.
 
 ### Why Share?
 
@@ -64,9 +65,9 @@ import (
     "github.com/open-rails/openrails/pkg/embedded"
 )
 
-func setupBillingWithSharedRiver(ctx context.Context, pool *pgxpool.Pool) error {
-    // 1. Create billing instance
-    billing, err := embedded.New(embedded.Options{
+func setupOpenRailsWithSharedRiver(ctx context.Context, pool *pgxpool.Pool) error {
+    // 1. Create OpenRails instance
+    openrails, err := embedded.New(embedded.Options{
         Config:  cfg,
         PGXPool: pool,
     })
@@ -81,8 +82,8 @@ func setupBillingWithSharedRiver(ctx context.Context, pool *pgxpool.Pool) error 
     river.AddWorkerSafely(workers, &MyAppWorker{})
     river.AddWorkerSafely(workers, &AnotherWorker{})
 
-    // Add billing workers to the same registry
-    if err := billing.AddWorkersTo(ctx, workers); err != nil {
+    // Add OpenRails workers to the same registry
+    if err := openrails.AddWorkersTo(ctx, workers); err != nil {
         return err
     }
 
@@ -91,15 +92,15 @@ func setupBillingWithSharedRiver(ctx context.Context, pool *pgxpool.Pool) error 
         Workers: workers,
         Queues: map[string]river.QueueConfig{
             river.QueueDefault:      {MaxWorkers: 10},
-            embedded.QueueBilling:   {MaxWorkers: 5},  // Billing uses this queue
+            embedded.QueueBilling:   {MaxWorkers: 5},  // OpenRails uses this queue
         },
     })
     if err != nil {
         return err
     }
 
-    // 4. Add billing's periodic jobs
-    periodicJobs, err := billing.GetPeriodicJobs(ctx)
+    // 4. Add OpenRails periodic jobs
+    periodicJobs, err := openrails.GetPeriodicJobs(ctx)
     if err != nil {
         return err
     }
@@ -107,8 +108,8 @@ func setupBillingWithSharedRiver(ctx context.Context, pool *pgxpool.Pool) error 
         client.PeriodicJobs().Add(job)
     }
 
-    // 5. Inject client into billing for job enqueueing
-    billing.SetRiverClient(client)
+    // 5. Inject client into OpenRails for job enqueueing
+    openrails.SetRiverClient(client)
 
     // 6. Start the unified client (you manage the lifecycle)
     if err := client.Start(ctx); err != nil {
@@ -124,7 +125,7 @@ func setupBillingWithSharedRiver(ctx context.Context, pool *pgxpool.Pool) error 
 #### Constants
 
 ```go
-// QueueBilling is the River queue name used by billing workers.
+// QueueBilling is the River queue name used by OpenRails workers.
 // Configure this queue when creating your River client.
 const QueueBilling = "billing"
 ```
@@ -132,25 +133,25 @@ const QueueBilling = "billing"
 #### Methods
 
 ```go
-// AddWorkersTo adds billing's River workers to your worker registry.
+// AddWorkersTo adds OpenRails River workers to your worker registry.
 // Call after creating your registry but before creating the River client.
 func (e *Embedded) AddWorkersTo(ctx context.Context, workers *river.Workers) error
 
-// GetPeriodicJobs returns billing's periodic jobs (dunning, cleanup, etc.).
+// GetPeriodicJobs returns OpenRails periodic jobs (dunning, cleanup, etc.).
 // Add these to your River client before starting it.
 func (e *Embedded) GetPeriodicJobs(ctx context.Context) ([]*river.PeriodicJob, error)
 
-// SetRiverClient injects your River client for billing to use for enqueueing.
-// When set, billing won't create its own client.
+// SetRiverClient injects your River client for OpenRails enqueueing.
+// When set, OpenRails won't create its own client.
 func (e *Embedded) SetRiverClient(client *river.Client[pgx.Tx])
 
 // HasExternalRiverClient returns true if an external client was configured.
 func (e *Embedded) HasExternalRiverClient() bool
 ```
 
-### Billing's Periodic Jobs
+### OpenRails periodic jobs
 
-When you call `GetPeriodicJobs()`, billing returns these scheduled jobs:
+When you call `GetPeriodicJobs()`, OpenRails returns these scheduled jobs:
 
 | Job | Interval | Purpose |
 |-----|----------|---------|
@@ -162,14 +163,14 @@ When you call `GetPeriodicJobs()`, billing returns these scheduled jobs:
 
 ### Without River Sharing
 
-If you don't use River or prefer billing to manage its own client:
+If you don't use River or prefer OpenRails to manage its own client:
 
 ```go
-billing, _ := embedded.New(opts)
+openrails, _ := embedded.New(opts)
 
-// Start billing's own River workers (blocking)
+// Start OpenRails' own River workers (blocking)
 go func() {
-    if err := billing.RunWorkers(ctx); err != nil {
+    if err := openrails.RunWorkers(ctx); err != nil {
         log.Error(err)
     }
 }()
@@ -182,11 +183,11 @@ The embedded instance provides HTTP handlers suitable for mounting into your hos
 Canonical embedded contract: routes live under `/billing/v1/*`.
 
 ```go
-// Full public billing API (health + user + admin + webhooks; debug routes in dev only)
-billing.Handler() http.Handler
+// Full public OpenRails API (health + user + admin + webhooks; debug routes in dev only)
+openrails.Handler() http.Handler
 
 // Selective handler (choose route groups)
-billing.NewHTTPHandler(embedded.HTTPHandlerOptions{
+openrails.NewHTTPHandler(embedded.HTTPHandlerOptions{
 	IncludeUser:     true,
 	IncludeAdmin:    true,
 	IncludeWebhooks: true,
@@ -203,7 +204,7 @@ billing.NewHTTPHandler(embedded.HTTPHandlerOptions{
 For server-to-server operations (credits, entitlements), use the in-process API instead of HTTP:
 
 ```go
-svc, err := billing.Service()
+svc, err := openrails.Service()
 if err != nil {
     return err
 }

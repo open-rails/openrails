@@ -133,6 +133,10 @@ browser JWT (`tenant` claim) resolution, including looking the slug up in
   from the charged subject. Billing credit, usage, admission, and budget storage
   should use those physical column names; service API fields use
   `tenant_subject_id` and `invoker_id`.
+- **Canonical AuthKit/OIDC vocabulary:** use
+  `docs/authkit-tenant-oidc-glossary.md` for examples and public wording.
+  Bootstrap authority is a deploy action; it should not be described as a
+  billable tenant subject or customer tenant.
 - **AuthKit resource-scoped service tokens:** standalone OpenRails service
   tokens are opaque server-to-server credentials. AuthKit stores permissions plus
   opaque resource scopes; OpenRails interprets `openrails.tenant=<tenant_uuid>`

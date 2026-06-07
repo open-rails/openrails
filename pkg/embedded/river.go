@@ -55,12 +55,12 @@ const QueueBilling = riverjobs.QueueBilling
 //
 // Example:
 //
-//	billing, _ := embedded.New(opts)
+//	openrails, _ := embedded.New(opts)
 //
 //	workers := river.NewWorkers()
 //	river.AddWorkerSafely(workers, &MyAppWorker{})
 //	// Add billing workers
-//	if err := billing.AddWorkersTo(ctx, workers); err != nil {
+//	if err := openrails.AddWorkersTo(ctx, workers); err != nil {
 //	    return err
 //	}
 //
@@ -78,7 +78,7 @@ func (e *Embedded) AddWorkersTo(ctx context.Context, workers *river.Workers) err
 // Example:
 //
 //	client, _ := river.NewClient(...)
-//	periodicJobs, _ := billing.GetPeriodicJobs(ctx)
+//	periodicJobs, _ := openrails.GetPeriodicJobs(ctx)
 //	for _, job := range periodicJobs {
 //	    client.PeriodicJobs().Add(job)
 //	}
@@ -104,7 +104,7 @@ func (e *Embedded) GetPeriodicJobs(ctx context.Context) ([]*river.PeriodicJob, e
 // Example:
 //
 //	client, _ := river.NewClient(...)
-//	billing.SetRiverClient(client)
+//	openrails.SetRiverClient(client)
 //	client.Start(ctx)
 func (e *Embedded) SetRiverClient(client *river.Client[pgx.Tx]) {
 	if e == nil || e.app == nil || e.app.Runtime == nil {

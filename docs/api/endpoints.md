@@ -309,10 +309,17 @@ Service-token examples:
 Embedded hosts skip HTTP entirely and call the in-process `pkg/service` facade
 after authorizing the action themselves.
 
+Terminology for this surface is defined in
+`docs/authkit-tenant-oidc-glossary.md`: OpenRails tenant = integration/customer
+boundary, delegated user = external OIDC `issuer` + `subject`, tenant subject =
+payable identity, service token = opaque server-to-server credential.
+
 ### GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements
 Returns active entitlements for the payable tenant subject at the current time.
 Optional query param `at` (RFC3339) queries entitlements at a specific time.
-Response: array of entitlement records with `tenant_subject_id`.
+Response: array of entitlement records with `tenant_subject_id`. Service
+entitlement reads query `billing.entitlements.tenant_subject_id` directly; they
+do not translate the tenant subject through legacy `user_id`.
 
 ### GET /v1/service/credits/invokers/{invoker_id}
 Returns credit balance summary for an invoker. Optional query params: `tenant_subject_id` and `type` (defaults to `api_credits`, which must exist in `billing.credit_types`).

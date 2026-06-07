@@ -518,13 +518,14 @@
       "name": "Hard-cut docs/tests/configs to standard tenant/OIDC terminology",
       "description": "Once AuthKit/OpenRails model changes land, remove stale wording from OpenRails docs, examples, config, tests, API fixtures, and local stack files. This is the cleanup issue that makes the new model visible and prevents reintroducing confusing `org`, `operator tenant`, `platform tenant`, `admin tenant`, owner/actor, or billing-service names.\n\n## Required vocabulary\n\n- AuthKit instance/realm, not tenant, for the deployed identity boundary.\n- tenant, not org, for the customer/account/workspace boundary.\n- tenant issuer with OIDC `issuer` and `jwks_uri`, not app-specific signing-key names.\n- delegated user/federated user with OIDC `iss` + `sub`, not native user.\n- service token/service token for server-to-server authorization.\n- OpenRails, not billing, for service/container/config names.",
       "tasks": [
-        "[ ] Update OpenRails docs and API endpoint docs with the canonical glossary and examples for OpenRails, Doujins/Hentai0, and Tensorhub patterns.",
+        "[x] Update OpenRails docs and API endpoint docs with the canonical glossary and examples for OpenRails, Doujins/Hentai0, and Tensorhub patterns.",
         "[x] Update all YAML examples and local stack config to use `openrails`, `tenants`, `issuers`, `jwks_uri`, `audiences`, `service_tokens`, `permissions`, `resources`, and `outputs`. Config examples now document the OpenRails-prefixed hot-path env var, and tenant manifest/local-stack examples already use v2 tenant/OIDC/service-token fields.",
         "[x] Remove references to `billing` service names except where describing historical migration is explicitly unavoidable; prefer `openrails` in Dockerfiles, compose services, commands, and docs. Docker/Taskfile now build `openrails`, docs/scripts use `/usr/local/bin/openrails`, and public runbooks use OpenRails wording.",
-        "[ ] Remove examples that model bootstrap/admin authority as an AuthKit tenant/org. Bootstrap is a deploy action, not a domain entity.",
+        "[x] Remove examples that model bootstrap/admin authority as an AuthKit tenant/org. Bootstrap is a deploy action, not a domain entity; the remaining operator-tenant references are implementation tasks tracked under #312, not public docs examples.",
         "[x] Update tests to use exact industry/OIDC terms and add negative assertions for removed config keys such as `operator_tenant_slug` and old org routes/fields. Added config file/env rejection tests and switched route-normalization fixture from `/orgs` to `/tenants`.",
-        "[ ] Update generated OpenAPI/schema snapshots if present so public contract fields no longer expose old terminology.",
-        "[ ] Run full OpenRails tests and the Doujins/Hentai0 compose integration path after implementation, because terminology changes cross repo boundaries."
+        "[x] Update generated OpenAPI/schema snapshots if present so public contract fields no longer expose old terminology. No generated OpenAPI/schema snapshot files are present in this repo; docs/api/endpoints.md is the tracked contract doc.",
+        "[x] Run full OpenRails tests after implementation (`go test ./...`) and build the binary (`task build`).",
+        "[ ] Run the Doujins/Hentai0 compose integration path after implementation, because terminology changes cross repo boundaries."
       ],
       "completed": false
     },
