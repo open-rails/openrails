@@ -530,7 +530,7 @@
         "[x] Run the Hentai0 compose integration path after implementation; `openrails-migrate` completed successfully and `TestLiveOpenRailsEntitlementFeedsHentai0Token` passed.",
         "[x] Run the Doujins compose integration path after implementation; direct compose startup validated Doujins migrations, `openrails-migrate`, OpenRails/Doujins health, Doujins issuer registration, and the new external-subject entitlement route. Full Playwright e2e remains blocked on host PostgreSQL client 17 while the restore tool requires 18+."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 317,
@@ -555,7 +555,7 @@
         "[ ] Ensure billing can associate balances/money owed/entitlements with tenant subjects regardless of whether the upstream system sees that subject as a native user, delegated user, tenant/company, or service principal.",
         "[x] Update the Hentai0 consumer after the hard cut: tenant manifest v2, service-token terminology, delegated tenant slug, and external-subject entitlement reads are validated by the live compose integration.",
         "[x] Update the Doujins consumer after the hard cut: AuthKit entitlement enrichment now queries OpenRails by OIDC `issuer` + `subject` through `/v1/service/tenant-subjects/by-external-subject/entitlements`, and direct compose startup validated the service-token route.",
-        "[ ] Update Tensorhub consumers after the hard cut so no caller sends `tenant_subject_id`, `payer_account_id`, `account_id`, payable `delegated_user_id`, `subject_type`, or old org/user terminology.",
+        "[x] Update Tensorhub consumers after the hard cut: bumped AuthKit to v0.12.5, migrated service-token parsing/resolution to `cozy_st_`, switched runtime source/scopes to `service_token` / `service_token_scopes`, kept OpenRails calls on `tenant_subject_id`, and validated `task build`, compile-only `go test ./... -run '^$'`, plus focused identity/authz/API/orchestrator OpenRails tests.",
         "[ ] Add negative tests proving old `tenant_subject_id` / `payer_account_id` / `account_id` / payable `delegated_user_id` / `subject_type` JSON/config/resource kinds are rejected."
       ],
       "completed": false
