@@ -1,6 +1,12 @@
 package controlplane
 
-import "testing"
+import (
+	"testing"
+
+	authcore "github.com/open-rails/authkit/core"
+
+	"github.com/open-rails/openrails/pkg/tenant"
+)
 
 func TestResolvedServiceToken_HasPermission(t *testing.T) {
 	r := &ResolvedServiceToken{Permissions: []string{PermCreditsRead, PermCreditsWrite}}
@@ -36,5 +42,29 @@ func TestControlPlane_TokenPrefix_NilSafe(t *testing.T) {
 	}
 	if c.LooksLikeServiceToken("anything") {
 		t.Error("nil control plane should not match service tokens")
+	}
+}
+
+func TestValidateServiceTokenResourcesRejectsLegacyPayableKinds(t *testing.T) {
+	legacyKinds := []string{
+		"tenant_subject_id",
+		"payer_account_id",
+		"account_id",
+		"delegated_user_id",
+		"subject_type",
+		"openrails.payer_account",
+		"openrails.account",
+		"openrails.delegated_user",
+	}
+	for _, kind := range legacyKinds {
+		t.Run(kind, func(t *testing.T) {
+			err := validateServiceTokenResources(tenant.DefaultID, []authcore.ServiceTokenResource{
+				TenantResource(tenant.DefaultID),
+				{Kind: kind, ID: "legacy"},
+			})
+			if err != ErrServiceTokenScopeDenied {
+				t.Fatalf("validateServiceTokenResources(%q) error = %v, want %v", kind, err, ErrServiceTokenScopeDenied)
+			}
+		})
 	}
 }
