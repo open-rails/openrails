@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"sort"
@@ -18,6 +19,7 @@ type debugNMITokenizationPageData struct {
 	TokenizationURL     string
 	EffectiveScriptURL  string
 	EffectiveKeyHint    string
+	ProviderJSON        template.JS
 	HasTokenizationKey  bool
 	HasTokenizationURL  bool
 	IsConfiguredForReal bool
@@ -182,7 +184,7 @@ curl -fsS "https://YOUR_BILLING_HOST/v1/checkout/checkout_session_UUID" \
 
     <script src="{{.EffectiveScriptURL}}" data-tokenization-key="{{.TokenizationKey}}"></script>
     <script>
-      const provider = {{printf "%q" .Provider}};
+      const provider = {{.ProviderJSON}};
 
       const el = (id) => document.getElementById(id);
       const status = (msg) => { el('status').textContent = msg || ''; };
@@ -330,6 +332,7 @@ func (s *Server) debugNMITokenization(c *gin.Context) {
 		TokenizationURL:     tokenizationURL,
 		EffectiveScriptURL:  effectiveScriptURL,
 		EffectiveKeyHint:    hint,
+		ProviderJSON:        jsonStringForScript(provider),
 		HasTokenizationKey:  tokenizationKey != "",
 		HasTokenizationURL:  tokenizationURL != "",
 		IsConfiguredForReal: tokenizationKey != "" && tokenizationURL != "",
@@ -342,6 +345,14 @@ func (s *Server) debugNMITokenization(c *gin.Context) {
 	}
 
 	c.Data(http.StatusOK, "text/html; charset=utf-8", buf.Bytes())
+}
+
+func jsonStringForScript(value string) template.JS {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return `""`
+	}
+	return template.JS(encoded)
 }
 
 func (s *Server) debugNMICollectStubJS(c *gin.Context) {

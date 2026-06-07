@@ -193,29 +193,6 @@
       "completed": false
     },
     {
-      "id": 295,
-      "name": "decline-code-aware-dunning-retry-scheduling",
-      "completed": false,
-      "description": "Make dunning retries SMART: drive next_retry_at off the DECLINE CLASSIFICATION + attempt# + card network, instead of the current flat 72h x 5 (internal/modules/subscriptions/dunning.go DunningInterval=72h; lifecycle_service.go computes now.Add(DunningInterval)).\n\n## Why (Hyperswitch revenue_recovery analysis)\nHyperswitch's get_schedule_time_for_smart_retry (router/src/workflows/revenue_recovery.rs) schedules off card network + issuer + PG/network decline codes + a PER-NETWORK 30-day retry budget + a tiered backoff (1min -> 3h x2 -> 6h x3 -> 9h...), NOT a flat interval. Card networks (Visa/MC) CAP retries per 30 days; over-retrying risks fines, and decline-reason-driven timing materially lifts recovery.\n## The OpenRails advantage\nOpenRails already has the HARD half Hyperswitch lacks: a real billing-domain decline classifier (internal/billing/declinecode/declinecode.go: Operational/Recoverable/Terminal/AlreadyPaid). We just don't SCHEDULE off it. Terminal -> stop (no retry); AlreadyPaid -> no retry; Operational -> short retry (infra); Recoverable -> the tiered backoff + per-network cap.\nDo NOT port Hyperswitch's gRPC decider \u2014 implement a small tiered-backoff table ([]{interval,count}) + a per-(card_network) 30-day attempt counter, as a pure addition to the existing River dunning worker. No new infra.",
-      "tasks": [
-        "[ ] Model the dunning schedule as data: []{interval, maxCount} tiered backoff (e.g. 1m, 3h x2, 6h x3, 24h...) instead of the constant 72h.",
-        "[ ] next_retry_at = f(declinecode.Category, attempt#, card_network): Terminal->stop, AlreadyPaid->none, Operational->short, Recoverable->tiered backoff.",
-        "[ ] Per-network 30-day retry cap (Visa/MC) \u2014 a small counter; stop retrying past the cap to avoid card-scheme fines.",
-        "[ ] Wire into the existing River dunning worker + lifecycle_service next-retry computation; keep behavior flag-gated; add unit tests over the classifier x attempt matrix."
-      ]
-    },
-    {
-      "id": 296,
-      "name": "webhook-normalization-interface",
-      "completed": false,
-      "description": "Unify the per-processor webhook handlers behind ONE interface, so adding processor #5's webhooks is 'implement the interface' instead of 'add another branch'. Today internal/modules/webhooks/{stripe,ccbill,nmi} are separate code paths (plus deduplication.go, webhookutil.go) with no shared contract.\n\n## Pattern (Hyperswitch IncomingWebhook trait)\nHyperswitch (hyperswitch_interfaces/src/webhooks.rs) collapses N gateway formats into one internal event model via a trait: verify_webhook_source, get_webhook_event_type (-> a unified IncomingWebhookEvent enum), get_webhook_object_reference_id, get_webhook_resource_object. The single HTTP endpoint + dedup + ledger-update logic then become processor-agnostic.\n## For OpenRails (small Go refactor, not new functionality)\nDefine WebhookHandler { Verify(req) error; Normalize(req) (WebhookEvent, error) } returning a unified WebhookEvent{Type, ProcessorRef, SubscriptionRef, Amount, OccurredAt, Raw}. Move the existing stripe/ccbill/nmi verify+parse behind it; the HTTP handler, dedup, and subscription/ledger updates consume the unified event. Solana already has its own confirm/poller path; include it as a handler if useful or leave it. All the pieces (signature verify, dedup) already exist \u2014 this is consolidation.",
-      "tasks": [
-        "[ ] Define WebhookHandler interface (Verify + Normalize) + a unified WebhookEvent struct + event-type enum.",
-        "[ ] Move stripe/ccbill/nmi verify+parse behind the interface; the single HTTP endpoint + deduplication.go + ledger/subscription update become processor-agnostic.",
-        "[ ] Registry by processor; adding a processor's webhooks = implement the interface. Tests: each processor's sample payloads normalize to the right WebhookEvent."
-      ]
-    },
-    {
       "id": 297,
       "name": "deplatforming-resilient-card-vault",
       "completed": false,
@@ -261,27 +238,6 @@
         "[ ] Invoice admin (cross-owner) list + CSV export.",
         "[ ] Migrate tensorhub platform_policies -> OpenRails tier_policies (cross-repo)."
       ]
-    },
-    {
-      "id": 320,
-      "name": "Add Hyperswitch payment vault support for cloud and self-hosted deployments",
-      "description": "Add Hyperswitch as an optional OpenRails payment provider and payment-method vault integration, covering both Hyperswitch Cloud and self-hosted Hyperswitch. This is payment vaulting/tokenization, not HashiCorp Vault tenant-secret storage. OpenRails should store only opaque Hyperswitch customer/payment-method identifiers plus non-sensitive metadata, while PAN/card collection stays in Hyperswitch-hosted/client-side tokenization flows or equivalent PCI-scoped Hyperswitch surfaces.\n\nThis issue must reconcile with future issue #297 (`deplatforming-resilient-card-vault`): Hyperswitch should not be positioned as the default adult/high-risk deplatforming-resilient vault until its contractual/export/compliance posture is explicitly certified. Hyperswitch Cloud may still be useful for lower-risk deployments or as an optional provider, and self-hosted Hyperswitch may be a break-glass/advanced deployment path if the operator accepts and satisfies the PCI requirements.\n\nThis should integrate with the provider capability and routing work in #288, #290, and #291: Hyperswitch can be selected as a processor/vault provider when the tenant/provider config says it is available, and OpenRails can route checkout/setup flows through it without treating it as a generic secret vault.",
-      "tasks": [
-        "[ ] Research the current Hyperswitch Cloud and self-hosted API surfaces needed for customers, payment methods, payment/setup intents, saved payment methods, refunds/voids, webhooks, connector routing, and vault/tokenization modes; record any version assumptions in docs.",
-        "[ ] Reconcile the implementation plan with future issue #297: document whether Hyperswitch is an optional provider, a lower-risk deployment choice, or a PCI-heavy break-glass/self-hosted vault path; do not make it the default portable adult/high-risk vault without explicit certification.",
-        "[ ] Define the OpenRails provider config shape for `hyperswitch`: cloud vs self-hosted mode, API base URL, optional vault/base URL split if Hyperswitch requires it, merchant/profile/account identifiers, API key secret reference, webhook secret reference, return/callback URLs, and test/live mode.",
-        "[ ] Store Hyperswitch credentials in the existing tenant secret store path; do not store processor API keys in bootstrap YAML, database rows, logs, or generated frontend config.",
-        "[ ] Extend provider capability metadata (#291) so Hyperswitch can advertise supported flows: payment-method vault/tokenization, one-time checkout, recurring/setup/mandate behavior if supported, refunds, webhooks, processor-side routing, remote payment-method listing, and manual certification status.",
-        "[ ] Add a provider adapter/client abstraction that lets NMI customer-vault IDs and Hyperswitch payment-method IDs fit the same OpenRails payment-method model without hard-coding NMI semantics into checkout/subscription flows.",
-        "[ ] Implement Hyperswitch customer/payment-method setup flow using an opaque token or hosted/client-side Hyperswitch collection result; persist only tenant subject, provider, external customer ID, external payment method ID, brand/last4/expiry metadata, and status.",
-        "[ ] Implement checkout/subscription charge paths that can use a saved Hyperswitch payment method and reconcile the resulting payment/subscription state back into OpenRails records.",
-        "[ ] Implement webhook verification and event handling for successful payment, failed payment, refund/void, payment-method updates/deletes, and any recurring/mandate lifecycle events OpenRails relies on.",
-        "[ ] Add self-hosted operational docs: required Hyperswitch services, base URL/TLS requirements, webhook reachability, secret injection, health checks, and local compose/dev smoke path if practical.",
-        "[ ] Add cloud operational docs: required Hyperswitch Cloud credentials, webhook setup, provider certification checklist entry (#290), and tenant bootstrap/provider-link examples.",
-        "[ ] Add tests with a mocked Hyperswitch server/client for tokenization/setup, saved-method charge, failure mapping, webhook signature verification, idempotency, tenant isolation, and no-sensitive-card-data persistence/logging.",
-        "[ ] Validate with focused Go tests for provider/checkout/vault/webhook code, compile-only full package coverage, `task build`, and an optional live sandbox/self-hosted smoke test when credentials or local Hyperswitch are available."
-      ],
-      "completed": false
     }
   ]
 }

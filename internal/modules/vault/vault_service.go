@@ -8,25 +8,44 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/tenant"
 	log "github.com/sirupsen/logrus"
 )
 
 type VaultService struct {
-	PaymentMethodService *PaymentMethodService
+	PaymentMethodService paymentMethodStore
 	SubscriptionService  subscriptionReader
 	NMIClients           map[string]*nmi.NMIClient
+	TenantSecrets        tenantSecretGetter
+	Config               *config.Config
 	DB                   *db.DB
 	clock                clockwork.Clock
+	newNMIClient         func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
 }
 
 type subscriptionReader interface {
 	GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error)
+}
+
+type paymentMethodStore interface {
+	Create(ctx context.Context, method *models.PaymentMethod) error
+	Update(ctx context.Context, method *models.PaymentMethod) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error)
+}
+
+type tenantSecretGetter interface {
+	Get(ctx context.Context, tenantID tenant.ID, name string) (tenancy.Secret, error)
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -48,6 +67,7 @@ func (s *VaultService) Clock() clockwork.Clock {
 type CreateVaultRequest struct {
 	PaymentToken string
 	Provider     string
+	NameOnCard   string
 	FirstName    string
 	LastName     string
 	Address1     string
@@ -68,6 +88,7 @@ type CreateVaultRequest struct {
 type UpdateVaultRequest struct {
 	PaymentToken *string
 	Provider     *string
+	NameOnCard   *string
 	FirstName    *string
 	LastName     *string
 	Address1     *string
@@ -105,11 +126,12 @@ func (e *VaultError) Unwrap() error {
 	return e.Err
 }
 
-func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, clocks ...clockwork.Clock) *VaultService {
+func NewVaultService(pm *PaymentMethodService, sub subscriptionReader, nmiClients map[string]*nmi.NMIClient, dbx *db.DB, cfg *config.Config, clocks ...clockwork.Clock) *VaultService {
 	return &VaultService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,
 		NMIClients:           nmiClients,
+		Config:               cfg,
 		DB:                   dbx,
 		clock:                firstClock(clocks...),
 	}
@@ -124,6 +146,16 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 	return clockwork.NewRealClock()
 }
 
+// SetTenantSecretStore wires dynamic tenant processor credentials into saved-card
+// vault operations. Tenant secrets take precedence; static clients/config remain
+// the fallback for single-tenant/static installs when a tenant secret is absent.
+func (s *VaultService) SetTenantSecretStore(store tenantSecretGetter) {
+	if s == nil {
+		return
+	}
+	s.TenantSecrets = store
+}
+
 // CreateVault creates a NMI customer vault and stores a local PaymentMethod
 func (s *VaultService) CreateVault(ctx context.Context, userID string, req *CreateVaultRequest) (*models.PaymentMethod, error) {
 	processor := strings.TrimSpace(strings.ToLower(req.Provider))
@@ -131,15 +163,16 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 		return nil, errors.New("provider is required")
 	}
 
-	client, ok := s.NMIClients[processor]
-	if !ok {
-		return nil, fmt.Errorf("processor '%s' is not configured", processor)
+	client, err := s.resolveNMIClient(ctx, processor)
+	if err != nil {
+		return nil, fmt.Errorf("processor '%s' is not configured: %w", processor, err)
 	}
 
+	firstName, lastName := nmiNameParts(req.FirstName, req.LastName, req.NameOnCard)
 	vaultData := nmi.CreateCustomerVaultData{
 		PaymentToken: req.PaymentToken,
-		FirstName:    req.FirstName,
-		LastName:     req.LastName,
+		FirstName:    firstName,
+		LastName:     lastName,
 		Address1:     req.Address1,
 		City:         req.City,
 		State:        req.State,
@@ -188,6 +221,89 @@ func (s *VaultService) CreateVault(ctx context.Context, userID string, req *Crea
 
 	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.VaultID}).Info("Successfully created payment vault")
 	return pm, nil
+}
+
+func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {
+	provider = strings.TrimSpace(strings.ToLower(provider))
+	if provider == "" {
+		return nil, errors.New("provider is required")
+	}
+
+	secretName := ""
+	if provider == "mobius" {
+		secretName = tenancy.SecretNMIMobiusProductionKey
+	}
+	if secretName != "" && s != nil && s.TenantSecrets != nil {
+		sec, err := s.TenantSecrets.Get(ctx, tenant.FromContextOrDefault(ctx), secretName)
+		if err != nil {
+			if !errors.Is(err, tenancy.ErrSecretNotFound) {
+				return nil, fmt.Errorf("load tenant NMI secret: %w", err)
+			}
+		} else if value := strings.TrimSpace(sec.Value); value != "" {
+			proc := cloneProcessorConfig(s.processorConfig(provider))
+			if proc == nil {
+				proc = &config.ProcessorConfig{Type: config.ProcessorTypeNMI}
+			}
+			proc.Type = config.ProcessorTypeNMI
+			proc.SecurityKey = value
+			return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
+		}
+	}
+
+	if s != nil && s.NMIClients != nil {
+		if client := s.NMIClients[provider]; client != nil {
+			return client, nil
+		}
+	}
+	if proc := s.processorConfig(provider); proc != nil && processors.IsNMIBacked(provider) {
+		return s.buildNMIClient(provider, proc.ToNMIProviderSettings(provider))
+	}
+	return nil, errors.New("missing client")
+}
+
+func (s *VaultService) buildNMIClient(provider string, cfg *config.NMIProviderSettings) (*nmi.NMIClient, error) {
+	testMode := s != nil && s.Config != nil && s.Config.IsTestMode()
+	if s != nil && s.newNMIClient != nil {
+		return s.newNMIClient(provider, cfg, testMode)
+	}
+	return nmi.NewClient(provider, cfg, testMode)
+}
+
+func (s *VaultService) processorConfig(name string) *config.ProcessorConfig {
+	if s == nil || s.Config == nil {
+		return nil
+	}
+	return s.Config.GetProcessor(name)
+}
+
+func cloneProcessorConfig(in *config.ProcessorConfig) *config.ProcessorConfig {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.Tokens != nil {
+		out.Tokens = make(map[string]config.TokenConfig, len(in.Tokens))
+		for k, v := range in.Tokens {
+			out.Tokens[k] = v
+		}
+	}
+	return &out
+}
+
+func nmiNameParts(firstName, lastName, nameOnCard string) (string, string) {
+	firstName = strings.TrimSpace(firstName)
+	lastName = strings.TrimSpace(lastName)
+	if firstName != "" || lastName != "" {
+		return firstName, lastName
+	}
+	parts := strings.Fields(strings.TrimSpace(nameOnCard))
+	if len(parts) == 0 {
+		return "", ""
+	}
+	if len(parts) == 1 {
+		return parts[0], ""
+	}
+	return parts[0], strings.Join(parts[1:], " ")
 }
 
 func sanitizeLastFour(value string) string {
@@ -248,9 +364,9 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 		return nil, errors.New("payment method processor is required")
 	}
 
-	client, ok := s.NMIClients[processor]
-	if !ok {
-		return nil, fmt.Errorf("processor '%s' is not configured", processor)
+	client, err := s.resolveNMIClient(ctx, processor)
+	if err != nil {
+		return nil, fmt.Errorf("processor '%s' is not configured: %w", processor, err)
 	}
 
 	upd := nmi.UpdateCustomerVaultData{CustomerVaultID: pm.VaultID}
@@ -269,6 +385,9 @@ func (s *VaultService) UpdateVault(ctx context.Context, pm *models.PaymentMethod
 	}
 	if req.LastName != nil {
 		upd.LastName = *req.LastName
+	}
+	if req.NameOnCard != nil && req.FirstName == nil && req.LastName == nil {
+		upd.FirstName, upd.LastName = nmiNameParts("", "", *req.NameOnCard)
 	}
 	if req.Address1 != nil {
 		upd.Address1 = *req.Address1
@@ -355,9 +474,9 @@ func (s *VaultService) DeleteVault(ctx context.Context, pm *models.PaymentMethod
 		return errors.New("payment method processor is required")
 	}
 
-	client, ok := s.NMIClients[processor]
-	if !ok {
-		return fmt.Errorf("processor '%s' is not configured", processor)
+	client, err := s.resolveNMIClient(ctx, processor)
+	if err != nil {
+		return fmt.Errorf("processor '%s' is not configured: %w", processor, err)
 	}
 
 	if err := client.DeleteCustomerVault(nmi.DeleteCustomerVaultData{CustomerVaultID: pm.VaultID}); err != nil {

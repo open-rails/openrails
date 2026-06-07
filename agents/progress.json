@@ -1,5 +1,5 @@
 {
-  "next_id": 324,
+  "next_id": 326,
   "issues": [
     {
       "id": 107,
@@ -362,6 +362,87 @@
         "[ ] Regression-test known special cases: CCBill manual catalog actions, NMI recurring plan push, Stripe remote dedup check, Solana one-off/recurring distinction."
       ],
       "completed": false
+    },
+    {
+      "id": 324,
+      "name": "saved-card-create-contract-relaxation",
+      "description": "Relax the existing OpenRails saved-card create/update contract so host apps can submit provider-tokenized cards without collecting a full billing address. OpenRails already correctly saves user payment-method references in the canonical `billing.payment_methods` table/model: `VaultService.CreateVault` exchanges NMI/Mobius `payment_token` for an NMI Customer Vault id, then stores that reference in `PaymentMethod.VaultID` with processor, tenant subject, last4/card type/expiry, and metadata. This issue is not about adding storage or another payment-method table.\n\n## Existing flow confirmed\n\n- `POST /v1/me/payment-methods` binds `createPaymentMethodRequest` in `internal/http/handlers/payment_methods.go`.\n- The handler falls back to the authenticated user's email if request email is omitted.\n- `VaultService.CreateVault` calls `NMIClient.CreateCustomerVault` and stores the returned `customer_vault_id` in existing `models.PaymentMethod.VaultID`.\n- `models.PaymentMethod` already maps to `billing.payment_methods` and has `Processor`, `VaultID`, `LastFour`, `CardType`, `ExpiryDate`, and `Metadata`.\n- `PaymentMethodRepo.GetByVaultID` already looks up local payment methods by processor + provider vault reference.\n\n## Actual gap\n\nThe NMI adapter only forwards optional billing fields when present, but the HTTP create request currently marks `first_name`, `last_name`, `address1`, `city`, `zip`, and `country` as required. That prevents the Doujins frontend from using the intended minimal international add-card form: name on card, provider-hosted card fields, billing country, and country-aware postal code where applicable.\n\n## Desired contract\n\n- Sensitive card details still go directly from the browser to provider-hosted/tokenized elements: NMI/Mobius now, Hyperswitch later.\n- OpenRails receives only a provider token/reference plus non-sensitive metadata.\n- OpenRails continues to store provider references in the existing `PaymentMethod` path.\n- Full address fields are optional and only conditionally required by explicit processor/capability/risk policy.\n- `name_on_card`, billing country, and postal code should be accepted as metadata without forcing separate first/last/address fields.",
+      "tasks": [
+        "API CONTRACT:",
+        "[x] Relax `POST /v1/me/payment-methods` create validation so `first_name`, `last_name`, `address1`, `city`, and US-style `zip` are not globally required for NMI/Mobius tokenized saved-card creation.",
+        "[x] Accept `name_on_card` as the host-facing cardholder-name field; keep backwards compatibility with `first_name`/`last_name` and split only at the NMI adapter boundary if needed.",
+        "[x] Accept billing country as ISO 3166 alpha-2 and postal code as country-aware metadata rather than US ZIP-only data.",
+        "[x] Use authenticated user/account email as metadata when the request omits billing email; do not force host apps to ask for email again.",
+        "[x] Define processor/capability policy hooks for fields that become conditionally required by a connector, AVS rule, risk rule, or region.",
+        "",
+        "EXISTING PAYMENTMETHOD PATH:",
+        "[x] Use the existing `billing.payment_methods` / `models.PaymentMethod` / `PaymentMethodService` path; do not add a duplicate payment-method table.",
+        "[x] Map new non-sensitive fields (`name_on_card`, billing country, postal code, provider-returned display metadata) into existing fields and metadata JSON where appropriate.",
+        "[x] Ensure PAN, CVV, raw card data, and raw tokenization payloads remain absent from normal OpenRails saved-card APIs, logs, metadata, and DB columns.",
+        "[x] Normalize card display metadata from NMI/Mobius tokenization responses and future Hyperswitch responses: brand/network, last4, expiry month/year, card type, issuer country/fingerprint/PAR when available.",
+        "[x] Store saved-card consent/audit metadata needed for recurring/off-session use without storing sensitive card data.",
+        "",
+        "PROVIDER SUPPORT:",
+        "[x] Preserve current NMI/Mobius Collect.js token flow: frontend receives `payment_token`, OpenRails exchanges/stores the provider vault reference.",
+        "[x] Design the same contract to support future Hyperswitch hosted/card-element flows using Hyperswitch `payment_method_id` or equivalent vault reference.",
+        "[x] Keep Hyperswitch as planned/future support; do not require it to be implemented before the NMI/Mobius API relaxation lands.",
+        "",
+        "VERIFY:",
+        "[x] Add API tests for saved-card creation with only token/reference, name_on_card, billing_country, optional postal code, and account email metadata.",
+        "[x] Add tests for international metadata: US, DE, ES, JP, KR, CN, and one South/Central American country.",
+        "[x] Add negative tests proving raw PAN/CVV fields are rejected or ignored and never logged.",
+        "[x] Add compatibility tests for existing clients that still send first_name/last_name/address fields during migration."
+      ],
+      "completed": true
+    },
+    {
+      "id": 325,
+      "name": "saved-card-vault-tenant-secret-nmi-resolution",
+      "description": "Teach OpenRails saved-card vault creation to resolve Mobius/NMI credentials from the tenant secret store, matching the checkout money path. Investigation from Doujins E2E on 2026-06-07 found that `CheckoutService.resolveNMIClient` can load `openrails/tenants/<tenant>/nmi/mobius/production_key` from tenant secrets, but `VaultService.CreateVault` still uses only the startup `NMIClients` map. In a tenant-secret-only stack, local config intentionally does not define a static `processors.mobius.security_key`, so `POST /v1/self/payment-methods` / `POST /v1/me/payment-methods` can fail with `processor 'mobius' is not configured` before it ever reaches NMI.\n\nThis is not a storage/table issue. `billing.payment_methods` and `PaymentMethod.VaultID` already persist the provider vault reference. This issue is about using the same dynamic tenant-secret credential source for saved-card customer-vault creation that checkout already uses.",
+      "tasks": [
+        "[x] Add tenant-secret access to the vault/payment-method creation service, or extract a shared NMI client resolver used by both checkout and vault services.",
+        "[x] For provider `mobius`, resolve `openrails/tenants/<tenant>/nmi/mobius/production_key` from the tenant secret store and construct an NMI client for the request when present.",
+        "[x] Preserve static configured `NMIClients` as a compatibility fallback only when tenant-secret storage is absent or the tenant secret is missing in self-hosted/static deployments.",
+        "[x] Fail closed and return a clear API error when tenant-secret storage is configured but unavailable, instead of silently falling back to stale/static credentials.",
+        "[x] Ensure tenant context is propagated into saved-card create/update requests so the resolver reads the correct tenant's NMI credential.",
+        "[x] Keep sensitive NMI keys out of logs, API responses, payment-method metadata, and database rows.",
+        "[x] Add tests proving saved-card create uses a tenant-secret Mobius key when no static `NMIClients[\"mobius\"]` exists.",
+        "[x] Add tests for missing tenant secret, tenant-secret backend unavailable, static fallback compatibility, and multi-tenant isolation.",
+        "[x] Validate with a live/sandbox smoke when real NMI test credentials are available: provider-hosted token -> saved card create -> `billing.payment_methods.vault_id` persisted -> list returns display metadata."
+      ],
+      "completed": true
+    },
+    {
+      "id": 320,
+      "name": "Add Hyperswitch payment vault support for cloud and self-hosted deployments",
+      "description": "Add Hyperswitch as an optional OpenRails payment provider and payment-method vault integration, covering both Hyperswitch Cloud and self-hosted Hyperswitch. This is payment vaulting/tokenization, not HashiCorp Vault tenant-secret storage. OpenRails should store only opaque Hyperswitch customer/payment-method identifiers plus non-sensitive metadata, while PAN/card collection stays in Hyperswitch-hosted/client-side tokenization flows or equivalent PCI-scoped Hyperswitch surfaces.\n\nThis issue must reconcile with future issue #297 (`deplatforming-resilient-card-vault`): Hyperswitch should not be positioned as the default adult/high-risk deplatforming-resilient vault until its contractual/export/compliance posture is explicitly certified. Hyperswitch Cloud may still be useful for lower-risk deployments or as an optional provider, and self-hosted Hyperswitch may be a break-glass/advanced deployment path if the operator accepts and satisfies the PCI requirements.\n\nThis should integrate with the provider capability and routing work in #288, #290, and #291: Hyperswitch can be selected as a processor/vault provider when the tenant/provider config says it is available, and OpenRails can route checkout/setup flows through it without treating it as a generic secret vault.",
+      "tasks": [
+        "[ ] Research the current Hyperswitch Cloud and self-hosted API surfaces needed for customers, payment methods, payment/setup intents, saved payment methods, refunds/voids, webhooks, connector routing, and vault/tokenization modes; record any version assumptions in docs.",
+        "[ ] Reconcile the implementation plan with future issue #297: document whether Hyperswitch is an optional provider, a lower-risk deployment choice, or a PCI-heavy break-glass/self-hosted vault path; do not make it the default portable adult/high-risk vault without explicit certification.",
+        "[ ] Define the OpenRails provider config shape for `hyperswitch`: cloud vs self-hosted mode, API base URL, optional vault/base URL split if Hyperswitch requires it, merchant/profile/account identifiers, API key secret reference, webhook secret reference, return/callback URLs, and test/live mode.",
+        "[ ] Store Hyperswitch credentials in the existing tenant secret store path; do not store processor API keys in bootstrap YAML, database rows, logs, or generated frontend config.",
+        "[ ] Extend provider capability metadata (#291) so Hyperswitch can advertise supported flows: payment-method vault/tokenization, one-time checkout, recurring/setup/mandate behavior if supported, refunds, webhooks, processor-side routing, remote payment-method listing, and manual certification status.",
+        "[ ] Add a provider adapter/client abstraction that lets NMI customer-vault IDs and Hyperswitch payment-method IDs fit the same OpenRails payment-method model without hard-coding NMI semantics into checkout/subscription flows.",
+        "[ ] Implement Hyperswitch customer/payment-method setup flow using an opaque token or hosted/client-side Hyperswitch collection result; persist only tenant subject, provider, external customer ID, external payment method ID, brand/last4/expiry metadata, and status.",
+        "[ ] Implement checkout/subscription charge paths that can use a saved Hyperswitch payment method and reconcile the resulting payment/subscription state back into OpenRails records.",
+        "[ ] Implement webhook verification and event handling for successful payment, failed payment, refund/void, payment-method updates/deletes, and any recurring/mandate lifecycle events OpenRails relies on.",
+        "[ ] Add self-hosted operational docs: required Hyperswitch services, base URL/TLS requirements, webhook reachability, secret injection, health checks, and local compose/dev smoke path if practical.",
+        "[ ] Add cloud operational docs: required Hyperswitch Cloud credentials, webhook setup, provider certification checklist entry (#290), and tenant bootstrap/provider-link examples.",
+        "[ ] Add tests with a mocked Hyperswitch server/client for tokenization/setup, saved-method charge, failure mapping, webhook signature verification, idempotency, tenant isolation, and no-sensitive-card-data persistence/logging.",
+        "[ ] Validate with focused Go tests for provider/checkout/vault/webhook code, compile-only full package coverage, `task build`, and an optional live sandbox/self-hosted smoke test when credentials or local Hyperswitch are available."
+      ],
+      "completed": false
+    },
+    {
+      "id": 296,
+      "name": "webhook-normalization-interface",
+      "completed": false,
+      "description": "Unify the per-processor webhook handlers behind ONE interface, so adding processor #5's webhooks is 'implement the interface' instead of 'add another branch'. Today internal/modules/webhooks/{stripe,ccbill,nmi} are separate code paths (plus deduplication.go, webhookutil.go) with no shared contract.\n\n## Pattern (Hyperswitch IncomingWebhook trait)\nHyperswitch (hyperswitch_interfaces/src/webhooks.rs) collapses N gateway formats into one internal event model via a trait: verify_webhook_source, get_webhook_event_type (-> a unified IncomingWebhookEvent enum), get_webhook_object_reference_id, get_webhook_resource_object. The single HTTP endpoint + dedup + ledger-update logic then become processor-agnostic.\n## For OpenRails (small Go refactor, not new functionality)\nDefine WebhookHandler { Verify(req) error; Normalize(req) (WebhookEvent, error) } returning a unified WebhookEvent{Type, ProcessorRef, SubscriptionRef, Amount, OccurredAt, Raw}. Move the existing stripe/ccbill/nmi verify+parse behind it; the HTTP handler, dedup, and subscription/ledger updates consume the unified event. Solana already has its own confirm/poller path; include it as a handler if useful or leave it. All the pieces (signature verify, dedup) already exist — this is consolidation.",
+      "tasks": [
+        "[ ] Define WebhookHandler interface (Verify + Normalize) + a unified WebhookEvent struct + event-type enum.",
+        "[ ] Move stripe/ccbill/nmi verify+parse behind the interface; the single HTTP endpoint + deduplication.go + ledger/subscription update become processor-agnostic.",
+        "[ ] Registry by processor; adding a processor's webhooks = implement the interface. Tests: each processor's sample payloads normalize to the right WebhookEvent."
+      ]
     }
   ]
 }

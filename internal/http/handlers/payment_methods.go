@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
+	"github.com/open-rails/openrails/internal/tenancy"
 	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
@@ -28,41 +31,109 @@ type paymentMethodURI struct {
 }
 
 type createPaymentMethodRequest struct {
-	PaymentToken string `json:"payment_token" binding:"required"`
-	FirstName    string `json:"first_name" binding:"required"`
-	LastName     string `json:"last_name" binding:"required"`
-	Address1     string `json:"address1" binding:"required"`
-	City         string `json:"city" binding:"required"`
-	State        string `json:"state" binding:"omitempty"`
-	Zip          string `json:"zip" binding:"required"`
-	Country      string `json:"country" binding:"required"`
-	Phone        string `json:"phone" binding:"omitempty"`
-	Email        string `json:"email" binding:"omitempty,email"`
-	Company      string `json:"company" binding:"omitempty"`
-	Address2     string `json:"address2" binding:"omitempty"`
-	Provider     string `json:"provider" binding:"omitempty"`
-	LastFour     string `json:"last_four" binding:"omitempty"`
-	CardType     string `json:"card_type" binding:"omitempty"`
-	ExpiryDate   string `json:"expiry_date" binding:"omitempty"`
+	PaymentToken   string `json:"payment_token" binding:"required"`
+	NameOnCard     string `json:"name_on_card" binding:"omitempty"`
+	FirstName      string `json:"first_name" binding:"omitempty"`
+	LastName       string `json:"last_name" binding:"omitempty"`
+	Address1       string `json:"address1" binding:"omitempty"`
+	City           string `json:"city" binding:"omitempty"`
+	State          string `json:"state" binding:"omitempty"`
+	Zip            string `json:"zip" binding:"omitempty"`
+	PostalCode     string `json:"postal_code" binding:"omitempty"`
+	Country        string `json:"country" binding:"omitempty"`
+	BillingCountry string `json:"billing_country" binding:"omitempty"`
+	Phone          string `json:"phone" binding:"omitempty"`
+	Email          string `json:"email" binding:"omitempty,email"`
+	Company        string `json:"company" binding:"omitempty"`
+	Address2       string `json:"address2" binding:"omitempty"`
+	Provider       string `json:"provider" binding:"omitempty"`
+	LastFour       string `json:"last_four" binding:"omitempty"`
+	CardType       string `json:"card_type" binding:"omitempty"`
+	ExpiryDate     string `json:"expiry_date" binding:"omitempty"`
+
+	RawCardNumber        *json.RawMessage `json:"card_number,omitempty"`
+	RawNumber            *json.RawMessage `json:"number,omitempty"`
+	RawPAN               *json.RawMessage `json:"pan,omitempty"`
+	RawPrimaryAccountNum *json.RawMessage `json:"primary_account_number,omitempty"`
+	RawCVV               *json.RawMessage `json:"cvv,omitempty"`
+	RawCVC               *json.RawMessage `json:"cvc,omitempty"`
+	RawCVN               *json.RawMessage `json:"cvn,omitempty"`
+	RawSecurityCode      *json.RawMessage `json:"security_code,omitempty"`
+	RawVerificationValue *json.RawMessage `json:"verification_value,omitempty"`
 }
 
 type updatePaymentMethodRequest struct {
-	PaymentToken string  `json:"payment_token" binding:"required"`
-	FirstName    *string `json:"first_name"`
-	LastName     *string `json:"last_name"`
-	Address1     *string `json:"address1"`
-	City         *string `json:"city"`
-	State        *string `json:"state"`
-	Zip          *string `json:"zip"`
-	Country      *string `json:"country"`
-	Phone        *string `json:"phone"`
-	Email        *string `json:"email" binding:"omitempty,email"`
-	Company      *string `json:"company"`
-	Address2     *string `json:"address2"`
-	Provider     *string `json:"provider"`
-	LastFour     *string `json:"last_four" binding:"omitempty"`
-	CardType     *string `json:"card_type" binding:"omitempty"`
-	ExpiryDate   *string `json:"expiry_date" binding:"omitempty"`
+	PaymentToken   string  `json:"payment_token" binding:"required"`
+	NameOnCard     *string `json:"name_on_card"`
+	FirstName      *string `json:"first_name"`
+	LastName       *string `json:"last_name"`
+	Address1       *string `json:"address1"`
+	City           *string `json:"city"`
+	State          *string `json:"state"`
+	Zip            *string `json:"zip"`
+	PostalCode     *string `json:"postal_code"`
+	Country        *string `json:"country"`
+	BillingCountry *string `json:"billing_country"`
+	Phone          *string `json:"phone"`
+	Email          *string `json:"email" binding:"omitempty,email"`
+	Company        *string `json:"company"`
+	Address2       *string `json:"address2"`
+	Provider       *string `json:"provider"`
+	LastFour       *string `json:"last_four" binding:"omitempty"`
+	CardType       *string `json:"card_type" binding:"omitempty"`
+	ExpiryDate     *string `json:"expiry_date" binding:"omitempty"`
+
+	RawCardNumber        *json.RawMessage `json:"card_number,omitempty"`
+	RawNumber            *json.RawMessage `json:"number,omitempty"`
+	RawPAN               *json.RawMessage `json:"pan,omitempty"`
+	RawPrimaryAccountNum *json.RawMessage `json:"primary_account_number,omitempty"`
+	RawCVV               *json.RawMessage `json:"cvv,omitempty"`
+	RawCVC               *json.RawMessage `json:"cvc,omitempty"`
+	RawCVN               *json.RawMessage `json:"cvn,omitempty"`
+	RawSecurityCode      *json.RawMessage `json:"security_code,omitempty"`
+	RawVerificationValue *json.RawMessage `json:"verification_value,omitempty"`
+}
+
+type rawCardField struct {
+	name  string
+	value *json.RawMessage
+}
+
+func (req *createPaymentMethodRequest) rejectRawCardFields() error {
+	return rejectRawCardFieldValues(
+		rawCardField{name: "card_number", value: req.RawCardNumber},
+		rawCardField{name: "number", value: req.RawNumber},
+		rawCardField{name: "pan", value: req.RawPAN},
+		rawCardField{name: "primary_account_number", value: req.RawPrimaryAccountNum},
+		rawCardField{name: "cvv", value: req.RawCVV},
+		rawCardField{name: "cvc", value: req.RawCVC},
+		rawCardField{name: "cvn", value: req.RawCVN},
+		rawCardField{name: "security_code", value: req.RawSecurityCode},
+		rawCardField{name: "verification_value", value: req.RawVerificationValue},
+	)
+}
+
+func (req *updatePaymentMethodRequest) rejectRawCardFields() error {
+	return rejectRawCardFieldValues(
+		rawCardField{name: "card_number", value: req.RawCardNumber},
+		rawCardField{name: "number", value: req.RawNumber},
+		rawCardField{name: "pan", value: req.RawPAN},
+		rawCardField{name: "primary_account_number", value: req.RawPrimaryAccountNum},
+		rawCardField{name: "cvv", value: req.RawCVV},
+		rawCardField{name: "cvc", value: req.RawCVC},
+		rawCardField{name: "cvn", value: req.RawCVN},
+		rawCardField{name: "security_code", value: req.RawSecurityCode},
+		rawCardField{name: "verification_value", value: req.RawVerificationValue},
+	)
+}
+
+func rejectRawCardFieldValues(fields ...rawCardField) error {
+	for _, field := range fields {
+		if field.value != nil {
+			return fmt.Errorf("%s must be tokenized by the payment provider before calling OpenRails", field.name)
+		}
+	}
+	return nil
 }
 
 type subscriptionSummary struct {
@@ -121,6 +192,10 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	if !r.BindJSON(req) {
 		return
 	}
+	if err := req.rejectRawCardFields(); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if strings.TrimSpace(req.PaymentToken) == "" {
 		r.ErrorJSON(http.StatusBadRequest, "payment_token is required")
@@ -130,40 +205,23 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	ctx, cancel := context.WithTimeout(r.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	lastFour := strings.TrimSpace(req.LastFour)
-	if len(lastFour) > 4 {
-		lastFour = lastFour[len(lastFour)-4:]
-	}
-	createReq := &vault.CreateVaultRequest{
-		PaymentToken: req.PaymentToken,
-		FirstName:    req.FirstName,
-		LastName:     req.LastName,
-		Address1:     req.Address1,
-		City:         req.City,
-		State:        req.State,
-		Zip:          req.Zip,
-		Country:      req.Country,
-		Phone:        req.Phone,
-		Company:      req.Company,
-		Address2:     req.Address2,
-		Provider:     req.Provider,
-		LastFour:     lastFour,
-		CardType:     req.CardType,
-		ExpiryDate:   req.ExpiryDate,
-	}
-	if e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID")); e2eRunID != "" {
-		createReq.Metadata = map[string]any{"e2e_run_id": e2eRunID}
+	email := strings.TrimSpace(req.Email)
+	if email == "" && user.Email != nil {
+		email = strings.TrimSpace(*user.Email)
 	}
 
-	if req.Email != "" {
-		createReq.Email = req.Email
-	} else if user.Email != nil {
-		createReq.Email = strings.TrimSpace(*user.Email)
+	createReq := createVaultRequestFromPaymentMethodRequest(req, email)
+	if e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID")); e2eRunID != "" {
+		createReq.Metadata["e2e_run_id"] = e2eRunID
 	}
 
 	pm, err := r.State.VaultService.CreateVault(ctx, user.ID, createReq)
 	if err != nil {
 		log.WithError(err).WithField("user_id", user.ID).Error("Failed to create payment method")
+		if errors.Is(err, tenancy.ErrSecretBackendUnavailable) {
+			r.ErrorJSON(http.StatusServiceUnavailable, "payment processor credentials are temporarily unavailable")
+			return
+		}
 		var vaultErr *vault.VaultError
 		if errors.As(err, &vaultErr) {
 			code := api.CodePaymentFailed
@@ -180,6 +238,59 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	r.SuccessJSON(paymentMethodToAPI(pm))
 }
 
+func createVaultRequestFromPaymentMethodRequest(req *createPaymentMethodRequest, email string) *vault.CreateVaultRequest {
+	lastFour := strings.TrimSpace(req.LastFour)
+	if len(lastFour) > 4 {
+		lastFour = lastFour[len(lastFour)-4:]
+	}
+	country := strings.TrimSpace(req.BillingCountry)
+	if country == "" {
+		country = strings.TrimSpace(req.Country)
+	}
+	postalCode := strings.TrimSpace(req.PostalCode)
+	if postalCode == "" {
+		postalCode = strings.TrimSpace(req.Zip)
+	}
+
+	metadata := map[string]any{}
+	setMetadata := func(key, value string) {
+		if value := strings.TrimSpace(value); value != "" {
+			metadata[key] = value
+		}
+	}
+	setMetadata("name_on_card", req.NameOnCard)
+	setMetadata("billing_country", country)
+	setMetadata("postal_code", postalCode)
+	setMetadata("billing_email", email)
+	setMetadata("billing_phone", req.Phone)
+	setMetadata("billing_address1", req.Address1)
+	setMetadata("billing_address2", req.Address2)
+	setMetadata("billing_city", req.City)
+	setMetadata("billing_state", req.State)
+	setMetadata("billing_company", req.Company)
+
+	return &vault.CreateVaultRequest{
+		PaymentToken: req.PaymentToken,
+		NameOnCard:   req.NameOnCard,
+		FirstName:    req.FirstName,
+		LastName:     req.LastName,
+		Address1:     req.Address1,
+		City:         req.City,
+		State:        req.State,
+		Zip:          postalCode,
+		Country:      country,
+		Phone:        req.Phone,
+		Email:        email,
+		Company:      req.Company,
+		Address2:     req.Address2,
+		Provider:     req.Provider,
+		LastFour:     lastFour,
+		CardType:     req.CardType,
+		ExpiryDate:   req.ExpiryDate,
+		Metadata:     metadata,
+	}
+}
+
 func UpdatePaymentMethod(r *httprequest.Request) {
 	path := new(paymentMethodURI)
 	if !r.BindURI(path) {
@@ -187,6 +298,10 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	}
 	body := new(updatePaymentMethodRequest)
 	if !r.BindJSON(body) {
+		return
+	}
+	if err := body.rejectRawCardFields(); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -232,13 +347,14 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	updateReq := &vault.UpdateVaultRequest{
 		PaymentToken: &trimmedToken,
 		Provider:     body.Provider,
+		NameOnCard:   body.NameOnCard,
 		FirstName:    body.FirstName,
 		LastName:     body.LastName,
 		Address1:     body.Address1,
 		City:         body.City,
 		State:        body.State,
-		Zip:          body.Zip,
-		Country:      body.Country,
+		Zip:          firstNonNilString(body.PostalCode, body.Zip),
+		Country:      firstNonNilString(body.BillingCountry, body.Country),
 		Phone:        body.Phone,
 		Email:        body.Email,
 		Company:      body.Company,
@@ -254,11 +370,24 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	updated, err := r.State.VaultService.UpdateVault(ctx, pm, updateReq)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"payment_method_id": methodID, "user_id": user.ID}).Error("Failed to update payment method")
+		if errors.Is(err, tenancy.ErrSecretBackendUnavailable) {
+			r.ErrorJSON(http.StatusServiceUnavailable, "payment processor credentials are temporarily unavailable")
+			return
+		}
 		r.ErrorJSON(http.StatusBadRequest, "failed to update payment method")
 		return
 	}
 
 	r.SuccessJSON(paymentMethodToAPI(updated))
+}
+
+func firstNonNilString(values ...*string) *string {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func ListPaymentMethods(r *httprequest.Request) {
@@ -397,17 +526,71 @@ func paymentMethodToAPI(pm *models.PaymentMethod) paymentMethodResponse {
 		subs = append(subs, summary)
 	}
 
+	metadata := paymentMethodMetadataToAPI(pm.Metadata)
 	return paymentMethodResponse{
-		ID:            api.FormatPaymentMethodID(pm.ID),
-		Object:        "payment_method",
-		Type:          "card",
-		Processor:     string(pm.Processor),
-		Card:          card,
-		Created:       api.ToUnix(pm.CreatedAt),
-		Metadata:      map[string]string{},
-		FailureReason: pm.FailureReason,
-		Subscriptions: subs,
+		ID:             api.FormatPaymentMethodID(pm.ID),
+		Object:         "payment_method",
+		Type:           "card",
+		Processor:      string(pm.Processor),
+		BillingDetails: paymentMethodBillingDetailsFromMetadata(metadata),
+		Card:           card,
+		Created:        api.ToUnix(pm.CreatedAt),
+		Metadata:       metadata,
+		FailureReason:  pm.FailureReason,
+		Subscriptions:  subs,
 	}
+}
+
+func paymentMethodMetadataToAPI(metadata map[string]any) map[string]string {
+	out := map[string]string{}
+	for key, value := range metadata {
+		switch v := value.(type) {
+		case string:
+			if v := strings.TrimSpace(v); v != "" {
+				out[key] = v
+			}
+		}
+	}
+	return out
+}
+
+func paymentMethodBillingDetailsFromMetadata(metadata map[string]string) *paymentMethodBillingDetails {
+	if len(metadata) == 0 {
+		return nil
+	}
+	details := &paymentMethodBillingDetails{
+		Name:  stringPtrFromMap(metadata, "name_on_card"),
+		Email: stringPtrFromMap(metadata, "billing_email"),
+		Phone: stringPtrFromMap(metadata, "billing_phone"),
+		Address: &paymentMethodAddress{
+			Line1:      stringPtrFromMap(metadata, "billing_address1"),
+			Line2:      stringPtrFromMap(metadata, "billing_address2"),
+			City:       stringPtrFromMap(metadata, "billing_city"),
+			State:      stringPtrFromMap(metadata, "billing_state"),
+			PostalCode: stringPtrFromMap(metadata, "postal_code"),
+			Country:    stringPtrFromMap(metadata, "billing_country"),
+		},
+	}
+	if details.Address.Line1 == nil &&
+		details.Address.Line2 == nil &&
+		details.Address.City == nil &&
+		details.Address.State == nil &&
+		details.Address.PostalCode == nil &&
+		details.Address.Country == nil {
+		details.Address = nil
+	}
+	if details.Name == nil && details.Email == nil && details.Phone == nil && details.Address == nil {
+		return nil
+	}
+	return details
+}
+
+func stringPtrFromMap(metadata map[string]string, key string) *string {
+	value := strings.TrimSpace(metadata[key])
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func paymentMethodsToAPI(methods []*models.PaymentMethod) []paymentMethodResponse {

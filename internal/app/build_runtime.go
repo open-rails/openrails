@@ -618,7 +618,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		clock,
 	)
 
-	vaultService := vault.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, clock)
+	vaultService := vault.NewVaultService(paymentMethodService, subscriptionService, nmiClients, database, cfg, clock)
 	subscriptionService.VaultService = vaultService
 	idempotencyService := idempotency.NewIdempotencyService(redisClient)
 	webhookIdempotencyService := idempotency.NewIdempotencyServiceWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)

@@ -245,6 +245,9 @@ func New(deps Dependencies) (*Server, error) {
 			if deps.Runtime.CheckoutService != nil {
 				deps.Runtime.CheckoutService.SetTenantSecretStore(secretStore)
 			}
+			if deps.Runtime.VaultService != nil {
+				deps.Runtime.VaultService.SetTenantSecretStore(secretStore)
+			}
 		}
 
 		// Single-install bridge (#253): a global-config Solana private key is seeded
