@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -112,7 +113,7 @@ func (s *CheckoutService) now() time.Time {
 }
 
 func (s *CheckoutService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 	if s.PurchaseService != nil {
 		s.PurchaseService.SetClock(s.clock)
 	}
@@ -137,7 +138,7 @@ func NewCheckoutService(
 	cfg *config.Config,
 	clocks ...clockwork.Clock,
 ) *CheckoutService {
-	clock := firstClock(clocks...)
+	clock := timeutil.FirstClock(clocks...)
 	service := &CheckoutService{
 		SubscriptionService:      subscriptionService,
 		ProductService:           productService,

@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/query"
 )
@@ -39,24 +40,15 @@ func (s *PaymentService) now() time.Time {
 type GetPaymentsFilters = repo.PaymentFilters
 
 func NewPaymentService(db *db.DB, clocks ...clockwork.Clock) *PaymentService {
-	return &PaymentService{repo: repo.NewPaymentRepo(db), clock: firstClock(clocks...)}
+	return &PaymentService{repo: repo.NewPaymentRepo(db), clock: timeutil.FirstClock(clocks...)}
 }
 
 func (s *PaymentService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *PaymentService) Clock() clockwork.Clock {
 	return s.clock
-}
-
-func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
-	for _, c := range clocks {
-		if c != nil {
-			return c
-		}
-	}
-	return clockwork.NewRealClock()
 }
 
 func (s *PaymentService) Create(ctx context.Context, payment *models.Payment) error {

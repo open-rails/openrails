@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // FeatureService implements the Stripe-shaped entitlement-features layer (issue
@@ -32,7 +33,7 @@ func NewFeatureService(database *db.DB, clocks ...clockwork.Clock) *FeatureServi
 		db:    database,
 		repo:  repo.NewEntitlementFeatureRepo(database),
 		ents:  repo.NewEntitlementRepo(database),
-		clock: firstClock(clocks...),
+		clock: timeutil.FirstClock(clocks...),
 	}
 }
 

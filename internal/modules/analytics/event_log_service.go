@@ -19,6 +19,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/spool"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -70,7 +71,7 @@ func (s *EventLogService) now() time.Time {
 
 // NewEventLogService creates a new event log service
 func NewEventLogService(cfg *config.ClickHouseConfig, clocks ...clockwork.Clock) (*EventLogService, error) {
-	clock := firstClock(clocks...)
+	clock := timeutil.FirstClock(clocks...)
 	// Feature gate: presence of HTTPAddr indicates intent to use CH
 	if cfg == nil || cfg.HTTPAddr == "" {
 		log.Warn("ClickHouse HTTPAddr not configured - billing events will not be logged")
@@ -101,7 +102,7 @@ func NewEventLogService(cfg *config.ClickHouseConfig, clocks ...clockwork.Clock)
 func (s *EventLogService) SetClock(c clockwork.Clock) {
 	s.clockMu.Lock()
 	defer s.clockMu.Unlock()
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *EventLogService) Clock() clockwork.Clock {
@@ -121,15 +122,6 @@ func resolveTenantID(ctx context.Context, existing string) string {
 		return existing
 	}
 	return tenant.FromContextOrDefault(ctx).String()
-}
-
-func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
-	for _, c := range clocks {
-		if c != nil {
-			return c
-		}
-	}
-	return clockwork.NewRealClock()
 }
 
 // ensureConn lazily (re)establishes the ClickHouse connection

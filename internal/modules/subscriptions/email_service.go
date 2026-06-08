@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 var errUserEmailUnavailable = errors.New("user email unavailable")
@@ -71,11 +72,11 @@ func NewEmailService(sendgridCfg *config.SendGridConfig, storeCfg *config.StoreC
 	client := sendgrid.NewSendClient(apiKey)
 	from := mail.NewEmail(fromName, fromEmail)
 
-	return &EmailService{client: client, from: from, store: storeCfg, clock: firstClock(clocks...)}, nil
+	return &EmailService{client: client, from: from, store: storeCfg, clock: timeutil.FirstClock(clocks...)}, nil
 }
 
 func (s *EmailService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *EmailService) Clock() clockwork.Clock {

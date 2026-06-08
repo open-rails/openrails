@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
@@ -46,7 +47,7 @@ type AdminSubscriptionService struct {
 
 // SetClock sets the clock for this service. Used for testing.
 func (s *AdminSubscriptionService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *AdminSubscriptionService) Clock() clockwork.Clock {
@@ -430,6 +431,6 @@ func NewAdminSubscriptionService(
 		NotificationService: notificationService,
 		PaymentService:      paymentService,
 		NMIClients:          nmiClients,
-		clock:               firstClock(clocks...),
+		clock:               timeutil.FirstClock(clocks...),
 	}
 }

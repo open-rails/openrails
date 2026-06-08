@@ -13,6 +13,7 @@ import (
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -42,12 +43,12 @@ func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *confi
 		cfg:          cfg,
 		priceService: price,
 		fxProvider:   fxProvider,
-		clock:        firstClock(clocks...),
+		clock:        timeutil.FirstClock(clocks...),
 	}
 }
 
 func (s *SolanaTransactionService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *SolanaTransactionService) Clock() clockwork.Clock {

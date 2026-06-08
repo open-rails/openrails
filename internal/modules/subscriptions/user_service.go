@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -66,7 +67,7 @@ func (s *UserSubscriptionService) SetDeferredDeleteScheduler(d DeferredDeleteSch
 
 // SetClock sets the clock for this service. Used for testing.
 func (s *UserSubscriptionService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *UserSubscriptionService) Clock() clockwork.Clock {
@@ -635,6 +636,6 @@ func NewUserSubscriptionService(
 		PaymentService:      paymentService,
 		NotificationService: notificationService,
 		EntitlementService:  entitlementService,
-		clock:               firstClock(clocks...),
+		clock:               timeutil.FirstClock(clocks...),
 	}
 }

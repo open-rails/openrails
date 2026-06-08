@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/open-rails/openrails/internal/app"
@@ -39,7 +38,7 @@ func (opts Options) requiredMW() router.Middleware {
 			}
 			uc, err := a.Authenticate(r.Request.Context(), r.Request)
 			if err != nil {
-				r.AbortJSON(http.StatusUnauthorized, unauthenticatedMessage(err))
+				r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
 				return
 			}
 			r.SetUserContext(uc)
@@ -61,13 +60,6 @@ func (opts Options) optionalMW() router.Middleware {
 			next(r)
 		}
 	}
-}
-
-func unauthenticatedMessage(err error) string {
-	if err == nil || errors.Is(err, billingauth.ErrUnauthenticated) {
-		return "authentication required"
-	}
-	return err.Error()
 }
 
 // h adapts a handler func to the neutral router.Handler type.

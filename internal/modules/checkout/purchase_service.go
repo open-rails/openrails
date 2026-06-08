@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
@@ -88,7 +89,7 @@ func NewCheckoutPurchaseService(
 		PaymentService:      paymentService,
 		EntitlementService:  entitlementService,
 		SubscriptionService: subscriptionService,
-		clock:               firstClock(clocks...),
+		clock:               timeutil.FirstClock(clocks...),
 	}
 }
 
@@ -100,7 +101,7 @@ func (s *CheckoutPurchaseService) now() time.Time {
 }
 
 func (s *CheckoutPurchaseService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 // SetProductAccessService wires the durable product-access grant service (issue
@@ -112,15 +113,6 @@ func (s *CheckoutPurchaseService) SetProductAccessService(g productAccessGranter
 
 func (s *CheckoutPurchaseService) Clock() clockwork.Clock {
 	return s.clock
-}
-
-func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
-	for _, c := range clocks {
-		if c != nil {
-			return c
-		}
-	}
-	return clockwork.NewRealClock()
 }
 
 func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*EligibilityResult, error) {

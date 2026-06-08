@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
@@ -60,7 +61,7 @@ func (s *SubscriptionService) now() time.Time {
 }
 
 func (s *SubscriptionService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *SubscriptionService) Clock() clockwork.Clock {
@@ -169,22 +170,13 @@ func NewSubscriptionService(
 	return &SubscriptionService{
 		subscriptionRepo:     repo.NewSubscriptionRepo(db),
 		notificationRepo:     repo.NewNotificationQueueRepo(db),
-		clock:                firstClock(clocks...),
+		clock:                timeutil.FirstClock(clocks...),
 		PriceService:         priceService,
 		ProductService:       productService,
 		CCBillRESTClient:     ccbillRESTClient,
 		NMIClients:           nmiClients,
 		PaymentMethodService: paymentMethodService,
 	}
-}
-
-func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
-	for _, c := range clocks {
-		if c != nil {
-			return c
-		}
-	}
-	return clockwork.NewRealClock()
 }
 
 func (s *SubscriptionService) Create(ctx context.Context, subscription *models.Subscription) error {

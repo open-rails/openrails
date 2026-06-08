@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/uptrace/bun"
 )
@@ -23,7 +24,7 @@ type EntitlementService struct {
 }
 
 func NewEntitlementService(db *db.DB, clocks ...clockwork.Clock) *EntitlementService {
-	return &EntitlementService{db: db, repo: repo.NewEntitlementRepo(db), clock: firstClock(clocks...)}
+	return &EntitlementService{db: db, repo: repo.NewEntitlementRepo(db), clock: timeutil.FirstClock(clocks...)}
 }
 
 func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Context, tx bun.Tx) error) error {
@@ -44,7 +45,7 @@ func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Con
 
 // SetClock sets the clock for this service. Used for testing.
 func (s *EntitlementService) SetClock(c clockwork.Clock) {
-	s.clock = firstClock(c)
+	s.clock = timeutil.FirstClock(c)
 }
 
 func (s *EntitlementService) Clock() clockwork.Clock {
@@ -57,15 +58,6 @@ func (s *EntitlementService) now() time.Time {
 		return s.clock.Now()
 	}
 	return time.Now()
-}
-
-func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
-	for _, c := range clocks {
-		if c != nil {
-			return c
-		}
-	}
-	return clockwork.NewRealClock()
 }
 
 // IsEntitled returns true if the user currently has an active entitlement
