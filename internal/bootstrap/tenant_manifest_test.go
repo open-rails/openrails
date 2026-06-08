@@ -1,61 +1,12 @@
 package bootstrap
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
 )
-
-func TestLoadTenantManifestRejectsUnknownFields(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "tenants.yaml")
-	require.NoError(t, os.WriteFile(path, []byte(`
-version: 1
-tenants:
-  - slug: cozy-art
-    operator_tenant_slug: legacy
-`), 0o600))
-
-	_, err := loadTenantManifest(path)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "operator_tenant_slug")
-}
-
-func TestLoadTenantManifestRejectsServiceTokens(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "tenants.yaml")
-	require.NoError(t, os.WriteFile(path, []byte(`
-version: 1
-tenants:
-  - slug: cozy-art
-    name: Cozy Art
-    service_tokens:
-      - name: runtime
-        permissions: [openrails:admin]
-        outputs:
-          - file:
-              path: /tmp/openrails-runtime-token
-`), 0o600))
-
-	_, err := loadTenantManifest(path)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "service_tokens")
-}
-
-func TestLoadTenantManifestRequiresVersion1(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "tenants.yaml")
-	require.NoError(t, os.WriteFile(path, []byte(`
-version: 2
-tenants:
-  - slug: cozy-art
-`), 0o600))
-
-	_, err := loadTenantManifest(path)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "version must be 1")
-}
 
 func TestResolveManifestResourcesMapsTenantAliasAndLeavesHostResourcesOpaque(t *testing.T) {
 	tid := tenant.DefaultID

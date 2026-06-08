@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -84,11 +83,7 @@ func TestReconcileTenantManifestEnsuresTenantsServiceJWTGrantsAndIssuers(t *test
 	ctx := context.Background()
 	pool := newTenantManifestTestPool(t)
 	cp := newTenantManifestControlPlane(t, pool)
-	dir := t.TempDir()
-	manifestPath := filepath.Join(dir, "tenants.yaml")
-
-	writeTenantManifest(t, manifestPath, "starter", "us-west", "/hooks/v1")
-	require.NoError(t, ReconcileTenantManifest(ctx, tenantManifestConfig(manifestPath), cp))
+	require.NoError(t, ReconcileTenantManifestData(ctx, &config.Config{}, cp, cozyArtTenantManifest("starter", "us-west", "/hooks/v1"), TenantManifestReconcileOptions{}))
 
 	var tenantID, billingTier, region, webhookPath, authkitTenantSlug string
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -106,8 +101,7 @@ func TestReconcileTenantManifestEnsuresTenantsServiceJWTGrantsAndIssuers(t *test
 	require.Empty(t, serviceTokens, "bootstrap manifests must not mint generated service tokens")
 	assertServiceJWTGrantRow(t, pool, tenantID, "https://doujins.example", "service:doujins-runtime", []string{controlplane.PermEntitlementsRead}, true)
 
-	writeTenantManifest(t, manifestPath, "pro", "us-east", "/hooks/v2")
-	require.NoError(t, ReconcileTenantManifest(ctx, tenantManifestConfig(manifestPath), cp))
+	require.NoError(t, ReconcileTenantManifestData(ctx, &config.Config{}, cp, cozyArtTenantManifest("pro", "us-east", "/hooks/v2"), TenantManifestReconcileOptions{}))
 
 	require.NoError(t, pool.QueryRow(ctx, `
 			SELECT billing_tier, region, webhook_path
@@ -150,9 +144,7 @@ func TestReconcileTenantManifestSerializesConcurrentReplicas(t *testing.T) {
 	ctx := context.Background()
 	pool := newTenantManifestTestPool(t)
 	cp := newTenantManifestControlPlane(t, pool)
-	dir := t.TempDir()
-	manifestPath := filepath.Join(dir, "tenants.yaml")
-	writeTenantManifest(t, manifestPath, "starter", "us-west", "/hooks/v1")
+	manifest := cozyArtTenantManifest("starter", "us-west", "/hooks/v1")
 
 	start := make(chan struct{})
 	var successes atomic.Int32
@@ -162,7 +154,7 @@ func TestReconcileTenantManifestSerializesConcurrentReplicas(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			if err := ReconcileTenantManifest(ctx, tenantManifestConfig(manifestPath), cp); err == nil {
+			if err := ReconcileTenantManifestData(ctx, &config.Config{}, cp, manifest, TenantManifestReconcileOptions{}); err == nil {
 				successes.Add(1)
 			} else {
 				require.NoError(t, err)
@@ -277,28 +269,23 @@ func newTenantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlpla
 	return cp
 }
 
-func tenantManifestConfig(path string) *config.Config {
-	return &config.Config{TenantBootstrap: &config.TenantBootstrapConfig{File: path}}
-}
-
-func writeTenantManifest(t *testing.T, manifestPath, tier, region, webhookPath string) {
-	t.Helper()
-	body := fmt.Sprintf(`
-version: 1
-tenants:
-  - slug: cozy-art
-    name: Cozy Art
-    billing_tier: %s
-    region: %s
-    webhook_host: cozy.example
-    webhook_path: %s
-    service_jwt_principals:
-      - issuer: https://doujins.example
-        subject: service:doujins-runtime
-        permissions:
-          - %s
-`, tier, region, webhookPath, controlplane.PermEntitlementsRead)
-	require.NoError(t, os.WriteFile(manifestPath, []byte(body), 0o600))
+func cozyArtTenantManifest(tier, region, webhookPath string) *TenantManifest {
+	return &TenantManifest{
+		Version: BootstrapManifestVersion,
+		Tenants: []ManifestTenant{{
+			Slug:        "cozy-art",
+			Name:        "Cozy Art",
+			BillingTier: tier,
+			Region:      region,
+			WebhookHost: "cozy.example",
+			WebhookPath: webhookPath,
+			ServiceJWTPrincipals: []ManifestServiceJWTPrincipal{{
+				Issuer:      "https://doujins.example",
+				Subject:     "service:doujins-runtime",
+				Permissions: []string{controlplane.PermEntitlementsRead},
+			}},
+		}},
+	}
 }
 
 func newJWKS(t *testing.T, kid string) *httptest.Server {

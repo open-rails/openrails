@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/goccy/go-yaml"
 	authcore "github.com/open-rails/authkit/core"
 	log "github.com/sirupsen/logrus"
 
@@ -57,30 +55,11 @@ type ManifestResource struct {
 
 type TenantManifestReconcileOptions struct{}
 
-// ReconcileTenantManifest loads cfg.tenant_bootstrap.file, if configured, and
-// applies the deployment-declared tenant state. Tenant rows and service-JWT grants
-// are reconciled synchronously. Issuer registration is retried in the background
-// because registration validates JWKS reachability, and app pods may not be
-// reachable yet during OpenRails startup.
-func ReconcileTenantManifest(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane) error {
-	path := tenantManifestPath(cfg)
-	if path == "" {
-		return nil
-	}
-	return ReconcileTenantManifestFile(ctx, cfg, cp, path, TenantManifestReconcileOptions{})
-}
-
-func ReconcileTenantManifestFile(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, path string, opts TenantManifestReconcileOptions) error {
-	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
-		return fmt.Errorf("tenant bootstrap manifest configured but control plane is not enabled")
-	}
-	manifest, err := loadTenantManifest(path)
-	if err != nil {
-		return err
-	}
-	return ReconcileTenantManifestData(ctx, cfg, cp, manifest, opts)
-}
-
+// ReconcileTenantManifestData provisions the tenants, service-JWT grants, and
+// issuers declared by a tenant manifest. It is the single tenant-provisioning
+// entry point, consumed by the unified BootstrapManifest apply path (CLI +
+// server first-run startup). Issuer registration is declarative and does not
+// fetch the JWKS, so it succeeds even when the issuer's app is not yet running.
 func ReconcileTenantManifestData(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *TenantManifest, opts TenantManifestReconcileOptions) error {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return fmt.Errorf("tenant bootstrap manifest configured but control plane is not enabled")
@@ -183,30 +162,6 @@ func unlockTenantManifestBootstrap(ctx context.Context, cp *controlplane.Control
 	if _, err := cp.Pool().Exec(ctx, `SELECT pg_advisory_unlock($1)`, tenantManifestAdvisoryLock); err != nil {
 		log.WithError(err).Warn("tenant bootstrap: release advisory lock failed")
 	}
-}
-
-func tenantManifestPath(cfg *config.Config) string {
-	if cfg != nil && cfg.TenantBootstrap != nil {
-		if p := strings.TrimSpace(cfg.TenantBootstrap.File); p != "" {
-			return p
-		}
-	}
-	return strings.TrimSpace(os.Getenv("OPENRAILS_TENANTS_FILE"))
-}
-
-func loadTenantManifest(path string) (*TenantManifest, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("tenant bootstrap: read %s: %w", path, err)
-	}
-	var manifest TenantManifest
-	if err := yaml.UnmarshalWithOptions(raw, &manifest, yaml.DisallowUnknownField()); err != nil {
-		return nil, fmt.Errorf("tenant bootstrap: parse %s: %w", path, err)
-	}
-	if manifest.Version != BootstrapManifestVersion {
-		return nil, fmt.Errorf("tenant bootstrap: manifest version must be %d", BootstrapManifestVersion)
-	}
-	return &manifest, nil
 }
 
 func resolveManifestResources(in []ManifestResource, tenantID tenant.ID, tenantSlug string) ([]authcore.ServiceTokenResource, error) {

@@ -123,11 +123,6 @@ func main() {
 		Short: "Seed a minimal dev billing catalog for local migrations",
 		RunE:  seedDevCatalog,
 	}
-	bootstrapTenantsCmd := &cobra.Command{
-		Use:   "bootstrap-tenants",
-		Short: "Reconcile the mounted tenant manifest and exit",
-		RunE:  bootstrapTenants,
-	}
 	mintOperatorServiceTokenCmd := &cobra.Command{
 		Use:   "mint-operator-service-token",
 		Short: "Mint an OpenRails operator service token and print the one-time token",
@@ -160,7 +155,7 @@ func main() {
 	mintOperatorJWTCmd.Flags().String("role", "", "Tenant role to assign (default openrails-operator)")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, bootstrapTenantsCmd, newBootstrapCmd(), mintOperatorServiceTokenCmd, mintTenantSubjectServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, newBootstrapCmd(), mintOperatorServiceTokenCmd, mintTenantSubjectServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		log.WithError(err).Fatal("Failed to execute command")
