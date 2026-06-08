@@ -273,6 +273,18 @@ func reconcileManifestIssuersOnce(ctx context.Context, cp *controlplane.ControlP
 	return allDone
 }
 
+// HasProvisionedTenants reports whether any tenant has been provisioned in the
+// control plane. The server uses this for first-run detection: it auto-applies
+// the bootstrap manifest only when no tenants exist yet (#327).
+func HasProvisionedTenants(ctx context.Context, cp *controlplane.ControlPlane) (bool, error) {
+	if cp == nil || cp.Pool() == nil {
+		return false, nil
+	}
+	var exists bool
+	err := cp.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing.tenants WHERE deleted_at IS NULL)`).Scan(&exists)
+	return exists, err
+}
+
 func tenantIDForSlug(ctx context.Context, cp *controlplane.ControlPlane, slug string) (tenant.ID, error) {
 	var id string
 	err := cp.Pool().QueryRow(ctx, `

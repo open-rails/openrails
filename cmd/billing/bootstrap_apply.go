@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/embedded"
@@ -72,11 +75,62 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
+	return applyBootstrapManifest(ctx, cfg, embeddedApp.App(), manifest, out, opts.dryRun)
+}
+
+// maybeFirstRunBootstrap auto-applies the unified bootstrap manifest exactly
+// once, on the first server start from an empty control plane (#327). On later
+// starts (tenants already provisioned) it is a no-op, and operators apply
+// manifest edits with `billing bootstrap apply`. It is also a no-op when no
+// manifest file is configured/present or the control plane is disabled.
+func maybeFirstRunBootstrap(ctx context.Context, cfg *config.Config, a *app.App) error {
+	path := resolveBootstrapManifestPath(cfg)
+	if path == "" {
+		return nil
+	}
+	cp := embcp.Get(a)
+	if cp == nil {
+		return nil // verifier-only mode; nothing to provision
+	}
+	provisioned, err := bootstrap.HasProvisionedTenants(ctx, cp)
+	if err != nil {
+		return fmt.Errorf("first-run check: %w", err)
+	}
+	if provisioned {
+		return nil // not first run; operators run `bootstrap apply` to apply edits
+	}
+	manifest, err := bootstrap.LoadBootstrapManifest(path)
+	if err != nil {
+		return err
+	}
+	log.WithField("file", path).Info("first-run bootstrap: applying unified manifest")
+	return applyBootstrapManifest(ctx, cfg, a, manifest, log.StandardLogger().Out, false)
+}
+
+// resolveBootstrapManifestPath returns the configured bootstrap manifest path,
+// or the conventional default location if that file exists, else "".
+func resolveBootstrapManifestPath(cfg *config.Config) string {
+	if cfg != nil && cfg.TenantBootstrap != nil {
+		if p := strings.TrimSpace(cfg.TenantBootstrap.File); p != "" {
+			return p
+		}
+	}
+	if _, err := os.Stat(bootstrap.DefaultBootstrapManifestPath); err == nil {
+		return bootstrap.DefaultBootstrapManifestPath
+	}
+	return ""
+}
+
+// applyBootstrapManifest provisions the tenants (issuers + service principals)
+// and catalog declared by a unified bootstrap manifest. It is the single apply
+// path shared by the `bootstrap apply` CLI and the server's first-run startup
+// bootstrap (#327), so both consume the same one manifest schema.
+func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BootstrapManifest, out io.Writer, dryRun bool) error {
 	if len(manifest.Tenants) > 0 {
-		if opts.dryRun {
+		if dryRun {
 			fmt.Fprintf(out, "tenants: %d declared (dry-run: no tenant mutations)\n", len(manifest.Tenants))
 		} else {
-			cp := embcp.Get(embeddedApp.App())
+			cp := embcp.Get(a)
 			if cp == nil {
 				return fmt.Errorf("tenant bootstrap requires auth.control_plane.enabled")
 			}
@@ -91,7 +145,7 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 		return nil
 	}
 
-	svc, err := billingservice.New(embeddedApp.App().Runtime)
+	svc, err := billingservice.New(a.Runtime)
 	if err != nil {
 		return fmt.Errorf("construct OpenRails service: %w", err)
 	}
@@ -111,8 +165,8 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 			return fmt.Errorf("plan %s: %w", name, err)
 		}
 		fmt.Fprintf(out, "\n%s plan:\n", name)
-		plan.Print(out, opts.dryRun)
-		if opts.dryRun {
+		plan.Print(out, dryRun)
+		if dryRun {
 			continue
 		}
 		if !plan.HasChanges() {
