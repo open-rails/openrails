@@ -33,20 +33,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      # OpenRails depends on private modules (github.com/doujins-org/*). CodeQL's
-      # autobuild runs `go build`, so configure private module access first.
-      - name: Configure private module access
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "GH_TOKEN secret is required for private module access" >&2
-            exit 1
-          fi
-          go env -w GOPRIVATE=github.com/doujins-org/*
-          go env -w GONOSUMDB=github.com/doujins-org/*
-          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-          go mod download
+      - name: Download modules
+        run: go mod download
       - uses: github/codeql-action/init@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4
         with:
           languages: go

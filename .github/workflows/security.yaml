@@ -19,19 +19,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Configure private module access
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "GH_TOKEN secret is required for private module access" >&2
-            exit 1
-          fi
-          go env -w GOPRIVATE=github.com/doujins-org/*
-          go env -w GONOSUMDB=github.com/doujins-org/*
-          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-          go mod download
-          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Download modules
+        run: go mod download
       - name: Install gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
       - name: Run gosec (fail on HIGH+)
@@ -48,19 +37,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Configure private module access
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "GH_TOKEN secret is required for private module access" >&2
-            exit 1
-          fi
-          go env -w GOPRIVATE=github.com/doujins-org/*
-          go env -w GONOSUMDB=github.com/doujins-org/*
-          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-          go mod download
-          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Download modules
+        run: go mod download
       # Advisory for now: this codebase has not previously run golangci-lint, so
       # the step reports findings without blocking merges. Flip continue-on-error
       # to false once the existing backlog is cleared.
@@ -79,19 +57,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Configure private module access
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "GH_TOKEN secret is required for private module access" >&2
-            exit 1
-          fi
-          go env -w GOPRIVATE=github.com/doujins-org/*
-          go env -w GONOSUMDB=github.com/doujins-org/*
-          git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-          go mod download
-          git config --global --unset-all url."https://${GH_TOKEN}@github.com/".insteadOf || true
+      - name: Download modules
+        run: go mod download
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Run govulncheck
