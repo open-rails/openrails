@@ -13,7 +13,7 @@ import (
 func TestLoadTenantManifestRejectsUnknownFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tenants.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(`
-version: 2
+version: 1
 tenants:
   - slug: cozy-art
     operator_tenant_slug: legacy
@@ -27,7 +27,7 @@ tenants:
 func TestLoadTenantManifestRejectsServiceTokens(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tenants.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(`
-version: 2
+version: 1
 tenants:
   - slug: cozy-art
     name: Cozy Art
@@ -44,17 +44,17 @@ tenants:
 	require.Contains(t, err.Error(), "service_tokens")
 }
 
-func TestLoadTenantManifestRequiresVersion2(t *testing.T) {
+func TestLoadTenantManifestRequiresVersion1(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tenants.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(`
-version: 1
+version: 2
 tenants:
   - slug: cozy-art
 `), 0o600))
 
 	_, err := loadTenantManifest(path)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "version must be 2")
+	require.Contains(t, err.Error(), "version must be 1")
 }
 
 func TestResolveManifestResourcesMapsTenantAliasAndLeavesHostResourcesOpaque(t *testing.T) {

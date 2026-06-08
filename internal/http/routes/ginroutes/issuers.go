@@ -136,8 +136,6 @@ func writeIssuerError(c *gin.Context, err error) {
 		response.BadRequest(c, "invalid_issuer")
 	case errors.Is(err, controlplane.ErrIssuerAudiencesRequired):
 		response.BadRequest(c, "audiences_required")
-	case errors.Is(err, controlplane.ErrIssuerJWKSUnreachable):
-		response.BadRequest(c, "jwks_unreachable")
 	case errors.Is(err, controlplane.ErrIssuerNotFound):
 		response.NotFoundWithMessage(c, "issuer_not_found")
 	case errors.Is(err, controlplane.ErrServiceTokenTenantUnresolved):

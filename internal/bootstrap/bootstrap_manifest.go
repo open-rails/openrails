@@ -83,13 +83,14 @@ func (m *BootstrapManifest) Validate() error {
 	return nil
 }
 
-// TenantManifest converts the tenant section to the existing tenant manifest v2
-// shape used by ReconcileTenantManifestData.
+// TenantManifest converts the tenant section to the internal tenant-manifest
+// shape consumed by ReconcileTenantManifestData. There is a single manifest
+// version (1); this internal representation carries it through unchanged.
 func (m *BootstrapManifest) TenantManifest() *TenantManifest {
 	if m == nil {
 		return nil
 	}
-	return &TenantManifest{Version: 2, Tenants: append([]ManifestTenant(nil), m.Tenants...)}
+	return &TenantManifest{Version: BootstrapManifestVersion, Tenants: append([]ManifestTenant(nil), m.Tenants...)}
 }
 
 // CatalogManifest converts one catalogs[] entry to the existing catalog manifest
@@ -119,8 +120,8 @@ func validateTenantManifestShape(m *TenantManifest) error {
 	if m == nil {
 		return fmt.Errorf("tenant manifest is required")
 	}
-	if m.Version != 2 {
-		return fmt.Errorf("tenant bootstrap: manifest version must be 2")
+	if m.Version != BootstrapManifestVersion {
+		return fmt.Errorf("tenant bootstrap: manifest version must be %d", BootstrapManifestVersion)
 	}
 	seen := map[string]struct{}{}
 	for i := range m.Tenants {

@@ -1,5 +1,5 @@
 {
-  "next_id": 327,
+  "next_id": 328,
   "issues": [
     {
       "id": 107,
@@ -428,6 +428,22 @@
         "[x] Registry by processor; adding a processor's webhooks = implement the interface. Tests: each processor's sample payloads normalize to the right WebhookEvent. DONE: WebhookHandlerRegistry (NMI-alias aware); webhook_handler_test.go covers normalization, registry resolution, and Verify happy/tamper paths. Validated: go test ./internal/modules/webhooks ./internal/http/handlers ./internal/http ./internal/river all pass; full go build ./... and go vet ./... clean."
       ],
       "priority": "high"
+    },
+    {
+      "id": 327,
+      "name": "unified-bootstrap-manifest + non-blocking issuer registration",
+      "completed": false,
+      "priority": "high",
+      "description": "Make OpenRails provisioning use ONE declarative manifest schema (version 1) for both the `bootstrap apply` CLI and server startup, register tenant issuers WITHOUT requiring their JWKS to be reachable, and auto-apply the manifest once on first boot.\n\nMotivation: the doujins compose stack's openrails-bootstrap hard-failed ('issuer reconciliation did not converge') because the manifest declared the hentai0 issuer but hentai0 wasn't running, so its JWKS URL was unreachable at registration time. Registering a trusted issuer should NOT require the app to be up — AuthKit's verifier already fetches JWKS lazily (with resilient retry) at token-verification time.\n\nDesign (settled with product owner):\n- ONE schema = the unified BootstrapManifest (version 1): tenants{issuers, service_jwt_principals} + catalogs{products/prices/entitlements}. Drop the internal 'version 2' TenantManifest designation entirely (pre-launch, no API stability obligation). The same schema is used by the CLI and startup.\n- Issuer registration just stores issuer + jwks_uri + audiences. NO JWKS reachability probe. Keep the SSRF allowlist on the jwks_uri (format/target safety), which is NOT a reachability check. If the JWKS can never be fetched, that's fine; it's only needed when a token from that issuer is verified.\n- Because registration always succeeds, remove the async-retry/convergence machinery (AsyncIssuers, reconcile-until-ready loop, 'did not converge' error). Register synchronously.\n- Startup: on `server` start, if FIRST RUN (no tenants provisioned yet), auto-apply the unified manifest once (tenants + catalog), Postgres-initdb style. Subsequent startups skip auto-apply; operators run `bootstrap apply` manually to apply later YAML edits (more tenants, price changes, etc.). First-run detection: zero tenants in the control plane (no new schema needed).\n- Compose (doujins, follow-up): remove the hard-failing one-shot openrails-bootstrap container, point openrails at the unified manifest, revert the temporary doujins-only manifest split, use the combined doujins+hentai0 manifest.",
+      "tasks": [
+        "[x] issuer_admin.go: remove the JWKS reachability probe from RegisterDelegatedIssuer (delete the probeJWKS call, the probeJWKS func, ErrIssuerJWKSUnreachable, jwksProbeTimeout). Keep validateJWKSURI (SSRF allowlist). Update doc comments. Registration stores issuer+jwks_uri+audiences and reloads the verifier; never blocks on reachability.",
+        "[x] tenant_manifest.go: register issuers synchronously (always succeeds now). Remove AsyncIssuers option, reconcileManifestIssuersUntilReady/Once retry loop, issuerRetryInterval, and the 'issuer reconciliation did not converge' error. Honor the per-issuer Enabled flag (register vs disable).",
+        "[x] Collapse to a single manifest version 1: BootstrapManifest stays version 1 and is the sole schema. Drop the internal version-2 requirement (TenantManifest.Version checks, .TenantManifest() setting Version:2, validateTenantManifestShape, loadTenantManifest). Update tests/fixtures.",
+        "[ ] Extract one shared apply path (tenants + issuers + service principals + catalog) used by BOTH the CLI `bootstrap apply` and the startup hook, so there is a single code path.",
+        "[ ] Server startup first-run auto-bootstrap: on `server` start, if no tenants are provisioned yet, load the configured unified manifest and apply it once via the shared path (tenants + catalog). Otherwise skip. Config-pointed file (tenant_bootstrap.file or equivalent).",
+        "[ ] Validate: go build ./..., go vet ./..., unit tests (bootstrap + controlplane), and a focused run confirming registration no longer probes JWKS and bootstrap converges with an unreachable issuer.",
+        "[ ] Follow-up (doujins compose): remove the one-shot openrails-bootstrap container, point openrails at the unified manifest, revert the doujins-only split, use the combined manifest; verify first-run auto-bootstrap works with hentai0 down."
+      ]
     }
   ]
 }

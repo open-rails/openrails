@@ -2,15 +2,11 @@ package controlplane
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -32,16 +28,10 @@ var (
 	// ErrIssuerAudiencesRequired indicates the issuer has no accepted `aud`
 	// values. Audience checking is part of the OIDC trust contract.
 	ErrIssuerAudiencesRequired = errors.New("controlplane: issuer audiences are required")
-	// ErrIssuerJWKSUnreachable indicates the jwks_uri could not be fetched or did
-	// not return a well-formed, non-empty JWKS at registration time.
-	ErrIssuerJWKSUnreachable = errors.New("controlplane: jwks_uri is unreachable or not a valid JWKS")
 	// ErrIssuerNotFound indicates a disable/rotate targeted an issuer that is not
 	// registered to the calling tenant.
 	ErrIssuerNotFound = errors.New("controlplane: issuer not found for tenant")
 )
-
-// jwksProbeTimeout bounds the one-time registration-time JWKS reachability probe.
-const jwksProbeTimeout = 5 * time.Second
 
 // RegisterDelegatedIssuerParams describes a federated issuer to register/rotate
 // (issue #259). TenantID is bound from the CALLING service token (resolved server-side) —
@@ -57,10 +47,14 @@ type RegisterDelegatedIssuerParams struct {
 // RegisterDelegatedIssuer registers (or rotates) a federated delegated-token
 // issuer for the caller's tenant and reloads the live verifier. It:
 //   - validates the issuer + jwks_uri (SSRF allowlist),
-//   - probes the JWKS once to confirm it is reachable + well-formed,
 //   - upserts the registry row enforcing GLOBAL issuer uniqueness (an issuer
 //     already owned by another tenant is rejected),
 //   - reloads the multi-issuer verifier so the issuer is trusted immediately.
+//
+// Registration does NOT fetch the JWKS: a trusted issuer is stored declaratively
+// even if its app is not running yet, and the verifier fetches (and caches, with
+// retry) the JWKS lazily the first time it must verify a token from that issuer.
+// So a temporarily-unreachable issuer never blocks registration or bootstrap.
 //
 // Rotation (same tenant re-registering an existing issuer with a new jwks_uri)
 // is just an upsert that also re-enables a previously-disabled issuer.
@@ -83,12 +77,6 @@ func (c *ControlPlane) RegisterDelegatedIssuer(ctx context.Context, p RegisterDe
 	}
 	if (p.TenantID == tenant.ID{}) {
 		return ErrServiceTokenTenantUnresolved
-	}
-
-	// Probe the JWKS once so registration fails fast on a typo'd/unreachable URL
-	// rather than silently accepting an issuer that can never verify a token.
-	if err := probeJWKS(ctx, jwksURI); err != nil {
-		return fmt.Errorf("%w: %v", ErrIssuerJWKSUnreachable, err)
 	}
 
 	// Upsert with global-uniqueness enforcement. The DO UPDATE ... WHERE clause
@@ -256,39 +244,4 @@ func isDisallowedIP(ip net.IP) bool {
 func isLoopbackHostname(host string) bool {
 	h := strings.ToLower(strings.TrimSpace(host))
 	return h == "localhost" || strings.HasSuffix(h, ".localhost")
-}
-
-// probeJWKS fetches the JWKS once and confirms it parses with a non-empty `keys`
-// array, so a typo'd/unreachable/empty URL is rejected at registration time
-// rather than failing silently per token.
-func probeJWKS(ctx context.Context, jwksURI string) error {
-	ctx, cancel := context.WithTimeout(ctx, jwksProbeTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURI, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("jwks http status %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return err
-	}
-	var jwks struct {
-		Keys []json.RawMessage `json:"keys"`
-	}
-	if err := json.Unmarshal(body, &jwks); err != nil {
-		return fmt.Errorf("jwks parse: %w", err)
-	}
-	if len(jwks.Keys) == 0 {
-		return errors.New("jwks contains no keys")
-	}
-	return nil
 }

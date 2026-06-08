@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/goccy/go-yaml"
 	authcore "github.com/open-rails/authkit/core"
@@ -18,10 +17,7 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-const (
-	issuerRetryInterval        = 10 * time.Second
-	tenantManifestAdvisoryLock = int64(734252042137424)
-)
+const tenantManifestAdvisoryLock = int64(734252042137424)
 
 type TenantManifest struct {
 	Version int              `yaml:"version"`
@@ -59,9 +55,7 @@ type ManifestResource struct {
 	ID   string `yaml:"id"`
 }
 
-type TenantManifestReconcileOptions struct {
-	AsyncIssuers bool
-}
+type TenantManifestReconcileOptions struct{}
 
 // ReconcileTenantManifest loads cfg.tenant_bootstrap.file, if configured, and
 // applies the deployment-declared tenant state. Tenant rows and service-JWT grants
@@ -73,7 +67,7 @@ func ReconcileTenantManifest(ctx context.Context, cfg *config.Config, cp *contro
 	if path == "" {
 		return nil
 	}
-	return ReconcileTenantManifestFile(ctx, cfg, cp, path, TenantManifestReconcileOptions{AsyncIssuers: true})
+	return ReconcileTenantManifestFile(ctx, cfg, cp, path, TenantManifestReconcileOptions{})
 }
 
 func ReconcileTenantManifestFile(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, path string, opts TenantManifestReconcileOptions) error {
@@ -94,8 +88,8 @@ func ReconcileTenantManifestData(ctx context.Context, cfg *config.Config, cp *co
 	if manifest == nil {
 		return fmt.Errorf("tenant bootstrap manifest is required")
 	}
-	if manifest.Version != 2 {
-		return fmt.Errorf("tenant bootstrap: manifest version must be 2")
+	if manifest.Version != BootstrapManifestVersion {
+		return fmt.Errorf("tenant bootstrap: manifest version must be %d", BootstrapManifestVersion)
 	}
 	if err := lockTenantManifestBootstrap(ctx, cp); err != nil {
 		return err
@@ -136,10 +130,12 @@ func ReconcileTenantManifestData(ctx context.Context, cfg *config.Config, cp *co
 		}
 	}
 
-	if opts.AsyncIssuers {
-		go reconcileManifestIssuersUntilReady(ctx, cp, manifest)
-	} else if ok := reconcileManifestIssuersOnce(ctx, cp, manifest); !ok {
-		return fmt.Errorf("tenant bootstrap: issuer reconciliation did not converge")
+	// Issuer registration is declarative and does not fetch the JWKS, so it
+	// succeeds even when the issuer's app is not running yet (the verifier fetches
+	// the JWKS lazily at token-verification time). A failure here is a genuine
+	// config/DB error, so surface it.
+	if ok := reconcileManifestIssuersOnce(ctx, cp, manifest); !ok {
+		return fmt.Errorf("tenant bootstrap: issuer registration failed")
 	}
 	return nil
 }
@@ -207,8 +203,8 @@ func loadTenantManifest(path string) (*TenantManifest, error) {
 	if err := yaml.UnmarshalWithOptions(raw, &manifest, yaml.DisallowUnknownField()); err != nil {
 		return nil, fmt.Errorf("tenant bootstrap: parse %s: %w", path, err)
 	}
-	if manifest.Version != 2 {
-		return nil, fmt.Errorf("tenant bootstrap: manifest version must be 2")
+	if manifest.Version != BootstrapManifestVersion {
+		return nil, fmt.Errorf("tenant bootstrap: manifest version must be %d", BootstrapManifestVersion)
 	}
 	return &manifest, nil
 }
@@ -235,23 +231,10 @@ func resolveManifestResources(in []ManifestResource, tenantID tenant.ID, tenantS
 	return out, nil
 }
 
-func reconcileManifestIssuersUntilReady(ctx context.Context, cp *controlplane.ControlPlane, manifest *TenantManifest) {
-	ticker := time.NewTicker(issuerRetryInterval)
-	defer ticker.Stop()
-
-	for {
-		done := reconcileManifestIssuersOnce(ctx, cp, manifest)
-		if done {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
+// reconcileManifestIssuersOnce registers (or disables) every tenant's declared
+// issuers. Registration is declarative and does not probe the JWKS, so it does
+// not depend on the issuer's app being reachable. Returns false if any genuine
+// registration error occurred (invalid config, ownership conflict, DB error).
 func reconcileManifestIssuersOnce(ctx context.Context, cp *controlplane.ControlPlane, manifest *TenantManifest) bool {
 	allDone := true
 	for _, mt := range manifest.Tenants {
@@ -280,7 +263,7 @@ func reconcileManifestIssuersOnce(ctx context.Context, cp *controlplane.ControlP
 			})
 			if err != nil {
 				log.WithError(err).WithFields(log.Fields{"tenant": mt.Slug, "issuer": issuer.Issuer, "jwks_uri": issuer.JWKSURI}).
-					Warn("tenant bootstrap: issuer reconciliation will retry")
+					Error("tenant bootstrap: issuer registration failed")
 				allDone = false
 				continue
 			}

@@ -124,7 +124,7 @@ func TestReconcileTenantManifestEnsuresTenantsServiceJWTGrantsAndIssuers(t *test
 
 	issuer1 := newJWKS(t, "issuer-kid-1")
 	issuer2 := newJWKS(t, "issuer-kid-2")
-	issuerManifest := &TenantManifest{Version: 2, Tenants: []ManifestTenant{{
+	issuerManifest := &TenantManifest{Version: 1, Tenants: []ManifestTenant{{
 		Slug: "cozy-art",
 		Issuers: []ManifestIssuer{{
 			Issuer:    "https://doujins.example",
@@ -284,7 +284,7 @@ func tenantManifestConfig(path string) *config.Config {
 func writeTenantManifest(t *testing.T, manifestPath, tier, region, webhookPath string) {
 	t.Helper()
 	body := fmt.Sprintf(`
-version: 2
+version: 1
 tenants:
   - slug: cozy-art
     name: Cozy Art
