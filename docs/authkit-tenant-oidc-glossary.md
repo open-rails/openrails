@@ -33,15 +33,17 @@ examples, and tests.
 
 ### Doujins/Hentai0 backend entitlement read
 
-1. Bootstrap registers the Doujins/Hentai0 issuer and a `service_jwt_principals[]`
-   grant such as `sub=service:doujins-runtime` with
-   `openrails:entitlements:read`.
+1. Bootstrap registers the Doujins/Hentai0 issuer for the tenant. That
+   registration is the whole authorization — a tenant has full authority over its
+   own resources, so there is no separate grant.
 2. The backend mints a 15-minute service JWT from its own AuthKit issuer with
-   `aud=openrails`, `token_use=service`, `jti`, and requested permissions.
+   `aud=openrails`, `token_use=service`, `jti`, and its self-assigned permissions
+   (e.g. `openrails:entitlements:read`).
 3. The backend calls
    `GET /v1/service/tenant-subjects/{tenant_subject_id}/entitlements`.
-4. OpenRails verifies the issuer/JWKS/claims, loads the server-side grant, then
-   intersects requested permissions/resources before returning entitlement rows.
+4. OpenRails verifies the issuer/JWKS/claims, treats the token's permissions as
+   authoritative, and scopes the read to the issuer's own tenant before returning
+   entitlement rows.
 
 ### Tensorhub usage billing
 
@@ -60,15 +62,6 @@ tenants:
     issuers:
       - issuer: https://doujins.example
         jwks_uri: https://doujins.example/.well-known/jwks.json
-        audiences: ["openrails"]
-    service_jwt_principals:
-      - issuer: https://doujins.example
-        subject: service:doujins-runtime
-        permissions:
-          - openrails:entitlements:read
-        resources:
-          - kind: openrails.tenant
-            id: $tenant
 ```
 
 Use this vocabulary in all OpenRails surfaces. The `user_id` column has been

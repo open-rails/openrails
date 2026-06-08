@@ -3,7 +3,6 @@ package controlplane
 import (
 	"testing"
 
-	"github.com/google/uuid"
 	authcore "github.com/open-rails/authkit/core"
 
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -70,40 +69,9 @@ func TestValidateServiceTokenResourcesRejectsLegacyPayableKinds(t *testing.T) {
 	}
 }
 
-func TestServiceJWTPermissionIntersection(t *testing.T) {
-	got := intersectPermissions(
-		[]string{PermCreditsRead, PermCreditsWrite, PermCreditsSpend},
-		[]string{PermCreditsRead, PermCreditsSpend},
-	)
-	if len(got) != 2 || got[0] != PermCreditsRead || got[1] != PermCreditsSpend {
-		t.Fatalf("intersectPermissions() = %#v", got)
-	}
-
-	got = intersectPermissions([]string{PermCreditsRead}, []string{PermAdmin})
-	if len(got) != 1 || got[0] != PermCreditsRead {
-		t.Fatalf("admin grant should allow requested permission, got %#v", got)
-	}
-}
-
-func TestServiceJWTResourceIntersection(t *testing.T) {
-	subjectResource := TenantSubjectResource(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
-	granted := []authcore.ServiceTokenResource{
-		TenantResource(tenant.DefaultID),
-		subjectResource,
-	}
-	got, err := intersectResources(tenant.DefaultID, []authcore.ServiceTokenResource{subjectResource}, granted)
-	if err != nil {
-		t.Fatalf("intersectResources() error = %v", err)
-	}
-	if !hasResource(got, ResourceKindTenant, tenant.DefaultID.String()) {
-		t.Fatalf("intersectResources() must retain tenant resource, got %#v", got)
-	}
-	if !hasResource(got, ResourceKindTenantSubject, subjectResource.ID) {
-		t.Fatalf("intersectResources() missing requested subject resource, got %#v", got)
-	}
-
-	_, err = intersectResources(tenant.DefaultID, []authcore.ServiceTokenResource{{Kind: ResourceKindTenantSubject, ID: "other"}}, granted)
-	if err != ErrServiceTokenScopeDenied {
-		t.Fatalf("intersectResources() error = %v, want %v", err, ErrServiceTokenScopeDenied)
-	}
-}
+// Service-JWT authority is no longer an intersection of a requested permission
+// set against a server-side grant. Registering an issuer to a tenant grants that
+// tenant full authority over its own resources; the self-signed token's claims
+// are authoritative, bounded only by validateServiceTokenResources (own-tenant
+// scope). The former intersectPermissions/intersectResources tests were removed
+// with that logic.

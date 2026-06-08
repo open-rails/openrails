@@ -35,11 +35,6 @@ type ControlPlane struct {
 	// permission-catalog validator. See delegated.go.
 	delegatedVerifier *authhttp.Verifier
 
-	// signer is the control plane's ACTIVE signing key — the SAME key whose public
-	// half delegatedVerifier trusts (both are derived from one KeySource built in
-	// New). It is used to MINT delegated access tokens for the browser tier
-	// (MintDelegatedAccessToken). See mint.go.
-	signer jwtkit.Signer
 	// issuer is the control plane's token issuer (`iss`), stamped on minted tokens
 	// so they verify against delegatedVerifier.
 	issuer string
@@ -154,7 +149,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts ONLY this control plane's own delegated tokens with the
 	// canonical `openrails` audience and `openrails:self:*` permissions.
-	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), expected, strings.TrimSpace(cp.TokenPrefix))
+	delegatedVerifier, err := newDelegatedVerifier(authSvc.Core(), strings.TrimSpace(cp.TokenPrefix))
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
 	}
@@ -164,7 +159,6 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 		authSvc:            authSvc,
 		pool:               pool,
 		delegatedVerifier:  delegatedVerifier,
-		signer:             keySource.ActiveSigner(),
 		issuer:             issuer,
 		delegatedAudiences: append([]string(nil), expected...),
 		delegatedIssuers:   map[string]struct{}{},
@@ -172,11 +166,11 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlP
 
 	// Load the FEDERATED tenant issuers (issue #259) into the multi-issuer
 	// verifier. A registry read failure (or an individual bad issuer) must NOT
-	// take down startup: the self-issuer is already registered (dual-trust
-	// migration window), and unreachable JWKS is handled lazily/fail-closed per
-	// token at verify time. So we log and continue.
+	// take down startup: unreachable JWKS is handled lazily/fail-closed per token
+	// at verify time. So we log and continue (delegated tokens for any tenant whose
+	// issuer failed to load simply fail closed until the next reload).
 	if err := cp2.reloadDelegatedIssuers(ctx); err != nil {
-		log.WithError(err).Warn("controlplane: initial delegated issuer load failed; continuing with self-issuer only")
+		log.WithError(err).Warn("controlplane: initial delegated issuer load failed; delegated tokens fail closed until reload")
 	}
 
 	return cp2, nil

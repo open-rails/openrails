@@ -148,7 +148,6 @@ func findProduct(plan *ApplyPlan, slug string) *ProductPlan {
 
 const planManifest = `
 version: 1
-default_currency: usd
 default_providers: [stripe]
 tier_groups:
   - slug: cozy

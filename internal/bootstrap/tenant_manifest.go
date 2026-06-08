@@ -2,11 +2,9 @@ package bootstrap
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
-	authcore "github.com/open-rails/authkit/core"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -23,14 +21,13 @@ type TenantManifest struct {
 }
 
 type ManifestTenant struct {
-	Slug                 string                        `yaml:"slug"`
-	Name                 string                        `yaml:"name"`
-	BillingTier          string                        `yaml:"billing_tier"`
-	Region               string                        `yaml:"region"`
-	WebhookHost          string                        `yaml:"webhook_host"`
-	WebhookPath          string                        `yaml:"webhook_path"`
-	Issuers              []ManifestIssuer              `yaml:"issuers"`
-	ServiceJWTPrincipals []ManifestServiceJWTPrincipal `yaml:"service_jwt_principals"`
+	Slug        string           `yaml:"slug"`
+	Name        string           `yaml:"name"`
+	BillingTier string           `yaml:"billing_tier"`
+	Region      string           `yaml:"region"`
+	WebhookHost string           `yaml:"webhook_host"`
+	WebhookPath string           `yaml:"webhook_path"`
+	Issuers     []ManifestIssuer `yaml:"issuers"`
 }
 
 type ManifestIssuer struct {
@@ -40,18 +37,10 @@ type ManifestIssuer struct {
 	Enabled   *bool    `yaml:"enabled"`
 }
 
-type ManifestServiceJWTPrincipal struct {
-	Issuer      string             `yaml:"issuer"`
-	Subject     string             `yaml:"subject"`
-	Permissions []string           `yaml:"permissions"`
-	Resources   []ManifestResource `yaml:"resources"`
-	Enabled     *bool              `yaml:"enabled"`
-}
-
-type ManifestResource struct {
-	Kind string `yaml:"kind"`
-	ID   string `yaml:"id"`
-}
+// defaultIssuerAudience is the JWT `aud` value accepted for a registered issuer
+// when the manifest declares none. Every Doujins-stack issuer mints tokens with
+// aud=openrails, so registration need not restate it per issuer.
+const defaultIssuerAudience = "openrails"
 
 type TenantManifestReconcileOptions struct{}
 
@@ -101,12 +90,6 @@ func ReconcileTenantManifestData(ctx context.Context, cfg *config.Config, cp *co
 			"tenant":    tn.Slug,
 			"tenant_id": tn.ID.String(),
 		}).Info("tenant bootstrap: tenant ensured")
-
-		for _, principal := range mt.ServiceJWTPrincipals {
-			if err := ensureManifestServiceJWTGrant(ctx, cp, tn.ID, tn.Slug, principal); err != nil {
-				return fmt.Errorf("tenant bootstrap: service JWT principal %q for tenant %q: %w", principal.Subject, tn.Slug, err)
-			}
-		}
 	}
 
 	// Issuer registration is declarative and does not fetch the JWKS, so it
@@ -117,37 +100,6 @@ func ReconcileTenantManifestData(ctx context.Context, cfg *config.Config, cp *co
 		return fmt.Errorf("tenant bootstrap: issuer registration failed")
 	}
 	return nil
-}
-
-func ensureManifestServiceJWTGrant(ctx context.Context, cp *controlplane.ControlPlane, tenantID tenant.ID, tenantSlug string, principal ManifestServiceJWTPrincipal) error {
-	issuer := strings.TrimSpace(principal.Issuer)
-	if issuer == "" {
-		return errors.New("issuer is required")
-	}
-	subject := strings.TrimSpace(principal.Subject)
-	if subject == "" {
-		return errors.New("subject is required")
-	}
-	permissions := cleanStrings(principal.Permissions)
-	if len(permissions) == 0 {
-		return fmt.Errorf("permissions are required for service JWT principal %q", subject)
-	}
-	resources, err := resolveManifestResources(principal.Resources, tenantID, tenantSlug)
-	if err != nil {
-		return err
-	}
-	enabled := true
-	if principal.Enabled != nil {
-		enabled = *principal.Enabled
-	}
-	return cp.UpsertServiceJWTGrant(ctx, controlplane.ServiceJWTGrant{
-		TenantID:    tenantID,
-		Issuer:      issuer,
-		Subject:     subject,
-		Permissions: permissions,
-		Resources:   resources,
-		Enabled:     enabled,
-	})
 }
 
 func lockTenantManifestBootstrap(ctx context.Context, cp *controlplane.ControlPlane) error {
@@ -162,28 +114,6 @@ func unlockTenantManifestBootstrap(ctx context.Context, cp *controlplane.Control
 	if _, err := cp.Pool().Exec(ctx, `SELECT pg_advisory_unlock($1)`, tenantManifestAdvisoryLock); err != nil {
 		log.WithError(err).Warn("tenant bootstrap: release advisory lock failed")
 	}
-}
-
-func resolveManifestResources(in []ManifestResource, tenantID tenant.ID, tenantSlug string) ([]authcore.ServiceTokenResource, error) {
-	if len(in) == 0 {
-		return []authcore.ServiceTokenResource{controlplane.TenantResource(tenantID)}, nil
-	}
-	out := make([]authcore.ServiceTokenResource, 0, len(in))
-	for _, r := range in {
-		kind := strings.TrimSpace(r.Kind)
-		id := strings.TrimSpace(r.ID)
-		if kind == "" || id == "" {
-			return nil, errors.New("resource kind and id are required")
-		}
-		if kind == controlplane.ResourceKindTenant {
-			switch strings.ToLower(id) {
-			case "$tenant", "self", tenantSlug:
-				id = tenantID.String()
-			}
-		}
-		out = append(out, authcore.ServiceTokenResource{Kind: kind, ID: id})
-	}
-	return out, nil
 }
 
 // reconcileManifestIssuersOnce registers (or disables) every tenant's declared
@@ -210,11 +140,15 @@ func reconcileManifestIssuersOnce(ctx context.Context, cp *controlplane.ControlP
 				}
 				continue
 			}
+			audiences := cleanStrings(issuer.Audiences)
+			if len(audiences) == 0 {
+				audiences = []string{defaultIssuerAudience}
+			}
 			err := cp.RegisterDelegatedIssuer(ctx, controlplane.RegisterDelegatedIssuerParams{
 				TenantID:  tid,
 				Issuer:    issuer.Issuer,
 				JWKSURI:   issuer.JWKSURI,
-				Audiences: issuer.Audiences,
+				Audiences: audiences,
 			})
 			if err != nil {
 				log.WithError(err).WithFields(log.Fields{"tenant": mt.Slug, "issuer": issuer.Issuer, "jwks_uri": issuer.JWKSURI}).

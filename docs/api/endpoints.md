@@ -289,10 +289,10 @@ resource.
 
 First-party service JWTs are signed by a registered tenant issuer and must carry
 standard JWT/OIDC claims plus `token_use=service`, `jti`, a maximum 15-minute
-lifetime, accepted `aud`, and requested `permissions`. OpenRails does not trust
-those permissions blindly: it loads the `service_jwt_principals[]` grant for
-`(tenant, issuer, subject)` and intersects requested permissions/resources with
-that server-side grant.
+lifetime, accepted `aud`, and self-assigned `permissions`. Registering the issuer
+to a tenant is the authorization: OpenRails resolves the issuer to its tenant,
+treats the token's `permissions` claim as authoritative, and scopes every
+resource to that tenant (a token can never reach another tenant's resources).
 
 The canonical permission vocabulary is colon-form
 `openrails:<resource>:<action>`:

@@ -52,7 +52,7 @@ func wrapHandler(rt *app.Runtime, fn func(r *httprequest.Request)) gin.HandlerFu
 // oatMW must authenticate the service token (typically ginmw.ServiceTokenRequired); it pins the
 // resolved tenant + permissions onto the context that the per-route
 // RequireServiceTokenPermission gates and the handlers read.
-func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc, minter DelegatedMinter, issuerAdmin DelegatedIssuerAdmin) {
+func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.HandlerFunc, issuerAdmin DelegatedIssuerAdmin) {
 	wrap := func(fn func(r *httprequest.Request)) gin.HandlerFunc {
 		return wrapHandler(rt, fn)
 	}
@@ -62,23 +62,6 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// constrains every tenant-owned query (issue #227).
 	if rt != nil && rt.DB != nil {
 		group.Use(ginmw.TenantDBConn(rt.DB))
-	}
-
-	// Browser-tier delegated-token MINT (issue #222). A host backend authenticated
-	// by a service token holding PermSelfMint asks OpenRails to mint a short-lived,
-	// user-scoped delegated access token (for its OWN tenant) to hand to a browser
-	// for the /v1/self/* surface. Mounted only when a minter is wired (control
-	// plane present); the service token gate + per-route permission keep it server-to-server.
-	//
-	// DEPRECATED (issue #259): the federated/tenant-signed tier lets hosts mint
-	// their OWN aud=openrails tokens (signed with their key, verified via JWKS),
-	// removing this round-trip. Kept during the dual-trust migration window; it is
-	// retired once all tenants self-sign (see the issuer-management routes below).
-	if minter != nil {
-		group.POST("/delegated-tokens",
-			ginmw.RequireServiceTokenPermission(controlplane.PermSelfMint),
-			mintDelegatedTokenHandler(minter),
-		)
 	}
 
 	// FEDERATED issuer management (issue #259). The service token remains the ROOT
@@ -259,12 +242,25 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 	pm.PUT("/:id", manage, wrap(httphandlers.UpdatePaymentMethod))
 	pm.DELETE("/:id", manage, wrap(httphandlers.DeletePaymentMethod))
 
+	walletManage := ginmw.RequireDelegatedPermission(controlplane.PermSelfWallets)
+	wallets := group.Group("/wallets")
+	wallets.GET("/solana", read, wrap(httphandlers.GetMySolanaWallet))
+	wallets.PUT("/solana", walletManage, wrap(httphandlers.UpsertMySolanaWallet))
+	wallets.DELETE("/solana", walletManage, wrap(httphandlers.DeleteMySolanaWallet))
+
 	// Checkout: create a session and read/confirm it (browser self-checkout).
 	checkoutCreate := ginmw.RequireDelegatedPermission(controlplane.PermSelfCheckoutCreate)
 	checkout := group.Group("/checkout")
 	checkout.POST("", checkoutCreate, wrap(httphandlers.CreateCheckoutSession))
 	checkout.GET("/:id", read, wrap(httphandlers.GetCheckoutSession))
 	checkout.POST("/:id/confirm", checkoutCreate, wrap(httphandlers.ConfirmCheckoutSession))
+
+	// USDC funding handoff: external providers fund the user's live wallet, then
+	// the existing checkout path collects from that wallet after balance checks.
+	group.GET("/usdc-funding-options", read, wrap(httphandlers.GetUSDCFundingOptions))
+	funding := group.Group("/usdc-funding-sessions")
+	funding.POST("", checkoutCreate, wrap(httphandlers.CreateUSDCFundingSession))
+	funding.GET("/:id", read, wrap(httphandlers.GetUSDCFundingSession))
 }
 
 // RegisterTenantAdminRoutes mounts the browser-direct TENANT-ADMIN billing

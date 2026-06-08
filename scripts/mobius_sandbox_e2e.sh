@@ -11,7 +11,7 @@ if [ -f "$ROOT_DIR/.env" ]; then
 fi
 
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.yaml}"
-OPENRAILS_LOCAL_URL="${OPENRAILS_LOCAL_URL:-${BILLING_LOCAL_URL:-http://localhost:2053}}"
+OPENRAILS_LOCAL_URL="${OPENRAILS_LOCAL_URL:-${BILLING_LOCAL_URL:-http://localhost:22053}}"
 COMPOSE_PROFILES="${COMPOSE_PROFILES:-all}"
 
 require() {
@@ -84,11 +84,12 @@ echo "  public routing OK: $PUBLIC_BASE"
 echo "5) Sending signed test webhook to public URL..."
 EVENT_ID="e2e_test_$(date +%s%N)"
 BODY="{\"event_id\":\"$EVENT_ID\",\"event_type\":\"test\",\"event_body\":{}}"
-SIG="$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$PROCESSORS_MOBIUS_WEBHOOK_SECRET" | awk '{print $NF}')"
+TS="$(date +%s)"
+SIG="$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$PROCESSORS_MOBIUS_WEBHOOK_SECRET" | awk '{print $NF}')"
 
 curl -i "$PUBLIC_BASE/v1/webhooks/mobius" \
   -H "Content-Type: application/json" \
-  -H "X-Signature: sha256=$SIG" \
+  -H "X-Signature: t=$TS,s=$SIG" \
   --data "$BODY"
 
 echo ""

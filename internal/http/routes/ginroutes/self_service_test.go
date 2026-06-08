@@ -132,6 +132,9 @@ func TestSelfService_SubscriptionMutationsMountedAndGated(t *testing.T) {
 		{"solana-cancel-confirm", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-cancel"},
 		{"solana-tier-change", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-tier-change"},
 		{"solana-tier-change-confirm", http.MethodPost, "/v1/self/subscriptions/sub_123/solana-tier-change/confirm"},
+		{"solana-wallet-link", http.MethodPut, "/v1/self/wallets/solana"},
+		{"solana-wallet-unlink", http.MethodDelete, "/v1/self/wallets/solana"},
+		{"usdc-funding-create", http.MethodPost, "/v1/self/usdc-funding-sessions"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -173,6 +176,20 @@ func TestSelfService_PaymentMethodRequiresManageScope(t *testing.T) {
 	e := newSelfRouter(t, []string{controlplane.PermSelfSubscriptionCancel})
 	w := doSelf(e, http.MethodPut, "/v1/self/subscriptions/sub_123/payment-method", true)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+}
+
+func TestSelfService_WalletsRequireWalletManageScope(t *testing.T) {
+	e := newSelfRouter(t, []string{controlplane.PermSelfPaymentMethods})
+	w := doSelf(e, http.MethodPut, "/v1/self/wallets/solana", true)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+
+	e = newSelfRouter(t, []string{controlplane.PermSelfWallets})
+	func() {
+		defer func() { _ = recover() }()
+		w := doSelf(e, http.MethodPut, "/v1/self/wallets/solana", true)
+		require.NotEqual(t, http.StatusForbidden, w.Code, "wallet manage scope must admit wallet upsert")
+		require.NotEqual(t, http.StatusNotFound, w.Code, "wallet upsert route must be mounted")
+	}()
 }
 
 // No token at all is rejected by the delegated auth middleware before any gate.

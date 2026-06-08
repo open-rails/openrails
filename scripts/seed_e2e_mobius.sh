@@ -27,9 +27,13 @@ if [ -z "${E2E_MOBIUS_PLAN_ID:-}" ]; then
 fi
 
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.yaml}"
+E2E_MOBIUS_ONE_OFF_AMOUNT="${E2E_MOBIUS_ONE_OFF_AMOUNT:-499}"
+E2E_MOBIUS_RECURRING_AMOUNT="${E2E_MOBIUS_RECURRING_AMOUNT:-999}"
 
 echo "Seeding local OpenRails DB with E2E product/price..."
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
   psql -U admin -d openrails_db \
   -v "mobius_plan_id=${E2E_MOBIUS_PLAN_ID}" \
+  -v "mobius_recurring_amount=${E2E_MOBIUS_RECURRING_AMOUNT}" \
+  -v "mobius_one_off_amount=${E2E_MOBIUS_ONE_OFF_AMOUNT}" \
   -f /dev/stdin <"$ROOT_DIR/scripts/seed_e2e_mobius.sql"

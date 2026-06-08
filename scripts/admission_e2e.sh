@@ -1,6 +1,6 @@
 set -u
 SERVICE_TOKEN="${OPENRAILS_SERVICE_TOKEN:?set OPENRAILS_SERVICE_TOKEN (docker compose exec -T openrails /usr/local/bin/openrails --config /app/config/openrails.config.yaml mint-operator-service-token)}"
-B="${BASE_URL:-http://127.0.0.1:2053}/v1/service"
+B="${BASE_URL:-http://127.0.0.1:22053}/v1/service"
 AUTH="Authorization: Bearer $SERVICE_TOKEN"
 CT="JT="; CT="Content-Type: application/json"
 uuid(){ cat /proc/sys/kernel/random/uuid; }

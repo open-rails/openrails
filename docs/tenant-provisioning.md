@@ -135,20 +135,9 @@ tenants:
     issuers:
       - issuer: https://auth.doujins.com
         jwks_uri: https://auth.doujins.com/.well-known/jwks.json
-        audiences: [openrails]
-
-    service_jwt_principals:
-      - issuer: https://auth.doujins.com
-        subject: service:doujins-runtime
-        permissions:
-          - openrails:entitlements:read
-          - openrails:credits:read
-          - openrails:credits:write
-          - openrails:credits:spend
 
 catalogs:
   - name: default
-    default_currency: usd
     default_providers: [nmi]
     tier_groups:
       - slug: plans
@@ -158,19 +147,24 @@ catalogs:
             display_name: Starter
             tier_rank: 1
             prices:
-              - unit_amount: 1000
+              - currency: usd
+                unit_amount: 1000
                 interval: month
 ```
 
 - `tenants[].issuers[]` registers tenant-owned OIDC issuers with exact
-  `issuer`, `jwks_uri`, accepted `audiences`, and optional `enabled`.
+  `issuer`, `jwks_uri`, optional `audiences` (default `openrails`), and optional
+  `enabled`. Registration is the whole authorization: a tenant has full authority
+  over its own resources, so there is no per-issuer permission grant to declare.
 - Delegated browser/admin calls use JWTs signed by those issuer keys. OpenRails
   validates `iss`, `aud`, `kid`/JWKS signature, expiry, and delegated
   `openrails:self:*` or `openrails:tenant:*` permissions, then touches the
   minimal payable tenant subject `(tenant_id, issuer, subject)`.
-- `tenants[].service_jwt_principals[]` grants server-side authorization to
-  caller-minted first-party service JWTs. The JWT must still request
-  permissions, but OpenRails intersects those requests with this grant.
+- Caller-minted first-party **service JWTs** are authorized by that same issuer
+  registration: a validly-signed token from a registered issuer is trusted, its
+  permission claims are authoritative (self-assigned least-privilege chosen by the
+  caller for the step), and it is scoped to the issuer's own tenant resources —
+  OpenRails never lets one tenant reach another tenant's resources.
 - Bootstrap YAML does not mint generated opaque service-token secrets and does
   not write service-token material to Vault KV or mounted files. Non-OIDC
   clients and break-glass/admin scripts must use an explicit operator/admin token

@@ -11,7 +11,8 @@ task e2e-mobius-live
 The harness starts the compose E2E stack, seeds the Mobius catalog, mints a JWT,
 uses real Collect.js tokenization, saves a card in OpenRails, charges the saved
 vault through one-off checkout, creates a saved-card subscription checkout,
-verifies local DB state, queries NMI remotely, and cancels the subscription.
+verifies local DB state, queries NMI remotely, verifies signed webhook
+ingestion/idempotent replay, and cancels the subscription.
 
 Required environment:
 
@@ -19,11 +20,19 @@ Required environment:
 - `PROCESSORS_MOBIUS_TOKENIZATION_KEY`
 - `PROCESSORS_MOBIUS_TOKENIZATION_URL`
 - `PROCESSORS_MOBIUS_WEBHOOK_SECRET`
-- `E2E_MOBIUS_PLAN_ID`
 
 Optional environment:
 
-- `MOBIUS_E2E_BASE_URL` defaults to `http://localhost:2053`.
+- `E2E_MOBIUS_PLAN_ID`; when omitted, the harness creates a per-run 1-day
+  sandbox recurring plan through the NMI direct-post API.
+- `E2E_MOBIUS_ONE_OFF_AMOUNT` defaults to a per-run value from 500 to 899 cents
+  so repeated sandbox runs do not trip NMI duplicate-transaction checks.
+- `E2E_MOBIUS_RECURRING_AMOUNT` defaults to the existing-plan amount `999`
+  cents when `E2E_MOBIUS_PLAN_ID` is supplied; otherwise it defaults to a
+  per-run amount from 1000 to 1399 cents for the auto-created sandbox plan.
+- `OPENRAILS_HOST_PORT` defaults to `2053`; use another free port when a
+  different local E2E stack already owns `2053`.
+- `MOBIUS_E2E_BASE_URL` defaults to `http://localhost:$OPENRAILS_HOST_PORT`.
 - `MOBIUS_E2E_TOKENIZATION_BASE_URL` defaults to `MOBIUS_E2E_BASE_URL`.
 - `MOBIUS_E2E_START_COMPOSE` defaults to `true`.
 - `MOBIUS_E2E_BUILD` defaults to `true`; set to `false` for faster reruns
@@ -78,7 +87,8 @@ PROCESSORS_MOBIUS_WEBHOOK_SECRET=...            # HMAC shared secret for webhook
 CLOUDFLARED_TUNNEL_TOKEN=...
 CLOUDFLARED_PUBLIC_HOSTNAME=openrails-webhooks.example.com
 
-# Sandbox plan id for local seed
+# Optional sandbox plan id for local seed. If omitted, task e2e-mobius-live
+# creates a per-run 1-day plan automatically.
 E2E_MOBIUS_PLAN_ID=YOUR_SANDBOX_PLAN_ID
 ```
 

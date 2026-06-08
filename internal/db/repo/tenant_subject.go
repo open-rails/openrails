@@ -50,14 +50,14 @@ func EnsureTenantSubjectID(ctx context.Context, db bun.IDB, tenantID uuid.UUID, 
 	// as the payable tenant_subject_id, with no tenant_subjects row. To converge
 	// commerce and credit rows on ONE payable subject id, when the user_id is a
 	// UUID we materialize the tenant_subjects row WITH id = that UUID and return it
-	// unchanged. ON CONFLICT keys on (tenant_id, issuer, subject) and RETURNs the
-	// stored id, so repeated calls are stable.
+	// unchanged. If a federated/self-service row with that payable id already
+	// exists, refresh last_seen_at and return it; the id is the identity here.
 	if uid, perr := uuid.Parse(userID); perr == nil {
 		var id uuid.UUID
 		err := db.NewRaw(
 			`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
 			 VALUES (?, ?, ?, ?)
-			 ON CONFLICT (tenant_id, issuer, subject) DO UPDATE SET last_seen_at = now()
+			 ON CONFLICT (id) DO UPDATE SET last_seen_at = now()
 			 RETURNING id`,
 			uid, tenantID, SelfIssuer, userID,
 		).Scan(ctx, &id)

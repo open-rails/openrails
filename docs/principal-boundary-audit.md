@@ -11,11 +11,11 @@ Every route is behind `ServiceTokenRequired`. That middleware accepts either:
 - a generated OpenRails/AuthKit opaque service token; or
 - a first-party OIDC service JWT from a registered tenant issuer.
 
-For service JWTs, the caller's `permissions` claim is only a request. OpenRails
-resolves `(tenant, issuer, subject)` to a server-side
-`billing.service_jwt_grants` row and intersects requested permissions/resources
-with that grant. Route-level permission gates then require the relevant
-effective service permission:
+For service JWTs, the caller is authorized by its issuer's tenant registration:
+OpenRails resolves the issuer to its tenant, treats the token's self-assigned
+`permissions` claim as authoritative, and scopes every resource to that tenant (a
+token can never reach another tenant's resources). Route-level permission gates
+then require the relevant service permission:
 
 - Entitlement reads: `openrails:entitlements:read`.
 - Credit and account/balance reads: `openrails:credits:read`.

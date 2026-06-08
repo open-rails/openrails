@@ -2,9 +2,11 @@
 --
 -- Requires psql variables:
 --   :mobius_plan_id
+--   :mobius_recurring_amount
+--   :mobius_one_off_amount
 --
 -- Example:
---   psql ... -v mobius_plan_id="123" -f scripts/seed_e2e_mobius.sql
+--   psql ... -v mobius_plan_id="123" -v mobius_recurring_amount="999" -v mobius_one_off_amount="499" -f scripts/seed_e2e_mobius.sql
 
 \set ON_ERROR_STOP on
 
@@ -34,7 +36,7 @@ WITH p AS (
 INSERT INTO billing.prices (product_id, amount, currency, billing_cycle_days, processors, status)
 SELECT
   p.product_id,
-  999,
+  :mobius_recurring_amount,
   'usd',
   1,
   jsonb_build_object('mobius', jsonb_build_object('plan_id', :'mobius_plan_id', 'provider', 'mobius')),
@@ -57,7 +59,7 @@ WITH p AS (
       updated_at = current_timestamp
   FROM p
   WHERE price.product_id = p.product_id
-    AND price.amount = 499
+    AND price.amount = :mobius_one_off_amount
     AND price.currency = 'usd'
     AND price.billing_cycle_days IS NULL
   RETURNING price.id
@@ -65,7 +67,7 @@ WITH p AS (
 INSERT INTO billing.prices (product_id, amount, currency, billing_cycle_days, processors, status)
 SELECT
   p.product_id,
-  499,
+  :mobius_one_off_amount,
   'usd',
   NULL,
   jsonb_build_object('mobius', jsonb_build_object('provider', 'mobius')),
@@ -79,9 +81,9 @@ UNION ALL
 SELECT 'recurring_price_id' AS key, id::text AS value
 FROM billing.prices
 WHERE product_id = (SELECT id FROM billing.products WHERE slug='e2e_mobius')
-  AND amount = 999 AND currency='usd' AND billing_cycle_days=1
+  AND amount = :mobius_recurring_amount AND currency='usd' AND billing_cycle_days=1
 UNION ALL
 SELECT 'one_off_price_id' AS key, id::text AS value
 FROM billing.prices
 WHERE product_id = (SELECT id FROM billing.products WHERE slug='e2e_mobius')
-  AND amount = 499 AND currency='usd' AND billing_cycle_days IS NULL;
+  AND amount = :mobius_one_off_amount AND currency='usd' AND billing_cycle_days IS NULL;

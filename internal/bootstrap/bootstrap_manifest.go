@@ -32,7 +32,6 @@ type BootstrapManifest struct {
 // apply more than one catalog later without inventing a second catalog format.
 type BootstrapCatalog struct {
 	Name             string              `yaml:"name,omitempty"`
-	DefaultCurrency  string              `yaml:"default_currency"`
 	DefaultProviders []string            `yaml:"default_providers,omitempty"`
 	TierGroups       []catalog.TierGroup `yaml:"tier_groups"`
 }
@@ -102,7 +101,6 @@ func (m *BootstrapManifest) CatalogManifest(index int) (*catalog.Manifest, error
 	c := m.Catalogs[index]
 	cm := &catalog.Manifest{
 		Version:          catalog.SupportedVersion,
-		DefaultCurrency:  c.DefaultCurrency,
 		DefaultProviders: append([]string(nil), c.DefaultProviders...),
 		TierGroups:       append([]catalog.TierGroup(nil), c.TierGroups...),
 	}
@@ -150,26 +148,11 @@ func validateTenantManifestShape(m *TenantManifest) error {
 			if !validHTTPURL(issuer.JWKSURI) {
 				return fmt.Errorf("tenant %q issuer %q jwks_uri must be an http(s) URL", slug, issuer.Issuer)
 			}
-			if len(cleanStrings(issuer.Audiences)) == 0 {
-				return fmt.Errorf("tenant %q issuer %q audiences are required", slug, issuer.Issuer)
-			}
-		}
-		for _, principal := range t.ServiceJWTPrincipals {
-			if strings.TrimSpace(principal.Issuer) == "" {
-				return fmt.Errorf("tenant %q service_jwt_principal issuer is required", slug)
-			}
-			if !validHTTPURL(principal.Issuer) {
-				return fmt.Errorf("tenant %q service_jwt_principal issuer %q must be an http(s) URL", slug, principal.Issuer)
-			}
-			if strings.TrimSpace(principal.Subject) == "" {
-				return fmt.Errorf("tenant %q service_jwt_principal subject is required", slug)
-			}
-			if len(cleanStrings(principal.Permissions)) == 0 {
-				return fmt.Errorf("tenant %q service_jwt_principal %q permissions are required", slug, principal.Subject)
-			}
-			if err := validateManifestResources(slug, "service_jwt_principal "+principal.Subject, principal.Resources); err != nil {
-				return err
-			}
+			// Audiences are optional in the manifest; they default to the
+			// control-plane audience ("openrails") at reconcile time. Registering
+			// an issuer is purely "this tenant, this issuer, this JWKS URI" — the
+			// tenant has full authority over its own resources, so there is no
+			// per-issuer permission ceiling to declare.
 		}
 	}
 	return nil
@@ -183,11 +166,3 @@ func validHTTPURL(raw string) bool {
 	return u.Scheme == "http" || u.Scheme == "https"
 }
 
-func validateManifestResources(tenantSlug, owner string, resources []ManifestResource) error {
-	for _, r := range resources {
-		if strings.TrimSpace(r.Kind) == "" || strings.TrimSpace(r.ID) == "" {
-			return fmt.Errorf("tenant %q %s resource kind and id are required", tenantSlug, owner)
-		}
-	}
-	return nil
-}

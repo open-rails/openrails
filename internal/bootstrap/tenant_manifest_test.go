@@ -3,34 +3,13 @@ package bootstrap
 import (
 	"testing"
 
-	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolveManifestResourcesMapsTenantAliasAndLeavesHostResourcesOpaque(t *testing.T) {
-	tid := tenant.DefaultID
-	resources, err := resolveManifestResources([]ManifestResource{
-		{Kind: controlplane.ResourceKindTenant, ID: "$tenant"},
-		{Kind: "custom.resource", ID: "alpha"},
-	}, tid, "cozy-art")
-	require.NoError(t, err)
-	require.Len(t, resources, 2)
-	require.Equal(t, controlplane.ResourceKindTenant, resources[0].Kind)
-	require.Equal(t, tid.String(), resources[0].ID)
-	require.Equal(t, "custom.resource", resources[1].Kind)
-	require.Equal(t, "alpha", resources[1].ID)
-}
-
-func TestResolveManifestResourcesDefaultsToTenantScope(t *testing.T) {
-	resources, err := resolveManifestResources(nil, tenant.DefaultID, "cozy-art")
-	require.NoError(t, err)
-	require.Len(t, resources, 1)
-	require.Equal(t, controlplane.ResourceKindTenant, resources[0].Kind)
-	require.Equal(t, tenant.DefaultID.String(), resources[0].ID)
-}
-
 func TestParseBootstrapManifest(t *testing.T) {
+	// Registration is purely tenant + issuer + JWKS URI. Audiences are optional
+	// (default openrails); there is no per-issuer permission grant — a tenant has
+	// full authority over its own resources.
 	manifest, err := ParseBootstrapManifest([]byte(`
 version: 1
 tenants:
@@ -39,14 +18,8 @@ tenants:
     issuers:
       - issuer: https://auth.cozy.art
         jwks_uri: https://auth.cozy.art/.well-known/jwks.json
-        audiences: [openrails]
-    service_jwt_principals:
-      - issuer: https://auth.cozy.art
-        subject: service:cozy-art-runtime
-        permissions: [openrails:entitlements:read]
 catalogs:
   - name: default
-    default_currency: usd
     tier_groups:
       - slug: plans
         display_name: Plans
@@ -55,7 +28,8 @@ catalogs:
             display_name: Starter
             tier_rank: 1
             prices:
-              - unit_amount: 1000
+              - currency: usd
+                unit_amount: 1000
                 interval: month
 `))
 	require.NoError(t, err)
@@ -108,15 +82,6 @@ tenants:
 			want: "must be an http(s) URL",
 		},
 		{
-			name: "missing issuer audiences",
-			body: base(`
-    issuers:
-      - issuer: https://auth.cozy.art
-        jwks_uri: https://auth.cozy.art/.well-known/jwks.json
-`),
-			want: "audiences are required",
-		},
-		{
 			name: "service tokens removed",
 			body: base(`
 	    service_tokens:
@@ -129,24 +94,21 @@ tenants:
 			want: "service_tokens",
 		},
 		{
-			name: "invalid resource shape",
+			name: "service_jwt_principals removed",
 			body: base(`
     service_jwt_principals:
       - issuer: https://auth.cozy.art
         subject: service:runtime
         permissions: [openrails:entitlements:read]
-        resources:
-          - kind: openrails.tenant
 `),
-			want: "resource kind and id are required",
+			want: "service_jwt_principals",
 		},
 		{
 			name: "duplicate product slug",
 			body: `
 version: 1
 catalogs:
-  - default_currency: usd
-    tier_groups:
+  - tier_groups:
       - slug: g1
         display_name: G1
         products:
@@ -163,8 +125,7 @@ catalogs:
 			body: `
 version: 1
 catalogs:
-  - default_currency: usd
-    tier_groups:
+  - tier_groups:
       - slug: g
         display_name: G
         products:
@@ -182,8 +143,7 @@ catalogs:
 			body: `
 version: 1
 catalogs:
-  - default_currency: usd
-    tier_groups:
+  - tier_groups:
       - slug: g
         display_name: G
         products:

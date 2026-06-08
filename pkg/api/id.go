@@ -17,6 +17,7 @@ const (
 	PrefixPaymentMethod   = "pm_"
 	PrefixInvoice         = "inv_"
 	PrefixCheckoutSession = "cs_"
+	PrefixUSDCFunding     = "ufs_"
 	PrefixUser            = "usr_"
 	PrefixEvent           = "evt_"
 	PrefixAdminGrant      = "ag_"
@@ -55,6 +56,11 @@ func FormatInvoiceID(id uuid.UUID) string {
 // FormatCheckoutSessionID formats a UUID as a checkout session ID (cs_xxx)
 func FormatCheckoutSessionID(id uuid.UUID) string {
 	return PrefixCheckoutSession + id.String()
+}
+
+// FormatUSDCFundingSessionID formats a UUID as a USDC funding session ID (ufs_xxx)
+func FormatUSDCFundingSessionID(id uuid.UUID) string {
+	return PrefixUSDCFunding + id.String()
 }
 
 // FormatUserID formats a user ID with the usr_ prefix
@@ -106,6 +112,11 @@ func ParseInvoiceID(id string) (uuid.UUID, error) {
 // ParseCheckoutSessionID parses a prefixed checkout session ID and returns the UUID
 func ParseCheckoutSessionID(id string) (uuid.UUID, error) {
 	return parseID(id, PrefixCheckoutSession, "checkout_session")
+}
+
+// ParseUSDCFundingSessionID parses a prefixed funding session ID and returns the UUID
+func ParseUSDCFundingSessionID(id string) (uuid.UUID, error) {
+	return parseID(id, PrefixUSDCFunding, "usdc_funding_session")
 }
 
 // ParseUserID parses a prefixed user ID and returns the raw ID string

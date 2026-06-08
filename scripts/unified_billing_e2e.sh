@@ -30,7 +30,7 @@
 #     --entrypoint sh alpine/curl:latest /h.sh
 set -u
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:2053}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:22053}"
 : "${OPENRAILS_SERVICE_TOKEN:?set OPENRAILS_SERVICE_TOKEN to a minted operator service token}"
 USER_ID="${USER_ID:-66666666-6666-6666-6666-666666666666}"
 SVC="$BASE_URL/v1/service"

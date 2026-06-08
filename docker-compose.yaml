@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin_password
     ports:
-      - "5432:5432"
+      - "127.0.0.1:25432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
       # Bootstrap SQL runs automatically during first initialization
@@ -47,7 +47,7 @@ services:
     volumes:
       - garnet_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:26379:6379"
     healthcheck:
       test:
         [
@@ -68,7 +68,7 @@ services:
       - ./config/clickhouse-keeper.xml:/etc/clickhouse-keeper/keeper_config.xml:ro
       - clickhouse_keeper_data:/var/lib/clickhouse
     ports:
-      - "127.0.0.1:9181:9181" # Keeper port
+      - "127.0.0.1:29181:9181" # Keeper port
     networks:
       - local-openrails
     healthcheck:
@@ -86,8 +86,8 @@ services:
       clickhouse-keeper:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8123:8123"  # HTTP interface
-      - "127.0.0.1:9002:9000"  # Native client (avoiding conflict with MinIO)
+      - "127.0.0.1:28123:8123"  # HTTP interface
+      - "127.0.0.1:29002:9000"  # Native client (avoiding conflict with MinIO)
     volumes:
       # Mount configs as config.d fragments so they merge with default config.xml
       - ./config/clickhouse.yaml:/etc/clickhouse-server/config.d/local.yaml:ro
@@ -209,12 +209,12 @@ services:
       # Single public API surface. Server-to-server callers authenticate with
       # generated service tokens or first-party service JWTs on this same port
       # (issue #222) — there is no separate private/mTLS service port.
-      - "127.0.0.1:2053:2053"  # API (public + admin + service token service routes)
+      - "127.0.0.1:${OPENRAILS_HOST_PORT:-22053}:2053"  # API (public + admin + service token service routes)
     environment:
       # Service runtime mode
       ENV: "${ENV:-development}"
       TEST_MODE: "${TEST_MODE:-true}"
-      API_URL: "${API_URL:-http://localhost:2053}"
+      API_URL: "${API_URL:-http://localhost:22053}"
       # For docker-compose E2E sandbox, the default issuer is the in-network `issuer` service (profile: e2e-sandbox).
       AUTH_ISSUERS: '${AUTH_ISSUERS:-["http://issuer:8080"]}'
       AUTH_EXPECTED_AUDIENCE: "${AUTH_EXPECTED_AUDIENCE:-openrails-app}"
@@ -263,24 +263,26 @@ services:
   #   docker compose -f docker-compose.yaml --profile all --profile e2e-sandbox up -d
   #
   # Then mint tokens:
-  #   curl -fsS http://localhost:8080/auth/dev/mint ...
+  #   curl -fsS http://localhost:28080/api/v1/dev/mint ...
   issuer:
     profiles: ["e2e-sandbox"]
-    # Single-container AuthKit dev issuer (includes embedded Postgres for E2E).
-    # Default tag is `latest`, but you can override via AUTHKIT_TEST_ISSUER_TAG
-    # to pin a version (e.g. `v0.8.1`).
-    image: "docker.io/openrails/authkit-test-issuer:${AUTHKIT_TEST_ISSUER_TAG:-latest}"
+    image: "${AUTHKIT_DEVSERVER_IMAGE:-authkit-devserver:local}"
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
-      AUTHKIT_LISTEN_ADDR: ":8080"
-      AUTHKIT_ISSUER: "http://issuer:8080"
-      AUTHKIT_ISSUED_AUDIENCES: "openrails-app"
-      AUTHKIT_EXPECTED_AUDIENCES: "openrails-app"
-      AUTHKIT_DEV_MODE: "true"
-      AUTHKIT_DEV_MINT_SECRET: "${AUTHKIT_DEV_MINT_SECRET:-dev-mint-secret-localhost-only}"
+      ENV: "dev"
+      DEVSERVER_LISTEN_ADDR: ":8080"
+      DEVSERVER_ISSUER: "http://issuer:8080"
+      DEVSERVER_ISSUED_AUDIENCES: "openrails-app"
+      DEVSERVER_EXPECTED_AUDIENCES: "openrails-app"
+      DB_URL: "postgres://admin:${DB_PASSWORD:-admin_password}@postgres:5432/openrails_db?sslmode=disable"
+      DEVSERVER_DEV_MODE: "true"
+      DEVSERVER_DEV_MINT_SECRET: "${AUTHKIT_DEV_MINT_SECRET:-dev-mint-secret-localhost-only}"
+      DEVSERVER_REGISTRATION_VERIFICATION: "none"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:28080:8080"
     volumes:
-      - issuer_postgres_data:/var/lib/postgresql/data
       - issuer_runtime_keys:/.runtime/authkit
     networks:
       - local-openrails
@@ -295,7 +297,6 @@ volumes:
   clickhouse_logs:
   clickhouse_keeper_data:
   openrails_spool:
-  issuer_postgres_data:
   issuer_runtime_keys:
 
 networks:

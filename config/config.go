@@ -116,6 +116,11 @@ type Config struct {
 	//       recipient_wallet: "..."
 	Processors map[string]*ProcessorConfig `koanf:"processors,omitempty"`
 
+	// USDCFunding configures external wallet-funding providers. These providers
+	// only move USDC into the user's self-custody wallet; OpenRails checkout still
+	// collects payment from that wallet afterwards.
+	USDCFunding *USDCFundingConfig `koanf:"usdc_funding,omitempty"`
+
 	DB          *DBConfig         `koanf:"db,omitempty"`
 	Redis       *RedisConfig      `koanf:"redis,omitempty"`
 	Auth        *AuthConfig       `koanf:"auth,omitempty"`
@@ -756,8 +761,8 @@ func (cp *ControlPlaneConfig) SelfHostedPosture() bool {
 
 func rejectDeprecatedConfigKeys(k *koanf.Koanf) error {
 	deprecated := map[string]string{
-		"auth.operator_tenant_slug":        "use /etc/openrails/bootstrap.yaml with manifest-declared tenants, issuers, service_jwt_principals, permissions, and resources",
-		"auth.operator_tenant_admin_roles": "use /etc/openrails/bootstrap.yaml with manifest-declared tenants, issuers, service_jwt_principals, permissions, and resources",
+		"auth.operator_tenant_slug":        "use /etc/openrails/bootstrap.yaml with manifest-declared tenants and issuers (a tenant has full authority over its own resources)",
+		"auth.operator_tenant_admin_roles": "use /etc/openrails/bootstrap.yaml with manifest-declared tenants and issuers (a tenant has full authority over its own resources)",
 		"auth.control_plane.org_mode":      "removed; tenants are always supported. Use public_user_registration + public_tenant_registration",
 		"auth.control_plane.tenant_mode":   "removed; tenants are always supported (authkit issue 60). Use public_user_registration + public_tenant_registration",
 		"auth.control_plane.locked_down":   "use auth.control_plane.public_user_registration + public_tenant_registration (both default false = restricted)",
@@ -893,6 +898,26 @@ func (f *FeatureFlags) IsDunningOff() bool {
 // Sender info (from_email, from_name) comes from StoreConfig.
 type SendGridConfig struct {
 	APIKey string `koanf:"api_key"`
+}
+
+type USDCFundingConfig struct {
+	Providers map[string]*USDCFundingProviderConfig `koanf:"providers,omitempty"`
+}
+
+type USDCFundingProviderConfig struct {
+	Enabled           bool     `koanf:"enabled"`
+	SupportedNetworks []string `koanf:"supported_networks,omitempty"`
+
+	// LaunchURLTemplate is used for provider handoffs where the partner surface
+	// exposes a configured URL/widget rather than a public session-create API.
+	// Supported placeholders: {wallet}, {network}, {asset}, {amount},
+	// {session_id}, {return_url}.
+	LaunchURLTemplate string `koanf:"launch_url_template,omitempty"`
+
+	// Coinbase-hosted Onramp session API configuration. APIKey should be an
+	// OpenRails-owned backend secret, not a host-app frontend value.
+	APIBaseURL string `koanf:"api_base_url,omitempty"`
+	APIKey     string `koanf:"api_key,omitempty"`
 }
 
 type ClickHouseConfig struct {
@@ -1732,6 +1757,15 @@ func Load(configPath string) (*Config, error) {
 		// FEATURE_FLAGS_* -> feature_flags.*
 		if strings.HasPrefix(s, "feature_flags_") {
 			return "feature_flags." + strings.TrimPrefix(s, "feature_flags_")
+		}
+
+		// USDC_FUNDING_PROVIDERS_<NAME>_<FIELD> -> usdc_funding.providers.<name>.<field>
+		if strings.HasPrefix(s, "usdc_funding_providers_") {
+			rest := strings.TrimPrefix(s, "usdc_funding_providers_")
+			parts := strings.SplitN(rest, "_", 2)
+			if len(parts) == 2 {
+				return fmt.Sprintf("usdc_funding.providers.%s.%s", parts[0], parts[1])
+			}
 		}
 
 		// PROCESSORS_<NAME>_<FIELD> -> processors.<name>.<field>

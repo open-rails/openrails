@@ -239,7 +239,7 @@ func nmiSaleOrderID(idempotencyKey string, metadata map[string]string) string {
 		orderID = uuid.New().String()
 	}
 	if runID := strings.TrimSpace(metadata["e2e_run_id"]); runID != "" {
-		orderID = fmt.Sprintf("e2e_%s_%s", runID, orderID)
+		orderID = fmt.Sprintf("%s_e2e_%s", orderID, nmiOrderIDSuffix(runID))
 	}
 	return orderID
 }

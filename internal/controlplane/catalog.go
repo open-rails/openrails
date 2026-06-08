@@ -84,22 +84,7 @@ const (
 	PermSelfCheckoutCreate     = "openrails:self:checkout:create"
 	PermSelfSubscriptionCancel = "openrails:self:subscriptions:cancel"
 	PermSelfPaymentMethods     = "openrails:self:payment-methods:manage"
-
-	// DEPRECATED (issue #259): PermSelfMint backs the central mint round-trip,
-	// superseded by federated tenant self-signing (POST /v1/service/tenant/issuers
-	// + local minting). Retained for the dual-trust migration window; removed once
-	// all tenants self-sign.
-	//
-	// PermSelfMint authorizes a server-to-server service token caller (a tenant's host
-	// backend, e.g. host apps) to MINT short-lived, user-scoped delegated
-	// access tokens for its OWN tenant, to hand to a browser for the
-	// `openrails:self:*` surface (issue #222 browser tier). It is an
-	// operator/server-to-server permission carried by service tokens — NOT a browser
-	// self-permission — so it is deliberately NOT part of selfCatalog: a minted
-	// browser token can never itself carry the mint capability. The minting tenant
-	// is always the CALLER's service token tenant, so this permission can never mint
-	// cross-tenant.
-	PermSelfMint = "openrails:self:mint"
+	PermSelfWallets            = "openrails:self:wallets:manage"
 
 	// Tenant-admin (browser-direct) permissions (issue #259). These gate the
 	// `/v1/tenant-admin/users/:user_id/*` surface reached with a FEDERATED,
@@ -161,7 +146,7 @@ var catalogEntries = []Permission{
 	{Name: PermSelfCheckoutCreate, Description: "Self-service: create your own checkout sessions."},
 	{Name: PermSelfSubscriptionCancel, Description: "Self-service: cancel your own subscriptions."},
 	{Name: PermSelfPaymentMethods, Description: "Self-service: manage your own payment methods."},
-	{Name: PermSelfMint, Description: "Mint short-lived, user-scoped delegated access tokens for your own tenant (server-to-server, browser tier)."},
+	{Name: PermSelfWallets, Description: "Self-service: manage your own verified linked wallets."},
 	{Name: PermTenantSecretsList, Description: "Tenant admin: list configured tenant-secret status without plaintext."},
 	{Name: PermTenantSecretsWrite, Description: "Tenant admin: create or rotate write-only tenant secrets."},
 	{Name: PermTenantSecretsDelete, Description: "Tenant admin: delete tenant secrets."},
@@ -178,6 +163,7 @@ var selfCatalog = map[string]struct{}{
 	PermSelfCheckoutCreate:     {},
 	PermSelfSubscriptionCancel: {},
 	PermSelfPaymentMethods:     {},
+	PermSelfWallets:            {},
 }
 
 // SelfCatalogNames returns the self-service permission names in catalog order.
@@ -187,6 +173,7 @@ func SelfCatalogNames() []string {
 		PermSelfCheckoutCreate,
 		PermSelfSubscriptionCancel,
 		PermSelfPaymentMethods,
+		PermSelfWallets,
 	}
 }
 

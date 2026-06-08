@@ -19,7 +19,6 @@ func writeManifest(t *testing.T, body string) string {
 
 const goodManifest = `
 version: 1
-default_currency: usd
 default_providers: [stripe]
 
 tier_groups:
@@ -54,7 +53,7 @@ func TestLoad_Good(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if m.Version != 1 || m.DefaultCurrency != "usd" {
+	if m.Version != 1 {
 		t.Fatalf("unexpected header: %+v", m)
 	}
 	if len(m.TierGroups) != 1 || len(m.TierGroups[0].Products) != 2 {

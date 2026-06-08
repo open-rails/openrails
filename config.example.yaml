@@ -179,8 +179,10 @@ auth:
 #   billing run-server -c /etc/openrails/config.yaml
 #
 # The mounted bootstrap file uses the unified manifest shape: tenants, OIDC
-# issuers, first-party service JWT principals, optional generated service tokens,
-# and top-level catalogs.
+# issuers and top-level catalogs. Registration is purely "this tenant, these
+# issuers, these JWKS URIs": a tenant has full authority over its own resources,
+# so there is no per-issuer permission grant. A validly-signed token from a
+# registered issuer self-asserts its permissions and is scoped to its own tenant.
 #
 # Example /etc/openrails/bootstrap.yaml:
 # version: 1
@@ -190,27 +192,11 @@ auth:
 #     issuers:
 #       - issuer: "http://doujins:8080"
 #         jwks_uri: "http://doujins:8080/.well-known/jwks.json"
-#         audiences: ["openrails-app"]
 #       - issuer: "http://hentai0:8081"
 #         jwks_uri: "http://hentai0:8081/.well-known/jwks.json"
-#         audiences: ["openrails-app"]
-#     service_jwt_principals:
-#       - issuer: "http://doujins:8080"
-#         subject: "service:doujins-runtime"
-#         permissions: ["openrails:entitlements:read"]
-#         resources:
-#           - kind: openrails.tenant
-#             id: "$tenant"
-#       - issuer: "http://hentai0:8081"
-#         subject: "service:hentai0-runtime"
-#         permissions: ["openrails:entitlements:read"]
-#         resources:
-#           - kind: openrails.tenant
-#             id: "$tenant"
 # catalogs:
 #   - name: default
-#     default_currency: usd
-#     tier_groups: []
+#     tier_groups: []   # each price declares its own `currency`
 
 # =============================================================================
 # ENCRYPTION AT REST (issue #227)
@@ -330,6 +316,32 @@ processors:
         mint: "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM"
         name: "PayPal USD (Devnet)"
         decimals: 6
+
+# =============================================================================
+# USDC WALLET FUNDING (OPTIONAL)
+# =============================================================================
+# External provider handoffs that move USDC into the user's own live wallet.
+# OpenRails does not custody these funds and does not treat provider return as
+# checkout payment. The wallet balance must still satisfy the normal checkout.
+#
+# Host apps should call /v1/self/usdc-funding-* and never build provider URLs
+# themselves.
+#
+# usdc_funding:
+#   providers:
+#     robinhood:
+#       enabled: false
+#       supported_networks: ["solana"]
+#       # Supplied by Robinhood partner docs/access. Supported placeholders:
+#       # {wallet}, {network}, {asset}, {amount}, {session_id}, {return_url}
+#       launch_url_template: "https://robinhood.example/connect?asset={asset}&network={network}&address={wallet}&amount={amount}&redirect={return_url}"
+#     coinbase:
+#       enabled: false
+#       # Coinbase is only used if it can deliver USDC to the user's Solana wallet.
+#       # Do not configure Base/EVM networks for this app.
+#       supported_networks: ["solana"]
+#       api_base_url: "https://api.cdp.coinbase.com"
+#       # api_key: set via USDC_FUNDING_PROVIDERS_COINBASE_API_KEY env var
 
 # =============================================================================
 # ANALYTICS (ClickHouse)

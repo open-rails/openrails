@@ -22,13 +22,12 @@ package catalog
 
 // Manifest is the root of a catalog-as-code document.
 //
-// Backward-compatible with cozy-art's billing_catalog.yaml: the `version`,
-// `default_currency` and `tier_groups` keys are unchanged. The new
-// `default_providers` key lets a manifest set a catalog-wide provider list that
-// individual products/prices inherit when they don't specify their own.
+// Every price declares its own `currency` explicitly — there is no catalog-wide
+// currency default. The `default_providers` key lets a manifest set a
+// catalog-wide provider list that individual products/prices inherit when they
+// don't specify their own.
 type Manifest struct {
 	Version          int         `yaml:"version"`
-	DefaultCurrency  string      `yaml:"default_currency"`
 	DefaultProviders []string    `yaml:"default_providers,omitempty"`
 	TierGroups       []TierGroup `yaml:"tier_groups"`
 }

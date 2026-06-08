@@ -40,14 +40,6 @@ func normalizeCurrency(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}
 
 // stablecoinCurrencies are the currencies eligible for the Solana provider.
 // Solana settles on-chain in stablecoins pegged $1; a recurring fiat price is
@@ -93,10 +85,6 @@ func (m *Manifest) Validate() error {
 func (m *Manifest) validate() error {
 	if m.Version != SupportedVersion {
 		return fmt.Errorf("unsupported catalog manifest version %d (want %d)", m.Version, SupportedVersion)
-	}
-	m.DefaultCurrency = normalizeCurrency(m.DefaultCurrency)
-	if m.DefaultCurrency == "" {
-		m.DefaultCurrency = "usd"
 	}
 	m.DefaultProviders = normalizeProviders(m.DefaultProviders)
 	if len(m.TierGroups) == 0 {
@@ -177,7 +165,7 @@ func (m *Manifest) validateProduct(groupSlug string, product *Product, productSl
 }
 
 func (m *Manifest) validatePrice(product Product, price *Price, idx int) error {
-	price.Currency = normalizeCurrency(firstNonEmpty(price.Currency, m.DefaultCurrency))
+	price.Currency = normalizeCurrency(price.Currency)
 	if price.Currency == "" {
 		return fmt.Errorf("product %q price #%d currency is required", product.Slug, idx+1)
 	}

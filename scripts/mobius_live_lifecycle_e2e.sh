@@ -12,17 +12,26 @@ fi
 
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.yaml}"
 COMPOSE_PROFILES="${COMPOSE_PROFILES:-all,e2e-sandbox}"
-BASE_URL="${MOBIUS_E2E_BASE_URL:-http://localhost:2053}"
+OPENRAILS_HOST_PORT="${OPENRAILS_HOST_PORT:-22053}"
+BASE_URL="${MOBIUS_E2E_BASE_URL:-http://localhost:$OPENRAILS_HOST_PORT}"
 TOKENIZATION_BASE_URL="${MOBIUS_E2E_TOKENIZATION_BASE_URL:-$BASE_URL}"
 START_COMPOSE="${MOBIUS_E2E_START_COMPOSE:-true}"
 BUILD_COMPOSE="${MOBIUS_E2E_BUILD:-true}"
 START_TUNNEL="${MOBIUS_E2E_START_TUNNEL:-false}"
 AUTHKIT_DEV_MINT_SECRET="${AUTHKIT_DEV_MINT_SECRET:-dev-mint-secret-localhost-only}"
-AUTHKIT_MINT_URL="${AUTHKIT_MINT_URL:-http://localhost:8080/auth/dev/mint}"
+AUTHKIT_MINT_URL="${AUTHKIT_MINT_URL:-http://localhost:28080/api/v1/dev/mint}"
 AUTHKIT_AUDIENCE="${AUTHKIT_AUDIENCE:-openrails-app}"
 E2E_RUN_ID="${E2E_RUN_ID:-e2e_mobius_live_$(date +%Y%m%dT%H%M%S)_$(cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s%N)}"
 E2E_USER_ID="${E2E_USER_ID:-$(cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s%N)}"
 E2E_EMAIL="${E2E_EMAIL:-e2e+${E2E_RUN_ID}@example.com}"
+E2E_MOBIUS_ONE_OFF_AMOUNT="${E2E_MOBIUS_ONE_OFF_AMOUNT:-$((500 + ($(date +%s) % 400)))}"
+if [ -z "${E2E_MOBIUS_RECURRING_AMOUNT:-}" ]; then
+  if [ -n "${E2E_MOBIUS_PLAN_ID:-}" ]; then
+    E2E_MOBIUS_RECURRING_AMOUNT=999
+  else
+    E2E_MOBIUS_RECURRING_AMOUNT="$((1000 + ($(date +%s) % 400)))"
+  fi
+fi
 PLAYWRIGHT_DIR="${PLAYWRIGHT_DIR:-$ROOT_DIR/.runtime/mobius-live-playwright}"
 RESULT_DIR="${RESULT_DIR:-$ROOT_DIR/.runtime/mobius-live-results}"
 
@@ -92,6 +101,20 @@ assert_http() {
   echo "PASS $name [HTTP $got]"
 }
 
+assert_http_accepted_or_ok() {
+  local name="$1"
+  local code_file="$2"
+  local body_file="$3"
+  local got
+  got="$(cat "$code_file")"
+  if [ "$got" != "200" ] && [ "$got" != "202" ]; then
+    echo "FAIL $name: HTTP $got, wanted 200 or 202" >&2
+    jq . "$body_file" 2>/dev/null || cat "$body_file" >&2
+    exit 1
+  fi
+  echo "PASS $name [HTTP $got]"
+}
+
 psql_scalar() {
   local sql="$1"
   docker compose -f "$COMPOSE_FILE" exec -T postgres \
@@ -113,6 +136,58 @@ query_nmi() {
   fi
 }
 
+assert_query_contains() {
+  local name="$1"
+  local file="$2"
+  local needle="$3"
+  if ! grep -Fq "$needle" "$file"; then
+    echo "FAIL $name: NMI query response did not contain expected value: $(redact_id "$needle")" >&2
+    sed -E 's/[A-Za-z0-9_-]{25,}/[redacted]/g' "$file" | head -80 >&2
+    exit 1
+  fi
+}
+
+assert_query_status() {
+  local name="$1"
+  local file="$2"
+  if ! grep -Eiq '(complete|completed|approved|success|active|cancelled|canceled)' "$file"; then
+    echo "FAIL $name: NMI query response did not include an approved/active/cancelled status" >&2
+    sed -E 's/[A-Za-z0-9_-]{25,}/[redacted]/g' "$file" | head -80 >&2
+    exit 1
+  fi
+}
+
+assert_query_currency_if_present() {
+  local name="$1"
+  local file="$2"
+  if grep -Eiq 'currency' "$file" && ! grep -Eiq 'usd' "$file"; then
+    echo "FAIL $name: NMI query response included currency metadata but not USD" >&2
+    sed -E 's/[A-Za-z0-9_-]{25,}/[redacted]/g' "$file" | head -80 >&2
+    exit 1
+  fi
+}
+
+sign_nmi_webhook_header() {
+  local body="$1"
+  local timestamp
+  timestamp="$(date +%s)"
+  local signature
+  signature="$(printf '%s.%s' "$timestamp" "$body" | openssl dgst -sha256 -hmac "$PROCESSORS_MOBIUS_WEBHOOK_SECRET" | awk '{print $NF}')"
+  printf 't=%s,s=%s' "$timestamp" "$signature"
+}
+
+post_signed_nmi_webhook() {
+  local body="$1"
+  local out="$2"
+  local signature
+  signature="$(sign_nmi_webhook_header "$body")"
+  curl -sS -m 60 -o "$out.body" -w '%{http_code}' \
+    -X POST "$BASE_URL/v1/webhooks/mobius" \
+    -H "Content-Type: application/json" \
+    -H "X-Signature: $signature" \
+    --data "$body" >"$out.code"
+}
+
 cleanup() {
   if [ -n "${TUNNEL_PID:-}" ]; then
     kill "$TUNNEL_PID" >/dev/null 2>&1 || true
@@ -124,13 +199,13 @@ require curl
 require docker
 require jq
 require node
+require openssl
 require pnpm
 
 need_env PROCESSORS_MOBIUS_SECURITY_KEY
 need_env PROCESSORS_MOBIUS_TOKENIZATION_KEY
 need_env PROCESSORS_MOBIUS_TOKENIZATION_URL
 need_env PROCESSORS_MOBIUS_WEBHOOK_SECRET
-need_env E2E_MOBIUS_PLAN_ID
 
 mkdir -p "$RESULT_DIR"
 
@@ -139,6 +214,8 @@ echo "run_id: $E2E_RUN_ID"
 echo "user_id: $E2E_USER_ID"
 echo "base_url: $BASE_URL"
 echo "tokenization_base_url: $TOKENIZATION_BASE_URL"
+echo "one_off_amount_cents: $E2E_MOBIUS_ONE_OFF_AMOUNT"
+echo "recurring_amount_cents: $E2E_MOBIUS_RECURRING_AMOUNT"
 
 if [ "$START_COMPOSE" = "true" ]; then
   echo "Starting docker compose stack..."
@@ -154,7 +231,7 @@ if [ "$START_COMPOSE" = "true" ]; then
   if [ "$BUILD_COMPOSE" = "true" ]; then
     BUILD_ARGS+=(--build)
   fi
-  AUTHKIT_DEV_MINT_SECRET="$AUTHKIT_DEV_MINT_SECRET" docker compose -f "$COMPOSE_FILE" "${PROFILE_ARGS[@]}" up -d "${BUILD_ARGS[@]}"
+  AUTHKIT_DEV_MINT_SECRET="$AUTHKIT_DEV_MINT_SECRET" OPENRAILS_HOST_PORT="$OPENRAILS_HOST_PORT" API_URL="$BASE_URL" docker compose -f "$COMPOSE_FILE" "${PROFILE_ARGS[@]}" up -d "${BUILD_ARGS[@]}"
 fi
 
 echo "Waiting for OpenRails health..."
@@ -176,11 +253,34 @@ if [ "$START_TUNNEL" = "true" ]; then
   curl -fsS "$TOKENIZATION_BASE_URL/health/live" >/dev/null
 fi
 
-echo "Seeding E2E Mobius catalog..."
-E2E_MOBIUS_PLAN_ID="$E2E_MOBIUS_PLAN_ID" COMPOSE_FILE="$COMPOSE_FILE" bash "$ROOT_DIR/scripts/seed_e2e_mobius.sh" >/dev/null
+if [ -z "${E2E_MOBIUS_PLAN_ID:-}" ]; then
+  E2E_MOBIUS_PLAN_ID="or_e2e_${E2E_RUN_ID//[^a-zA-Z0-9]/_}"
+  RECURRING_AMOUNT_DECIMAL="$(printf '%d.%02d' "$((E2E_MOBIUS_RECURRING_AMOUNT / 100))" "$((E2E_MOBIUS_RECURRING_AMOUNT % 100))")"
+  echo "Creating Mobius/NMI sandbox recurring plan for this run..."
+  ADD_PLAN_OUT="$RESULT_DIR/nmi_add_plan.txt"
+  curl -fsS -m 60 -X POST "https://secure.networkmerchants.com/api/transact.php" \
+    -d "security_key=$PROCESSORS_MOBIUS_SECURITY_KEY" \
+    -d "recurring=add_plan" \
+    -d "plan_id=$E2E_MOBIUS_PLAN_ID" \
+    -d "plan_name=OpenRails E2E $E2E_RUN_ID" \
+    -d "plan_amount=$RECURRING_AMOUNT_DECIMAL" \
+    -d "day_frequency=1" \
+    -d "plan_payments=0" >"$ADD_PLAN_OUT"
+  if ! grep -q 'response=1' "$ADD_PLAN_OUT"; then
+    echo "FAIL could not create Mobius/NMI recurring plan" >&2
+    sed -E 's/[A-Za-z0-9_-]{25,}/[redacted]/g' "$ADD_PLAN_OUT" >&2
+    exit 1
+  fi
+  echo "PASS Mobius/NMI recurring plan created: $(redact_id "$E2E_MOBIUS_PLAN_ID")"
+else
+  echo "Using configured Mobius/NMI recurring plan: $(redact_id "$E2E_MOBIUS_PLAN_ID")"
+fi
 
-RECURRING_PRICE_ID="$(psql_scalar "SELECT id::text FROM billing.prices WHERE product_id = (SELECT id FROM billing.products WHERE slug='e2e_mobius') AND amount=999 AND currency='usd' AND billing_cycle_days=1 ORDER BY created_at DESC LIMIT 1;")"
-ONE_OFF_PRICE_ID="$(psql_scalar "SELECT id::text FROM billing.prices WHERE product_id = (SELECT id FROM billing.products WHERE slug='e2e_mobius') AND amount=499 AND currency='usd' AND billing_cycle_days IS NULL ORDER BY created_at DESC LIMIT 1;")"
+echo "Seeding E2E Mobius catalog..."
+E2E_MOBIUS_PLAN_ID="$E2E_MOBIUS_PLAN_ID" E2E_MOBIUS_ONE_OFF_AMOUNT="$E2E_MOBIUS_ONE_OFF_AMOUNT" E2E_MOBIUS_RECURRING_AMOUNT="$E2E_MOBIUS_RECURRING_AMOUNT" COMPOSE_FILE="$COMPOSE_FILE" bash "$ROOT_DIR/scripts/seed_e2e_mobius.sh" >/dev/null
+
+RECURRING_PRICE_ID="$(psql_scalar "SELECT id::text FROM billing.prices WHERE product_id = (SELECT id FROM billing.products WHERE slug='e2e_mobius') AND amount=$E2E_MOBIUS_RECURRING_AMOUNT AND currency='usd' AND billing_cycle_days=1 ORDER BY created_at DESC LIMIT 1;")"
+ONE_OFF_PRICE_ID="$(psql_scalar "SELECT id::text FROM billing.prices WHERE product_id = (SELECT id FROM billing.products WHERE slug='e2e_mobius') AND amount=$E2E_MOBIUS_ONE_OFF_AMOUNT AND currency='usd' AND billing_cycle_days IS NULL ORDER BY created_at DESC LIMIT 1;")"
 if [ -z "$RECURRING_PRICE_ID" ] || [ -z "$ONE_OFF_PRICE_ID" ]; then
   echo "Failed to load seeded E2E price ids" >&2
   exit 1
@@ -335,7 +435,7 @@ if [ "$ONE_OFF_STATUS" != "succeeded" ] || [ -z "$ONE_OFF_TXN_ID" ]; then
 fi
 echo "PASS one-off saved-vault charge: $(redact_id "$ONE_OFF_TXN_ID")"
 
-ONE_OFF_DB_CHECK="$(psql_scalar "SELECT concat(count(*), '|', bool_and(status='completed'), '|', bool_and(amount=499), '|', bool_and(currency='usd')) FROM billing.payments WHERE metadata->>'e2e_run_id' = '$E2E_RUN_ID' AND transaction_id = '$ONE_OFF_TXN_ID';")"
+ONE_OFF_DB_CHECK="$(psql_scalar "SELECT concat(count(*), '|', bool_and(status='completed'), '|', bool_and(amount=$E2E_MOBIUS_ONE_OFF_AMOUNT), '|', bool_and(currency='usd')) FROM billing.payments WHERE metadata->>'e2e_run_id' = '$E2E_RUN_ID' AND transaction_id = '$ONE_OFF_TXN_ID';")"
 if [ "$ONE_OFF_DB_CHECK" != "1|t|t|t" ]; then
   echo "FAIL one-off payment DB check: $ONE_OFF_DB_CHECK" >&2
   exit 1
@@ -373,19 +473,62 @@ echo "Verifying remote NMI state via Query API..."
 query_nmi transaction transaction_id "$ONE_OFF_TXN_ID" "$RESULT_DIR/nmi_one_off_query.xml"
 query_nmi transaction transaction_id "$SUB_TXN_ID" "$RESULT_DIR/nmi_subscription_txn_query.xml"
 query_nmi recurring recurring_id "$PROVIDER_SUB_ID" "$RESULT_DIR/nmi_recurring_query.xml"
-echo "PASS NMI Query API returned transaction and recurring responses"
+assert_query_contains "one-off remote transaction id" "$RESULT_DIR/nmi_one_off_query.xml" "$ONE_OFF_TXN_ID"
+ONE_OFF_AMOUNT_DECIMAL="$(printf '%d.%02d' "$((E2E_MOBIUS_ONE_OFF_AMOUNT / 100))" "$((E2E_MOBIUS_ONE_OFF_AMOUNT % 100))")"
+assert_query_contains "one-off remote amount" "$RESULT_DIR/nmi_one_off_query.xml" "$ONE_OFF_AMOUNT_DECIMAL"
+assert_query_status "one-off remote status" "$RESULT_DIR/nmi_one_off_query.xml"
+assert_query_currency_if_present "one-off remote currency" "$RESULT_DIR/nmi_one_off_query.xml"
+assert_query_contains "subscription remote transaction id" "$RESULT_DIR/nmi_subscription_txn_query.xml" "$SUB_TXN_ID"
+RECURRING_AMOUNT_DECIMAL="$(printf '%d.%02d' "$((E2E_MOBIUS_RECURRING_AMOUNT / 100))" "$((E2E_MOBIUS_RECURRING_AMOUNT % 100))")"
+assert_query_contains "subscription remote amount" "$RESULT_DIR/nmi_subscription_txn_query.xml" "$RECURRING_AMOUNT_DECIMAL"
+assert_query_status "subscription remote transaction status" "$RESULT_DIR/nmi_subscription_txn_query.xml"
+assert_query_currency_if_present "subscription remote transaction currency" "$RESULT_DIR/nmi_subscription_txn_query.xml"
+assert_query_contains "recurring remote subscription id" "$RESULT_DIR/nmi_recurring_query.xml" "$PROVIDER_SUB_ID"
+assert_query_status "recurring remote status" "$RESULT_DIR/nmi_recurring_query.xml"
+echo "PASS NMI Query API matches local transaction/subscription ids, amount, currency when returned, and status"
+
+echo "Verifying signed Mobius/NMI webhook ingestion and idempotent replay..."
+NEXT_CHARGE_DATE="$(date -u -d '+1 day' +%F)"
+WEBHOOK_BODY="$(jq -nc --arg event_id "e2e_webhook_${E2E_RUN_ID}" --arg sub "$PROVIDER_SUB_ID" --arg plan "$E2E_MOBIUS_PLAN_ID" --arg amount "$RECURRING_AMOUNT_DECIMAL" --arg next_charge_date "$NEXT_CHARGE_DATE" '{event_id:$event_id,event_type:"recurring.subscription.add",event_body:{subscription_id:$sub,next_charge_date:$next_charge_date,plan:{id:$plan,amount:$amount}}}')"
+post_signed_nmi_webhook "$WEBHOOK_BODY" "$RESULT_DIR/webhook_first"
+assert_http "signed NMI webhook ingestion" 200 "$RESULT_DIR/webhook_first.code" "$RESULT_DIR/webhook_first.body"
+post_signed_nmi_webhook "$WEBHOOK_BODY" "$RESULT_DIR/webhook_replay"
+assert_http "signed NMI webhook idempotent replay" 200 "$RESULT_DIR/webhook_replay.code" "$RESULT_DIR/webhook_replay.body"
+for _ in $(seq 1 90); do
+  SUB_ACTIVATION_CHECK="$(psql_scalar "SELECT concat(count(*), '|', bool_and(status='active')) FROM billing.subscriptions WHERE id = '$SUB_UUID'::uuid;")"
+  if [ "$SUB_ACTIVATION_CHECK" = "1|t" ]; then
+    break
+  fi
+  sleep 1
+done
+if [ "$SUB_ACTIVATION_CHECK" != "1|t" ]; then
+  echo "FAIL signed NMI add-subscription webhook did not activate local subscription: $SUB_ACTIVATION_CHECK" >&2
+  exit 1
+fi
+echo "PASS signed Mobius/NMI webhook ingestion, idempotent replay, and activation"
 
 echo "Cancelling subscription through OpenRails..."
 CANCEL_BODY='{"feedback":"mobius live e2e cancel"}'
 curl_json POST "$BASE_URL/v1/me/subscriptions/$SUBSCRIPTION_ID/cancel" "$CANCEL_BODY" "$RESULT_DIR/cancel_subscription"
-assert_http "subscription cancel" 200 "$RESULT_DIR/cancel_subscription.code" "$RESULT_DIR/cancel_subscription.body"
-CANCEL_CHECK="$(psql_scalar "SELECT concat(count(*), '|', bool_and(status='cancelled')) FROM billing.subscriptions WHERE id = '$SUB_UUID'::uuid;")"
+assert_http_accepted_or_ok "subscription cancel" "$RESULT_DIR/cancel_subscription.code" "$RESULT_DIR/cancel_subscription.body"
+for _ in $(seq 1 90); do
+  CANCEL_CHECK="$(psql_scalar "SELECT concat(count(*), '|', bool_and(status='cancelled')) FROM billing.subscriptions WHERE id = '$SUB_UUID'::uuid;")"
+  if [ "$CANCEL_CHECK" = "1|t" ]; then
+    break
+  fi
+  sleep 1
+done
 if [ "$CANCEL_CHECK" != "1|t" ]; then
   echo "FAIL local cancellation check: $CANCEL_CHECK" >&2
   exit 1
 fi
 query_nmi recurring recurring_id "$PROVIDER_SUB_ID" "$RESULT_DIR/nmi_recurring_after_cancel_query.xml"
-echo "PASS subscription cancelled locally and remote recurring query still resolves"
+if grep -Fq "$PROVIDER_SUB_ID" "$RESULT_DIR/nmi_recurring_after_cancel_query.xml"; then
+  assert_query_status "recurring after cancel remote status" "$RESULT_DIR/nmi_recurring_after_cancel_query.xml"
+  echo "PASS subscription cancelled locally and remote recurring query still resolves"
+else
+  echo "PASS subscription cancelled locally and NMI no longer returns the deleted recurring id"
+fi
 
 SUMMARY="$RESULT_DIR/summary.json"
 jq -nc \
@@ -407,6 +550,8 @@ jq -nc \
       saved_vault_one_off_charge:true,
       saved_vault_subscription_checkout:true,
       nmi_query:true,
+      signed_webhook_ingestion:true,
+      signed_webhook_idempotent_replay:true,
       cancellation:true
     },
     provider_refs:{

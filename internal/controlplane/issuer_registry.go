@@ -95,8 +95,8 @@ func (c *ControlPlane) loadEnabledDelegatedIssuers(ctx context.Context) ([]Deleg
 // registry: every enabled issuer (mapped to an active tenant) is registered via
 // AddIssuer with JWKS-URL key fetching, and any issuer previously registered but
 // no longer enabled is removed (the per-issuer kill-switch + reload convergence
-// path, issue #259). The self-issuer is registered separately in
-// newDelegatedVerifier (dual-trust migration window) and is never touched here.
+// path, issue #259). Every delegated-token issuer is a federated tenant issuer;
+// OpenRails registers no self-issuer of its own.
 //
 // JWKS keys are fetched lazily by the verifier on first use and refreshed on the
 // configured cadence / on unknown-kid, so registering an issuer whose JWKS is

@@ -40,6 +40,8 @@ var ModelRegistry = []any{
 	(*CreditSpendLimit)(nil),
 	(*ProcessorCustomer)(nil),
 	(*SolanaSubscription)(nil),
+	(*LinkedWallet)(nil),
+	(*USDCFundingSession)(nil),
 	(*ProductAccessGrant)(nil),
 	(*UsageEvent)(nil),
 	(*Invoice)(nil),

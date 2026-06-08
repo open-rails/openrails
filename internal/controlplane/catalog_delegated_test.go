@@ -34,7 +34,6 @@ func TestIsDelegatedPermission_HardRejectsServiceAndOperatorGrants(t *testing.T)
 		PermCatalogWrite,
 		PermPaymentsRefund,
 		PermSubscriptionsCancel,
-		PermSelfMint,
 		PermPlatformSuperadmin,
 		"openrails:tenant:*", // no wildcard is ever a real permission
 		"openrails:tenant",   // coarse super-grant must not exist

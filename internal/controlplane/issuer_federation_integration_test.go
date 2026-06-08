@@ -66,18 +66,6 @@ CREATE TABLE IF NOT EXISTS billing.tenant_subjects (
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     CONSTRAINT uq_fed_tenant_subject UNIQUE (tenant_id, issuer, subject)
 );
-CREATE TABLE IF NOT EXISTS billing.service_jwt_grants (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id   UUID NOT NULL REFERENCES billing.tenants (id) ON DELETE CASCADE,
-    issuer      TEXT NOT NULL,
-    subject     TEXT NOT NULL,
-    permissions TEXT[] NOT NULL DEFAULT '{}',
-    resources   JSONB NOT NULL DEFAULT '[]'::jsonb,
-    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    CONSTRAINT uq_fed_service_jwt_grant UNIQUE (tenant_id, issuer, subject)
-);
 `
 
 func mustTenantID(s string) tenant.ID {
@@ -292,32 +280,29 @@ func TestFederatedServiceJWTs(t *testing.T) {
 	registerIssuerRow(t, pool, fedTenantA, issuer, jwksServer(t, signer).URL, true)
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
 
-	require.NoError(t, cp.UpsertServiceJWTGrant(ctx, ServiceJWTGrant{
-		TenantID:    fedTenantA,
-		Issuer:      issuer,
-		Subject:     subject,
-		Permissions: []string{PermEntitlementsRead, PermCreditsRead},
-		Resources:   []authcore.ServiceTokenResource{TenantResource(fedTenantA)},
-		Enabled:     true,
-	}))
-
+	// Registering the issuer to the tenant IS the authorization — there is no
+	// server-side grant. The token's self-assigned permissions are authoritative,
+	// scoped to the issuer's own tenant resources.
 	token := mintServiceJWT(t, signer, issuer, subject, []string{PermEntitlementsRead, PermCreditsWrite}, []string{"openrails"})
 	resolved, err := cp.ResolveServiceJWT(ctx, token)
 	require.NoError(t, err)
 	require.Equal(t, fedTenantA, resolved.TenantID)
 	require.Equal(t, "tenant-a", resolved.TenantSlug)
-	require.ElementsMatch(t, []string{PermEntitlementsRead}, resolved.Permissions, "JWT-requested permissions must be intersected with the server-side grant")
+	require.ElementsMatch(t, []string{PermEntitlementsRead, PermCreditsWrite}, resolved.Permissions, "self-assigned token permissions are authoritative")
 	require.Contains(t, resourceIDs(resolved.Resources, ResourceKindTenant), fedTenantA.String())
 
-	_, err = cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, issuer, "service:unknown", []string{PermEntitlementsRead}, []string{"openrails"}))
-	require.ErrorIs(t, err, ErrServiceTokenScopeDenied)
+	// Authority anchors to the issuer's tenant, not a per-subject grant: any
+	// subject minted by a registered issuer is authorized over its own tenant.
+	resolvedUnknown, err := cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, issuer, "service:unknown", []string{PermEntitlementsRead}, []string{"openrails"}))
+	require.NoError(t, err)
+	require.Equal(t, fedTenantA, resolvedUnknown.TenantID)
 
-	_, err = cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, issuer, subject, []string{PermCreditsWrite}, []string{"openrails"}))
-	require.ErrorIs(t, err, ErrServiceTokenScopeDenied)
-
+	// Audience verification still applies: an aud not accepted for the registered
+	// issuer is rejected.
 	_, err = cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, issuer, subject, []string{PermEntitlementsRead}, []string{"wrong-audience"}))
 	require.Error(t, err)
 
+	// An unregistered issuer resolves to no tenant → denied.
 	_, err = cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, "https://unregistered-service.example", subject, []string{PermEntitlementsRead}, []string{"openrails"}))
 	require.Error(t, err)
 
@@ -330,14 +315,6 @@ func TestFederatedServiceJWTs(t *testing.T) {
 		{name: "tensorhub credits", subject: "service:tensorhub-runtime", permissions: []string{PermCreditsRead, PermCreditsWrite}},
 	} {
 		t.Run(service.name, func(t *testing.T) {
-			require.NoError(t, cp.UpsertServiceJWTGrant(ctx, ServiceJWTGrant{
-				TenantID:    fedTenantA,
-				Issuer:      issuer,
-				Subject:     service.subject,
-				Permissions: service.permissions,
-				Resources:   []authcore.ServiceTokenResource{TenantResource(fedTenantA)},
-				Enabled:     true,
-			}))
 			resolved, err := cp.ResolveServiceJWT(ctx, mintServiceJWT(t, signer, issuer, service.subject, service.permissions, []string{"openrails"}))
 			require.NoError(t, err)
 			require.Equal(t, fedTenantA, resolved.TenantID)
@@ -363,14 +340,6 @@ func TestFederatedServiceJWTClaimRejections(t *testing.T) {
 	subject := "service:hentai0-runtime"
 	registerIssuerRow(t, pool, fedTenantA, issuer, jwksServer(t, signer).URL, true)
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
-	require.NoError(t, cp.UpsertServiceJWTGrant(ctx, ServiceJWTGrant{
-		TenantID:    fedTenantA,
-		Issuer:      issuer,
-		Subject:     subject,
-		Permissions: []string{PermEntitlementsRead},
-		Resources:   []authcore.ServiceTokenResource{TenantResource(fedTenantA)},
-		Enabled:     true,
-	}))
 
 	now := time.Now().UTC()
 	base := jwt.MapClaims{
