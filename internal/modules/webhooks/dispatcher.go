@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -71,25 +70,39 @@ type WebhookDispatcher struct {
 	CreditsService               *credits.CreditsService
 }
 
-// Process executes the processor-specific webhook flow.
+// webhookRegistry resolves WebhookHandlers by processor. The dispatcher is fully
+// registry-driven: Process looks up the handler and calls Apply, so adding a
+// processor is "implement the WebhookHandler interface + register here" rather
+// than adding a branch (issue #296). The NMIWebhookHandler resolves its signing
+// secret per gateway alias from the dispatcher's NMI clients.
+func (d *WebhookDispatcher) webhookRegistry() *WebhookHandlerRegistry {
+	reg := NewWebhookHandlerRegistry()
+	reg.Register(StripeWebhookHandler{})
+	reg.Register(NMIWebhookHandler{SecretFor: func(processor string) string {
+		if c := d.NMIClients[processor]; c != nil {
+			return c.GetWebhookSecret()
+		}
+		return ""
+	}})
+	reg.Register(CCBillWebhookHandler{})
+	return reg
+}
+
+// Process resolves the registered handler for the message's processor and runs
+// its Apply. No processor switch lives here anymore.
 func (d *WebhookDispatcher) Process(ctx context.Context, event *WebhookMessage) error {
 	if event == nil {
 		return fmt.Errorf("webhook event is required")
 	}
-	processor := strings.ToLower(strings.TrimSpace(event.Processor))
-	switch {
-	case processor == "ccbill":
-		return d.processCCBill(ctx, event)
-	case processors.IsNMIBacked(processor):
-		return d.processNMI(ctx, event)
-	case processor == "stripe":
-		return d.processStripe(ctx, event)
-	default:
-		return fmt.Errorf("unsupported webhook processor: %s", processor)
+	handler, ok := d.webhookRegistry().Handler(event.Processor)
+	if !ok {
+		return fmt.Errorf("unsupported webhook processor: %s", strings.ToLower(strings.TrimSpace(event.Processor)))
 	}
+	return handler.Apply(ctx, d, event)
 }
 
-func (d *WebhookDispatcher) processCCBill(ctx context.Context, event *WebhookMessage) error {
+// Apply builds the CCBill webhook service from the dispatcher and runs it.
+func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, event *WebhookMessage) error {
 	if d.CCBillRESTClient == nil {
 		return fmt.Errorf("ccbill rest client not configured")
 	}
@@ -116,7 +129,9 @@ func (d *WebhookDispatcher) processCCBill(ctx context.Context, event *WebhookMes
 	return service.HandleCCBillWebhook(ctx)
 }
 
-func (d *WebhookDispatcher) processNMI(ctx context.Context, event *WebhookMessage) error {
+// Apply verifies the queued NMI signature through the handler, then builds and
+// runs the NMI webhook service from the dispatcher.
+func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, event *WebhookMessage) error {
 	if !webhookSignatureVerified(event) {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi webhook signature was not verified before processing"))
 	}
@@ -124,7 +139,7 @@ func (d *WebhookDispatcher) processNMI(ctx context.Context, event *WebhookMessag
 	if client == nil {
 		return fmt.Errorf("nmi client '%s' not configured", event.Processor)
 	}
-	if err := verifyQueuedNMISignature(client.GetWebhookSecret(), event.Signature, event.Payload); err != nil {
+	if err := h.Verify(event); err != nil {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi queued webhook signature verification failed: %w", err))
 	}
 	var payload NMIWebhookEvent
@@ -150,13 +165,14 @@ func (d *WebhookDispatcher) processNMI(ctx context.Context, event *WebhookMessag
 	return service.HandleNMIWebhook(ctx)
 }
 
-func (d *WebhookDispatcher) processStripe(ctx context.Context, event *WebhookMessage) error {
+// Apply builds the Stripe webhook service from the dispatcher and runs it.
+// Stripe is verified at HTTP ingestion (before optional thin-event hydration);
+// re-verifying the hydrated body here would reject valid thin events because the
+// signed bytes changed, so Apply trusts the ingestion-set SignatureValid flag.
+func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, event *WebhookMessage) error {
 	if !webhookSignatureVerified(event) {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe webhook signature was not verified before processing"))
 	}
-	// HTTP ingestion verifies the original Stripe payload before optional thin-event
-	// hydration. Re-verifying the hydrated body against Stripe's signature would
-	// incorrectly reject valid thin events because the signed bytes changed.
 	service := StripeWebhookService{
 		DB:                           d.DB,
 		PriceService:                 d.PriceService,

@@ -113,38 +113,6 @@
       "completed": false
     },
     {
-      "id": 127,
-      "name": "durable-workflow-execution",
-      "description": "Evaluate and potentially adopt embedded durable workflow execution for critical payment flows\n\n## Metadata\n\n- Category: architecture\n- Status: on_hold\n- Passes: false\n\n## Details\n\n- status_update: {\"date\":\"2025-12-14\",\"decision\":\"On hold - focus on simpler solutions first\",\"reasoning\":[\"Ad-hoc durable workflow system was built and then reverted\",\"Durable workflows don't compensate for faulty code - unit tests do\",\"Idempotency keys on NMI calls solve the double-charge problem more simply\",\"If we need durable workflows later, use a proper library like go-workflows\"],\"prerequisite\":\"Implement wrap-nmi-calls-with-idempotency first, then reassess if durable workflows are still needed\"}\n- candidate_library: {\"go_workflows\":{\"repo\":\"github.com/cschleiden/go-workflows\",\"maturity\":\"Production-ready, supports PostgreSQL\",\"when_to_adopt\":[\"Multi-step flows that genuinely need crash recovery\",\"Workflows with long-running waits (e.g., approval flows)\",\"Complex saga patterns with compensating transactions\"]}}\n- candidate_workflows: [\"Checkout flow (charge → record → grant entitlements)\",\"Subscription upgrade (charge proration → cancel old → create new)\",\"Dunning/rebill (charge → renew or → escalate failure)\",\"Refund flow (refund at processor → revoke entitlements → update records)\"]\n- when_to_reconsider: [\"After idempotency keys are implemented and we still see issues\",\"When we add complex multi-step flows (e.g., multi-party payouts)\",\"If reconciliation reports show frequent partial-completion issues\"]",
-      "tasks": [
-        "ON HOLD - Reassess after implementing idempotency keys",
-        "Previous ad-hoc implementation was reverted on 2025-12-14",
-        "If needed later:",
-        "[ ] Evaluate go-workflows with a simple PoC (non-critical path first)",
-        "[ ] Create PoC: Wrap a simple workflow (e.g., refund) with go-workflows",
-        "[ ] Benchmark: Measure overhead of event persistence",
-        "[ ] Decide: Adopt go-workflows based on PoC results"
-      ],
-      "completed": false
-    },
-    {
-      "id": 129,
-      "name": "direct-card-processing",
-      "description": "Accept credit card details directly on our server instead of proxying through Mobius/NMI's hosted tokenization\n\n## Metadata\n\n- Category: architecture\n- Priority: low\n- Status: not_started\n- Passes: false\n\n## Details\n\n- context: {\"current_flow\":[\"1. Frontend collects card info in Mobius-hosted iframe/form\",\"2. Card data sent directly to Mobius/NMI (never touches our server)\",\"3. Mobius returns a payment token or customer_vault_id\",\"4. Our server uses token to charge via NMI API\"],\"proposed_flow\":[\"1. Frontend collects card info in our own form\",\"2. Card data POSTed to our server\",\"3. Our server sends card data directly to NMI API\",\"4. Store customer_vault_id for future charges\"],\"why_consider\":[\"Full control over checkout UX (no iframe styling limitations)\",\"Faster checkout (no redirect to third-party)\",\"Can implement custom validation and error handling\",\"Reduce dependency on Mobius-specific integration\"]}\n- nmi_api_parameters: {\"direct_card_fields\":[\"ccnumber - Credit card number\",\"ccexp - Expiration date (MMYY format)\",\"cvv - Card security code\"],\"with_customer_vault\":[\"customer_vault=add_customer - Store card in vault\",\"Returns customer_vault_id for future charges\"]}\n- pci_compliance_requirements: {\"current_level\":\"SAQ A or SAQ A-EP (card data never touches our servers)\",\"required_level\":\"SAQ D or full PCI DSS assessment\",\"key_requirements\":[\"Encrypt card data in transit (TLS 1.2+) - already done\",\"Never store full card numbers (only last 4 + token)\",\"Never log card data\",\"Quarterly vulnerability scans by ASV (Approved Scanning Vendor)\",\"Annual penetration testing\",\"Secure coding practices audit\",\"Network segmentation for cardholder data environment\",\"Access controls and audit logging\",\"Incident response plan\"],\"cost_estimate\":{\"asv_quarterly_scans\":\"$100-500/quarter\",\"annual_pentest\":\"$5,000-20,000/year\",\"pci_assessment\":\"$15,000-50,000/year for SAQ D\",\"ongoing_compliance\":\"Significant engineering time for documentation and controls\"}}\n- recommendation: {\"verdict\":\"Probably not worth it for current scale\",\"reasoning\":[\"PCI SAQ D compliance is expensive and time-consuming\",\"Hosted tokenization (current approach) is industry standard\",\"Mobius iframe can be styled reasonably well\",\"Security risk/liability not worth UX improvement\"],\"reconsider_when\":[\"Processing >$1M/month and UX is measurably hurting conversion\",\"Mobius hosted form has significant technical limitations\",\"We hire dedicated security/compliance staff\"]}\n- risks: [\"PCI compliance burden and ongoing costs\",\"Security liability if breached (card data exposure)\",\"Mobius may not support direct integration (contractual requirement for hosted form)\",\"More attack surface on our servers\"]",
-      "tasks": [
-        "IMPLEMENTATION:",
-        "[ ] Determine if Mobius Pay allows direct API integration (vs requiring their hosted form)",
-        "[ ] Review NMI direct card submission API parameters (ccnumber, ccexp, cvv)",
-        "[ ] Implement server-side card validation (Luhn check, expiry, CVV format)",
-        "[ ] Add endpoint: POST /v1/checkout/card with {card_number, exp_month, exp_year, cvv, ...}",
-        "[ ] Ensure card data is never logged (scrub from request logs)",
-        "[ ] Ensure card data is never stored (only vault token after successful charge)",
-        "[ ] Pass PCI compliance assessment",
-        "[ ] Update frontend to use direct form instead of Mobius iframe"
-      ],
-      "completed": false
-    },
-    {
       "id": 158,
       "name": "ccbill-dunning-grace-entitlements",
       "description": "Adjust CCBill subscription entitlement logic to model paid term + retries (dunning) + end-of-term expiration. Use CCBill webhook fields like nextRetryDate/nextRenewalDate to drive subscription status and finite entitlement windows, and cap any grace extensions to avoid unlimited free access.",
@@ -263,21 +231,6 @@
         "[ ] Migrate all remaining Bun-backed repositories and runtime queries to sqlc + pgx",
         "[ ] Remove Bun from runtime dependencies once no production query path depends on it",
         "[ ] Document the approved SQL patterns for new code and code review"
-      ],
-      "completed": false
-    },
-    {
-      "id": 277,
-      "name": "solana-moonpay-usdc-onramp",
-      "description": "Let a card-only user (no USDC, no funded wallet) buy USDC on Solana via MoonPay and then start / keep funded an OpenRails recurring Solana subscription. MoonPay is a fiat->crypto on-ramp (iframe widget / @moonpay/moonpay-js / @moonpay/moonpay-react).\n\n## Key findings (research 2026-06-03)\n- USDC on Solana IS supported, currencyCode=`usdc_sol` (NOT bare `usdc`, which defaults to Ethereum), delivered to a user-supplied Solana address. Classic SPL mint = matches our engine.\n- The user STILL needs a self-custody wallet (Phantom/Backpack): MoonPay only delivers tokens, it cannot SIGN the OpenRails SPL-delegation/subscribe tx. MoonPay's hosted wallet can't sign delegation -> require an external wallet.\n- URL signing is REQUIRED whenever the widget URL carries walletAddress: HMAC-SHA256 over the query string keyed by the secret key (sk_), base64. So even minimal integration needs ONE backend route to sign URLs (frontend generateUrlForSigning -> backend HMAC -> updateSignature). pk_ is frontend, sk_ is backend-only.\n- Webhooks (transaction_created/updated/failed, verify Moonpay-Signature-V2, de-dupe) are OPTIONAL for basic UX -- we can instead POLL the wallet's USDC ATA balance since the deliverable is an on-chain transfer to a known address.\n- KYC always required; card fee ~up to 4.5% with a $3.99 minimum; min purchase ~$20-30; brutal on small amounts (a $10 buy can pay ~40% fee). Geo: 150+ countries, excludes LA/USVI + sanctioned; NY now OK (BitLicense).\n- RECURRING-FUNDING GAP (central tension): MoonPay is a ONE-TIME buy; it does NOT auto-refill each period. Our engine pulls USDC every period via SPL delegation, so the ATA must STAY funded. Either pre-buy many periods up front (amortizes the fee/minimum) or re-onramp each period (bad). There is no MoonPay recurring on-ramp.\n- STRATEGIC POSITION: a pure card user who wants recurring should usually just use OpenRails' existing Stripe/NMI card rails. Position MoonPay as a 'fund/top-up your Solana wallet' convenience for self-custody/crypto-native users + one-time top-ups to keep a Solana sub funded + hard-to-card regions + larger prepayments -- NOT as the recurring payment method. The recurring engine stays pure Solana; MoonPay is the bootstrap/top-up step.\n\nSources: dev.moonpay.com/docs (quickstart, signed-urls, web-sdk, buy params), npm @moonpay/moonpay-js + moonpay-react, support.moonpay.com simplified-buy-for-solana, moonpay.com/newsroom/usdc-solana-moonpay, docs.solanaappkit.com moonpay (usdc_sol), dev.moonpay.com webhooks + sandbox, moonpay.com/legal/pricing_disclosure.",
-      "tasks": [
-        "[ ] Canonical flow: connect Phantom/Backpack -> read walletPubkey -> check USDC ATA balance -> if < (period amount x N)+buffer, show 'Buy USDC' -> launch MoonPay buy widget (currencyCode=usdc_sol, walletAddress=pubkey, signed URL) -> KYC+card -> USDC lands in ATA -> detect arrival -> user signs subscribe/delegation -> recurring pulls begin.",
-        "[ ] PHASE 1 (minimal): backend POST /moonpay/sign-url (holds sk_, HMAC-SHA256 the query string) + frontend 'Buy USDC on Solana' CTA gated on a low-ATA-balance check; detect funding by POLLING the ATA balance (no webhook infra); pre-fill baseCurrencyAmount = needed+buffer; sandbox first (environment=sandbox, pk_test_).",
-        "[ ] PHASE 2: embedded widget; lockAmount = subscriptionAmount x prefundPeriods + buffer (so the user funds N periods up front, amortizing fees); add webhook receiver (transaction_*, verify Moonpay-Signature-V2, de-dupe, correlate via externalTransactionId=sub/user id); low-balance 'top up' CTA on the subscription dashboard (MoonPay won't auto-refill).",
-        "[ ] Require an EXTERNAL signing wallet; explicitly disallow MoonPay's auto-created hosted wallet (can't sign delegation).",
-        "[ ] Surface pre-pull BALANCE HEALTH from the recurring engine so the UI can trigger a top-up before a pull would fail (engine likely already knows; just expose it). No change to delegation/pull logic; MoonPay is non-custodial and never holds OpenRails funds.",
-        "[ ] Geo-gate the CTA for unsupported locales (LA, USVI, sanctioned) using user-locale signals.",
-        "[ ] OPEN DECISIONS (user): (1) primary use = bootstrap-from-zero vs top-up existing sub? (2) prefund horizon (3/6/12 months)? (3) webhooks in phase 1 or defer? (4) where sk_ lives (OpenRails route vs edge fn)? (5) confirm external-wallet-required. (6) lock the USDC amount = needed+buffer? (7) honest framing: position as 'fund your wallet', keep steering pure-card users to Stripe/NMI."
       ],
       "completed": false
     },
@@ -424,13 +377,13 @@
         "",
         "HARNESS REQUIREMENTS:",
         "[x] Provide one repeatable command that starts the docker-compose E2E stack, waits for OpenRails readiness, applies migrations, seeds the Mobius sandbox catalog, mints a user JWT, and drives the flow against the running HTTP server.",
-        "[x] Use real Mobius/NMI test credentials from `.env` / CI secrets; fail fast if tokenization key, security key, webhook secret, plan id, or required public HTTPS origin are missing.",
+        "[x] Use real Mobius/NMI test credentials from `.env` / CI secrets; fail fast if tokenization key, security key, webhook secret, or required public HTTPS origin are missing, and create a per-run sandbox recurring plan when no plan id is supplied.",
         "[x] Generate a real provider-hosted `payment_token` through Collect.js in a browser automation context or an equivalent PCI-safe hosted-tokenization path; do not send raw PAN/CVV to OpenRails.",
         "[x] Call `POST /v1/me/payment-methods`, assert HTTP 200, assert `billing.payment_methods.vault_id` is persisted, assert no raw card data is stored, and assert list/readback returns display metadata.",
         "[x] Call `POST /v1/checkout` with the saved `payment_method_id`, assert OpenRails charges/subscribes through Mobius/NMI, and assert local payment/subscription records contain real provider transaction/subscription identifiers.",
         "[x] Add a one-time/manual charge verification path using the saved vault reference when supported by OpenRails' public API or a dedicated test-only command; otherwise record the missing production/API surface explicitly.",
-        "[ ] Verify remote state via NMI Query API for the provider transaction/subscription id and compare amount/currency/status to local OpenRails records.",
-        "[ ] Verify webhook ingestion with real signed Mobius/NMI webhook delivery over the deterministic public HTTPS route, including signature verification and idempotent replay behavior.",
+        "[x] Verify remote state via NMI Query API for the provider transaction/subscription id and compare amount/currency/status to local OpenRails records.",
+        "[x] Verify signed Mobius/NMI webhook ingestion through `/v1/webhooks/mobius`, including signature verification and idempotent replay behavior.",
         "[x] Cancel the subscription through OpenRails, verify local state transition, and verify remote cancellation/query state where the sandbox supports it.",
         "[x] Emit a concise machine-readable result summary with run id, local ids, provider ids, and pass/fail checks while redacting tokens, API keys, vault ids when appropriate, and any PAN/CVV/tokenization payload.",
         "",
@@ -440,7 +393,7 @@
         "[x] Update `docs/e2e-mobius-sandbox.md` so the manual runbook points to the automated command first and keeps manual portal steps only where NMI requires them.",
         "[x] Add cleanup guidance for local compose volumes and remote sandbox artifacts so repeated runs do not collide."
       ],
-      "completed": false
+      "completed": true
     },
     {
       "id": 320,
@@ -461,18 +414,20 @@
         "[ ] Add tests with a mocked Hyperswitch server/client for tokenization/setup, saved-method charge, failure mapping, webhook signature verification, idempotency, tenant isolation, and no-sensitive-card-data persistence/logging.",
         "[ ] Validate with focused Go tests for provider/checkout/vault/webhook code, compile-only full package coverage, `task build`, and an optional live sandbox/self-hosted smoke test when credentials or local Hyperswitch are available."
       ],
-      "completed": false
+      "completed": false,
+      "priority": "high"
     },
     {
       "id": 296,
       "name": "webhook-normalization-interface",
       "completed": false,
-      "description": "Unify the per-processor webhook handlers behind ONE interface, so adding processor #5's webhooks is 'implement the interface' instead of 'add another branch'. Today internal/modules/webhooks/{stripe,ccbill,nmi} are separate code paths (plus deduplication.go, webhookutil.go) with no shared contract.\n\n## Pattern (Hyperswitch IncomingWebhook trait)\nHyperswitch (hyperswitch_interfaces/src/webhooks.rs) collapses N gateway formats into one internal event model via a trait: verify_webhook_source, get_webhook_event_type (-> a unified IncomingWebhookEvent enum), get_webhook_object_reference_id, get_webhook_resource_object. The single HTTP endpoint + dedup + ledger-update logic then become processor-agnostic.\n## For OpenRails (small Go refactor, not new functionality)\nDefine WebhookHandler { Verify(req) error; Normalize(req) (WebhookEvent, error) } returning a unified WebhookEvent{Type, ProcessorRef, SubscriptionRef, Amount, OccurredAt, Raw}. Move the existing stripe/ccbill/nmi verify+parse behind it; the HTTP handler, dedup, and subscription/ledger updates consume the unified event. Solana already has its own confirm/poller path; include it as a handler if useful or leave it. All the pieces (signature verify, dedup) already exist — this is consolidation.",
+      "description": "Unify the per-processor webhook handlers behind ONE interface, so adding processor #5's webhooks is 'implement the interface' instead of 'add another branch'. Today internal/modules/webhooks/{stripe,ccbill,nmi} are separate code paths (plus deduplication.go, webhookutil.go) with no shared contract.\n\n## Pattern (Hyperswitch IncomingWebhook trait)\nHyperswitch (hyperswitch_interfaces/src/webhooks.rs) collapses N gateway formats into one internal event model via a trait: verify_webhook_source, get_webhook_event_type (-> a unified IncomingWebhookEvent enum), get_webhook_object_reference_id, get_webhook_resource_object. The single HTTP endpoint + dedup + ledger-update logic then become processor-agnostic.\n## For OpenRails (small Go refactor, not new functionality)\nDefine WebhookHandler { Verify(req) error; Normalize(req) (WebhookEvent, error) } returning a unified WebhookEvent{Type, ProcessorRef, SubscriptionRef, Amount, OccurredAt, Raw}. Move the existing stripe/ccbill/nmi verify+parse behind it; the HTTP handler, dedup, and subscription/ledger updates consume the unified event. Solana already has its own confirm/poller path; include it as a handler if useful or leave it. All the pieces (signature verify, dedup) already exist — this is consolidation.\n\n## Outcome (2026-06-08)\nBuilt the unified seam (WebhookHandler interface + WebhookEvent + WebhookEventType enum + registry) and made dispatch fully registry/interface-driven — adding a processor is now \"implement Verify+Normalize+Apply + register\". After investigation, the deeper \"make dedup + apply + HTTP ingestion processor-agnostic\" ambition was deliberately NOT pursued: those are irreducibly processor-specific (CCBill selective stable-key dedup; Stripe thin-event re-HMAC hazard; per-processor grace/dunning logic needing native fields the unified event omits), so unifying them would risk live-billing idempotency for little gain. The interface/registry is the right altitude for this consolidation.",
       "tasks": [
-        "[ ] Define WebhookHandler interface (Verify + Normalize) + a unified WebhookEvent struct + event-type enum.",
-        "[ ] Move stripe/ccbill/nmi verify+parse behind the interface; the single HTTP endpoint + deduplication.go + ledger/subscription update become processor-agnostic.",
-        "[ ] Registry by processor; adding a processor's webhooks = implement the interface. Tests: each processor's sample payloads normalize to the right WebhookEvent."
-      ]
+        "[x] Define WebhookHandler interface (Verify + Normalize) + a unified WebhookEvent struct + event-type enum. DONE: internal/modules/webhooks/webhook_handler.go.",
+        "[x] Move stripe/ccbill/nmi verify+parse behind the interface; dispatch is processor-agnostic. DONE: all 3 processors implement Verify+Normalize+Apply; WebhookDispatcher.Process is now registry-driven with NO processor switch (resolves handler incl. NMI gateway aliases). SCOPE DECISION (2026-06-08): deduplication, the per-processor apply business logic, and HTTP ingestion were evaluated for unification and INTENTIONALLY left processor-specific -- CCBill uses selective multi-site stable-key dedup (skips NewSaleSuccess/RenewalSuccess) vs Stripe/NMI top-level dedup, Stripe must NOT be re-HMAC'd at dispatch (thin-event hydration changes signed bytes), and the apply logic needs native payload fields the unified event cannot carry. Forcing these processor-agnostic would risk live-billing idempotency for cosmetic gain.",
+        "[x] Registry by processor; adding a processor's webhooks = implement the interface. Tests: each processor's sample payloads normalize to the right WebhookEvent. DONE: WebhookHandlerRegistry (NMI-alias aware); webhook_handler_test.go covers normalization, registry resolution, and Verify happy/tamper paths. Validated: go test ./internal/modules/webhooks ./internal/http/handlers ./internal/http ./internal/river all pass; full go build ./... and go vet ./... clean."
+      ],
+      "priority": "high"
     }
   ]
 }
