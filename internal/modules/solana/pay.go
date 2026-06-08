@@ -17,9 +17,11 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -49,16 +51,8 @@ const (
 	eligibilityDowngrade = "downgrade"
 )
 
-// ErrSolanaSubscribePending is returned by ConfirmSolanaSubscribeSession (and
-// surfaced through the poller) when a RECURRING subscribe Solana Pay session has
-// only its init tx landed so far — the authority now exists but the atomic
-// [subscribe+transfer] bundle has not landed yet. The poller treats it as
-// "keep polling": it does NOT consume the reference (the subscribe tx carries the
-// SAME reference) and re-checks until the subscription PDA is funded. It is a
-// normal in-progress state, not a failure.
 var ErrSolanaSubscribePending = errors.New("solana: recurring subscribe pending subscribe step")
 
-// PendingSolanaPayment represents a pending Solana payment stored in Redis
 type PendingSolanaPayment struct {
 	UserID      string    `json:"user_id"`
 	PriceID     string    `json:"price_id"`
@@ -71,26 +65,10 @@ type PendingSolanaPayment struct {
 	Recipient   string    `json:"recipient"`    // merchant wallet
 	CreatedAt   time.Time `json:"created_at"`
 	ExpiresAt   time.Time `json:"expires_at,omitempty"`
-
-	// Lifecycle marks a checkout-session-backed pending record whose confirmation
-	// mirrors an on-chain CANCEL or TIER-CHANGE (checkout modes solana_cancel /
-	// solana_tier_change) rather than registering a purchase. When set, the poller
-	// skips token/amount verification (the random reference already identifies the
-	// tx) and routes the confirmed signature to ConfirmSolanaLifecycleSession.
-	Lifecycle bool `json:"lifecycle,omitempty"`
-
-	// Subscribe marks a checkout-session-backed pending record for a RECURRING
-	// subscribe over Solana Pay (mode=subscription, flow=transaction_request). Like
-	// Lifecycle, the poller skips token verification (the random reference already
-	// identifies the tx) and routes the confirmed signature to
-	// ConfirmSolanaSubscribeSession, which advances the init→subscribe step and, once
-	// the atomic [subscribe+transfer] bundle has landed, enrolls the membership. The
-	// init tx and the subscribe tx share this same reference, so confirmation is
-	// step-aware + idempotent.
-	Subscribe bool `json:"subscribe,omitempty"`
+	Lifecycle   bool `json:"lifecycle,omitempty"`
+	Subscribe   bool `json:"subscribe,omitempty"`
 }
 
-// SolanaPayService handles Solana Pay Transfer Request flow
 type SolanaPayService struct {
 	db                 *db.DB
 	redis              *redis.Client
@@ -101,9 +79,10 @@ type SolanaPayService struct {
 	eligibilityChecker purchaseEligibilityChecker
 	fxProvider         fx.Provider
 	priceProvider      TokenPriceProvider
+	latency            metric.Float64Histogram
+	errors             metric.Int64Counter
 }
 
-// NewSolanaPayService creates a new SolanaPayService
 func NewSolanaPayService(
 	db *db.DB,
 	redis *redis.Client,
@@ -115,6 +94,9 @@ func NewSolanaPayService(
 	priceProvider TokenPriceProvider,
 	clocks ...clockwork.Clock,
 ) *SolanaPayService {
+	meter, _ := platform.InitTelemetry()
+	latency, _ := meter.Float64Histogram("solana_pay_generate_latency_seconds", metric.WithDescription("Latency of Solana Pay payment generation"))
+	errors, _ := meter.Int64Counter("solana_pay_generate_errors_total", metric.WithDescription("Total count of Solana Pay payment generation errors"))
 	return &SolanaPayService{
 		db:                 db,
 		redis:              redis,
@@ -125,6 +107,8 @@ func NewSolanaPayService(
 		fxProvider:         fxProvider,
 		priceProvider:      priceProvider,
 		clock:              timeutil.FirstClock(clocks...),
+		latency:            latency,
+		errors:             errors,
 	}
 }
 
@@ -150,18 +134,25 @@ func (s *SolanaPayService) Clock() clockwork.Clock {
 // GeneratePayment creates a new pending Solana payment and returns the Transfer Request URL.
 // It first checks purchase eligibility to prevent duplicate purchases.
 func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*PayResult, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
+
 	if sessionID == nil || *sessionID == uuid.Nil {
+		s.errors.Add(ctx, 1)
 		return nil, fmt.Errorf("checkout session id is required for solana payments")
 	}
 	tokenSymbol = strings.ToUpper(strings.TrimSpace(tokenSymbol))
 	if tokenSymbol == "" {
+		s.errors.Add(ctx, 1)
 		return nil, fmt.Errorf("token symbol is required")
 	}
 
-	// Check purchase eligibility BEFORE generating the payment URL
 	if s.eligibilityChecker != nil {
 		eligibility, err := s.eligibilityChecker.CheckPurchaseEligibility(ctx, userID, priceID)
 		if err != nil {
+			s.errors.Add(ctx, 1)
 			return nil, fmt.Errorf("failed to check purchase eligibility: %w", err)
 		}
 
@@ -169,26 +160,25 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		case eligibilityBlocked:
 			return nil, fmt.Errorf("purchase blocked: %s", eligibility.Reason)
 		case eligibilityUpgrade, eligibilityDowngrade:
-			// Solana doesn't support subscription upgrades/downgrades
 			return nil, fmt.Errorf("solana does not support subscription tier changes; please cancel existing subscription first")
 		case eligibilityAllowed:
-			// Continue with payment generation
+			// Continue
 		}
 	}
 
-	// Validate price
 	price, err := s.priceService.GetByID(ctx, priceID)
 	if err != nil {
+		s.errors.Add(ctx, 1)
 		return nil, fmt.Errorf("price not found: %w", err)
 	}
 	if !price.IsPurchasable() {
 		return nil, fmt.Errorf("price is not active")
 	}
 
-	// Validate product
 	if s.productService != nil {
 		product, err := s.productService.GetByID(ctx, price.ProductID)
 		if err != nil {
+			s.errors.Add(ctx, 1)
 			return nil, fmt.Errorf("product not found: %w", err)
 		}
 		if !product.IsPurchasable() {
@@ -196,45 +186,44 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		}
 	}
 
-	// Validate Solana config
 	solanaProc, err := RequireSolanaProcessorConfig(s.cfg)
 	if err != nil {
+		s.errors.Add(ctx, 1)
 		return nil, err
 	}
 	tokenCfg, ok := solanaProc.Tokens[tokenSymbol]
 	if !ok {
+		s.errors.Add(ctx, 1)
 		return nil, fmt.Errorf("invalid or unsupported token: %s", tokenSymbol)
 	}
 
-	// Calculate token amount from fiat price with FX conversion if needed
 	quote, err := CalculateTokenQuote(ctx, tokenSymbol, tokenCfg, price.Amount, price.Currency, s.fxProvider, s.priceProvider)
 	if err != nil {
+		s.errors.Add(ctx, 1)
 		return nil, fmt.Errorf("failed to calculate token quote: %w", err)
 	}
 	tokenUnits := quote.Units
 	if tokenUnits == 0 {
+		s.errors.Add(ctx, 1)
 		return nil, fmt.Errorf("calculated token amount is zero")
 	}
 
-	// Generate reference for Solana Pay
 	reference, err := solanarpc.GenerateReference()
 	if err != nil {
+		s.errors.Add(ctx, 1)
 		return nil, fmt.Errorf("failed to generate reference: %w", err)
 	}
 
-	// Get merchant recipient wallet
 	recipient := solanaProc.RecipientWallet
 	if recipient == "" {
+		s.errors.Add(ctx, 1)
 		return nil, fmt.Errorf("merchant wallet not configured")
 	}
 
-	// Get token mint
 	tokenMint := tokenCfg.Mint
-
 	now := s.now()
 	expiresAt := now.Add(pendingPaymentTTL)
 
-	// Store pending payment in Redis
 	pending := &PendingSolanaPayment{
 		UserID:      userID,
 		PriceID:     priceID.String(),
@@ -252,10 +241,10 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	if err := s.storePendingPayment(ctx, reference, pending); err != nil {
+		s.errors.Add(ctx, 1)
 		return nil, fmt.Errorf("failed to store pending payment: %w", err)
 	}
 
-	// Build Solana Pay Transfer Request URL
 	url := s.buildTransferRequestURL(recipient, tokenUnits, tokenMint, tokenSymbol, reference)
 
 	return &PayResult{
@@ -277,33 +266,19 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}, nil
 }
 
-// buildTransferRequestURL constructs the solana: URL per the Solana Pay spec
 func (s *SolanaPayService) buildTransferRequestURL(recipient string, amount uint64, tokenMint, tokenSymbol, reference string) string {
-	// Base URL: solana:<recipient>
 	baseURL := fmt.Sprintf("solana:%s", recipient)
-
-	// Get token config for decimals
 	solanaProc, err := RequireSolanaProcessorConfig(s.cfg)
 	if err != nil {
-		return baseURL // fallback without params if not configured
+		return baseURL
 	}
 	tokenCfg := solanaProc.Tokens[tokenSymbol]
-
-	// Format amount with proper decimals
 	formattedAmount := formatTokenAmount(amount, tokenCfg.Decimals)
-
-	// Add query params
 	params := fmt.Sprintf("?amount=%s", formattedAmount)
-
-	// Add spl-token param if not native SOL
 	if tokenMint != "" && tokenSymbol != "SOL" {
 		params += fmt.Sprintf("&spl-token=%s", tokenMint)
 	}
-
-	// Add reference for payment detection
 	params += fmt.Sprintf("&reference=%s", reference)
-
-	// Add label
 	label := "Purchase"
 	if s.cfg != nil && s.cfg.Store != nil {
 		if name := strings.TrimSpace(s.cfg.Store.Name); name != "" {
@@ -311,12 +286,15 @@ func (s *SolanaPayService) buildTransferRequestURL(recipient string, amount uint
 		}
 	}
 	params += fmt.Sprintf("&label=%s", url.QueryEscape(label))
-
 	return baseURL + params
 }
 
-// storePendingPayment stores a pending payment in Redis
 func (s *SolanaPayService) storePendingPayment(ctx context.Context, reference string, pending *PendingSolanaPayment) error {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
+
 	if s.redis == nil {
 		return fmt.Errorf("redis not configured")
 	}
@@ -324,18 +302,18 @@ func (s *SolanaPayService) storePendingPayment(ctx context.Context, reference st
 	key := solanaPayKeyPrefix + reference
 	data, err := json.Marshal(pending)
 	if err != nil {
+		s.errors.Add(ctx, 1)
 		return fmt.Errorf("failed to marshal pending payment: %w", err)
 	}
 
-	// Store the payment data with TTL
 	if err := s.redis.Set(ctx, key, data, pendingPaymentTTL).Err(); err != nil {
+		s.errors.Add(ctx, 1)
 		return fmt.Errorf("failed to store pending payment: %w", err)
 	}
 
-	// Add to the pending payments set
 	if err := s.redis.SAdd(ctx, pendingSolanaPaymentsKey, reference).Err(); err != nil {
-		// Try to cleanup the key we just set
 		s.redis.Del(ctx, key)
+		s.errors.Add(ctx, 1)
 		return fmt.Errorf("failed to add to pending set: %w", err)
 	}
 
@@ -349,49 +327,36 @@ func (s *SolanaPayService) storePendingPayment(ctx context.Context, reference st
 	return nil
 }
 
-// GetPendingPayment retrieves a pending payment by reference
 func (s *SolanaPayService) GetPendingPayment(ctx context.Context, reference string) (*PendingSolanaPayment, error) {
 	if s.redis == nil {
 		return nil, fmt.Errorf("redis not configured")
 	}
-
 	key := solanaPayKeyPrefix + reference
 	data, err := s.redis.Get(ctx, key).Bytes()
 	if err == redis.Nil {
-		return nil, nil // Not found (expired)
+		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending payment: %w", err)
 	}
-
 	var pending PendingSolanaPayment
 	if err := json.Unmarshal(data, &pending); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal pending payment: %w", err)
 	}
-
 	return &pending, nil
 }
 
-// GetAllPendingReferences returns all pending payment references
 func (s *SolanaPayService) GetAllPendingReferences(ctx context.Context) ([]string, error) {
 	if s.redis == nil {
 		return nil, nil
 	}
-
 	refs, err := s.redis.SMembers(ctx, pendingSolanaPaymentsKey).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending references: %w", err)
 	}
-
 	return refs, nil
 }
 
-// RegisterPendingReference adds an already-bound checkout-session reference to the
-// poller's pending set so the reference poller actually iterates it. The one-off
-// transfer-request flow seeds its reference via GeneratePayment; the
-// transaction-request lifecycle (cancel/tier-change) + recurring-subscribe flows
-// instead bind the reference to the DB session and call this — the poller then
-// recovers the session via GetByReference. Idempotent (SAdd on a set).
 func (s *SolanaPayService) RegisterPendingReference(ctx context.Context, reference string) error {
 	if s.redis == nil {
 		return nil
@@ -406,7 +371,6 @@ func (s *SolanaPayService) RegisterPendingReference(ctx context.Context, referen
 	return nil
 }
 
-// RemovePendingPayment removes a pending payment from Redis
 func (s *SolanaPayService) RemovePendingPayment(ctx context.Context, reference string) error {
 	if s.redis == nil {
 		return nil
@@ -415,16 +379,11 @@ func (s *SolanaPayService) RemovePendingPayment(ctx context.Context, reference s
 	if reference == "" {
 		return nil
 	}
-
 	key := solanaPayKeyPrefix + reference
 	var removeErr error
-
-	// Remove from set
 	if err := s.redis.SRem(ctx, pendingSolanaPaymentsKey, reference).Err(); err != nil {
 		removeErr = fmt.Errorf("failed to remove from pending set: %w", err)
 	}
-
-	// Delete the key
 	if err := s.redis.Del(ctx, key).Err(); err != nil {
 		if removeErr != nil {
 			removeErr = fmt.Errorf("%v; failed to delete pending payment key: %w", removeErr, err)
@@ -432,12 +391,10 @@ func (s *SolanaPayService) RemovePendingPayment(ctx context.Context, reference s
 			removeErr = fmt.Errorf("failed to delete pending payment key: %w", err)
 		}
 	}
-
 	if removeErr != nil {
 		log.WithError(removeErr).WithField("reference", reference).Warn("Failed to remove pending Solana payment")
 		return removeErr
 	}
-
 	return nil
 }
 
@@ -445,17 +402,14 @@ func (s *SolanaPayService) IsReferenceConsumed(ctx context.Context, reference st
 	if s.redis == nil {
 		return false, nil
 	}
-
 	reference = strings.TrimSpace(reference)
 	if reference == "" {
 		return false, nil
 	}
-
 	count, err := s.redis.Exists(ctx, solanaPayConsumedPrefix+reference).Result()
 	if err != nil {
 		return false, fmt.Errorf("failed checking consumed reference: %w", err)
 	}
-
 	return count > 0, nil
 }
 
@@ -463,22 +417,18 @@ func (s *SolanaPayService) MarkReferenceConsumed(ctx context.Context, reference,
 	if s.redis == nil {
 		return false, fmt.Errorf("redis not configured")
 	}
-
 	reference = strings.TrimSpace(reference)
 	if reference == "" {
 		return false, fmt.Errorf("reference is required")
 	}
-
 	value := strings.TrimSpace(transactionID)
 	if value == "" {
 		value = "consumed"
 	}
-
 	claimed, err := s.redis.SetNX(ctx, solanaPayConsumedPrefix+reference, value, consumedRefTTL).Result()
 	if err != nil {
 		return false, fmt.Errorf("failed to mark reference consumed: %w", err)
 	}
-
 	return claimed, nil
 }
 
@@ -487,68 +437,8 @@ func (s *SolanaPayService) ConsumeAndRemovePending(ctx context.Context, referenc
 	if reference == "" {
 		return nil
 	}
-
 	if _, err := s.MarkReferenceConsumed(ctx, reference, transactionID); err != nil {
 		return err
 	}
-
-	if err := s.RemovePendingPayment(ctx, reference); err != nil {
-		return err
-	}
-
 	return nil
-}
-
-// GetPaymentStatus checks if a payment is pending, confirmed, or expired
-func (s *SolanaPayService) GetPaymentStatus(ctx context.Context, reference string) (status string, payment *models.Payment, err error) {
-	// First check Postgres for confirmed payment
-	payment, err = s.getPaymentByReference(ctx, reference)
-	if err == nil && payment != nil {
-		return "confirmed", payment, nil
-	}
-
-	// Check Redis for pending payment
-	pending, err := s.GetPendingPayment(ctx, reference)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to check pending payment: %w", err)
-	}
-
-	if pending == nil {
-		return "expired", nil, nil
-	}
-
-	return "pending", nil, nil
-}
-
-// getPaymentByReference looks up a payment by its Solana reference.
-// Note: Reference-based lookup is not currently supported since payments
-// are identified by their transaction signature (stored in Payment.TransactionID).
-// The reference is only used during the checkout flow for on-chain matching.
-func (s *SolanaPayService) getPaymentByReference(ctx context.Context, reference string) (*models.Payment, error) {
-	// References are ephemeral and used only during checkout flow for on-chain matching.
-	// Once a payment is confirmed, it's identified by its transaction signature.
-	// Return not found - callers should check Redis for pending status.
-	return nil, fmt.Errorf("payment not found for reference")
-}
-
-// formatTokenAmount formats a token amount with the appropriate decimal places
-func formatTokenAmount(amount uint64, decimals int) string {
-	if decimals <= 0 {
-		return fmt.Sprintf("%d", amount)
-	}
-	// Convert to string with decimal point
-	divisor := uint64(1)
-	for i := 0; i < decimals; i++ {
-		divisor *= 10
-	}
-	whole := amount / divisor
-	frac := amount % divisor
-	if frac == 0 {
-		return fmt.Sprintf("%d", whole)
-	}
-	// Format fractional part with leading zeros
-	fracStr := fmt.Sprintf("%0*d", decimals, frac)
-	// Trim trailing zeros
-	fracStr = strings.TrimRight(fracStr, "0")
-	return fmt.Sprintf("%d.%s", whole, fracStr)
 }
