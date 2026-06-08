@@ -92,16 +92,20 @@ func maybeFirstRunBootstrap(ctx context.Context, cfg *config.Config, a *app.App)
 	if cp == nil {
 		return nil // verifier-only mode; nothing to provision
 	}
-	provisioned, err := bootstrap.HasProvisionedTenants(ctx, cp)
+	manifest, err := bootstrap.LoadBootstrapManifest(path)
+	if err != nil {
+		return err
+	}
+	slugs := make([]string, 0, len(manifest.Tenants))
+	for i := range manifest.Tenants {
+		slugs = append(slugs, manifest.Tenants[i].Slug)
+	}
+	provisioned, err := bootstrap.AnyTenantProvisioned(ctx, cp, slugs)
 	if err != nil {
 		return fmt.Errorf("first-run check: %w", err)
 	}
 	if provisioned {
-		return nil // not first run; operators run `bootstrap apply` to apply edits
-	}
-	manifest, err := bootstrap.LoadBootstrapManifest(path)
-	if err != nil {
-		return err
+		return nil // already bootstrapped; operators run `bootstrap apply` to apply edits
 	}
 	log.WithField("file", path).Info("first-run bootstrap: applying unified manifest")
 	return applyBootstrapManifest(ctx, cfg, a, manifest, log.StandardLogger().Out, false)
