@@ -195,9 +195,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Opt into the OpenRails-owned AuthKit control plane (#284): the embedded core
 	// no longer builds it, so the standalone attaches it here (no-op in
 	// verifier-only mode) before bootstrapping.
-	if err := embcp.Attach(context.Background(), embeddedApp.App(), cfg, nil); err != nil {
+	if err := embcp.Attach(context.Background(), embeddedApp, cfg, nil); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("attach control plane: %w", err)
+	}
+	if err := platform.InitTelemetry(); err != nil {
+		log.WithError(err).Error("failed to init telemetry")
 	}
 
 	// Bootstrap the OpenRails-owned AuthKit control plane (#224) when enabled.

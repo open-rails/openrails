@@ -161,8 +161,8 @@ func New(deps Dependencies) (*Server, error) {
 	}
 
 	// Build the tenant provisioning/lifecycle/secret service when the control
-	// plane is present (issue #225). It reuses the control plane's pgx pool (the
-	// OpenRails-owned billing.* control-plane DB) and operator-tenant provisioner. The
+	// plane is present (it owns the
+	// billing.* control-plane pool and the operator-tenant provisioner). The
 	// DB-backed secret store is the self-hosted default and needs no live Vault; a
 	// managed deployment swaps in the Vault-backed store with the same addressing.
 	if deps.ControlPlane != nil && deps.ControlPlane.Pool() != nil {
@@ -271,7 +271,7 @@ func New(deps Dependencies) (*Server, error) {
 			var submitter recurring.Submitter
 			// solanaSigner is the SAME per-tenant signer the Submitter wraps. The
 			// tier-change prepare service (#272) co-signs the merchant/cranker slot
-			// with it directly, so it MUST be the same key as the cranker.
+			// with it directly, so the slot it pre-signs is the merchant's own key.
 			var solanaSigner solanaint.Signer
 			if solanaTransit != nil {
 				solanaSigner = recurring.NewSignerFromTransit(solanaTransit, 0)
@@ -291,7 +291,9 @@ func New(deps Dependencies) (*Server, error) {
 			cranker := recurring.NewCrankService(submitter)
 			deps.Runtime.SetSolanaCranker(cranker)
 			// Plan-publish (#254) + enroll-confirm (#255) HTTP surfaces. Enroll needs
-			// the lifecycle (membership) + the on-chain subscription store.
+			// the lifecycle (membership) + the on-chain subscription store. Wire both into the
+			// checkout session service so /v1/self/checkout(+confirm) drives the
+			// recurring Solana subscription flow.
 			if deps.Runtime.SubscriptionLifecycleService != nil && deps.Runtime.DB != nil {
 				planSvc := recurring.NewPlanServiceWithReader(submitter, deps.Runtime.SolanaRPC, network, solanaTokens)
 				enrollSvc := recurring.NewEnrollService(
@@ -307,7 +309,7 @@ func New(deps Dependencies) (*Server, error) {
 				// App-driven on-chain cancel (#266): builds the unsigned
 				// cancel_subscription tx the subscriber signs to trustlessly revoke a
 				// recurring subscription on-chain (additive to the soft cancel #264).
-				deps.Runtime.SetSolanaPrepareCancelService(recurring.NewPrepareCancelService(
+				deps.Runtime.SetSolanaCancelService(recurring.NewCancelService(
 					dbrepo.NewSolanaSubscriptionRepo(deps.Runtime.DB),
 					deps.Runtime.SolanaRPC,
 				))
@@ -386,43 +388,14 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Single (standalone-friendly) HTTP surface.
 	// Standalone mode owns service-level health/debug routes.
-	s.publicHandler = s.newPublicEngine()
-	s.registerStandaloneMetaRoutes(s.publicHandler)
-	s.registerDebugRoutes(s.publicHandler)
-	// Canonical: /v1/*
-	s.registerUserRoutes(s.publicHandler)
-	s.registerAdminRoutesOn(s.publicHandler)
 	s.registerWebhookRoutes(s.publicHandler)
-
-	// Selective AuthKit route mounting (#224). In locked-down mode this mounts
-	// ONLY the intentional AuthKit route groups (login/session/user) under
-	// /auth — never AuthKit DefaultAPI. No-op in verifier-only mode.
-	s.registerControlPlaneAuthRoutes(s.publicHandler)
-
-	// Server-to-server service API: service token-authenticated, on the SAME public engine
-	// (issue #222). No private port, no mTLS listener. No-op without a control
-	// plane (verifier-only mode has no service token issuer).
-	s.registerServiceRoutes(s.publicHandler)
-
-	// Browser-direct self-service API: delegated-access-token-authenticated, on
-	// the SAME public engine (issue #222 browser tier). No-op without a control
-	// plane (verifier-only mode has no delegated-token issuer).
-	s.registerSelfServiceRoutes(s.publicHandler)
-
-	// Tenant-scoped webhook routing (issue #225): /v1/t/:tenant/webhooks/:provider
-	// resolves the tenant from the path slug, then loads THAT tenant's signing
-	// secret and verifies the signature AFTER tenant resolution. No-op without the
-	// tenancy service (verifier-only mode).
-	s.registerTenantWebhookRoutes(s.publicHandler)
-
-	// Operator-gated tenant provisioning/lifecycle admin API (issue #225). No-op
-	// without the tenancy service.
-	s.registerTenantAdminRoutes(s.publicHandler)
-
-	// Platform-superadmin cross-tenant admin API (issue #226), gated by
-	// openrails:platform:superadmin in the SEPARATE platform tenant. No-op without
-	// the control plane / platform tenant configured.
+	s.registerTenancyRoutes(s.publicHandler)
 	s.registerPlatformRoutes(s.publicHandler)
+	s.registerServiceRoutes(s.publicHandler)
+	s.registerSelfServiceRoutes(s.publicHandler)
+	s.registerTenantWebhookRoutes(s.publicHandler)
+	s.registerTenantAdminRoutes(s.publicHandler)
+	s.registerMetricsRoutes(s.publicHandler)
 
 	log.Info("Billing service initialized successfully")
 	return s, nil
