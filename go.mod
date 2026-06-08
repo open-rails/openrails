@@ -1,6 +1,6 @@
 module github.com/open-rails/openrails
 
-go 1.25.5
+go 1.25.11
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.40.3

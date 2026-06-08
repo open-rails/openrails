@@ -1,6 +1,7 @@
 package subscriptions
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -81,7 +82,12 @@ func DecodePlanAccount(data []byte) (*PlanAccount, error) {
 		off += 8
 		return v
 	}
-	readI64 := func() int64 { return int64(readU64()) }
+	readI64 := func() int64 {
+		var v int64
+		_ = binary.Read(bytes.NewReader(data[off:off+8]), binary.LittleEndian, &v)
+		off += 8
+		return v
+	}
 
 	p.Owner = readPubkey()
 	p.Bump = data[off]

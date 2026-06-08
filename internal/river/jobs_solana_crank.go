@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
@@ -203,7 +204,11 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			// (the partial-failure window). Advance past this period so we neither
 			// re-attempt nor dun; the reconcile worker (#258) repairs the ledger.
 			llog.Warn("Solana cranker: period already paid on-chain (idempotent); advancing, ledger repair via reconcile (#258)")
-			next := w.now().Add(time.Duration(periodHours) * time.Hour)
+			periodHoursI64, err := safecast.Convert[int64](periodHours)
+			if err != nil {
+				return fmt.Errorf("solana crank: period hours overflow: %w", err)
+			}
+			next := w.now().Add(time.Duration(periodHoursI64) * time.Hour)
 			return repo.SetNextPullAt(ctx, row.ID, next)
 		case declinecode.Terminal:
 			// The subscriber revoked the SPL token delegate on-chain — transfer_subscription
@@ -252,8 +257,12 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 		}
 	}
 
+	periodHoursI64, err := safecast.Convert[int64](periodHours)
+	if err != nil {
+		return fmt.Errorf("solana crank: period hours overflow: %w", err)
+	}
 	now := w.now()
-	periodEnd := now.Add(time.Duration(periodHours) * time.Hour)
+	periodEnd := now.Add(time.Duration(periodHoursI64) * time.Hour)
 	if err := w.Lifecycle.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 		Processor:               models.ProcessorSolana,
 		ProcessorSubscriptionID: row.SubscriptionPDA,

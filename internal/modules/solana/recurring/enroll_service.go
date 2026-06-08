@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
@@ -172,8 +173,12 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 		sig = subPDA.String()
 	}
 
+	periodHoursI64, err := safecast.Convert[int64](in.PeriodHours)
+	if err != nil {
+		return nil, fmt.Errorf("recurring: enroll: period hours overflow: %w", err)
+	}
 	now := s.now().UTC()
-	periodEnd := now.Add(time.Duration(in.PeriodHours) * time.Hour)
+	periodEnd := now.Add(time.Duration(periodHoursI64) * time.Hour)
 	subPDAStr := subPDA.String()
 	var emailPtr *string
 	if in.UserEmail != "" {
