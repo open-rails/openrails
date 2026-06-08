@@ -57,6 +57,13 @@ func (s *VaultService) now() time.Time {
 	return time.Now()
 }
 
+func (s *VaultService) SetTenantSecretStore(store tenantSecretGetter) {
+	if s == nil {
+		return
+	}
+	s.TenantSecrets = store
+}
+
 func (s *VaultService) SetClock(c clockwork.Clock) {
 	s.clock = timeutil.FirstClock(c)
 }
