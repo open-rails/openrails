@@ -2,7 +2,6 @@ package ginauth
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -61,7 +60,7 @@ func (p *authenticatorProvider) Required() gin.HandlerFunc {
 		}
 		uc, err := p.a.Authenticate(c.Request.Context(), c.Request)
 		if err != nil {
-			response.UnauthorizedWithMessage(c, unauthenticatedMessage(err))
+			response.UnauthorizedWithMessage(c, billingauth.UnauthenticatedMessage(err))
 			c.Abort()
 			return
 		}
@@ -88,11 +87,4 @@ func (p *authenticatorProvider) Optional() gin.HandlerFunc {
 func applyGinUserContext(c *gin.Context, uc billingauth.UserContext) {
 	c.Set(ginUserContextKey, uc)
 	c.Request = c.Request.WithContext(billingauth.SetUserContext(c.Request.Context(), uc))
-}
-
-func unauthenticatedMessage(err error) string {
-	if err == nil || errors.Is(err, billingauth.ErrUnauthenticated) {
-		return "authentication required"
-	}
-	return err.Error()
 }

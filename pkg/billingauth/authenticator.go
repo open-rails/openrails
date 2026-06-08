@@ -48,7 +48,7 @@ func Required(a Authenticator) func(http.Handler) http.Handler {
 			}
 			uc, err := a.Authenticate(r.Context(), r)
 			if err != nil {
-				WriteJSONError(w, http.StatusUnauthorized, "unauthorized", unauthenticatedMessage(err))
+				WriteJSONError(w, http.StatusUnauthorized, "unauthorized", UnauthenticatedMessage(err))
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(SetUserContext(r.Context(), uc)))
@@ -72,7 +72,11 @@ func Optional(a Authenticator) func(http.Handler) http.Handler {
 	}
 }
 
-func unauthenticatedMessage(err error) string {
+// UnauthenticatedMessage maps an authentication error to a client-safe message:
+// the generic "authentication required" for a nil/ErrUnauthenticated error, or
+// the error's own text otherwise. Shared by the net/http, gin, and neutral-router
+// auth middleware so the 401 message is identical across all surfaces.
+func UnauthenticatedMessage(err error) string {
 	if err == nil || errors.Is(err, ErrUnauthenticated) {
 		return "authentication required"
 	}

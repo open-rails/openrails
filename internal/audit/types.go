@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -191,7 +192,7 @@ func (c *Checker) Run(ctx context.Context, opts Options) ([]Finding, Summary, er
 
 	for _, check := range c.checks {
 		// Filter by category if specified
-		if len(opts.Categories) > 0 && !contains(opts.Categories, check.Category()) {
+		if len(opts.Categories) > 0 && !slices.Contains(opts.Categories, check.Category()) {
 			continue
 		}
 
@@ -236,13 +237,4 @@ func (c *Checker) GetCategories() []string {
 		}
 	}
 	return categories
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }
