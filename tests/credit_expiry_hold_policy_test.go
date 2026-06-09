@@ -34,7 +34,7 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry
 	batch := &models.CreditBlock{
 		ID:              uuid.New(),
 		TenantID:        tenant.DefaultID.UUID(),
-		TenantSubjectID: personalOwnerID(userID),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		InvokerID:       userID,
 		CreditTypeID:    creditType.ID,
 		OriginalAmount:  100,

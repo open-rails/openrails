@@ -214,7 +214,7 @@ func mustGetSubscriptionEntitlement(t *testing.T, suite *TestContainerSuite, ctx
 	var ent models.Entitlement
 	err := suite.BunDB.NewSelect().
 		Model(&ent).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).
 		Where("entitlement = ?", entitlement).
 		Where("source_type = ?", models.EntitlementSourceSubscription).
 		Where("source_id = ?", subscriptionID).

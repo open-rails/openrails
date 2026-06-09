@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -42,6 +41,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(t0)
 
 	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 	productID := uuid.New()
@@ -79,7 +79,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -95,7 +95,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 
 	paidEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium",
 		StartAt:         periodStart,
 		EndAt:           &paidEnd,
@@ -108,7 +108,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
@@ -222,7 +222,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	var graceRows []models.Entitlement
 	require.NoError(t, bunDB.NewSelect().
 		Model(&graceRows).
-		Where("user_id = ? AND entitlement = ?", userID, "premium").
+		Where("tenant_subject_id = ? AND entitlement = ?", tenantSubjectID, "premium").
 		Where("source_type = ?", models.EntitlementSourceGrace).
 		Where("source_id = ?", subID).
 		WhereAllWithDeleted().
@@ -251,7 +251,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	var paidWindows []models.Entitlement
 	require.NoError(t, bunDB.NewSelect().
 		Model(&paidWindows).
-		Where("user_id = ? AND entitlement = ?", userID, "premium").
+		Where("tenant_subject_id = ? AND entitlement = ?", tenantSubjectID, "premium").
 		Where("source_type = ?", models.EntitlementSourceSubscription).
 		Where("source_id = ?", subID).
 		Where("revoked_at IS NULL").

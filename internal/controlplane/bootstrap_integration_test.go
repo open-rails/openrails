@@ -42,6 +42,18 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
 INSERT INTO billing.tenants (id, slug, name)
 VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default')
 ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS billing.tenant_delegated_issuers (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id   UUID NOT NULL REFERENCES billing.tenants (id) ON DELETE CASCADE,
+    issuer      TEXT NOT NULL,
+    jwks_uri    TEXT NOT NULL,
+    audiences   TEXT[] NOT NULL DEFAULT '{}',
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CONSTRAINT uq_bootstrap_delegated_issuer UNIQUE (issuer)
+);
 `
 
 func newBootstrapTestPool(t *testing.T) *pgxpool.Pool {

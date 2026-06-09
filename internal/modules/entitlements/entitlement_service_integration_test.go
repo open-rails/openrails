@@ -37,6 +37,7 @@ func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T
 	svc := NewEntitlementService(dbi, clockwork.NewFakeClockAt(now))
 
 	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	entName := "premium_covered_finite_" + uuid.New().String()
 	firstSourceID := uuid.New()
 	coveredSourceID := uuid.New()
@@ -68,7 +69,7 @@ func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T
 
 	count, err := bunDB.NewSelect().
 		Model((*models.Entitlement)(nil)).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Where("entitlement = ?", entName).
 		Where("revoked_at IS NULL").
 		Where("deleted_at IS NULL").

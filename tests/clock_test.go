@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -103,6 +102,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	assert.WithinDuration(t, mockClock.Now(), updated.UpdatedAt, time.Millisecond)
 
 	retryUserID := uuid.New().String()
+	retryTenantSubjectID := suite.ensureTenantSubject(ctx, retryUserID)
 	pm := suite.CreateTestPaymentMethod(retryUserID)
 	nextRetry := mockClock.Now().Add(time.Hour)
 	retryAttempts := 1
@@ -124,7 +124,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		err := suite.BunDB.NewSelect().
 			Model((*models.Subscription)(nil)).
 			Where("sub.processor = ?", models.ProcessorMobius).
-			Where("sub.user_id = ?", retryUserID).
+			Where("sub.tenant_subject_id = ?", retryTenantSubjectID).
 			Where("sub.status = ?", models.StatusPastDue).
 			Where("sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= ?", mockClock.Now()).
 			ColumnExpr("COUNT(*)").
@@ -149,7 +149,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	})
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(cancelUserID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, cancelUserID),
 		Entitlement:     "premium",
 		StartAt:         cancelStart,
 		EndAt:           &cancelPeriodEnd,
@@ -190,7 +190,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	block := &models.CreditBlock{
 		ID:              uuid.New(),
 		TenantID:        tenant.DefaultID.UUID(),
-		TenantSubjectID: personalOwnerID(creditUserID),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, creditUserID),
 		InvokerID:       creditUserID,
 		CreditTypeID:    creditType.ID,
 		OriginalAmount:  75,

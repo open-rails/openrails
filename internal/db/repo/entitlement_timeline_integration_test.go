@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
@@ -38,6 +37,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	entName := "premium_timeline_test_" + uuid.New().String()
 	subID := uuid.New()
 	adminGrantID := uuid.New()
@@ -49,7 +49,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 	// Create a subscription-sourced entitlement window [t0, t1)
 	subEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		Entitlement:     entName,
 		StartAt:         t0,
 		EndAt:           &t1,
@@ -63,7 +63,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 	// Create a scheduled admin window [t1, t2)
 	adminEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		Entitlement:     entName,
 		StartAt:         t1,
 		EndAt:           &t2,
@@ -77,7 +77,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 	t.Cleanup(func() {
 		_, _ = bunDB.NewDelete().
 			Model((*models.Entitlement)(nil)).
-			Where("user_id = ? AND entitlement = ?", userID, entName).
+			Where("tenant_subject_id = ? AND entitlement = ?", tenantSubjectID, entName).
 			Exec(ctx)
 	})
 
@@ -115,6 +115,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	entName := "premium_payment_revoke_" + uuid.New().String()
 	paymentID := uuid.New()
 
@@ -124,7 +125,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 
 	active := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		Entitlement:     entName,
 		StartAt:         activeStart,
 		EndAt:           &activeEnd,
@@ -137,7 +138,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 
 	future := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		Entitlement:     entName,
 		StartAt:         activeEnd,
 		EndAt:           &futureEnd,
@@ -198,7 +199,6 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	tenantSubjectID := uuid.New()
 	otherTenantSubjectID := uuid.New()
-	userID := uuid.New().String()
 	entName := "premium_tenant_subject_" + uuid.New().String()
 	finiteSourceID := uuid.New()
 	indefiniteSourceID := uuid.New()
@@ -243,7 +243,7 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = bunDB.NewDelete().
 			Model((*models.Entitlement)(nil)).
-			Where("user_id = ? AND entitlement IN (?)", userID, bun.In([]string{entName, indefiniteName})).
+			Where("tenant_subject_id = ? AND entitlement IN (?)", tenantSubjectID, bun.In([]string{entName, indefiniteName})).
 			Exec(ctx)
 	})
 

@@ -12,7 +12,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,7 +71,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 
 	_, err = suite.BunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:         suite.ensureTenantSubject(ctx, userID),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -88,7 +87,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 
 	paidEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     "premium",
 		StartAt:         periodStart,
 		EndAt:           &paidEnd,
@@ -101,7 +100,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
@@ -121,7 +120,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	countGrace := func() int {
 		n, err := suite.BunDB.NewSelect().
 			Model((*models.Entitlement)(nil)).
-			Where("user_id = ? AND entitlement = ?", userID, "premium").
+			Where("tenant_subject_id = ? AND entitlement = ?", suite.ensureTenantSubject(ctx, userID), "premium").
 			Where("source_type = ?", models.EntitlementSourceGrace).
 			Where("source_id = ?", subID).
 			Count(ctx)
@@ -132,7 +131,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		var ent models.Entitlement
 		err := suite.BunDB.NewSelect().
 			Model(&ent).
-			Where("user_id = ? AND entitlement = ?", userID, "premium").
+			Where("tenant_subject_id = ? AND entitlement = ?", suite.ensureTenantSubject(ctx, userID), "premium").
 			Where("source_type = ?", models.EntitlementSourceGrace).
 			Where("source_id = ?", subID).
 			OrderExpr("end_at DESC").
@@ -235,7 +234,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.NoError(t, suite.BunDB.NewSelect().
 		Model(&graceRows).
 		WhereAllWithDeleted().
-		Where("user_id = ? AND entitlement = ?", userID, "premium").
+		Where("tenant_subject_id = ? AND entitlement = ?", suite.ensureTenantSubject(ctx, userID), "premium").
 		Where("source_type = ?", models.EntitlementSourceGrace).
 		Where("source_id = ?", subID).
 		OrderExpr("start_at ASC").
@@ -253,7 +252,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	var paidWindows []models.Entitlement
 	require.NoError(t, suite.BunDB.NewSelect().
 		Model(&paidWindows).
-		Where("user_id = ? AND entitlement = ?", userID, "premium").
+		Where("tenant_subject_id = ? AND entitlement = ?", suite.ensureTenantSubject(ctx, userID), "premium").
 		Where("source_type = ?", models.EntitlementSourceSubscription).
 		Where("source_id = ?", subID).
 		Where("revoked_at IS NULL").

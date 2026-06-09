@@ -129,12 +129,19 @@ func seedTenantsAndEntitlements(t *testing.T, ctx context.Context, superDSN stri
 			VALUES ($1::uuid, $2, $2, 'active') ON CONFLICT (id) DO NOTHING
 		`, id.String(), "t-"+id.String()[:8])
 		require.NoError(t, err)
+		tenantSubjectID := uuid.New()
+		_, err = pool.Exec(ctx, `
+			INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
+			VALUES ($1::uuid, $2::uuid, 'test', $3)
+			ON CONFLICT (id) DO NOTHING
+		`, tenantSubjectID.String(), id.String(), "user-"+id.String()[:8])
+		require.NoError(t, err)
 		// One entitlement row per tenant.
 		_, err = pool.Exec(ctx, `
 			INSERT INTO billing.entitlements
-				(tenant_id, user_id, entitlement, start_at, source_id, source_type)
-			VALUES ($1::uuid, $2, 'premium', current_timestamp, gen_random_uuid(), 'admin')
-		`, id.String(), "user-"+id.String()[:8])
+				(tenant_id, tenant_subject_id, entitlement, start_at, source_id, source_type)
+			VALUES ($1::uuid, $2::uuid, 'premium', current_timestamp, gen_random_uuid(), 'admin')
+		`, id.String(), tenantSubjectID.String())
 		require.NoError(t, err)
 	}
 }

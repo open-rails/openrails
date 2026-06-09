@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -40,6 +39,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 	productID := uuid.New()
@@ -78,7 +78,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -95,7 +95,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	// Paid subscription entitlement window [periodStart, paidEnd)
 	paidEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium",
 		StartAt:         periodStart,
 		EndAt:           &paidEnd,
@@ -108,7 +108,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
@@ -150,7 +150,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	var grace models.Entitlement
 	require.NoError(t, bunDB.NewSelect().
 		Model(&grace).
-		Where("user_id = ? AND entitlement = ?", userID, "premium").
+		Where("tenant_subject_id = ? AND entitlement = ?", tenantSubjectID, "premium").
 		Where("source_type = ?", models.EntitlementSourceGrace).
 		Where("source_id = ?", subID).
 		Where("revoked_at IS NULL").
@@ -185,6 +185,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 	productID := uuid.New()
@@ -222,7 +223,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -238,7 +239,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	paidEnt := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium",
 		StartAt:         periodStart,
 		EndAt:           &paidEnd,
@@ -253,7 +254,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	graceEnd := now.Add(2 * 24 * time.Hour)
 	graceActive := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium",
 		StartAt:         paidEnd,
 		EndAt:           &graceEnd,
@@ -268,7 +269,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	graceFutureEnd := graceEnd.Add(24 * time.Hour)
 	graceFuture := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium",
 		StartAt:         graceEnd,
 		EndAt:           &graceFutureEnd,
@@ -281,7 +282,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)

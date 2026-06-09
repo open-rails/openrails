@@ -52,9 +52,16 @@ VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default')
 ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS billing.entitlements (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id         UUID,
+    tenant_subject_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS billing.tenant_subjects (
     id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID,
-    user_id   TEXT
+    tenant_id UUID NOT NULL,
+    issuer    TEXT NOT NULL,
+    subject   TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS billing.tenant_secrets (
@@ -226,7 +233,15 @@ func TestDelete_RequiresExport(t *testing.T) {
 	require.NoError(t, err)
 
 	// Seed a tenant-owned row + a secret so the purge has something to remove.
-	_, err = svc.pool.Exec(ctx, `INSERT INTO billing.entitlements (tenant_id, user_id) VALUES ($1::uuid,'u1')`, tn.ID.String())
+	_, err = svc.pool.Exec(ctx, `
+		WITH subject AS (
+			INSERT INTO billing.tenant_subjects (tenant_id, issuer, subject)
+			VALUES ($1::uuid, 'test', 'u1')
+			RETURNING id
+		)
+		INSERT INTO billing.entitlements (tenant_id, tenant_subject_id)
+		SELECT $1::uuid, id FROM subject
+	`, tn.ID.String())
 	require.NoError(t, err)
 	_, err = svc.secrets.Put(ctx, tn.ID, SecretStripeSecretKey, "sk")
 	require.NoError(t, err)

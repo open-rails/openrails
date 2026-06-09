@@ -127,10 +127,20 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	}
 	_, err = suite.BunDB.NewInsert().Model(ent).Exec(ctx)
 	require.NoError(t, err)
+	legacyOnlyTenantSubjectID := uuid.New()
+	_, err = suite.BunDB.NewInsert().Model(&models.TenantSubject{
+		ID:         legacyOnlyTenantSubjectID,
+		TenantID:   tenant.DefaultID.UUID(),
+		Issuer:     "service-facade-parity-other",
+		Subject:    userID + "-other",
+		CreatedAt:  time.Now().UTC(),
+		LastSeenAt: time.Now().UTC(),
+	}).Exec(ctx)
+	require.NoError(t, err)
 	legacyOnlyEnt := &models.Entitlement{
 		ID:              uuid.New(),
 		TenantID:        tenant.DefaultID.UUID(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: legacyOnlyTenantSubjectID,
 		Entitlement:     "legacy-user-only",
 		StartAt:         time.Now().Add(-1 * time.Hour).UTC(),
 		EndAt:           nil,

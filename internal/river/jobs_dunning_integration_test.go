@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -102,9 +101,10 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	billingID := "bill_" + uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	paymentMethod := &models.PaymentMethod{
 		ID:                   paymentMethodID,
-		TenantSubjectID:      identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:      tenantSubjectID,
 		Processor:            models.ProcessorMobius,
 		VaultID:              "vault_" + uuid.New().String(),
 		BillingID:            &billingID,
@@ -121,7 +121,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	sub := &models.Subscription{
 		ID:                      subID,
-		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusPastDue,
@@ -141,9 +141,9 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("user_id = ?", userID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("user_id = ?", userID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("subscription_id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.PaymentMethod)(nil)).Where("id = ?", paymentMethodID).Exec(ctx)
@@ -185,7 +185,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	depositCount, err := bunDB.NewSelect().
 		Model((*models.CreditTransaction)(nil)).
-		Where("user_id = ? AND credit_type_id = ?", userID, creditTypeID).
+		Where("tenant_subject_id = ? AND credit_type_id = ?", tenantSubjectID, creditTypeID).
 		Where("transaction_type = 'deposit' AND source = 'subscription_renewal'").
 		Count(ctx)
 	require.NoError(t, err)

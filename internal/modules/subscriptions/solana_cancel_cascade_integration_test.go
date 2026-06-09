@@ -19,7 +19,6 @@ import (
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // TestCancelMembership_CascadesToSolanaCranker proves #264: cancelling a Solana
@@ -177,7 +176,7 @@ func insertCatalogAndSub(ctx context.Context, t *testing.T, bunDB *bun.DB, now t
 
 	_, err = bunDB.NewInsert().Model(&models.Subscription{
 		ID:                    subID,
-		TenantSubjectID:       identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:       dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID),
 		ProductID:             productID,
 		PriceID:               priceID,
 		Status:                models.StatusActive,

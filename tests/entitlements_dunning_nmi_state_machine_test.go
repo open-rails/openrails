@@ -101,7 +101,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	}
 
 	t.Cleanup(func() {
-		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", sub.ID).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.PaymentMethod)(nil)).Where("id = ?", pm.ID).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
@@ -186,7 +186,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", sub.ID).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.PaymentMethod)(nil)).Where("id = ?", pm.ID).Exec(ctx)
 	})

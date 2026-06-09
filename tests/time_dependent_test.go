@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // =============================================================================
@@ -40,7 +39,7 @@ func TestEntitlementExpiry(t *testing.T) {
 
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     entitlementName,
 		StartAt:         startTime,
 		EndAt:           &endAt,
@@ -105,7 +104,7 @@ func TestEntitlementStacking(t *testing.T) {
 	firstSourceID := uuid.New()
 	ent1 := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     entitlementName,
 		StartAt:         startTime,
 		EndAt:           &firstEnd,
@@ -123,7 +122,7 @@ func TestEntitlementStacking(t *testing.T) {
 	secondSourceID := uuid.New()
 	ent2 := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     entitlementName,
 		StartAt:         secondStart,
 		EndAt:           &secondEnd,
@@ -178,7 +177,7 @@ func TestIndefiniteEntitlement(t *testing.T) {
 	// Grant an indefinite entitlement (EndAt is nil)
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     entitlementName,
 		StartAt:         startTime,
 		EndAt:           nil, // Indefinite
@@ -251,7 +250,7 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 	// Create a paid-term entitlement linked to the subscription
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     "premium",
 		StartAt:         startTime,
 		EndAt:           &periodEnd,
@@ -364,7 +363,7 @@ func TestAdminRevokeAccess(t *testing.T) {
 	// Create an indefinite entitlement linked to the subscription
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     "premium",
 		StartAt:         startTime,
 		EndAt:           nil, // Indefinite while subscription is active
@@ -558,7 +557,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 	// Create an indefinite entitlement linked to the subscription
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     "premium",
 		StartAt:         startTime.Add(-30 * 24 * time.Hour),
 		EndAt:           nil, // Indefinite
@@ -848,7 +847,7 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 		// Create a payment with TransactionID (required unique field)
 		payment := &models.Payment{
 			ID:              uuid.New(),
-			TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+			TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 			PriceID:         priceID,
 			Processor:       models.ProcessorMobius,
 			TransactionID:   "test-tx-" + uuid.New().String()[:8],
@@ -873,7 +872,7 @@ func TestPaymentTimestampUsesMockClock(t *testing.T) {
 		// Create another payment with unique TransactionID
 		payment := &models.Payment{
 			ID:              uuid.New(),
-			TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+			TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 			PriceID:         priceID,
 			Processor:       models.ProcessorMobius,
 			TransactionID:   "test-tx-" + uuid.New().String()[:8],
@@ -924,7 +923,7 @@ func TestSubscriptionExpiryAtExactBoundary(t *testing.T) {
 	// Create entitlement that ends exactly at period end
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     "premium",
 		StartAt:         startTime,
 		EndAt:           &periodEnd,
@@ -1059,7 +1058,7 @@ func TestVaultTimestamps(t *testing.T) {
 	// Create a payment method directly
 	pm := &models.PaymentMethod{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Processor:       models.ProcessorMobius,
 		VaultID:         "test-vault-" + uuid.New().String()[:8],
 		CreatedAt:       mockClock.Now(),

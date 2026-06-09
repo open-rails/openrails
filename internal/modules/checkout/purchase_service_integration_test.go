@@ -38,6 +38,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 	durationDays := 30
@@ -70,8 +71,8 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
 	})
@@ -101,7 +102,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	var firstEnt models.Entitlement
 	require.NoError(t, bunDB.NewSelect().
 		Model(&firstEnt).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Where("entitlement = ?", "premium_duplicate_purchase").
 		Where("source_id = ?", first.PaymentID).
 		Where("revoked_at IS NULL").
@@ -135,7 +136,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	var ents []models.Entitlement
 	require.NoError(t, bunDB.NewSelect().
 		Model(&ents).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Where("revoked_at IS NULL").
 		Where("deleted_at IS NULL").
 		OrderExpr("entitlement ASC").
@@ -167,6 +168,7 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 	durationDays := 30
@@ -199,8 +201,8 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
 	})

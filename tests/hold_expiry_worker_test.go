@@ -38,10 +38,12 @@ func (suite *TestContainerSuite) createTestCreditType(name string) *models.Credi
 
 // createTestCreditBalance creates a user credit balance for testing
 func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTypeID uuid.UUID, balance, heldBalance int64) *models.UserCreditBalance {
+	ctx := context.Background()
 	now := suite.GetClock().Now()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 	bal := &models.UserCreditBalance{
 		ID:              uuid.New(),
-		TenantSubjectID: personalOwnerID(userID),
+		TenantSubjectID: tenantSubjectID,
 		InvokerID:       userID,
 		CreditTypeID:    creditTypeID,
 		Balance:         balance,
@@ -49,7 +51,7 @@ func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTy
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	_, err := suite.BunDB.NewInsert().Model(bal).Exec(context.Background())
+	_, err := suite.BunDB.NewInsert().Model(bal).Exec(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -59,12 +61,14 @@ func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTy
 // createTestCreditHold creates a credit hold for testing.
 // Holds are stored as billing.credit_transactions rows with transaction_type='hold'.
 func (suite *TestContainerSuite) createTestCreditHold(userID string, creditTypeID uuid.UUID, amount int64, status string, expiresAt time.Time) *models.CreditTransaction {
+	ctx := context.Background()
 	now := suite.GetClock().Now()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 	auth := amount
 	sid := uuid.New().String()
 	hold := &models.CreditTransaction{
 		ID:              uuid.New(),
-		TenantSubjectID: personalOwnerID(userID),
+		TenantSubjectID: tenantSubjectID,
 		InvokerID:       userID,
 		CreditTypeID:    creditTypeID,
 		Amount:          0,
@@ -80,7 +84,7 @@ func (suite *TestContainerSuite) createTestCreditHold(userID string, creditTypeI
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	_, err := suite.BunDB.NewInsert().Model(hold).Exec(context.Background())
+	_, err := suite.BunDB.NewInsert().Model(hold).Exec(ctx)
 	if err != nil {
 		panic(err)
 	}

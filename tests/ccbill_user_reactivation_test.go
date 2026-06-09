@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -174,7 +173,7 @@ func TestCCBillChargeback_DedupesDuplicateDelivery(t *testing.T) {
 	require.Eventually(t, func() bool {
 		count, err := suite.BunDB.NewSelect().
 			Model((*models.NotificationQueue)(nil)).
-			Where("user_id = ?", userID).
+			Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).
 			Where("event_type = ?", models.NotificationPremiumEnded).
 			Count(ctx)
 		if err != nil {
@@ -218,7 +217,7 @@ func seedCCBillActiveSubscriptionWithEntitlement(t *testing.T) (*TestContainerSu
 	subID := created.ID
 	_, err := suite.BunDB.NewInsert().Model(&models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     "premium",
 		StartAt:         startAt,
 		EndAt:           &endAt,

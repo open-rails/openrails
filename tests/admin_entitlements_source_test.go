@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 func TestAdminEntitlementGrantCreatesSourceRecord(t *testing.T) {
@@ -85,7 +84,7 @@ func TestAdminEntitlementAppendsAfterLatestEnd(t *testing.T) {
 	subEnd := fixedNow.Add(30 * 24 * time.Hour)
 	existing := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(context.Background(), userID),
 		Entitlement:     "premium",
 		StartAt:         start,
 		EndAt:           &subEnd,

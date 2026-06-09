@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,7 +66,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 
 	_, err = suite.BunDB.NewInsert().Model(&models.Subscription{
 		ID:                      subID,
-		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:         suite.ensureTenantSubject(ctx, userID),
 		ProductID:               productID,
 		PriceID:                 priceID,
 		Status:                  models.StatusActive,
@@ -120,7 +119,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	// Admin manual grant: extra +5 days, should schedule after subscription end too.
 	adminGrant := &models.AdminGrant{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		GrantedBy:       "admin",
 		Reason:          "test",
 		CreatedAt:       clock.Now().UTC(),
@@ -152,7 +151,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.Payment)(nil)).Where("id = ?", payment.ID).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.AdminGrant)(nil)).Where("id = ?", adminGrant.ID).Exec(ctx)
 		_, _ = suite.BunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
@@ -198,7 +197,7 @@ func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
 	// Insert an entitlement window that is currently active.
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     entName,
 		StartAt:         now.Add(-1 * time.Hour),
 		EndAt:           nil, // active indefinitely

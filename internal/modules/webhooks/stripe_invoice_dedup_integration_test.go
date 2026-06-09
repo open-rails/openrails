@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -41,6 +40,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 
 	now := time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
 	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 	billingDays := 30
@@ -70,7 +70,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("user_id = ?", userID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
 	})
@@ -83,7 +83,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	const invoiceID = "in_dedup_1"
 	require.NoError(t, paymentSvc.Create(ctx, &models.Payment{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		PriceID:         priceID,
 		Processor:       models.ProcessorStripe,
 		TransactionID:   chargeID,
@@ -121,7 +121,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	// metadata, so they never match.
 	require.NoError(t, paymentSvc.Create(ctx, &models.Payment{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		PriceID:         priceID,
 		Processor:       models.ProcessorStripe,
 		TransactionID:   "failed:in_dedup_2",

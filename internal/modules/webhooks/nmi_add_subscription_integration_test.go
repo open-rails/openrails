@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -42,11 +41,11 @@ func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t 
 
 	var payment models.Payment
 	require.NoError(t, bunDB.NewSelect().Model(&payment).Where("transaction_id = ?", ids.transactionID).Scan(ctx))
-	require.Equal(t, ids.userID, payment.TenantSubjectID.String())
+	require.Equal(t, ids.tenantSubjectID, payment.TenantSubjectID)
 	require.Equal(t, ids.subscriptionID, *payment.SubscriptionID)
 
 	exists, err := bunDB.NewSelect().Model((*models.Entitlement)(nil)).
-		Where("user_id = ?", ids.userID).
+		Where("tenant_subject_id = ?", ids.tenantSubjectID).
 		Where("entitlement = ?", "premium").
 		Where("source_type = ?", models.EntitlementSourceSubscription).
 		Where("source_id = ?", ids.subscriptionID).
@@ -82,6 +81,7 @@ func TestHandleAddSubscription_WithoutSettledTransactionMetadataStaysPending(t *
 
 type nmiAddSubscriptionTestIDs struct {
 	userID          string
+	tenantSubjectID uuid.UUID
 	subscriptionID  uuid.UUID
 	transactionID   string
 	transactionBody []byte
@@ -108,6 +108,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	providerSubID := "nmi_sub_" + uuid.New().String()
 	transactionID := "txn_" + uuid.New().String()
 	userID := uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 	subscriptionID := uuid.New()
@@ -154,7 +155,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	require.NoError(t, err)
 	subscription := &models.Subscription{
 		ID:                       subscriptionID,
-		TenantSubjectID:          identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:          tenantSubjectID,
 		ProductID:                productID,
 		PriceID:                  priceID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
@@ -175,9 +176,9 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.NotificationQueue)(nil)).Where("user_id = ?", userID).Exec(context.Background())
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("user_id = ?", userID).Exec(context.Background())
-		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("user_id = ?", userID).Exec(context.Background())
+		_, _ = bunDB.NewDelete().Model((*models.NotificationQueue)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(context.Background())
+		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(context.Background())
+		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(context.Background())
 		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subscriptionID).Exec(context.Background())
 		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(context.Background())
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(context.Background())
@@ -221,6 +222,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 			SubscriptionLifecycleService: lifecycleSvc,
 		}, bunDB, nmiAddSubscriptionTestIDs{
 			userID:          userID,
+			tenantSubjectID: tenantSubjectID,
 			subscriptionID:  subscriptionID,
 			transactionID:   transactionID,
 			transactionBody: transactionBody,

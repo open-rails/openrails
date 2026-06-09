@@ -11,7 +11,25 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
+
+func (suite *TestContainerSuite) ensureTenantSubject(ctx context.Context, userID string) uuid.UUID {
+	suite.t.Helper()
+	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
+	require.NotEqual(suite.t, uuid.Nil, tenantSubjectID, "test user id must be a UUID tenant subject")
+	_, err := suite.BunDB.NewRaw(
+		`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT (id) DO UPDATE SET last_seen_at = now()`,
+		tenantSubjectID,
+		tenant.DefaultID.UUID(),
+		"openrails:self",
+		userID,
+	).Exec(ctx)
+	require.NoError(suite.t, err, "Failed to ensure tenant subject")
+	return tenantSubjectID
+}
 
 // TestProduct represents a seeded product with its prices
 type TestProduct struct {
@@ -521,6 +539,7 @@ func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID u
 	suite.t.Helper()
 	ctx := context.Background()
 	now := time.Now()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 
 	// Look up the price to get ProductID
 	price := suite.GetPrice(priceID)
@@ -530,7 +549,7 @@ func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID u
 
 	sub := &models.Subscription{
 		ID:                      uuid.New(),
-		TenantSubjectID:         identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:         tenantSubjectID,
 		ProductID:               price.ProductID,
 		PriceID:                 priceID,
 		Status:                  status,
@@ -570,6 +589,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 	suite.t.Helper()
 	ctx := context.Background()
 	now := suite.GetClock().Now()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, opts.UserID)
 
 	// Look up the price to get ProductID
 	price := suite.GetPrice(opts.PriceID)
@@ -594,7 +614,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 
 	sub := &models.Subscription{
 		ID:                      uuid.New(),
-		TenantSubjectID:         identity.TenantSubjectIDFromString(opts.UserID).UUID(),
+		TenantSubjectID:         tenantSubjectID,
 		ProductID:               price.ProductID,
 		PriceID:                 opts.PriceID,
 		Status:                  opts.Status,
@@ -633,10 +653,11 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 	suite.t.Helper()
 	ctx := context.Background()
 	now := suite.GetClock().Now()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
-		TenantSubjectID:      identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID:      tenantSubjectID,
 		Processor:            models.ProcessorMobius,
 		VaultID:              "vault-" + uuid.New().String()[:8],
 		BillingID:            strPtr("billing-" + uuid.New().String()[:8]),
@@ -671,6 +692,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 	suite.t.Helper()
 	ctx := context.Background()
 	now := time.Now()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, opts.UserID)
 
 	if opts.Processor == "" {
 		opts.Processor = models.ProcessorMobius
@@ -684,7 +706,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 
 	pm := &models.PaymentMethod{
 		ID:                   uuid.New(),
-		TenantSubjectID:      identity.TenantSubjectIDFromString(opts.UserID).UUID(),
+		TenantSubjectID:      tenantSubjectID,
 		Processor:            opts.Processor,
 		VaultID:              opts.VaultID,
 		BillingID:            strPtrOrNil(opts.BillingID),
@@ -708,10 +730,11 @@ func (suite *TestContainerSuite) CreateTestPayment(userID string, priceID uuid.U
 	suite.t.Helper()
 	ctx := context.Background()
 	now := time.Now()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 
 	payment := &models.Payment{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		PriceID:         priceID,
 		SubscriptionID:  subscriptionID,
 		Processor:       models.ProcessorMobius,
@@ -745,6 +768,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 	suite.t.Helper()
 	ctx := context.Background()
 	now := time.Now()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, opts.UserID)
 
 	if opts.Processor == "" {
 		opts.Processor = models.ProcessorMobius
@@ -764,7 +788,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 
 	payment := &models.Payment{
 		ID:                uuid.New(),
-		TenantSubjectID:   identity.TenantSubjectIDFromString(opts.UserID).UUID(),
+		TenantSubjectID:   tenantSubjectID,
 		PriceID:           opts.PriceID,
 		SubscriptionID:    opts.SubscriptionID,
 		RefundedPaymentID: opts.RefundedPaymentID,
@@ -788,13 +812,14 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 	suite.t.Helper()
 	ctx := context.Background()
 	now := suite.GetClock().Now()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 
 	if sourceID == nil {
 		switch sourceType {
 		case models.EntitlementSourceAdmin:
 			adminGrant := &models.AdminGrant{
 				ID:              uuid.New(),
-				TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+				TenantSubjectID: tenantSubjectID,
 				GrantedBy:       "test-admin",
 				Reason:          "test_admin_entitlement",
 				DurationDays:    nil,
@@ -818,7 +843,7 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 
 	ent := &models.Entitlement{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		Entitlement:     entitlementName,
 		StartAt:         now,
 		EndAt:           endAt,
@@ -839,10 +864,11 @@ func (suite *TestContainerSuite) CreateTestNotification(userID string, eventType
 	suite.t.Helper()
 	ctx := context.Background()
 	now := time.Now()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 
 	notif := &models.NotificationQueue{
 		ID:              uuid.New(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID(),
+		TenantSubjectID: tenantSubjectID,
 		EventType:       eventType,
 		Data:            data,
 		Seen:            false,
@@ -878,11 +904,12 @@ func (suite *TestContainerSuite) GetSubscription(id uuid.UUID) *models.Subscript
 func (suite *TestContainerSuite) GetSubscriptionByUserID(userID string) *models.Subscription {
 	suite.t.Helper()
 	ctx := context.Background()
+	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
 	var sub models.Subscription
 	err := suite.BunDB.NewSelect().
 		Model(&sub).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Where("status = ?", models.StatusActive).
 		Relation("Price").
 		Scan(ctx)
@@ -897,11 +924,12 @@ func (suite *TestContainerSuite) GetSubscriptionByUserID(userID string) *models.
 func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*models.Subscription {
 	suite.t.Helper()
 	ctx := context.Background()
+	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
 	var subs []*models.Subscription
 	err := suite.BunDB.NewSelect().
 		Model(&subs).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Order("created_at DESC").
 		Relation("Price").
 		Scan(ctx)
@@ -914,11 +942,12 @@ func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*m
 func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Payment {
 	suite.t.Helper()
 	ctx := context.Background()
+	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
 	var payments []*models.Payment
 	err := suite.BunDB.NewSelect().
 		Model(&payments).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Order("purchased_at DESC").
 		Relation("Price").
 		Scan(ctx)
@@ -931,11 +960,12 @@ func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Pa
 func (suite *TestContainerSuite) GetPaymentMethodsByUserID(userID string) []*models.PaymentMethod {
 	suite.t.Helper()
 	ctx := context.Background()
+	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
 	var pms []*models.PaymentMethod
 	err := suite.BunDB.NewSelect().
 		Model(&pms).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Order("created_at DESC").
 		Scan(ctx)
 	require.NoError(suite.t, err, "Failed to get payment methods for user %s", userID)
@@ -948,11 +978,12 @@ func (suite *TestContainerSuite) GetEntitlementsByUserID(userID string) []*model
 	suite.t.Helper()
 	ctx := context.Background()
 	now := time.Now()
+	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
 	var ents []*models.Entitlement
 	err := suite.BunDB.NewSelect().
 		Model(&ents).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Where("start_at <= ?", now).
 		Where("(end_at IS NULL OR end_at > ?)", now).
 		Where("revoked_at IS NULL").
@@ -967,11 +998,12 @@ func (suite *TestContainerSuite) GetEntitlementsByUserID(userID string) []*model
 func (suite *TestContainerSuite) GetNotificationsByUserID(userID string) []*models.NotificationQueue {
 	suite.t.Helper()
 	ctx := context.Background()
+	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
 	var notifs []*models.NotificationQueue
 	err := suite.BunDB.NewSelect().
 		Model(&notifs).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Order("created_at DESC").
 		Scan(ctx)
 	require.NoError(suite.t, err, "Failed to get notifications for user %s", userID)
@@ -983,10 +1015,11 @@ func (suite *TestContainerSuite) GetNotificationsByUserID(userID string) []*mode
 func (suite *TestContainerSuite) CountUnreadNotifications(userID string) int {
 	suite.t.Helper()
 	ctx := context.Background()
+	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
 	count, err := suite.BunDB.NewSelect().
 		Model((*models.NotificationQueue)(nil)).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Where("seen = ?", false).
 		Count(ctx)
 	require.NoError(suite.t, err, "Failed to count unread notifications for user %s", userID)
@@ -1069,22 +1102,23 @@ func (suite *TestContainerSuite) SeedCCBillTestDataWithSubscription() *models.Su
 func (suite *TestContainerSuite) CleanupSubscriptionsForUser(userID string) {
 	suite.t.Helper()
 	ctx := context.Background()
+	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
 	// Also delete entitlements for this user
 	_, _ = suite.BunDB.NewDelete().
 		Model((*models.Entitlement)(nil)).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Exec(ctx)
 
 	_, _ = suite.BunDB.NewDelete().
 		Model((*models.CheckoutSession)(nil)).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Exec(ctx)
 
 	// Delete subscriptions
 	_, err := suite.BunDB.NewDelete().
 		Model((*models.Subscription)(nil)).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", tenantSubjectID).
 		Exec(ctx)
 	if err != nil {
 		suite.t.Logf("Warning: failed to cleanup subscriptions for user %s: %v", userID, err)
