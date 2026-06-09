@@ -26,11 +26,11 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 )
 
-// startOwnerOrgPostgres boots a Postgres 18 container, creates the billing
+// startOwnerTenantPostgres boots a Postgres 18 container, creates the billing
 // schema + pgcrypto, and applies the billing migratekit migrations (which now
 // include 040). It returns a ready bun.DB. River migrations are intentionally
 // skipped — the credit tables do not depend on River.
-func startOwnerOrgPostgres(t *testing.T) (*bun.DB, context.Context) {
+func startOwnerTenantPostgres(t *testing.T) (*bun.DB, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -86,7 +86,7 @@ func startOwnerOrgPostgres(t *testing.T) (*bun.DB, context.Context) {
 // tenant_subject_id for the credit tables: an insert that omits either is rejected by the
 // database, so there is no path to a tenant-less or payer-less credit row.
 func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
-	bunDB, ctx := startOwnerOrgPostgres(t)
+	bunDB, ctx := startOwnerTenantPostgres(t)
 
 	creditTypeID := uuid.New()
 	_, err := bunDB.NewInsert().Model(&models.CreditType{
@@ -130,7 +130,7 @@ func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
 // (tenant, payer, credit_type) collide, while the SAME payer across DISTINCT
 // tenants does NOT collide (tenant is part of the key).
 func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
-	bunDB, ctx := startOwnerOrgPostgres(t)
+	bunDB, ctx := startOwnerTenantPostgres(t)
 
 	creditTypeID := uuid.New()
 	_, err := bunDB.NewInsert().Model(&models.CreditType{
@@ -194,7 +194,7 @@ func seedSpendable(t *testing.T, ctx context.Context, svc *credits.CreditsServic
 // available + held returns to (initial - captured), with the unused reservation
 // fully released back to available.
 func TestReserveCapturePartial_ConservesTotal(t *testing.T) {
-	bunDB, ctx := startOwnerOrgPostgres(t)
+	bunDB, ctx := startOwnerTenantPostgres(t)
 	dbi, err := db.NewWithBun(bunDB)
 	require.NoError(t, err)
 	svc := credits.NewCreditsService(dbi, clockwork.NewRealClock())
@@ -241,7 +241,7 @@ func TestReserveCapturePartial_ConservesTotal(t *testing.T) {
 // TestReserveRelease_RestoresFullBalance proves Reserve(Hold) -> ReleaseHold
 // restores the full available balance: no credits consumed.
 func TestReserveRelease_RestoresFullBalance(t *testing.T) {
-	bunDB, ctx := startOwnerOrgPostgres(t)
+	bunDB, ctx := startOwnerTenantPostgres(t)
 	dbi, err := db.NewWithBun(bunDB)
 	require.NoError(t, err)
 	svc := credits.NewCreditsService(dbi, clockwork.NewRealClock())

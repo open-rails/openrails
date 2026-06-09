@@ -92,7 +92,7 @@ func TestAuthorizeHoldFailOpenOnTimeout(t *testing.T) {
 	rec := &recordingReconcile{}
 	a, done := authorizerWithServer(t, FailOpen, 20*time.Millisecond, hangHandler, rec)
 	defer done()
-	d, err := a.AuthorizeHold(context.Background(), AuthorizeRequest{RequestID: "r", PayerOrgID: "org-1"})
+	d, err := a.AuthorizeHold(context.Background(), AuthorizeRequest{RequestID: "r", PayerTenantID: "org-1"})
 	if err != nil {
 		t.Fatalf("fail-policy must absorb the unreachable error: %v", err)
 	}

@@ -34,7 +34,7 @@ func TestAuthorizeAllowed(t *testing.T) {
 	defer srv.Close()
 
 	resp, err := newTestClient(t, srv.URL).Authorize(context.Background(), AuthorizeRequest{
-		PayerOrgID: "org-1", InvokerID: "oat:k1", EstimateCents: 100, RequestID: "req-1",
+		PayerTenantID: "org-1", InvokerID: "oat:k1", EstimateCents: 100, RequestID: "req-1",
 	})
 	if err != nil {
 		t.Fatalf("Authorize: %v", err)
@@ -48,7 +48,7 @@ func TestAuthorizeAllowed(t *testing.T) {
 	if gotPath != "/v1/service/credits/authorize" {
 		t.Fatalf("path = %q", gotPath)
 	}
-	if gotBody.PayerOrgID != "org-1" || gotBody.InvokerID != "oat:k1" || gotBody.RequestID != "req-1" || gotBody.EstimateCents != 100 {
+	if gotBody.PayerTenantID != "org-1" || gotBody.InvokerID != "oat:k1" || gotBody.RequestID != "req-1" || gotBody.EstimateCents != 100 {
 		t.Fatalf("body threaded wrong: %+v", gotBody)
 	}
 }

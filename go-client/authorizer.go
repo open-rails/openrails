@@ -145,7 +145,7 @@ func (a *Authorizer) AdmitHold(ctx context.Context, req AdmitRequest) (Decision,
 		if errors.Is(err, ErrUnreachable) {
 			// Reuse the authorize fail-policy on the credit-bearing fields.
 			return a.applyFailPolicy(ctx, AuthorizeRequest{
-				PayerOrgID:    req.PayerOrgID,
+				PayerTenantID: req.PayerTenantID,
 				InvokerID:     req.InvokerID,
 				CreditType:    req.CreditType,
 				EstimateCents: req.EstimateCents,
@@ -192,7 +192,7 @@ func (a *Authorizer) applyFailPolicy(ctx context.Context, req AuthorizeRequest, 
 	switch a.policy {
 	case FailOpen:
 		log.Printf("[openrails] AUTHORIZE fail-open: admitting request_id=%s tenant_subject_id=%s invoker_id=%s estimate_cents=%d cause=%v",
-			req.RequestID, req.PayerOrgID, req.InvokerID, req.EstimateCents, cause)
+			req.RequestID, req.PayerTenantID, req.InvokerID, req.EstimateCents, cause)
 		if a.reconcile != nil {
 			if err := a.reconcile.EnqueueDeferredAuthorize(ctx, req); err != nil {
 				log.Printf("[openrails] fail-open deferred-reconcile enqueue failed request_id=%s: %v", req.RequestID, err)
@@ -201,7 +201,7 @@ func (a *Authorizer) applyFailPolicy(ctx context.Context, req AuthorizeRequest, 
 		return Decision{Allowed: true, FailedOpen: true}
 	default: // FailClosed
 		log.Printf("[openrails] AUTHORIZE fail-closed: rejecting request_id=%s tenant_subject_id=%s invoker_id=%s cause=%v",
-			req.RequestID, req.PayerOrgID, req.InvokerID, cause)
+			req.RequestID, req.PayerTenantID, req.InvokerID, cause)
 		return Decision{Allowed: false, DenyCode: "openrails_unreachable"}
 	}
 }

@@ -40,7 +40,6 @@ func normalizeCurrency(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-
 // stablecoinCurrencies are the currencies eligible for the Solana provider.
 // Solana settles on-chain in stablecoins pegged $1; a recurring fiat price is
 // only Solana-eligible if its currency is one of these.

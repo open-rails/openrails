@@ -25,7 +25,7 @@ import (
 type AuditRow struct {
 	ID             string    `json:"id"`
 	InvokerID      string    `json:"invoker_id"`
-	ActorOrg       string    `json:"actor_org,omitempty"`
+	ActorTenant    string    `json:"actor_tenant,omitempty"`
 	Action         string    `json:"action"`
 	TargetTenantID string    `json:"target_tenant_id,omitempty"`
 	Reason         string    `json:"reason,omitempty"`
@@ -51,7 +51,7 @@ const (
 // AuditEntry is a single cross-tenant platform audit record.
 type AuditEntry struct {
 	InvokerID      string
-	ActorOrg       string
+	ActorTenant    string
 	Action         string
 	TargetTenantID *tenant.ID // nil for platform-wide actions (list/metrics)
 	Reason         string
@@ -112,10 +112,10 @@ func (a *AuditLog) Record(ctx context.Context, e AuditEntry) (string, error) {
 	var id string
 	err = a.pool.QueryRow(ctx, `
 		INSERT INTO billing.platform_audit
-			(invoker_id, actor_org, action, target_tenant_id, reason, before_state, after_state, detail)
+			(invoker_id, actor_tenant, action, target_tenant_id, reason, before_state, after_state, detail)
 		VALUES ($1, NULLIF($2,''), $3, $4::uuid, NULLIF($5,''), $6::jsonb, $7::jsonb, $8::jsonb)
 		RETURNING id::text
-	`, actor, strings.TrimSpace(e.ActorOrg), action, targetID, strings.TrimSpace(e.Reason),
+	`, actor, strings.TrimSpace(e.ActorTenant), action, targetID, strings.TrimSpace(e.Reason),
 		beforeJSON, afterJSON, detailJSON).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("platform: record audit %q: %w", action, err)
@@ -144,7 +144,7 @@ func (a *AuditLog) List(ctx context.Context, targetTenant *tenant.ID, limit int)
 	)
 	if targetTenant != nil {
 		rows, err = a.pool.Query(ctx, `
-			SELECT id::text, invoker_id, COALESCE(actor_org,''), action,
+			SELECT id::text, invoker_id, COALESCE(actor_tenant,''), action,
 			       COALESCE(target_tenant_id::text,''), COALESCE(reason,''), created_at
 			  FROM billing.platform_audit
 			 WHERE target_tenant_id = $1::uuid
@@ -152,7 +152,7 @@ func (a *AuditLog) List(ctx context.Context, targetTenant *tenant.ID, limit int)
 		`, targetTenant.String(), limit)
 	} else {
 		rows, err = a.pool.Query(ctx, `
-			SELECT id::text, invoker_id, COALESCE(actor_org,''), action,
+			SELECT id::text, invoker_id, COALESCE(actor_tenant,''), action,
 			       COALESCE(target_tenant_id::text,''), COALESCE(reason,''), created_at
 			  FROM billing.platform_audit
 			 ORDER BY created_at DESC LIMIT $1
@@ -166,7 +166,7 @@ func (a *AuditLog) List(ctx context.Context, targetTenant *tenant.ID, limit int)
 	var out []AuditRow
 	for rows.Next() {
 		var r AuditRow
-		if err := rows.Scan(&r.ID, &r.InvokerID, &r.ActorOrg, &r.Action,
+		if err := rows.Scan(&r.ID, &r.InvokerID, &r.ActorTenant, &r.Action,
 			&r.TargetTenantID, &r.Reason, &r.CreatedAt); err != nil {
 			return nil, err
 		}

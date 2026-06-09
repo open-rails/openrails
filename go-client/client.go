@@ -42,18 +42,18 @@ var (
 	ErrCreditTypeInactive  = errors.New("credit_type_inactive")
 )
 
-// PayerOrgID is the OpenRails tenant-subject UUID a charge is billed to.
-type PayerOrgID uuid.UUID
+// PayerTenantID is the OpenRails tenant-subject UUID a charge is billed to.
+type PayerTenantID uuid.UUID
 
-func (id PayerOrgID) UUID() uuid.UUID { return uuid.UUID(id) }
-func (id PayerOrgID) String() string  { return uuid.UUID(id).String() }
-func (id PayerOrgID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
+func (id PayerTenantID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id PayerTenantID) String() string  { return uuid.UUID(id).String() }
+func (id PayerTenantID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 
 // AuthorizeRequest is the body for POST /v1/service/credits/authorize. It is the
 // atomic authorize+hold: OpenRails checks the payer's balance and, if allowed,
 // places a hold for EstimateCents in a single idempotent call keyed on RequestID.
 type AuthorizeRequest struct {
-	PayerOrgID    string `json:"tenant_subject_id"`
+	PayerTenantID string `json:"tenant_subject_id"`
 	InvokerID     string `json:"invoker_id"`
 	CreditType    string `json:"credit_type,omitempty"`
 	EstimateCents int64  `json:"estimate_cents"`
@@ -74,13 +74,13 @@ type AuthorizeResponse struct {
 
 // HoldCreditsRequest reserves credits for an estimate.
 type HoldCreditsRequest struct {
-	PayerOrgID *PayerOrgID
-	InvokerID  string
-	CreditType string
-	Amount     int64
-	Source     string
-	SourceID   string
-	ExpiresAt  time.Time
+	PayerTenantID *PayerTenantID
+	InvokerID     string
+	CreditType    string
+	Amount        int64
+	Source        string
+	SourceID      string
+	ExpiresAt     time.Time
 }
 
 // CreditHold is the reservation returned by a successful hold.
@@ -105,18 +105,18 @@ type CaptureHoldRequest struct {
 
 // WithdrawCreditsRequest debits credits directly.
 type WithdrawCreditsRequest struct {
-	PayerOrgID *PayerOrgID
-	InvokerID  string
-	CreditType string
-	Amount     int64
-	Source     string
-	SourceID   *uuid.UUID
+	PayerTenantID *PayerTenantID
+	InvokerID     string
+	CreditType    string
+	Amount        int64
+	Source        string
+	SourceID      *uuid.UUID
 }
 
 // CreditTransaction is the ledger row returned by capture/withdraw.
 type CreditTransaction struct {
 	ID              uuid.UUID
-	PayerOrgID      uuid.UUID
+	PayerTenantID   uuid.UUID
 	InvokerID       string
 	CreditTypeID    uuid.UUID
 	Amount          int64
@@ -146,7 +146,7 @@ type CreditTransaction struct {
 // the upper-bound charge to hold. A zero EstimateCents runs the limit checks
 // without placing a money hold.
 type AdmitRequest struct {
-	PayerOrgID    string           `json:"tenant_subject_id"`
+	PayerTenantID string           `json:"tenant_subject_id"`
 	InvokerID     string           `json:"invoker_id"`
 	Tier          string           `json:"tier,omitempty"`
 	Model         string           `json:"model,omitempty"`
@@ -241,7 +241,7 @@ type BalanceResponse struct {
 
 // CreditAccount is the OpenRails service balance/policy snapshot.
 type CreditAccount struct {
-	PayerOrgID           string `json:"tenant_subject_id"`
+	PayerTenantID        string `json:"tenant_subject_id"`
 	CreditType           string `json:"credit_type"`
 	BillingMode          string `json:"billing_mode"`
 	BalanceCents         int64  `json:"balance_cents"`
@@ -388,7 +388,7 @@ func (c *Client) Authorize(ctx context.Context, req AuthorizeRequest) (*Authoriz
 func (c *Client) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*CreditHold, error) {
 	var out CreditHold
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/hold", map[string]any{
-		"tenant_subject_id": payerOrgIDString(req.PayerOrgID),
+		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
 		"invoker_id":        req.InvokerID,
 		"credit_type":       req.CreditType,
 		"amount":            req.Amount,
@@ -458,7 +458,7 @@ func (c *Client) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest
 	}
 	var out CreditTransaction
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/withdraw", map[string]any{
-		"tenant_subject_id": payerOrgIDString(req.PayerOrgID),
+		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
 		"invoker_id":        req.InvokerID,
 		"credit_type":       req.CreditType,
 		"amount":            req.Amount,
@@ -487,12 +487,12 @@ func (c *Client) EnsureCreditType(ctx context.Context, name string) error {
 }
 
 // Balance returns the payer's balance snapshot.
-func (c *Client) Balance(ctx context.Context, payerOrgID string) (*BalanceResponse, error) {
+func (c *Client) Balance(ctx context.Context, payerTenantID string) (*BalanceResponse, error) {
 	if c == nil {
 		return nil, fmt.Errorf("openrails: nil client")
 	}
 	q := url.Values{}
-	q.Set("tenant_subject_id", strings.TrimSpace(payerOrgID))
+	q.Set("tenant_subject_id", strings.TrimSpace(payerTenantID))
 	if c.creditType != "" {
 		q.Set("credit_type", c.creditType)
 	}
@@ -504,9 +504,9 @@ func (c *Client) Balance(ctx context.Context, payerOrgID string) (*BalanceRespon
 }
 
 // GetCreditAccount reads a payer org's balance + policy snapshot.
-func (c *Client) GetCreditAccount(ctx context.Context, payerOrgID, creditType string) (*CreditAccount, error) {
+func (c *Client) GetCreditAccount(ctx context.Context, payerTenantID, creditType string) (*CreditAccount, error) {
 	q := url.Values{}
-	q.Set("tenant_subject_id", strings.TrimSpace(payerOrgID))
+	q.Set("tenant_subject_id", strings.TrimSpace(payerTenantID))
 	q.Set("credit_type", normalizeCreditType(creditType))
 	var out CreditAccount
 	if err := c.do(ctx, http.MethodGet, "/v1/service/credits/balance?"+q.Encode(), nil, &out); err != nil {
@@ -517,23 +517,23 @@ func (c *Client) GetCreditAccount(ctx context.Context, payerOrgID, creditType st
 
 // SetCreditAccountSettings upserts an org's billing account settings and returns
 // the refreshed account snapshot.
-func (c *Client) SetCreditAccountSettings(ctx context.Context, payerOrgID, creditType string, in AccountSettingsInput) (*CreditAccount, error) {
+func (c *Client) SetCreditAccountSettings(ctx context.Context, payerTenantID, creditType string, in AccountSettingsInput) (*CreditAccount, error) {
 	body := map[string]any{
-		"tenant_subject_id": strings.TrimSpace(payerOrgID),
+		"tenant_subject_id": strings.TrimSpace(payerTenantID),
 		"credit_type":       normalizeCreditType(creditType),
 	}
 	addAccountSettingFields(body, in)
 	if err := c.do(ctx, http.MethodPut, "/v1/service/credits/account-settings", body, nil); err != nil {
 		return nil, err
 	}
-	return c.GetCreditAccount(ctx, payerOrgID, creditType)
+	return c.GetCreditAccount(ctx, payerTenantID, creditType)
 }
 
 // ListCreditTransactions reads an org's usage/transaction history from
 // OpenRails and passes the canonical JSON through.
-func (c *Client) ListCreditTransactions(ctx context.Context, payerOrgID, creditType string, limit int) (json.RawMessage, error) {
+func (c *Client) ListCreditTransactions(ctx context.Context, payerTenantID, creditType string, limit int) (json.RawMessage, error) {
 	q := url.Values{}
-	q.Set("tenant_subject_id", strings.TrimSpace(payerOrgID))
+	q.Set("tenant_subject_id", strings.TrimSpace(payerTenantID))
 	q.Set("credit_type", normalizeCreditType(creditType))
 	if limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", limit))
@@ -546,12 +546,12 @@ func (c *Client) ListCreditTransactions(ctx context.Context, payerOrgID, creditT
 }
 
 // UsageRollup returns grouped OpenRails usage over [from, to).
-func (c *Client) UsageRollup(ctx context.Context, payerOrgID string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
+func (c *Client) UsageRollup(ctx context.Context, payerTenantID string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
 	var resp struct {
 		Rows []UsageRollupRow `json:"rows"`
 	}
 	body := map[string]any{
-		"tenant_subject_id": payerOrgID,
+		"tenant_subject_id": payerTenantID,
 		"from":              from.UTC().Unix(),
 		"to":                to.UTC().Unix(),
 		"group_by":          groupBy,
@@ -657,7 +657,7 @@ func normalizeCreditType(creditType string) string {
 	return creditType
 }
 
-func payerOrgIDString(payer *PayerOrgID) string {
+func payerTenantIDString(payer *PayerTenantID) string {
 	if payer == nil || payer.IsZero() {
 		return ""
 	}

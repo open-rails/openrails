@@ -561,11 +561,11 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerOrg, err := resolveTenantSubject(payer, invokerID)
+	ownerTenant, err := resolveTenantSubject(payer, invokerID)
 	if err != nil {
 		return nil, err
 	}
-	ownerID := ownerOrg.UUID()
+	ownerID := ownerTenant.UUID()
 	if err := ensureTenantSubject(ctx, tx, tenantID, ownerID); err != nil {
 		return nil, err
 	}
@@ -589,7 +589,7 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 		return nil, err
 	}
 
-	bal, err := s.lockBalance(ctx, tx, ownerOrg, invokerID, ct.ID)
+	bal, err := s.lockBalance(ctx, tx, ownerTenant, invokerID, ct.ID)
 	if err != nil {
 		return nil, err
 	}

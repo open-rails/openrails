@@ -211,11 +211,11 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	require.ElementsMatch(t, eff, eff2, fmt.Sprintf("permissions should be stable across reruns: %v vs %v", eff, eff2))
 }
 
-// TestBootstrapPlatform_SeedsSuperadminInSeparateOrg proves the #226 platform
+// TestBootstrapPlatform_SeedsSuperadminInSeparateTenant proves the #226 platform
 // layer: BootstrapPlatform seeds a SEPARATE platform tenant whose role holds ONLY
 // openrails:platform:superadmin, and HasPlatformSuperadmin authorizes a member
 // of that org while a tenant operator admin (in the operator tenant) is denied.
-func TestBootstrapPlatform_SeedsSuperadminInSeparateOrg(t *testing.T) {
+func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
 

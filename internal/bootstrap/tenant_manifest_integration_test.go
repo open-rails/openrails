@@ -308,4 +308,3 @@ func assertIssuerRow(t *testing.T, pool *pgxpool.Pool, issuer, jwksURI string, a
 	require.ElementsMatch(t, audiences, gotAudiences)
 	require.Equal(t, enabled, gotEnabled)
 }
-

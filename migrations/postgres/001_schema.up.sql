@@ -221,7 +221,7 @@ COMMENT ON COLUMN billing.tenant_delegated_issuers.audiences IS 'Accepted OIDC J
 CREATE TABLE IF NOT EXISTS billing.platform_audit (
     id               UUID         PRIMARY KEY DEFAULT uuidv7(),
     invoker_id    TEXT         NOT NULL,
-    actor_org        TEXT,
+    actor_tenant        TEXT,
     action           TEXT         NOT NULL,
     target_tenant_id UUID,
     reason           TEXT,

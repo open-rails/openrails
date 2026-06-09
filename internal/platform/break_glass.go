@@ -72,7 +72,7 @@ func NewBreakGlass(pool *pgxpool.Pool, audit *AuditLog) (*BreakGlass, error) {
 // GrantRequest parameterizes a break-glass elevation.
 type GrantRequest struct {
 	InvokerID     string
-	ActorOrg      string
+	ActorTenant   string
 	TargetTenant  *tenant.ID // nil for a platform-wide elevation
 	Justification string
 	TTL           time.Duration // clamped to [0, MaxBreakGlassTTL]; 0 -> DefaultBreakGlassTTL
@@ -131,7 +131,7 @@ func (b *BreakGlass) Grant(ctx context.Context, req GrantRequest) (*BreakGlassGr
 	// Audit the grant (cross-tenant record, survives tenant delete).
 	if _, aerr := b.audit.Record(ctx, AuditEntry{
 		InvokerID:      actor,
-		ActorOrg:       req.ActorOrg,
+		ActorTenant:    req.ActorTenant,
 		Action:         ActionBreakGlassGrant,
 		TargetTenantID: req.TargetTenant,
 		Reason:         just,
@@ -157,7 +157,7 @@ func (b *BreakGlass) Grant(ctx context.Context, req GrantRequest) (*BreakGlassGr
 
 // Revoke ends a grant early and audits the revocation. Idempotent: revoking an
 // already-revoked or expired grant is not an error.
-func (b *BreakGlass) Revoke(ctx context.Context, id, actorUserID, actorOrg string) error {
+func (b *BreakGlass) Revoke(ctx context.Context, id, actorUserID, actorTenant string) error {
 	if b == nil || b.pool == nil {
 		return errors.New("platform: break-glass not configured")
 	}
@@ -185,10 +185,10 @@ func (b *BreakGlass) Revoke(ctx context.Context, id, actorUserID, actorOrg strin
 		return nil // already revoked: idempotent
 	}
 	if _, aerr := b.audit.Record(ctx, AuditEntry{
-		InvokerID: strings.TrimSpace(actorUserID),
-		ActorOrg:  actorOrg,
-		Action:    ActionBreakGlassRevoke,
-		Detail:    map[string]any{"grant_id": id},
+		InvokerID:   strings.TrimSpace(actorUserID),
+		ActorTenant: actorTenant,
+		Action:      ActionBreakGlassRevoke,
+		Detail:      map[string]any{"grant_id": id},
 	}); aerr != nil {
 		return fmt.Errorf("platform: audit break-glass revoke: %w", aerr)
 	}
