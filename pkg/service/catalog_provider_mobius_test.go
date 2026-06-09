@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -33,11 +34,28 @@ func newMobiusAdapterWithServer(t *testing.T, serverURL string) *mobiusAdapter {
 }
 
 func TestMobiusAdapter_DeterministicPlanIDFormat(t *testing.T) {
-	id := uuid.MustParse("11111111-2222-3333-4444-555555555555")
-	got := mobiusDeterministicPlanID(id)
-	want := "openrails-11111111-2222-3333-4444-555555555555"
+	got := mobiusDeterministicPlanID("premium", "usd", 2300, intPtr(30))
+	want := "premium-usd-2300-30"
 	if got != want {
 		t.Fatalf("plan_id format drift: got %q want %q", got, want)
+	}
+	// No "openrails-"/tenant/application prefix: the content key IS the whole id.
+	if strings.HasPrefix(got, "openrails-") {
+		t.Fatalf("generated plan_id must not carry an openrails- prefix: %q", got)
+	}
+	// Content-addressed: no price-UUID input, so it is stable across a fresh DB;
+	// unchanged by cosmetic edits; distinct when money terms change.
+	if mobiusDeterministicPlanID("premium", "usd", 2300, intPtr(30)) != want {
+		t.Error("plan_id must be deterministic for identical content")
+	}
+	if mobiusDeterministicPlanID("premium", "usd", 2900, intPtr(30)) == want {
+		t.Error("a different amount must yield a different plan_id")
+	}
+	if mobiusDeterministicPlanID("premium", "usd", 2300, intPtr(365)) == want {
+		t.Error("a different cycle must yield a different plan_id")
+	}
+	if mobiusDeterministicPlanID("basic", "usd", 2300, intPtr(30)) == want {
+		t.Error("a different product slug must yield a different plan_id")
 	}
 }
 
@@ -91,7 +109,7 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 
 	priceID := uuid.New()
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: priceID, UnitAmount: 999, BillingCycleDays: intPtr(30),
+		PriceID: priceID, ProductSlug: "pro", Currency: "usd", UnitAmount: 999, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -99,7 +117,7 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 	if !addCalled {
 		t.Fatal("expected AddRecurringPlan to be called for a missing plan")
 	}
-	if ids[models.ProcessorKeyPlanID] != mobiusDeterministicPlanID(priceID) {
+	if ids[models.ProcessorKeyPlanID] != mobiusDeterministicPlanID("pro", "usd", 999, intPtr(30)) {
 		t.Fatalf("plan_id mismatch: %v", ids)
 	}
 	if ids[models.ProcessorKeyProvider] != "mobius" {
@@ -108,8 +126,10 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 }
 
 func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
+	// A FRESH-DB price gets a new random UUID, but the content-addressed plan_id is
+	// unchanged, so find-or-attach reattaches to the existing NMI plan (no create).
 	priceID := uuid.New()
-	planID := mobiusDeterministicPlanID(priceID)
+	planID := mobiusDeterministicPlanID("pro", "usd", 999, intPtr(30))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		if r.Form.Get("recurring") == "add_plan" {
@@ -123,13 +143,137 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: priceID, UnitAmount: 999, BillingCycleDays: intPtr(30),
+		PriceID: priceID, ProductSlug: "pro", Currency: "usd", UnitAmount: 999, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if ids[models.ProcessorKeyPlanID] != planID {
 		t.Fatalf("plan_id mismatch: %v", ids)
+	}
+}
+
+// nmiPlanQueryXML renders a single-plan recurring_plans query response.
+func nmiPlanQueryXML(planID, planName, planAmount, dayFrequency string) string {
+	return "<nm_response><plan><plan_id>" + planID + "</plan_id><plan_name>" + planName +
+		"</plan_name><plan_amount>" + planAmount + "</plan_amount><day_frequency>" + dayFrequency +
+		"</day_frequency></plan></nm_response>"
+}
+
+func TestMobiusAdapter_AttachValidatesLinkAndCreatesNothing(t *testing.T) {
+	// A supplied link to a plan that EXISTS and MATCHES the price money terms is
+	// accepted, and Attach must never create a plan (no add_plan).
+	planID := "premium-usd-999-30"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("recurring") == "add_plan" {
+			t.Error("Attach must not create an NMI plan when a valid link is supplied")
+		}
+		_, _ = w.Write([]byte(nmiPlanQueryXML(planID, "Premium", "9.99", "30")))
+	}))
+	t.Cleanup(server.Close)
+	a := newMobiusAdapterWithServer(t, server.URL)
+
+	ids, err := a.Attach(context.Background(),
+		map[string]string{models.ProcessorKeyPlanID: planID},
+		autoCreateContext{ProductSlug: "premium", Currency: "usd", UnitAmount: 999, BillingCycleDays: intPtr(30)})
+	if err != nil {
+		t.Fatalf("valid link should attach cleanly, got %v", err)
+	}
+	if ids[models.ProcessorKeyPlanID] != planID || ids[models.ProcessorKeyProvider] != "mobius" {
+		t.Fatalf("unexpected ids: %v", ids)
+	}
+}
+
+func TestMobiusAdapter_AttachCreatesMissingPlanAtOperatorID(t *testing.T) {
+	// NMI plan_ids are client-creatable, so a link to a not-yet-existing plan_id
+	// is a find-or-CREATE at that operator-chosen id (e.g. "premium").
+	var addCalled bool
+	var addedPlanID, addedFreq, addedAmount string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("recurring") == "add_plan" {
+			addCalled = true
+			addedPlanID = r.Form.Get("plan_id")
+			addedFreq = r.Form.Get("day_frequency")
+			addedAmount = r.Form.Get("plan_amount")
+			_, _ = w.Write([]byte("response=1"))
+			return
+		}
+		_, _ = w.Write([]byte("<nm_response></nm_response>")) // query: not found
+	}))
+	t.Cleanup(server.Close)
+	a := newMobiusAdapterWithServer(t, server.URL)
+
+	ids, err := a.Attach(context.Background(),
+		map[string]string{models.ProcessorKeyPlanID: "premium"},
+		autoCreateContext{ProductSlug: "premium", Currency: "usd", UnitAmount: 999, BillingCycleDays: intPtr(30)})
+	if err != nil {
+		t.Fatalf("missing plan should be created, got %v", err)
+	}
+	if !addCalled {
+		t.Fatal("expected AddRecurringPlan to be called for a missing operator-supplied plan_id")
+	}
+	if addedPlanID != "premium" || addedFreq != "30" || addedAmount != "9.99" {
+		t.Fatalf("created plan with wrong terms: id=%q freq=%q amount=%q", addedPlanID, addedFreq, addedAmount)
+	}
+	if ids[models.ProcessorKeyPlanID] != "premium" {
+		t.Fatalf("unexpected ids: %v", ids)
+	}
+}
+
+func TestMobiusAdapter_AttachMissingPlanRequiresCycleToCreate(t *testing.T) {
+	// A missing plan_id with no billing cycle cannot be created (NMI plans need a
+	// frequency) -> loud, actionable error.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("recurring") == "add_plan" {
+			t.Error("must not create an NMI plan without a billing cycle")
+		}
+		_, _ = w.Write([]byte("<nm_response></nm_response>")) // query: not found
+	}))
+	t.Cleanup(server.Close)
+	a := newMobiusAdapterWithServer(t, server.URL)
+
+	_, err := a.Attach(context.Background(),
+		map[string]string{models.ProcessorKeyPlanID: "premium"},
+		autoCreateContext{UnitAmount: 999, BillingCycleDays: nil})
+	if err == nil || !strings.Contains(err.Error(), "billing_cycle_days") {
+		t.Fatalf("expected a loud billing_cycle_days error, got %v", err)
+	}
+}
+
+func TestMobiusAdapter_AttachRejectsAmountMismatch(t *testing.T) {
+	planID := "premium-usd-999-30"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Remote plan bills 5.00 (500 cents) but the catalog price is 999 cents.
+		_, _ = w.Write([]byte(nmiPlanQueryXML(planID, "Premium", "5.00", "30")))
+	}))
+	t.Cleanup(server.Close)
+	a := newMobiusAdapterWithServer(t, server.URL)
+
+	_, err := a.Attach(context.Background(),
+		map[string]string{models.ProcessorKeyPlanID: planID},
+		autoCreateContext{UnitAmount: 999, BillingCycleDays: intPtr(30)})
+	if err == nil || !strings.Contains(err.Error(), "amount") {
+		t.Fatalf("expected an amount-mismatch error, got %v", err)
+	}
+}
+
+func TestMobiusAdapter_AttachRejectsCycleMismatch(t *testing.T) {
+	planID := "premium-usd-999-30"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Remote plan bills every 365 days but the catalog price is 30-day.
+		_, _ = w.Write([]byte(nmiPlanQueryXML(planID, "Premium", "9.99", "365")))
+	}))
+	t.Cleanup(server.Close)
+	a := newMobiusAdapterWithServer(t, server.URL)
+
+	_, err := a.Attach(context.Background(),
+		map[string]string{models.ProcessorKeyPlanID: planID},
+		autoCreateContext{UnitAmount: 999, BillingCycleDays: intPtr(30)})
+	if err == nil || !strings.Contains(err.Error(), "billing cycle") {
+		t.Fatalf("expected a billing-cycle-mismatch error, got %v", err)
 	}
 }
 

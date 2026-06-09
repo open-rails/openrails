@@ -197,6 +197,28 @@ auth:
 # catalogs:
 #   - name: default
 #     tier_groups: []   # each price declares its own `currency`
+#
+# A price may either let OpenRails find-or-create each provider object
+# (content-addressed, idempotent across DB rebuilds) or pin external objects with
+# `provider_links`. Linked objects are validated against the provider (existence
+# + amount/currency/cycle/mint); a mismatch fails the apply loudly and ids are
+# never renamed by OpenRails. A MISSING object is created where the linked id is
+# client-creatable (NMI plan_id, Stripe lookup_key) and errors where it is
+# provider-generated (Stripe price_id, Solana plan_pda).
+# The recommended manual-link fields are the operator-chosen identifiers — Stripe
+# `lookup_key` and NMI `plan_id` — both find-or-create (human-readable, stable,
+# portable across DB rebuilds and Stripe test/live).
+#         prices:
+#           - currency: usd
+#             unit_amount: 2300
+#             interval: month
+#             provider_links:
+#               stripe: { lookup_key: premium }   # find-or-create at this key (recommended)
+#               mobius: { plan_id: premium }      # find-or-create the NMI plan at this id
+#               solana: { plan_pda: 7Xy...PdA }   # must already exist on-chain
+#               ccbill: { form_name: premium, flex_id: abc-123 }
+#       # To pin an exact pre-existing Stripe price instead of find-or-create:
+#       #   stripe: { price_id: price_123, product_id: prod_123 }  # require-exists
 
 # =============================================================================
 # ENCRYPTION AT REST (issue #227)
@@ -341,6 +363,13 @@ processors:
 #       # Do not configure Base/EVM networks for this app.
 #       supported_networks: ["solana"]
 #       api_base_url: "https://api.cdp.coinbase.com"
+#       # Preferred: CDP Secret API Key credentials. OpenRails generates the
+#       # short-lived JWT bearer token for each server-side request.
+#       # api_key_id: set via USDC_FUNDING_PROVIDERS_COINBASE_API_KEY_ID env var
+#       # api_key_secret: set via USDC_FUNDING_PROVIDERS_COINBASE_API_KEY_SECRET env var
+#       # Webhook subscription secret for X-Hook0-Signature verification.
+#       # webhook_secret: set via USDC_FUNDING_PROVIDERS_COINBASE_WEBHOOK_SECRET env var
+#       # Escape hatch only: pre-generated short-lived bearer token.
 #       # api_key: set via USDC_FUNDING_PROVIDERS_COINBASE_API_KEY env var
 
 # =============================================================================

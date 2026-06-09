@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -268,7 +267,7 @@ func TestDriftDedupeKeyStable(t *testing.T) {
 const nmiPlansXMLFixture = `<?xml version="1.0" encoding="UTF-8"?>
 <nm_response>
   <plan>
-    <plan_id>openrails-%s</plan_id>
+    <plan_id>premium-usd-999-30</plan_id>
     <plan_name>Premium Monthly</plan_name>
     <plan_amount>9.99</plan_amount>
   </plan>
@@ -280,9 +279,7 @@ const nmiPlansXMLFixture = `<?xml version="1.0" encoding="UTF-8"?>
 </nm_response>`
 
 func TestParseNMIPlans(t *testing.T) {
-	priceID := uuid.New()
-	raw := fmt.Sprintf(nmiPlansXMLFixture, priceID.String())
-	plans, err := parseNMIPlans(raw)
+	plans, err := parseNMIPlans(nmiPlansXMLFixture)
 	if err != nil {
 		t.Fatalf("parseNMIPlans: %v", err)
 	}
@@ -297,11 +294,12 @@ func TestParseNMIPlans(t *testing.T) {
 	}
 }
 
-func TestComputeNMIDriftOrphanAndPrefixDiscrimination(t *testing.T) {
+func TestComputeNMIDriftOrphanContentAddressed(t *testing.T) {
 	now := time.Now().UTC()
-	priceID := uuid.New()
 	plans := []nmiPlan{
-		{PlanID: "openrails-" + priceID.String(), PlanName: "Premium", AmountCents: 999},
+		// Content-addressed generated id (no openrails-/UUID prefix) ...
+		{PlanID: "premium-usd-999-30", PlanName: "Premium", AmountCents: 999},
+		// ... and an operator-hand-made id.
 		{PlanID: "operator-handmade", PlanName: "Legacy", AmountCents: 499},
 	}
 	// No OpenRails prices reference any of these plans -> both orphan_in_nmi.
@@ -310,25 +308,12 @@ func TestComputeNMIDriftOrphanAndPrefixDiscrimination(t *testing.T) {
 	if got := countKind(events, models.CatalogDriftOrphanInNMI); got != 2 {
 		t.Fatalf("expected 2 orphan_in_nmi, got %d (%+v)", got, events)
 	}
-	// The openrails-<uuid> prefixed plan must carry the extracted OpenRails price id;
-	// the operator-made one must not.
-	var sawPrefixed, sawOperator bool
+	// Content-addressed plan_ids no longer encode a price UUID, so an orphan
+	// carries only the external plan_id and never a recovered OpenRailsResourceID.
 	for _, e := range events {
-		if e.ExternalResourceID == "openrails-"+priceID.String() {
-			sawPrefixed = true
-			if e.OpenRailsResourceID != priceID.String() {
-				t.Fatalf("expected openrails-prefixed orphan to carry price id %s, got %q", priceID, e.OpenRailsResourceID)
-			}
+		if e.OpenRailsResourceID != "" {
+			t.Fatalf("orphan %q must not carry a recovered openrails id, got %q", e.ExternalResourceID, e.OpenRailsResourceID)
 		}
-		if e.ExternalResourceID == "operator-handmade" {
-			sawOperator = true
-			if e.OpenRailsResourceID != "" {
-				t.Fatalf("expected operator-made orphan to have empty openrails id, got %q", e.OpenRailsResourceID)
-			}
-		}
-	}
-	if !sawPrefixed || !sawOperator {
-		t.Fatalf("expected to observe both prefixed and operator orphans")
 	}
 }
 
@@ -336,7 +321,7 @@ func TestComputeNMIDriftMissingInNMI(t *testing.T) {
 	now := time.Now().UTC()
 	productID := uuid.New()
 	priceID := uuid.New()
-	planID := "openrails-" + priceID.String()
+	planID := "premium-usd-999-30"
 	prices := []*models.Price{nmiPrice(priceID, productID, "Premium", 999, planID)}
 	snap := snapFromRows(nil, prices)
 	// NMI returns no plans -> the price's plan is missing_in_nmi.
@@ -350,7 +335,7 @@ func TestComputeNMIDriftFieldDrift(t *testing.T) {
 	now := time.Now().UTC()
 	productID := uuid.New()
 	priceID := uuid.New()
-	planID := "openrails-" + priceID.String()
+	planID := "premium-usd-999-30"
 	prices := []*models.Price{nmiPrice(priceID, productID, "Premium", 999, planID)}
 	snap := snapFromRows(nil, prices)
 	// NMI plan disagrees on amount (plan_name is no longer tracked for prices).
@@ -370,7 +355,7 @@ func TestComputeNMIDriftNoDriftWhenInSync(t *testing.T) {
 	now := time.Now().UTC()
 	productID := uuid.New()
 	priceID := uuid.New()
-	planID := "openrails-" + priceID.String()
+	planID := "premium-usd-999-30"
 	prices := []*models.Price{nmiPrice(priceID, productID, "Premium", 999, planID)}
 	snap := snapFromRows(nil, prices)
 	plans := []nmiPlan{{PlanID: planID, PlanName: "Premium", AmountCents: 999}}

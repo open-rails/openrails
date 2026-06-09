@@ -135,6 +135,29 @@ func TestGetRecurringPlanByID_FoundParsesAmount(t *testing.T) {
 	assert.Equal(t, "openrails-abc", seen.Get("plan_id"))
 }
 
+func TestGetRecurringPlanDetailByID_ParsesAmountAndFrequency(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<?xml version="1.0"?>
+<nm_response>
+  <plan>
+    <plan_id>premium-usd-999-30</plan_id>
+    <plan_name>Premium Monthly</plan_name>
+    <plan_amount>9.99</plan_amount>
+    <day_frequency>30</day_frequency>
+  </plan>
+</nm_response>`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	detail, err := client.GetRecurringPlanDetailByID("premium-usd-999-30")
+	require.NoError(t, err)
+	assert.True(t, detail.Found)
+	assert.Equal(t, "Premium Monthly", detail.Name)
+	assert.Equal(t, int64(999), detail.AmountCents)
+	assert.Equal(t, 30, detail.DayFrequency)
+}
+
 func TestGetRecurringPlanByID_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`<nm_response></nm_response>`))

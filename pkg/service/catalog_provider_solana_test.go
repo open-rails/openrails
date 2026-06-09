@@ -29,7 +29,7 @@ func TestSolanaAdapter_AutoCreateUnconfiguredIsPending(t *testing.T) {
 
 func TestSolanaAdapter_AttachRequiresPlanPDA(t *testing.T) {
 	a := &solanaAdapter{}
-	if _, err := a.Attach(context.Background(), map[string]string{"mint": "x"}); err == nil {
+	if _, err := a.Attach(context.Background(), map[string]string{"mint": "x"}, autoCreateContext{}); err == nil {
 		t.Error("Attach without plan_pda should error")
 	}
 	got, err := a.Attach(context.Background(), map[string]string{
@@ -37,7 +37,7 @@ func TestSolanaAdapter_AttachRequiresPlanPDA(t *testing.T) {
 		solanaKeyMintSymbol:      "USDC",
 		solanaKeyAmountBaseUnits: "29000000",
 		"junk":                   "", // empty values are dropped
-	})
+	}, autoCreateContext{})
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -65,14 +65,23 @@ func TestSolanaAdapter_UpdateIsNoOp(t *testing.T) {
 }
 
 func TestSolanaPlanID_Deterministic(t *testing.T) {
-	id := uuid.New()
-	if solanaPlanID(id, "mint-a") != solanaPlanID(id, "mint-a") {
-		t.Error("solanaPlanID must be deterministic for a given price id")
+	base := solanaPlanID("premium", "usd", 2300, intPtr(30), "mint-a")
+	// Content-addressed: deterministic for identical content, and with NO price-UUID
+	// input it is stable across a fresh OpenRails DB (a rebuilt catalog derives the
+	// same on-chain plan PDA and reattaches instead of republishing).
+	if base != solanaPlanID("premium", "usd", 2300, intPtr(30), "mint-a") {
+		t.Error("solanaPlanID must be deterministic for identical content")
 	}
-	if solanaPlanID(id, "mint-a") == solanaPlanID(uuid.New(), "mint-a") {
-		t.Error("solanaPlanID should differ across distinct price ids")
+	if base == solanaPlanID("premium", "usd", 2900, intPtr(30), "mint-a") {
+		t.Error("a different amount must yield a different plan id")
 	}
-	if solanaPlanID(id, "mint-a") == solanaPlanID(id, "mint-b") {
-		t.Error("solanaPlanID should differ across distinct configured mints")
+	if base == solanaPlanID("premium", "usd", 2300, intPtr(365), "mint-a") {
+		t.Error("a different cycle must yield a different plan id")
+	}
+	if base == solanaPlanID("basic", "usd", 2300, intPtr(30), "mint-a") {
+		t.Error("a different product slug must yield a different plan id")
+	}
+	if base == solanaPlanID("premium", "usd", 2300, intPtr(30), "mint-b") {
+		t.Error("a different mint must yield a different plan id")
 	}
 }

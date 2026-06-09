@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -33,28 +34,91 @@ func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) PendingAction {
 	}
 }
 
-// Attach validates supplied Stripe link ids. When the feature flag
-// VerifyProcessorMappings is on, the price_id is round-tripped against Stripe.
-func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string) (map[string]string, error) {
+// Attach validates supplied Stripe link ids. When Stripe is configured the
+// linked Price is round-tripped against the API and its substance verified
+// against the OpenRails price: the Price must exist and match unit_amount,
+// currency, the recurring interval/duration, and — when the operator supplied a
+// product_id — the expected Product association. A missing or mismatched Price
+// is a loud error. When Stripe is not configured there is no read API to verify
+// against, so the ids are stored as operator-owned.
+func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
 	priceID := strings.TrimSpace(link[models.ProcessorKeyStripePriceID])
 	if priceID == "" {
-		return nil, fmt.Errorf("stripe link requires provider_links.stripe.price_id")
+		// A Stripe price_id (price_xxx) is STRIPE-GENERATED: it cannot be created
+		// at an operator-chosen id, so a price_id link must already exist. The
+		// Stripe analog of NMI's "create at my chosen id" is the client-chosen
+		// lookup_key — a link supplying only a lookup_key is find-or-created at
+		// that key (AutoCreate's flow, but at the operator's key).
+		if lookupKey := strings.TrimSpace(link[providerLookupKey]); lookupKey != "" {
+			in.LookupKey = lookupKey
+			ids, err := a.AutoCreate(ctx, in)
+			if errors.Is(err, errPendingManualLink) {
+				// Stripe not configured: store the operator-chosen key as-is.
+				return map[string]string{providerLookupKey: lookupKey}, nil
+			}
+			return ids, err
+		}
+		return nil, fmt.Errorf("stripe link requires provider_links.stripe.price_id (an existing Stripe Price) or lookup_key (find-or-create at a chosen key)")
 	}
 	out := map[string]string{
 		models.ProcessorKeyStripePriceID: priceID,
 	}
-	if prodID := strings.TrimSpace(link[models.ProcessorKeyStripeProductID]); prodID != "" {
-		out[models.ProcessorKeyStripeProductID] = prodID
+	suppliedProductID := strings.TrimSpace(link[models.ProcessorKeyStripeProductID])
+	if suppliedProductID != "" {
+		out[models.ProcessorKeyStripeProductID] = suppliedProductID
 	}
-	if a.svc != nil && a.svc.rt != nil && a.svc.rt.Config != nil &&
-		a.svc.rt.Config.FeatureFlags != nil && a.svc.rt.Config.FeatureFlags.VerifyProcessorMappings {
-		stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config}
-		if err := stripeSvc.VerifyPriceExists(ctx, priceID); err != nil {
-			return nil, err
+
+	if !a.stripeConfigured() {
+		return out, nil
+	}
+	stripeSvc := &catalog.StripeCatalogService{Config: a.svc.rt.Config}
+	remote, err := stripeSvc.RetrievePrice(ctx, priceID)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return nil, fmt.Errorf("stripe price %q not found; create it or fix provider_links.stripe.price_id", priceID)
 		}
+		return nil, fmt.Errorf("verify stripe price %q: %w", priceID, err)
+	}
+	if in.UnitAmount > 0 && remote.UnitAmount != in.UnitAmount {
+		return nil, fmt.Errorf("stripe price %q unit_amount (%d) does not match catalog price (%d)", priceID, remote.UnitAmount, in.UnitAmount)
+	}
+	if in.Currency != "" && !strings.EqualFold(strings.TrimSpace(remote.Currency), strings.TrimSpace(in.Currency)) {
+		return nil, fmt.Errorf("stripe price %q currency (%s) does not match catalog price (%s)", priceID, remote.Currency, in.Currency)
+	}
+	if in.BillingCycleDays != nil && *in.BillingCycleDays > 0 {
+		wantInterval, wantCount := catalog.StripeIntervalForDays(*in.BillingCycleDays)
+		switch {
+		case remote.Recurring == nil:
+			return nil, fmt.Errorf("stripe price %q is one-time but catalog price is recurring (%d days)", priceID, *in.BillingCycleDays)
+		case remote.Recurring.Interval != wantInterval || remote.Recurring.IntervalCount != wantCount:
+			return nil, fmt.Errorf("stripe price %q recurring terms (%d %s) do not match catalog price (%d %s)", priceID, remote.Recurring.IntervalCount, remote.Recurring.Interval, wantCount, wantInterval)
+		}
+	} else if remote.Recurring != nil {
+		return nil, fmt.Errorf("stripe price %q is recurring but catalog price is one-time", priceID)
+	}
+	// Product association: if the operator pinned a product_id it must be the
+	// Price's actual product; otherwise adopt the Price's product as canonical.
+	remoteProduct := strings.TrimSpace(remote.Product)
+	if suppliedProductID != "" && remoteProduct != "" && !strings.EqualFold(remoteProduct, suppliedProductID) {
+		return nil, fmt.Errorf("stripe price %q belongs to product %q, not the linked product %q", priceID, remoteProduct, suppliedProductID)
+	}
+	if suppliedProductID == "" && remoteProduct != "" {
+		out[models.ProcessorKeyStripeProductID] = remoteProduct
+	}
+	if lk := strings.TrimSpace(remote.LookupKey); lk != "" {
+		out[providerLookupKey] = lk
 	}
 	return out, nil
+}
+
+// stripeConfigured reports whether a usable Stripe secret key is available.
+func (a *stripeAdapter) stripeConfigured() bool {
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
+		return false
+	}
+	stripeProc := a.svc.rt.Config.GetStripeProcessor()
+	return stripeProc != nil && strings.TrimSpace(stripeProc.SecretKey) != ""
 }
 
 // AutoCreate implements the find-or-create flow for Stripe. Identity is

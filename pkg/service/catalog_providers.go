@@ -73,7 +73,14 @@ type providerAdapter interface {
 	// OpenRails price. Returns the canonical IDs that should be written to the
 	// processors[provider] map. Called when the caller provided
 	// provider_links[provider] in the create/update request.
-	Attach(ctx context.Context, link map[string]string) (map[string]string, error)
+	//
+	// in carries the OpenRails price substance (slug + immutable money terms) so
+	// the adapter can VERIFY the linked remote object actually exists AND matches
+	// that substance (amount / currency / billing cycle / provider-specific
+	// immutable terms). A missing or mismatched remote object is a loud error —
+	// the operator linked the wrong id — not a silent accept. Adapters whose
+	// provider has no read API (CCBill) store the supplied ids as-is.
+	Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error)
 
 	// AutoCreate mints a brand-new remote object for this price and returns the
 	// canonical IDs to store. Called when the caller listed this provider in
@@ -229,6 +236,25 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	}
 	sort.Strings(names)
 
+	// The price substance (slug + immutable money terms) is the same for the
+	// Attach (link-validation) and AutoCreate (mint) paths. lookup_key + content
+	// keys are derived from the product slug + money terms, not the row UUIDs, so
+	// re-syncing after a DB wipe finds the same provider objects.
+	productSlug := ""
+	if product != nil {
+		productSlug = strings.TrimSpace(product.Slug)
+	}
+	pctx := autoCreateContext{
+		PriceID:          priceID,
+		ProductID:        req.ProductID,
+		Product:          product,
+		ProductSlug:      productSlug,
+		UnitAmount:       req.UnitAmount,
+		Currency:         req.Currency,
+		BillingCycleDays: req.BillingCycleDays,
+		LookupKey:        internalStripeLookupKey(productSlug, req.Currency, req.UnitAmount, req.BillingCycleDays),
+	}
+
 	for _, name := range names {
 		adapter, ok := adapters[name]
 		if !ok {
@@ -236,9 +262,12 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			continue
 		}
 		link := req.ProviderLinks[name]
-		// Try the user-supplied attach path first.
+		// Try the user-supplied attach path first. Attach VERIFIES the linked
+		// remote object exists and matches the price substance (pctx) — a wrong
+		// or missing link is a loud error, never a silent accept — and no provider
+		// object is created when a valid link is supplied.
 		if len(normalizeLinkMap(link)) > 0 {
-			ids, attachErr := adapter.Attach(ctx, link)
+			ids, attachErr := adapter.Attach(ctx, link, pctx)
 			if attachErr != nil {
 				return nil, nil, nil, fmt.Errorf("%s: %w", name, attachErr)
 			}
@@ -254,23 +283,8 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			}
 			continue
 		}
-		// Otherwise dispatch AutoCreate. The lookup_key + content keys are
-		// derived from the product slug + the immutable money terms, not the row
-		// UUIDs, so re-syncing after a DB wipe finds the same Stripe objects.
-		productSlug := ""
-		if product != nil {
-			productSlug = strings.TrimSpace(product.Slug)
-		}
-		ids, createErr := adapter.AutoCreate(ctx, autoCreateContext{
-			PriceID:          priceID,
-			ProductID:        req.ProductID,
-			Product:          product,
-			ProductSlug:      productSlug,
-			UnitAmount:       req.UnitAmount,
-			Currency:         req.Currency,
-			BillingCycleDays: req.BillingCycleDays,
-			LookupKey:        internalStripeLookupKey(productSlug, req.Currency, req.UnitAmount, req.BillingCycleDays),
-		})
+		// Otherwise dispatch AutoCreate to mint (or find-or-attach) the object.
+		ids, createErr := adapter.AutoCreate(ctx, pctx)
 		switch {
 		case errors.Is(createErr, errPendingManualLink):
 			template := adapter.PendingActionTemplate(priceID)
@@ -299,6 +313,32 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		}
 	}
 	return processors, states, pending, nil
+}
+
+// priceLinkContext builds the substance context (slug + immutable money terms)
+// used by adapter.Attach to validate an operator-supplied provider link against
+// an EXISTING price (the admin PATCH / link-rotation path). It resolves the
+// product slug via the product service; an unresolved product yields an empty
+// slug (validators tolerate a blank slug — they still check amount/cycle/mint).
+func (s *Service) priceLinkContext(ctx context.Context, price *models.Price) (autoCreateContext, error) {
+	if price == nil {
+		return autoCreateContext{}, fmt.Errorf("price required")
+	}
+	pctx := autoCreateContext{
+		PriceID:          price.ID,
+		ProductID:        price.ProductID,
+		UnitAmount:       price.Amount,
+		Currency:         price.Currency,
+		BillingCycleDays: price.BillingCycleDays,
+	}
+	if products, err := s.requireProductService(); err == nil {
+		if product, err := products.GetByID(ctx, price.ProductID); err == nil && product != nil {
+			pctx.Product = product
+			pctx.ProductSlug = strings.TrimSpace(product.Slug)
+		}
+	}
+	pctx.LookupKey = internalStripeLookupKey(pctx.ProductSlug, pctx.Currency, pctx.UnitAmount, pctx.BillingCycleDays)
+	return pctx, nil
 }
 
 // normalizeLinkMap trims whitespace from each key/value and drops empty pairs.

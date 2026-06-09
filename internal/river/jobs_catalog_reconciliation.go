@@ -382,8 +382,6 @@ func dollarStringToCentsJob(dollars string) int64 {
 	return int64(f*100 + 0.5)
 }
 
-const nmiOpenRailsPlanPrefixJob = "openrails-"
-
 // computeNMIDriftJob is the worker-side mirror of
 // pkg/service.computeNMICatalogDrift.
 func computeNMIDriftJob(plans []nmiPlanJob, priceRows []*models.Price, now time.Time) []models.CatalogDriftEvent {
@@ -411,17 +409,16 @@ func computeNMIDriftJob(plans []nmiPlanJob, priceRows []*models.Price, now time.
 		seenPlanIDs[plan.PlanID] = struct{}{}
 		orPriceID, matched := priceByPlanID[plan.PlanID]
 		if !matched {
-			ev := models.CatalogDriftEvent{
+			// Content-addressed plan_ids carry no price UUID to recover; report
+			// the orphan with the external plan_id only (mirror of the service
+			// path computeNMICatalogDrift).
+			events = append(events, models.CatalogDriftEvent{
 				Provider:              models.CatalogDriftProviderNMI,
 				Kind:                  models.CatalogDriftOrphanInNMI,
 				OpenRailsResourceType: models.CatalogDriftResourcePrice,
 				ExternalResourceID:    plan.PlanID,
 				DetectedAt:            now,
-			}
-			if uuidPart, ok := openRailsPriceIDFromPlanIDJob(plan.PlanID); ok {
-				ev.OpenRailsResourceID = uuidPart
-			}
-			events = append(events, ev)
+			})
 			continue
 		}
 		local := priceByID[orPriceID]
@@ -449,17 +446,6 @@ func computeNMIDriftJob(plans []nmiPlanJob, priceRows []*models.Price, now time.
 		}
 	}
 	return events
-}
-
-func openRailsPriceIDFromPlanIDJob(planID string) (string, bool) {
-	if !strings.HasPrefix(planID, nmiOpenRailsPlanPrefixJob) {
-		return "", false
-	}
-	rest := strings.TrimPrefix(planID, nmiOpenRailsPlanPrefixJob)
-	if _, err := uuid.Parse(rest); err != nil {
-		return "", false
-	}
-	return rest, true
 }
 
 func nmiFieldDriftJob(orPriceID, planID, field, orVal, nmiVal string, now time.Time) models.CatalogDriftEvent {

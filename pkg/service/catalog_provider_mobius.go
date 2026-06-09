@@ -19,8 +19,11 @@ import (
 // programmatically creates, attaches to, updates, and reconciles NMI Recurring
 // Plans via the Direct Post + Query APIs.
 //
-//   - Attach: validates and stores plan_id (+ optional provider override).
-//   - AutoCreate: deterministic plan_id `openrails-<price_uuid>`; find-or-attach
+//   - Attach: find-or-create at the operator-supplied plan_id. NMI plan_ids are
+//     operator-chosen AND client-creatable, so a link to a plan that exists is
+//     verified (amount + frequency must match the price) while a link to one that
+//     does not yet exist is CREATED from the price's terms (+ optional provider override).
+//   - AutoCreate: content-addressed plan_id `<slug>-<cur>-<amt>-<cycle>`; find-or-attach
 //     against NMI, falling back to creating the plan. Requires
 //     billing_cycle_days (NMI requires a frequency). When no NMI processor is
 //     configured, falls back to errPendingManualLink so the operator can link
@@ -53,27 +56,88 @@ func (a *mobiusAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	}
 }
 
-func (a *mobiusAdapter) Attach(ctx context.Context, link map[string]string) (map[string]string, error) {
+func (a *mobiusAdapter) Attach(_ context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
 	planID := strings.TrimSpace(link[models.ProcessorKeyPlanID])
 	if planID == "" {
 		return nil, fmt.Errorf("mobius link requires provider_links.mobius.plan_id")
 	}
-	out := map[string]string{
-		models.ProcessorKeyPlanID:   planID,
-		models.ProcessorKeyProvider: "mobius",
-	}
+	provider := "mobius"
 	if override := strings.TrimSpace(link[models.ProcessorKeyProvider]); override != "" {
-		out[models.ProcessorKeyProvider] = strings.ToLower(override)
+		provider = strings.ToLower(override)
 	}
-	return out, nil
+
+	// NMI plan_ids are operator-chosen AND client-creatable (the id is an input to
+	// AddRecurringPlan), so an explicit link is a find-or-CREATE at that id:
+	//   - exists: verify it matches the catalog price's immutable money terms
+	//     (amount + day-based cycle); a mismatch is a loud error.
+	//   - missing: create the plan at the supplied id from the price's terms.
+	// When no NMI processor is configured there is no API to verify/create
+	// against, so the link is stored as-is (operator-owned).
+	if client, ok := a.nmiClient(provider); ok && client != nil {
+		detail, err := client.GetRecurringPlanDetailByID(planID)
+		if err != nil {
+			return nil, fmt.Errorf("verify NMI recurring plan %q: %w", planID, err)
+		}
+		if detail.Found {
+			if in.UnitAmount > 0 && detail.AmountCents != in.UnitAmount {
+				return nil, fmt.Errorf("NMI recurring plan %q amount (%d cents) does not match catalog price (%d cents)", planID, detail.AmountCents, in.UnitAmount)
+			}
+			// day_frequency is only reported for day-based plans; validate it only
+			// when NMI returns one (month-based plans report 0 -> unverifiable here).
+			if in.BillingCycleDays != nil && *in.BillingCycleDays > 0 && detail.DayFrequency > 0 && detail.DayFrequency != *in.BillingCycleDays {
+				return nil, fmt.Errorf("NMI recurring plan %q billing cycle (%d days) does not match catalog price (%d days)", planID, detail.DayFrequency, *in.BillingCycleDays)
+			}
+		} else {
+			if err := a.createPlan(client, planID, in); err != nil {
+				return nil, fmt.Errorf("link plan_id %q does not exist and could not be created: %w", planID, err)
+			}
+		}
+	}
+
+	return map[string]string{
+		models.ProcessorKeyPlanID:   planID,
+		models.ProcessorKeyProvider: provider,
+	}, nil
 }
 
-// mobiusDeterministicPlanID is the stable NMI plan_id OpenRails uses for a
-// price. NMI plan_ids are operator-chosen and stable, so the OpenRails price
-// UUID is the natural identity.
-func mobiusDeterministicPlanID(priceID uuid.UUID) string {
-	return "openrails-" + priceID.String()
+// createPlan adds an NMI Recurring Plan at the given plan_id from the price's
+// money terms. Shared by AutoCreate (content-addressed id) and Attach (operator
+// id). NMI plans are inherently recurring, so a fixed billing frequency and a
+// positive amount are required.
+func (a *mobiusAdapter) createPlan(client *nmi.NMIClient, planID string, in autoCreateContext) error {
+	if in.BillingCycleDays == nil || *in.BillingCycleDays <= 0 {
+		return fmt.Errorf("billing_cycle_days is required (NMI plans need a recurring frequency)")
+	}
+	if in.UnitAmount <= 0 {
+		return fmt.Errorf("a positive unit_amount is required")
+	}
+	planName := ""
+	if in.Product != nil {
+		planName = strings.TrimSpace(in.Product.DisplayName)
+	}
+	if planName == "" {
+		planName = planID
+	}
+	// plan_payments=0 means bill forever; OpenRails models open-ended subscriptions.
+	return client.AddRecurringPlan(planID, planName, in.UnitAmount, *in.BillingCycleDays, 0)
+}
+
+// mobiusDeterministicPlanID is the stable NMI plan_id OpenRails uses for a price.
+// It is CONTENT-addressed — derived from the price content key (product slug +
+// immutable money terms), NOT the per-DB price UUID — so it is stable across a
+// FRESH OpenRails DB: a rebuilt catalog re-derives the same plan_id and
+// find-or-attach reattaches to the existing NMI Recurring Plan instead of
+// creating a duplicate. Cosmetic edits (display_name/description/providers) do
+// not change it. Dots in the content key become hyphens to stay within NMI's
+// plan_id charset, e.g. "premium-usd-2300-30".
+//
+// The plan_id carries NO "openrails-"/tenant/application prefix: the content key
+// is the whole id. Operator-supplied (Attach) plan_ids are owned by the operator
+// and never renamed by OpenRails, even when this template changes.
+func mobiusDeterministicPlanID(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {
+	key := openRailsPriceContentKey(productSlug, currency, unitAmount, billingCycleDays)
+	return strings.ReplaceAll(key, ".", "-")
 }
 
 // nmiClient resolves the NMI client backing the given provider name (defaulting
@@ -104,24 +168,15 @@ func (a *mobiusAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map
 		return nil, fmt.Errorf("mobius create-mode requires billing_cycle_days (NMI plans need a recurring frequency)")
 	}
 
-	planID := mobiusDeterministicPlanID(in.PriceID)
-	planName := ""
-	if in.Product != nil {
-		planName = strings.TrimSpace(in.Product.DisplayName)
-	}
-	if planName == "" {
-		planName = planID
-	}
+	planID := mobiusDeterministicPlanID(in.ProductSlug, in.Currency, in.UnitAmount, in.BillingCycleDays)
 
-	// Find-or-attach: prefer an existing plan with this deterministic id.
+	// Find-or-create: prefer an existing plan with this deterministic id.
 	found, _, _, err := client.GetRecurringPlanByID(planID)
 	if err != nil {
 		return nil, fmt.Errorf("lookup recurring plan: %w", err)
 	}
 	if !found {
-		// plan_payments=0 means bill forever; OpenRails models open-ended
-		// subscriptions, so it does not surface a finite payment count here.
-		if err := client.AddRecurringPlan(planID, planName, in.UnitAmount, *in.BillingCycleDays, 0); err != nil {
+		if err := a.createPlan(client, planID, in); err != nil {
 			return nil, fmt.Errorf("create recurring plan: %w", err)
 		}
 	}

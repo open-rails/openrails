@@ -37,7 +37,11 @@ func (a *ccbillAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	}
 }
 
-func (a *ccbillAdapter) Attach(ctx context.Context, link map[string]string) (map[string]string, error) {
+// Attach stores the operator-supplied form_name + flex_id. CCBill exposes no
+// public read API for FlexForms, so OpenRails cannot verify the form exists or
+// matches the price's money terms — the ids are accepted as operator-owned
+// (the one provider in the shared model without remote link validation).
+func (a *ccbillAdapter) Attach(_ context.Context, link map[string]string, _ autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
 	formName := strings.TrimSpace(link[models.ProcessorKeyCCBillFormName])
 	flexID := strings.TrimSpace(link[models.ProcessorKeyCCBillFlexID])

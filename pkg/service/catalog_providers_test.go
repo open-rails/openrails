@@ -24,7 +24,7 @@ func TestCCBillAdapter_Attach(t *testing.T) {
 	ids, err := a.Attach(context.Background(), map[string]string{
 		models.ProcessorKeyCCBillFormName: "premium",
 		models.ProcessorKeyCCBillFlexID:   "abc-123",
-	})
+	}, autoCreateContext{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestCCBillAdapter_Attach(t *testing.T) {
 		t.Fatalf("unexpected ids: %v", ids)
 	}
 
-	if _, err := a.Attach(context.Background(), map[string]string{"form_name": "premium"}); err == nil {
+	if _, err := a.Attach(context.Background(), map[string]string{"form_name": "premium"}, autoCreateContext{}); err == nil {
 		t.Fatal("expected error when flex_id missing")
 	}
 }
@@ -51,14 +51,14 @@ func TestCCBillAdapter_AutoCreatePending(t *testing.T) {
 
 func TestMobiusAdapter_Attach(t *testing.T) {
 	a := &mobiusAdapter{}
-	ids, err := a.Attach(context.Background(), map[string]string{models.ProcessorKeyPlanID: "premium_monthly"})
+	ids, err := a.Attach(context.Background(), map[string]string{models.ProcessorKeyPlanID: "premium_monthly"}, autoCreateContext{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if ids[models.ProcessorKeyPlanID] != "premium_monthly" || ids[models.ProcessorKeyProvider] != "mobius" {
 		t.Fatalf("unexpected ids: %v", ids)
 	}
-	if _, err := a.Attach(context.Background(), map[string]string{}); err == nil {
+	if _, err := a.Attach(context.Background(), map[string]string{}, autoCreateContext{}); err == nil {
 		t.Fatal("expected error when plan_id missing")
 	}
 }
@@ -80,13 +80,13 @@ func TestMobiusAdapter_AutoCreatePending(t *testing.T) {
 
 func TestStripeAdapter_AttachRequiresPriceID(t *testing.T) {
 	a := &stripeAdapter{svc: newUnconfiguredService()}
-	if _, err := a.Attach(context.Background(), map[string]string{}); err == nil {
+	if _, err := a.Attach(context.Background(), map[string]string{}, autoCreateContext{}); err == nil {
 		t.Fatal("expected error when price_id missing")
 	}
 	ids, err := a.Attach(context.Background(), map[string]string{
 		models.ProcessorKeyStripePriceID:   "price_xxx",
 		models.ProcessorKeyStripeProductID: "prod_yyy",
-	})
+	}, autoCreateContext{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}

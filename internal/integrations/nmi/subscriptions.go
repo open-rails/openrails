@@ -483,9 +483,21 @@ type recurringPlanQueryResponse struct {
 }
 
 type recurringPlanQuery struct {
-	PlanID     string `xml:"plan_id"`
-	PlanName   string `xml:"plan_name"`
-	PlanAmount string `xml:"plan_amount"`
+	PlanID       string `xml:"plan_id"`
+	PlanName     string `xml:"plan_name"`
+	PlanAmount   string `xml:"plan_amount"`
+	DayFrequency string `xml:"day_frequency"`
+}
+
+// RecurringPlanDetail is the parsed view of a single NMI recurring plan returned
+// by GetRecurringPlanDetailByID. Found=false means no plan matched the id.
+// DayFrequency is the billing interval in days; it is 0 when NMI reports a
+// month-based frequency (the query API does not return a day count for those).
+type RecurringPlanDetail struct {
+	Found        bool
+	Name         string
+	AmountCents  int64
+	DayFrequency int
 }
 
 // GetRecurringPlanByID performs a strongly-consistent lookup of a single
@@ -494,11 +506,23 @@ type recurringPlanQuery struct {
 // Returns found=false when no plan matches. amountCents is the plan amount
 // converted from NMI dollars back into integer cents to match OpenRails storage.
 func (c *NMIClient) GetRecurringPlanByID(planID string) (found bool, name string, amountCents int64, err error) {
-	if err := c.checkConfiguration(); err != nil {
+	detail, err := c.GetRecurringPlanDetailByID(planID)
+	if err != nil {
 		return false, "", 0, err
 	}
+	return detail.Found, detail.Name, detail.AmountCents, nil
+}
+
+// GetRecurringPlanDetailByID is the richer sibling of GetRecurringPlanByID: it
+// returns the plan name, amount (cents), AND billing frequency (day_frequency)
+// so callers validating an operator-supplied link can confirm the linked plan
+// matches the OpenRails price's money terms, not just that it exists.
+func (c *NMIClient) GetRecurringPlanDetailByID(planID string) (RecurringPlanDetail, error) {
+	if err := c.checkConfiguration(); err != nil {
+		return RecurringPlanDetail{}, err
+	}
 	if strings.TrimSpace(planID) == "" {
-		return false, "", 0, errors.New("planID is required")
+		return RecurringPlanDetail{}, errors.New("planID is required")
 	}
 
 	values := url.Values{
@@ -509,24 +533,27 @@ func (c *NMIClient) GetRecurringPlanByID(planID string) (found bool, name string
 
 	response, err := c.sendQueryRequest(values)
 	if err != nil {
-		return false, "", 0, err
+		return RecurringPlanDetail{}, err
 	}
 
 	var parsed recurringPlanQueryResponse
 	if err := xml.Unmarshal([]byte(response), &parsed); err != nil {
-		return false, "", 0, fmt.Errorf("failed to parse recurring plan query response: %w", err)
+		return RecurringPlanDetail{}, fmt.Errorf("failed to parse recurring plan query response: %w", err)
 	}
 
 	for _, p := range parsed.Plans {
 		if strings.TrimSpace(p.PlanID) == strings.TrimSpace(planID) {
 			cents, convErr := dollarStringToCents(p.PlanAmount)
 			if convErr != nil {
-				return true, p.PlanName, 0, fmt.Errorf("failed to parse plan amount %q: %w", p.PlanAmount, convErr)
+				return RecurringPlanDetail{Found: true, Name: p.PlanName}, fmt.Errorf("failed to parse plan amount %q: %w", p.PlanAmount, convErr)
 			}
-			return true, p.PlanName, cents, nil
+			// day_frequency is optional in the query response (absent for
+			// month-based plans); a blank/invalid value leaves DayFrequency 0.
+			dayFreq, _ := strconv.Atoi(strings.TrimSpace(p.DayFrequency))
+			return RecurringPlanDetail{Found: true, Name: p.PlanName, AmountCents: cents, DayFrequency: dayFreq}, nil
 		}
 	}
-	return false, "", 0, nil
+	return RecurringPlanDetail{}, nil
 }
 
 // centsToDollarString converts integer cents into a fixed two-decimal dollar

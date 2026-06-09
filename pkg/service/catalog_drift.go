@@ -327,12 +327,6 @@ func dollarStringToCents(dollars string) int64 {
 	return int64(f*100 + 0.5)
 }
 
-// nmiOpenRailsPlanPrefix is the deterministic plan_id prefix the mobius adapter
-// stamps on OpenRails-created NMI plans (mobiusDeterministicPlanID). It is the
-// NMI analog of Stripe's openrails_*_id metadata: a clean ownership signal that
-// distinguishes OpenRails-owned plans from operator-hand-made ones.
-const nmiOpenRailsPlanPrefix = "openrails-"
-
 // computeNMICatalogDrift is the pure NMI diff: given the full list of NMI
 // recurring plans and the OpenRails snapshot, it returns the NMI drift events
 // that should be open. NMI plans are matched to OpenRails prices by the stored
@@ -360,21 +354,17 @@ func computeNMICatalogDrift(
 		seenPlanIDs[plan.PlanID] = struct{}{}
 		orPriceID, matched := priceByPlanID[plan.PlanID]
 		if !matched {
-			// Plan on the NMI account with no matching OpenRails price.
-			// OpenRailsResourceID carries the openrails price id IF this looks
-			// OpenRails-owned (openrails-<uuid> prefix) so operators can tell an
-			// orphaned-but-ours plan from an operator-hand-made one.
-			ev := models.CatalogDriftEvent{
+			// Plan on the NMI account with no matching OpenRails price. Generated
+			// plan_ids are content-addressed (no "openrails-"/UUID prefix), so the
+			// plan_id no longer encodes a price UUID to recover — the orphan is
+			// reported with the external plan_id only and no OpenRailsResourceID.
+			events = append(events, models.CatalogDriftEvent{
 				Provider:              models.CatalogDriftProviderNMI,
 				Kind:                  models.CatalogDriftOrphanInNMI,
 				OpenRailsResourceType: models.CatalogDriftResourcePrice,
 				ExternalResourceID:    plan.PlanID,
 				DetectedAt:            now,
-			}
-			if uuidPart, ok := openRailsPriceIDFromPlanID(plan.PlanID); ok {
-				ev.OpenRailsResourceID = uuidPart
-			}
-			events = append(events, ev)
+			})
 			continue
 		}
 		// Matched: diff amount only (frequency is immutable, not drift).
@@ -405,20 +395,6 @@ func computeNMICatalogDrift(
 	}
 
 	return events
-}
-
-// openRailsPriceIDFromPlanID extracts the OpenRails price UUID from a
-// deterministic openrails-<uuid> plan_id, returning ok=false for operator-made
-// plans that don't carry the prefix.
-func openRailsPriceIDFromPlanID(planID string) (string, bool) {
-	if !strings.HasPrefix(planID, nmiOpenRailsPlanPrefix) {
-		return "", false
-	}
-	rest := strings.TrimPrefix(planID, nmiOpenRailsPlanPrefix)
-	if _, err := uuid.Parse(rest); err != nil {
-		return "", false
-	}
-	return rest, true
 }
 
 func nmiFieldDriftEvent(orPriceID, planID, field, orVal, nmiVal string, now time.Time) models.CatalogDriftEvent {

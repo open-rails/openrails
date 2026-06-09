@@ -494,6 +494,14 @@ func (s *StripeCatalogService) VerifyPriceExists(ctx context.Context, priceID st
 	return nil
 }
 
+// StripeIntervalForDays exposes the OpenRails-billing-cycle -> Stripe
+// (interval, interval_count) mapping so callers outside this package (the
+// catalog provider adapter) can validate that a linked Stripe Price's recurring
+// terms match an OpenRails price's billing cycle.
+func StripeIntervalForDays(days int) (interval string, intervalCount int) {
+	return stripeIntervalForDays(days)
+}
+
 func stripeIntervalForDays(days int) (interval string, intervalCount int) {
 	if days <= 0 {
 		return "month", 1

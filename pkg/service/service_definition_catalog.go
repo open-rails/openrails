@@ -501,14 +501,22 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	// the entire processors map; otherwise the supplied entries are merged
 	// into the existing map (partial PATCH). Empty inner maps clear a provider.
 	if req.ProviderLinks != nil {
+		// The existing price + its product give the substance (slug + money terms)
+		// each adapter's Attach validates the supplied link against. Fetch it
+		// regardless of merge/replace so a rotated link is verified, not blindly
+		// stored.
+		existing, getErr := prices.GetByID(ctx, priceID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		pctx, ctxErr := s.priceLinkContext(ctx, existing)
+		if ctxErr != nil {
+			return nil, ctxErr
+		}
 		var next map[string]map[string]string
 		if req.ReplaceProviderLinks {
 			next = map[string]map[string]string{}
 		} else {
-			existing, getErr := prices.GetByID(ctx, priceID)
-			if getErr != nil {
-				return nil, getErr
-			}
 			next = cloneProcessors(existing.Processors)
 			if next == nil {
 				next = map[string]map[string]string{}
@@ -533,7 +541,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 				next[provider] = normalized
 				continue
 			}
-			ids, attachErr := adapter.Attach(ctx, normalized)
+			ids, attachErr := adapter.Attach(ctx, normalized, pctx)
 			if attachErr != nil {
 				return nil, fmt.Errorf("%s: %w", provider, attachErr)
 			}

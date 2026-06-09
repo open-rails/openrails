@@ -172,6 +172,104 @@ catalogs:
 - `catalogs[]` uses the existing catalog-as-code schema. Bootstrap applies it
   additively: missing products/prices are not removed by omission.
 
+### Provider identity & idempotency
+
+Applying a catalog (via bootstrap first-run, the `billing catalog apply` CLI, or
+the `/admin/catalog/*` API — all one shared path) fans each price out to its
+declared `providers` and **find-or-creates** the corresponding object in each:
+Stripe Product+Price, NMI Recurring Plan, Solana on-chain Plan. CCBill is
+manual-link (supply `flex_id`).
+
+Every provider object is **content-addressed** by the price's *substance* — the
+product slug plus the immutable money terms (`<slug>.<currency>.<amount>.<cycle>`),
+never the per-DB price UUID. Consequences:
+
+- **Idempotent across a fresh/rebuilt DB.** Re-applying the same manifest to an
+  empty control plane (DR, new cluster) re-derives the same Stripe lookup key, NMI
+  `plan_id`, and Solana plan PDA, so it re-attaches to the existing provider
+  objects instead of creating duplicates.
+- **Cosmetic edits are free.** Changing `display_name`, `description`, or the
+  `providers` list does not change identity, so it never regenerates provider
+  objects (only mutable fields update where the provider supports it).
+- **Money-term changes mint a new price.** A different amount/currency/interval is
+  a new identity → create-new + archive-old (OpenRails prices are immutable).
+
+Auto-generated NMI `plan_id`s are the content key with NMI-safe separators and
+**no prefix** — `<slug>-<currency>-<amount>-<cycle>`, e.g. `premium-usd-2300-30`
+(dots → hyphens; no `openrails-`, tenant, or application prefix). Auto-generated
+Solana plan ids are `sha256(contentKey + ":" + mint)` truncated to a `uint64`.
+
+### Explicit provider links
+
+When an external object already exists (it was created in the provider's own
+dashboard, or by an earlier system), declare it with `provider_links` instead of
+letting OpenRails auto-create. The same schema works in the bootstrap manifest,
+the `billing catalog apply` YAML, and the `PATCH /admin/catalog/prices/{id}`
+API. Canonical keys per provider:
+
+| Provider | `provider_links` key | Recommended key |
+| --- | --- | --- |
+| `stripe` | `stripe` | `lookup_key` (a user-set, account/mode-portable handle) |
+| `mobius` (NMI) | `mobius` | `plan_id` (optional `provider`) |
+| `solana` | `solana` | `plan_pda` |
+| `ccbill` | `ccbill` | `form_name`, `flex_id` |
+
+The recommended manual-link fields are the **operator-chosen** identifiers —
+Stripe `lookup_key` and NMI `plan_id` — because they are human-readable, stable,
+and the same string works across a fresh DB / test+live Stripe modes. Both are
+*find-or-create*: OpenRails links an existing object (verifying its money terms)
+or creates one at that identifier.
+
+```yaml
+prices:
+  - currency: usd
+    unit_amount: 2300
+    interval: month
+    provider_links:
+      stripe: { lookup_key: premium }   # find-or-create at this key (recommended)
+      mobius: { plan_id: premium }      # find-or-create the NMI plan at this id
+      solana: { plan_pda: 7Xy...PdA }   # must already exist on-chain
+      ccbill: { form_name: premium, flex_id: abc-123 }
+```
+
+To instead pin an *exact* pre-existing Stripe Price that OpenRails must never
+recreate, link its generated id directly: `stripe: { price_id: price_123,
+product_id: prod_123 }` (product_id optional). `price_id` is require-exists;
+`lookup_key` is find-or-create.
+
+A supplied link is **validated against the external provider before it is
+accepted**, and when the object already exists no duplicate is created. Whether
+a *missing* linked object is an error or is **created** depends on whether the
+provider's linked identifier is client-creatable:
+
+- **NMI/Mobius** — `plan_id` is operator-chosen **and** client-creatable, so a
+  link is **find-or-create**: an existing plan is verified (amount and, when NMI
+  reports a day-based frequency, the billing cycle must match); a missing one is
+  **created at the operator's chosen id** from the price's terms. Link
+  `plan_id: premium` and OpenRails uses or creates the `premium` plan.
+- **Stripe** — `price_id` (`price_xxx`) is Stripe-**generated** and cannot be
+  created at a chosen id, so a `price_id` link must already exist and is verified
+  against `unit_amount`, `currency`, recurring interval/duration, and (when
+  `product_id` is given) its Product. The client-creatable Stripe identifier is
+  the **`lookup_key`**: a link supplying only `lookup_key` is **find-or-create**
+  at that key (the auto-create flow, at the operator's key instead of the derived
+  one).
+- **Solana** — `plan_pda` is derived from `(merchant, plan_id)`, so OpenRails
+  cannot publish at an arbitrary supplied PDA: a Solana link must already exist
+  and is verified against amount (base units), period (`cycle × 24h`), the mint
+  resolved from the price currency, and the tenant's merchant/owner. (To create
+  a new on-chain plan, list `solana` under `providers` and let auto-create
+  publish it.)
+- **CCBill** — has no public read API, so its ids are stored as operator-owned
+  without remote validation.
+
+A **mismatched** link (the object exists but its money terms differ) **fails the
+apply loudly** with an actionable error naming the offending field — OpenRails
+never silently binds the wrong object. A **missing** link errors only where the
+identifier is not client-creatable (Stripe `price_id`, Solana `plan_pda`).
+Explicit links are operator-owned: OpenRails never renames them, even when the
+auto-generated id template changes.
+
 Delegated JWTs are for browser/direct self-service or tenant-admin operations.
 First-party service JWTs are for backend calls such as entitlement reads and
 credit reserve/capture/release flows, and must not be accepted by delegated

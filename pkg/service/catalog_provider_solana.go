@@ -65,12 +65,16 @@ func (a *solanaAdapter) planService() (*recurring.PlanService, bool) {
 	return a.svc.rt.SolanaPlanService, true
 }
 
-// solanaPlanID derives the deterministic on-chain plan id from the OpenRails price
-// UUID (first 8 bytes, big-endian). Determinism makes re-apply idempotent: the
-// same price always derives the same plan PDA, so find-or-attach re-attaches
-// rather than duplicating.
-func solanaPlanID(priceID uuid.UUID, mint string) uint64 {
-	sum := sha256.Sum256([]byte(priceID.String() + ":" + strings.TrimSpace(mint)))
+// solanaPlanID derives the deterministic on-chain plan id from the price CONTENT
+// key (product slug + immutable money terms) plus the token mint, hashed to a
+// uint64 (first 8 bytes, big-endian). Content-addressing — NOT the per-DB price
+// UUID — makes re-apply idempotent AND stable across a FRESH OpenRails DB: a
+// rebuilt catalog derives the same plan PDA, so find-or-attach re-attaches to the
+// existing on-chain plan rather than publishing a duplicate. Cosmetic edits
+// (display_name/description/providers) do not change it.
+func solanaPlanID(productSlug, currency string, unitAmount int64, billingCycleDays *int, mint string) uint64 {
+	key := openRailsPriceContentKey(productSlug, currency, unitAmount, billingCycleDays) + ":" + strings.TrimSpace(mint)
+	sum := sha256.Sum256([]byte(key))
 	return binary.BigEndian.Uint64(sum[:8])
 }
 
@@ -96,7 +100,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	if err != nil {
 		return nil, err
 	}
-	planID := solanaPlanID(in.PriceID, mint)
+	planID := solanaPlanID(in.ProductSlug, in.Currency, in.UnitAmount, in.BillingCycleDays, mint)
 	periodHours := uint64(*in.BillingCycleDays) * 24
 
 	// Idempotent find-or-attach: create_plan fails on an already-occupied PDA, so
@@ -157,7 +161,15 @@ func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.Pl
 	return handle.ToProcessorConfig(), true
 }
 
-func (a *solanaAdapter) Attach(_ context.Context, link map[string]string) (map[string]string, error) {
+// Attach stores an operator-supplied existing on-chain plan handle. When the
+// Solana RPC is available the plan account is read back and its IMMUTABLE terms
+// are verified against the OpenRails price: the account must exist and match
+// amount (base units), period (billing cycle * 24h), mint (resolved from the
+// price currency), and — when a tenant is in context — the merchant/owner. A
+// missing or mismatched plan is a loud error. On a successful read the verified
+// on-chain terms are stamped onto the stored ids so Verify has a snapshot. When
+// RPC is unavailable the operator-supplied fields are stored as-is.
+func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
 	pda := strings.TrimSpace(link[solanaKeyPlanPDA])
 	if pda == "" {
@@ -172,6 +184,54 @@ func (a *solanaAdapter) Attach(_ context.Context, link map[string]string) (map[s
 			out[k] = v
 		}
 	}
+
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPC == nil {
+		// No RPC to verify against: store the operator-owned handle as-is.
+		return out, nil
+	}
+	pubkey, err := solanago.PublicKeyFromBase58(pda)
+	if err != nil {
+		return nil, fmt.Errorf("invalid solana plan_pda %q: %w", pda, err)
+	}
+	data, err := a.svc.rt.SolanaRPC.GetAccountData(ctx, pubkey)
+	if err != nil || len(data) == 0 {
+		return nil, fmt.Errorf("solana plan account %q not found on-chain; publish it or fix provider_links.solana.plan_pda", pda)
+	}
+	acct, err := subscriptions.DecodePlanAccount(data)
+	if err != nil {
+		return nil, fmt.Errorf("decode solana plan account %q: %w", pda, err)
+	}
+	if in.UnitAmount > 0 && acct.Amount != uint64(in.UnitAmount) {
+		return nil, fmt.Errorf("solana plan %q amount (%d base units) does not match catalog price (%d)", pda, acct.Amount, in.UnitAmount)
+	}
+	if in.BillingCycleDays != nil && *in.BillingCycleDays > 0 {
+		wantPeriod := uint64(*in.BillingCycleDays) * 24
+		if acct.PeriodHours != wantPeriod {
+			return nil, fmt.Errorf("solana plan %q period (%d hours) does not match catalog price (%d hours)", pda, acct.PeriodHours, wantPeriod)
+		}
+	}
+	// Mint + merchant validation requires the plan service (mint allowlist +
+	// tenant merchant resolution); skip gracefully when it is unconfigured.
+	if plan, ok := a.planService(); ok {
+		if symbol := strings.ToUpper(strings.TrimSpace(in.Currency)); symbol != "" {
+			if mint, _, err := plan.ResolveMint(symbol); err == nil && !strings.EqualFold(acct.Mint.String(), strings.TrimSpace(mint)) {
+				return nil, fmt.Errorf("solana plan %q mint (%s) does not match catalog currency %s mint (%s)", pda, acct.Mint, symbol, mint)
+			}
+		}
+		if tid, ok := tenant.FromContext(ctx); ok {
+			if merchant, err := plan.MerchantAddress(ctx, tid); err == nil && !strings.EqualFold(acct.Owner.String(), merchant.String()) {
+				return nil, fmt.Errorf("solana plan %q merchant (%s) does not match this tenant's merchant (%s)", pda, acct.Owner, merchant)
+			}
+		}
+	}
+
+	// Stamp the authoritative on-chain terms (override any operator-supplied
+	// values) so Verify diffs against the real account.
+	out[solanaKeyMint] = acct.Mint.String()
+	out[solanaKeyAmountBaseUnits] = strconv.FormatUint(acct.Amount, 10)
+	out[solanaKeyPeriodHours] = strconv.FormatUint(acct.PeriodHours, 10)
+	out[solanaKeyCreatedAt] = strconv.FormatInt(acct.CreatedAt, 10)
+	out[solanaKeyMerchant] = acct.Owner.String()
 	return out, nil
 }
 
