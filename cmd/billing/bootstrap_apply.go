@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	billingservice "github.com/open-rails/openrails/pkg/service"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type bootstrapApplyOptions struct {
@@ -164,7 +165,11 @@ func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App,
 		if name == "" {
 			name = fmt.Sprintf("catalog-%d", i+1)
 		}
-		plan, err := catalog.PlanWithOptions(ctx, applier, cat, catalog.PlanOptions{ArchiveMissingProducts: false})
+		catalogCtx, err := contextForBootstrapCatalog(ctx, a, manifest.Catalogs[i].Name)
+		if err != nil {
+			return err
+		}
+		plan, err := catalog.PlanWithOptions(catalogCtx, applier, cat, catalog.PlanOptions{ArchiveMissingProducts: false})
 		if err != nil {
 			return fmt.Errorf("plan %s: %w", name, err)
 		}
@@ -177,7 +182,7 @@ func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App,
 			fmt.Fprintf(out, "\n%s: no changes\n", name)
 			continue
 		}
-		result, err := catalog.Apply(ctx, applier, plan)
+		result, err := catalog.Apply(catalogCtx, applier, plan)
 		if err != nil {
 			return fmt.Errorf("apply %s: %w", name, err)
 		}
@@ -185,4 +190,24 @@ func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App,
 		result.Print(out)
 	}
 	return nil
+}
+
+func contextForBootstrapCatalog(ctx context.Context, a *app.App, catalogName string) (context.Context, error) {
+	slug := strings.ToLower(strings.TrimSpace(catalogName))
+	if slug == "" {
+		return ctx, nil
+	}
+	cp := embcp.Get(a)
+	if cp == nil || cp.Pool() == nil {
+		return nil, fmt.Errorf("catalog %q declares a tenant name but auth.control_plane.enabled is not available", catalogName)
+	}
+	var id string
+	if err := cp.Pool().QueryRow(ctx, `SELECT id::text FROM billing.tenants WHERE lower(slug) = lower($1)`, slug).Scan(&id); err != nil {
+		return nil, fmt.Errorf("resolve catalog tenant %q: %w", slug, err)
+	}
+	tid, err := tenant.ParseID(id)
+	if err != nil {
+		return nil, fmt.Errorf("parse catalog tenant %q id: %w", slug, err)
+	}
+	return tenant.WithID(ctx, tid), nil
 }

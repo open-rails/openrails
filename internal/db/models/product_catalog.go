@@ -43,6 +43,7 @@ type Product struct {
 	bun.BaseModel `bun:"table:billing.products,alias:prod"`
 
 	ID          uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	TenantID    uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	Slug        string    `bun:"slug,notnull,unique" json:"slug"`
 	DisplayName string    `bun:"display_name,notnull" json:"display_name"`
 	Description string    `bun:"description,nullzero" json:"description"`

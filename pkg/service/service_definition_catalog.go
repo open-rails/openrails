@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type CreditGrantCadence string
@@ -151,6 +152,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	}
 	p := &models.Product{
 		ID:               uuidutil.NewV7(),
+		TenantID:         tenant.FromContextOrDefault(ctx).UUID(),
 		Slug:             req.Slug,
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
