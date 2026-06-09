@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
@@ -91,6 +92,18 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if err != nil {
 		log.WithError(err).Error("Failed to create checkout session")
+		// Card-abuse tracking (#371): a vault/card decline is a failed charge
+		// attempt. Record it against this request's rate-limit subjects so
+		// repeated failures escalate to captcha/block (and feed site-wide
+		// attack-mode detection). Best-effort + nil-safe; never affects the
+		// response.
+		var vErr *vault.VaultError
+		if errors.As(err, &vErr) {
+			r.State.CardAbuseGuard.RecordChargeFailure(
+				r.Request.Context(),
+				ginmw.SubjectKeysFromContext(r.Request.Context()),
+			)
+		}
 		writeCheckoutSessionError(r, err)
 		return
 	}
