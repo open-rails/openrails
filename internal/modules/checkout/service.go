@@ -775,7 +775,10 @@ func (s *CheckoutService) recoverNMISubscriptionAttempt(ctx context.Context, req
 
 func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, provider string, subscriptionID uuid.UUID, providerSubscriptionID string, transactionID string, delayedStart *time.Time, orderID string, paymentMethodID *uuid.UUID, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
 	if existing, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, providerSubscriptionID); err == nil {
-		return s.nmiSubscriptionResponse(ctx, existing.ID, transactionID, delayedStart, idempOp, idempotencyKey)
+		if delayedStart == nil && (existing.Status == models.StatusPending || existing.Status == models.StatusActive) {
+			return s.activateImmediateNMISubscription(ctx, req, user, price, existing.ID, provider, providerSubscriptionID, transactionID, orderID, idempOp, idempotencyKey)
+		}
+		return s.nmiSubscriptionPendingResponse(ctx, existing.ID, transactionID, delayedStart, idempOp, idempotencyKey)
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("load existing subscription: %w", err)
 	}
@@ -815,16 +818,144 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 	if err := s.SubscriptionService.Create(ctx, subscription); err != nil {
 		if errors.Is(err, subscriptions.ErrActiveSubscriptionExists) {
 			if existing, loadErr := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, providerSubscriptionID); loadErr == nil {
-				return s.nmiSubscriptionResponse(ctx, existing.ID, transactionID, delayedStart, idempOp, idempotencyKey)
+				if delayedStart == nil && (existing.Status == models.StatusPending || existing.Status == models.StatusActive) {
+					return s.activateImmediateNMISubscription(ctx, req, user, price, existing.ID, provider, providerSubscriptionID, transactionID, orderID, idempOp, idempotencyKey)
+				}
+				return s.nmiSubscriptionPendingResponse(ctx, existing.ID, transactionID, delayedStart, idempOp, idempotencyKey)
 			}
 		}
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, fmt.Errorf("failed to save subscription: %w", err)
 	}
-	return s.nmiSubscriptionResponse(ctx, subscriptionID, transactionID, delayedStart, idempOp, idempotencyKey)
+	if delayedStart == nil {
+		return s.activateImmediateNMISubscription(ctx, req, user, price, subscriptionID, provider, providerSubscriptionID, transactionID, orderID, idempOp, idempotencyKey)
+	}
+	return s.nmiSubscriptionPendingResponse(ctx, subscriptionID, transactionID, delayedStart, idempOp, idempotencyKey)
 }
 
-func (s *CheckoutService) nmiSubscriptionResponse(ctx context.Context, subscriptionID uuid.UUID, transactionID string, delayedStart *time.Time, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
+func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, subscriptionID uuid.UUID, provider string, providerSubscriptionID string, transactionID string, orderID string, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
+	if s.SubscriptionService == nil {
+		return nil, errors.New("subscription service unavailable")
+	}
+	if s.EntitlementService == nil {
+		return nil, errors.New("entitlement service unavailable")
+	}
+	if s.PaymentService == nil {
+		return nil, errors.New("payment service unavailable")
+	}
+
+	metadata := map[string]any{
+		"order_id":                orderID,
+		"provider_transaction_id": transactionID,
+	}
+	if req.Metadata != nil {
+		if runID := strings.TrimSpace(req.Metadata["e2e_run_id"]); runID != "" {
+			metadata["e2e_run_id"] = runID
+		}
+	}
+
+	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
+	if err != nil {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, fmt.Errorf("failed to load NMI subscription for activation: %w", err)
+	}
+	if subscription.Status != models.StatusActive || subscription.CurrentPeriodStartsAt == nil || subscription.CurrentPeriodEndsAt == nil {
+		now := s.now().UTC()
+		periodStart := now
+		periodEnd := nmiSubscriptionPeriodEnd(now, price)
+		subscription.Status = models.StatusActive
+		subscription.CurrentPeriodStartsAt = &periodStart
+		subscription.CurrentPeriodEndsAt = &periodEnd
+		subscription.StartedAt = periodStart
+		if subscription.ProcessorSubscriptionID == "" {
+			subscription.ProcessorSubscriptionID = providerSubscriptionID
+		}
+		subscription.Processor = models.Processor(provider)
+		if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
+			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+			return nil, fmt.Errorf("failed to activate NMI subscription: %w", err)
+		}
+	}
+	if err := s.grantImmediateNMISubscriptionEntitlements(ctx, user.ID, subscription); err != nil {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, err
+	}
+
+	if _, err := s.PaymentService.GetByTransactionID(ctx, models.Processor(provider), transactionID); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+			return nil, fmt.Errorf("failed to check NMI subscription payment: %w", err)
+		}
+		now := s.now().UTC()
+		payment := &models.Payment{
+			ID:                       uuidutil.NewV7(),
+			TenantSubjectID:          subscription.TenantSubjectID,
+			PriceID:                  price.ID,
+			SubscriptionID:           &subscription.ID,
+			Processor:                models.Processor(provider),
+			TransactionID:            transactionID,
+			Amount:                   price.Amount,
+			ListAmount:               price.Amount,
+			Currency:                 price.Currency,
+			Status:                   payments.PaymentStatusCompletedValue,
+			Metadata:                 metadata,
+			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
+			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
+			PurchasedAt:              now,
+			CreatedAt:                now,
+		}
+		if err := s.PaymentService.Create(ctx, payment); err != nil {
+			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+			return nil, fmt.Errorf("failed to record NMI subscription payment: %w", err)
+		}
+	}
+	return s.nmiSubscriptionSuccessResponse(ctx, subscriptionID, transactionID, idempOp, idempotencyKey)
+}
+
+func (s *CheckoutService) grantImmediateNMISubscriptionEntitlements(ctx context.Context, userID string, subscription *models.Subscription) error {
+	if subscription == nil {
+		return errors.New("subscription is required")
+	}
+	if subscription.CurrentPeriodStartsAt == nil || subscription.CurrentPeriodEndsAt == nil {
+		return errors.New("active subscription period is required")
+	}
+	entitlementsSpec := subscription.EntitlementsSpecSnapshot
+	if len(entitlementsSpec) == 0 {
+		entitlementsSpec = map[string]*int{"premium": nil}
+	}
+	for entitlementName := range entitlementsSpec {
+		exists, err := s.EntitlementService.ExistsBySource(ctx, models.EntitlementSourceSubscription, subscription.ID, entitlementName)
+		if err != nil {
+			return fmt.Errorf("failed entitlement check: %w", err)
+		}
+		if exists {
+			continue
+		}
+		notBefore := subscription.CurrentPeriodStartsAt.UTC()
+		endAt := subscription.CurrentPeriodEndsAt.UTC()
+		if _, err := s.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
+			UserID:          userID,
+			TenantSubjectID: subscription.TenantSubjectID,
+			Entitlement:     entitlementName,
+			NotBefore:       &notBefore,
+			EndAt:           &endAt,
+			SourceType:      models.EntitlementSourceSubscription,
+			SourceID:        subscription.ID,
+		}); err != nil {
+			return fmt.Errorf("failed to grant entitlement %s: %w", entitlementName, err)
+		}
+	}
+	return nil
+}
+
+func nmiSubscriptionPeriodEnd(start time.Time, price *models.Price) time.Time {
+	if price != nil && price.BillingCycleDays != nil && *price.BillingCycleDays > 0 {
+		return start.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+	}
+	return start.Add(30 * 24 * time.Hour)
+}
+
+func (s *CheckoutService) nmiSubscriptionPendingResponse(ctx context.Context, subscriptionID uuid.UUID, transactionID string, delayedStart *time.Time, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
 	var delayedStartStr *string
 	if delayedStart != nil {
 		ds := delayedStart.Format(time.RFC3339)
@@ -848,6 +979,22 @@ func (s *CheckoutService) nmiSubscriptionResponse(ctx context.Context, subscript
 		SubscriptionID: &subscriptionID,
 		TransactionID:  transactionID,
 		DelayedStart:   delayedStart,
+	}, nil
+}
+
+func (s *CheckoutService) nmiSubscriptionSuccessResponse(ctx context.Context, subscriptionID uuid.UUID, transactionID string, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
+	cachedResult, _ := json.Marshal(subscriptionIdempotencyResult{
+		SubscriptionID: subscriptionID.String(),
+		TransactionID:  transactionID,
+	})
+	_ = s.IdempotencyService.Complete(ctx, idempOp, idempotencyKey, cachedResult)
+
+	return &CheckoutResponse{
+		Status:         "success",
+		Action:         "new",
+		Message:        "Subscription created successfully",
+		SubscriptionID: &subscriptionID,
+		TransactionID:  transactionID,
 	}, nil
 }
 

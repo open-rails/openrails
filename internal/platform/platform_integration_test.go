@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS billing.payments (
 
 CREATE TABLE IF NOT EXISTS billing.platform_audit (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    actor_user_id    TEXT NOT NULL,
+    invoker_id    TEXT NOT NULL,
     actor_org        TEXT,
     action           TEXT NOT NULL,
     target_tenant_id UUID,
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS billing.platform_audit (
 
 CREATE TABLE IF NOT EXISTS billing.platform_break_glass (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    actor_user_id    TEXT NOT NULL,
+    invoker_id    TEXT NOT NULL,
     target_tenant_id UUID,
     justification    TEXT NOT NULL,
     granted_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,

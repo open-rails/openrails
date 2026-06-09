@@ -31,7 +31,7 @@ var ErrBreakGlassNotFound = errors.New("platform: break-glass grant not found")
 // BreakGlassGrant is a time-boxed elevation record.
 type BreakGlassGrant struct {
 	ID             string     `json:"id"`
-	InvokerID      string     `json:"actor_user_id"`
+	InvokerID      string     `json:"invoker_id"`
 	TargetTenantID string     `json:"target_tenant_id,omitempty"`
 	Justification  string     `json:"justification"`
 	GrantedAt      time.Time  `json:"granted_at"`
@@ -117,9 +117,9 @@ func (b *BreakGlass) Grant(ctx context.Context, req GrantRequest) (*BreakGlassGr
 	var target string
 	err := b.pool.QueryRow(ctx, `
 		INSERT INTO billing.platform_break_glass
-			(actor_user_id, target_tenant_id, justification, granted_at, expires_at)
+			(invoker_id, target_tenant_id, justification, granted_at, expires_at)
 		VALUES ($1, $2::uuid, $3, $4, $5)
-		RETURNING id::text, actor_user_id, COALESCE(target_tenant_id::text,''),
+		RETURNING id::text, invoker_id, COALESCE(target_tenant_id::text,''),
 		          justification, granted_at, expires_at, revoked_at
 	`, actor, targetID, just, now, expires).Scan(
 		&g.ID, &g.InvokerID, &target, &g.Justification, &g.GrantedAt, &g.ExpiresAt, &g.RevokedAt)
@@ -213,14 +213,14 @@ func (b *BreakGlass) IsActive(ctx context.Context, actorUserID string, targetTen
 		err = b.pool.QueryRow(ctx, `
 			SELECT EXISTS(
 				SELECT 1 FROM billing.platform_break_glass
-				 WHERE actor_user_id = $1 AND revoked_at IS NULL AND expires_at > $2
+				 WHERE invoker_id = $1 AND revoked_at IS NULL AND expires_at > $2
 				   AND (target_tenant_id IS NULL OR target_tenant_id = $3::uuid)
 			)`, actor, now, targetTenant.String()).Scan(&exists)
 	} else {
 		err = b.pool.QueryRow(ctx, `
 			SELECT EXISTS(
 				SELECT 1 FROM billing.platform_break_glass
-				 WHERE actor_user_id = $1 AND revoked_at IS NULL AND expires_at > $2
+				 WHERE invoker_id = $1 AND revoked_at IS NULL AND expires_at > $2
 			)`, actor, now).Scan(&exists)
 	}
 	if err != nil {
@@ -236,7 +236,7 @@ func (b *BreakGlass) ListActive(ctx context.Context) ([]BreakGlassGrant, error) 
 	}
 	now := b.now().UTC()
 	rows, err := b.pool.Query(ctx, `
-		SELECT id::text, actor_user_id, COALESCE(target_tenant_id::text,''),
+		SELECT id::text, invoker_id, COALESCE(target_tenant_id::text,''),
 		       justification, granted_at, expires_at, revoked_at
 		  FROM billing.platform_break_glass
 		 WHERE revoked_at IS NULL AND expires_at > $1
