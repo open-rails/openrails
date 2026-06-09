@@ -29,6 +29,9 @@ func (d *DB) Q(ctx context.Context) bun.IDB {
 	if d == nil {
 		return nil
 	}
+	if _, ok := d.db.(bun.Tx); ok {
+		return d.db
+	}
 	if c, ok := ctx.Value(tenantConnKey{}).(bun.Conn); ok {
 		return c
 	}
