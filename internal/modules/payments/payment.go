@@ -93,26 +93,50 @@ func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.
 }
 
 func (s *PaymentService) GetByID(ctx context.Context, id uuid.UUID) (*models.Payment, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetByID(ctx, id)
 }
 
 func (s *PaymentService) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*models.Payment, []*models.Payment, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetByIDWithDetails(ctx, id)
 }
 
 func (s *PaymentService) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetByUserID(ctx, userID)
 }
 
 func (s *PaymentService) GetByTransactionID(ctx context.Context, processor models.Processor, transactionID string) (*models.Payment, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetByTransactionID(ctx, processor, transactionID)
 }
 
 func (s *PaymentService) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Payment, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetByPriceID(ctx, priceID)
 }
 
 func (s *PaymentService) GetByProcessor(ctx context.Context, processor models.Processor) ([]*models.Payment, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetByProcessor(ctx, processor)
 }
 
@@ -278,6 +302,10 @@ func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *mo
 }
 
 func (s *PaymentService) GetByMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetByMetadataValue(ctx, key, value)
 }
 
@@ -353,18 +381,34 @@ func PaymentStatusCompleted(status string) bool {
 }
 
 func (s *PaymentService) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetRefundTotalByPaymentID(ctx, paymentID)
 }
 
 func (s *PaymentService) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.LinkRefundedPayment(ctx, paymentID, originalPaymentID)
 }
 
 func (s *PaymentService) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetPaginatedByUserID(ctx, userID, page, pageSize)
 }
 
 func (s *PaymentService) GetPayments(ctx context.Context, queryOpts query.QueryOptions[GetPaymentsFilters]) ([]*models.Payment, int64, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	repoOpts := query.QueryOptions[repo.PaymentFilters]{
 		Filters:  queryOpts.Filters,
 		Limit:    queryOpts.Limit,
@@ -378,21 +422,41 @@ func (s *PaymentService) GetPayments(ctx context.Context, queryOpts query.QueryO
 }
 
 func (s *PaymentService) GetLatestByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (*models.Payment, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetLatestByUserAndProcessor(ctx, userID, processor)
 }
 
 func (s *PaymentService) GetLatestBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetLatestBySubscriptionID(ctx, subscriptionID)
 }
 
 func (s *PaymentService) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.GetLatestChargeBySubscriptionID(ctx, subscriptionID)
 }
 
 func (s *PaymentService) CountByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (successful int, failed int, err error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.CountByUserAndProcessor(ctx, userID, processor)
 }
 
 func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.repo.MarkFailed(ctx, id)
 }

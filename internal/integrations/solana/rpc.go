@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
-	solanago "github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	log "github.com/sirupsen/logrus"
+	"github.com/open-rails/openrails/internal/observability"
 )
 
 // RPCClient handles interactions with the Solana blockchain.
@@ -50,6 +51,12 @@ func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 
 // GetBalance returns the SOL balance for an address.
 func (c *RPCClient) GetBalance(ctx context.Context, address solanago.PublicKey) (uint64, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	return c.fallback.GetBalance(ctx, address)
 }
 
@@ -57,11 +64,23 @@ func (c *RPCClient) GetBalance(ctx context.Context, address solanago.PublicKey) 
 // preceding write confirmed at), so a lagging RPC node returns a retryable error
 // instead of stale data. minSlot == 0 behaves like GetBalance.
 func (c *RPCClient) GetBalanceAtSlot(ctx context.Context, address solanago.PublicKey, minSlot uint64) (uint64, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	return c.fallback.GetBalanceAtSlot(ctx, address, minSlot)
 }
 
 // GetTokenBalance returns the SPL token balance for an address and mint
 func (c *RPCClient) GetTokenBalance(ctx context.Context, tokenAccount solanago.PublicKey) (*rpc.UiTokenAmount, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	resp, err := c.fallback.GetTokenAccountBalance(ctx, tokenAccount)
 	if err != nil {
 		return nil, err
@@ -69,49 +88,36 @@ func (c *RPCClient) GetTokenBalance(ctx context.Context, tokenAccount solanago.P
 	return resp.Value, nil
 }
 
-// GetTokenBalanceForMintAtSlot is GetTokenBalanceForMint gated on minSlot: the
-// ATA balance is read only against a node that has reached minSlot (the slot a
-// preceding write — e.g. a pull/crank — confirmed at), so a lagging node returns
-// a retryable error instead of a stale balance. minSlot == 0 behaves exactly like
-// GetTokenBalanceForMint. Returns 0 when the ATA does not exist.
-func (c *RPCClient) GetTokenBalanceForMintAtSlot(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey, minSlot uint64) (uint64, error) {
-	if minSlot == 0 {
-		return c.GetTokenBalanceForMint(ctx, owner, mint)
-	}
-	ata, _, err := solanago.FindAssociatedTokenAddress(owner, mint)
-	if err != nil {
-		return 0, fmt.Errorf("failed to derive ATA for mint %s: %w", mint.String(), err)
-	}
-	resp, err := c.fallback.GetTokenAccountBalanceAtSlot(ctx, ata, minSlot)
-	if err != nil {
-		if strings.Contains(err.Error(), "could not find account") ||
-			strings.Contains(err.Error(), "Invalid param") {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("failed to get token balance: %w", err)
-	}
-	if resp.Value == nil {
-		return 0, nil
-	}
-	balance, err := strconv.ParseUint(resp.Value.Amount, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse token balance %q: %w", resp.Value.Amount, err)
-	}
-	return balance, nil
-}
-
 // SimulateTransaction simulates a transaction to check if it would succeed
 func (c *RPCClient) SimulateTransaction(ctx context.Context, tx *solanago.Transaction) (*rpc.SimulateTransactionResponse, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	return c.fallback.SimulateTransaction(ctx, tx)
 }
 
 // SendTransaction submits a transaction to the blockchain
 func (c *RPCClient) SendTransaction(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	return c.fallback.SendTransaction(ctx, tx)
 }
 
 // GetTransaction retrieves transaction details by signature
 func (c *RPCClient) GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	return c.fallback.GetTransaction(ctx, signature)
 }
 
@@ -197,11 +203,23 @@ func (c *RPCClient) ConfirmTransaction(ctx context.Context, signature solanago.S
 
 // GetLatestBlockhash gets the latest blockhash for transaction creation
 func (c *RPCClient) GetLatestBlockhash(ctx context.Context) (solanago.Hash, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	return c.fallback.GetLatestBlockhash(ctx)
 }
 
 // GetMinimumBalanceForRentExemption returns the minimum balance needed for rent exemption
 func (c *RPCClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataSize uint64) (uint64, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	return c.fallback.GetMinimumBalanceForRentExemption(ctx, dataSize)
 }
 
@@ -209,6 +227,12 @@ func (c *RPCClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataS
 // account does not exist (used to read on-chain PDA state, e.g. the
 // SubscriptionAuthority initId for building a subscribe instruction).
 func (c *RPCClient) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	return c.fallback.GetAccountData(ctx, address)
 }
 
@@ -217,6 +241,12 @@ func (c *RPCClient) GetAccountData(ctx context.Context, address solanago.PublicK
 // confirmed at), so a lagging node returns a retryable error rather than a stale
 // (or "missing") account. minSlot == 0 behaves like GetAccountData.
 func (c *RPCClient) GetAccountDataAtSlot(ctx context.Context, address solanago.PublicKey, minSlot uint64) ([]byte, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	return c.fallback.GetAccountDataAtSlot(ctx, address, minSlot)
 }
 
@@ -233,6 +263,12 @@ type SignatureInfo struct {
 
 // GetSignaturesForAddress finds transactions that reference a specific address.
 func (c *RPCClient) GetSignaturesForAddress(ctx context.Context, address string, limit int) ([]SignatureInfo, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	pubkey, err := solanago.PublicKeyFromBase58(strings.TrimSpace(address))
 	if err != nil {
 		return nil, fmt.Errorf("invalid address: %w", err)
@@ -272,6 +308,12 @@ type TokenAccountInfo struct {
 // It derives the Associated Token Account (ATA) address and queries its balance.
 // Returns 0 if the account doesn't exist or has no balance.
 func (c *RPCClient) GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
 	// Derive the Associated Token Account address
 	ata, _, err := solanago.FindAssociatedTokenAddress(owner, mint)
 	if err != nil {

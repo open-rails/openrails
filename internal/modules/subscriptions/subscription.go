@@ -17,11 +17,13 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/vault"
+	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/metric"
 )
 
 type GetSubscriptionsFilters struct {
@@ -48,6 +50,9 @@ type SubscriptionService struct {
 	NMIClients           map[string]*nmi.NMIClient
 	PaymentMethodService *vault.PaymentMethodService
 	VaultService         *vault.VaultService
+	latency              metric.Float64Histogram
+	errCounter           metric.Int64Counter
+	memory               metric.Float64Gauge
 }
 
 var ErrActiveSubscriptionExists = errors.New("active or pending subscription already exists for this product")
@@ -88,12 +93,49 @@ const (
 	StatusMessagePending = "pending"
 )
 
+func NewSubscriptionService(
+	db *db.DB,
+	priceService *catalog.PriceService,
+	productService *catalog.ProductService,
+	ccbillRESTClient *ccbill.RESTClient,
+	nmiClients map[string]*nmi.NMIClient,
+	paymentMethodService *vault.PaymentMethodService,
+	clocks ...clockwork.Clock,
+) *SubscriptionService {
+	meter, _ := platform.InitTelemetry()
+	latency, _ := meter.Float64Histogram("subscription_create_latency_seconds", metric.WithDescription("Latency of subscription creation"))
+	errCounter, _ := meter.Int64Counter("subscription_create_errors_total", metric.WithDescription("Total count of subscription creation errors"))
+	memory, _ := meter.Float64Gauge("subscription_create_memory_usage_bytes", metric.WithDescription("Memory usage of subscription creation"), metric.WithUnit("B"))
+	return &SubscriptionService{
+		subscriptionRepo:     repo.NewSubscriptionRepo(db),
+		notificationRepo:     repo.NewNotificationQueueRepo(db),
+		clock:                timeutil.FirstClock(clocks...),
+		PriceService:         priceService,
+		ProductService:       productService,
+		CCBillRESTClient:     ccbillRESTClient,
+		NMIClients:           nmiClients,
+		PaymentMethodService: paymentMethodService,
+		VaultService:         nil, // Need to initialize this or pass it in
+		latency:              latency,
+		errCounter:           errCounter,
+		memory:               memory,
+	}
+}
+
 func (s *SubscriptionService) GetUserSubscription(ctx context.Context, userID string) (*models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.GetByUserID(ctx, userID)
 }
 
 // CancelUserSubscription cancels a user's subscription
 func (s *SubscriptionService) CancelUserSubscription(ctx context.Context, userID string, feedback string) error {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	subscription, err := s.GetByUserID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("subscription not found: %w", err)
@@ -137,6 +179,10 @@ func (s *SubscriptionService) CancelUserSubscription(ctx context.Context, userID
 
 // GetAvailableProducts returns all active products with their prices
 func (s *SubscriptionService) GetAvailableProducts(ctx context.Context) ([]*models.Product, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	products, err := s.ProductService.GetActive(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active products: %w", err)
@@ -158,28 +204,11 @@ func (s *SubscriptionService) GetAvailableProducts(ctx context.Context) ([]*mode
 	return products, nil
 }
 
-func NewSubscriptionService(
-	db *db.DB,
-	priceService *catalog.PriceService,
-	productService *catalog.ProductService,
-	ccbillRESTClient *ccbill.RESTClient,
-	nmiClients map[string]*nmi.NMIClient,
-	paymentMethodService *vault.PaymentMethodService,
-	clocks ...clockwork.Clock,
-) *SubscriptionService {
-	return &SubscriptionService{
-		subscriptionRepo:     repo.NewSubscriptionRepo(db),
-		notificationRepo:     repo.NewNotificationQueueRepo(db),
-		clock:                timeutil.FirstClock(clocks...),
-		PriceService:         priceService,
-		ProductService:       productService,
-		CCBillRESTClient:     ccbillRESTClient,
-		NMIClients:           nmiClients,
-		PaymentMethodService: paymentMethodService,
-	}
-}
-
 func (s *SubscriptionService) Create(ctx context.Context, subscription *models.Subscription) error {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	if subscription == nil {
 		return errors.New("subscription is nil")
 	}
@@ -204,35 +233,62 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 }
 
 func (s *SubscriptionService) GetByID(ctx context.Context, id uuid.UUID) (*models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetByID(ctx, id)
 }
 
 func (s *SubscriptionService) GetByUserID(ctx context.Context, id string) (*models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetLatestByUserID(ctx, id)
 }
 
 func (s *SubscriptionService) GetByUserIDAndPriceID(ctx context.Context, id string, priceID uuid.UUID) (*models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetByUserIDAndPriceID(ctx, id, priceID)
 }
 
 // GetActiveOrPendingByUserIDAndProductID returns an active or pending subscription for a user and product.
 // Uses the denormalized ProductID field for efficient lookup.
 func (s *SubscriptionService) GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetActiveOrPendingByUserIDAndProductID(ctx, userID, productID)
 }
 
 // GetActiveOrPendingByUserIDAndTierGroup returns an active or pending subscription for a user
 // in the specified tier group. Used to detect upgrade/downgrade scenarios.
-// Returns the subscription with its Price and Product loaded.
 func (s *SubscriptionService) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetActiveOrPendingByUserIDAndTierGroup(ctx, userID, tierGroup)
 }
 
 func (s *SubscriptionService) Update(ctx context.Context, subscription *models.Subscription) error {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.UpdateAt(ctx, subscription, s.now())
 }
 
 func (s *SubscriptionService) GetSubscribers(ctx context.Context, params query.QueryOptions[GetSubscriptionsFilters]) ([]*models.Subscription, int64, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	repoParams := query.QueryOptions[repo.SubscriptionFilters]{
 		Filters: repo.SubscriptionFilters{
 			UserID:          params.Filters.UserID,
@@ -255,44 +311,81 @@ func (s *SubscriptionService) GetSubscribers(ctx context.Context, params query.Q
 }
 
 func (s *SubscriptionService) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetPaginatedByUserID(ctx, userID, page, pageSize)
 }
 
 // GetSubscriptionsWithDetailsForUser retrieves subscriptions with related price information for billing history
 func (s *SubscriptionService) GetSubscriptionsWithDetailsForUser(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetSubscriptionsWithDetailsForUser(ctx, userID, page, pageSize)
 }
 
 // GetActiveSubscriptionsByUserID retrieves only active subscriptions for a user
 func (s *SubscriptionService) GetActiveSubscriptionsByUserID(ctx context.Context, userID string) ([]models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetActiveSubscriptionsByUserID(ctx, userID)
 }
 
 // GetSubscriptionsByProcessorAndUserID retrieves subscriptions filtered by processor
 func (s *SubscriptionService) GetSubscriptionsByProcessorAndUserID(ctx context.Context, userID string, processor models.Processor) ([]models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetSubscriptionsByProcessorAndUserID(ctx, userID, processor)
 }
 
 // GetActiveSubscription retrieves the active subscription for a user
 func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID string) (*models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetActiveSubscriptionAt(ctx, userID, s.now())
 }
 
 // GetByProcessorSubscriptionID finds a subscription by processor and processor_subscription_id.
 func (s *SubscriptionService) GetByProcessorSubscriptionID(ctx context.Context, processor, processorSubscriptionID string) (*models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetByProcessorSubscriptionID(ctx, processor, processorSubscriptionID)
 }
 
+// GetByProcessorMetadataValue returns a subscription by processor and metadata value.
 func (s *SubscriptionService) GetByProcessorMetadataValue(ctx context.Context, processor, key, value string) (*models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetByProcessorMetadataValue(ctx, processor, key, value)
 }
 
 // GetActiveSubscriptionsByProcessor gets all active subscriptions for a processor
 func (s *SubscriptionService) GetActiveSubscriptionsByProcessor(ctx context.Context, processor string) ([]*models.Subscription, error) {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.GetActiveSubscriptionsByProcessor(ctx, processor)
 }
 
 // Delete removes a subscription from the database permanently
 func (s *SubscriptionService) Delete(ctx context.Context, id uuid.UUID) error {
+	start := time.Now()
+	defer func() {
+		s.latency.Record(ctx, time.Since(start).Seconds())
+	}()
 	return s.subscriptionRepo.Delete(ctx, id)
 }

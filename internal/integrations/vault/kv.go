@@ -16,7 +16,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/open-rails/openrails/internal/observability"
 	vaultapi "github.com/hashicorp/vault/api"
 )
 
@@ -55,6 +57,13 @@ func (a *KVv2Adapter) metadataPath(full string) string {
 // ErrSecretNotFound). A transport/permission error propagates so callers can fail
 // closed and distinguish "Vault unreachable" (retry) from "absent" (terminal).
 func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]string, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
+
 	sec, err := a.client.Logical().ReadWithContext(ctx, a.dataPath(path))
 	if err != nil {
 		return nil, fmt.Errorf("vault kv read: %w", err)
@@ -75,7 +84,15 @@ func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]s
 	return out, nil
 }
 
+// WriteSecret purges ALL versions via the metadata endpoint (idempotent).
 func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[string]string) error {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
+
 	payload := make(map[string]any, len(data))
 	for k, v := range data {
 		payload[k] = v
@@ -89,6 +106,13 @@ func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[str
 
 // DeleteSecret purges ALL versions via the metadata endpoint (idempotent).
 func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
+
 	if _, err := a.client.Logical().DeleteWithContext(ctx, a.metadataPath(path)); err != nil {
 		return fmt.Errorf("vault kv delete: %w", err)
 	}
@@ -97,6 +121,13 @@ func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
 
 // ListSecrets enumerates child names under path (never values), via metadata.
 func (a *KVv2Adapter) ListSecrets(ctx context.Context, path string) ([]string, error) {
+	start := time.Now()
+	defer func() {
+		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
+			m.latency.Record(ctx, time.Since(start).Seconds())
+		}
+	}()
+
 	sec, err := a.client.Logical().ListWithContext(ctx, a.metadataPath(path))
 	if err != nil {
 		return nil, fmt.Errorf("vault kv list: %w", err)
