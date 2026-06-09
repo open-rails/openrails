@@ -10,23 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 func (suite *TestContainerSuite) ensureTenantSubject(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
-	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
-	require.NotEqual(suite.t, uuid.Nil, tenantSubjectID, "test user id must be a UUID tenant subject")
-	_, err := suite.BunDB.NewRaw(
-		`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT (id) DO UPDATE SET last_seen_at = now()`,
-		tenantSubjectID,
-		tenant.DefaultID.UUID(),
-		"openrails:self",
-		userID,
-	).Exec(ctx)
+	tenantSubjectID, err := dbrepo.EnsureTenantSubjectID(ctx, suite.BunDB, tenant.DefaultID.UUID(), userID)
 	require.NoError(suite.t, err, "Failed to ensure tenant subject")
 	return tenantSubjectID
 }

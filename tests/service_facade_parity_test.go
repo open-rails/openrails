@@ -68,7 +68,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	ctx := context.Background()
 
 	userID := "service-user-" + uuid.NewString()
-	tenantSubjectID := uuid.New()
+	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 	tenantSubject := identity.TenantSubjectID(tenantSubjectID)
 	creditTypeName := "svc_test_credits_" + uuid.NewString()
 
@@ -83,17 +83,6 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		CreatedAt:     time.Now().UTC(),
 	}
 	_, err := suite.BunDB.NewInsert().Model(ct).Exec(ctx)
-	require.NoError(t, err)
-
-	ts := &models.TenantSubject{
-		ID:         tenantSubjectID,
-		TenantID:   tenant.DefaultID.UUID(),
-		Issuer:     "service-facade-parity",
-		Subject:    userID,
-		CreatedAt:  time.Now().UTC(),
-		LastSeenAt: time.Now().UTC(),
-	}
-	_, err = suite.BunDB.NewInsert().Model(ts).Exec(ctx)
 	require.NoError(t, err)
 
 	ucb := &models.UserCreditBalance{
