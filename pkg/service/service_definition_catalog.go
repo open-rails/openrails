@@ -427,6 +427,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	now := time.Now().UTC()
 	price := &models.Price{
 		ID:               priceID,
+		TenantID:         tenant.FromContextOrDefault(ctx).UUID(),
 		ProductID:        req.ProductID,
 		Status:           status,
 		Amount:           req.UnitAmount,

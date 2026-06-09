@@ -1,5 +1,5 @@
 {
-  "next_id": 331,
+  "next_id": 332,
   "issues": [
     {
       "id": 330,
@@ -520,6 +520,20 @@
         "[x] Server startup first-run auto-bootstrap: on `server` start, if no tenants are provisioned yet, load the configured unified manifest and apply it once via the shared path (tenants + catalog). Otherwise skip. Config-pointed file (tenant_bootstrap.file or equivalent).",
         "[x] Validate: go build ./..., go vet ./..., unit tests (bootstrap + controlplane), and a focused run confirming registration no longer probes JWKS and bootstrap converges with an unreachable issuer.",
         "[x] Follow-up (doujins compose): remove the one-shot openrails-bootstrap container, point openrails at the unified manifest, revert the doujins-only split, use the combined manifest; verify first-run auto-bootstrap works with hentai0 down."
+      ]
+    },
+    {
+      "id": 331,
+      "name": "Tune card-abuse rate-limit windows (#371): 15-min 3->captcha/6->block, 24h 10->block per user+ip, keep global 100->attack-mode",
+      "completed": false,
+      "priority": "high",
+      "description": "The #371 CardAbuseGuard (internal/modules/abuse/card_abuse.go), middleware subject-key plumbing, checkout hook, and integration tests already landed on master. This refines the policy to the agreed windows. Card-testing is defined by volume over time, so pair a short BURST window with a rolling DAILY cap, both keyed per user AND per IP. Final thresholds (user-specified): a 15-MINUTE rolling window per (user+ip) where 3 failed card charges -> future attempts require captcha, and 6 failed charges -> cut off (blocked) for the remainder of that 15-min window; PLUS a 24-HOUR rolling cap of 10 failed charges per (user+ip) -> cut off for the day. Keep the existing site-wide GLOBAL cap of 100 failed charges / 24h -> attack mode (captcha for every request from everyone).",
+      "tasks": [
+        "[ ] DefaultCardAbuseConfig: short window 15 min, CaptchaAfter=3, BlockAfter=6 (block lasts the remainder of the window)",
+        "[ ] Add a second per-subject rolling 24h window with a cap of 10 failed charges -> block; the Limiter already returns multiple windows, so configure the daily window + add the second-window check in RecordChargeFailure",
+        "[ ] Keep both subject keys (user: and ip:) so a logged-in attacker rotating cards and a bot rotating accounts behind one IP are both caught",
+        "[ ] Keep the global 24h/100 attack-mode (captcha for everyone) unchanged",
+        "[ ] Extend the abuse integration tests (real Redis) to cover the 15-min 3/6 thresholds and the 24h/10 daily cap; go build ./... + go vet ./... clean"
       ]
     }
   ]

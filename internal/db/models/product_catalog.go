@@ -135,6 +135,7 @@ type Price struct {
 	bun.BaseModel `bun:"table:billing.prices,alias:price"`
 
 	ID        uuid.UUID     `bun:"id,pk,type:uuid" json:"id"`
+	TenantID  uuid.UUID     `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	ProductID uuid.UUID     `bun:"product_id,notnull" json:"product_id"`
 	Status    CatalogStatus `bun:"status,notnull,default:'active'" json:"status"`
 	Amount    int64         `bun:"amount,notnull" json:"amount"`
