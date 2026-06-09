@@ -36,18 +36,18 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("control plane is not enabled")
 	}
 
-	bootstrapOrg, err := cmd.Flags().GetString("org")
+	bootstrapTenant, err := cmd.Flags().GetString("org")
 	if err != nil {
 		return fmt.Errorf("read org flag: %w", err)
 	}
-	bootstrapOrg = strings.ToLower(strings.TrimSpace(bootstrapOrg))
-	if bootstrapOrg == "" {
+	bootstrapTenant = strings.ToLower(strings.TrimSpace(bootstrapTenant))
+	if bootstrapTenant == "" {
 		// HARDCUT (#312): service tokens are minted under the default tenant's own
 		// AuthKit org — there is no separate "operator" tenant.
-		bootstrapOrg = tenant.DefaultSlug
+		bootstrapTenant = tenant.DefaultSlug
 	}
 	if _, err := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		BootstrapTenantSlug:     bootstrapOrg,
+		BootstrapTenantSlug:     bootstrapTenant,
 		MintInitialServiceToken: false,
 	}); err != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", err)
@@ -95,7 +95,7 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 		tenantResource,
 		controlplane.TenantSubjectResource(tenantSubjectID),
 	}
-	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, bootstrapOrg, authcore.ServiceTokenMintOptions{
+	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, bootstrapTenant, authcore.ServiceTokenMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,
@@ -105,7 +105,7 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":                  bootstrapOrg,
+		"org":                  bootstrapTenant,
 		"name":                 name,
 		"tenant":               tenantSlug,
 		"tenant_id":            tenantID.String(),

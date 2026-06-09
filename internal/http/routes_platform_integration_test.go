@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
 CREATE TABLE IF NOT EXISTS billing.subscriptions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, status TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS billing.payments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, amount BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'completed');
 CREATE TABLE IF NOT EXISTS billing.platform_audit (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), invoker_id TEXT NOT NULL, actor_org TEXT,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), invoker_id TEXT NOT NULL, actor_tenant TEXT,
     action TEXT NOT NULL, target_tenant_id UUID, reason TEXT,
     before_state JSONB, after_state JSONB, detail JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp

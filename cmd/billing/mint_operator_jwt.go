@@ -51,12 +51,12 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	}
 	core := cp.Core()
 
-	org, _ := cmd.Flags().GetString("org")
-	org = strings.ToLower(strings.TrimSpace(org))
-	if org == "" {
+	authorityTenantSlug, _ := cmd.Flags().GetString("org")
+	authorityTenantSlug = strings.ToLower(strings.TrimSpace(authorityTenantSlug))
+	if authorityTenantSlug == "" {
 		// HARDCUT (#312): admin authority lives under the default tenant's own
 		// AuthKit org — there is no separate "operator" tenant.
-		org = tenant.DefaultSlug
+		authorityTenantSlug = tenant.DefaultSlug
 	}
 
 	email, _ := cmd.Flags().GetString("email")
@@ -78,7 +78,7 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	// 1. Ensure the bootstrap (default-tenant) AuthKit org + admin role exist
 	//    (idempotent bootstrap).
 	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		BootstrapTenantSlug:     org,
+		BootstrapTenantSlug:     authorityTenantSlug,
 		MintInitialServiceToken: false,
 	}); berr != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", berr)
@@ -91,21 +91,21 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	}
 
 	// 3. Make them a legacy bridge member + assign the operator role.
-	if err := core.AddMember(ctx, org, userID); err != nil {
+	if err := core.AddMember(ctx, authorityTenantSlug, userID); err != nil {
 		return fmt.Errorf("add member: %w", err)
 	}
-	if err := core.AssignRole(ctx, org, userID, role); err != nil {
+	if err := core.AssignRole(ctx, authorityTenantSlug, userID, role); err != nil {
 		return fmt.Errorf("assign role %q: %w", role, err)
 	}
 
 	// 4. Issue the tenant-scoped JWT (carries tenant + tenant_roles claims).
-	token, exp, err := core.IssueServiceToken(ctx, userID, email, org, nil)
+	token, exp, err := core.IssueServiceToken(ctx, userID, email, authorityTenantSlug, nil)
 	if err != nil {
 		return fmt.Errorf("issue tenant access token: %w", err)
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":        org,
+		"org":        authorityTenantSlug,
 		"user_id":    userID,
 		"email":      email,
 		"role":       role,

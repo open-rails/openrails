@@ -165,4 +165,3 @@ func validHTTPURL(raw string) bool {
 	}
 	return u.Scheme == "http" || u.Scheme == "https"
 }
-

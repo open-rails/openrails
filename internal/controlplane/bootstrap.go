@@ -77,7 +77,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 
 	// 1. Ensure the bootstrap (default-tenant) AuthKit org exists (idempotent:
 	//    resolve, else create).
-	org, err := core.ResolveTenantBySlug(ctx, slug)
+	authkitTenant, err := core.ResolveTenantBySlug(ctx, slug)
 	if err != nil {
 		if !errors.Is(err, authcore.ErrTenantNotFound) {
 			return nil, fmt.Errorf("controlplane: resolve bootstrap tenant %q: %w", slug, err)
@@ -95,9 +95,9 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 			res.TenantCreated = true
 			log.WithField("bootstrap_tenant", slug).Info("controlplane: created bootstrap tenant org")
 		}
-		org = created
+		authkitTenant = created
 	}
-	res.BootstrapTenantID = org.ID
+	res.BootstrapTenantID = authkitTenant.ID
 
 	// 2. Define the admin role and seed it the full OpenRails catalog
 	//    (idempotent: DefineRole upserts, SetRolePermissions replaces).
@@ -124,7 +124,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 
 	// 4. Record the default tenant's AuthKit org on the DEFAULT tenant directory
 	//    row so tenant resolution / admin policy can map the default tenant -> org.
-	if err := c.recordAuthKitTenantOnDefaultTenant(ctx, tenant.DefaultID, org.ID, slug); err != nil {
+	if err := c.recordAuthKitTenantOnDefaultTenant(ctx, tenant.DefaultID, authkitTenant.ID, slug); err != nil {
 		return nil, err
 	}
 
@@ -194,7 +194,7 @@ func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstra
 
 	res := &PlatformBootstrapResult{PlatformTenantSlug: slug}
 
-	org, err := core.ResolveTenantBySlug(ctx, slug)
+	authkitTenant, err := core.ResolveTenantBySlug(ctx, slug)
 	if err != nil {
 		if !errors.Is(err, authcore.ErrTenantNotFound) {
 			return nil, fmt.Errorf("controlplane: resolve platform tenant %q: %w", slug, err)
@@ -212,9 +212,9 @@ func (c *ControlPlane) BootstrapPlatform(ctx context.Context) (*PlatformBootstra
 			res.TenantCreated = true
 			log.WithField("platform_tenant", slug).Info("controlplane: created platform superadmin org")
 		}
-		org = created
+		authkitTenant = created
 	}
-	res.PlatformTenantID = org.ID
+	res.PlatformTenantID = authkitTenant.ID
 
 	if err := core.DefineRole(ctx, slug, PlatformRole); err != nil {
 		return nil, fmt.Errorf("controlplane: define platform superadmin role: %w", err)

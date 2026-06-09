@@ -34,7 +34,7 @@ func (c *ControlPlane) EnsureAuthKitTenant(ctx context.Context, tenantSlug strin
 		return "", errors.New("controlplane: tenant slug is required")
 	}
 
-	org, err := core.ResolveTenantBySlug(ctx, slug)
+	tenant, err := core.ResolveTenantBySlug(ctx, slug)
 	if err != nil {
 		if !errors.Is(err, authcore.ErrTenantNotFound) {
 			return "", fmt.Errorf("controlplane: resolve tenant %q: %w", slug, err)
@@ -43,7 +43,7 @@ func (c *ControlPlane) EnsureAuthKitTenant(ctx context.Context, tenantSlug strin
 		if cerr != nil {
 			return "", fmt.Errorf("controlplane: create tenant %q: %w", slug, cerr)
 		}
-		org = created
+		tenant = created
 		log.WithField("tenant", slug).Info("controlplane: created tenant AuthKit org")
 	}
 
@@ -53,5 +53,5 @@ func (c *ControlPlane) EnsureAuthKitTenant(ctx context.Context, tenantSlug strin
 	if err := core.SetRolePermissions(ctx, slug, OperatorRole, OperatorRolePermissions()); err != nil {
 		return "", fmt.Errorf("controlplane: seed operator role permissions on tenant: %w", err)
 	}
-	return org.ID, nil
+	return tenant.ID, nil
 }

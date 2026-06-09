@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS billing.payments (
 CREATE TABLE IF NOT EXISTS billing.platform_audit (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     invoker_id    TEXT NOT NULL,
-    actor_org        TEXT,
+    actor_tenant        TEXT,
     action           TEXT NOT NULL,
     target_tenant_id UUID,
     reason           TEXT,
@@ -159,7 +159,7 @@ func TestAuditLog_RecordAndList(t *testing.T) {
 
 	id, err := audit.Record(ctx, AuditEntry{
 		InvokerID:      "platform-admin",
-		ActorOrg:       "openrails-platform",
+		ActorTenant:    "openrails-platform",
 		Action:         ActionTenantSuspend,
 		TargetTenantID: &tid,
 		Reason:         "abuse report",

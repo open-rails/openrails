@@ -84,10 +84,10 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjec
 	}
 
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	var payerOrgID *uuid.UUID
+	var payerTenantID *uuid.UUID
 	if payer != nil && !payer.IsZero() {
 		id := payer.UUID()
-		payerOrgID = &id
+		payerTenantID = &id
 	}
 	var reasonPtr *string
 	if r := strings.TrimSpace(reason); r != "" {
@@ -97,7 +97,7 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjec
 	entry := &models.PaymentBlocklistEntry{
 		ID:              uuidutil.NewV7(),
 		TenantID:        tenantID,
-		TenantSubjectID: payerOrgID,
+		TenantSubjectID: payerTenantID,
 		Kind:            kind,
 		Value:           value,
 		Reason:          reasonPtr,
@@ -107,8 +107,8 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjec
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		// Owner-scoped blocks reference a payable tenant subject; materialize its
 		// tenant_subjects row so the payment_blocklist FK (migration 076) holds (#317).
-		if payerOrgID != nil {
-			if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Q(ctx), tenantID, payerOrgID.String()); err != nil {
+		if payerTenantID != nil {
+			if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Q(ctx), tenantID, payerTenantID.String()); err != nil {
 				return err
 			}
 		}

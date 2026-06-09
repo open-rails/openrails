@@ -35,19 +35,19 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("control plane is not enabled")
 	}
 
-	org, err := cmd.Flags().GetString("org")
+	authorityTenantSlug, err := cmd.Flags().GetString("org")
 	if err != nil {
 		return fmt.Errorf("read org flag: %w", err)
 	}
-	org = strings.ToLower(strings.TrimSpace(org))
-	if org == "" {
+	authorityTenantSlug = strings.ToLower(strings.TrimSpace(authorityTenantSlug))
+	if authorityTenantSlug == "" {
 		// HARDCUT (#312): the deployment admin service token is minted under the
 		// default tenant's own AuthKit org — there is no separate "operator" tenant.
-		org = tenant.DefaultSlug
+		authorityTenantSlug = tenant.DefaultSlug
 	}
 
 	if _, berr := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
-		BootstrapTenantSlug:     org,
+		BootstrapTenantSlug:     authorityTenantSlug,
 		MintInitialServiceToken: false,
 	}); berr != nil {
 		return fmt.Errorf("bootstrap authority/role: %w", berr)
@@ -83,7 +83,7 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 
 	resources := []authcore.ServiceTokenResource{tenantResource}
-	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, org, authcore.ServiceTokenMintOptions{
+	serviceToken, token, err := cp.Core().MintServiceTokenWithOptions(ctx, authorityTenantSlug, authcore.ServiceTokenMintOptions{
 		Name:        name,
 		Permissions: permissions,
 		Resources:   resources,
@@ -93,7 +93,7 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"org":                  org,
+		"org":                  authorityTenantSlug,
 		"name":                 name,
 		"tenant":               tenantSlug,
 		"tenant_id":            tenantID.String(),

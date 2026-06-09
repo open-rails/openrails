@@ -165,15 +165,15 @@ func (f *fakeTenantProvisioner) EnsureAuthKitTenant(_ context.Context, slug stri
 
 func newSvc(t *testing.T) (*Service, *fakeTenantProvisioner) {
 	pool := newTestPool(t)
-	orgs := &fakeTenantProvisioner{}
-	svc, err := NewService(pool, orgs, NewMemorySecretStore())
+	tenants := &fakeTenantProvisioner{}
+	svc, err := NewService(pool, tenants, NewMemorySecretStore())
 	require.NoError(t, err)
-	return svc, orgs
+	return svc, tenants
 }
 
 func TestProvision_Idempotent(t *testing.T) {
 	ctx := context.Background()
-	svc, orgs := newSvc(t)
+	svc, tenants := newSvc(t)
 
 	req := ProvisionRequest{Slug: "acme", Name: "Acme", WebhookHost: "acme.example.com", BillingTier: "pro"}
 	first, err := svc.Provision(ctx, req)
@@ -191,7 +191,7 @@ func TestProvision_Idempotent(t *testing.T) {
 	var count int
 	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM billing.tenants WHERE slug='acme'`).Scan(&count))
 	require.Equal(t, 1, count, "provision must not create a duplicate tenant row")
-	require.GreaterOrEqual(t, orgs.calls, 2, "org provisioner called on each provision")
+	require.GreaterOrEqual(t, tenants.calls, 2, "org provisioner called on each provision")
 }
 
 func TestSuspend_DeniesWritesAllowsReads(t *testing.T) {

@@ -170,7 +170,7 @@ func (s *Server) platformBreakGlassGrantHandler() gin.HandlerFunc {
 		uc, _ := ginauth.UserContextFromGin(c)
 		grant, err := s.platformBreakGlass.Grant(c.Request.Context(), platform.GrantRequest{
 			InvokerID:     uc.UserID,
-			ActorOrg:      uc.Tenant,
+			ActorTenant:   uc.Tenant,
 			TargetTenant:  target,
 			Justification: body.Justification,
 			TTL:           time.Duration(body.TTLSeconds) * time.Second,
