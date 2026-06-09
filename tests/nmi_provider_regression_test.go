@@ -64,10 +64,28 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 	require.NotEmpty(t, subs, "expected subscription records")
 	sub := subs[0]
 	assert.Equal(t, models.Processor("nmi"), sub.Processor)
+	assert.Equal(t, models.StatusActive, sub.Status)
+	require.NotNil(t, sub.CurrentPeriodStartsAt)
+	require.NotNil(t, sub.CurrentPeriodEndsAt)
 
 	pms := suite.GetPaymentMethodsByUserID(userID)
 	require.NotEmpty(t, pms)
 	assert.Equal(t, models.Processor("nmi"), pms[0].Processor)
+
+	payments := suite.GetPaymentsByUserID(userID)
+	require.NotEmpty(t, payments)
+	var completedPayment *models.Payment
+	for _, payment := range payments {
+		if payment.SubscriptionID != nil && *payment.SubscriptionID == sub.ID && payment.Status == "completed" {
+			completedPayment = payment
+			break
+		}
+	}
+	require.NotNil(t, completedPayment, "expected a completed payment linked to the activated subscription")
+
+	entitled, err := suite.App.Runtime.EntitlementService.IsEntitled(context.Background(), userID, "premium", suite.GetClock().Now().UTC())
+	require.NoError(t, err)
+	assert.True(t, entitled, "NMI checkout should grant premium access synchronously after approval")
 	assert.GreaterOrEqual(t, int(mock.RequestCount), 1, "should have used the configured NMI client")
 }
 

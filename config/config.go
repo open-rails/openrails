@@ -914,10 +914,17 @@ type USDCFundingProviderConfig struct {
 	// {session_id}, {return_url}.
 	LaunchURLTemplate string `koanf:"launch_url_template,omitempty"`
 
-	// Coinbase-hosted Onramp session API configuration. APIKey should be an
-	// OpenRails-owned backend secret, not a host-app frontend value.
-	APIBaseURL string `koanf:"api_base_url,omitempty"`
-	APIKey     string `koanf:"api_key,omitempty"`
+	// Coinbase-hosted Onramp session API configuration. Prefer APIKeyID +
+	// APIKeySecret so OpenRails can generate the short-lived CDP JWT required for
+	// server-to-server calls. APIKey is retained as an escape hatch for tests or
+	// manually supplied short-lived bearer tokens; never expose these to host apps.
+	APIBaseURL   string `koanf:"api_base_url,omitempty"`
+	APIKeyID     string `koanf:"api_key_id,omitempty"`
+	APIKeySecret string `koanf:"api_key_secret,omitempty"`
+	APIKey       string `koanf:"api_key,omitempty"`
+	// WebhookSecret is the Coinbase webhook subscription secret returned when
+	// creating the Onramp webhook subscription. It verifies X-Hook0-Signature.
+	WebhookSecret string `koanf:"webhook_secret,omitempty"`
 }
 
 type ClickHouseConfig struct {

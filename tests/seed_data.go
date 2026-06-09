@@ -857,6 +857,10 @@ func (suite *TestContainerSuite) CreateTestNotification(userID string, eventType
 
 // Query helpers for assertions
 
+func testTenantSubjectID(userID string) uuid.UUID {
+	return identity.TenantSubjectIDFromString(userID).UUID()
+}
+
 // GetSubscription retrieves a subscription by ID
 func (suite *TestContainerSuite) GetSubscription(id uuid.UUID) *models.Subscription {
 	suite.t.Helper()
@@ -882,7 +886,7 @@ func (suite *TestContainerSuite) GetSubscriptionByUserID(userID string) *models.
 	var sub models.Subscription
 	err := suite.BunDB.NewSelect().
 		Model(&sub).
-		Where("user_id = ?", userID).
+		Where("sub.tenant_subject_id = ?", testTenantSubjectID(userID)).
 		Where("status = ?", models.StatusActive).
 		Relation("Price").
 		Scan(ctx)
@@ -901,7 +905,7 @@ func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*m
 	var subs []*models.Subscription
 	err := suite.BunDB.NewSelect().
 		Model(&subs).
-		Where("user_id = ?", userID).
+		Where("sub.tenant_subject_id = ?", testTenantSubjectID(userID)).
 		Order("created_at DESC").
 		Relation("Price").
 		Scan(ctx)
@@ -918,7 +922,7 @@ func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Pa
 	var payments []*models.Payment
 	err := suite.BunDB.NewSelect().
 		Model(&payments).
-		Where("user_id = ?", userID).
+		Where("purch.tenant_subject_id = ?", testTenantSubjectID(userID)).
 		Order("purchased_at DESC").
 		Relation("Price").
 		Scan(ctx)
@@ -935,7 +939,7 @@ func (suite *TestContainerSuite) GetPaymentMethodsByUserID(userID string) []*mod
 	var pms []*models.PaymentMethod
 	err := suite.BunDB.NewSelect().
 		Model(&pms).
-		Where("user_id = ?", userID).
+		Where("pm.tenant_subject_id = ?", testTenantSubjectID(userID)).
 		Order("created_at DESC").
 		Scan(ctx)
 	require.NoError(suite.t, err, "Failed to get payment methods for user %s", userID)
@@ -952,7 +956,7 @@ func (suite *TestContainerSuite) GetEntitlementsByUserID(userID string) []*model
 	var ents []*models.Entitlement
 	err := suite.BunDB.NewSelect().
 		Model(&ents).
-		Where("user_id = ?", userID).
+		Where("ent.tenant_subject_id = ?", testTenantSubjectID(userID)).
 		Where("start_at <= ?", now).
 		Where("(end_at IS NULL OR end_at > ?)", now).
 		Where("revoked_at IS NULL").
@@ -971,7 +975,7 @@ func (suite *TestContainerSuite) GetNotificationsByUserID(userID string) []*mode
 	var notifs []*models.NotificationQueue
 	err := suite.BunDB.NewSelect().
 		Model(&notifs).
-		Where("user_id = ?", userID).
+		Where("nq.tenant_subject_id = ?", testTenantSubjectID(userID)).
 		Order("created_at DESC").
 		Scan(ctx)
 	require.NoError(suite.t, err, "Failed to get notifications for user %s", userID)
@@ -986,7 +990,7 @@ func (suite *TestContainerSuite) CountUnreadNotifications(userID string) int {
 
 	count, err := suite.BunDB.NewSelect().
 		Model((*models.NotificationQueue)(nil)).
-		Where("user_id = ?", userID).
+		Where("nq.tenant_subject_id = ?", testTenantSubjectID(userID)).
 		Where("seen = ?", false).
 		Count(ctx)
 	require.NoError(suite.t, err, "Failed to count unread notifications for user %s", userID)
@@ -1073,18 +1077,18 @@ func (suite *TestContainerSuite) CleanupSubscriptionsForUser(userID string) {
 	// Also delete entitlements for this user
 	_, _ = suite.BunDB.NewDelete().
 		Model((*models.Entitlement)(nil)).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", testTenantSubjectID(userID)).
 		Exec(ctx)
 
 	_, _ = suite.BunDB.NewDelete().
 		Model((*models.CheckoutSession)(nil)).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", testTenantSubjectID(userID)).
 		Exec(ctx)
 
 	// Delete subscriptions
 	_, err := suite.BunDB.NewDelete().
 		Model((*models.Subscription)(nil)).
-		Where("user_id = ?", userID).
+		Where("tenant_subject_id = ?", testTenantSubjectID(userID)).
 		Exec(ctx)
 	if err != nil {
 		suite.t.Logf("Warning: failed to cleanup subscriptions for user %s: %v", userID, err)

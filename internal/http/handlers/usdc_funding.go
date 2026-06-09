@@ -71,7 +71,7 @@ func GetUSDCFundingOptions(r *httprequest.Request) {
 		}
 		checkoutID = parsed
 	}
-	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config)
+	svc := newUSDCFundingService(r)
 	resp := usdcFundingOptionsResponse{Data: svc.Options(funding.OptionsRequest{
 		WalletAddress:     query.Wallet,
 		Network:           query.Network,
@@ -101,7 +101,7 @@ func CreateUSDCFundingSession(r *httprequest.Request) {
 		}
 		checkoutID = parsed
 	}
-	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config)
+	svc := newUSDCFundingService(r)
 	session, err := svc.Create(r.Request.Context(), funding.CreateRequest{
 		UserID:            user.ID,
 		Provider:          req.Provider,
@@ -131,13 +131,21 @@ func GetUSDCFundingSession(r *httprequest.Request) {
 		r.APIError(api.InvalidIDError("usdc_funding_session"))
 		return
 	}
-	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config)
+	svc := newUSDCFundingService(r)
 	session, err := svc.Get(r.Request.Context(), user.ID, id)
 	if err != nil {
 		writeUSDCFundingError(r, err)
 		return
 	}
 	r.SuccessJSON(usdcFundingSessionToResponse(session))
+}
+
+func newUSDCFundingService(r *httprequest.Request) *funding.Service {
+	svc := funding.NewService(repo.NewUSDCFundingSessionRepo(r.State.DB), r.State.Config)
+	if r.State.SolanaRPC != nil {
+		svc.WithSolanaBalanceReader(r.State.SolanaRPC)
+	}
+	return svc
 }
 
 func writeUSDCFundingError(r *httprequest.Request, err error) {

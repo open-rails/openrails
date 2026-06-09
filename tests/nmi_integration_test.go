@@ -106,10 +106,7 @@ func TestNMIDemoDeclinedPayment(t *testing.T) {
 }
 
 func TestNMIMobiusConfiguredAccountSale(t *testing.T) {
-	securityKey := strings.TrimSpace(os.Getenv("PROCESSORS_MOBIUS_SECURITY_KEY"))
-	if securityKey == "" || securityKey == NMIDemoSecurityKey {
-		t.Skip("PROCESSORS_MOBIUS_SECURITY_KEY with a real Mobius/NMI test account key is required")
-	}
+	securityKey := configuredMobiusSecurityKey(t)
 
 	amount := fmt.Sprintf("1.%02d", time.Now().UnixNano()%90+10)
 	values := url.Values{
@@ -140,6 +137,53 @@ func TestNMIMobiusConfiguredAccountSale(t *testing.T) {
 	assert.Equal(t, "1", output.Get("response"), "Configured Mobius/NMI account should approve test-mode sale, got: %s - %s", output.Get("response"), output.Get("responsetext"))
 	assert.NotEmpty(t, output.Get("transactionid"), "Should receive transaction ID")
 	t.Logf("Configured Mobius/NMI sale approved with response_code=%s", output.Get("response_code"))
+}
+
+func TestNMIMobiusConfiguredAccountRecurringSubscription(t *testing.T) {
+	securityKey := configuredMobiusSecurityKey(t)
+	client := createConfiguredMobiusClient(t, securityKey)
+
+	vaultID := createConfiguredMobiusVault(t, securityKey)
+	t.Cleanup(func() {
+		deleteConfiguredVault(t, securityKey, vaultID)
+	})
+
+	planID := "openrails-it-" + uuid.NewString()
+	err := client.AddRecurringPlan(planID, "OpenRails integration test", 123, 30, 0)
+	require.NoError(t, err, "configured Mobius/NMI account should create a temporary recurring plan")
+	t.Cleanup(func() {
+		if err := client.DeleteRecurringPlan(planID); err != nil {
+			t.Logf("failed to delete temporary NMI recurring plan %s: %v", planID, err)
+		}
+	})
+
+	resp, err := client.AddRecurringSubscription(nmi.RecurringPaymentData{
+		CardUserData: nmi.CardUserData{
+			FirstName: "OpenRails",
+			LastName:  "Recurring",
+			Address1:  TestCardAddress1,
+			City:      "Test City",
+			State:     "CA",
+			Zip:       TestCardZip,
+			Country:   "US",
+		},
+		PlanID:          planID,
+		CustomerVaultID: vaultID,
+		Email:           "openrails-recurring-test@example.com",
+		Currency:        "USD",
+		Amount:          1.23,
+		OrderID:         "openrails-recurring-" + uuid.NewString(),
+	})
+	require.NoError(t, err, "configured Mobius/NMI account should approve immediate recurring subscription")
+	require.NotEmpty(t, resp.SubscriptionID, "NMI should return a provider subscription id")
+	require.NotEmpty(t, resp.TransactionID, "NMI should return the initial provider transaction id")
+	t.Cleanup(func() {
+		if err := client.DeleteRecurringSubscription(resp.SubscriptionID); err != nil {
+			t.Logf("failed to delete temporary NMI subscription %s: %v", resp.SubscriptionID, err)
+		}
+	})
+
+	t.Logf("Configured Mobius/NMI recurring subscription approved with subscription_id=%s", resp.SubscriptionID)
 }
 
 // TestNMIDemoClientCreateVault tests creating a customer vault entry with real NMI API
@@ -439,6 +483,31 @@ func TestNMIRuntimeClientConfigured(t *testing.T) {
 
 // Helper functions
 
+func configuredMobiusSecurityKey(t *testing.T) string {
+	t.Helper()
+
+	securityKey := strings.TrimSpace(os.Getenv("PROCESSORS_MOBIUS_SECURITY_KEY"))
+	if securityKey == "" || securityKey == NMIDemoSecurityKey {
+		t.Skip("PROCESSORS_MOBIUS_SECURITY_KEY with a real Mobius/NMI test account key is required")
+	}
+	return securityKey
+}
+
+func createConfiguredMobiusClient(t *testing.T, securityKey string) *nmi.NMIClient {
+	t.Helper()
+
+	settings := &config.NMIProviderSettings{
+		Name:        "mobius",
+		SecurityKey: securityKey,
+		TestMode:    true,
+	}
+
+	client, err := nmi.NewClient("mobius", settings, true)
+	require.NoError(t, err)
+
+	return client
+}
+
 func createNMIDemoClient(t *testing.T) *nmi.NMIClient {
 	t.Helper()
 
@@ -452,6 +521,42 @@ func createNMIDemoClient(t *testing.T) *nmi.NMIClient {
 	require.NoError(t, err)
 
 	return client
+}
+
+func createConfiguredMobiusVault(t *testing.T, securityKey string) string {
+	t.Helper()
+
+	values := url.Values{
+		"customer_vault": {"add_customer"},
+		"security_key":   {securityKey},
+		"ccnumber":       {TestCardVisa},
+		"ccexp":          {TestCardExpiry},
+		"cvv":            {TestCardCVV},
+		"first_name":     {"OpenRails"},
+		"last_name":      {"Recurring"},
+		"address1":       {TestCardAddress1},
+		"city":           {"Test City"},
+		"state":          {"CA"},
+		"zip":            {TestCardZip},
+		"country":        {"US"},
+		"email":          {"openrails-recurring-test@example.com"},
+		"test_mode":      {"enabled"},
+	}
+
+	resp, err := http.PostForm(NMIDirectPostURL, values)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	output, err := url.ParseQuery(string(body))
+	require.NoError(t, err)
+	require.Equal(t, "1", output.Get("response"), "Failed to create configured Mobius vault: %s", output.Get("responsetext"))
+
+	vaultID := output.Get("customer_vault_id")
+	require.NotEmpty(t, vaultID)
+	return vaultID
 }
 
 func createNMIDemoVault(t *testing.T) string {
@@ -482,6 +587,23 @@ func createNMIDemoVault(t *testing.T) string {
 	require.Equal(t, "1", output.Get("response"), "Failed to create vault: %s", output.Get("responsetext"))
 
 	return output.Get("customer_vault_id")
+}
+
+func deleteConfiguredVault(t *testing.T, securityKey string, vaultID string) {
+	t.Helper()
+
+	values := url.Values{
+		"customer_vault":    {"delete_customer"},
+		"security_key":      {securityKey},
+		"customer_vault_id": {vaultID},
+		"test_mode":         {"enabled"},
+	}
+	resp, err := http.PostForm(NMIDirectPostURL, values)
+	if err != nil {
+		t.Logf("failed to delete configured Mobius vault %s: %v", vaultID, err)
+		return
+	}
+	_ = resp.Body.Close()
 }
 
 func deleteVault(vaultID string) {

@@ -3,8 +3,10 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
+	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
@@ -91,7 +93,22 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if err != nil {
 		log.WithError(err).Error("Failed to create checkout session")
-		writeCheckoutSessionError(r, err)
+		// Card-abuse tracking (#371): a vault/card decline is a failed charge
+		// attempt. Record it against this request's rate-limit subjects so
+		// repeated failures escalate to captcha/block (and feed attack-mode
+		// detection). Best-effort + nil-safe; never affects the response.
+		var vErr *vault.VaultError
+		if errors.As(err, &vErr) {
+			r.State.CardAbuseGuard.RecordChargeFailure(
+				r.Request.Context(),
+				ginmw.SubjectKeysFromContext(r.Request.Context()),
+			)
+		}
+		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
+			Processor: req.Payment.Processor,
+			Wallet:    req.Payment.Wallet,
+			Asset:     req.Payment.TokenSymbol,
+		})
 		return
 	}
 	r.SuccessJSON(resp)
@@ -151,13 +168,24 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Processor: req.Payment.Processor, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
 	resp, err := r.State.CheckoutSessionService.ConfirmSession(r.Request.Context(), parsedID, svcReq, user)
 	if err != nil {
-		writeCheckoutSessionError(r, err)
+		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
+			Processor:         req.Payment.Processor,
+			Wallet:            req.Payment.Wallet,
+			CheckoutSessionID: sessionID,
+		})
 		return
 	}
 	r.SuccessJSON(resp)
 }
 
-func writeCheckoutSessionError(r *httprequest.Request, err error) {
+type checkoutSessionErrorContext struct {
+	Processor         string
+	Wallet            string
+	Asset             string
+	CheckoutSessionID string
+}
+
+func writeCheckoutSessionError(r *httprequest.Request, err error, contexts ...checkoutSessionErrorContext) {
 	var vaultErr *vault.VaultError
 	if errors.As(err, &vaultErr) {
 		code := api.CodePaymentFailed
@@ -175,6 +203,7 @@ func writeCheckoutSessionError(r *httprequest.Request, err error) {
 		param := "usdc_balance"
 		apiErr := api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, api.CodeInsufficientFunds, insufficientUSDC.Error())
 		apiErr.Param = &param
+		apiErr.Metadata = insufficientUSDCFundingMetadata(insufficientUSDC, contexts...)
 		r.APIError(apiErr)
 		return
 	}
@@ -194,4 +223,63 @@ func writeCheckoutSessionError(r *httprequest.Request, err error) {
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session request failed")
 	}
+}
+
+func insufficientUSDCFundingMetadata(err *recurring.InsufficientUSDCError, contexts ...checkoutSessionErrorContext) map[string]any {
+	ctx := checkoutSessionErrorContext{}
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	asset := strings.ToUpper(strings.TrimSpace(ctx.Asset))
+	if asset == "" {
+		asset = "USDC"
+	}
+	network := ""
+	if strings.EqualFold(strings.TrimSpace(ctx.Processor), "solana") {
+		network = "solana"
+	}
+	if network == "" {
+		network = "solana"
+	}
+	shortfall := uint64(0)
+	if err.NeedBaseUnits > err.HaveBaseUnits {
+		shortfall = err.NeedBaseUnits - err.HaveBaseUnits
+	}
+	funding := map[string]any{
+		"asset":                asset,
+		"network":              network,
+		"amount":               formatUSDCBaseUnits(err.NeedBaseUnits),
+		"amount_needed":        formatUSDCBaseUnits(err.NeedBaseUnits),
+		"balance":              formatUSDCBaseUnits(err.HaveBaseUnits),
+		"shortfall":            formatUSDCBaseUnits(shortfall),
+		"amount_base_units":    strconv.FormatUint(err.NeedBaseUnits, 10),
+		"balance_base_units":   strconv.FormatUint(err.HaveBaseUnits, 10),
+		"shortfall_base_units": strconv.FormatUint(shortfall, 10),
+	}
+	if wallet := strings.TrimSpace(ctx.Wallet); wallet != "" {
+		funding["wallet"] = wallet
+	}
+	if checkoutSessionID := strings.TrimSpace(ctx.CheckoutSessionID); checkoutSessionID != "" {
+		funding["checkout_session_id"] = checkoutSessionID
+	}
+	return map[string]any{"usdc_funding": funding}
+}
+
+func formatUSDCBaseUnits(baseUnits uint64) string {
+	const decimals = 6
+	whole := baseUnits / 1_000_000
+	frac := baseUnits % 1_000_000
+	if frac == 0 {
+		return strconv.FormatUint(whole, 10)
+	}
+	value := strconv.FormatUint(whole, 10) + "." + leftPadUint(frac, decimals)
+	return strings.TrimRight(value, "0")
+}
+
+func leftPadUint(value uint64, width int) string {
+	out := strconv.FormatUint(value, 10)
+	for len(out) < width {
+		out = "0" + out
+	}
+	return out
 }

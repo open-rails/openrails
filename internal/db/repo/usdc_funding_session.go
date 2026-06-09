@@ -61,6 +61,18 @@ func (r *USDCFundingSessionRepo) GetByIDForUserID(ctx context.Context, id uuid.U
 	return session, err
 }
 
+func (r *USDCFundingSessionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.USDCFundingSession, error) {
+	session := new(models.USDCFundingSession)
+	err := r.db.Q(ctx).NewSelect().Model(session).
+		Where("ufs.id = ?", id).
+		Limit(1).
+		Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrUSDCFundingSessionNotFound
+	}
+	return session, err
+}
+
 func (r *USDCFundingSessionRepo) GetByIdempotencyKeyForUserID(ctx context.Context, userID, key string) (*models.USDCFundingSession, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
