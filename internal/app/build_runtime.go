@@ -26,8 +26,11 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/pyth"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/analytics"
+	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -234,6 +237,18 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	// Set emailService on the NotificationService that was created in createServices
 	serviceInstances.NotificationService.SetEmailService(emailService)
 
+	// Card-abuse guard (#371): escalates repeated card-charge failures to
+	// captcha/block and detects site-wide card-testing attacks. Requires Redis
+	// for its windowed counters; nil (safe no-op) otherwise.
+	var cardAbuseGuard *abuse.CardAbuseGuard
+	if redisClient != nil {
+		cardAbuseGuard = abuse.NewCardAbuseGuard(
+			ratelimit.NewLimiter(redisClient),
+			captcha.NewChallengeStore(redisClient),
+			abuse.DefaultCardAbuseConfig(),
+		)
+	}
+
 	runtime := &Runtime{
 		DB:               database,
 		RedisClient:      redisClient,
@@ -274,6 +289,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 
 		CheckoutService:          serviceInstances.CheckoutService,
 		CheckoutSessionService:   serviceInstances.CheckoutSessionService,
+		CardAbuseGuard:           cardAbuseGuard,
 		CreditsService:           serviceInstances.CreditsService,
 		CreditTypeService:        serviceInstances.CreditTypeService,
 		ProcessorCustomerService: serviceInstances.ProcessorCustomerService,

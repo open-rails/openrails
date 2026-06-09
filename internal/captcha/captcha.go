@@ -21,6 +21,13 @@ const (
 	// TokenHeader is the request header clients use to submit a captcha response token.
 	TokenHeader = "X-Captcha-Token"
 
+	// CardAttackModeSubject is the well-known challenge subject set while a
+	// site-wide card-testing attack is in progress (#371). When challenged,
+	// every request to a captcha-relevant bucket must solve a captcha until the
+	// marker's TTL elapses. Separate from per-user/per-IP subjects so one solve
+	// never clears the global flag.
+	CardAttackModeSubject = "__card_attack_mode__"
+
 	maxMemoryEntries = 10_000
 )
 

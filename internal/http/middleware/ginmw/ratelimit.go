@@ -88,6 +88,12 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 		}
 
 		subjects := rateLimitSubjects(c)
+		// Expose the exact subject keys (ip:.. / user:..) to downstream handlers
+		// via the request context so abuse tracking (#371) marks the SAME
+		// subjects the captcha enforcement here reads back.
+		c.Request = c.Request.WithContext(
+			withSubjectKeys(c.Request.Context(), subjectKeys(subjects)),
+		)
 		clientIP := ""
 		userID := ""
 		for _, subject := range subjects {
@@ -102,6 +108,14 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 		captchaEnforced := captchaShouldEnforce(captchaConfig, c.Request, bucket)
 		if captchaEnforced && challengeStore != nil {
 			challenged := false
+			// Site-wide card-testing attack mode (#371): while active, every
+			// request to a captcha-relevant bucket must solve a captcha. The flag
+			// lives on its own subject so an individual solve never clears it.
+			if attack, err := challengeStore.IsChallenged(c.Request.Context(), captcha.CardAttackModeSubject); err != nil {
+				log.WithError(err).WithField("bucket", bucket).Warn("attack-mode lookup failed")
+			} else if attack {
+				challenged = true
+			}
 			for _, subject := range subjects {
 				subjectChallenged, err := challengeStore.IsChallenged(c.Request.Context(), subject.Key)
 				if err != nil {
@@ -186,6 +200,24 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 // RateLimitSubjectKeys returns the current request's captcha/rate-limit subjects.
 func RateLimitSubjectKeys(c *gin.Context) []string {
 	return subjectKeys(rateLimitSubjects(c))
+}
+
+type subjectKeysCtxKey struct{}
+
+func withSubjectKeys(ctx context.Context, keys []string) context.Context {
+	return context.WithValue(ctx, subjectKeysCtxKey{}, keys)
+}
+
+// SubjectKeysFromContext returns the rate-limit subject keys (ip:.. / user:..)
+// the rate-limit middleware computed for this request, or nil. Gin-free
+// handlers use it to mark/inspect the SAME captcha subjects the middleware
+// enforces (#371).
+func SubjectKeysFromContext(ctx context.Context) []string {
+	if ctx == nil {
+		return nil
+	}
+	keys, _ := ctx.Value(subjectKeysCtxKey{}).([]string)
+	return keys
 }
 
 func rateLimitSubjects(c *gin.Context) []rateLimitSubject {

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -27,7 +28,16 @@ type NMIClient struct {
 	DirectPostURL string
 	QueryURL      string
 	TestMode      bool
+	// httpClient bounds every gateway call with a timeout so a slow/hung NMI
+	// endpoint fails fast instead of blocking the request forever (#363/#367).
+	// The default http.DefaultClient used by http.PostForm has NO timeout.
+	httpClient *http.Client
 }
+
+// nmiRequestTimeout caps a single direct-post/query round-trip to NMI. NMI's
+// own tokenization timeout is separate (client-side Collect.js); this protects
+// the server->gateway add_customer/sale/query call.
+const nmiRequestTimeout = 25 * time.Second
 
 type CustomerVaultError struct {
 	Message        string
@@ -169,7 +179,27 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 		DirectPostURL: DefaultDirectPostURL,
 		QueryURL:      DefaultQueryAPIURL,
 		TestMode:      testMode,
+		httpClient: &http.Client{
+			Timeout: nmiRequestTimeout,
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				MaxIdleConns:          20,
+				MaxIdleConnsPerHost:   10,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
+		},
 	}, nil
+}
+
+// client returns the configured timeout-bounded HTTP client, falling back to a
+// sane default if a client was constructed without NewClient.
+func (c *NMIClient) client() *http.Client {
+	if c.httpClient != nil {
+		return c.httpClient
+	}
+	return &http.Client{Timeout: nmiRequestTimeout}
 }
 
 func (c *NMIClient) isConfigured() bool {
@@ -263,7 +293,7 @@ func responseText(output url.Values, fallback string) string {
 func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
 	requestType := strings.TrimSpace(data.Get("type"))
 
-	resp, err := http.PostForm(c.DirectPostURL, data)
+	resp, err := c.client().PostForm(c.DirectPostURL, data)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"provider":     c.providerName,
@@ -296,7 +326,7 @@ func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
 }
 
 func (c *NMIClient) sendQueryRequest(data url.Values) (_ string, err error) {
-	resp, err := http.PostForm(c.QueryURL, data)
+	resp, err := c.client().PostForm(c.QueryURL, data)
 	if err != nil {
 		return "", fmt.Errorf("failed to send query request: %w", err)
 	}
