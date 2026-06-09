@@ -20,6 +20,7 @@ import (
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -121,6 +122,11 @@ type Runtime struct {
 
 	CheckoutService        *checkout.CheckoutService
 	CheckoutSessionService *checkout.CheckoutSessionService
+
+	// CardAbuseGuard escalates repeated card-charge failures to captcha/block
+	// and detects site-wide card-testing attacks (#371). Nil when Redis isn't
+	// configured (safe no-op).
+	CardAbuseGuard *abuse.CardAbuseGuard
 
 	riverStarted        bool
 	externalRiverClient bool // true if River client was provided externally
