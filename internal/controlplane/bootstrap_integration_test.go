@@ -24,7 +24,7 @@ import (
 )
 
 // minimalTenantsDDL creates just the billing.tenants directory row the control
-// plane updates. OpenRails migration 039 owns the full table in production; the
+// plane updates. OpenRails 001_schema.up.sql owns the full table in production; the
 // control-plane bootstrap only needs the default row to exist.
 const minimalTenantsDDL = `
 CREATE SCHEMA IF NOT EXISTS billing;

@@ -93,7 +93,7 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 	require.NoError(t, m.ApplyMigrations(ctx, migrations))
 
 	// Production attaches LOGIN + a password to the app role out of band; do that
-	// here so we can connect as it. The role keeps NOBYPASSRLS from migration 050.
+	// here so we can connect as it. The role keeps NOBYPASSRLS from 001_schema.up.sql.
 	_, err = sqlDB.ExecContext(ctx, `ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw'`)
 	require.NoError(t, err)
 

@@ -27,7 +27,7 @@ import (
 type ID uuid.UUID
 
 // DefaultID is the well-known id of the single default tenant seeded by
-// migration 039 (slug "default"). Self-hosted single-tenant installs operate
+// 002_seed.up.sql (slug "default"). Self-hosted single-tenant installs operate
 // entirely as this tenant.
 //
 // It is deterministic (00000000-0000-0000-0000-000000000001) so application

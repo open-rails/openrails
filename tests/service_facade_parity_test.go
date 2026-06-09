@@ -165,7 +165,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 			controlplane.TenantSubjectResource(tenantSubjectID),
 		},
 	}
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver), nil, nil)
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver), nil)
 
 	withServiceToken := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer openrails_st_testkeyid_testsecret")
@@ -252,7 +252,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	jwtGroup := jwtRouter.Group("/v1/service")
 	jwtResolver := resolver
 	jwtResolver.serviceJWT = true
-	httproutes.RegisterServiceRoutes(jwtGroup, suite.App.Runtime, ginmw.ServiceTokenRequired(jwtResolver), nil, nil)
+	httproutes.RegisterServiceRoutes(jwtGroup, suite.App.Runtime, ginmw.ServiceTokenRequired(jwtResolver), nil)
 	withServiceJWT := func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer eyJ.service.jwt")
 	}

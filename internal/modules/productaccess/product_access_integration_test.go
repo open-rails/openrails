@@ -28,10 +28,10 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// This suite proves the migration-063 product_access_grants table + its
-// migration-050-form RLS policy enforce durable ownership AND tenant isolation
+// This suite proves the consolidated product_access_grants table + its RLS
+// policy enforce durable ownership AND tenant isolation
 // when the app connects as the unprivileged openrails_app role (issue #227/#250).
-// It runs the REAL 063 up SQL (read from the embedded migrations FS), then drives
+// It runs the REAL consolidated Postgres migrations, then drives
 // the productaccess.Service through db.RunInTenantTx (which pins app.tenant_id),
 // so it validates the real schema, the real policy, and the GUC plumbing.
 //
@@ -50,38 +50,6 @@ func mustTenant(s string) tenant.ID {
 	}
 	return id
 }
-
-// prereqDDL creates the minimal environment migration-063 assumes: the billing
-// schema, a uuidv7() function (Postgres < 18 has none), the products table the
-// grant FK references, and the unprivileged openrails_app role (WITH LOGIN for
-// the test) that makes RLS actually enforce.
-const pagPrereqDDL = `
-CREATE SCHEMA IF NOT EXISTS billing;
-
--- uuidv7() shim for engines without the native function. Migration 063 uses it
--- as the id default. (On Postgres 18 the native one is used instead; CREATE OR
--- REPLACE keeps this harmless.)
-CREATE OR REPLACE FUNCTION uuidv7() RETURNS uuid AS $$
-    SELECT gen_random_uuid();
-$$ LANGUAGE sql VOLATILE;
-
-CREATE TABLE IF NOT EXISTS billing.products (
-    id           UUID PRIMARY KEY,
-    slug         TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'active',
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
-        CREATE ROLE openrails_app LOGIN PASSWORD 'app_pw' NOBYPASSRLS;
-    END IF;
-END $$;
-GRANT USAGE ON SCHEMA billing TO openrails_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON billing.products TO openrails_app;
-`
 
 func pagStartContainer(t *testing.T) (superDSN, appDSN string) {
 	t.Helper()
@@ -142,14 +110,28 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 	ctx := context.Background()
 	superDSN, appDSN := pagStartContainer(t)
 
-	// As superuser: prereqs + the REAL migration 063 up SQL.
+	// As superuser: the REAL consolidated Postgres migrations.
 	superBun := pagOpenBun(t, superDSN)
-	_, err := superBun.ExecContext(ctx, pagPrereqDDL)
+	schema001, err := postgresmigrations.FS.ReadFile("001_schema.up.sql")
 	require.NoError(t, err)
-	up063, err := postgresmigrations.FS.ReadFile("063_product_access_grants.up.sql")
+	_, err = superBun.ExecContext(ctx, string(schema001))
 	require.NoError(t, err)
-	_, err = superBun.ExecContext(ctx, string(up063))
+	seed002, err := postgresmigrations.FS.ReadFile("002_seed.up.sql")
 	require.NoError(t, err)
+	_, err = superBun.ExecContext(ctx, string(seed002))
+	require.NoError(t, err)
+	_, err = superBun.ExecContext(ctx, `ALTER ROLE openrails_app LOGIN PASSWORD 'app_pw'`)
+	require.NoError(t, err)
+	for _, tt := range []struct {
+		id   tenant.ID
+		slug string
+	}{{pagTenantA, "tenant-a"}, {pagTenantB, "tenant-b"}} {
+		_, err = superBun.NewRaw(
+			`INSERT INTO billing.tenants (id, slug, name, status) VALUES (?, ?, ?, 'active') ON CONFLICT (slug) DO NOTHING`,
+			tt.id.UUID(), tt.slug, tt.slug,
+		).Exec(ctx)
+		require.NoError(t, err)
+	}
 
 	// Seed a product per tenant (superuser bypasses RLS so it can write any tenant).
 	productA := uuid.New()
@@ -158,11 +140,14 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 		id   uuid.UUID
 		slug string
 	}{{productA, "prod-a-" + productA.String()}, {productB, "prod-b-" + productB.String()}} {
-		// Explicit columns: the minimal pagPrereqDDL products table only has the
-		// FK-target columns, not the full models.Product column set.
+		// Explicit columns keep the fixture focused on the product-access FK target.
+		tenantID := pagTenantA.UUID()
+		if p.id == productB {
+			tenantID = pagTenantB.UUID()
+		}
 		_, err = superBun.NewRaw(
-			`INSERT INTO billing.products (id, slug, display_name, status) VALUES (?, ?, 'P', 'active')`,
-			p.id, p.slug,
+			`INSERT INTO billing.products (id, tenant_id, slug, display_name, status) VALUES (?, ?, ?, 'P', 'active')`,
+			p.id, tenantID, p.slug,
 		).Exec(ctx)
 		require.NoError(t, err)
 	}

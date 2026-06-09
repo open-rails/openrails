@@ -16,7 +16,7 @@ import (
 )
 
 // This test proves end-to-end #227 RLS enforcement on a REAL billing.* table
-// through a REAL repo: it runs the actual migrations (so migration 050 applies
+// through a REAL repo: it runs the actual migrations (so 001_schema.up.sql applies
 // its policies + creates openrails_app), connects as openrails_app, and drives
 // ProductRepo.GetAll — a no-filter read — to show it returns ONLY the pinned
 // tenant's rows. This is the request-path chain (middleware pins conn -> repo

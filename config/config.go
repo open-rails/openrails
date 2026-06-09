@@ -287,7 +287,7 @@ type DBConfig struct {
 	// RequireRLS makes startup FAIL if the connected role does not enforce Row
 	// Level Security (i.e. it is a superuser or a BYPASSRLS role). Set this in
 	// managed multi-tenant deployments, where the app MUST connect as the
-	// unprivileged openrails_app role (migration 050) so the per-tenant RLS
+	// unprivileged openrails_app role (created by 001_schema.up.sql) so the per-tenant RLS
 	// policies actually constrain queries (issue #227). Left false for self-hosted
 	// single-tenant deployments, where RLS is a backstop and running as a
 	// privileged role is acceptable.

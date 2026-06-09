@@ -9,9 +9,9 @@ import (
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
-// tenantOwnedTables are the billing.* tables that carry a tenant_id (migration
-// 039). Tenant deletion purges these rows for the target tenant. Kept in sync
-// with migration 039's FOREACH list.
+// tenantOwnedTables are the billing.* tables that carry a tenant_id. Tenant
+// deletion purges these rows for the target tenant. Kept in sync with the
+// consolidated schema's tenant-owned table set.
 var tenantOwnedTables = []string{
 	"products", "prices", "catalog_drift_events", "payment_methods",
 	"subscriptions", "entitlements", "payments", "admin_grants",

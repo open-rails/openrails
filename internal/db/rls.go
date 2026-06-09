@@ -90,7 +90,7 @@ func rlsPostureError(posture RLSPosture, require bool) error {
 	}
 	return fmt.Errorf(
 		"db: RLS enforcement required but role %q bypasses RLS (superuser/BYPASSRLS); "+
-			"connect as the unprivileged openrails_app role (migration 050) in managed multi-tenant mode",
+			"connect as the unprivileged openrails_app role (created by 001_schema.up.sql) in managed multi-tenant mode",
 		posture.CurrentUser,
 	)
 }

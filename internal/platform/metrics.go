@@ -49,7 +49,7 @@ func NewMetrics(pool *pgxpool.Pool) (*Metrics, error) {
 
 // Compute returns the platform-wide metrics aggregate. It LEFT JOINs the tenant
 // directory against per-tenant aggregates of billing.subscriptions and
-// billing.payments (both carry tenant_id from migration 039), so a tenant with
+// billing.payments (both carry tenant_id from the consolidated schema), so a tenant with
 // no activity still appears with zeroes.
 //
 // NOTE on webhook failures: OpenRails does not keep a Postgres webhook-event

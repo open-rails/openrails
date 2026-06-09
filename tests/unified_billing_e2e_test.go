@@ -99,9 +99,9 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	}, resources: []authcore.ServiceTokenResource{
 		controlplane.TenantResource(tenant.DefaultID),
 	}}
-	// nil minter + issuer-admin: the delegated-token mint/issuer routes are
+	// nil issuer-admin: the delegated issuer routes are
 	// irrelevant to the money path.
-	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver), nil, nil)
+	httproutes.RegisterServiceRoutes(group, suite.App.Runtime, ginmw.ServiceTokenRequired(resolver), nil)
 
 	return &billingE2EHarness{
 		t:          t,

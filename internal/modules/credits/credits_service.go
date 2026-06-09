@@ -817,7 +817,7 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 // is keyed by (tenant, payer, credit_type); invoker_id is stamped for attribution.
 //
 // The balance row is unique per (tenant_id, tenant_subject_id, credit_type_id) — the
-// HARDCUT payer+tenant-scoped uniqueness (migration 040). ON CONFLICT DO NOTHING
+// HARDCUT payer+tenant-scoped uniqueness (001_schema.up.sql). ON CONFLICT DO NOTHING
 // targets that constraint to avoid a duplicate-key error on concurrent
 // first-touch, after which the row is re-selected FOR UPDATE.
 func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, payer identity.TenantSubjectID, invokerID string, creditTypeID uuid.UUID) (*models.UserCreditBalance, error) {

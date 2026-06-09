@@ -1,22 +1,140 @@
--- Issue #232: tenant-scope the daily_metrics rollup and the materialized view
--- that feeds it, and finish auditing the remaining ClickHouse tables.
---
--- BOUNDARY (do not weaken): Postgres is the system of record for every billing
--- state and money / entitlement / authorization DECISION. ClickHouse is a
--- DERIVED, tenant-scoped analytics sink ONLY. Nothing here may become a source
--- of truth for entitlement/premium/credit decisions.
---
--- Migration 004 added tenant_id to the raw event tables and to daily_metrics,
--- but the mv_daily_metrics materialized view (002) still aggregated events
--- WITHOUT a tenant_id, so every tenant's events collapsed into one unscoped
--- daily_metrics row. This migration rebuilds daily_metrics + the MV so each
--- aggregate row is keyed by (snapshot_date, currency, tenant_id). Combined with
--- AdminMetricsService's per-tenant WHERE tenant_id = ? predicate, one tenant can
--- never read another tenant's metrics.
+-- ClickHouse analytics schema for Open Rails Billing.
+-- Postgres remains the source of truth for billing, entitlement, and money decisions.
+-- ClickHouse is a derived tenant-scoped analytics sink only.
 
--- Rebuild daily_metrics with tenant_id in the sort key.
-DROP TABLE IF EXISTS mv_daily_metrics {{ON_CLUSTER}};
-DROP TABLE IF EXISTS daily_metrics {{ON_CLUSTER}};
+CREATE TABLE IF NOT EXISTS subscription_events {{ON_CLUSTER}} (
+    event_id UUID,
+    subscription_id Nullable(UUID),
+    user_id String,
+    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    event_type LowCardinality(String),
+    processor LowCardinality(String),
+    processor_subscription_id Nullable(String),
+    processor_transaction_id Nullable(String),
+    status LowCardinality(String) DEFAULT '',
+    cancel_type LowCardinality(String) DEFAULT '',
+    price_amount Decimal(12, 2) DEFAULT 0,
+    price_currency LowCardinality(String) DEFAULT 'usd',
+    billing_cycle_days UInt32 DEFAULT 0,
+    product_id Nullable(UUID),
+    price_id Nullable(UUID),
+    metadata String DEFAULT '{}',
+    timestamp DateTime('UTC'),
+    created_at DateTime('UTC') DEFAULT now(),
+    version DateTime('UTC') DEFAULT now(),
+    INDEX idx_subscription_events_user (user_id) TYPE minmax GRANULARITY 1,
+    INDEX idx_subscription_events_subscription (subscription_id) TYPE minmax GRANULARITY 1,
+    INDEX idx_subscription_events_processor (processor) TYPE set(100) GRANULARITY 1,
+    INDEX idx_subscription_events_type (event_type) TYPE set(100) GRANULARITY 1,
+    INDEX idx_subscription_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', version)
+ORDER BY (event_id, timestamp)
+SETTINGS index_granularity = 8192;
+
+CREATE TABLE IF NOT EXISTS payment_events {{ON_CLUSTER}} (
+    event_id UUID,
+    subscription_id Nullable(UUID),
+    user_id String,
+    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    event_type LowCardinality(String),
+    processor LowCardinality(String),
+    processor_transaction_id Nullable(String),
+    amount Nullable(Decimal(10, 2)),
+    currency LowCardinality(String) DEFAULT 'usd',
+    billing_info String DEFAULT '{}',
+    webhook_source LowCardinality(String),
+    metadata String DEFAULT '{}',
+    timestamp DateTime('UTC'),
+    created_at DateTime('UTC') DEFAULT now(),
+    version DateTime('UTC') DEFAULT now(),
+    INDEX idx_payment_events_user (user_id) TYPE minmax GRANULARITY 1,
+    INDEX idx_payment_events_subscription (subscription_id) TYPE minmax GRANULARITY 1,
+    INDEX idx_payment_events_processor (processor) TYPE set(100) GRANULARITY 1,
+    INDEX idx_payment_events_type (event_type) TYPE set(100) GRANULARITY 1,
+    INDEX idx_payment_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', version)
+ORDER BY (event_id, timestamp)
+SETTINGS index_granularity = 8192;
+
+CREATE TABLE IF NOT EXISTS webhook_events {{ON_CLUSTER}} (
+    event_id UUID,
+    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    webhook_source LowCardinality(String),
+    event_type String,
+    subscription_id Nullable(UUID),
+    user_id Nullable(String),
+    processor_subscription_id Nullable(String),
+    processor_transaction_id Nullable(String),
+    processing_status LowCardinality(String),
+    processing_time_ms UInt32,
+    error_message Nullable(String),
+    webhook_payload String,
+    headers String,
+    timestamp DateTime('UTC'),
+    processed_at Nullable(DateTime('UTC')),
+    created_at DateTime('UTC') DEFAULT now(),
+    INDEX idx_webhook_events_ts (timestamp) TYPE minmax GRANULARITY 1,
+    INDEX idx_webhook_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}')
+ORDER BY (event_id)
+SETTINGS index_granularity = 8192;
+
+CREATE TABLE IF NOT EXISTS acu_events {{ON_CLUSTER}} (
+    event_id UUID,
+    subscription_id Nullable(UUID),
+    user_id Nullable(String),
+    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    event_type LowCardinality(String),
+    processor LowCardinality(String),
+    processor_subscription_id Nullable(String),
+    card_info String,
+    update_status LowCardinality(String),
+    requires_action Bool,
+    reason String,
+    metadata String,
+    timestamp DateTime('UTC'),
+    created_at DateTime('UTC') DEFAULT now(),
+    INDEX idx_acu_events_ts (timestamp) TYPE minmax GRANULARITY 1,
+    INDEX idx_acu_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}')
+ORDER BY (event_id)
+SETTINGS index_granularity = 8192;
+
+CREATE TABLE IF NOT EXISTS chargeback_events {{ON_CLUSTER}} (
+    event_id UUID,
+    chargeback_id String,
+    batch_id String,
+    subscription_id Nullable(UUID),
+    user_id Nullable(String),
+    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    event_type LowCardinality(String),
+    processor LowCardinality(String),
+    processor_transaction_id Nullable(String),
+    amount Nullable(Float64),
+    currency LowCardinality(String) DEFAULT 'usd',
+    chargeback_type LowCardinality(String),
+    reason String,
+    status LowCardinality(String),
+    metadata String,
+    timestamp DateTime('UTC'),
+    created_at DateTime('UTC') DEFAULT now(),
+    INDEX idx_chargeback_events_ts (timestamp) TYPE minmax GRANULARITY 1,
+    INDEX idx_chargeback_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}')
+ORDER BY (event_id)
+SETTINGS index_granularity = 8192;
+
+CREATE TABLE IF NOT EXISTS premium_status_daily {{ON_CLUSTER}} (
+    day Date,
+    user_id String,
+    tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001',
+    is_premium UInt8,
+    last_updated DateTime('UTC') DEFAULT now(),
+    INDEX idx_premium_status_daily_tenant (tenant_id) TYPE set(0) GRANULARITY 1
+) ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{database}/{table}', '{replica}', last_updated)
+PARTITION BY toYYYYMM(day)
+ORDER BY (day, user_id)
+SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS daily_metrics {{ON_CLUSTER}} (
     snapshot_date Date,
@@ -63,9 +181,6 @@ ORDER BY (snapshot_date, currency, tenant_id)
 PARTITION BY toYYYYMM(snapshot_date)
 SETTINGS index_granularity = 8192;
 
--- Consolidated MV with date spine and per-(currency, tenant) carry-forward.
--- Every CTE now carries tenant_id and groups by it, so each tenant rolls up
--- independently and rows are never mixed across tenants.
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_daily_metrics {{ON_CLUSTER}}
 TO daily_metrics
 AS
@@ -121,7 +236,7 @@ sub_status AS (
         countIf(status = 'active') AS active_count_end,
         countIf(status = 'past_due') AS past_due_count_end,
         countIf(status = 'pending') AS pending_count_end,
-        toInt64(sumIf(price_amount * 100 * 30 / NULLIF(billing_cycle_days,0), status IN ('active','past_due'))) AS mrr_cents
+        toInt64(sumIf(price_amount * 100 * 30 / NULLIF(billing_cycle_days, 0), status IN ('active','past_due'))) AS mrr_cents
     FROM per_sub
     GROUP BY snapshot_date, currency, tenant_id
 ),
@@ -367,7 +482,6 @@ SELECT
     cancellations_expired,
     cancellations_chargeback,
     reactivations,
-    -- carry-forward status counts and MRR per (currency, tenant)
     coalesce(last_value(active_count_end) IGNORE NULLS OVER w, 0) AS active_count_end,
     coalesce(last_value(past_due_count_end) IGNORE NULLS OVER w, 0) AS past_due_count_end,
     coalesce(last_value(pending_count_end) IGNORE NULLS OVER w, 0) AS pending_count_end,
@@ -388,29 +502,3 @@ SELECT
     now('UTC') AS version
 FROM daily
 WINDOW w AS (PARTITION BY currency, tenant_id ORDER BY snapshot_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW);
-
--- ---------------------------------------------------------------------------
--- Audit of remaining ClickHouse tables (issue #232).
---
--- webhook_events: derived from billing webhook processing, so it is tenant-owned
--- and would leak across tenants in hosted mode. It currently has NO active app
--- writer/reader (the boundary note in event_log_service.go forbids reading
--- webhook PROCESSING STATE from ClickHouse — that lives in Postgres). Rather
--- than delete a table that may be repurposed as a pure analytics sink, we
--- tenant-scope it now so it can never become an unscoped hosted table. If no
--- writer/PII-redaction/retention policy is defined before hosted launch, a
--- follow-up should DROP it. Owner: billing platform. Tracking: issue #232.
-ALTER TABLE webhook_events {{ON_CLUSTER}}
-    ADD COLUMN IF NOT EXISTS tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001';
-ALTER TABLE webhook_events {{ON_CLUSTER}}
-    ADD INDEX IF NOT EXISTS idx_webhook_events_tenant (tenant_id) TYPE set(0) GRANULARITY 1;
-
--- premium_status_daily: an analytics snapshot of premium status derived from
--- billing/subscription state. It is tenant-owned and must NEVER be the source
--- for entitlement/premium DECISIONS (those remain Postgres/JWT-derived). It has
--- no active writer today; tenant-scope it so any future analytics snapshot is
--- per-tenant. Owner: billing platform. Tracking: issue #232.
-ALTER TABLE premium_status_daily {{ON_CLUSTER}}
-    ADD COLUMN IF NOT EXISTS tenant_id String DEFAULT '00000000-0000-0000-0000-000000000001';
-ALTER TABLE premium_status_daily {{ON_CLUSTER}}
-    ADD INDEX IF NOT EXISTS idx_premium_status_daily_tenant (tenant_id) TYPE set(0) GRANULARITY 1;

@@ -207,7 +207,7 @@ func TestAdminMetricsCrossTenantIsolation(t *testing.T) {
 // createMinimalDailyMetrics creates a single-node (non-replicated) daily_metrics
 // table with the columns the AdminMetricsService queries read, including
 // tenant_id. We use a plain MergeTree (no Keeper) so the test runs against a
-// standalone container; production uses the Replicated engine from migration 005.
+// standalone container; production uses the Replicated engine from 001_schema.up.sql.
 func createMinimalDailyMetrics(t *testing.T, ctx context.Context, conn driver.Conn) {
 	t.Helper()
 	if err := conn.Exec(ctx, `DROP TABLE IF EXISTS daily_metrics`); err != nil {
