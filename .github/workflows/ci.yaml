@@ -34,9 +34,8 @@ jobs:
     # Advisory while the long-dormant integration suite is being revived: this
     # suite never ran in CI, so it accumulated bit-rot (stale call signatures,
     # a hand-rolled profiles schema that drifted from the authkit migrations).
-    # continue-on-error surfaces real pass/fail in the logs without blocking
-    # merges. Flip to a required check once the suite is fully green.
-    continue-on-error: true
+    # The test step is continue-on-error so failures stay visible in logs without
+    # marking the integration job/check as failed. Remove that once fully green.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -48,4 +47,5 @@ jobs:
       # via testcontainers — ubuntu-latest ships with Docker, so no `services:`
       # block is needed. See internal/dbtest and tests/testcontainer_suite.go.
       - name: Integration test
+        continue-on-error: true
         run: go test -tags=integration -timeout 25m ./...
