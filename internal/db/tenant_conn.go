@@ -3,10 +3,18 @@ package db
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/uptrace/bun"
 )
+
+// tenantConnAcquireTimeout bounds each per-request pool acquisition. Two
+// sequential acquisitions per request (bun + the #334 pgx twin) can starve
+// each other under burst; an unbounded wait then wedges the server
+// permanently when client aborts don't propagate (e.g. behind a proxy
+// without abortonclose). Failing fast keeps the pools recoverable.
+const tenantConnAcquireTimeout = 4 * time.Second
 
 // tenantConnKey is the context key under which a request-pinned, tenant-scoped
 // bun.Conn is stored. Unexported so only this package manages the lifecycle.
@@ -73,7 +81,9 @@ func (d *DB) WithTenantConn(ctx context.Context) (context.Context, func(), error
 		return ctx, func() {}, nil
 	}
 
-	conn, err := base.Conn(ctx)
+	acqCtx, acqCancel := context.WithTimeout(ctx, tenantConnAcquireTimeout)
+	conn, err := base.Conn(acqCtx)
+	acqCancel()
 	if err != nil {
 		return ctx, func() {}, fmt.Errorf("db: acquire tenant connection: %w", err)
 	}
@@ -98,7 +108,9 @@ func (d *DB) WithTenantConn(ctx context.Context) (context.Context, func(), error
 	// sqlc-converted call sites in this request are RLS-scoped too.
 	var pgxRelease func()
 	if d.pool != nil {
-		pgxConn, err := d.pool.Acquire(ctx)
+		pgxAcqCtx, pgxAcqCancel := context.WithTimeout(ctx, tenantConnAcquireTimeout)
+		pgxConn, err := d.pool.Acquire(pgxAcqCtx)
+		pgxAcqCancel()
 		if err != nil {
 			_ = conn.Close()
 			return ctx, func() {}, fmt.Errorf("db: acquire pgx tenant connection: %w", err)
