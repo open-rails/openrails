@@ -74,15 +74,24 @@ func parseServiceTenantSubjectID(raw string) (*billingidentity.TenantSubjectID, 
 	return &tenantSubject, nil
 }
 
-func requireServiceTenantSubjectScope(r *httprequest.Request, tenantSubject billingidentity.TenantSubjectID) bool {
+// serviceTokenFromRequest returns the resolved service token the auth
+// middleware pinned onto the context, or a (status, message) error pair.
+func serviceTokenFromRequest(r *httprequest.Request) (*controlplane.ResolvedServiceToken, int, string) {
 	v, ok := r.Get(ginmw.ServiceTokenContextKey)
 	if !ok {
-		r.ErrorJSON(http.StatusUnauthorized, "service token required")
-		return false
+		return nil, http.StatusUnauthorized, "service token required"
 	}
 	resolved, ok := v.(*controlplane.ResolvedServiceToken)
 	if !ok || resolved == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "service token state invalid")
+		return nil, http.StatusInternalServerError, "service token state invalid"
+	}
+	return resolved, 0, ""
+}
+
+func requireServiceTenantSubjectScope(r *httprequest.Request, tenantSubject billingidentity.TenantSubjectID) bool {
+	resolved, status, msg := serviceTokenFromRequest(r)
+	if resolved == nil {
+		r.ErrorJSON(status, msg)
 		return false
 	}
 	if !resolved.AllowsTenantSubject(tenantSubject.UUID()) {

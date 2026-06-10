@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
@@ -173,6 +174,17 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 
 	if totalExpired > 0 {
 		logger.WithField("total_expired", totalExpired).Info("completed hold expiry job")
+	}
+
+	// Credit windows (#335) expire on the same sweep: release each open,
+	// past-expiry window's unsettled remainder and mark it expired.
+	creditsSvc := credits.NewCreditsService(w.DB, clock)
+	expiredWindows, err := creditsSvc.ExpireWindows(ctx, batchSize)
+	if err != nil {
+		return fmt.Errorf("expire credit windows: %w", err)
+	}
+	if expiredWindows > 0 {
+		logger.WithField("expired_windows", expiredWindows).Info("expired credit windows")
 	}
 
 	return nil

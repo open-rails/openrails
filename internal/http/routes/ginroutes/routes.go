@@ -104,6 +104,9 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// suspension + blocklist + endpoint gating in one call; emits x-ratelimit-*
 	// + 429/Retry-After. Hot-path gate hosts call before doing work.
 	group.POST("/admit", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmit))
+	// Cross-payer BATCH admission (#335): N admit items (mixed payers) in one
+	// hop, per-item verdicts with single-admit semantics. Same spend gates.
+	group.POST("/admit/batch", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmitBatch))
 	// Budget introspection (#304): rolling money-budget windows for a host /status.
 	group.GET("/budget", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetBudget))
 	// #410: budget-window status against caller-supplied windows (host owns the
@@ -111,6 +114,16 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	group.POST("/budget/check", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceBudgetCheck))
 	// Tier policy admin (#298): configure a tier's throughput + entitled endpoints + money budgets.
 	group.PUT("/tier-policies", creditsWrite, wrap(httphandlers.ServiceSetTierPolicy))
+
+	// Prepaid credit windows (#335): open reserves a bulk hold the host admits
+	// against locally; settle flushes cross-payer batches of actuals (idempotent
+	// per request_id); refill extends funds+TTL; close releases the remainder.
+	// Open/settle/refill draw down payer funds -> write+spend (the /admit gates);
+	// close releases a remainder (un-bills) -> write only, like hold release.
+	credits.POST("/windows", creditsWrite, creditsSpend, wrap(httphandlers.ServiceOpenCreditWindow))
+	credits.POST("/settle", creditsWrite, creditsSpend, wrap(httphandlers.ServiceSettleCreditWindows))
+	credits.POST("/windows/:id/refill", creditsWrite, creditsSpend, wrap(httphandlers.ServiceRefillCreditWindow))
+	credits.POST("/windows/:id/close", creditsWrite, wrap(httphandlers.ServiceCloseCreditWindow))
 
 	// Unified authorize: policy decision + ATOMIC hold placement (issue #235/#247).
 	credits.POST("/authorize", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAuthorizeCredits))

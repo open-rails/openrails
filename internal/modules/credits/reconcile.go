@@ -104,10 +104,18 @@ func (s *CreditsService) FindOrphanedExpiredHolds(ctx context.Context) ([]Orphan
 	return out, nil
 }
 
-const activeHoldSumSubquery = `COALESCE((SELECT SUM(COALESCE(t.authorized_amount,0)) ` +
+// activeHoldSumSubquery computes the expected held_balance: active holds PLUS
+// open credit windows' unsettled remainder (#335 — windows bump held_balance
+// without an active hold row, so drift/repair must count them or every open
+// window would read as drift).
+const activeHoldSumSubquery = `(COALESCE((SELECT SUM(COALESCE(t.authorized_amount,0)) ` +
 	`FROM billing.credit_transactions t ` +
 	`WHERE t.tenant_id = b.tenant_id AND t.tenant_subject_id = b.tenant_subject_id AND t.credit_type_id = b.credit_type_id ` +
-	`AND t.transaction_type = 'hold' AND t.status = 'active'), 0)`
+	`AND t.transaction_type = 'hold' AND t.status = 'active'), 0) ` +
+	`+ COALESCE((SELECT SUM(w.held_amount - w.settled_amount) ` +
+	`FROM billing.credit_windows w ` +
+	`WHERE w.tenant_id = b.tenant_id AND w.tenant_subject_id = b.tenant_subject_id AND w.credit_type_id = b.credit_type_id ` +
+	`AND w.status = 'open'), 0))`
 
 // FindHeldBalanceDrift returns balance rows whose stored held_balance differs
 // from the sum of their active holds.
