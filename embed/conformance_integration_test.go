@@ -302,18 +302,20 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, err, "%s withdraw", env.side)
 	r.Withdraw = observeTxn(t, env.side+" withdraw", wd)
 
-	// 4) Tier policy: 2 requests/60s throughput + a 1,000-budget-micro fixed
+	// 4) Tier policy: 2 requests/60s throughput + a 10,000-micro fixed
 	// hourly money window (#337 cadence on the wire).
 	require.NoError(t, c.SetTierPolicy(ctx, payerID, openrails.TierPolicyInput{
 		Tier:              "conf",
 		Windows:           []openrails.TierThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 2}},
 		EntitledResources: []string{},
 		BudgetWindows: []openrails.BudgetWindowInput{
-			{Key: "hourly", WindowSeconds: 3600, LimitMicros: 1_000, Cadence: "fixed"},
+			{Key: "hourly", WindowSeconds: 3600, LimitMicros: 10_000, Cadence: "fixed"},
 		},
 	}), "%s set-tier-policy", env.side)
 
-	// 5) Admit #1: estimate 5,000 micros (= 500 budget micros) -> allowed.
+	// 5) Admit #1: estimate 5,000 micros -> allowed (budgets and ledger are
+	// BOTH micro-dollars, 1:1 — the old /10 was the pre-#337 millicent
+	// conversion, fixed as a 10x under-reservation bug).
 	a1, err := c.Admit(ctx, openrails.AdmitRequest{
 		PayerTenantID:  payerID,
 		Actor:          env.actor,
@@ -336,8 +338,8 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		Resource:  env.resource,
 	}), "%s capture admission hold", env.side)
 
-	// 7) Admit #2: estimate 6,000 (= 600 budget micros; 500 already consumed of
-	// the 1,000 limit) -> denied on the budget axis.
+	// 7) Admit #2: estimate 6,000 (5,000 already consumed of the 10,000
+	// limit) -> denied on the budget axis.
 	a2, err := c.Admit(ctx, openrails.AdmitRequest{
 		PayerTenantID:  payerID,
 		Actor:          env.actor,
@@ -375,7 +377,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// 9) Budget check against caller-supplied windows: fixed + session cadence
 	// round-trip (#337).
 	bw, err := c.BudgetCheck(ctx, payerID, env.actor, []openrails.BudgetWindowInput{
-		{Key: "hourly", WindowSeconds: 3600, LimitMicros: 1_000, Cadence: "fixed"},
+		{Key: "hourly", WindowSeconds: 3600, LimitMicros: 10_000, Cadence: "fixed"},
 		{Key: "sess", WindowSeconds: 600, LimitMicros: 2_000, Cadence: "session"},
 	}, 0)
 	require.NoError(t, err, "%s budget-check", env.side)
