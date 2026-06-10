@@ -102,6 +102,22 @@ func (q *Queries) CountCreditTransactionsByPayer(ctx context.Context, arg CountC
 	return count, err
 }
 
+const expireCreditHold = `-- name: ExpireCreditHold :exec
+UPDATE billing.credit_transactions
+SET status = 'expired', updated_at = $2
+WHERE id = $1
+`
+
+type ExpireCreditHoldParams struct {
+	ID        uuid.UUID
+	UpdatedAt time.Time
+}
+
+func (q *Queries) ExpireCreditHold(ctx context.Context, arg ExpireCreditHoldParams) error {
+	_, err := q.db.Exec(ctx, expireCreditHold, arg.ID, arg.UpdatedAt)
+	return err
+}
+
 const getCreditBalance = `-- name: GetCreditBalance :one
 
 SELECT id, credit_type_id, balance, held_balance, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.credit_balances
@@ -472,6 +488,58 @@ func (q *Queries) InsertCreditWindow(ctx context.Context, arg InsertCreditWindow
 	return err
 }
 
+const listActiveCreditTypesWithBalance = `-- name: ListActiveCreditTypesWithBalance :many
+SELECT ct.id AS credit_type_id, ct.name, ct.display_name, ct.unit, ct.decimal_places,
+       ucb.balance, ucb.held_balance
+FROM billing.credit_types ct
+LEFT JOIN billing.credit_balances ucb
+  ON ucb.credit_type_id = ct.id
+ AND ucb.tenant_subject_id = $1::uuid
+WHERE ct.is_active = true
+`
+
+type ListActiveCreditTypesWithBalanceRow struct {
+	CreditTypeID  uuid.UUID
+	Name          string
+	DisplayName   string
+	Unit          string
+	DecimalPlaces int32
+	Balance       *int64
+	HeldBalance   *int64
+}
+
+// GetMyCredits: every active credit type with the payer's balance (NULL when
+// the payer has never touched that type). NOTE: the bun-era handler joined on
+// a nonexistent ucb.user_id column and errored at runtime; the join key is
+// the payer's tenant_subject_id.
+func (q *Queries) ListActiveCreditTypesWithBalance(ctx context.Context, tenantSubjectID uuid.UUID) ([]ListActiveCreditTypesWithBalanceRow, error) {
+	rows, err := q.db.Query(ctx, listActiveCreditTypesWithBalance, tenantSubjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveCreditTypesWithBalanceRow
+	for rows.Next() {
+		var i ListActiveCreditTypesWithBalanceRow
+		if err := rows.Scan(
+			&i.CreditTypeID,
+			&i.Name,
+			&i.DisplayName,
+			&i.Unit,
+			&i.DecimalPlaces,
+			&i.Balance,
+			&i.HeldBalance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBalanceAnomalies = `-- name: ListBalanceAnomalies :many
 SELECT b.tenant_id, b.tenant_subject_id, b.credit_type_id, b.balance, b.held_balance
 FROM billing.credit_balances b
@@ -561,6 +629,106 @@ func (q *Queries) ListCreditTransactionsByPayer(ctx context.Context, arg ListCre
 			&i.CapturedAmount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
+			&i.TenantSubjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExpiredActiveHoldsForUpdate = `-- name: ListExpiredActiveHoldsForUpdate :many
+SELECT id, actor, resource, metadata, credit_type_id, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.credit_transactions
+WHERE transaction_type = 'hold' AND status = 'active'
+  AND expires_at IS NOT NULL AND expires_at <= $1::timestamptz
+ORDER BY expires_at ASC
+LIMIT $2::int
+FOR UPDATE SKIP LOCKED
+`
+
+type ListExpiredActiveHoldsForUpdateParams struct {
+	Now       time.Time
+	BatchSize int32
+}
+
+// Hold expiry sweep (cross-tenant, SKIP LOCKED so concurrent sweeps don't contend).
+func (q *Queries) ListExpiredActiveHoldsForUpdate(ctx context.Context, arg ListExpiredActiveHoldsForUpdateParams) ([]BillingCreditTransaction, error) {
+	rows, err := q.db.Query(ctx, listExpiredActiveHoldsForUpdate, arg.Now, arg.BatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCreditTransaction
+	for rows.Next() {
+		var i BillingCreditTransaction
+		if err := rows.Scan(
+			&i.ID,
+			&i.Actor,
+			&i.Resource,
+			&i.Metadata,
+			&i.CreditTypeID,
+			&i.Amount,
+			&i.BalanceAfter,
+			&i.TransactionType,
+			&i.Source,
+			&i.SourceID,
+			&i.ExpiresAt,
+			&i.Description,
+			&i.Status,
+			&i.AuthorizedAmount,
+			&i.CapturedAmount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TenantID,
+			&i.TenantSubjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExpiredCreditBlocksForUpdate = `-- name: ListExpiredCreditBlocksForUpdate :many
+SELECT id, credit_type_id, original_amount, remaining_amount, expires_at, source_transaction_id, created_at, tenant_id, tenant_subject_id FROM billing.credit_blocks
+WHERE remaining_amount > 0
+  AND expires_at IS NOT NULL AND expires_at <= $1::timestamptz
+ORDER BY expires_at ASC
+LIMIT $2::int
+FOR UPDATE SKIP LOCKED
+`
+
+type ListExpiredCreditBlocksForUpdateParams struct {
+	Now       time.Time
+	BatchSize int32
+}
+
+// Credit block expiry sweep (cross-tenant, SKIP LOCKED).
+func (q *Queries) ListExpiredCreditBlocksForUpdate(ctx context.Context, arg ListExpiredCreditBlocksForUpdateParams) ([]BillingCreditBlock, error) {
+	rows, err := q.db.Query(ctx, listExpiredCreditBlocksForUpdate, arg.Now, arg.BatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCreditBlock
+	for rows.Next() {
+		var i BillingCreditBlock
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreditTypeID,
+			&i.OriginalAmount,
+			&i.RemainingAmount,
+			&i.ExpiresAt,
+			&i.SourceTransactionID,
+			&i.CreatedAt,
 			&i.TenantID,
 			&i.TenantSubjectID,
 		); err != nil {

@@ -16,7 +16,6 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
@@ -43,8 +42,7 @@ func authzEnv(t *testing.T) (*billingservice.Service, *credits.CreditsService, i
 		t.Skip("billing.credit_account_settings missing; run migration 043")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 	rt := &app.Runtime{
 		DB:                 dbi,
 		CreditsService:     credits.NewCreditsService(dbi),

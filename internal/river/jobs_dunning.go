@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -25,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
-	"github.com/uptrace/bun"
 )
 
 const (
@@ -89,15 +90,8 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// Query all due past_due NMI-backed subscriptions
 	// Use w.now() instead of SQL NOW() to support time mocking in tests
 	nmiProcessors := processors.GetNMIBackedProcessorsList()
-	var dueSubscriptions []models.Subscription
-	if err := w.DB.Q(ctx).NewSelect().
-		Model(&dueSubscriptions).
-		Where("sub.processor IN (?)", bun.In(nmiProcessors)).
-		Where("sub.status = ?", models.StatusPastDue).
-		Where("sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= ?", w.now()).
-		Relation("Price").
-		Relation("PaymentMethod").
-		Scan(ctx); err != nil {
+	dueSubscriptions, err := repo.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(ctx, nmiProcessors, w.now())
+	if err != nil {
 		return fmt.Errorf("query due subscriptions: %w", err)
 	}
 
@@ -296,13 +290,7 @@ func (w *DunningWorker) applySuccessfulRebill(
 	}
 
 	if creditsSvc != nil {
-		var updated models.Subscription
-		if err := w.DB.Q(ctx).NewSelect().
-			Model(&updated).
-			Column("id", "current_period_ends_at").
-			Where("id = ?", sub.ID).
-			Limit(1).
-			Scan(ctx); err != nil {
+		if updated, err := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID); err != nil {
 			logEntry.WithError(err).Warn("load subscription after rebill for credit grants")
 		} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
 			if err := creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
@@ -328,14 +316,12 @@ func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscripti
 	var attempt *models.ManualRebillAttempt
 	claimed := false
 
-	err := w.DB.Q(ctx).RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		attempt = new(models.ManualRebillAttempt)
-		err := tx.NewSelect().
-			Model(attempt).
-			Where("subscription_id = ?", subscriptionID).
-			Where("period_end = ?", periodEnd.UTC()).
-			For("UPDATE").
-			Scan(ctx)
+	err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		row, err := q.GetManualRebillAttemptForUpdate(ctx, gen.GetManualRebillAttemptForUpdateParams{
+			SubscriptionID: subscriptionID,
+			PeriodEnd:      periodEnd.UTC(),
+		})
 		if repo.IsNotFound(err) {
 			attempt = &models.ManualRebillAttempt{
 				ID:             uuidutil.NewV7(),
@@ -348,7 +334,19 @@ func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscripti
 				CreatedAt:      now.UTC(),
 				UpdatedAt:      now.UTC(),
 			}
-			if _, err := tx.NewInsert().Model(attempt).Exec(ctx); err != nil {
+			if err := q.InsertManualRebillAttempt(ctx, gen.InsertManualRebillAttemptParams{
+				ID:             attempt.ID,
+				SubscriptionID: attempt.SubscriptionID,
+				PeriodEnd:      attempt.PeriodEnd,
+				Processor:      string(attempt.Processor),
+				OrderReference: attempt.OrderReference,
+				Status:         string(attempt.Status),
+				TransactionID:  attempt.TransactionID,
+				FailureReason:  attempt.FailureReason,
+				ClaimedUntil:   attempt.ClaimedUntil,
+				CreatedAt:      attempt.CreatedAt,
+				UpdatedAt:      attempt.UpdatedAt,
+			}); err != nil {
 				return fmt.Errorf("create manual rebill attempt: %w", err)
 			}
 			claimed = true
@@ -357,6 +355,7 @@ func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscripti
 		if err != nil {
 			return fmt.Errorf("load manual rebill attempt: %w", err)
 		}
+		attempt = manualRebillAttemptFromGen(row)
 
 		switch attempt.Status {
 		case models.ManualRebillAttemptSucceeded, models.ManualRebillAttemptUnknown:
@@ -372,11 +371,10 @@ func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscripti
 			attempt.FailureReason = &reason
 			attempt.ClaimedUntil = nil
 			attempt.UpdatedAt = now.UTC()
-			_, err := tx.NewUpdate().Model(attempt).
-				Column("status", "failure_reason", "claimed_until", "updated_at").
-				WherePK().
-				Exec(ctx)
-			if err != nil {
+			if err := q.UpdateManualRebillAttempt(ctx, gen.UpdateManualRebillAttemptParams{
+				ID: attempt.ID, Status: string(attempt.Status), TransactionID: attempt.TransactionID,
+				FailureReason: attempt.FailureReason, ClaimedUntil: nil, UpdatedAt: attempt.UpdatedAt,
+			}); err != nil {
 				return fmt.Errorf("mark stale manual rebill attempt unknown: %w", err)
 			}
 			return nil
@@ -386,11 +384,10 @@ func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscripti
 			attempt.TransactionID = nil
 			attempt.ClaimedUntil = &claimedUntil
 			attempt.UpdatedAt = now.UTC()
-			_, err := tx.NewUpdate().Model(attempt).
-				Column("status", "failure_reason", "transaction_id", "claimed_until", "updated_at").
-				WherePK().
-				Exec(ctx)
-			if err != nil {
+			if err := q.UpdateManualRebillAttempt(ctx, gen.UpdateManualRebillAttemptParams{
+				ID: attempt.ID, Status: string(attempt.Status), TransactionID: nil,
+				FailureReason: nil, ClaimedUntil: &claimedUntil, UpdatedAt: attempt.UpdatedAt,
+			}); err != nil {
 				return fmt.Errorf("claim failed manual rebill attempt: %w", err)
 			}
 			claimed = true
@@ -422,16 +419,10 @@ func (w *DunningWorker) updateManualRebillAttempt(ctx context.Context, attemptID
 		return errors.New("dunning worker database is required")
 	}
 	now := w.now().UTC()
-	_, err := w.DB.Q(ctx).NewUpdate().
-		Model((*models.ManualRebillAttempt)(nil)).
-		Set("status = ?", status).
-		Set("transaction_id = ?", transactionID).
-		Set("failure_reason = ?", reason).
-		Set("claimed_until = NULL").
-		Set("updated_at = ?", now).
-		Where("id = ?", attemptID).
-		Exec(ctx)
-	if err != nil {
+	if err := w.DB.Gen(ctx).UpdateManualRebillAttempt(ctx, gen.UpdateManualRebillAttemptParams{
+		ID: attemptID, Status: string(status), TransactionID: transactionID,
+		FailureReason: reason, ClaimedUntil: nil, UpdatedAt: now,
+	}); err != nil {
 		return fmt.Errorf("update manual rebill attempt: %w", err)
 	}
 	return nil
@@ -444,20 +435,9 @@ func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Sub
 
 	claimedAt := now.UTC()
 	leaseUntil := claimedAt.Add(dunningAttemptLease)
-	res, err := w.DB.Q(ctx).NewUpdate().
-		Model((*models.Subscription)(nil)).
-		Set("next_retry_at = ?", leaseUntil).
-		Set("last_retry_at = ?", claimedAt).
-		Set("updated_at = ?", claimedAt).
-		Where("id = ?", sub.ID).
-		Where("status = ?", models.StatusPastDue).
-		Where("next_retry_at IS NOT NULL AND next_retry_at <= ?", claimedAt).
-		Exec(ctx)
-	if err != nil {
-		return false, fmt.Errorf("claim dunning attempt: %w", err)
-	}
-
-	rowsAffected, err := res.RowsAffected()
+	rowsAffected, err := w.DB.Gen(ctx).ClaimDunningAttempt(ctx, gen.ClaimDunningAttemptParams{
+		ID: sub.ID, LeaseUntil: leaseUntil, ClaimedAt: claimedAt,
+	})
 	if err != nil {
 		return false, fmt.Errorf("read dunning claim result: %w", err)
 	}
@@ -512,5 +492,22 @@ func normalizeProcessor(value interface{}) string {
 		return normalize.Lower(string(v))
 	default:
 		return ""
+	}
+}
+
+// manualRebillAttemptFromGen maps the generated row onto the domain model.
+func manualRebillAttemptFromGen(r gen.BillingManualRebillAttempt) *models.ManualRebillAttempt {
+	return &models.ManualRebillAttempt{
+		ID:             r.ID,
+		SubscriptionID: r.SubscriptionID,
+		PeriodEnd:      r.PeriodEnd,
+		Processor:      models.Processor(r.Processor),
+		OrderReference: r.OrderReference,
+		Status:         models.ManualRebillAttemptStatus(r.Status),
+		TransactionID:  r.TransactionID,
+		FailureReason:  r.FailureReason,
+		ClaimedUntil:   r.ClaimedUntil,
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
 	}
 }

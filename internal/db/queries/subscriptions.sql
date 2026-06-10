@@ -184,3 +184,29 @@ WHERE tenant_subject_id = $1
   AND product_id = $2
   AND status = 'cancelled'
   AND (sqlc.narg(exclude_id)::uuid IS NULL OR id != sqlc.narg(exclude_id)::uuid);
+
+-- name: ListDueDunningSubscriptions :many
+-- Dunning: past_due NMI-backed subscriptions whose next retry is due.
+SELECT * FROM billing.subscriptions sub
+WHERE sub.processor = ANY(sqlc.arg(processors)::text[])
+  AND sub.status = 'past_due'
+  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz;
+
+-- name: ClaimDunningAttempt :execrows
+-- Lease-style claim: pushes next_retry_at out so concurrent dunning runs
+-- cannot double-charge; only claims a still-due past_due row.
+UPDATE billing.subscriptions
+SET next_retry_at = sqlc.arg(lease_until)::timestamptz,
+    last_retry_at = sqlc.arg(claimed_at)::timestamptz,
+    updated_at = sqlc.arg(claimed_at)::timestamptz
+WHERE id = $1
+  AND status = 'past_due'
+  AND next_retry_at IS NOT NULL AND next_retry_at <= sqlc.arg(claimed_at)::timestamptz;
+
+-- name: GetLatestResumableCancelledSubscription :one
+SELECT * FROM billing.subscriptions sub
+WHERE sub.tenant_subject_id = $1
+  AND sub.status = 'cancelled'
+  AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > sqlc.arg(now)::timestamptz)
+ORDER BY sub.created_at DESC
+LIMIT 1;

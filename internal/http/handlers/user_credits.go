@@ -29,28 +29,11 @@ func GetMyCredits(r *httprequest.Request) {
 		return
 	}
 
-	var rows []struct {
-		CreditTypeID  uuid.UUID `bun:"credit_type_id"`
-		Name          string    `bun:"name"`
-		DisplayName   string    `bun:"display_name"`
-		Unit          string    `bun:"unit"`
-		DecimalPlaces int       `bun:"decimal_places"`
-		Balance       *int64    `bun:"balance"`
-		HeldBalance   *int64    `bun:"held_balance"`
-	}
-
-	err := r.State.DB.Q(r.Request.Context()).NewSelect().
-		TableExpr("billing.credit_types ct").
-		ColumnExpr("ct.id as credit_type_id").
-		ColumnExpr("ct.name").
-		ColumnExpr("ct.display_name").
-		ColumnExpr("ct.unit").
-		ColumnExpr("ct.decimal_places").
-		ColumnExpr("ucb.balance").
-		ColumnExpr("ucb.held_balance").
-		Join("LEFT JOIN billing.credit_balances ucb ON ucb.credit_type_id = ct.id AND ucb.user_id = ?", user.ID).
-		Where("ct.is_active = true").
-		Scan(r.Request.Context(), &rows)
+	// The payer's balance rows are keyed by tenant_subject_id — the user's own
+	// personal tenant-subject UUID for self-service identities. (The bun-era
+	// query joined on a nonexistent credit_balances.user_id column and errored.)
+	payerID := identity.TenantSubjectIDFromString(user.ID).UUID()
+	rows, err := r.State.DB.Gen(r.Request.Context()).ListActiveCreditTypesWithBalance(r.Request.Context(), payerID)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load credits")
 		return
@@ -62,7 +45,7 @@ func GetMyCredits(r *httprequest.Request) {
 			Type:          row.Name,
 			DisplayName:   row.DisplayName,
 			Unit:          row.Unit,
-			DecimalPlaces: row.DecimalPlaces,
+			DecimalPlaces: int(row.DecimalPlaces),
 			Balance:       derefInt64(row.Balance),
 			HeldBalance:   derefInt64(row.HeldBalance),
 		})

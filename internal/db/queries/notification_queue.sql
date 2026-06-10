@@ -72,3 +72,27 @@ WHERE (sqlc.narg(tenant_subject_id)::uuid IS NULL OR nq.tenant_subject_id = sqlc
   AND (sqlc.narg(seen)::boolean IS NULL OR nq.seen = sqlc.narg(seen)::boolean)
 ORDER BY nq.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
+
+-- name: DeleteSeenNotificationsBefore :execrows
+DELETE FROM billing.notification_queue
+WHERE seen = true AND created_at < sqlc.arg(cutoff)::timestamptz;
+
+-- name: DeleteNotificationsBefore :execrows
+DELETE FROM billing.notification_queue
+WHERE created_at < sqlc.arg(cutoff)::timestamptz;
+
+-- name: CountRepairAlerts :one
+SELECT count(*) FROM billing.notification_queue nq
+WHERE nq.tenant_subject_id = $1
+  AND nq.event_type = $2
+  AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
+  AND (sqlc.narg(seen)::boolean IS NULL OR nq.seen = sqlc.narg(seen)::boolean);
+
+-- name: ListRepairAlerts :many
+SELECT * FROM billing.notification_queue nq
+WHERE nq.tenant_subject_id = $1
+  AND nq.event_type = $2
+  AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
+  AND (sqlc.narg(seen)::boolean IS NULL OR nq.seen = sqlc.narg(seen)::boolean)
+ORDER BY nq.created_at DESC
+LIMIT $3::int OFFSET $4::int;

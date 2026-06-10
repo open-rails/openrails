@@ -52,6 +52,27 @@ func (q *Queries) CountNotificationsFiltered(ctx context.Context, arg CountNotif
 	return count, err
 }
 
+const countRepairAlerts = `-- name: CountRepairAlerts :one
+SELECT count(*) FROM billing.notification_queue nq
+WHERE nq.tenant_subject_id = $1
+  AND nq.event_type = $2
+  AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
+  AND ($3::boolean IS NULL OR nq.seen = $3::boolean)
+`
+
+type CountRepairAlertsParams struct {
+	TenantSubjectID uuid.UUID
+	EventType       string
+	Seen            *bool
+}
+
+func (q *Queries) CountRepairAlerts(ctx context.Context, arg CountRepairAlertsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRepairAlerts, arg.TenantSubjectID, arg.EventType, arg.Seen)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createNotification = `-- name: CreateNotification :execrows
 
 INSERT INTO billing.notification_queue (
@@ -93,6 +114,32 @@ DELETE FROM billing.notification_queue WHERE id = $1
 
 func (q *Queries) DeleteNotification(ctx context.Context, id uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteNotification, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteNotificationsBefore = `-- name: DeleteNotificationsBefore :execrows
+DELETE FROM billing.notification_queue
+WHERE created_at < $1::timestamptz
+`
+
+func (q *Queries) DeleteNotificationsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteNotificationsBefore, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteSeenNotificationsBefore = `-- name: DeleteSeenNotificationsBefore :execrows
+DELETE FROM billing.notification_queue
+WHERE seen = true AND created_at < $1::timestamptz
+`
+
+func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSeenNotificationsBefore, cutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -259,6 +306,58 @@ func (q *Queries) ListPendingDigestForTenantSubject(ctx context.Context, arg Lis
 		arg.EventType,
 		arg.CreatedAt,
 		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingNotificationQueue
+	for rows.Next() {
+		var i BillingNotificationQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Data,
+			&i.Seen,
+			&i.CreatedAt,
+			&i.TenantID,
+			&i.TenantSubjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRepairAlerts = `-- name: ListRepairAlerts :many
+SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM billing.notification_queue nq
+WHERE nq.tenant_subject_id = $1
+  AND nq.event_type = $2
+  AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
+  AND ($5::boolean IS NULL OR nq.seen = $5::boolean)
+ORDER BY nq.created_at DESC
+LIMIT $3::int OFFSET $4::int
+`
+
+type ListRepairAlertsParams struct {
+	TenantSubjectID uuid.UUID
+	EventType       string
+	Column3         int32
+	Column4         int32
+	Seen            *bool
+}
+
+func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsParams) ([]BillingNotificationQueue, error) {
+	rows, err := q.db.Query(ctx, listRepairAlerts,
+		arg.TenantSubjectID,
+		arg.EventType,
+		arg.Column3,
+		arg.Column4,
+		arg.Seen,
 	)
 	if err != nil {
 		return nil, err

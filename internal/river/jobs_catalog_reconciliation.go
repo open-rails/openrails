@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
-	"github.com/uptrace/bun"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -469,11 +469,15 @@ func driftDedupeKeyJob(e models.CatalogDriftEvent) string {
 // persistCatalogDriftJob inserts new divergences and auto-resolves open rows
 // whose divergence is gone. Idempotent. Returns (inserted, resolved).
 func persistCatalogDriftJob(ctx context.Context, database *db.DB, desired []models.CatalogDriftEvent, now time.Time) (int, int, error) {
-	idb := database.GetDB().(*bun.DB)
+	q := database.Gen(ctx)
 
-	var existing []models.CatalogDriftEvent
-	if err := idb.NewSelect().Model(&existing).Where("resolved_at IS NULL").Scan(ctx); err != nil {
+	openRows, err := q.ListOpenCatalogDriftEvents(ctx)
+	if err != nil {
 		return 0, 0, fmt.Errorf("load open drift events: %w", err)
+	}
+	existing := make([]models.CatalogDriftEvent, 0, len(openRows))
+	for _, r := range openRows {
+		existing = append(existing, catalogDriftEventFromGen(r))
 	}
 	existingByKey := make(map[string]*models.CatalogDriftEvent, len(existing))
 	for i := range existing {
@@ -492,7 +496,18 @@ func persistCatalogDriftJob(ctx context.Context, database *db.DB, desired []mode
 		if row.ID == uuid.Nil {
 			row.ID = uuidutil.NewV7()
 		}
-		if _, err := idb.NewInsert().Model(&row).Exec(ctx); err != nil {
+		if err := q.InsertCatalogDriftEvent(ctx, gen.InsertCatalogDriftEventParams{
+			ID:                    row.ID,
+			Provider:              string(row.Provider),
+			Kind:                  string(row.Kind),
+			OpenrailsResourceType: string(row.OpenRailsResourceType),
+			OpenrailsResourceID:   nilIfEmptyStr(row.OpenRailsResourceID),
+			ExternalResourceID:    nilIfEmptyStr(row.ExternalResourceID),
+			Field:                 nilIfEmptyStr(row.Field),
+			OpenrailsValue:        nilIfEmptyStr(row.OpenRailsValue),
+			ExternalValue:         nilIfEmptyStr(row.ExternalValue),
+			DetectedAt:            row.DetectedAt,
+		}); err != nil {
 			return inserted, 0, fmt.Errorf("insert drift event: %w", err)
 		}
 		inserted++
@@ -504,13 +519,44 @@ func persistCatalogDriftJob(ctx context.Context, database *db.DB, desired []mode
 		if _, stillDesired := desiredKeys[key]; stillDesired {
 			continue
 		}
-		if _, err := idb.NewUpdate().Model((*models.CatalogDriftEvent)(nil)).
-			Set("resolved_at = ?", now).
-			Where("id = ? AND resolved_at IS NULL", row.ID).
-			Exec(ctx); err != nil {
+		if err := q.ResolveCatalogDriftEvent(ctx, gen.ResolveCatalogDriftEventParams{
+			ID: row.ID, ResolvedAt: &now,
+		}); err != nil {
 			return inserted, resolved, fmt.Errorf("resolve drift event: %w", err)
 		}
 		resolved++
 	}
 	return inserted, resolved, nil
+}
+
+// catalogDriftEventFromGen maps the generated row onto the domain model
+// (NULL text columns flatten to "" like the bun nullzero tags did).
+func catalogDriftEventFromGen(r gen.BillingCatalogDriftEvent) models.CatalogDriftEvent {
+	return models.CatalogDriftEvent{
+		ID:                    r.ID,
+		Provider:              models.CatalogDriftProvider(r.Provider),
+		Kind:                  models.CatalogDriftKind(r.Kind),
+		OpenRailsResourceType: models.CatalogDriftResourceType(r.OpenrailsResourceType),
+		OpenRailsResourceID:   derefStr(r.OpenrailsResourceID),
+		ExternalResourceID:    derefStr(r.ExternalResourceID),
+		Field:                 derefStr(r.Field),
+		OpenRailsValue:        derefStr(r.OpenrailsValue),
+		ExternalValue:         derefStr(r.ExternalValue),
+		DetectedAt:            r.DetectedAt,
+		ResolvedAt:            r.ResolvedAt,
+	}
+}
+
+func nilIfEmptyStr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

@@ -549,3 +549,39 @@ func intPtrTo32(v *int) *int32 {
 	i := int32(*v)
 	return &i
 }
+
+// ListDueDunningSubscriptions returns past_due subscriptions on the given
+// processors whose next retry is due (Price + PaymentMethod relations
+// attached) — the dunning worker's work list.
+func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, processors []string, now time.Time) ([]models.Subscription, error) {
+	rows, err := r.db.Gen(ctx).ListDueDunningSubscriptions(ctx, gen.ListDueDunningSubscriptionsParams{
+		Processors: processors,
+		Now:        now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	subs, err := r.manyWithDetails(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.Subscription, 0, len(subs))
+	for _, s := range subs {
+		out = append(out, *s)
+	}
+	return out, nil
+}
+
+// GetLatestResumableCancelled returns the payer's most recent cancelled
+// subscription whose paid period has not elapsed (resume candidate), or
+// pgx.ErrNoRows.
+func (r *SubscriptionRepo) GetLatestResumableCancelled(ctx context.Context, tenantSubjectID uuid.UUID, now time.Time) (*models.Subscription, error) {
+	row, err := r.db.Gen(ctx).GetLatestResumableCancelledSubscription(ctx, gen.GetLatestResumableCancelledSubscriptionParams{
+		TenantSubjectID: tenantSubjectID,
+		Now:             now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.oneWithDetails(ctx, row, false)
+}

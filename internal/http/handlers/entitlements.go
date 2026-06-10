@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/middleware/ginmw"
@@ -101,15 +102,11 @@ func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
 		return
 	}
 
-	var tenantSubjectID uuid.UUID
-	err := r.State.DB.Q(r.Request.Context()).NewRaw(`
-		SELECT id
-		  FROM billing.tenant_subjects
-		 WHERE tenant_id = ?
-		   AND issuer = ?
-		   AND subject = ?
-		 LIMIT 1
-	`, tenant.FromContextOrDefault(r.Request.Context()).UUID(), issuer, subject).Scan(r.Request.Context(), &tenantSubjectID)
+	tenantSubjectID, err := r.State.DB.Gen(r.Request.Context()).GetTenantSubjectIDByIssuerSubject(r.Request.Context(), gen.GetTenantSubjectIDByIssuerSubjectParams{
+		TenantID: tenant.FromContextOrDefault(r.Request.Context()).UUID(),
+		Issuer:   issuer,
+		Subject:  subject,
+	})
 	if err != nil {
 		if repo.IsNotFound(err) {
 			r.JSON(http.StatusOK, []ServiceEntitlementRecord{})
@@ -214,7 +211,7 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		now = r.State.Clock.Now()
 	}
 	adminGrant := &models.AdminGrant{ID: uuidutil.NewV7(), TenantSubjectID: tenantSubjectID, GrantedBy: adminUser.ID, Reason: "admin_entitlement", DurationDays: req.Days, CreatedAt: now}
-	if _, err := r.State.DB.Q(r.Request.Context()).NewInsert().Model(adminGrant).Exec(r.Request.Context()); err != nil {
+	if err := repo.NewAdminGrantRepo(r.State.DB).Create(r.Request.Context(), adminGrant); err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to create admin grant source record")
 		return
 	}
@@ -246,15 +243,11 @@ func tenantSubjectForAdminGrantTarget(r *httprequest.Request, subject string) (u
 	if resolved.TenantID.IsZero() || issuer == "" || subject == "" {
 		return uuid.Nil, controlplane.ErrTenantSubjectInvalid
 	}
-	var id uuid.UUID
-	err := r.State.DB.Q(r.Request.Context()).NewRaw(`
-		INSERT INTO billing.tenant_subjects (tenant_id, issuer, subject)
-		VALUES (?, ?, ?)
-		ON CONFLICT (tenant_id, issuer, subject) DO UPDATE
-		   SET last_seen_at = now()
-		RETURNING id
-	`, resolved.TenantID.UUID(), issuer, subject).Scan(r.Request.Context(), &id)
-	return id, err
+	return r.State.DB.Gen(r.Request.Context()).UpsertLegacyTenantSubject(r.Request.Context(), gen.UpsertLegacyTenantSubjectParams{
+		TenantID: resolved.TenantID.UUID(),
+		Issuer:   issuer,
+		Subject:  subject,
+	})
 }
 
 func RevokeAdminEntitlement(r *httprequest.Request) {

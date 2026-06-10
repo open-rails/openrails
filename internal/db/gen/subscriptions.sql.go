@@ -12,6 +12,32 @@ import (
 	"github.com/google/uuid"
 )
 
+const claimDunningAttempt = `-- name: ClaimDunningAttempt :execrows
+UPDATE billing.subscriptions
+SET next_retry_at = $2::timestamptz,
+    last_retry_at = $3::timestamptz,
+    updated_at = $3::timestamptz
+WHERE id = $1
+  AND status = 'past_due'
+  AND next_retry_at IS NOT NULL AND next_retry_at <= $3::timestamptz
+`
+
+type ClaimDunningAttemptParams struct {
+	ID         uuid.UUID
+	LeaseUntil time.Time
+	ClaimedAt  time.Time
+}
+
+// Lease-style claim: pushes next_retry_at out so concurrent dunning runs
+// cannot double-charge; only claims a still-due past_due row.
+func (q *Queries) ClaimDunningAttempt(ctx context.Context, arg ClaimDunningAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimDunningAttempt, arg.ID, arg.LeaseUntil, arg.ClaimedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countSubscriptionsByTenantSubject = `-- name: CountSubscriptionsByTenantSubject :one
 SELECT count(*) FROM billing.subscriptions sub
 WHERE sub.tenant_subject_id = $1
@@ -188,6 +214,57 @@ type GetActiveSubscriptionByTenantSubjectAtParams struct {
 
 func (q *Queries) GetActiveSubscriptionByTenantSubjectAt(ctx context.Context, arg GetActiveSubscriptionByTenantSubjectAtParams) (BillingSubscription, error) {
 	row := q.db.QueryRow(ctx, getActiveSubscriptionByTenantSubjectAt, arg.TenantSubjectID, arg.Now)
+	var i BillingSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.PriceID,
+		&i.ProductID,
+		&i.Status,
+		&i.Processor,
+		&i.ProcessorSubscriptionID,
+		&i.UserEmail,
+		&i.PaymentMethodID,
+		&i.CurrentPeriodStartsAt,
+		&i.CurrentPeriodEndsAt,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.GraceEndsAt,
+		&i.ScheduledPriceID,
+		&i.LastRetryAt,
+		&i.RetryAttempts,
+		&i.NextRetryAt,
+		&i.CancelledAt,
+		&i.CancelType,
+		&i.CancelFeedback,
+		&i.EntitlementsSpecSnapshot,
+		&i.CreditsSpecSnapshot,
+		&i.GatewayResponse,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TierGroup,
+		&i.DeletionScheduledAt,
+		&i.TenantID,
+		&i.TenantSubjectID,
+	)
+	return i, err
+}
+
+const getLatestResumableCancelledSubscription = `-- name: GetLatestResumableCancelledSubscription :one
+SELECT id, price_id, product_id, status, processor, processor_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, tenant_id, tenant_subject_id FROM billing.subscriptions sub
+WHERE sub.tenant_subject_id = $1
+  AND sub.status = 'cancelled'
+  AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > $2::timestamptz)
+ORDER BY sub.created_at DESC
+LIMIT 1
+`
+
+type GetLatestResumableCancelledSubscriptionParams struct {
+	TenantSubjectID uuid.UUID
+	Now             time.Time
+}
+
+func (q *Queries) GetLatestResumableCancelledSubscription(ctx context.Context, arg GetLatestResumableCancelledSubscriptionParams) (BillingSubscription, error) {
+	row := q.db.QueryRow(ctx, getLatestResumableCancelledSubscription, arg.TenantSubjectID, arg.Now)
 	var i BillingSubscription
 	err := row.Scan(
 		&i.ID,
@@ -621,6 +698,69 @@ ORDER BY sub.created_at DESC
 
 func (q *Queries) ListActiveSubscriptionsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listActiveSubscriptionsByTenantSubject, tenantSubjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingSubscription
+	for rows.Next() {
+		var i BillingSubscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.ProductID,
+			&i.Status,
+			&i.Processor,
+			&i.ProcessorSubscriptionID,
+			&i.UserEmail,
+			&i.PaymentMethodID,
+			&i.CurrentPeriodStartsAt,
+			&i.CurrentPeriodEndsAt,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.GraceEndsAt,
+			&i.ScheduledPriceID,
+			&i.LastRetryAt,
+			&i.RetryAttempts,
+			&i.NextRetryAt,
+			&i.CancelledAt,
+			&i.CancelType,
+			&i.CancelFeedback,
+			&i.EntitlementsSpecSnapshot,
+			&i.CreditsSpecSnapshot,
+			&i.GatewayResponse,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TierGroup,
+			&i.DeletionScheduledAt,
+			&i.TenantID,
+			&i.TenantSubjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDueDunningSubscriptions = `-- name: ListDueDunningSubscriptions :many
+SELECT id, price_id, product_id, status, processor, processor_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, tenant_id, tenant_subject_id FROM billing.subscriptions sub
+WHERE sub.processor = ANY($1::text[])
+  AND sub.status = 'past_due'
+  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $2::timestamptz
+`
+
+type ListDueDunningSubscriptionsParams struct {
+	Processors []string
+	Now        time.Time
+}
+
+// Dunning: past_due NMI-backed subscriptions whose next retry is due.
+func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDunningSubscriptionsParams) ([]BillingSubscription, error) {
+	rows, err := q.db.Query(ctx, listDueDunningSubscriptions, arg.Processors, arg.Now)
 	if err != nil {
 		return nil, err
 	}

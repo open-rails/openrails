@@ -179,19 +179,11 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		}
 	} else {
 		// Fallback to active subscription lookup
-		sub = new(models.Subscription)
 		tsid, terr := repo.ResolveTenantSubjectID(ctx, w.DB.Qx(ctx), uuid.Nil, userID)
 		if terr != nil {
 			return terr
 		}
-		err = w.DB.Q(ctx).NewSelect().
-			Model(sub).
-			Where("sub.tenant_subject_id = ?", tsid).
-			Where("sub.status = ?", models.StatusCancelled).
-			Where("(sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > ?)", now).
-			OrderExpr("sub.created_at DESC").
-			Limit(1).
-			Scan(ctx)
+		sub, err = repo.NewSubscriptionRepo(w.DB).GetLatestResumableCancelled(ctx, tsid, now)
 		if err != nil {
 			if repo.IsNotFound(err) {
 				log.WithContext(ctx).WithField("user_id", userID).Info("no cancellable subscription to resume")

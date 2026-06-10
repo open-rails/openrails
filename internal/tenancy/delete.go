@@ -6,18 +6,102 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // tenantOwnedTables are the billing.* tables that carry a tenant_id. Tenant
 // deletion purges these rows for the target tenant. Kept in sync with the
-// consolidated schema's tenant-owned table set.
+// consolidated schema's tenant-owned table set AND with
+// queries/tenant_lifecycle.sql + the dispatch switches below (#334: each table
+// has a STATIC generated count/purge query — no runtime SQL assembly).
 var tenantOwnedTables = []string{
 	"products", "prices", "catalog_drift_events", "payment_methods",
 	"subscriptions", "entitlements", "payments", "admin_grants",
 	"notification_queue", "processor_customers", "credit_types",
 	"credit_transactions", "credit_blocks", "credit_balances",
 	"checkout_sessions", "manual_rebill_attempts",
+}
+
+// countTenantRows dispatches to the table's generated count query.
+func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.UUID) (int64, error) {
+	switch table {
+	case "products":
+		return q.CountTenantRowsProducts(ctx, id)
+	case "prices":
+		return q.CountTenantRowsPrices(ctx, id)
+	case "catalog_drift_events":
+		return q.CountTenantRowsCatalogDriftEvents(ctx, id)
+	case "payment_methods":
+		return q.CountTenantRowsPaymentMethods(ctx, id)
+	case "subscriptions":
+		return q.CountTenantRowsSubscriptions(ctx, id)
+	case "entitlements":
+		return q.CountTenantRowsEntitlements(ctx, id)
+	case "payments":
+		return q.CountTenantRowsPayments(ctx, id)
+	case "admin_grants":
+		return q.CountTenantRowsAdminGrants(ctx, id)
+	case "notification_queue":
+		return q.CountTenantRowsNotificationQueue(ctx, id)
+	case "processor_customers":
+		return q.CountTenantRowsProcessorCustomers(ctx, id)
+	case "credit_types":
+		return q.CountTenantRowsCreditTypes(ctx, id)
+	case "credit_transactions":
+		return q.CountTenantRowsCreditTransactions(ctx, id)
+	case "credit_blocks":
+		return q.CountTenantRowsCreditBlocks(ctx, id)
+	case "credit_balances":
+		return q.CountTenantRowsCreditBalances(ctx, id)
+	case "checkout_sessions":
+		return q.CountTenantRowsCheckoutSessions(ctx, id)
+	case "manual_rebill_attempts":
+		return q.CountTenantRowsManualRebillAttempts(ctx, id)
+	default:
+		return 0, fmt.Errorf("tenancy: no count query for table %q", table)
+	}
+}
+
+// purgeTenantRows dispatches to the table's generated purge query.
+func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.UUID) error {
+	switch table {
+	case "products":
+		return q.PurgeTenantRowsProducts(ctx, id)
+	case "prices":
+		return q.PurgeTenantRowsPrices(ctx, id)
+	case "catalog_drift_events":
+		return q.PurgeTenantRowsCatalogDriftEvents(ctx, id)
+	case "payment_methods":
+		return q.PurgeTenantRowsPaymentMethods(ctx, id)
+	case "subscriptions":
+		return q.PurgeTenantRowsSubscriptions(ctx, id)
+	case "entitlements":
+		return q.PurgeTenantRowsEntitlements(ctx, id)
+	case "payments":
+		return q.PurgeTenantRowsPayments(ctx, id)
+	case "admin_grants":
+		return q.PurgeTenantRowsAdminGrants(ctx, id)
+	case "notification_queue":
+		return q.PurgeTenantRowsNotificationQueue(ctx, id)
+	case "processor_customers":
+		return q.PurgeTenantRowsProcessorCustomers(ctx, id)
+	case "credit_types":
+		return q.PurgeTenantRowsCreditTypes(ctx, id)
+	case "credit_transactions":
+		return q.PurgeTenantRowsCreditTransactions(ctx, id)
+	case "credit_blocks":
+		return q.PurgeTenantRowsCreditBlocks(ctx, id)
+	case "credit_balances":
+		return q.PurgeTenantRowsCreditBalances(ctx, id)
+	case "checkout_sessions":
+		return q.PurgeTenantRowsCheckoutSessions(ctx, id)
+	case "manual_rebill_attempts":
+		return q.PurgeTenantRowsManualRebillAttempts(ctx, id)
+	default:
+		return fmt.Errorf("tenancy: no purge query for table %q", table)
+	}
 }
 
 // Export performs a tenant-scoped logical export and records a completed
@@ -37,16 +121,13 @@ func (s *Service) Export(ctx context.Context, id tenant.ID) (string, map[string]
 		return "", nil, err
 	}
 	counts := make(map[string]int, len(tables))
+	q := gen.New(s.pool)
 	for _, tbl := range tables {
-		var n int
-		// table name comes from a fixed allow-list, never user input.
-		err := s.pool.QueryRow(ctx,
-			fmt.Sprintf(`SELECT count(*) FROM billing.%s WHERE tenant_id = $1::uuid`, tbl),
-			id.String()).Scan(&n)
+		n, err := countTenantRows(ctx, q, tbl, id.UUID())
 		if err != nil {
 			return "", nil, fmt.Errorf("tenancy: export count %s: %w", tbl, err)
 		}
-		counts[tbl] = n
+		counts[tbl] = int(n)
 	}
 
 	// Enumerate per-tenant secret NAMES (never values) for the portability manifest.
@@ -132,10 +213,9 @@ func (s *Service) Delete(ctx context.Context, id tenant.ID, opts DeleteOptions) 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	txq := gen.New(tx)
 	for _, tbl := range tables {
-		if _, err := tx.Exec(ctx,
-			fmt.Sprintf(`DELETE FROM billing.%s WHERE tenant_id = $1::uuid`, tbl),
-			id.String()); err != nil {
+		if err := purgeTenantRows(ctx, txq, tbl, id.UUID()); err != nil {
 			return fmt.Errorf("tenancy: purge %s: %w", tbl, err)
 		}
 	}

@@ -207,3 +207,39 @@ WHERE status = 'open' AND expires_at <= sqlc.arg(now)::timestamptz
 ORDER BY expires_at ASC
 LIMIT sqlc.arg(batch_size)::int
 FOR UPDATE SKIP LOCKED;
+
+-- name: ListExpiredActiveHoldsForUpdate :many
+-- Hold expiry sweep (cross-tenant, SKIP LOCKED so concurrent sweeps don't contend).
+SELECT * FROM billing.credit_transactions
+WHERE transaction_type = 'hold' AND status = 'active'
+  AND expires_at IS NOT NULL AND expires_at <= sqlc.arg(now)::timestamptz
+ORDER BY expires_at ASC
+LIMIT sqlc.arg(batch_size)::int
+FOR UPDATE SKIP LOCKED;
+
+-- name: ExpireCreditHold :exec
+UPDATE billing.credit_transactions
+SET status = 'expired', updated_at = $2
+WHERE id = $1;
+
+-- name: ListExpiredCreditBlocksForUpdate :many
+-- Credit block expiry sweep (cross-tenant, SKIP LOCKED).
+SELECT * FROM billing.credit_blocks
+WHERE remaining_amount > 0
+  AND expires_at IS NOT NULL AND expires_at <= sqlc.arg(now)::timestamptz
+ORDER BY expires_at ASC
+LIMIT sqlc.arg(batch_size)::int
+FOR UPDATE SKIP LOCKED;
+
+-- name: ListActiveCreditTypesWithBalance :many
+-- GetMyCredits: every active credit type with the payer's balance (NULL when
+-- the payer has never touched that type). NOTE: the bun-era handler joined on
+-- a nonexistent ucb.user_id column and errored at runtime; the join key is
+-- the payer's tenant_subject_id.
+SELECT ct.id AS credit_type_id, ct.name, ct.display_name, ct.unit, ct.decimal_places,
+       ucb.balance, ucb.held_balance
+FROM billing.credit_types ct
+LEFT JOIN billing.credit_balances ucb
+  ON ucb.credit_type_id = ct.id
+ AND ucb.tenant_subject_id = sqlc.arg(tenant_subject_id)::uuid
+WHERE ct.is_active = true;

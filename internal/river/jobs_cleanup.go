@@ -8,7 +8,6 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -106,18 +105,10 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 }
 
 func (w CleanupExpiredDataWorker) expireCheckoutSessions(ctx context.Context, now time.Time) (int64, error) {
-	res, err := w.DB.Q(ctx).NewUpdate().
-		TableExpr("billing.checkout_sessions").
-		Set("status = ?", models.CheckoutSessionStatusExpired).
-		Set("updated_at = ?", now).
-		Where("expires_at IS NOT NULL AND expires_at < ?", now).
-		Where("status IN ('created', 'requires_action')").
-		Exec(ctx)
+	rows, err := w.DB.Gen(ctx).ExpireCheckoutSessions(ctx, now)
 	if err != nil {
 		return 0, fmt.Errorf("expire checkout sessions: %w", err)
 	}
-
-	rows, _ := res.RowsAffected()
 	return rows, nil
 }
 
@@ -125,15 +116,10 @@ func (w CleanupExpiredDataWorker) expireCheckoutSessions(ctx context.Context, no
 func (w CleanupExpiredDataWorker) cleanupSeenNotifications(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
 	cutoff := now.Add(-retention)
 
-	res, err := w.DB.Q(ctx).NewDelete().
-		TableExpr("billing.notification_queue").
-		Where("seen = ? AND created_at < ?", true, cutoff).
-		Exec(ctx)
+	rows, err := w.DB.Gen(ctx).DeleteSeenNotificationsBefore(ctx, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("delete seen notifications: %w", err)
 	}
-
-	rows, _ := res.RowsAffected()
 	return rows, nil
 }
 
@@ -141,14 +127,9 @@ func (w CleanupExpiredDataWorker) cleanupSeenNotifications(ctx context.Context, 
 func (w CleanupExpiredDataWorker) cleanupOldNotifications(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
 	cutoff := now.Add(-retention)
 
-	res, err := w.DB.Q(ctx).NewDelete().
-		TableExpr("billing.notification_queue").
-		Where("created_at < ?", cutoff).
-		Exec(ctx)
+	rows, err := w.DB.Gen(ctx).DeleteNotificationsBefore(ctx, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("delete old notifications: %w", err)
 	}
-
-	rows, _ := res.RowsAffected()
 	return rows, nil
 }

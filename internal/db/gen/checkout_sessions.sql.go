@@ -116,6 +116,21 @@ func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutS
 	return result.RowsAffected(), nil
 }
 
+const expireCheckoutSessions = `-- name: ExpireCheckoutSessions :execrows
+UPDATE billing.checkout_sessions
+SET status = 'expired', updated_at = $1
+WHERE expires_at IS NOT NULL AND expires_at < $1::timestamptz
+  AND status IN ('created', 'requires_action')
+`
+
+func (q *Queries) ExpireCheckoutSessions(ctx context.Context, now time.Time) (int64, error) {
+	result, err := q.db.Exec(ctx, expireCheckoutSessions, now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
 SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM billing.checkout_sessions WHERE id = $1
 `

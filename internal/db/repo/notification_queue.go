@@ -235,3 +235,9 @@ func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query
 	}
 	return notifications, total, nil
 }
+
+// NotificationFromGen exposes the gen -> model mapping for callers outside the
+// repo (e.g. the admin operations handlers reading repair alerts).
+func NotificationFromGen(n gen.BillingNotificationQueue) (*models.NotificationQueue, error) {
+	return notificationFromGen(n)
+}

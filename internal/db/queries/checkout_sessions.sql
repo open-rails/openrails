@@ -66,3 +66,9 @@ WHERE cs.tenant_subject_id = $1
   AND (cs.expires_at IS NULL OR cs.expires_at > sqlc.arg(now)::timestamptz)
 ORDER BY cs.created_at DESC
 LIMIT 1;
+
+-- name: ExpireCheckoutSessions :execrows
+UPDATE billing.checkout_sessions
+SET status = 'expired', updated_at = sqlc.arg(now)
+WHERE expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
+  AND status IN ('created', 'requires_action');
