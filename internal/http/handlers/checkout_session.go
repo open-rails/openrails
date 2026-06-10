@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
@@ -104,7 +106,10 @@ func CreateCheckoutSession(r *httprequest.Request) {
 				ginmw.SubjectKeysFromContext(r.Request.Context()),
 			)
 		}
-		writeCheckoutSessionError(r, err)
+		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
+			Processor: req.Payment.Processor,
+			Wallet:    req.Payment.Wallet,
+		})
 		return
 	}
 	r.SuccessJSON(resp)
@@ -131,7 +136,7 @@ func GetCheckoutSession(r *httprequest.Request) {
 	}
 	resp, err := r.State.CheckoutSessionService.GetSession(r.Request.Context(), parsedID, user)
 	if err != nil {
-		writeCheckoutSessionError(r, err)
+		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{CheckoutSessionID: sessionID})
 		return
 	}
 	r.SuccessJSON(resp)
@@ -164,13 +169,26 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Processor: req.Payment.Processor, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
 	resp, err := r.State.CheckoutSessionService.ConfirmSession(r.Request.Context(), parsedID, svcReq, user)
 	if err != nil {
-		writeCheckoutSessionError(r, err)
+		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
+			Processor:         req.Payment.Processor,
+			Wallet:            req.Payment.Wallet,
+			CheckoutSessionID: sessionID,
+		})
 		return
 	}
 	r.SuccessJSON(resp)
 }
 
-func writeCheckoutSessionError(r *httprequest.Request, err error) {
+// checkoutSessionErrorContext carries per-request context threaded into
+// actionable checkout error metadata (e.g. the usdc_funding payload on the
+// pre-flight insufficient-USDC 402), so the frontend can drive a funding flow.
+type checkoutSessionErrorContext struct {
+	Processor         string
+	Wallet            string
+	CheckoutSessionID string
+}
+
+func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutSessionErrorContext) {
 	var vaultErr *vault.VaultError
 	if errors.As(err, &vaultErr) {
 		code := api.CodePaymentFailed
@@ -188,7 +206,31 @@ func writeCheckoutSessionError(r *httprequest.Request, err error) {
 		param := "usdc_balance"
 		apiErr := api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, api.CodeInsufficientFunds, insufficientUSDC.Error())
 		apiErr.Param = &param
-		r.APIError(apiErr)
+		need, have := insufficientUSDC.NeedBaseUnits, insufficientUSDC.HaveBaseUnits
+		var short uint64
+		if need > have {
+			short = need - have
+		}
+		funding := map[string]any{
+			"asset":                "USDC",
+			"network":              "solana",
+			"amount":               formatUSDCBaseUnits(need),
+			"balance":              formatUSDCBaseUnits(have),
+			"shortfall":            formatUSDCBaseUnits(short),
+			"amount_base_units":    strconv.FormatUint(need, 10),
+			"balance_base_units":   strconv.FormatUint(have, 10),
+			"shortfall_base_units": strconv.FormatUint(short, 10),
+		}
+		if w := strings.TrimSpace(ectx.Wallet); w != "" {
+			funding["wallet"] = w
+		}
+		if id := strings.TrimSpace(ectx.CheckoutSessionID); id != "" {
+			funding["checkout_session_id"] = id
+		}
+		if p := strings.TrimSpace(ectx.Processor); p != "" {
+			funding["processor"] = p
+		}
+		r.APIError(apiErr.WithMetadata(map[string]any{"usdc_funding": funding}))
 		return
 	}
 	switch {
@@ -207,4 +249,15 @@ func writeCheckoutSessionError(r *httprequest.Request, err error) {
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session request failed")
 	}
+}
+
+// formatUSDCBaseUnits renders USDC token base units (6 decimals) as a trimmed
+// decimal string: 1500000 -> "1.5", 250000 -> "0.25".
+func formatUSDCBaseUnits(v uint64) string {
+	whole := v / 1_000_000
+	frac := v % 1_000_000
+	if frac == 0 {
+		return strconv.FormatUint(whole, 10)
+	}
+	return strconv.FormatUint(whole, 10) + "." + strings.TrimRight(fmt.Sprintf("%06d", frac), "0")
 }
