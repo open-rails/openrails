@@ -2,32 +2,22 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/sirupsen/logrus"
-
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
 )
 
-// DB wraps the application's database handles. During the bun -> sqlc
-// transition (issue #334) it carries BOTH sides over ONE underlying pgx pool:
+// DB wraps the application's database handle: a pgx/v5 pool that all
+// sqlc-generated queries run on (Qx/Gen). A DB can also be transaction-scoped
+// (pgtx set, via NewWithPgxTx) so services can hand repos a tx-bound DB.
 //
-//   - pool: the pgx/v5 pool that sqlc-generated queries run on (Qx/Gen).
-//   - db:   the bun handle, served by the SAME pool through pgx's
-//     database/sql adapter (stdlib.OpenDBFromPool). Removed in Phase 2.
-//
-// A DB can also be transaction-scoped (one of pgtx / bun.Tx set) so services
-// can hand repos a tx-bound DB.
+// The bun ORM side that coexisted here during the #334 transition is gone:
+// one driver, one pool.
 type DB struct {
-	db   bun.IDB
 	pool *pgxpool.Pool
 	pgtx pgx.Tx
 
@@ -43,7 +33,6 @@ const (
 	dbConnectPingTimeout = 5 * time.Second
 
 	dbMaxOpenConns    = 30
-	dbMaxIdleConns    = 10
 	dbConnMaxLifetime = time.Hour
 	dbConnMaxIdleTime = 15 * time.Minute
 )
@@ -61,35 +50,11 @@ func NewDB(cfg *config.DBConfig) (_ *DB, err error) {
 	if err != nil {
 		return nil, err
 	}
-
-	db, sqldb := newBunOverPool(pool)
-	if err := pingWithRetry(context.Background(), func(ctx context.Context) error {
-		return db.PingContext(ctx)
-	}, "database"); err != nil {
-		if cerr := sqldb.Close(); cerr != nil {
-			logrus.Errorf("failed to close database connection: %v", cerr)
-		}
-		pool.Close()
-		return nil, err
-	}
-
-	return &DB{db: db, pool: pool, ownsPool: true}, nil
+	return &DB{pool: pool, ownsPool: true}, nil
 }
 
-// newBunOverPool builds the transition-era bun handle on top of the pgx pool
-// via the database/sql adapter, so bun and sqlc traffic share one pool and
-// one connection budget.
-func newBunOverPool(pool *pgxpool.Pool) (*bun.DB, *sql.DB) {
-	sqldb := stdlib.OpenDBFromPool(pool)
-	applySQLPoolTuning(sqldb)
-	db := bun.NewDB(sqldb, pgdialect.New())
-	models.RegisterModels(db)
-	return db, sqldb
-}
-
-// newTunedPGXPool parses the connection string, applies the pool tuning that
-// applySQLPoolTuning historically applied to the database/sql pool, installs
-// the optional query tracer, and verifies connectivity with retry.
+// newTunedPGXPool parses the connection string, applies the pool tuning,
+// installs the optional query tracer, and verifies connectivity with retry.
 func newTunedPGXPool(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	pcfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
@@ -169,68 +134,16 @@ func pingWithRetry(ctx context.Context, ping func(context.Context) error, label 
 	}
 }
 
-func applySQLPoolTuning(sqldb *sql.DB) {
-	sqldb.SetMaxOpenConns(dbMaxOpenConns)
-	sqldb.SetMaxIdleConns(dbMaxIdleConns)
-	sqldb.SetConnMaxLifetime(dbConnMaxLifetime)
-	sqldb.SetConnMaxIdleTime(dbConnMaxIdleTime)
-
-	logrus.WithFields(logrus.Fields{
-		"db_max_open_conns":     dbMaxOpenConns,
-		"db_max_idle_conns":     dbMaxIdleConns,
-		"db_conn_max_lifetime":  dbConnMaxLifetime.String(),
-		"db_conn_max_idle_time": dbConnMaxIdleTime.String(),
-	}).Info("Applied SQL connection pool settings")
-}
-
-// NewWithSQLDB wraps a host-supplied *sql.DB. Transition note (#334): this
-// path has NO pgx pool, so sqlc-converted code paths are unavailable on it —
-// embedded hosts should supply a pgx pool (embedded.Options.PGXPool) instead.
-// Scheduled for removal in Phase 2 of #334 (no known production user).
-func NewWithSQLDB(sqlDB *sql.DB) (*DB, error) {
-	if sqlDB == nil {
-		return nil, fmt.Errorf("sql db is nil")
-	}
-	db := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(db)
-	if err := db.PingContext(context.Background()); err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
-	}
-	return &DB{db: db}, nil
-}
-
-// NewWithBun wraps a host-supplied *bun.DB. Same transition caveat as
-// NewWithSQLDB: no pgx pool, sqlc paths unavailable, removed in Phase 2.
-func NewWithBun(bunDB *bun.DB) (*DB, error) {
-	if bunDB == nil {
-		return nil, fmt.Errorf("bun db is nil")
-	}
-	models.RegisterModels(bunDB)
-	if err := bunDB.PingContext(context.Background()); err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
-	}
-	return &DB{db: bunDB}, nil
-}
-
 // NewWithPGXPool wraps a host-supplied pgx pool (the embedded-host path). The
-// pool serves both sides: sqlc directly, bun through the stdlib adapter. The
-// host keeps ownership of the pool; Close() does not close it.
+// host keeps ownership of its pool; Close() is a no-op for it.
 func NewWithPGXPool(pool *pgxpool.Pool) (*DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pgx pool is nil")
 	}
-	db, _ := newBunOverPool(pool)
-	if err := db.PingContext(context.Background()); err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
-	}
-	return &DB{db: db, pool: pool}, nil
+	return &DB{pool: pool}, nil
 }
 
-func (d *DB) GetDB() bun.IDB {
-	return d.db
-}
-
-// Pool exposes the pgx pool (nil for tx-scoped or bun-only wrappers).
+// Pool exposes the pgx pool (nil for tx-scoped wrappers).
 func (d *DB) Pool() *pgxpool.Pool {
 	if d == nil {
 		return nil
@@ -238,40 +151,15 @@ func (d *DB) Pool() *pgxpool.Pool {
 	return d.pool
 }
 
-func (d *DB) QualifiedTable(tableName string) string {
-	return fmt.Sprintf("billing.%s", tableName)
-}
-
 func (d *DB) Close() error {
-	var err error
-	if bunDB, ok := d.db.(*bun.DB); ok {
-		if underlyingDB := bunDB.DB; underlyingDB != nil {
-			err = underlyingDB.Close()
-		}
-	}
 	if d.ownsPool && d.pool != nil {
 		d.pool.Close()
 	}
-	return err
-}
-
-// NewWithTx returns a DB scoped to an open bun transaction (transition-era;
-// converted code uses NewWithPgxTx).
-func NewWithTx(tx bun.Tx) *DB {
-	return &DB{
-		db: tx,
-	}
-}
-
-func (d *DB) NewWithTx(tx bun.Tx) *DB {
-	return &DB{
-		db: tx,
-	}
+	return nil
 }
 
 // NewWithPgxTx returns a DB scoped to an open pgx transaction: Qx/Gen return
-// the transaction, so repos called with this DB run inside it. The pgx
-// analogue of NewWithTx.
+// the transaction, so repos called with this DB run inside it.
 func NewWithPgxTx(tx pgx.Tx) *DB {
 	return &DB{pgtx: tx}
 }

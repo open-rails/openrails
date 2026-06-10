@@ -129,9 +129,8 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 			DurationDays:    nil,
 			CreatedAt:       now,
 		}
-		_, err := suite.BunDB.NewInsert().Model(adminGrant).Exec(context.Background())
-		require.NoError(t, err)
-		_, err = suite.BunDB.NewInsert().Model(&models.Entitlement{
+		suite.InsertAdminGrant(context.Background(), adminGrant)
+		suite.InsertEntitlement(context.Background(), &models.Entitlement{
 			ID:              uuid.New(),
 			TenantSubjectID: suite.ensureTenantSubject(context.Background(), userID),
 			Entitlement:     "premium",
@@ -141,8 +140,7 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 			SourceType:      models.EntitlementSourceAdmin,
 			CreatedAt:       now,
 			UpdatedAt:       now,
-		}).Exec(context.Background())
-		require.NoError(t, err)
+		})
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/admin/users/%s", userID), nil)
@@ -153,7 +151,7 @@ func TestAdminGetUserBillingProfile(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK")
 
 		var response map[string]interface{}
-		err = json.Unmarshal(w.Body.Bytes(), &response)
+		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
 		assert.Equal(t, userID, response["user_id"], "User ID should match")

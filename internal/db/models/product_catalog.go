@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/shared/normalize"
-	"github.com/uptrace/bun"
 )
 
 // CatalogStatus is the lifecycle state of a catalog product or price. It
@@ -40,32 +39,30 @@ func (s CatalogStatus) Valid() bool {
 // Product represents a product offering (e.g., Premium Membership)
 // This represents our product catalog concept
 type Product struct {
-	bun.BaseModel `bun:"table:billing.products,alias:prod"`
-
-	ID          uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
-	TenantID    uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	Slug        string    `bun:"slug,notnull,unique" json:"slug"`
-	DisplayName string    `bun:"display_name,notnull" json:"display_name"`
-	Description string    `bun:"description,nullzero" json:"description"`
+	ID          uuid.UUID `json:"id"`
+	TenantID    uuid.UUID `json:"tenant_id"`
+	Slug        string    `json:"slug"`
+	DisplayName string    `json:"display_name"`
+	Description string    `json:"description"`
 
 	// Entitlements configuration: map entitlement name -> duration days (nil or 0 means indefinite)
-	EntitlementsSpec map[string]*int `bun:"entitlements_spec,type:jsonb,nullzero" json:"entitlements_spec,omitempty"`
+	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
 
 	// Credits configuration: bundled promo credits for subscriptions
-	CreditsSpec CreditsSpec `bun:"credits_spec,type:jsonb,nullzero" json:"credits_spec,omitempty"`
+	CreditsSpec CreditsSpec `json:"credits_spec,omitempty"`
 
 	// Tier configuration for upgrade/downgrade relationships
 	// Products in the same TierGroup are mutually exclusive - user must upgrade/downgrade between them
 	// TierRank determines direction: higher rank = more premium (upgrade), lower rank = downgrade
-	TierGroup *string `bun:"tier_group,nullzero" json:"tier_group,omitempty"`
-	TierRank  int     `bun:"tier_rank,notnull,default:0" json:"tier_rank"`
+	TierGroup *string `json:"tier_group,omitempty"`
+	TierRank  int     `json:"tier_rank"`
 
-	Status    CatalogStatus `bun:"status,notnull,default:'active'" json:"status"`
-	CreatedAt time.Time     `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt time.Time     `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	Status    CatalogStatus `json:"status"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
 
 	// Relationships
-	Prices []*Price `bun:"rel:has-many,join:id=product_id" json:"prices,omitempty"`
+	Prices []*Price `json:"prices,omitempty"`
 }
 
 // IsPurchasable reports whether the product can be bought by a new customer
@@ -132,32 +129,30 @@ func CloneCreditsSpec(spec CreditsSpec) CreditsSpec {
 // Price represents a specific pricing option for a product
 // This represents pricing options similar to Stripe's pricing model
 type Price struct {
-	bun.BaseModel `bun:"table:billing.prices,alias:price"`
-
-	ID        uuid.UUID     `bun:"id,pk,type:uuid" json:"id"`
-	TenantID  uuid.UUID     `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	ProductID uuid.UUID     `bun:"product_id,notnull" json:"product_id"`
-	Status    CatalogStatus `bun:"status,notnull,default:'active'" json:"status"`
-	Amount    int64         `bun:"amount,notnull" json:"amount"`
-	Currency  string        `bun:"currency,notnull" json:"currency"`
+	ID        uuid.UUID     `json:"id"`
+	TenantID  uuid.UUID     `json:"tenant_id"`
+	ProductID uuid.UUID     `json:"product_id"`
+	Status    CatalogStatus `json:"status"`
+	Amount    int64         `json:"amount"`
+	Currency  string        `json:"currency"`
 
 	// Billing interval in days (nullable for one-time purchases)
 	// 30 = monthly, 365 = yearly, null = one-time purchase
-	BillingCycleDays *int `bun:"billing_cycle_days,nullzero" json:"billing_cycle_days"`
+	BillingCycleDays *int `json:"billing_cycle_days"`
 
 	// Processors is a JSONB map of processor name -> processor-specific configuration
 	// Keys: "mobius", "ccbill", "solana", etc.
 	// Values: processor-specific data (e.g., plan_id, price_id, provider)
 	// Example: {"mobius": {"plan_id": "123"}, "ccbill": {"price_id": "456"}}
-	Processors map[string]map[string]string `bun:"processors,type:jsonb,nullzero" json:"processors,omitempty"`
+	Processors map[string]map[string]string `json:"processors,omitempty"`
 
-	CreatedAt time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt time.Time `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Relationships
-	Product       *Product       `bun:"rel:belongs-to,join:product_id=id" json:"-"`
-	Subscriptions []Subscription `bun:"rel:has-many,join:id=price_id" json:"-"`
-	Payments      []Payment      `bun:"rel:has-many,join:id=price_id" json:"-"`
+	Product       *Product       `json:"-"`
+	Subscriptions []Subscription `json:"-"`
+	Payments      []Payment      `json:"-"`
 }
 
 // IsPurchasable reports whether the price can be bought by a new customer

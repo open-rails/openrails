@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
@@ -15,12 +16,28 @@ type CreditTypeRepo struct {
 
 func NewCreditTypeRepo(d *db.DB) *CreditTypeRepo { return &CreditTypeRepo{db: d} }
 
-func (r *CreditTypeRepo) Create(ctx context.Context, ct *models.CreditType) error {
-	res, err := r.db.Q(ctx).NewInsert().Model(ct).Exec(ctx)
-	if err != nil {
-		return err
+func creditTypeFromGen(ct gen.BillingCreditType) *models.CreditType {
+	return &models.CreditType{
+		ID:            ct.ID,
+		Name:          ct.Name,
+		DisplayName:   ct.DisplayName,
+		Unit:          ct.Unit,
+		DecimalPlaces: int(ct.DecimalPlaces),
+		IsActive:      ct.IsActive,
+		CreatedAt:     ct.CreatedAt,
 	}
-	rows, err := res.RowsAffected()
+}
+
+func (r *CreditTypeRepo) Create(ctx context.Context, ct *models.CreditType) error {
+	rows, err := r.db.Gen(ctx).CreateCreditType(ctx, gen.CreateCreditTypeParams{
+		ID:            ct.ID,
+		Name:          ct.Name,
+		DisplayName:   ct.DisplayName,
+		Unit:          ct.Unit,
+		DecimalPlaces: int32(ct.DecimalPlaces),
+		IsActive:      ct.IsActive,
+		CreatedAt:     ct.CreatedAt,
+	})
 	if err != nil {
 		return err
 	}
@@ -31,39 +48,42 @@ func (r *CreditTypeRepo) Create(ctx context.Context, ct *models.CreditType) erro
 }
 
 func (r *CreditTypeRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.CreditType, error) {
-	ct := new(models.CreditType)
-	if err := r.db.Q(ctx).NewSelect().Model(ct).Where("ct.id = ?", id).Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetCreditTypeByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return ct, nil
+	return creditTypeFromGen(row), nil
 }
 
 func (r *CreditTypeRepo) GetByName(ctx context.Context, name string) (*models.CreditType, error) {
-	ct := new(models.CreditType)
-	if err := r.db.Q(ctx).NewSelect().Model(ct).Where("ct.name = ?", name).Limit(1).Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetCreditTypeByName(ctx, name)
+	if err != nil {
 		return nil, err
 	}
-	return ct, nil
+	return creditTypeFromGen(row), nil
 }
 
 func (r *CreditTypeRepo) List(ctx context.Context, activeOnly bool) ([]*models.CreditType, error) {
-	items := []*models.CreditType{}
-	q := r.db.Q(ctx).NewSelect().Model(&items).OrderExpr("ct.created_at ASC")
-	if activeOnly {
-		q = q.Where("ct.is_active = true")
-	}
-	if err := q.Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListCreditTypes(ctx, activeOnly)
+	if err != nil {
 		return nil, err
+	}
+	items := make([]*models.CreditType, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, creditTypeFromGen(row))
 	}
 	return items, nil
 }
 
 func (r *CreditTypeRepo) Update(ctx context.Context, ct *models.CreditType) error {
-	res, err := r.db.Q(ctx).NewUpdate().Model(ct).WherePK().Exec(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).UpdateCreditType(ctx, gen.UpdateCreditTypeParams{
+		ID:            ct.ID,
+		Name:          ct.Name,
+		DisplayName:   ct.DisplayName,
+		Unit:          ct.Unit,
+		DecimalPlaces: int32(ct.DecimalPlaces),
+		IsActive:      ct.IsActive,
+	})
 	if err != nil {
 		return err
 	}

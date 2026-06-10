@@ -2,12 +2,12 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"net/http"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/vault"
@@ -54,7 +54,7 @@ func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 
 	subscription, err := r.State.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "Subscription not found")
 			return
 		}

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 type SubscriptionStatus string
@@ -33,63 +32,61 @@ const (
 )
 
 type Subscription struct {
-	bun.BaseModel `bun:"table:billing.subscriptions,alias:sub"`
-
-	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	ID uuid.UUID `json:"id"`
 	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
 	// it before user_id is dropped. Join billing.tenant_subjects for issuer/subject.
-	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
-	ProductID       uuid.UUID `bun:"product_id,type:uuid,notnull" json:"product_id"` // Denormalized for efficient product-based lookups
-	PriceID         uuid.UUID `bun:"price_id,type:uuid,notnull" json:"price_id"`     // Required for all subscriptions
+	TenantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
+	ProductID       uuid.UUID `json:"product_id"` // Denormalized for efficient product-based lookups
+	PriceID         uuid.UUID `json:"price_id"`   // Required for all subscriptions
 
 	// Scheduled tier change (for downgrades that take effect at end of period)
-	ScheduledPriceID *uuid.UUID `bun:"scheduled_price_id,type:uuid,nullzero" json:"scheduled_price_id,omitempty"`
+	ScheduledPriceID *uuid.UUID `json:"scheduled_price_id,omitempty"`
 
-	EntitlementsSpecSnapshot map[string]*int `bun:"entitlements_spec_snapshot,type:jsonb,nullzero" json:"entitlements_spec_snapshot,omitempty"`
-	CreditsSpecSnapshot      CreditsSpec     `bun:"credits_spec_snapshot,type:jsonb,nullzero" json:"credits_spec_snapshot,omitempty"`
+	EntitlementsSpecSnapshot map[string]*int `json:"entitlements_spec_snapshot,omitempty"`
+	CreditsSpecSnapshot      CreditsSpec     `json:"credits_spec_snapshot,omitempty"`
 
-	Status                SubscriptionStatus `bun:"status,notnull,default:'pending'" json:"status"`
-	StartedAt             time.Time          `bun:"started_at,notnull" json:"started_at"`
-	EndedAt               *time.Time         `bun:"ended_at,nullzero" json:"ended_at"`
-	CurrentPeriodStartsAt *time.Time         `bun:"current_period_starts_at,nullzero" json:"current_period_starts_at"`
-	CurrentPeriodEndsAt   *time.Time         `bun:"current_period_ends_at,nullzero" json:"current_period_ends_at"`
+	Status                SubscriptionStatus `json:"status"`
+	StartedAt             time.Time          `json:"started_at"`
+	EndedAt               *time.Time         `json:"ended_at"`
+	CurrentPeriodStartsAt *time.Time         `json:"current_period_starts_at"`
+	CurrentPeriodEndsAt   *time.Time         `json:"current_period_ends_at"`
 
 	// Payment processor information
-	Processor               Processor  `bun:"processor,notnull" json:"processor"`                                 // Processor: mobius, ccbill, solana
-	ProcessorSubscriptionID string     `bun:"processor_subscription_id,notnull" json:"processor_subscription_id"` // Subscription ID from processor
-	UserEmail               *string    `bun:"user_email,nullzero" json:"user_email,omitempty"`
-	PaymentMethodID         *uuid.UUID `bun:"payment_method_id,type:uuid,nullzero" json:"payment_method_id"` // Reference to stored payment method
+	Processor               Processor  `json:"processor"`                 // Processor: mobius, ccbill, solana
+	ProcessorSubscriptionID string     `json:"processor_subscription_id"` // Subscription ID from processor
+	UserEmail               *string    `json:"user_email,omitempty"`
+	PaymentMethodID         *uuid.UUID `json:"payment_method_id"` // Reference to stored payment method
 
 	// Manual rebill attempt fields for NMI
-	LastRetryAt   *time.Time `bun:"last_retry_at,nullzero" json:"last_retry_at"`   // Date of last rebill attempt
-	RetryAttempts *int       `bun:"retry_attempts,nullzero" json:"retry_attempts"` // Number of retry attempts (nullable for new subscriptions)
-	NextRetryAt   *time.Time `bun:"next_retry_at,nullzero" json:"next_retry_at"`   // When to try next rebill
-	GraceEndsAt   *time.Time `bun:"grace_ends_at,nullzero" json:"grace_ends_at"`   // Optional grace window end during dunning (processor-specific)
+	LastRetryAt   *time.Time `json:"last_retry_at"`  // Date of last rebill attempt
+	RetryAttempts *int       `json:"retry_attempts"` // Number of retry attempts (nullable for new subscriptions)
+	NextRetryAt   *time.Time `json:"next_retry_at"`  // When to try next rebill
+	GraceEndsAt   *time.Time `json:"grace_ends_at"`  // Optional grace window end during dunning (processor-specific)
 
 	// Cancellation information
-	CancelFeedback *string     `bun:"cancel_feedback,nullzero" json:"cancel_feedback"` // User's cancellation message
-	CancelType     *CancelType `bun:"cancel_type,nullzero" json:"cancel_type"`         // Who/what caused cancellation
-	CancelledAt    *time.Time  `bun:"cancelled_at,nullzero" json:"cancelled_at"`
+	CancelFeedback *string     `json:"cancel_feedback"` // User's cancellation message
+	CancelType     *CancelType `json:"cancel_type"`     // Who/what caused cancellation
+	CancelledAt    *time.Time  `json:"cancelled_at"`
 
 	// DeletionScheduledAt is set for NMI-backed cancellations that defer the
 	// processor-side delete_subscription until shortly before the paid period
 	// ends (issue 216). While non-nil, the cancellation is still reversible (the
 	// processor subscription is alive). The River finalizer clears it to nil
 	// after calling DeleteRecurringSubscription.
-	DeletionScheduledAt *time.Time `bun:"deletion_scheduled_at,nullzero" json:"deletion_scheduled_at,omitempty"`
+	DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
 
 	// Relationships
-	Price         *Price         `bun:"rel:belongs-to,join:price_id=id" json:"price,omitempty"`
-	PaymentMethod *PaymentMethod `bun:"rel:belongs-to,join:payment_method_id=id" json:"payment_method,omitempty"`
+	Price         *Price         `json:"price,omitempty"`
+	PaymentMethod *PaymentMethod `json:"payment_method,omitempty"`
 
 	// Product relation for description
-	Product *Product `bun:"rel:belongs-to,join:product_id=id" json:"product,omitempty"`
+	Product *Product `json:"product,omitempty"`
 
-	Metadata json.RawMessage `bun:"gateway_response,type:jsonb,nullzero" json:"gateway_response,omitempty"` // Renamed from GatewayResponse - stores arbitrary subscription metadata
+	Metadata json.RawMessage `json:"gateway_response,omitempty"` // Renamed from GatewayResponse - stores arbitrary subscription metadata
 
-	CreatedAt time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt time.Time `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (s *Subscription) updateCurrentPeriods(billingCycle *time.Duration) {

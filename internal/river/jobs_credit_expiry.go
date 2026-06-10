@@ -2,17 +2,17 @@ package riverjobs
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
-	"github.com/uptrace/bun"
 )
 
 const KindCreditExpiry = "billing.credit_expiry"
@@ -54,129 +54,112 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 	logger := log.WithContext(ctx).WithField("worker", KindCreditExpiry)
 
 	for {
-		tx, err := w.DB.GetDB().(*bun.DB).BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		var blocks []models.CreditBlock
-		if err := tx.NewSelect().
-			Model(&blocks).
-			Where("remaining_amount > 0 AND expires_at IS NOT NULL AND expires_at <= ?", now).
-			OrderExpr("expires_at ASC").
-			Limit(batchSize).
-			For("UPDATE SKIP LOCKED").
-			Scan(ctx); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if len(blocks) == 0 {
-			if err := tx.Commit(); err != nil {
+		batch := 0
+		// Privileged (no-GUC) cross-tenant sweep with explicit tenant predicates.
+		err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			q := gen.New(tx)
+			blocks, err := q.ListExpiredCreditBlocksForUpdate(ctx, gen.ListExpiredCreditBlocksForUpdateParams{
+				Now: now, BatchSize: int32(batchSize),
+			})
+			if err != nil {
 				return err
 			}
-			break
-		}
+			batch = len(blocks)
+			if batch == 0 {
+				return nil
+			}
 
-		// HARDCUT (#221/#223): credit rows are payer+tenant-scoped. Expiry rolls up
-		// per (tenant, payer, credit_type); actor is carried for actor attribution
-		// only and is not part of the balance key.
-		type key struct {
-			TenantID        uuid.UUID
-			TenantSubjectID uuid.UUID
-			CreditTypeID    uuid.UUID
-		}
-		expiredTotals := make(map[key]int64)
-		for i := range blocks {
-			if blocks[i].RemainingAmount <= 0 {
-				continue
+			// HARDCUT (#221/#223): credit rows are payer+tenant-scoped. Expiry rolls up
+			// per (tenant, payer, credit_type); actor is carried for actor attribution
+			// only and is not part of the balance key.
+			type key struct {
+				TenantID        uuid.UUID
+				TenantSubjectID uuid.UUID
+				CreditTypeID    uuid.UUID
 			}
-			k := key{
-				TenantID:        blocks[i].TenantID,
-				TenantSubjectID: blocks[i].TenantSubjectID,
-				CreditTypeID:    blocks[i].CreditTypeID,
-			}
-			expiredTotals[k] += blocks[i].RemainingAmount
-			blocks[i].RemainingAmount = 0
-			if _, err := tx.NewUpdate().Model(&blocks[i]).
-				Column("remaining_amount").
-				WherePK().
-				Exec(ctx); err != nil {
-				_ = tx.Rollback()
-				return err
-			}
-		}
-
-		for k, amount := range expiredTotals {
-			if amount <= 0 {
-				continue
-			}
-			bal := new(models.CreditBalance)
-			err := tx.NewSelect().
-				Model(bal).
-				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
-				For("UPDATE").
-				Scan(ctx)
-			if err != nil && !errorsIsNoRows(err) {
-				_ = tx.Rollback()
-				return err
-			}
-			if errorsIsNoRows(err) {
-				bal = &models.CreditBalance{
-					ID:              uuidutil.NewV7(),
-					TenantID:        k.TenantID,
-					TenantSubjectID: k.TenantSubjectID,
-					CreditTypeID:    k.CreditTypeID,
-					Balance:         0,
-					HeldBalance:     0,
-					CreatedAt:       now,
-					UpdatedAt:       now,
+			expiredTotals := make(map[key]int64)
+			for i := range blocks {
+				if blocks[i].RemainingAmount <= 0 {
+					continue
 				}
-				if _, err := tx.NewInsert().Model(bal).Exec(ctx); err != nil {
-					_ = tx.Rollback()
+				k := key{
+					TenantID:        blocks[i].TenantID,
+					TenantSubjectID: blocks[i].TenantSubjectID,
+					CreditTypeID:    blocks[i].CreditTypeID,
+				}
+				expiredTotals[k] += blocks[i].RemainingAmount
+				if err := q.SetCreditBlockRemaining(ctx, gen.SetCreditBlockRemainingParams{
+					ID: blocks[i].ID, RemainingAmount: 0,
+				}); err != nil {
 					return err
 				}
 			}
 
-			newBalance := bal.Balance - amount
-			if newBalance < 0 {
-				newBalance = 0
-			}
+			for k, amount := range expiredTotals {
+				if amount <= 0 {
+					continue
+				}
+				balKey := gen.LockCreditBalanceParams{
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, CreditTypeID: k.CreditTypeID,
+				}
+				bal, err := q.LockCreditBalance(ctx, balKey)
+				if err != nil && !errorsIsNoRows(err) {
+					return err
+				}
+				if errorsIsNoRows(err) {
+					if err := q.InsertCreditBalanceIfAbsent(ctx, gen.InsertCreditBalanceIfAbsentParams{
+						ID: uuidutil.NewV7(), TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID,
+						CreditTypeID: k.CreditTypeID, Now: now,
+					}); err != nil {
+						return err
+					}
+					bal, err = q.LockCreditBalance(ctx, balKey)
+					if err != nil {
+						return err
+					}
+				}
 
-			if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-				Set("balance = ?", newBalance).
-				Set("updated_at = ?", now).
-				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
-				Exec(ctx); err != nil {
-				_ = tx.Rollback()
-				return err
-			}
+				newBalance := bal.Balance - amount
+				if newBalance < 0 {
+					newBalance = 0
+				}
 
-			trx := &models.CreditTransaction{
-				ID:              uuidutil.NewV7(),
-				TenantID:        k.TenantID,
-				TenantSubjectID: k.TenantSubjectID,
-				// System event: no caller actor; payer-derived per money_in convention.
-				Actor:           k.TenantSubjectID.String(),
-				CreditTypeID:    k.CreditTypeID,
-				Amount:          -amount,
-				BalanceAfter:    &newBalance,
-				TransactionType: "expiry",
-				Status:          "posted",
-				Source:          "expiry_job",
-				ExpiresAt:       &now,
-				CreatedAt:       now,
-				UpdatedAt:       now,
-			}
-			if _, err := tx.NewInsert().Model(trx).Exec(ctx); err != nil {
-				_ = tx.Rollback()
-				return err
-			}
-		}
+				if err := q.SetCreditBalance(ctx, gen.SetCreditBalanceParams{
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, CreditTypeID: k.CreditTypeID,
+					Balance: newBalance, UpdatedAt: now,
+				}); err != nil {
+					return err
+				}
 
-		if err := tx.Commit(); err != nil {
+				if err := q.InsertCreditTransaction(ctx, gen.InsertCreditTransactionParams{
+					ID:              uuidutil.NewV7(),
+					TenantID:        k.TenantID,
+					TenantSubjectID: k.TenantSubjectID,
+					// System event: no caller actor; payer-derived per money_in convention.
+					Actor:           k.TenantSubjectID.String(),
+					CreditTypeID:    k.CreditTypeID,
+					Amount:          -amount,
+					BalanceAfter:    &newBalance,
+					TransactionType: "expiry",
+					Status:          "posted",
+					Source:          "expiry_job",
+					ExpiresAt:       &now,
+					CreatedAt:       now,
+					UpdatedAt:       now,
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
 			return err
 		}
-		logger.WithField("expired_blocks", len(blocks)).Info("expired credit blocks")
-		if len(blocks) < batchSize {
+		if batch == 0 {
+			break
+		}
+		logger.WithField("expired_blocks", batch).Info("expired credit blocks")
+		if batch < batchSize {
 			break
 		}
 	}
@@ -185,5 +168,5 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 }
 
 func errorsIsNoRows(err error) bool {
-	return err != nil && err == sql.ErrNoRows
+	return err != nil && repo.IsNotFound(err)
 }

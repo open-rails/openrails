@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 // BudgetReservation is one in-flight or settled charge against a delegated
@@ -21,26 +20,24 @@ import (
 // (tenant_id, tenant_subject_id, actor, source, source_id): a replayed Reserve returns
 // the existing row rather than double-reserving.
 type BudgetReservation struct {
-	bun.BaseModel `bun:"table:billing.budget_reservations,alias:br"`
-
-	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	ID uuid.UUID `json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223/#227).
-	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
+	TenantID uuid.UUID `json:"tenant_id"`
 	// TenantSubjectID is the tenant subject the budget is charged against (issue #221, the payer).
-	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	// Actor is the caller-supplied principal string whose spend the windows cap.
-	Actor string `bun:"actor,notnull" json:"actor"`
+	Actor string `json:"actor"`
 	// AmountMicros is the reserved (authorized) amount; counts against
 	// `reserved` while Status == "active".
-	AmountMicros int64 `bun:"amount_micros,notnull" json:"amount_micros"`
+	AmountMicros int64 `json:"amount_micros"`
 	// CapturedMicros is the actually captured amount; counts against `used`
 	// once Status == "captured". 0 until captured.
-	CapturedMicros int64 `bun:"captured_micros,notnull" json:"captured_micros"`
+	CapturedMicros int64 `json:"captured_micros"`
 	// Status is one of "active", "captured", "released".
-	Status string `bun:"status,notnull" json:"status"`
+	Status string `json:"status"`
 	// Source + SourceID form the idempotency key (SourceID is typically the request id).
-	Source    string     `bun:"source,notnull" json:"source"`
-	SourceID  string     `bun:"source_id,notnull" json:"source_id"`
-	CreatedAt time.Time  `bun:"created_at,notnull" json:"created_at"`
-	ExpiresAt *time.Time `bun:"expires_at,nullzero" json:"expires_at,omitempty"`
+	Source    string     `json:"source"`
+	SourceID  string     `json:"source_id"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }

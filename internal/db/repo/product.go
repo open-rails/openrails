@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
@@ -15,12 +16,45 @@ type ProductRepo struct {
 
 func NewProductRepo(d *db.DB) *ProductRepo { return &ProductRepo{db: d} }
 
+func productsFromGen(rows []gen.BillingProduct) ([]*models.Product, error) {
+	out := make([]*models.Product, 0, len(rows))
+	for _, r := range rows {
+		p, err := productFromGen(r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
 func (r *ProductRepo) Create(ctx context.Context, product *models.Product) error {
-	res, err := r.db.Q(ctx).NewInsert().Model(product).Exec(ctx)
+	entSpec, err := toJSONB(product.EntitlementsSpec)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	credSpec, err := toJSONB(product.CreditsSpec)
+	if err != nil {
+		return err
+	}
+	var desc *string
+	if product.Description != "" {
+		desc = &product.Description
+	}
+	rows, err := r.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
+		ID:               product.ID,
+		TenantID:         product.TenantID,
+		Slug:             product.Slug,
+		DisplayName:      product.DisplayName,
+		Description:      desc,
+		EntitlementsSpec: entSpec,
+		CreditsSpec:      credSpec,
+		TierGroup:        product.TierGroup,
+		TierRank:         int32(product.TierRank),
+		Status:           string(product.Status),
+		CreatedAt:        product.CreatedAt,
+		UpdatedAt:        product.UpdatedAt,
+	})
 	if err != nil {
 		return err
 	}
@@ -31,66 +65,96 @@ func (r *ProductRepo) Create(ctx context.Context, product *models.Product) error
 }
 
 func (r *ProductRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
-	product := new(models.Product)
-	if err := r.db.Q(ctx).NewSelect().Model(product).Where("prod.id = ?", id).Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetProductByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return product, nil
+	return productFromGen(row)
 }
 
 func (r *ProductRepo) GetActive(ctx context.Context) ([]*models.Product, error) {
-	products := []*models.Product{}
-	if err := r.db.Q(ctx).NewSelect().Model(&products).Where("prod.status = ?", models.CatalogStatusActive).Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListActiveProducts(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return products, nil
+	return productsFromGen(rows)
 }
 
 func (r *ProductRepo) GetAll(ctx context.Context) ([]*models.Product, error) {
-	products := []*models.Product{}
-	if err := r.db.Q(ctx).NewSelect().Model(&products).Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListAllProducts(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return products, nil
+	return productsFromGen(rows)
 }
 
 // GetActivePaginated returns active products with pagination
 func (r *ProductRepo) GetActivePaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
-	products := []*models.Product{}
-	count, err := r.db.Q(ctx).NewSelect().
-		Model(&products).
-		Where("prod.status = ?", models.CatalogStatusActive).
-		Order("prod.created_at DESC").
-		Limit(limit).
-		Offset(offset).
-		ScanAndCount(ctx)
+	q := r.db.Gen(ctx)
+	total, err := q.CountActiveProducts(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	return products, int64(count), nil
+	rows, err := q.ListActiveProductsPaged(ctx, gen.ListActiveProductsPagedParams{
+		PageLimit:  int32(limit),
+		PageOffset: int32(offset),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	products, err := productsFromGen(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return products, total, nil
 }
 
 // GetAllPaginated returns all products with pagination
 func (r *ProductRepo) GetAllPaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
-	products := []*models.Product{}
-	count, err := r.db.Q(ctx).NewSelect().
-		Model(&products).
-		Order("prod.created_at DESC").
-		Limit(limit).
-		Offset(offset).
-		ScanAndCount(ctx)
+	q := r.db.Gen(ctx)
+	total, err := q.CountAllProducts(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	return products, int64(count), nil
+	rows, err := q.ListAllProductsPaged(ctx, gen.ListAllProductsPagedParams{
+		PageLimit:  int32(limit),
+		PageOffset: int32(offset),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	products, err := productsFromGen(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return products, total, nil
 }
 
 func (r *ProductRepo) Update(ctx context.Context, product *models.Product) error {
-	res, err := r.db.Q(ctx).NewUpdate().Model(product).WherePK().Exec(ctx)
+	entSpec, err := toJSONB(product.EntitlementsSpec)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	credSpec, err := toJSONB(product.CreditsSpec)
+	if err != nil {
+		return err
+	}
+	var desc *string
+	if product.Description != "" {
+		desc = &product.Description
+	}
+	rows, err := r.db.Gen(ctx).UpdateProduct(ctx, gen.UpdateProductParams{
+		ID:               product.ID,
+		Slug:             product.Slug,
+		DisplayName:      product.DisplayName,
+		Description:      desc,
+		EntitlementsSpec: entSpec,
+		CreditsSpec:      credSpec,
+		TierGroup:        product.TierGroup,
+		TierRank:         int32(product.TierRank),
+		Status:           string(product.Status),
+		UpdatedAt:        updateTimestamp(product.UpdatedAt),
+	})
 	if err != nil {
 		return err
 	}
@@ -101,11 +165,7 @@ func (r *ProductRepo) Update(ctx context.Context, product *models.Product) error
 }
 
 func (r *ProductRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.Q(ctx).NewDelete().Model((*models.Product)(nil)).Where("prod.id = ?", id).Exec(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).DeleteProduct(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -116,9 +176,9 @@ func (r *ProductRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *ProductRepo) GetBySlug(ctx context.Context, slug string) (*models.Product, error) {
-	product := new(models.Product)
-	if err := r.db.Q(ctx).NewSelect().Model(product).Where("prod.slug = ?", slug).Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetProductBySlug(ctx, slug)
+	if err != nil {
 		return nil, err
 	}
-	return product, nil
+	return productFromGen(row)
 }

@@ -2,13 +2,13 @@ package subscriptions
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
-	"github.com/uptrace/bun"
 )
 
 // SubscriptionLifecycleService handles the complete lifecycle of subscriptions
@@ -138,8 +137,8 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 		"currency":                  params.Currency,
 	}).Info("Starting membership creation flow")
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		dbb := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		dbb := db.NewWithPgxTx(tx)
 		var err error
 		subscription, notifications, err = s.createMembershipCore(ctx, dbb, params)
 		return err
@@ -194,7 +193,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	var existingPendingSub *models.Subscription
 	if params.ProcessorSubscriptionID != nil && strings.TrimSpace(*params.ProcessorSubscriptionID) != "" {
 		found, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), strings.TrimSpace(*params.ProcessorSubscriptionID))
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !repo.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing subscription by processor subscription ID: %w", err)
 		}
 		if err == nil && found.Status == models.StatusPending {
@@ -209,7 +208,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	if params.TransactionID != "" && s.PaymentService != nil {
 		paymentService = payments.NewPaymentService(dbb, s.Clock())
 		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !repo.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
 		}
 		if err == nil {
@@ -251,7 +250,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	activeSub, err := subService.GetActiveOrPendingByUserIDAndProductID(ctx, params.UserID, price.ProductID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !repo.IsNotFound(err) {
 		return nil, nil, fmt.Errorf("failed to check existing subscriptions: %w", err)
 	}
 
@@ -524,8 +523,8 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		"allow_terminal_reactivate": params.AllowTerminalReactivation,
 	}).Info("Starting membership renewal flow")
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		db := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
@@ -884,8 +883,8 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 
 	var reactivated *models.Subscription
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		txdb := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
 		subService := NewSubscriptionService(txdb, priceService, productService, nil, nil, nil, s.Clock())
@@ -1021,8 +1020,8 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		"cancel_feedback_provided":  cancelFeedback != "",
 	}).Info("Starting membership cancellation flow")
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		db := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
@@ -1182,7 +1181,7 @@ func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscription
 	solanaRepo := repo.NewSolanaSubscriptionRepo(d)
 	row, err := solanaRepo.GetBySubscriptionID(ctx, subscriptionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
 			}).Info("no solana_subscriptions row linked to cancelled subscription; nothing to cascade")
@@ -1209,8 +1208,8 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 
 	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Starting membership expiration flow")
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		db := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
@@ -1348,8 +1347,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		"dunning_mode":              dunningMode,
 	}).Warn("Starting membership failure flow")
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		db := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)

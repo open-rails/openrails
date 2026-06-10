@@ -48,8 +48,7 @@ func TestEntitlementExpiry(t *testing.T) {
 		CreatedAt:       startTime,
 		UpdatedAt:       startTime,
 	}
-	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent)
 
 	entService := suite.App.Runtime.EntitlementService
 
@@ -113,8 +112,7 @@ func TestEntitlementStacking(t *testing.T) {
 		CreatedAt:       startTime,
 		UpdatedAt:       startTime,
 	}
-	_, err := suite.BunDB.NewInsert().Model(ent1).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent1)
 
 	// Grant second 15-day entitlement that stacks (starts where first ends)
 	secondStart := firstEnd
@@ -131,8 +129,7 @@ func TestEntitlementStacking(t *testing.T) {
 		CreatedAt:       startTime,
 		UpdatedAt:       startTime,
 	}
-	_, err = suite.BunDB.NewInsert().Model(ent2).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent2)
 
 	entService := suite.App.Runtime.EntitlementService
 
@@ -186,8 +183,7 @@ func TestIndefiniteEntitlement(t *testing.T) {
 		CreatedAt:       startTime,
 		UpdatedAt:       startTime,
 	}
-	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent)
 
 	entService := suite.App.Runtime.EntitlementService
 
@@ -259,8 +255,7 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 		CreatedAt:       startTime,
 		UpdatedAt:       startTime,
 	}
-	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent)
 
 	entService := suite.App.Runtime.EntitlementService
 	lifecycleService := suite.App.Runtime.SubscriptionLifecycleService
@@ -290,12 +285,7 @@ func TestCancelAccessAtPeriodEnd(t *testing.T) {
 	})
 
 	t.Run("entitlement EndAt remains at period end", func(t *testing.T) {
-		var dbEnt models.Entitlement
-		err := suite.BunDB.NewSelect().
-			Model(&dbEnt).
-			Where("id = ?", ent.ID).
-			Scan(ctx)
-		require.NoError(t, err)
+		dbEnt := *suite.GetEntitlement(ctx, ent.ID)
 		require.NotNil(t, dbEnt.EndAt, "Entitlement EndAt should be set")
 		assert.WithinDuration(t, periodEnd, *dbEnt.EndAt, time.Second,
 			"Entitlement EndAt should remain at period end")
@@ -372,8 +362,7 @@ func TestAdminRevokeAccess(t *testing.T) {
 		CreatedAt:       startTime,
 		UpdatedAt:       startTime,
 	}
-	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent)
 
 	entService := suite.App.Runtime.EntitlementService
 	lifecycleService := suite.App.Runtime.SubscriptionLifecycleService
@@ -463,16 +452,12 @@ func TestDunningRetrySchedule(t *testing.T) {
 
 	// Helper to count due subscriptions using the same query as DunningWorker
 	countDueSubscriptions := func(clock clockwork.Clock) int {
-		var count int
-		err := suite.BunDB.NewSelect().
-			Model((*models.Subscription)(nil)).
-			Where("sub.processor = ?", models.ProcessorMobius).
-			Where("sub.status = ?", models.StatusPastDue).
-			Where("sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= ?", clock.Now()).
-			ColumnExpr("COUNT(*)").
-			Scan(ctx, &count)
-		require.NoError(t, err)
-		return count
+		return suite.Count(ctx, `
+			SELECT COUNT(*) FROM billing.subscriptions sub
+			WHERE sub.processor = $1
+			  AND sub.status = $2
+			  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $3`,
+			string(models.ProcessorMobius), string(models.StatusPastDue), clock.Now())
 	}
 
 	t.Run("subscription is past_due with scheduled retry", func(t *testing.T) {
@@ -566,8 +551,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 		CreatedAt:       startTime,
 		UpdatedAt:       startTime,
 	}
-	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent)
 
 	lifecycleService := suite.App.Runtime.SubscriptionLifecycleService
 	entService := suite.App.Runtime.EntitlementService
@@ -620,12 +604,7 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 
 	t.Run("entitlement was revoked at failure time", func(t *testing.T) {
 		// Verify the entitlement was properly revoked
-		var dbEnt models.Entitlement
-		err := suite.BunDB.NewSelect().
-			Model(&dbEnt).
-			Where("id = ?", ent.ID).
-			Scan(ctx)
-		require.NoError(t, err)
+		dbEnt := *suite.GetEntitlement(ctx, ent.ID)
 		require.NotNil(t, dbEnt.RevokedAt, "Entitlement RevokedAt should be set after failure")
 		expectedRevokedAt := startTime.Add(1 * 24 * time.Hour)
 		assert.WithinDuration(t, expectedRevokedAt, *dbEnt.RevokedAt, time.Minute,
@@ -932,8 +911,7 @@ func TestSubscriptionExpiryAtExactBoundary(t *testing.T) {
 		CreatedAt:       startTime,
 		UpdatedAt:       startTime,
 	}
-	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent)
 
 	entService := suite.App.Runtime.EntitlementService
 
@@ -1064,13 +1042,10 @@ func TestVaultTimestamps(t *testing.T) {
 		CreatedAt:       mockClock.Now(),
 		UpdatedAt:       mockClock.Now(),
 	}
-	_, err := suite.BunDB.NewInsert().Model(pm).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertPaymentMethod(ctx, pm)
 
 	t.Run("payment method timestamps match mock clock", func(t *testing.T) {
-		var dbPM models.PaymentMethod
-		err := suite.BunDB.NewSelect().Model(&dbPM).Where("id = ?", pm.ID).Scan(ctx)
-		require.NoError(t, err)
+		dbPM := *suite.GetPaymentMethod(ctx, pm.ID)
 
 		assert.WithinDuration(t, vaultTime, dbPM.CreatedAt, time.Second,
 			"PaymentMethod CreatedAt should match mock clock time")
@@ -1084,16 +1059,12 @@ func TestVaultTimestamps(t *testing.T) {
 		expectedUpdateTime := vaultTime.Add(10 * 24 * time.Hour)
 
 		// Update the payment method
-		_, err := suite.BunDB.NewUpdate().
-			Model((*models.PaymentMethod)(nil)).
-			Set("updated_at = ?", mockClock.Now()).
-			Where("id = ?", pm.ID).
-			Exec(ctx)
+		_, err := suite.Pool.Exec(ctx,
+			"UPDATE billing.payment_methods SET updated_at = $1 WHERE id = $2",
+			mockClock.Now(), pm.ID)
 		require.NoError(t, err)
 
-		var dbPM models.PaymentMethod
-		err = suite.BunDB.NewSelect().Model(&dbPM).Where("id = ?", pm.ID).Scan(ctx)
-		require.NoError(t, err)
+		dbPM := *suite.GetPaymentMethod(ctx, pm.ID)
 
 		assert.WithinDuration(t, vaultTime, dbPM.CreatedAt, time.Second,
 			"PaymentMethod CreatedAt should remain at original time")

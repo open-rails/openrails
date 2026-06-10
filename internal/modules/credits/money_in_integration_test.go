@@ -4,64 +4,56 @@ package credits_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // moneyInEnv seeds a fresh credit type + payer with NO initial deposit (balance 0).
-func moneyInEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.TenantSubjectID, string, context.Context) {
+func moneyInEnv(t *testing.T) (*credits.CreditsService, *pgxpool.Pool, identity.TenantSubjectID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
+
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 
 	var hasSettings bool
-	require.NoError(t, bunDB.NewSelect().
-		ColumnExpr("EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_account_settings')").
-		Scan(ctx, &hasSettings))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_account_settings')").
+		Scan(&hasSettings))
 	if !hasSettings {
 		t.Skip("billing.credit_account_settings missing; run migration 043")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
-
 	now := time.Now().UTC().Truncate(time.Second)
 	ctName := "test_moneyin_" + uuid.NewString()
 	ctID := uuid.New()
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := gen.New(pool).CreateCreditType(ctx, gen.CreateCreditTypeParams{
 		ID: ctID, Name: ctName, DisplayName: "Money-in Test", Unit: "cents",
 		DecimalPlaces: 2, IsActive: true, CreatedAt: now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditSpendLimit)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_spend_limits WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_account_settings WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", ctID)
 	})
-	return credits.NewCreditsService(dbi), bunDB, payer, ctName, ctx
+	return credits.NewCreditsService(dbi), pool, payer, ctName, ctx
 }
 
 // --- fakes ---
@@ -86,40 +78,42 @@ func (f *fakeAlerter) LowBalanceAlert(_ context.Context, _ identity.TenantSubjec
 	return nil
 }
 
-func latestBlock(t *testing.T, bunDB *bun.DB, ctx context.Context, payerID uuid.UUID) *models.CreditBlock {
+func latestBlock(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payerID uuid.UUID) *models.CreditBlock {
 	t.Helper()
 	b := new(models.CreditBlock)
-	require.NoError(t, bunDB.NewSelect().Model(b).Where("tenant_subject_id = ?", payerID).OrderExpr("created_at DESC").Limit(1).Scan(ctx))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT expires_at FROM billing.credit_blocks WHERE tenant_subject_id = $1 ORDER BY created_at DESC LIMIT 1",
+		payerID).Scan(&b.ExpiresAt))
 	return b
 }
 
 // --- #240 expiry default ---
 
 func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
-	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
+	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
 		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
-	b := latestBlock(t, bunDB, ctx, payer.UUID())
+	b := latestBlock(t, pool, ctx, payer.UUID())
 	require.NotNil(t, b.ExpiresAt, "default 365d expiry should be applied")
 	days := b.ExpiresAt.Sub(time.Now().UTC()).Hours() / 24
 	require.InDelta(t, 365, days, 1.5)
 }
 
 func TestDeposit_NoFlag_Permanent(t *testing.T) {
-	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
+	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
 		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 1000, Source: "grant",
 	})
 	require.NoError(t, err)
-	b := latestBlock(t, bunDB, ctx, payer.UUID())
+	b := latestBlock(t, pool, ctx, payer.UUID())
 	require.Nil(t, b.ExpiresAt, "no flag, no explicit expiry -> permanent")
 }
 
 func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
-	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
+	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	days := 30
 	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{DefaultCreditExpiryDays: &days})
 	require.NoError(t, err)
@@ -128,7 +122,7 @@ func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
-	b := latestBlock(t, bunDB, ctx, payer.UUID())
+	b := latestBlock(t, pool, ctx, payer.UUID())
 	require.NotNil(t, b.ExpiresAt)
 	require.InDelta(t, 30, b.ExpiresAt.Sub(time.Now().UTC()).Hours()/24, 1.5)
 }

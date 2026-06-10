@@ -68,13 +68,7 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	require.Equal(t, newPrice.ID, updated.PriceID)
 
 	ctx := context.Background()
-	var payment models.Payment
-	err := suite.BunDB.NewSelect().
-		Model(&payment).
-		Where("purch.processor = ?", models.ProcessorCCBill).
-		Where("purch.transaction_id = ?", transactionID).
-		Scan(ctx)
-	require.NoError(t, err)
+	payment := suite.GetPaymentByTransaction(ctx, models.ProcessorCCBill, transactionID)
 	require.NotNil(t, payment.SubscriptionID)
 	require.Equal(t, updated.ID, *payment.SubscriptionID)
 	require.Equal(t, newPrice.ID, payment.PriceID)
@@ -88,12 +82,9 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	payload["timestamp"] = time.Now().UTC().Add(2 * time.Second).Format("2006-01-02 15:04:05")
 	postCCBillWebhook(t, suite.ServerURL, "UpgradeSuccess", payload)
 
-	count, err := suite.BunDB.NewSelect().
-		Model((*models.Payment)(nil)).
-		Where("purch.processor = ?", models.ProcessorCCBill).
-		Where("purch.transaction_id = ?", transactionID).
-		Count(ctx)
-	require.NoError(t, err)
+	count := suite.Count(ctx,
+		"SELECT COUNT(*) FROM billing.payments WHERE processor = $1 AND transaction_id = $2",
+		string(models.ProcessorCCBill), transactionID)
 	require.Equal(t, 1, count)
 
 	updatedAfterDupe := suite.GetSubscriptionByProcessorID(newProcessorSubID)

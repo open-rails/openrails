@@ -6,11 +6,14 @@ package admission
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/budgets"
@@ -58,15 +61,23 @@ func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identi
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		// Materialize the payable tenant_subjects row so the tier_policies FK
 		// (migration 076) is satisfied on a subject's first policy write (#317).
-		if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Q(ctx), tenantID, payer.UUID().String()); err != nil {
+		if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
 			return err
 		}
-		_, err := s.db.Q(ctx).NewInsert().Model(row).
-			On("CONFLICT (tenant_id, tenant_subject_id, tier) DO UPDATE").
-			Set("policy = EXCLUDED.policy").
-			Set("updated_at = EXCLUDED.updated_at").
-			Exec(ctx)
-		return err
+		policyJSON, err := json.Marshal(row.Policy)
+		if err != nil {
+			return fmt.Errorf("admission: encode tier policy: %w", err)
+		}
+		return s.db.Gen(ctx).UpsertTierPolicy(ctx, gen.UpsertTierPolicyParams{
+			ID:              row.ID,
+			TenantID:        row.TenantID,
+			TenantSubjectID: row.TenantSubjectID,
+			Tier:            row.Tier,
+			Policy:          policyJSON,
+			PolicyVersion:   int64(row.PolicyVersion),
+			CreatedAt:       row.CreatedAt,
+			UpdatedAt:       row.UpdatedAt,
+		})
 	})
 }
 
@@ -77,14 +88,19 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Tena
 	row := new(models.TierPolicy)
 	found := false
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		e := s.db.Q(ctx).NewSelect().Model(row).
-			Where("tenant_id = ? AND tenant_subject_id = ? AND tier = ?", tenantID, payer.UUID(), tier).
-			Limit(1).Scan(ctx)
-		if errors.Is(e, sql.ErrNoRows) {
+		genRow, e := s.db.Gen(ctx).GetTierPolicy(ctx, gen.GetTierPolicyParams{
+			TenantID: tenantID, TenantSubjectID: payer.UUID(), Tier: tier,
+		})
+		if errors.Is(e, pgx.ErrNoRows) {
 			return nil
 		}
 		if e != nil {
 			return e
+		}
+		if len(genRow.Policy) > 0 {
+			if uerr := json.Unmarshal(genRow.Policy, &row.Policy); uerr != nil {
+				return fmt.Errorf("admission: decode tier policy: %w", uerr)
+			}
 		}
 		found = true
 		return nil

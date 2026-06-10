@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	entitlementmod "github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -398,7 +399,7 @@ func (s *Service) AdminGrantEntitlement(ctx context.Context, adminUserID string,
 		}
 	}
 
-	if _, err := database.GetDB().NewInsert().Model(adminGrant).Exec(ctx); err != nil {
+	if err := repo.NewAdminGrantRepo(database).Create(ctx, adminGrant); err != nil {
 		return nil, fmt.Errorf("create admin grant: %w", err)
 	}
 

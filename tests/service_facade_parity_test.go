@@ -82,7 +82,10 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		IsActive:      true,
 		CreatedAt:     time.Now().UTC(),
 	}
-	_, err := suite.BunDB.NewInsert().Model(ct).Exec(ctx)
+	_, err := suite.Pool.Exec(ctx, `
+		INSERT INTO billing.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		ct.ID, ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
 	require.NoError(t, err)
 
 	ucb := &models.CreditBalance{
@@ -95,7 +98,10 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		CreatedAt:       time.Now().UTC(),
 		UpdatedAt:       time.Now().UTC(),
 	}
-	_, err = suite.BunDB.NewInsert().Model(ucb).Exec(ctx)
+	_, err = suite.Pool.Exec(ctx, `
+		INSERT INTO billing.credit_balances (id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		ucb.ID, ucb.TenantID, ucb.TenantSubjectID, ucb.CreditTypeID, ucb.Balance, ucb.HeldBalance, ucb.CreatedAt, ucb.UpdatedAt)
 	require.NoError(t, err)
 
 	// Seed an entitlement. source_id is NOT NULL (the originating
@@ -113,17 +119,14 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		CreatedAt:       time.Now().UTC(),
 		UpdatedAt:       time.Now().UTC(),
 	}
-	_, err = suite.BunDB.NewInsert().Model(ent).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent)
 	legacyOnlyTenantSubjectID := uuid.New()
-	_, err = suite.BunDB.NewInsert().Model(&models.TenantSubject{
-		ID:         legacyOnlyTenantSubjectID,
-		TenantID:   tenant.DefaultID.UUID(),
-		Issuer:     "service-facade-parity-other",
-		Subject:    userID + "-other",
-		CreatedAt:  time.Now().UTC(),
-		LastSeenAt: time.Now().UTC(),
-	}).Exec(ctx)
+	_, err = suite.Pool.Exec(ctx, `
+		INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject, created_at, last_seen_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		legacyOnlyTenantSubjectID, tenant.DefaultID.UUID(),
+		"service-facade-parity-other", userID+"-other",
+		time.Now().UTC(), time.Now().UTC())
 	require.NoError(t, err)
 	legacyOnlyEnt := &models.Entitlement{
 		ID:              uuid.New(),
@@ -137,8 +140,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 		CreatedAt:       time.Now().UTC(),
 		UpdatedAt:       time.Now().UTC(),
 	}
-	_, err = suite.BunDB.NewInsert().Model(legacyOnlyEnt).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, legacyOnlyEnt)
 
 	// Build the in-process facade.
 	svc, err := billingservice.New(suite.App.Runtime)
@@ -269,8 +271,8 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Equal(t, http.StatusOK, wJWTBalance.Code)
 	var balanceResp struct {
 		TenantSubjectID string `json:"tenant_subject_id"`
-		BalanceMicros    int64  `json:"balance_micros"`
-		HeldMicros       int64  `json:"held_micros"`
+		BalanceMicros   int64  `json:"balance_micros"`
+		HeldMicros      int64  `json:"held_micros"`
 	}
 	require.NoError(t, json.Unmarshal(wJWTBalance.Body.Bytes(), &balanceResp))
 	require.Equal(t, tenantSubjectID.String(), balanceResp.TenantSubjectID)

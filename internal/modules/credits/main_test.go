@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
 
 	"github.com/open-rails/openrails/internal/dbtest"
 )
@@ -22,11 +22,11 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 // payable-row insert needs to satisfy the tenant_subject_id FK (migrations
 // 076/078, #317). The id IS the payable subject id (the credits/self-service
 // deterministic scheme, issuer openrails:self); tenant_id is the default tenant.
-func seedTenantSubject(t *testing.T, ctx context.Context, db *bun.DB, tsID uuid.UUID) {
+func seedTenantSubject(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tsID uuid.UUID) {
 	t.Helper()
-	_, err := db.ExecContext(ctx,
+	_, err := pool.Exec(ctx,
 		`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
-		 VALUES (?, '00000000-0000-0000-0000-000000000001', 'openrails:self', ?::text)
+		 VALUES ($1, '00000000-0000-0000-0000-000000000001', 'openrails:self', $2::text)
 		 ON CONFLICT DO NOTHING`, tsID, tsID)
 	require.NoError(t, err)
 }

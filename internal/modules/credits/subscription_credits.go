@@ -2,13 +2,14 @@ package credits
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	log "github.com/sirupsen/logrus"
 )
@@ -60,104 +61,92 @@ func (s *CreditsService) GrantSubscriptionCredits(ctx context.Context, params Gr
 		return fmt.Errorf("source required")
 	}
 
-	tx, err := s.db.BeginTenantTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
+	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		now := s.now()
 
-	now := s.now()
-
-	sub := new(models.Subscription)
-	if err := tx.NewSelect().
-		Model(sub).
-		Where("sub.id = ?", params.SubscriptionID).
-		Limit(1).
-		Scan(ctx); err != nil {
-		return err
-	}
-
-	creditsSpec := sub.CreditsSpecSnapshot
-	if len(creditsSpec) == 0 {
-		prod := new(models.Product)
-		if err := tx.NewSelect().
-			Model(prod).
-			Where("prod.id = ?", sub.ProductID).
-			Limit(1).
-			Scan(ctx); err != nil {
-			return err
-		}
-		creditsSpec = prod.CreditsSpec
-	}
-
-	if len(creditsSpec) == 0 {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	for creditTypeName, spec := range creditsSpec {
-		creditTypeName = strings.TrimSpace(creditTypeName)
-		if err := validateCreditGrantSpec(creditTypeName, spec); err != nil {
-			return err
-		}
-
-		cadence := spec.Cadence
-		if cadence == "" {
-			cadence = models.CreditGrantCadenceOnce
-		}
-		if cadence != params.Cadence {
-			continue
-		}
-
-		ct, err := s.getCreditTypeByNameTx(ctx, tx, creditTypeName)
+		sub, err := q.GetSubscriptionByID(ctx, params.SubscriptionID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("unknown credit type: %s", creditTypeName)
+			return err
+		}
+
+		var creditsSpec models.CreditsSpec
+		if err := fromJSONBC(sub.CreditsSpecSnapshot, &creditsSpec, "subscriptions.credits_spec_snapshot"); err != nil {
+			return err
+		}
+		if len(creditsSpec) == 0 {
+			prod, perr := q.GetProductByID(ctx, sub.ProductID)
+			if perr != nil {
+				return perr
 			}
-			return err
-		}
-		if !ct.IsActive {
-			return ErrCreditTypeInactive
-		}
-
-		grantKey := fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s", cadence, sub.ID, ct.ID)
-		if cadence == models.CreditGrantCadencePerRenewal {
-			grantKey = fmt.Sprintf("%s:%s", grantKey, params.PeriodEnd.UTC().Format(time.RFC3339Nano))
-		}
-		grantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
-
-		var expiresAt *time.Time
-		if spec.ExpiresDays != nil && *spec.ExpiresDays > 0 {
-			t := now.Add(time.Duration(*spec.ExpiresDays) * 24 * time.Hour)
-			expiresAt = &t
+			if err := fromJSONBC(prod.CreditsSpec, &creditsSpec, "products.credits_spec"); err != nil {
+				return err
+			}
 		}
 
-		if _, err := s.depositTx(ctx, tx, ct, CreditDepositParams{
-			Actor:      sub.TenantSubjectID.String(),
-			CreditType: creditTypeName,
-			Amount:     spec.Amount,
-			Source:     strings.TrimSpace(params.Source),
-			SourceID:   &grantID,
-			ExpiresAt:  expiresAt,
-		}); err != nil {
-			return err
+		if len(creditsSpec) == 0 {
+			return nil
 		}
 
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id": sub.ID,
-			"period_end":      params.PeriodEnd.UTC(),
-			"credit_type":     creditTypeName,
-			"amount":          spec.Amount,
-			"expires_days":    spec.ExpiresDays,
-			"cadence":         cadence,
-			"grant_id":        grantID,
-		}).Info("subscription credit grant applied")
-	}
+		for creditTypeName, spec := range creditsSpec {
+			creditTypeName = strings.TrimSpace(creditTypeName)
+			if err := validateCreditGrantSpec(creditTypeName, spec); err != nil {
+				return err
+			}
 
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return nil
+			cadence := spec.Cadence
+			if cadence == "" {
+				cadence = models.CreditGrantCadenceOnce
+			}
+			if cadence != params.Cadence {
+				continue
+			}
+
+			ct, err := s.getCreditTypeByNameTx(ctx, q, creditTypeName)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return fmt.Errorf("unknown credit type: %s", creditTypeName)
+				}
+				return err
+			}
+			if !ct.IsActive {
+				return ErrCreditTypeInactive
+			}
+
+			grantKey := fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s", cadence, sub.ID, ct.ID)
+			if cadence == models.CreditGrantCadencePerRenewal {
+				grantKey = fmt.Sprintf("%s:%s", grantKey, params.PeriodEnd.UTC().Format(time.RFC3339Nano))
+			}
+			grantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
+
+			var expiresAt *time.Time
+			if spec.ExpiresDays != nil && *spec.ExpiresDays > 0 {
+				t := now.Add(time.Duration(*spec.ExpiresDays) * 24 * time.Hour)
+				expiresAt = &t
+			}
+
+			if _, err := s.depositTx(ctx, q, ct, CreditDepositParams{
+				Actor:      sub.TenantSubjectID.String(),
+				CreditType: creditTypeName,
+				Amount:     spec.Amount,
+				Source:     strings.TrimSpace(params.Source),
+				SourceID:   &grantID,
+				ExpiresAt:  expiresAt,
+			}); err != nil {
+				return err
+			}
+
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": sub.ID,
+				"period_end":      params.PeriodEnd.UTC(),
+				"credit_type":     creditTypeName,
+				"amount":          spec.Amount,
+				"expires_days":    spec.ExpiresDays,
+				"cadence":         cadence,
+				"grant_id":        grantID,
+			}).Info("subscription credit grant applied")
+		}
+
+		return nil
+	})
 }

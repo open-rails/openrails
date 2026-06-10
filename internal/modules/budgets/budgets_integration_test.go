@@ -4,60 +4,49 @@ package budgets_test
 
 import (
 	"context"
-	"database/sql"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // budgetEnv spins up the budget engine over the shared migrated Postgres with an
 // injectable fake clock and a fresh payer+actor, and returns a cleanup-scoped
 // context. State is scoped by the freshly generated payer id.
-func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, *bun.DB, identity.TenantSubjectID, string, context.Context) {
+func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, *pgxpool.Pool, identity.TenantSubjectID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
 
 	var hasTable bool
-	require.NoError(t, bunDB.NewSelect().
-		ColumnExpr("EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='budget_window_state')").
-		Scan(ctx, &hasTable))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='budget_window_state')").
+		Scan(&hasTable))
 	if !hasTable {
 		t.Skip("billing.budget_window_state missing; run migration 005")
 	}
-
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
 
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	actor := "actor_" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.BudgetReservation)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.BudgetWindowState)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.budget_reservations WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.budget_window_state WHERE tenant_subject_id = $1", payerID)
 	})
 
 	// Fixed wall clock so window math is deterministic; advance it to cross
 	// window boundaries.
 	clk := clockwork.NewFakeClockAt(time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC))
-	return budgets.NewService(dbi, clk), clk, bunDB, payer, actor, ctx
+	return budgets.NewService(dbi, clk), clk, pool, payer, actor, ctx
 }
 
 // Money literals are micro-dollars: $1 = 1_000_000 micros.

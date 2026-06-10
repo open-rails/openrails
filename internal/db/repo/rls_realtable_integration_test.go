@@ -59,7 +59,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 		   ('` + productB + `','` + tenantB + `','` + slugB + `','Product B')
 		 ON CONFLICT (id) DO NOTHING`,
 	} {
-		_, e := super.GetDB().ExecContext(ctx, stmt)
+		_, e := super.Pool().Exec(ctx, stmt)
 		require.NoError(t, e, stmt)
 	}
 

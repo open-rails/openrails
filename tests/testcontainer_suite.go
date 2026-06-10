@@ -17,11 +17,14 @@ import (
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/ginboot"
 	"github.com/open-rails/openrails/internal/db/models"
+	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/migrate"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	_ "github.com/lib/pq" // PostgreSQL driver for schema creation
 	"github.com/redis/go-redis/v9"
@@ -33,7 +36,6 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	redismodule "github.com/testcontainers/testcontainers-go/modules/redis"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"github.com/uptrace/bun"
 )
 
 // TestContainerSuite manages test containers for integration testing
@@ -47,7 +49,7 @@ type TestContainerSuite struct {
 
 	// Application and database connections
 	App         *app.App
-	BunDB       *bun.DB
+	Pool        *pgxpool.Pool
 	RedisClient *redis.Client
 
 	// Server and configuration
@@ -412,8 +414,8 @@ func (suite *TestContainerSuite) initializeServer() {
 	require.NoError(suite.t, err)
 	suite.App = assembled.App
 
-	// Get the BunDB from the app runtime
-	suite.BunDB = assembled.App.Runtime.DB.GetDB().(*bun.DB)
+	// Get the pgx pool from the app runtime
+	suite.Pool = assembled.App.Runtime.DB.Pool()
 	suite.Server = assembled.Server
 
 	// Start workers in-process for the integration suite (separate from HTTP server).
@@ -423,6 +425,22 @@ func (suite *TestContainerSuite) initializeServer() {
 	go func() {
 		suite.workersErrCh <- suite.App.Runtime.RunWorkers(workersCtx)
 	}()
+
+	// Wait for the River client: tests assume workers are up, and RunWorkers
+	// initialises River asynchronously. (The bun-era double database init was
+	// slow enough to mask this race; the pgx-only boot is faster and loses it.)
+	riverDeadline := time.Now().Add(30 * time.Second)
+	for suite.App.Runtime.RiverClient == nil {
+		select {
+		case werr := <-suite.workersErrCh:
+			suite.workersErrCh <- werr
+			require.NoError(suite.t, werr, "RunWorkers exited before River init")
+			require.Fail(suite.t, "RunWorkers returned before River init")
+		default:
+		}
+		require.True(suite.t, time.Now().Before(riverDeadline), "timed out waiting for River client")
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	// Create HTTP server
 	httpServer := &http.Server{
@@ -517,9 +535,9 @@ func (suite *TestContainerSuite) Cleanup() {
 	}
 }
 
-// ExecuteSQL executes a SQL query on the test database
-func (suite *TestContainerSuite) ExecuteSQL(query string, args ...interface{}) (sql.Result, error) {
-	return suite.BunDB.ExecContext(suite.ctx, query, args...)
+// ExecuteSQL executes a SQL query on the test database ($1-style placeholders).
+func (suite *TestContainerSuite) ExecuteSQL(query string, args ...interface{}) (pgconn.CommandTag, error) {
+	return suite.Pool.Exec(suite.ctx, query, args...)
 }
 
 // ResetDatabase clears all data from test tables for clean test state
@@ -536,7 +554,7 @@ func (suite *TestContainerSuite) ResetDatabase() {
 	}
 
 	for _, table := range tables {
-		_, err := suite.BunDB.ExecContext(suite.ctx, fmt.Sprintf("TRUNCATE TABLE IF EXISTS %s CASCADE", table))
+		_, err := suite.Pool.Exec(suite.ctx, fmt.Sprintf("TRUNCATE TABLE IF EXISTS %s CASCADE", table))
 		if err != nil {
 			// Log but don't fail - table might not exist
 			suite.t.Logf("Failed to truncate table %s: %v", table, err)
@@ -652,7 +670,7 @@ func (suite *TestContainerSuite) WaitForJobCompletion(expectedJobs int, timeout 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		var count int
-		err := suite.BunDB.QueryRowContext(suite.ctx,
+		err := suite.Pool.QueryRow(suite.ctx,
 			"SELECT COUNT(*) FROM billing.river_job WHERE state = 'completed'").Scan(&count)
 		if err == nil && count >= expectedJobs {
 			return true
@@ -666,7 +684,7 @@ func (suite *TestContainerSuite) WaitForJobCompletion(expectedJobs int, timeout 
 func (suite *TestContainerSuite) GetPendingJobCount() int {
 	suite.t.Helper()
 	var count int
-	err := suite.BunDB.QueryRowContext(suite.ctx,
+	err := suite.Pool.QueryRow(suite.ctx,
 		"SELECT COUNT(*) FROM billing.river_job WHERE state = 'available'").Scan(&count)
 	if err != nil {
 		suite.t.Logf("Error getting pending job count: %v", err)
@@ -679,7 +697,7 @@ func (suite *TestContainerSuite) GetPendingJobCount() int {
 func (suite *TestContainerSuite) GetCompletedJobCount() int {
 	suite.t.Helper()
 	var count int
-	err := suite.BunDB.QueryRowContext(suite.ctx,
+	err := suite.Pool.QueryRow(suite.ctx,
 		"SELECT COUNT(*) FROM billing.river_job WHERE state = 'completed'").Scan(&count)
 	if err != nil {
 		suite.t.Logf("Error getting completed job count: %v", err)
@@ -691,7 +709,7 @@ func (suite *TestContainerSuite) GetCompletedJobCount() int {
 // ClearJobQueue removes all jobs from the River queue for clean test state.
 func (suite *TestContainerSuite) ClearJobQueue() {
 	suite.t.Helper()
-	_, err := suite.BunDB.ExecContext(suite.ctx, "DELETE FROM billing.river_job")
+	_, err := suite.Pool.Exec(suite.ctx, "DELETE FROM billing.river_job")
 	if err != nil {
 		suite.t.Logf("Error clearing job queue: %v", err)
 	}
@@ -700,8 +718,7 @@ func (suite *TestContainerSuite) ClearJobQueue() {
 // GetPrice retrieves a price by ID from the database.
 func (suite *TestContainerSuite) GetPrice(priceID uuid.UUID) *models.Price {
 	suite.t.Helper()
-	price := new(models.Price)
-	err := suite.BunDB.NewSelect().Model(price).Where("id = ?", priceID).Scan(suite.ctx)
+	price, err := dbrepo.NewPriceRepo(suite.App.Runtime.DB).GetByID(suite.ctx, priceID)
 	require.NoError(suite.t, err, "Failed to get price by ID")
 	return price
 }

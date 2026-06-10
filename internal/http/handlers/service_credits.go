@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/db/repo"
 	ginmw "github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/credits"
@@ -760,7 +760,7 @@ func ServiceLookupCreditTransaction(r *httprequest.Request) {
 
 	trx, err := r.State.CreditsService.GetTransactionBySource(r.Request.Context(), actorID, creditType, transactionType, source, sourceID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "not found")
 			return
 		}

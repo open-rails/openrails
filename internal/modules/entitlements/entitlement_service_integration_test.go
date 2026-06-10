@@ -4,40 +4,27 @@ package entitlements
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
-
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	svc := NewEntitlementService(dbi, clockwork.NewFakeClockAt(now))
 
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, dbi.Pool(), userID)
 	entName := "premium_covered_finite_" + uuid.New().String()
 	firstSourceID := uuid.New()
 	coveredSourceID := uuid.New()
@@ -67,13 +54,12 @@ func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T
 	require.NotNil(t, covered)
 	require.Equal(t, first.ID, covered.ID)
 
-	count, err := bunDB.NewSelect().
-		Model((*models.Entitlement)(nil)).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Where("entitlement = ?", entName).
-		Where("revoked_at IS NULL").
-		Where("deleted_at IS NULL").
-		Count(ctx)
-	require.NoError(t, err)
+	var count int
+	require.NoError(t, dbi.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM billing.entitlements
+		 WHERE tenant_subject_id = $1 AND entitlement = $2
+		   AND revoked_at IS NULL AND deleted_at IS NULL`,
+		tenantSubjectID, entName,
+	).Scan(&count))
 	require.Equal(t, 1, count)
 }

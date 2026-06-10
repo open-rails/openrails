@@ -2,19 +2,18 @@ package credits
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
-	"github.com/uptrace/bun"
 )
 
 // Prepaid credit windows (issue #335). A window is a FIRST-CLASS bulk
@@ -51,6 +50,22 @@ type OpenWindowParams struct {
 	ExpiresAt  time.Time
 }
 
+// creditWindowFromGen maps a generated window row onto the domain model.
+func creditWindowFromGen(r gen.BillingCreditWindow) *models.CreditWindow {
+	return &models.CreditWindow{
+		ID:              r.ID,
+		TenantID:        r.TenantID,
+		TenantSubjectID: r.TenantSubjectID,
+		CreditTypeID:    r.CreditTypeID,
+		HeldAmount:      r.HeldAmount,
+		SettledAmount:   r.SettledAmount,
+		Status:          r.Status,
+		ExpiresAt:       r.ExpiresAt,
+		CreatedAt:       r.CreatedAt,
+		UpdatedAt:       r.UpdatedAt,
+	}
+}
+
 // OpenWindow reserves Amount from the payer's available balance into a new
 // open window — the same balance/held mechanics as Hold, in ONE transaction:
 // the balance row is locked, available (balance - held) is checked, and
@@ -75,9 +90,9 @@ func (s *CreditsService) OpenWindow(ctx context.Context, p OpenWindowParams) (*m
 	}
 
 	var window *models.CreditWindow
-	err := s.db.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		txSvc := &CreditsService{db: db.NewWithTx(tx), clock: s.clock}
-		ct, err := txSvc.GetCreditTypeByName(ctx, p.CreditType)
+	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		ct, err := s.getCreditTypeByNameTx(ctx, q, p.CreditType)
 		if err != nil {
 			return err
 		}
@@ -88,22 +103,21 @@ func (s *CreditsService) OpenWindow(ctx context.Context, p OpenWindowParams) (*m
 		now := s.now()
 		tenantID := tenant.FromContextOrDefault(ctx).UUID()
 		payerID := p.Payer.UUID()
-		if err := ensureTenantSubject(ctx, tx, tenantID, payerID); err != nil {
+		if err := ensureTenantSubject(ctx, q, tenantID, payerID); err != nil {
 			return err
 		}
 
-		bal, err := txSvc.lockBalance(ctx, tx, p.Payer, p.Actor, ct.ID)
+		bal, err := s.lockBalance(ctx, q, p.Payer, p.Actor, ct.ID)
 		if err != nil {
 			return err
 		}
 		if bal.Balance-bal.HeldBalance < p.Amount {
 			return ErrInsufficientCredits
 		}
-		if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-			Set("held_balance = ?", bal.HeldBalance+p.Amount).
-			Set("updated_at = ?", now).
-			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-			Exec(ctx); err != nil {
+		if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			HeldBalance: bal.HeldBalance + p.Amount, UpdatedAt: now,
+		}); err != nil {
 			return err
 		}
 
@@ -120,10 +134,14 @@ func (s *CreditsService) OpenWindow(ctx context.Context, p OpenWindowParams) (*m
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
-		if _, err := tx.NewInsert().Model(w).Exec(ctx); err != nil {
+		if err := q.InsertCreditWindow(ctx, gen.InsertCreditWindowParams{
+			ID: w.ID, TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID,
+			CreditTypeID: w.CreditTypeID, HeldAmount: w.HeldAmount, SettledAmount: w.SettledAmount,
+			Status: w.Status, ExpiresAt: w.ExpiresAt, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
+		}); err != nil {
 			return err
 		}
-		if err := insertWindowRecordTx(ctx, tx, w, txWindowOpen, windowActor(p.Actor, payerID), p.Amount, now); err != nil {
+		if err := insertWindowRecordTx(ctx, q, w, txWindowOpen, windowActor(p.Actor, payerID), p.Amount, now); err != nil {
 			return err
 		}
 		window = w
@@ -138,7 +156,7 @@ func (s *CreditsService) OpenWindow(ctx context.Context, p OpenWindowParams) (*m
 // insertWindowRecordTx writes the zero-amount audit ledger row for a window
 // open/refill (amount=0 — no balance movement; authorized records the reserved
 // delta; source_id is the window id).
-func insertWindowRecordTx(ctx context.Context, tx bun.Tx, w *models.CreditWindow, txType, actor string, amount int64, now time.Time) error {
+func insertWindowRecordTx(ctx context.Context, q *gen.Queries, w *models.CreditWindow, txType, actor string, amount int64, now time.Time) error {
 	auth := amount
 	exp := w.ExpiresAt
 	srcID := w.ID.String()
@@ -158,8 +176,7 @@ func insertWindowRecordTx(ctx context.Context, tx bun.Tx, w *models.CreditWindow
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	_, err := tx.NewInsert().Model(rec).Exec(ctx)
-	return err
+	return q.InsertCreditTransaction(ctx, insertParamsFromTransaction(rec))
 }
 
 // windowActor returns the ledger/usage attribution actor: the caller-supplied
@@ -226,34 +243,33 @@ func (s *CreditsService) settleOneWindowItem(ctx context.Context, item WindowSet
 		return res
 	}
 
-	err := s.db.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		txSvc := &CreditsService{db: db.NewWithTx(tx), clock: s.clock}
+	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
 		now := s.now()
 
-		w := new(models.CreditWindow)
-		if err := tx.NewSelect().Model(w).Where("id = ?", item.WindowID).For("UPDATE").Scan(ctx); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+		wRow, err := q.GetCreditWindowForUpdate(ctx, item.WindowID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrWindowNotFound
 			}
 			return err
 		}
+		w := creditWindowFromGen(wRow)
 		payer := identity.TenantSubjectID(w.TenantSubjectID)
 		actor := windowActor(item.Actor, w.TenantSubjectID)
 
 		// Replay check FIRST (under the window lock) so a re-sent batch returns
 		// success even after the window has since closed/expired.
-		existing := new(models.CreditTransaction)
-		derr := tx.NewSelect().Model(existing).
-			Where("tenant_id = ? AND tenant_subject_id = ?", w.TenantID, w.TenantSubjectID).
-			Where("credit_type_id = ?", w.CreditTypeID).
-			Where("transaction_type = 'withdrawal'").
-			Where("source = ? AND source_id = ?", windowSettleSource, res.RequestID).
-			Limit(1).Scan(ctx)
+		existing, derr := q.GetCreditTransactionByCoords(ctx, gen.GetCreditTransactionByCoordsParams{
+			TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID, CreditTypeID: w.CreditTypeID,
+			TransactionType: "withdrawal", Source: windowSettleSource, SourceID: &res.RequestID,
+		})
 		if derr == nil {
-			res.OK, res.Replayed, res.TransactionID = true, true, &existing.ID
+			id := existing.ID
+			res.OK, res.Replayed, res.TransactionID = true, true, &id
 			return nil
 		}
-		if !errors.Is(derr, sql.ErrNoRows) {
+		if !errors.Is(derr, pgx.ErrNoRows) {
 			return derr
 		}
 
@@ -266,7 +282,7 @@ func (s *CreditsService) settleOneWindowItem(ctx context.Context, item WindowSet
 
 		// Capture mechanics: release this slice of the reservation, then debit the
 		// balance/FIFO blocks for it. Both target the payer's balance row.
-		bal, err := txSvc.lockBalance(ctx, tx, payer, actor, w.CreditTypeID)
+		bal, err := s.lockBalance(ctx, q, payer, actor, w.CreditTypeID)
 		if err != nil {
 			return err
 		}
@@ -274,23 +290,20 @@ func (s *CreditsService) settleOneWindowItem(ctx context.Context, item WindowSet
 		if newHeld < 0 {
 			newHeld = 0
 		}
-		if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-			Set("held_balance = ?", newHeld).
-			Set("updated_at = ?", now).
-			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", w.TenantID, w.TenantSubjectID, w.CreditTypeID).
-			Exec(ctx); err != nil {
+		if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+			TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID, CreditTypeID: w.CreditTypeID,
+			HeldBalance: newHeld, UpdatedAt: now,
+		}); err != nil {
 			return err
 		}
-		newBal, err := txSvc.withdrawBalanceAndBlocks(ctx, tx, payer, actor, w.CreditTypeID, item.Amount)
+		newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, actor, w.CreditTypeID, item.Amount)
 		if err != nil {
 			return err
 		}
 
-		if _, err := tx.NewUpdate().Model((*models.CreditWindow)(nil)).
-			Set("settled_amount = settled_amount + ?", item.Amount).
-			Set("updated_at = ?", now).
-			Where("id = ?", w.ID).
-			Exec(ctx); err != nil {
+		if err := q.AddCreditWindowSettled(ctx, gen.AddCreditWindowSettledParams{
+			ID: w.ID, Amount: item.Amount, UpdatedAt: now,
+		}); err != nil {
 			return err
 		}
 
@@ -311,14 +324,18 @@ func (s *CreditsService) settleOneWindowItem(ctx context.Context, item WindowSet
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
-		if _, err := tx.NewInsert().Model(trx).Exec(ctx); err != nil {
+		if err := q.InsertCreditTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
 			return err
 		}
 
 		// Usage analytics (#311-style): append a usage_event linked to the settle
 		// debit, in the SAME tx (replays never reach here, so no duplicates).
 		if et := strings.TrimSpace(item.EventType); et != "" {
-			ev := &models.UsageEvent{
+			meta, jerr := toJSONBC(item.Metadata)
+			if jerr != nil {
+				return jerr
+			}
+			if err := q.InsertUsageEvent(ctx, gen.InsertUsageEventParams{
 				ID:                  uuidutil.NewV7(),
 				TenantID:            w.TenantID,
 				TenantSubjectID:     w.TenantSubjectID,
@@ -330,11 +347,10 @@ func (s *CreditsService) settleOneWindowItem(ctx context.Context, item WindowSet
 				Source:              windowSettleSource,
 				SourceID:            res.RequestID,
 				CreditTransactionID: &trx.ID,
-				Metadata:            item.Metadata,
+				Metadata:            meta,
 				OccurredAt:          now,
 				CreatedAt:           now,
-			}
-			if _, err := tx.NewInsert().Model(ev).Exec(ctx); err != nil {
+			}); err != nil {
 				return err
 			}
 		}
@@ -384,17 +400,18 @@ func (s *CreditsService) RefillWindow(ctx context.Context, windowID uuid.UUID, a
 	}
 
 	var window *models.CreditWindow
-	err := s.db.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		txSvc := &CreditsService{db: db.NewWithTx(tx), clock: s.clock}
+	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
 		now := s.now()
 
-		w := new(models.CreditWindow)
-		if err := tx.NewSelect().Model(w).Where("id = ?", windowID).For("UPDATE").Scan(ctx); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+		wRow, err := q.GetCreditWindowForUpdate(ctx, windowID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrWindowNotFound
 			}
 			return err
 		}
+		w := creditWindowFromGen(wRow)
 		if w.Status != "open" {
 			return ErrWindowNotOpen
 		}
@@ -402,18 +419,17 @@ func (s *CreditsService) RefillWindow(ctx context.Context, windowID uuid.UUID, a
 		actor := w.TenantSubjectID.String()
 
 		if amount > 0 {
-			bal, err := txSvc.lockBalance(ctx, tx, payer, actor, w.CreditTypeID)
+			bal, err := s.lockBalance(ctx, q, payer, actor, w.CreditTypeID)
 			if err != nil {
 				return err
 			}
 			if bal.Balance-bal.HeldBalance < amount {
 				return ErrInsufficientCredits
 			}
-			if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-				Set("held_balance = ?", bal.HeldBalance+amount).
-				Set("updated_at = ?", now).
-				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", w.TenantID, w.TenantSubjectID, w.CreditTypeID).
-				Exec(ctx); err != nil {
+			if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+				TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID, CreditTypeID: w.CreditTypeID,
+				HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
+			}); err != nil {
 				return err
 			}
 			w.HeldAmount += amount
@@ -422,14 +438,13 @@ func (s *CreditsService) RefillWindow(ctx context.Context, windowID uuid.UUID, a
 			w.ExpiresAt = extendTo.UTC()
 		}
 		w.UpdatedAt = now
-		if _, err := tx.NewUpdate().Model(w).
-			Column("held_amount", "expires_at", "updated_at").
-			WherePK().
-			Exec(ctx); err != nil {
+		if err := q.UpdateCreditWindowReservation(ctx, gen.UpdateCreditWindowReservationParams{
+			ID: w.ID, HeldAmount: w.HeldAmount, ExpiresAt: w.ExpiresAt, UpdatedAt: w.UpdatedAt,
+		}); err != nil {
 			return err
 		}
 		if amount > 0 {
-			if err := insertWindowRecordTx(ctx, tx, w, txWindowRefill, actor, amount, now); err != nil {
+			if err := insertWindowRecordTx(ctx, q, w, txWindowRefill, actor, amount, now); err != nil {
 				return err
 			}
 		}
@@ -454,17 +469,18 @@ func (s *CreditsService) CloseWindow(ctx context.Context, windowID uuid.UUID) (*
 	}
 
 	var window *models.CreditWindow
-	err := s.db.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		txSvc := &CreditsService{db: db.NewWithTx(tx), clock: s.clock}
+	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
 		now := s.now()
 
-		w := new(models.CreditWindow)
-		if err := tx.NewSelect().Model(w).Where("id = ?", windowID).For("UPDATE").Scan(ctx); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+		wRow, err := q.GetCreditWindowForUpdate(ctx, windowID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrWindowNotFound
 			}
 			return err
 		}
+		w := creditWindowFromGen(wRow)
 		if w.Status != "open" {
 			window = w // already closed/expired: remainder already released
 			return nil
@@ -472,7 +488,7 @@ func (s *CreditsService) CloseWindow(ctx context.Context, windowID uuid.UUID) (*
 		payer := identity.TenantSubjectID(w.TenantSubjectID)
 
 		if remainder := w.HeldAmount - w.SettledAmount; remainder > 0 {
-			bal, err := txSvc.lockBalance(ctx, tx, payer, w.TenantSubjectID.String(), w.CreditTypeID)
+			bal, err := s.lockBalance(ctx, q, payer, w.TenantSubjectID.String(), w.CreditTypeID)
 			if err != nil {
 				return err
 			}
@@ -480,20 +496,18 @@ func (s *CreditsService) CloseWindow(ctx context.Context, windowID uuid.UUID) (*
 			if newHeld < 0 {
 				newHeld = 0
 			}
-			if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-				Set("held_balance = ?", newHeld).
-				Set("updated_at = ?", now).
-				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", w.TenantID, w.TenantSubjectID, w.CreditTypeID).
-				Exec(ctx); err != nil {
+			if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+				TenantID: w.TenantID, TenantSubjectID: w.TenantSubjectID, CreditTypeID: w.CreditTypeID,
+				HeldBalance: newHeld, UpdatedAt: now,
+			}); err != nil {
 				return err
 			}
 		}
 		w.Status = "closed"
 		w.UpdatedAt = now
-		if _, err := tx.NewUpdate().Model(w).
-			Column("status", "updated_at").
-			WherePK().
-			Exec(ctx); err != nil {
+		if err := q.SetCreditWindowStatus(ctx, gen.SetCreditWindowStatusParams{
+			ID: w.ID, Status: w.Status, UpdatedAt: w.UpdatedAt,
+		}); err != nil {
 			return err
 		}
 		window = w
@@ -510,11 +524,16 @@ func (s *CreditsService) GetWindow(ctx context.Context, windowID uuid.UUID) (*mo
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
-	w := new(models.CreditWindow)
+	var w *models.CreditWindow
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		return s.db.Q(ctx).NewSelect().Model(w).Where("id = ?", windowID).Limit(1).Scan(ctx)
+		row, e := s.db.Gen(ctx).GetCreditWindow(ctx, windowID)
+		if e != nil {
+			return e
+		}
+		w = creditWindowFromGen(row)
+		return nil
 	})
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrWindowNotFound
 	}
 	if err != nil {
@@ -534,83 +553,72 @@ func (s *CreditsService) ExpireWindows(ctx context.Context, batchSize int) (int,
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	bunDB, ok := s.db.GetDB().(*bun.DB)
-	if !ok {
-		return 0, fmt.Errorf("expire windows: requires a root *bun.DB (cross-tenant sweep)")
-	}
 	now := s.now()
 	total := 0
 
 	for {
-		tx, err := bunDB.BeginTx(ctx, nil)
+		batch := 0
+		// Privileged (no-GUC) transaction per batch: cross-tenant sweep with
+		// explicit tenant_id predicates, like the hold expiry worker.
+		err := s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			q := gen.New(tx)
+			windows, err := q.ListExpiredOpenCreditWindowsForUpdate(ctx, gen.ListExpiredOpenCreditWindowsForUpdateParams{
+				Now: now, BatchSize: int32(batchSize),
+			})
+			if err != nil {
+				return err
+			}
+			batch = len(windows)
+			if batch == 0 {
+				return nil
+			}
+
+			// Group released remainders by balance key (the HoldExpiryWorker pattern).
+			type key struct {
+				TenantID        uuid.UUID
+				TenantSubjectID uuid.UUID
+				CreditTypeID    uuid.UUID
+			}
+			released := make(map[key]int64)
+			for i := range windows {
+				w := windows[i]
+				if rem := w.HeldAmount - w.SettledAmount; rem > 0 {
+					released[key{w.TenantID, w.TenantSubjectID, w.CreditTypeID}] += rem
+				}
+				if err := q.SetCreditWindowStatus(ctx, gen.SetCreditWindowStatusParams{
+					ID: w.ID, Status: "expired", UpdatedAt: now,
+				}); err != nil {
+					return err
+				}
+			}
+			for k, amount := range released {
+				bal, err := q.LockCreditBalance(ctx, gen.LockCreditBalanceParams{
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, CreditTypeID: k.CreditTypeID,
+				})
+				if err != nil {
+					return err
+				}
+				newHeld := bal.HeldBalance - amount
+				if newHeld < 0 {
+					newHeld = 0
+				}
+				if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, CreditTypeID: k.CreditTypeID,
+					HeldBalance: newHeld, UpdatedAt: now,
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			return total, err
 		}
-
-		var windows []models.CreditWindow
-		if err := tx.NewSelect().Model(&windows).
-			Where("status = 'open' AND expires_at <= ?", now).
-			OrderExpr("expires_at ASC").
-			Limit(batchSize).
-			For("UPDATE SKIP LOCKED").
-			Scan(ctx); err != nil {
-			_ = tx.Rollback()
-			return total, err
-		}
-		if len(windows) == 0 {
-			_ = tx.Rollback()
+		if batch == 0 {
 			break
 		}
-
-		// Group released remainders by balance key (the HoldExpiryWorker pattern).
-		type key struct {
-			TenantID        uuid.UUID
-			TenantSubjectID uuid.UUID
-			CreditTypeID    uuid.UUID
-		}
-		released := make(map[key]int64)
-		for i := range windows {
-			w := &windows[i]
-			if rem := w.HeldAmount - w.SettledAmount; rem > 0 {
-				released[key{w.TenantID, w.TenantSubjectID, w.CreditTypeID}] += rem
-			}
-			w.Status = "expired"
-			w.UpdatedAt = now
-			if _, err := tx.NewUpdate().Model(w).
-				Column("status", "updated_at").
-				WherePK().
-				Exec(ctx); err != nil {
-				_ = tx.Rollback()
-				return total, err
-			}
-		}
-		for k, amount := range released {
-			bal := new(models.CreditBalance)
-			if err := tx.NewSelect().Model(bal).
-				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
-				For("UPDATE").
-				Scan(ctx); err != nil {
-				_ = tx.Rollback()
-				return total, err
-			}
-			newHeld := bal.HeldBalance - amount
-			if newHeld < 0 {
-				newHeld = 0
-			}
-			if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-				Set("held_balance = ?", newHeld).
-				Set("updated_at = ?", now).
-				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
-				Exec(ctx); err != nil {
-				_ = tx.Rollback()
-				return total, err
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			return total, err
-		}
-		total += len(windows)
-		if len(windows) < batchSize {
+		total += batch
+		if batch < batchSize {
 			break
 		}
 	}

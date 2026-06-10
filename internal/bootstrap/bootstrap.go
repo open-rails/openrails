@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"database/sql"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,7 +15,6 @@ import (
 
 // Options controls optional dependency overrides during application construction.
 type Options struct {
-	DB      *sql.DB
 	PGXPool *pgxpool.Pool
 	Redis   *redis.Client
 	// Authenticator is the framework-neutral auth boundary (gin-free). When nil,
@@ -29,7 +27,6 @@ type Options struct {
 // NewApp constructs the long-lived application runtime.
 func NewApp(cfg *config.Config, opts *Options) (*app.App, error) {
 	application, err := app.BootstrapWithOptions(cfg, &app.BootstrapOptions{
-		DB:            optsValue(opts, func(o *Options) *sql.DB { return o.DB }),
 		PGXPool:       optsValue(opts, func(o *Options) *pgxpool.Pool { return o.PGXPool }),
 		Redis:         optsValue(opts, func(o *Options) *redis.Client { return o.Redis }),
 		Authenticator: optsValue(opts, func(o *Options) billingauth.Authenticator { return o.Authenticator }),

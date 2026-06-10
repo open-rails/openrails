@@ -5,14 +5,14 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
-	"github.com/uptrace/bun"
 )
 
 const KindHoldExpiry = "billing.hold_expiry"
@@ -62,112 +62,96 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 	totalExpired := 0
 
 	for {
-		tx, err := w.DB.GetDB().(*bun.DB).BeginTx(ctx, nil)
+		batch := 0
+		// Privileged (no-GUC) cross-tenant sweep with explicit tenant predicates.
+		err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			q := gen.New(tx)
+
+			// Find expired active holds (stored as credit_transactions rows with transaction_type='hold')
+			holds, err := q.ListExpiredActiveHoldsForUpdate(ctx, gen.ListExpiredActiveHoldsForUpdateParams{
+				Now: now, BatchSize: int32(batchSize),
+			})
+			if err != nil {
+				return err
+			}
+			batch = len(holds)
+			if batch == 0 {
+				return nil
+			}
+
+			// Group holds by the BALANCE KEY to batch balance updates. The unified
+			// lifecycle balance row (issue #221/#223) is keyed by
+			// (tenant_id, tenant_subject_id, credit_type_id) — actor is ACTOR attribution
+			// only and is NOT part of the balance identity, so releasing held_balance
+			// must target the payer's row, not the actor's.
+			type key struct {
+				TenantID        uuid.UUID
+				TenantSubjectID uuid.UUID
+				CreditTypeID    uuid.UUID
+			}
+			releasedTotals := make(map[key]int64)
+
+			for i := range holds {
+				hold := holds[i]
+				if hold.AuthorizedAmount == nil || *hold.AuthorizedAmount <= 0 {
+					continue
+				}
+				k := key{TenantID: hold.TenantID, TenantSubjectID: hold.TenantSubjectID, CreditTypeID: hold.CreditTypeID}
+				releasedTotals[k] += *hold.AuthorizedAmount
+
+				// Mark hold as expired
+				if err := q.ExpireCreditHold(ctx, gen.ExpireCreditHoldParams{ID: hold.ID, UpdatedAt: now}); err != nil {
+					return err
+				}
+			}
+
+			// Update balances - subtract from held_balance to make credits available again
+			for k, amount := range releasedTotals {
+				if amount <= 0 {
+					continue
+				}
+
+				bal, err := q.LockCreditBalance(ctx, gen.LockCreditBalanceParams{
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, CreditTypeID: k.CreditTypeID,
+				})
+				if err != nil {
+					return err
+				}
+
+				// Reduce held_balance - credits become available again
+				newHeldBalance := bal.HeldBalance - amount
+				if newHeldBalance < 0 {
+					// Shouldn't happen, but be safe
+					newHeldBalance = 0
+				}
+
+				if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, CreditTypeID: k.CreditTypeID,
+					HeldBalance: newHeldBalance, UpdatedAt: now,
+				}); err != nil {
+					return err
+				}
+
+				logger.WithFields(log.Fields{
+					"tenant_id":         k.TenantID,
+					"tenant_subject_id": k.TenantSubjectID,
+					"credit_type_id":    k.CreditTypeID,
+					"amount":            amount,
+				}).Debug("released expired hold credits")
+			}
+			return nil
+		})
 		if err != nil {
 			return err
 		}
-
-		// Find expired active holds (stored as credit_transactions rows with transaction_type='hold')
-		var holds []models.CreditTransaction
-		if err := tx.NewSelect().
-			Model(&holds).
-			Where("transaction_type = ? AND status = ? AND expires_at IS NOT NULL AND expires_at <= ?", "hold", "active", now).
-			OrderExpr("expires_at ASC").
-			Limit(batchSize).
-			For("UPDATE SKIP LOCKED").
-			Scan(ctx); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-
-		if len(holds) == 0 {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
+		if batch == 0 {
 			break
 		}
 
-		// Group holds by the BALANCE KEY to batch balance updates. The unified
-		// lifecycle balance row (issue #221/#223) is keyed by
-		// (tenant_id, tenant_subject_id, credit_type_id) — actor is ACTOR attribution
-		// only and is NOT part of the balance identity, so releasing held_balance
-		// must target the payer's row, not the actor's.
-		type key struct {
-			TenantID        uuid.UUID
-			TenantSubjectID uuid.UUID
-			CreditTypeID    uuid.UUID
-		}
-		releasedTotals := make(map[key]int64)
+		totalExpired += batch
+		logger.WithField("expired_holds", batch).Info("expired credit holds in batch")
 
-		for i := range holds {
-			hold := &holds[i]
-			if hold.Authorized == nil || *hold.Authorized <= 0 {
-				continue
-			}
-			k := key{TenantID: hold.TenantID, TenantSubjectID: hold.TenantSubjectID, CreditTypeID: hold.CreditTypeID}
-			releasedTotals[k] += *hold.Authorized
-
-			// Mark hold as expired
-			hold.Status = "expired"
-			hold.UpdatedAt = now
-			if _, err := tx.NewUpdate().Model(hold).
-				Column("status", "updated_at").
-				WherePK().
-				Exec(ctx); err != nil {
-				_ = tx.Rollback()
-				return err
-			}
-		}
-
-		// Update balances - subtract from held_balance to make credits available again
-		for k, amount := range releasedTotals {
-			if amount <= 0 {
-				continue
-			}
-
-			bal := new(models.CreditBalance)
-			err := tx.NewSelect().
-				Model(bal).
-				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
-				For("UPDATE").
-				Scan(ctx)
-			if err != nil {
-				_ = tx.Rollback()
-				return err
-			}
-
-			// Reduce held_balance - credits become available again
-			newHeldBalance := bal.HeldBalance - amount
-			if newHeldBalance < 0 {
-				// Shouldn't happen, but be safe
-				newHeldBalance = 0
-			}
-
-			if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-				Set("held_balance = ?", newHeldBalance).
-				Set("updated_at = ?", now).
-				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
-				Exec(ctx); err != nil {
-				_ = tx.Rollback()
-				return err
-			}
-
-			logger.WithFields(log.Fields{
-				"tenant_id":         k.TenantID,
-				"tenant_subject_id": k.TenantSubjectID,
-				"credit_type_id":    k.CreditTypeID,
-				"amount":            amount,
-			}).Debug("released expired hold credits")
-		}
-
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-
-		totalExpired += len(holds)
-		logger.WithField("expired_holds", len(holds)).Info("expired credit holds in batch")
-
-		if len(holds) < batchSize {
+		if batch < batchSize {
 			break
 		}
 	}

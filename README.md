@@ -204,3 +204,18 @@ Integer money fields MUST carry their unit in the name: `_micros` (micro-dollars
 Millicents no longer exist anywhere. Human-authored config uses dollar strings
 ("$0.05") parsed once at load. Budget windows are FIXED per-user-anchored
 (session or fixed cadence — see internal/modules/budgets), never rolling.
+
+### Database queries (sqlc)
+
+All SQL lives in hand-written query files under `internal/db/queries/*.sql`,
+compiled by [sqlc](https://sqlc.dev) into the type-safe `internal/db/gen`
+package over pgx/v5. There is no ORM, and identifiers are never assembled at
+runtime — every query is vetted against a real database schema.
+
+```bash
+task sqlc        # regenerate internal/db/gen + vet queries against a real DB
+task sqlc-check  # same, then fail if generated code is out of date (CI)
+```
+
+Both targets need `SQLC_DATABASE_URL` (defaulting to the local dev DB);
+`scripts/sqlc-vet-db.sh` builds a throwaway vet database from the migrations.

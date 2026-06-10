@@ -4,25 +4,24 @@ package repo
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
+
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/tenant"
-	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // startFeatureRLSPostgres boots Postgres, applies all billing migrations
 // (including 050 RLS + the openrails_app role, and 062 which puts FORCE RLS on the
 // entitlement-feature tables), and returns a *db.DB connected AS the unprivileged
 // openrails_app role — the only role for which RLS actually enforces. Driving the
-// feature repo through this DB + RunInTenantTx exercises the SAME tenant-scoping
+// feature repo through this DB + TenantTx exercises the SAME tenant-scoping
 // chokepoint as production (GUC pinned per tx) on real tables.
 func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 	t.Helper()
@@ -32,13 +31,11 @@ func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 	// RLS on the feature tables). The app DSN connects as the unprivileged
 	// openrails_app role — the only role for which RLS actually enforces.
 	_, appDSN := dbtest.SharedRLSPostgres(t)
-	appSQL := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(appDSN)))
-	t.Cleanup(func() { _ = appSQL.Close() })
-	bunDB := bun.NewDB(appSQL, pgdialect.New())
-	models.RegisterModels(bunDB)
-	require.NoError(t, bunDB.PingContext(ctx))
 
-	appDB, err := db.NewWithBun(bunDB)
+	pool, err := pgxpool.New(ctx, appDSN)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	appDB, err = db.NewWithPGXPool(pool)
 	require.NoError(t, err)
 	return appDB, ctx
 }
@@ -47,17 +44,17 @@ func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 // RLS, but here we run everything as the app role inside the correct tenant tx).
 func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid tenant.ID, productID uuid.UUID, slug string) {
 	t.Helper()
-	require.NoError(t, appDB.RunInTenantTx(tenant.WithID(ctx, tid), func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.NewRaw(
-			`INSERT INTO billing.tenants (id, slug, name, status) VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING`,
-			tid.UUID(), "t-"+tid.String()[:8], "t-"+tid.String()[:8],
-		).Exec(ctx); err != nil {
+	require.NoError(t, appDB.TenantTx(tenant.WithID(ctx, tid), func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO billing.tenants (id, slug, name, status) VALUES ($1, $2, $2, 'active') ON CONFLICT (id) DO NOTHING`,
+			tid.UUID(), "t-"+tid.String()[:8],
+		); err != nil {
 			return err
 		}
-		_, err := tx.NewRaw(
-			`INSERT INTO billing.products (id, tenant_id, slug, display_name) VALUES (?, ?, ?, ?)`,
-			productID, tid.UUID(), slug, slug,
-		).Exec(ctx)
+		_, err := tx.Exec(ctx,
+			`INSERT INTO billing.products (id, tenant_id, slug, display_name) VALUES ($1, $2, $3, $3)`,
+			productID, tid.UUID(), slug,
+		)
 		return err
 	}))
 }
@@ -81,38 +78,38 @@ func TestEntitlementFeatureRepo_TenantIsolation(t *testing.T) {
 
 	// (1) Create a feature in tenant A.
 	var featureA *models.EntitlementFeature
-	require.NoError(t, appDB.RunInTenantTx(ctxA, func(ctx context.Context, tx bun.Tx) error {
+	require.NoError(t, appDB.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		featureA = &models.EntitlementFeature{LookupKey: "premium", Name: "Premium"}
-		return NewEntitlementFeatureRepo(appDB.NewWithTx(tx)).CreateFeature(ctx, featureA)
+		return NewEntitlementFeatureRepo(db.NewWithPgxTx(tx)).CreateFeature(ctx, featureA)
 	}))
 	require.NotEqual(t, uuid.UUID{}, featureA.ID)
 	require.Equal(t, tA.UUID(), featureA.TenantID)
 
 	// (2) Tenant A lists exactly its one feature; tenant B sees none.
-	require.NoError(t, appDB.RunInTenantTx(ctxA, func(ctx context.Context, tx bun.Tx) error {
-		got, err := NewEntitlementFeatureRepo(appDB.NewWithTx(tx)).ListFeatures(ctx)
+	require.NoError(t, appDB.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
+		got, err := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx)).ListFeatures(ctx)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, "premium", got[0].LookupKey)
 		return nil
 	}))
-	require.NoError(t, appDB.RunInTenantTx(ctxB, func(ctx context.Context, tx bun.Tx) error {
-		got, err := NewEntitlementFeatureRepo(appDB.NewWithTx(tx)).ListFeatures(ctx)
+	require.NoError(t, appDB.TenantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
+		got, err := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx)).ListFeatures(ctx)
 		require.NoError(t, err)
 		require.Len(t, got, 0, "tenant B must not see tenant A's feature")
 		return nil
 	}))
 
 	// (3) Tenant B cannot fetch tenant A's feature by id (RLS + explicit filter).
-	require.NoError(t, appDB.RunInTenantTx(ctxB, func(ctx context.Context, tx bun.Tx) error {
-		_, err := NewEntitlementFeatureRepo(appDB.NewWithTx(tx)).GetFeatureByID(ctx, featureA.ID)
+	require.NoError(t, appDB.TenantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx)).GetFeatureByID(ctx, featureA.ID)
 		require.Error(t, err, "tenant B must not read tenant A's feature by id")
 		return nil
 	}))
 
 	// (4) Attach the feature to product A within tenant A; then list it back.
-	require.NoError(t, appDB.RunInTenantTx(ctxA, func(ctx context.Context, tx bun.Tx) error {
-		rr := NewEntitlementFeatureRepo(appDB.NewWithTx(tx))
+	require.NoError(t, appDB.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
+		rr := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx))
 		days := 30
 		require.NoError(t, rr.AttachFeatureToProduct(ctx, &models.ProductEntitlementFeature{
 			ProductID:            productA,
@@ -131,8 +128,8 @@ func TestEntitlementFeatureRepo_TenantIsolation(t *testing.T) {
 
 	// (5) Tenant B sees no product features on its own product, and cannot attach
 	//     tenant A's feature (the feature id is invisible/foreign under RLS).
-	require.NoError(t, appDB.RunInTenantTx(ctxB, func(ctx context.Context, tx bun.Tx) error {
-		rr := NewEntitlementFeatureRepo(appDB.NewWithTx(tx))
+	require.NoError(t, appDB.TenantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
+		rr := NewEntitlementFeatureRepo(db.NewWithPgxTx(tx))
 		pfs, err := rr.ListProductFeatures(ctx, productB)
 		require.NoError(t, err)
 		require.Len(t, pfs, 0)

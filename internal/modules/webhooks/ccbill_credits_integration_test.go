@@ -4,13 +4,12 @@ package webhooks
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -19,35 +18,26 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+	q := gen.New(pool)
 
 	var exists bool
-	require.NoError(t, bunDB.NewSelect().
-		ColumnExpr("EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
-		Scan(ctx, &exists))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
+		Scan(&exists))
 	if !exists {
 		t.Skip("billing.credit_blocks not found; run migrations before integration tests")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
-
 	now := time.Now().UTC().Truncate(time.Second)
-	billingDays := 30
+	billingDays := int32(30)
 
 	creditTypeName := "test_credits_" + uuid.New().String()
 	creditTypeID := uuid.New()
@@ -55,10 +45,10 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	priceID := uuid.New()
 	subID := uuid.New()
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := q.CreateCreditType(ctx, gen.CreateCreditTypeParams{
 		ID:            creditTypeID,
 		Name:          creditTypeName,
 		DisplayName:   "Test Credits",
@@ -66,62 +56,65 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		DecimalPlaces: 0,
 		IsActive:      true,
 		CreatedAt:     now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Product{
+	creditsSpecJSON, err := json.Marshal(models.CreditsSpec{
+		creditTypeName: {Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
+	})
+	require.NoError(t, err)
+	description := "Test"
+	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
-		Description: "Test",
-		CreditsSpec: models.CreditsSpec{
-			creditTypeName: {Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
-		},
-		Status:    models.CatalogStatusActive,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}).Exec(ctx)
+		Description: &description,
+		CreditsSpec: creditsSpecJSON,
+		Status:      string(models.CatalogStatusActive),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Price{
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               priceID,
 		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
+		Status:           string(models.CatalogStatusActive),
 		BillingCycleDays: &billingDays,
 		CreatedAt:        now,
 		UpdatedAt:        now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	periodEnd := now.Add(30 * 24 * time.Hour)
 	periodStart := now
-	_, err = bunDB.NewInsert().Model(&models.Subscription{
+	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
 		TenantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
-		PriceID:                 priceID,
-		Status:                  models.StatusActive,
-		Processor:               models.ProcessorCCBill,
+		PriceID:                 &priceID,
+		Status:                  string(models.StatusActive),
+		Processor:               string(models.ProcessorCCBill),
 		ProcessorSubscriptionID: ccbillSubID,
 		CurrentPeriodStartsAt:   &periodStart,
 		CurrentPeriodEndsAt:     &periodEnd,
 		StartedAt:               now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("subscription_id = ?", subID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", creditTypeID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", creditTypeID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -159,11 +152,11 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	require.NoError(t, svc.handleRenewalSuccess(ctx))
 
-	depositCount, err := bunDB.NewSelect().
-		Model((*models.CreditTransaction)(nil)).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", tenantSubjectID, creditTypeID).
-		Where("transaction_type = 'deposit' AND source = 'subscription_renewal'").
-		Count(ctx)
-	require.NoError(t, err)
+	var depositCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM billing.credit_transactions
+		 WHERE tenant_subject_id = $1 AND credit_type_id = $2
+		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
+		tenantSubjectID, creditTypeID).Scan(&depositCount))
 	require.Equal(t, 1, depositCount)
 }

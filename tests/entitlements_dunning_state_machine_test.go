@@ -43,7 +43,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	periodStart := t0
 	paidEnd := t0.Add(30 * 24 * time.Hour)
 
-	_, err := suite.BunDB.NewInsert().Model(&models.Product{
+	suite.InsertProduct(ctx, &models.Product{
 		ID:          productID,
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
@@ -54,10 +54,9 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		Status:    models.CatalogStatusActive,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
-	_, err = suite.BunDB.NewInsert().Model(&models.Price{
+	suite.InsertPrice(ctx, &models.Price{
 		ID:               priceID,
 		ProductID:        productID,
 		Status:           models.CatalogStatusActive,
@@ -66,10 +65,9 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		BillingCycleDays: &billingDays,
 		CreatedAt:        clock.Now().UTC(),
 		UpdatedAt:        clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
-	_, err = suite.BunDB.NewInsert().Model(&models.Subscription{
+	suite.InsertSubscription(ctx, &models.Subscription{
 		ID:                      subID,
 		TenantSubjectID:         suite.ensureTenantSubject(ctx, userID),
 		ProductID:               productID,
@@ -82,8 +80,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		StartedAt:               clock.Now().UTC(),
 		CreatedAt:               clock.Now().UTC(),
 		UpdatedAt:               clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
 	paidEnt := &models.Entitlement{
 		ID:              uuid.New(),
@@ -96,14 +93,13 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		CreatedAt:       clock.Now().UTC(),
 		UpdatedAt:       clock.Now().UTC(),
 	}
-	_, err = suite.BunDB.NewInsert().Model(paidEnt).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, paidEnt)
 
 	t.Cleanup(func() {
-		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// (1) Subscription entitlement is active until paidEnd.
@@ -118,28 +114,26 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
 
 	countGrace := func() int {
-		n, err := suite.BunDB.NewSelect().
-			Model((*models.Entitlement)(nil)).
-			Where("tenant_subject_id = ? AND entitlement = ?", suite.ensureTenantSubject(ctx, userID), "premium").
-			Where("source_type = ?", models.EntitlementSourceGrace).
-			Where("source_id = ?", subID).
-			Count(ctx)
-		require.NoError(t, err)
-		return n
+		return suite.Count(ctx, `
+			SELECT COUNT(*) FROM billing.entitlements
+			WHERE tenant_subject_id = $1 AND entitlement = $2
+			  AND source_type = $3 AND source_id = $4
+			  AND deleted_at IS NULL`,
+			suite.ensureTenantSubject(ctx, userID), "premium",
+			string(models.EntitlementSourceGrace), subID)
 	}
 	latestGraceEnd := func() time.Time {
-		var ent models.Entitlement
-		err := suite.BunDB.NewSelect().
-			Model(&ent).
-			Where("tenant_subject_id = ? AND entitlement = ?", suite.ensureTenantSubject(ctx, userID), "premium").
-			Where("source_type = ?", models.EntitlementSourceGrace).
-			Where("source_id = ?", subID).
-			OrderExpr("end_at DESC").
-			Limit(1).
-			Scan(ctx)
-		require.NoError(t, err)
-		require.NotNil(t, ent.EndAt)
-		return ent.EndAt.UTC()
+		ents := suite.QueryEntitlements(ctx, `
+			WHERE tenant_subject_id = $1 AND entitlement = $2
+			  AND source_type = $3 AND source_id = $4
+			  AND deleted_at IS NULL
+			ORDER BY end_at DESC
+			LIMIT 1`,
+			suite.ensureTenantSubject(ctx, userID), "premium",
+			string(models.EntitlementSourceGrace), subID)
+		require.Len(t, ents, 1)
+		require.NotNil(t, ents[0].EndAt)
+		return ents[0].EndAt.UTC()
 	}
 
 	callRenewalFailure := func(nextRetryDate string) {
@@ -188,8 +182,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.WithinDuration(t, grace1.UTC(), latestGraceEnd(), time.Second)
 
 	// Sanity: paid window is unchanged.
-	var gotPaid models.Entitlement
-	require.NoError(t, suite.BunDB.NewSelect().Model(&gotPaid).Where("id = ?", paidEnt.ID).Scan(ctx))
+	gotPaid := *suite.GetEntitlement(ctx, paidEnt.ID)
 	require.NotNil(t, gotPaid.EndAt)
 	require.Equal(t, paidEnd.UTC(), gotPaid.EndAt.UTC())
 	require.Nil(t, gotPaid.RevokedAt)
@@ -230,15 +223,13 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.NoError(t, webhook.HandleCCBillWebhook(ctx))
 
 	// The single active grace window should be revoked by renewal success.
-	var graceRows []models.Entitlement
-	require.NoError(t, suite.BunDB.NewSelect().
-		Model(&graceRows).
-		WhereAllWithDeleted().
-		Where("tenant_subject_id = ? AND entitlement = ?", suite.ensureTenantSubject(ctx, userID), "premium").
-		Where("source_type = ?", models.EntitlementSourceGrace).
-		Where("source_id = ?", subID).
-		OrderExpr("start_at ASC").
-		Scan(ctx))
+	// (No deleted_at filter: this is the bun WhereAllWithDeleted read.)
+	graceRows := suite.QueryEntitlements(ctx, `
+		WHERE tenant_subject_id = $1 AND entitlement = $2
+		  AND source_type = $3 AND source_id = $4
+		ORDER BY start_at ASC`,
+		suite.ensureTenantSubject(ctx, userID), "premium",
+		string(models.EntitlementSourceGrace), subID)
 	require.Len(t, graceRows, 1)
 	require.NotNil(t, graceRows[0].RevokedAt, "active grace window should be revoked")
 	require.Nil(t, graceRows[0].DeletedAt, "historical grace window should not be deleted")
@@ -249,16 +240,14 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 		paidEnd.Add(30*24*time.Hour).Day(),
 		23, 59, 59, 0, time.UTC,
 	)
-	var paidWindows []models.Entitlement
-	require.NoError(t, suite.BunDB.NewSelect().
-		Model(&paidWindows).
-		Where("tenant_subject_id = ? AND entitlement = ?", suite.ensureTenantSubject(ctx, userID), "premium").
-		Where("source_type = ?", models.EntitlementSourceSubscription).
-		Where("source_id = ?", subID).
-		Where("revoked_at IS NULL").
-		Where("deleted_at IS NULL").
-		OrderExpr("start_at ASC").
-		Scan(ctx))
+	paidWindows := suite.QueryEntitlements(ctx, `
+		WHERE tenant_subject_id = $1 AND entitlement = $2
+		  AND source_type = $3 AND source_id = $4
+		  AND revoked_at IS NULL
+		  AND deleted_at IS NULL
+		ORDER BY start_at ASC`,
+		suite.ensureTenantSubject(ctx, userID), "premium",
+		string(models.EntitlementSourceSubscription), subID)
 	require.GreaterOrEqual(t, len(paidWindows), 2)
 
 	latest := paidWindows[len(paidWindows)-1]

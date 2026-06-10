@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
-	"github.com/uptrace/bun"
 )
 
 type PaymentFilters struct {
@@ -38,15 +39,59 @@ const internalNMISubscriptionAttemptMetadataKey = "nmi_subscription_order_id"
 
 func NewPaymentRepo(d *db.DB) *PaymentRepo { return &PaymentRepo{db: d} }
 
+// paymentInsertParams maps a model onto the insert parameter set shared by
+// CreatePayment and CreatePaymentIfNotExists (identical column lists).
+func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
+	discountMeta, err := toJSONB(p.DiscountMetadata)
+	if err != nil {
+		return gen.CreatePaymentParams{}, err
+	}
+	meta, err := toJSONB(p.Metadata)
+	if err != nil {
+		return gen.CreatePaymentParams{}, err
+	}
+	entSnap, err := toJSONB(p.EntitlementsSpecSnapshot)
+	if err != nil {
+		return gen.CreatePaymentParams{}, err
+	}
+	credSnap, err := toJSONB(p.CreditsSpecSnapshot)
+	if err != nil {
+		return gen.CreatePaymentParams{}, err
+	}
+	return gen.CreatePaymentParams{
+		ID:                       p.ID,
+		PriceID:                  p.PriceID,
+		Processor:                gen.BillingProcessorType(p.Processor),
+		TransactionID:            p.TransactionID,
+		Amount:                   p.Amount,
+		ListAmount:               p.ListAmount,
+		Currency:                 p.Currency,
+		Status:                   p.Status,
+		SubscriptionID:           p.SubscriptionID,
+		RefundedPaymentID:        p.RefundedPaymentID,
+		DiscountCode:             p.DiscountCode,
+		DiscountReason:           p.DiscountReason,
+		DiscountMetadata:         discountMeta,
+		EntitlementsSpecSnapshot: entSnap,
+		CreditsSpecSnapshot:      credSnap,
+		Metadata:                 meta,
+		PurchasedAt:              p.PurchasedAt,
+		CreatedAt:                p.CreatedAt,
+		CardBrand:                p.CardBrand,
+		CardLast4:                p.CardLast4,
+		TenantSubjectID:          p.TenantSubjectID,
+	}, nil
+}
+
 func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error {
-	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, payment.TenantSubjectID); err != nil {
+	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.TenantSubjectID); err != nil {
 		return err
 	}
-	res, err := r.db.Q(ctx).NewInsert().Model(payment).Exec(ctx)
+	params, err := paymentInsertParams(payment)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).CreatePayment(ctx, params)
 	if err != nil {
 		return err
 	}
@@ -57,111 +102,117 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 }
 
 func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
-	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, payment.TenantSubjectID); err != nil {
+	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.TenantSubjectID); err != nil {
 		return false, err
 	}
-	res, err := r.db.Q(ctx).
-		NewInsert().
-		Model(payment).
-		On("CONFLICT (tenant_id, processor, transaction_id) DO NOTHING").
-		Exec(ctx)
+	params, err := paymentInsertParams(payment)
 	if err != nil {
 		return false, err
 	}
-
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil {
 		return false, err
 	}
-
 	return rows > 0, nil
 }
 
 func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Payment, error) {
-	payment := new(models.Payment)
-	if err := r.db.Q(ctx).NewSelect().Model(payment).Where("purch.id = ?", id).Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetPaymentByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return payment, nil
+	return paymentFromGen(row)
 }
 
 // GetByIDWithDetails fetches a payment with all related entities (Price, Product, Subscription)
 // and also loads any refund entries linked to this payment
 func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*models.Payment, []*models.Payment, error) {
-	payment := new(models.Payment)
-	err := r.db.Q(ctx).NewSelect().
-		Model(payment).
-		Relation("Price").
-		Relation("Price.Product").
-		Relation("Subscription").
-		Where("purch.id = ?", id).
-		Scan(ctx)
+	q := r.db.Gen(ctx)
+	row, err := q.GetPaymentWithPriceProduct(ctx, id)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// Load any refund entries linked to this payment
-	refunds := []*models.Payment{}
-	err = r.db.Q(ctx).NewSelect().
-		Model(&refunds).
-		Where("refunded_payment_id = ?", id).
-		OrderExpr("created_at DESC").
-		Scan(ctx)
+	payment, err := paymentFromGen(row.BillingPayment)
 	if err != nil {
 		return nil, nil, err
 	}
+	price, err := priceFromGen(row.BillingPrice)
+	if err != nil {
+		return nil, nil, err
+	}
+	product, err := productFromGen(row.BillingProduct)
+	if err != nil {
+		return nil, nil, err
+	}
+	price.Product = product
+	payment.Price = price
 
+	if payment.SubscriptionID != nil {
+		subRow, err := q.GetSubscriptionByID(ctx, *payment.SubscriptionID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, err
+		}
+		if err == nil {
+			sub, err := subscriptionFromGen(subRow)
+			if err != nil {
+				return nil, nil, err
+			}
+			payment.Subscription = sub
+		}
+	}
+
+	refundRows, err := q.ListRefundsForPayment(ctx, &id)
+	if err != nil {
+		return nil, nil, err
+	}
+	refunds, err := paymentsFromGen(refundRows)
+	if err != nil {
+		return nil, nil, err
+	}
 	return payment, refunds, nil
 }
 
 func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	payments := []*models.Payment{}
-	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.tenant_subject_id = ?", tsid)
-	q = excludeInternalPaymentAttempts(q)
-	if err := q.OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListPaymentsByTenantSubject(ctx, tsid)
+	if err != nil {
 		return nil, err
 	}
-	return payments, nil
+	return paymentsFromGen(rows)
 }
 
 func (r *PaymentRepo) GetByTransactionID(ctx context.Context, processor models.Processor, transactionID string) (*models.Payment, error) {
-	payment := new(models.Payment)
-	if err := r.db.Q(ctx).NewSelect().Model(payment).Where("purch.processor = ?", processor).Where("purch.transaction_id = ?", transactionID).Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetPaymentByTransactionID(ctx, gen.GetPaymentByTransactionIDParams{
+		Processor:     gen.BillingProcessorType(processor),
+		TransactionID: transactionID,
+	})
+	if err != nil {
 		return nil, err
 	}
-	return payment, nil
+	return paymentFromGen(row)
 }
 
 func (r *PaymentRepo) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Payment, error) {
-	payments := []*models.Payment{}
-	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.price_id = ?", priceID)
-	q = excludeInternalPaymentAttempts(q)
-	if err := q.OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListPaymentsByPriceID(ctx, priceID)
+	if err != nil {
 		return nil, err
 	}
-	return payments, nil
+	return paymentsFromGen(rows)
 }
 
 func (r *PaymentRepo) GetByProcessor(ctx context.Context, processor models.Processor) ([]*models.Payment, error) {
-	payments := []*models.Payment{}
-	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.processor = ?", processor)
-	q = excludeInternalPaymentAttempts(q)
-	if err := q.OrderExpr("purch.purchased_at DESC").Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListPaymentsByProcessor(ctx, gen.BillingProcessorType(processor))
+	if err != nil {
 		return nil, err
 	}
-	return payments, nil
+	return paymentsFromGen(rows)
 }
 
 func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.Q(ctx).NewDelete().Model((*models.Payment)(nil)).Where("purch.id = ?", id).Exec(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).DeletePayment(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -172,29 +223,22 @@ func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
-	var refunds []refundTotalRow
-	if err := r.db.Q(ctx).NewSelect().
-		Model((*models.Payment)(nil)).
-		Column("amount", "status").
-		Where("purch.refunded_payment_id = ?", paymentID).
-		Scan(ctx, &refunds); err != nil {
+	rows, err := r.db.Gen(ctx).ListRefundRowsForTotal(ctx, &paymentID)
+	if err != nil {
 		return 0, err
+	}
+	refunds := make([]refundTotalRow, 0, len(rows))
+	for _, row := range rows {
+		refunds = append(refunds, refundTotalRow{Amount: row.Amount, Status: string(row.Status)})
 	}
 	return effectiveRefundTotalFromLinkedRows(refunds), nil
 }
 
 func (r *PaymentRepo) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
-	res, err := r.db.Q(ctx).
-		NewUpdate().
-		Model((*models.Payment)(nil)).
-		Set("refunded_payment_id = ?", originalPaymentID).
-		Where("purch.id = ?", paymentID).
-		Where("purch.refunded_payment_id IS NULL").
-		Exec(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).LinkRefundedPayment(ctx, gen.LinkRefundedPaymentParams{
+		ID:                paymentID,
+		RefundedPaymentID: &originalPaymentID,
+	})
 	if err != nil {
 		return err
 	}
@@ -205,8 +249,8 @@ func (r *PaymentRepo) LinkRefundedPayment(ctx context.Context, paymentID, origin
 }
 
 type refundTotalRow struct {
-	Amount int64  `bun:"amount"`
-	Status string `bun:"status"`
+	Amount int64
+	Status string
 }
 
 func effectiveRefundTotalFromLinkedRows(refunds []refundTotalRow) int64 {
@@ -233,33 +277,26 @@ func RefundStatusCountsTowardTotal(status string) bool {
 }
 
 func (r *PaymentRepo) GetRefundByAdminIdempotencyKey(ctx context.Context, originalPaymentID uuid.UUID, key string) (*models.Payment, error) {
-	payment := new(models.Payment)
-	if err := r.db.Q(ctx).NewSelect().
-		Model(payment).
-		Where("purch.refunded_payment_id = ?", originalPaymentID).
-		Where("purch.metadata ->> 'admin_refund_idempotency_key' = ?", strings.TrimSpace(key)).
-		Limit(1).
-		Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetRefundByAdminIdempotencyKey(ctx, gen.GetRefundByAdminIdempotencyKeyParams{
+		RefundedPaymentID: &originalPaymentID,
+		IdemKey:           strings.TrimSpace(key),
+	})
+	if err != nil {
 		return nil, err
 	}
-	return payment, nil
+	return paymentFromGen(row)
 }
 
 func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservationID uuid.UUID, refundTransactionID string, metadata map[string]any) error {
-	res, err := r.db.Q(ctx).NewUpdate().
-		Model((*models.Payment)(nil)).
-		Set("transaction_id = ?", refundTransactionID).
-		Set("status = ?", "completed").
-		Set("metadata = ?", metadata).
-		Where("purch.id = ?", reservationID).
-		Where("purch.refunded_payment_id IS NOT NULL").
-		Where("purch.amount < 0").
-		Where("purch.status = ?", "pending").
-		Exec(ctx)
+	meta, err := toJSONB(metadata)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).CompleteRefundReservation(ctx, gen.CompleteRefundReservationParams{
+		ID:            reservationID,
+		TransactionID: refundTransactionID,
+		Metadata:      meta,
+	})
 	if err != nil {
 		return err
 	}
@@ -270,31 +307,26 @@ func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservation
 }
 
 func (r *PaymentRepo) GetByMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
-	payment := new(models.Payment)
-	if err := r.db.Q(ctx).NewSelect().
-		Model(payment).
-		Where("purch.metadata ->> ? = ?", strings.TrimSpace(key), strings.TrimSpace(value)).
-		Limit(1).
-		Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetPaymentByMetadataValue(ctx, gen.GetPaymentByMetadataValueParams{
+		Key:   strings.TrimSpace(key),
+		Value: strings.TrimSpace(value),
+	})
+	if err != nil {
 		return nil, err
 	}
-	return payment, nil
+	return paymentFromGen(row)
 }
 
 func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) error {
-	res, err := r.db.Q(ctx).NewUpdate().
-		Model((*models.Payment)(nil)).
-		Set("transaction_id = ?", strings.TrimSpace(providerTransactionID)).
-		Set("status = ?", "completed").
-		Set("metadata = ?", metadata).
-		Where("purch.id = ?", attemptID).
-		Where("purch.amount > 0").
-		Where("purch.status = ?", "pending").
-		Exec(ctx)
+	meta, err := toJSONB(metadata)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).CompleteProviderAttempt(ctx, gen.CompleteProviderAttemptParams{
+		ID:            attemptID,
+		TransactionID: strings.TrimSpace(providerTransactionID),
+		Metadata:      meta,
+	})
 	if err != nil {
 		return err
 	}
@@ -305,17 +337,14 @@ func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uui
 }
 
 func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) error {
-	res, err := r.db.Q(ctx).NewUpdate().
-		Model((*models.Payment)(nil)).
-		Set("metadata = ?", metadata).
-		Where("purch.id = ?", attemptID).
-		Where("purch.amount > 0").
-		Where("purch.status = ?", "pending").
-		Exec(ctx)
+	meta, err := toJSONB(metadata)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).CompleteProviderAttemptInPlace(ctx, gen.CompleteProviderAttemptInPlaceParams{
+		ID:       attemptID,
+		Metadata: meta,
+	})
 	if err != nil {
 		return err
 	}
@@ -326,214 +355,225 @@ func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemp
 }
 
 func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, 0, err
 	}
-	payments := []*models.Payment{}
-	offset := (page - 1) * pageSize
-
-	countQ := r.db.Q(ctx).NewSelect().Model((*models.Payment)(nil)).Where("purch.tenant_subject_id = ?", tsid)
-	countQ = excludeInternalPaymentAttempts(countQ)
-	count, err := countQ.Count(ctx)
+	q := r.db.Gen(ctx)
+	count, err := q.CountPaymentsByTenantSubject(ctx, tsid)
 	if err != nil {
 		return nil, 0, err
 	}
-
-	q := r.db.Q(ctx).NewSelect().Model(&payments).Where("purch.tenant_subject_id = ?", tsid)
-	q = excludeInternalPaymentAttempts(q)
-	if err := q.OrderExpr("purch.purchased_at DESC").Limit(pageSize).Offset(offset).Scan(ctx); err != nil {
+	rows, err := q.ListPaymentsByTenantSubjectPaged(ctx, gen.ListPaymentsByTenantSubjectPagedParams{
+		TenantSubjectID: tsid,
+		PageLimit:       int32(pageSize),
+		PageOffset:      int32((page - 1) * pageSize),
+	})
+	if err != nil {
 		return nil, 0, err
 	}
-
-	return payments, count, nil
+	payments, err := paymentsFromGen(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return payments, int(count), nil
 }
 
 func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[PaymentFilters]) ([]*models.Payment, int64, error) {
-	payments := []*models.Payment{}
-	q := r.db.Q(ctx).NewSelect().Model(&payments)
-	q = excludeInternalPaymentAttempts(q)
+	f := opts.Filters
 
-	q = q.Relation("Price").Relation("Price.Product").Relation("Subscription")
-
-	if opts.Filters.UserID != "" {
-		tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, opts.Filters.UserID)
+	var tsid *uuid.UUID
+	if f.UserID != "" {
+		id, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, f.UserID)
 		if err != nil {
 			return nil, 0, err
 		}
-		q = q.Where("purch.tenant_subject_id = ?", tsid)
+		tsid = &id
 	}
-	if opts.Filters.PriceID != uuid.Nil {
-		q = q.Where("purch.price_id = ?", opts.Filters.PriceID)
+	var priceID *uuid.UUID
+	if f.PriceID != uuid.Nil {
+		priceID = &f.PriceID
 	}
-	if opts.Filters.SubscriptionID != "" {
-		subID, err := api.ParseSubscriptionID(opts.Filters.SubscriptionID)
-		if err == nil {
-			q = q.Where("purch.subscription_id = ?", subID)
+	var subID *uuid.UUID
+	if f.SubscriptionID != "" {
+		if parsed, err := api.ParseSubscriptionID(f.SubscriptionID); err == nil {
+			subID = &parsed
 		}
 	}
-	if opts.Filters.Processor != "" {
-		q = q.Where("purch.processor = ?", opts.Filters.Processor)
+	var processor, transactionID *string
+	if f.Processor != "" {
+		processor = &f.Processor
 	}
-	if opts.Filters.TransactionID != "" {
-		q = q.Where("purch.transaction_id = ?", opts.Filters.TransactionID)
-	}
-	if opts.Filters.StartDate != nil {
-		q = q.Where("purch.purchased_at >= ?", opts.Filters.StartDate)
-	}
-	if opts.Filters.EndDate != nil {
-		q = q.Where("purch.purchased_at <= ?", opts.Filters.EndDate)
-	}
-	if opts.Filters.MinAmount != nil {
-		q = q.Where("purch.amount >= ?", opts.Filters.MinAmount)
-	}
-	if opts.Filters.MaxAmount != nil {
-		q = q.Where("purch.amount <= ?", opts.Filters.MaxAmount)
-	}
-	if opts.Filters.RefundsOnly {
-		q = q.Where("purch.refunded_payment_id IS NOT NULL")
+	if f.TransactionID != "" {
+		transactionID = &f.TransactionID
 	}
 
-	total, err := q.Count(ctx)
+	q := r.db.Gen(ctx)
+	total, err := q.CountPaymentsFiltered(ctx, gen.CountPaymentsFilteredParams{
+		TenantSubjectID: tsid,
+		PriceID:         priceID,
+		SubscriptionID:  subID,
+		Processor:       processor,
+		TransactionID:   transactionID,
+		PurchasedAfter:  f.StartDate,
+		PurchasedBefore: f.EndDate,
+		MinAmount:       f.MinAmount,
+		MaxAmount:       f.MaxAmount,
+		RefundsOnly:     f.RefundsOnly,
+	})
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// Apply sorting
-	q = applyPaymentSorting(q, opts.Filters.SortBy, opts.Filters.SortOrder)
-	q = q.Limit(opts.GetLimit()).Offset(opts.GetOffset())
-
-	if err := q.Scan(ctx); err != nil {
+	sortBy := f.SortBy
+	switch sortBy {
+	case "amount", "purchased_at":
+	default:
+		sortBy = "created_at"
+	}
+	rows, err := q.ListPaymentsFiltered(ctx, gen.ListPaymentsFilteredParams{
+		TenantSubjectID: tsid,
+		PriceID:         priceID,
+		SubscriptionID:  subID,
+		Processor:       processor,
+		TransactionID:   transactionID,
+		PurchasedAfter:  f.StartDate,
+		PurchasedBefore: f.EndDate,
+		MinAmount:       f.MinAmount,
+		MaxAmount:       f.MaxAmount,
+		RefundsOnly:     f.RefundsOnly,
+		SortBy:          sortBy,
+		SortDesc:        f.SortOrder != "asc",
+		PageLimit:       int32(opts.GetLimit()),
+		PageOffset:      int32(opts.GetOffset()),
+	})
+	if err != nil {
 		return nil, 0, err
 	}
-
-	return payments, int64(total), nil
+	payments, err := paymentsFromGen(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := r.attachPaymentRelations(ctx, payments); err != nil {
+		return nil, 0, err
+	}
+	return payments, total, nil
 }
 
-func excludeInternalPaymentAttempts(q *bun.SelectQuery) *bun.SelectQuery {
-	return q.Where("COALESCE(purch.metadata ->> ?, '') = ''", internalNMISubscriptionAttemptMetadataKey)
+// attachPaymentRelations stitches Price (+Product) and Subscription onto the
+// supplied payments in two batched lookups — the sqlc replacement for bun's
+// Relation("Price").Relation("Price.Product").Relation("Subscription").
+func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*models.Payment) error {
+	if len(payments) == 0 {
+		return nil
+	}
+	priceIDs := make([]uuid.UUID, 0, len(payments))
+	subIDs := make([]uuid.UUID, 0, len(payments))
+	seenPrice := map[uuid.UUID]bool{}
+	seenSub := map[uuid.UUID]bool{}
+	for _, p := range payments {
+		if p.PriceID != uuid.Nil && !seenPrice[p.PriceID] {
+			seenPrice[p.PriceID] = true
+			priceIDs = append(priceIDs, p.PriceID)
+		}
+		if p.SubscriptionID != nil && !seenSub[*p.SubscriptionID] {
+			seenSub[*p.SubscriptionID] = true
+			subIDs = append(subIDs, *p.SubscriptionID)
+		}
+	}
+
+	q := r.db.Gen(ctx)
+	prices := map[uuid.UUID]*models.Price{}
+	if len(priceIDs) > 0 {
+		rows, err := q.ListPricesWithProductByIDs(ctx, priceIDs)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			price, err := priceFromGen(row.BillingPrice)
+			if err != nil {
+				return err
+			}
+			product, err := productFromGen(row.BillingProduct)
+			if err != nil {
+				return err
+			}
+			price.Product = product
+			prices[price.ID] = price
+		}
+	}
+	subs := map[uuid.UUID]*models.Subscription{}
+	if len(subIDs) > 0 {
+		rows, err := q.ListSubscriptionsByIDs(ctx, subIDs)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			sub, err := subscriptionFromGen(row)
+			if err != nil {
+				return err
+			}
+			subs[sub.ID] = sub
+		}
+	}
+	for _, p := range payments {
+		p.Price = prices[p.PriceID]
+		if p.SubscriptionID != nil {
+			p.Subscription = subs[*p.SubscriptionID]
+		}
+	}
+	return nil
 }
 
 func (r *PaymentRepo) GetLatestByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (*models.Payment, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	payment := new(models.Payment)
-	q := r.db.Q(ctx).
-		NewSelect().
-		Model(payment).
-		Where("purch.tenant_subject_id = ?", tsid).
-		Where("purch.processor = ?", processor)
-	q = excludeInternalPaymentAttempts(q)
-	err = q.OrderExpr("purch.purchased_at DESC").
-		Limit(1).
-		Scan(ctx)
+	row, err := r.db.Gen(ctx).GetLatestPaymentByTenantSubjectProcessor(ctx, gen.GetLatestPaymentByTenantSubjectProcessorParams{
+		TenantSubjectID: tsid,
+		Processor:       gen.BillingProcessorType(processor),
+	})
 	if err != nil {
 		return nil, err
 	}
-	return payment, nil
+	return paymentFromGen(row)
 }
 
 func (r *PaymentRepo) GetLatestBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
-	payment := new(models.Payment)
-	err := r.db.Q(ctx).
-		NewSelect().
-		Model(payment).
-		Where("purch.subscription_id = ?", subscriptionID).
-		OrderExpr("purch.purchased_at DESC").
-		Limit(1).
-		Scan(ctx)
+	row, err := r.db.Gen(ctx).GetLatestPaymentBySubscriptionID(ctx, &subscriptionID)
 	if err != nil {
 		return nil, err
 	}
-	return payment, nil
+	return paymentFromGen(row)
 }
 
 func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
-	payment := new(models.Payment)
-	err := r.db.Q(ctx).
-		NewSelect().
-		Model(payment).
-		Where("purch.subscription_id = ?", subscriptionID).
-		Where("purch.amount > 0").
-		Where("COALESCE(purch.status::text, 'completed') = ?", "completed").
-		OrderExpr("purch.purchased_at DESC").
-		Limit(1).
-		Scan(ctx)
+	row, err := r.db.Gen(ctx).GetLatestChargeBySubscriptionID(ctx, &subscriptionID)
 	if err != nil {
 		return nil, err
 	}
-	return payment, nil
+	return paymentFromGen(row)
 }
 
 func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (successful int, failed int, err error) {
 	if userID == "" {
 		return 0, 0, fmt.Errorf("user_id is required")
 	}
-
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return 0, 0, err
 	}
-
-	// Successful payments (positive amount)
-	successQ := r.db.Q(ctx).
-		NewSelect().
-		Model((*models.Payment)(nil)).
-		Where("purch.tenant_subject_id = ?", tsid).
-		Where("purch.processor = ?", processor).
-		Where("purch.amount > 0").
-		Where("COALESCE(purch.status::text, 'completed') = ?", "completed")
-	successQ = excludeInternalPaymentAttempts(successQ)
-	successful, err = successQ.Count(ctx)
+	row, err := r.db.Gen(ctx).CountPaymentOutcomesBySubjectProcessor(ctx, gen.CountPaymentOutcomesBySubjectProcessorParams{
+		TenantSubjectID: tsid,
+		Processor:       gen.BillingProcessorType(processor),
+	})
 	if err != nil {
-		return
+		return 0, 0, err
 	}
-
-	// Failed/negative/zero payments
-	failedQ := r.db.Q(ctx).
-		NewSelect().
-		Model((*models.Payment)(nil)).
-		Where("purch.tenant_subject_id = ?", tsid).
-		Where("purch.processor = ?", processor).
-		Where("COALESCE(purch.status::text, 'completed') = ?", "failed")
-	failedQ = excludeInternalPaymentAttempts(failedQ)
-	failed, err = failedQ.Count(ctx)
-	if err != nil {
-		return
-	}
-
-	return
+	return int(row.Successful), int(row.Failed), nil
 }
 
 func (r *PaymentRepo) MarkFailed(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.Q(ctx).
-		NewUpdate().
-		Model((*models.Payment)(nil)).
-		Set("status = ?", "failed").
-		Where("purch.id = ?", id).
-		Exec(ctx)
-	return err
-}
-
-func applyPaymentSorting(q *bun.SelectQuery, sortBy, sortOrder string) *bun.SelectQuery {
-	// Validate and map sort field
-	var column string
-	switch sortBy {
-	case "amount":
-		column = "purch.amount"
-	case "purchased_at":
-		column = "purch.purchased_at"
-	default:
-		column = "purch.created_at"
-	}
-
-	// Validate sort order
-	order := "DESC"
-	if sortOrder == "asc" {
-		order = "ASC"
-	}
-
-	return q.OrderExpr(column + " " + order)
+	return r.db.Gen(ctx).MarkPaymentFailed(ctx, id)
 }

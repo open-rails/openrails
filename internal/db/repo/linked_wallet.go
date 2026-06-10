@@ -2,13 +2,14 @@ package repo
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -21,28 +22,48 @@ type LinkedWalletRepo struct {
 
 func NewLinkedWalletRepo(d *db.DB) *LinkedWalletRepo { return &LinkedWalletRepo{db: d} }
 
+func linkedWalletFromGen(w gen.BillingLinkedWallet) (*models.LinkedWallet, error) {
+	m := &models.LinkedWallet{
+		ID:                   w.ID,
+		TenantID:             w.TenantID,
+		TenantSubjectID:      w.TenantSubjectID,
+		Chain:                w.Chain,
+		Address:              w.Address,
+		VerificationProvider: w.VerificationProvider,
+		VerifiedAt:           w.VerifiedAt,
+		DisplayName:          w.DisplayName,
+		CreatedAt:            w.CreatedAt,
+		UpdatedAt:            w.UpdatedAt,
+	}
+	if err := fromJSONB(w.Metadata, &m.Metadata, "linked_wallets.metadata"); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (r *LinkedWalletRepo) GetByUserIDAndChain(ctx context.Context, userID, chain string) (*models.LinkedWallet, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
 	if tsid == uuid.Nil {
 		return nil, ErrLinkedWalletNotFound
 	}
-	wallet := new(models.LinkedWallet)
-	err = r.db.Q(ctx).NewSelect().Model(wallet).
-		Where("lw.tenant_subject_id = ?", tsid).
-		Where("lw.chain = ?", strings.ToLower(strings.TrimSpace(chain))).
-		Limit(1).
-		Scan(ctx)
-	if errors.Is(err, sql.ErrNoRows) {
+	row, err := r.db.Gen(ctx).GetLinkedWalletByTenantSubjectAndChain(ctx, gen.GetLinkedWalletByTenantSubjectAndChainParams{
+		TenantSubjectID: tsid,
+		Chain:           strings.ToLower(strings.TrimSpace(chain)),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrLinkedWalletNotFound
 	}
-	return wallet, err
+	if err != nil {
+		return nil, err
+	}
+	return linkedWalletFromGen(row)
 }
 
 func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, wallet *models.LinkedWallet) (*models.LinkedWallet, error) {
-	tsid, err := EnsureTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := EnsureTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -52,35 +73,46 @@ func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, w
 	if wallet.Metadata == nil {
 		wallet.Metadata = map[string]any{}
 	}
-	_, err = r.db.Q(ctx).NewInsert().Model(wallet).
-		On(`CONFLICT (tenant_id, tenant_subject_id, chain) DO UPDATE`).
-		Set(`address = EXCLUDED.address`).
-		Set(`verification_provider = EXCLUDED.verification_provider`).
-		Set(`verified_at = EXCLUDED.verified_at`).
-		Set(`display_name = EXCLUDED.display_name`).
-		Set(`metadata = EXCLUDED.metadata`).
-		Set(`updated_at = now()`).
-		Returning(`*`).
-		Exec(ctx)
-	return wallet, err
+	meta, err := toJSONB(wallet.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).UpsertLinkedWallet(ctx, gen.UpsertLinkedWalletParams{
+		ID:                   wallet.ID,
+		TenantID:             wallet.TenantID,
+		TenantSubjectID:      wallet.TenantSubjectID,
+		Chain:                wallet.Chain,
+		Address:              wallet.Address,
+		VerificationProvider: wallet.VerificationProvider,
+		VerifiedAt:           wallet.VerifiedAt,
+		DisplayName:          wallet.DisplayName,
+		Metadata:             meta,
+		CreatedAt:            wallet.CreatedAt,
+		UpdatedAt:            wallet.UpdatedAt,
+	})
+	if err != nil {
+		return nil, err
+	}
+	updated, err := linkedWalletFromGen(row)
+	if err != nil {
+		return nil, err
+	}
+	*wallet = *updated
+	return wallet, nil
 }
 
 func (r *LinkedWalletRepo) DeleteForUserIDAndChain(ctx context.Context, userID, chain string) error {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return err
 	}
 	if tsid == uuid.Nil {
 		return ErrLinkedWalletNotFound
 	}
-	res, err := r.db.Q(ctx).NewDelete().Model((*models.LinkedWallet)(nil)).
-		Where("tenant_subject_id = ?", tsid).
-		Where("chain = ?", strings.ToLower(strings.TrimSpace(chain))).
-		Exec(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).DeleteLinkedWalletByTenantSubjectAndChain(ctx, gen.DeleteLinkedWalletByTenantSubjectAndChainParams{
+		TenantSubjectID: tsid,
+		Chain:           strings.ToLower(strings.TrimSpace(chain)),
+	})
 	if err != nil {
 		return err
 	}

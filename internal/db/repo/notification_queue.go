@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/query"
 )
@@ -23,15 +24,48 @@ type NotificationQueueRepo struct {
 
 func NewNotificationQueueRepo(d *db.DB) *NotificationQueueRepo { return &NotificationQueueRepo{db: d} }
 
+func notificationFromGen(n gen.BillingNotificationQueue) (*models.NotificationQueue, error) {
+	m := &models.NotificationQueue{
+		ID:              n.ID,
+		TenantSubjectID: n.TenantSubjectID,
+		EventType:       models.NotificationEventType(n.EventType),
+		Seen:            n.Seen,
+		CreatedAt:       n.CreatedAt,
+	}
+	if err := fromJSONB(n.Data, &m.Data, "notification_queue.data"); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func notificationsFromGen(rows []gen.BillingNotificationQueue) ([]*models.NotificationQueue, error) {
+	out := make([]*models.NotificationQueue, 0, len(rows))
+	for _, r := range rows {
+		m, err := notificationFromGen(r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
 func (r *NotificationQueueRepo) Create(ctx context.Context, notification *models.NotificationQueue) error {
-	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, notification.TenantSubjectID); err != nil {
+	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, notification.TenantSubjectID); err != nil {
 		return err
 	}
-	res, err := r.db.Q(ctx).NewInsert().Model(notification).Exec(ctx)
+	data, err := toJSONB(notification.Data)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).CreateNotification(ctx, gen.CreateNotificationParams{
+		ID:              notification.ID,
+		TenantSubjectID: notification.TenantSubjectID,
+		EventType:       string(notification.EventType),
+		Data:            data,
+		Seen:            notification.Seen,
+		CreatedAt:       notification.CreatedAt,
+	})
 	if err != nil {
 		return err
 	}
@@ -42,101 +76,84 @@ func (r *NotificationQueueRepo) Create(ctx context.Context, notification *models
 }
 
 func (r *NotificationQueueRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.NotificationQueue, error) {
-	notification := new(models.NotificationQueue)
-	if err := r.db.Q(ctx).NewSelect().Model(notification).Where("nq.id = ?", id).Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetNotificationByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return notification, nil
+	return notificationFromGen(row)
 }
 
 func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	notifications := []*models.NotificationQueue{}
-	if err := r.db.Q(ctx).NewSelect().Model(&notifications).Where("nq.tenant_subject_id = ?", tsid).OrderExpr("nq.created_at DESC").Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListNotificationsByTenantSubject(ctx, tsid)
+	if err != nil {
 		return nil, err
 	}
-	return notifications, nil
+	return notificationsFromGen(rows)
 }
 
 func (r *NotificationQueueRepo) GetUnseenByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	notifications := []*models.NotificationQueue{}
-	if err := r.db.Q(ctx).NewSelect().Model(&notifications).Where("nq.tenant_subject_id = ?", tsid).Where("nq.seen = ?", false).OrderExpr("nq.created_at DESC").Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListUnseenNotificationsByTenantSubject(ctx, tsid)
+	if err != nil {
 		return nil, err
 	}
-	return notifications, nil
+	return notificationsFromGen(rows)
 }
 
 func (r *NotificationQueueRepo) GetByEventType(ctx context.Context, eventType models.NotificationEventType) ([]*models.NotificationQueue, error) {
-	notifications := []*models.NotificationQueue{}
-	if err := r.db.Q(ctx).NewSelect().Model(&notifications).Where("nq.event_type = ?", eventType).OrderExpr("nq.created_at DESC").Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListNotificationsByEventType(ctx, string(eventType))
+	if err != nil {
 		return nil, err
 	}
-	return notifications, nil
+	return notificationsFromGen(rows)
 }
 
 func (r *NotificationQueueRepo) CountByUserAndEventSince(ctx context.Context, userID string, eventType models.NotificationEventType, since time.Time) (int, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return 0, err
 	}
-	var count int
-	err = r.db.Q(ctx).NewSelect().
-		Model((*models.NotificationQueue)(nil)).
-		ColumnExpr("COUNT(*)").
-		Where("nq.tenant_subject_id = ?", tsid).
-		Where("nq.event_type = ?", eventType).
-		Where("nq.created_at >= ?", since).
-		Scan(ctx, &count)
-	return count, err
+	count, err := r.db.Gen(ctx).CountNotificationsByTenantSubjectEventSince(ctx, gen.CountNotificationsByTenantSubjectEventSinceParams{
+		TenantSubjectID: tsid,
+		EventType:       string(eventType),
+		CreatedAt:       since,
+	})
+	return int(count), err
 }
 
 func (r *NotificationQueueRepo) GetUsersWithPendingDigest(ctx context.Context, since time.Time) ([]string, error) {
-	userIDs := []string{}
-	err := r.db.Q(ctx).NewSelect().
-		Model((*models.NotificationQueue)(nil)).
-		ColumnExpr("DISTINCT nq.tenant_subject_id::text").
-		Where("nq.event_type = ?", models.NotificationTranslationCompletedPendingDigest).
-		Where("nq.created_at >= ?", since).
-		Scan(ctx, &userIDs)
-	if err != nil {
-		return nil, err
-	}
-	return userIDs, nil
+	return r.db.Gen(ctx).ListTenantSubjectsWithPendingDigest(ctx, gen.ListTenantSubjectsWithPendingDigestParams{
+		EventType: string(models.NotificationTranslationCompletedPendingDigest),
+		CreatedAt: since,
+	})
 }
 
 func (r *NotificationQueueRepo) GetPendingDigestForUser(ctx context.Context, userID string, since time.Time, limit int) ([]*models.NotificationQueue, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	items := []*models.NotificationQueue{}
-	q := r.db.Q(ctx).NewSelect().Model(&items).
-		Where("nq.tenant_subject_id = ?", tsid).
-		Where("nq.event_type = ?", models.NotificationTranslationCompletedPendingDigest).
-		Where("nq.created_at >= ?", since).
-		OrderExpr("nq.created_at DESC")
-	if limit > 0 {
-		q = q.Limit(limit)
-	}
-	if err := q.Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListPendingDigestForTenantSubject(ctx, gen.ListPendingDigestForTenantSubjectParams{
+		TenantSubjectID: tsid,
+		EventType:       string(models.NotificationTranslationCompletedPendingDigest),
+		CreatedAt:       since,
+		PageLimit:       int32(limit),
+	})
+	if err != nil {
 		return nil, err
 	}
-	return items, nil
+	return notificationsFromGen(rows)
 }
 
 func (r *NotificationQueueRepo) MarkAsSeen(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.Q(ctx).NewUpdate().Model((*models.NotificationQueue)(nil)).Set("seen = ?", true).Where("nq.id = ?", id).Exec(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).MarkNotificationSeen(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -147,11 +164,17 @@ func (r *NotificationQueueRepo) MarkAsSeen(ctx context.Context, id uuid.UUID) er
 }
 
 func (r *NotificationQueueRepo) Update(ctx context.Context, notification *models.NotificationQueue) error {
-	res, err := r.db.Q(ctx).NewUpdate().Model(notification).WherePK().Exec(ctx)
+	data, err := toJSONB(notification.Data)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).UpdateNotification(ctx, gen.UpdateNotificationParams{
+		ID:              notification.ID,
+		TenantSubjectID: notification.TenantSubjectID,
+		EventType:       string(notification.EventType),
+		Data:            data,
+		Seen:            notification.Seen,
+	})
 	if err != nil {
 		return err
 	}
@@ -162,11 +185,7 @@ func (r *NotificationQueueRepo) Update(ctx context.Context, notification *models
 }
 
 func (r *NotificationQueueRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.Q(ctx).NewDelete().Model((*models.NotificationQueue)(nil)).Where("nq.id = ?", id).Exec(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).DeleteNotification(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -177,33 +196,48 @@ func (r *NotificationQueueRepo) Delete(ctx context.Context, id uuid.UUID) error 
 }
 
 func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query.QueryOptions[NotificationFilters]) ([]*models.NotificationQueue, int64, error) {
-	notifications := []*models.NotificationQueue{}
-	q := r.db.Q(ctx).NewSelect().Model(&notifications)
-
+	var tsid *uuid.UUID
 	if opts.Filters.UserID != "" {
-		tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, opts.Filters.UserID)
+		id, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, opts.Filters.UserID)
 		if err != nil {
 			return nil, 0, err
 		}
-		q = q.Where("nq.tenant_subject_id = ?", tsid)
+		tsid = &id
 	}
+	var eventType *string
 	if opts.Filters.EventType != "" {
-		q = q.Where("nq.event_type = ?", opts.Filters.EventType)
-	}
-	if opts.Filters.Seen != nil {
-		q = q.Where("nq.seen = ?", *opts.Filters.Seen)
+		et := string(opts.Filters.EventType)
+		eventType = &et
 	}
 
-	total, err := q.Count(ctx)
+	q := r.db.Gen(ctx)
+	total, err := q.CountNotificationsFiltered(ctx, gen.CountNotificationsFilteredParams{
+		TenantSubjectID: tsid,
+		EventType:       eventType,
+		Seen:            opts.Filters.Seen,
+	})
 	if err != nil {
 		return nil, 0, err
 	}
-
-	q = q.Limit(opts.GetLimit()).Offset(opts.GetOffset()).OrderExpr("nq.created_at DESC")
-
-	if err := q.Scan(ctx); err != nil {
+	rows, err := q.ListNotificationsFiltered(ctx, gen.ListNotificationsFilteredParams{
+		TenantSubjectID: tsid,
+		EventType:       eventType,
+		Seen:            opts.Filters.Seen,
+		PageLimit:       int32(opts.GetLimit()),
+		PageOffset:      int32(opts.GetOffset()),
+	})
+	if err != nil {
 		return nil, 0, err
 	}
+	notifications, err := notificationsFromGen(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return notifications, total, nil
+}
 
-	return notifications, int64(total), nil
+// NotificationFromGen exposes the gen -> model mapping for callers outside the
+// repo (e.g. the admin operations handlers reading repair alerts).
+func NotificationFromGen(n gen.BillingNotificationQueue) (*models.NotificationQueue, error) {
+	return notificationFromGen(n)
 }

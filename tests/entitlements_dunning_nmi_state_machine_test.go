@@ -36,7 +36,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	priceID := uuid.New()
 	billingDays := 30
 
-	_, err := suite.BunDB.NewInsert().Model(&models.Product{
+	suite.InsertProduct(ctx, &models.Product{
 		ID:          productID,
 		Slug:        "test_nmi_multi_" + uuid.New().String()[:8],
 		DisplayName: "Test Product",
@@ -48,10 +48,9 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		Status:    models.CatalogStatusActive,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
-	_, err = suite.BunDB.NewInsert().Model(&models.Price{
+	suite.InsertPrice(ctx, &models.Price{
 		ID:               priceID,
 		ProductID:        productID,
 		Status:           models.CatalogStatusActive,
@@ -65,8 +64,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		},
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
 	userID := uuid.New().String()
 	pm := suite.CreateTestPaymentMethod(userID)
@@ -101,11 +99,11 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	}
 
 	t.Cleanup(func() {
-		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", sub.ID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.PaymentMethod)(nil)).Where("id = ?", pm.ID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", sub.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// Move time to paid end and mark a failure (puts subscription into past_due and schedules next_retry_at).
@@ -186,9 +184,9 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", sub.ID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.PaymentMethod)(nil)).Where("id = ?", pm.ID).Exec(ctx)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", sub.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm.ID)
 	})
 
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
@@ -213,8 +211,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 	for i := 0; i < subscriptions.MaxDunningFailures+1; i++ {
 		clock.Advance(subscriptions.DunningInterval)
 		require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
-		var refreshed models.Subscription
-		require.NoError(t, suite.BunDB.NewSelect().Model(&refreshed).Where("id = ?", sub.ID).Scan(ctx))
+		refreshed := suite.GetSubscription(sub.ID)
 		if refreshed.Status == models.StatusCancelled {
 			break
 		}

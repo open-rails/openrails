@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 // CatalogDriftProvider names the upstream payment processor a drift event
@@ -68,30 +67,28 @@ const (
 // The external_resource_id column generalizes across providers: it holds the
 // Stripe object id for the Stripe pass and the NMI plan_id for the NMI pass.
 type CatalogDriftEvent struct {
-	bun.BaseModel `bun:"table:billing.catalog_drift_events,alias:cde"`
-
-	ID uuid.UUID `bun:"id,pk,type:uuid,default:uuidv7()" json:"id"`
+	ID uuid.UUID `json:"id"`
 	// Provider is "stripe" or "nmi"; it disambiguates the shared field_drift kind.
-	Provider CatalogDriftProvider `bun:"provider,notnull" json:"provider"`
-	Kind     CatalogDriftKind     `bun:"kind,notnull" json:"kind"`
+	Provider CatalogDriftProvider `json:"provider"`
+	Kind     CatalogDriftKind     `json:"kind"`
 
 	// OpenRailsResourceType is "product" or "price". Always set.
-	OpenRailsResourceType CatalogDriftResourceType `bun:"openrails_resource_type,notnull" json:"openrails_resource_type"`
+	OpenRailsResourceType CatalogDriftResourceType `json:"openrails_resource_type"`
 	// OpenRailsResourceID is the UUID of the OpenRails row (empty for pure
 	// orphans that have no OpenRails counterpart).
-	OpenRailsResourceID string `bun:"openrails_resource_id,nullzero" json:"openrails_resource_id,omitempty"`
+	OpenRailsResourceID string `json:"openrails_resource_id,omitempty"`
 	// ExternalResourceID is the upstream object id: a Stripe product/price id for
 	// the Stripe pass, or an NMI plan_id for the NMI pass. For missing_in_*, it
 	// carries the id we failed to find, so it is set for all kinds in practice.
-	ExternalResourceID string `bun:"external_resource_id,nullzero" json:"external_resource_id,omitempty"`
+	ExternalResourceID string `json:"external_resource_id,omitempty"`
 
 	// Field is the diverged field name for field_drift; empty for orphan/missing.
-	Field string `bun:"field,nullzero" json:"field,omitempty"`
+	Field string `json:"field,omitempty"`
 	// OpenRailsValue / ExternalValue carry the stringified diverging values for
 	// field_drift; empty otherwise.
-	OpenRailsValue string `bun:"openrails_value,nullzero" json:"openrails_value,omitempty"`
-	ExternalValue  string `bun:"external_value,nullzero" json:"external_value,omitempty"`
+	OpenRailsValue string `json:"openrails_value,omitempty"`
+	ExternalValue  string `json:"external_value,omitempty"`
 
-	DetectedAt time.Time  `bun:"detected_at,notnull,default:current_timestamp" json:"detected_at"`
-	ResolvedAt *time.Time `bun:"resolved_at,nullzero" json:"resolved_at,omitempty"`
+	DetectedAt time.Time  `json:"detected_at"`
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 }

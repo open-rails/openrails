@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -289,7 +290,7 @@ func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userI
 		resp := &UserSubscriptionResponse{Subscription: subscription, Access: accessFromSubscription(subscription)}
 		s.enrichSubscriptionResponse(ctx, resp)
 		return resp, nil
-	case errors.Is(err, sql.ErrNoRows):
+	case repo.IsNotFound(err):
 		access, accessErr := s.activeEntitlementAccess(ctx, userID)
 		if accessErr != nil {
 			return nil, accessErr
@@ -311,7 +312,7 @@ func (s *UserSubscriptionService) GetUserAccessStatus(ctx context.Context, userI
 		if sub, err := s.SubscriptionService.GetActiveSubscription(ctx, userID); err == nil {
 			grants = append(grants, accessFromSubscription(sub))
 			skipSubscriptionIDs[sub.ID] = struct{}{}
-		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		} else if err != nil && !repo.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to fetch subscription access: %w", err)
 		}
 	}
@@ -330,7 +331,7 @@ func (s *UserSubscriptionService) GetUserAccessStatus(ctx context.Context, userI
 func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, userID string, subscriptionID uuid.UUID) (*UserSubscriptionResponse, error) {
 	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			return nil, ErrSubscriptionNotFound
 		}
 		return nil, fmt.Errorf("failed to get subscription: %w", err)

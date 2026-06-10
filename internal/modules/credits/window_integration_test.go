@@ -4,65 +4,56 @@ package credits_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // windowEnv provisions a migrated DB + credits service + one funded payer.
-func windowEnv(t *testing.T, depositMicros int64) (context.Context, *bun.DB, *credits.CreditsService, identity.TenantSubjectID, string) {
+func windowEnv(t *testing.T, depositMicros int64) (context.Context, *pgxpool.Pool, *credits.CreditsService, identity.TenantSubjectID, string) {
 	t.Helper()
 	ctx := context.Background()
 
 	dsn := dbtest.SharedPostgresDSN(t)
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-	require.NoError(t, bunDB.PingContext(ctx))
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 
 	var hasWindows bool
-	require.NoError(t, bunDB.NewSelect().
-		ColumnExpr("EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_windows')").
-		Scan(ctx, &hasWindows))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_windows')").
+		Scan(&hasWindows))
 	if !hasWindows {
 		t.Skip("billing.credit_windows not found; run migrations before integration tests")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
 	svc := credits.NewCreditsService(dbi)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	ctName := "test_windows_" + uuid.NewString()
 	ctID := uuid.New()
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := gen.New(pool).CreateCreditType(ctx, gen.CreateCreditTypeParams{
 		ID: ctID, Name: ctName, DisplayName: "Test Windows", Unit: "usd", DecimalPlaces: 6, IsActive: true, CreatedAt: now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("credit_type_id = ?", ctID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditWindow)(nil)).Where("credit_type_id = ?", ctID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("credit_type_id = ?", ctID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("credit_type_id = ?", ctID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("credit_type_id = ?", ctID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE credit_type_id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_windows WHERE credit_type_id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE credit_type_id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE credit_type_id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE credit_type_id = $1", ctID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", ctID)
 	})
 
 	if depositMicros > 0 {
@@ -75,7 +66,7 @@ func windowEnv(t *testing.T, depositMicros int64) (context.Context, *bun.DB, *cr
 		})
 		require.NoError(t, err)
 	}
-	return ctx, bunDB, svc, payer, ctName
+	return ctx, pool, svc, payer, ctName
 }
 
 func requireBalance(t *testing.T, ctx context.Context, svc *credits.CreditsService, payer identity.TenantSubjectID, ctName string, balance, held int64) {
@@ -90,7 +81,7 @@ func requireBalance(t *testing.T, ctx context.Context, svc *credits.CreditsServi
 // (idempotent) -> over-settle rejected -> refill -> close-releases-remainder,
 // asserting the ledger invariants at every step.
 func TestCreditWindows_Lifecycle(t *testing.T) {
-	ctx, bunDB, svc, payer, ctName := windowEnv(t, 1000)
+	ctx, pool, svc, payer, ctName := windowEnv(t, 1000)
 
 	// Open: funds leave available immediately (a REAL hold).
 	w, err := svc.OpenWindow(ctx, credits.OpenWindowParams{
@@ -121,10 +112,9 @@ func TestCreditWindows_Lifecycle(t *testing.T) {
 
 	// Usage attribution rode along with req_1.
 	var usageCount int
-	require.NoError(t, bunDB.NewSelect().Model((*models.UsageEvent)(nil)).
-		ColumnExpr("count(*)").
-		Where("source = 'window_settle' AND source_id = 'req_1'").
-		Scan(ctx, &usageCount))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT count(*) FROM billing.usage_events WHERE source = 'window_settle' AND source_id = 'req_1'").
+		Scan(&usageCount))
 	require.Equal(t, 1, usageCount)
 
 	// Idempotent replay: same request_id -> success, NOTHING re-charged.
@@ -229,12 +219,7 @@ func TestCreditWindows_ExpiryReleasesRemainder(t *testing.T) {
 	ctx, _, svc, payer, ctName := windowEnv(t, 500)
 
 	dsn := dbtest.SharedPostgresDSN(t)
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	// Already past expiry; the sweep hasn't run yet.
 	w, err := svc.OpenWindow(ctx, credits.OpenWindowParams{

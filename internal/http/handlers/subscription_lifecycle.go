@@ -1,14 +1,13 @@
 package handlers
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -79,7 +78,7 @@ func CancelSubscription(r *httprequest.Request) {
 
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "subscription not found")
 			return
 		}
@@ -138,7 +137,7 @@ func ResumeSubscription(r *httprequest.Request) {
 
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "subscription not found")
 			return
 		}

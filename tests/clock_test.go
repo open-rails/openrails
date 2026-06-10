@@ -120,17 +120,14 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		PaymentMethodID: &pm.ID,
 	})
 	countDueRetries := func() int {
-		var count int
-		err := suite.BunDB.NewSelect().
-			Model((*models.Subscription)(nil)).
-			Where("sub.processor = ?", models.ProcessorMobius).
-			Where("sub.tenant_subject_id = ?", retryTenantSubjectID).
-			Where("sub.status = ?", models.StatusPastDue).
-			Where("sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= ?", mockClock.Now()).
-			ColumnExpr("COUNT(*)").
-			Scan(ctx, &count)
-		require.NoError(t, err)
-		return count
+		return suite.Count(ctx, `
+			SELECT COUNT(*) FROM billing.subscriptions sub
+			WHERE sub.processor = $1
+			  AND sub.tenant_subject_id = $2
+			  AND sub.status = $3
+			  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $4`,
+			string(models.ProcessorMobius), retryTenantSubjectID,
+			string(models.StatusPastDue), mockClock.Now())
 	}
 	assert.Equal(t, 0, countDueRetries())
 	mockClock.Advance(time.Hour)
@@ -158,8 +155,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		CreatedAt:       cancelStart,
 		UpdatedAt:       cancelStart,
 	}
-	_, err = suite.BunDB.NewInsert().Model(ent).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent)
 
 	mockClock.Advance(5 * 24 * time.Hour)
 	require.NoError(t, rt.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
@@ -197,8 +193,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		ExpiresAt:       &blockExpiry,
 		CreatedAt:       mockClock.Now(),
 	}
-	_, err = suite.BunDB.NewInsert().Model(block).Exec(ctx)
-	require.NoError(t, err)
+	suite.insertCreditBlock(ctx, block)
 
 	holdWorker := &riverjobs.HoldExpiryWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock}
 	creditWorker := &riverjobs.CreditExpiryWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock}
@@ -207,10 +202,8 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
 	assert.Equal(t, "active", suite.getCreditHold(hold.ID).Status)
 	var remaining int64
-	require.NoError(t, suite.BunDB.NewSelect().Model((*models.CreditBlock)(nil)).
-		ColumnExpr("remaining_amount").
-		Where("id = ?", block.ID).
-		Scan(ctx, &remaining))
+	require.NoError(t, suite.Pool.QueryRow(ctx,
+		"SELECT remaining_amount FROM billing.credit_blocks WHERE id = $1", block.ID).Scan(&remaining))
 	assert.Equal(t, int64(75), remaining)
 
 	mockClock.Advance(2 * time.Hour)
@@ -220,10 +213,8 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	updatedBalance := suite.getCreditBalance(balance.ID)
 	assert.Equal(t, int64(0), updatedBalance.HeldBalance)
 	assert.Equal(t, int64(25), updatedBalance.Balance)
-	require.NoError(t, suite.BunDB.NewSelect().Model((*models.CreditBlock)(nil)).
-		ColumnExpr("remaining_amount").
-		Where("id = ?", block.ID).
-		Scan(ctx, &remaining))
+	require.NoError(t, suite.Pool.QueryRow(ctx,
+		"SELECT remaining_amount FROM billing.credit_blocks WHERE id = $1", block.ID).Scan(&remaining))
 	assert.Equal(t, int64(0), remaining)
 }
 

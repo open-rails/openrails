@@ -2,7 +2,6 @@ package riverjobs
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -180,21 +179,13 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		}
 	} else {
 		// Fallback to active subscription lookup
-		sub = new(models.Subscription)
-		tsid, terr := repo.ResolveTenantSubjectID(ctx, w.DB.Q(ctx), uuid.Nil, userID)
+		tsid, terr := repo.ResolveTenantSubjectID(ctx, w.DB.Qx(ctx), uuid.Nil, userID)
 		if terr != nil {
 			return terr
 		}
-		err = w.DB.Q(ctx).NewSelect().
-			Model(sub).
-			Where("sub.tenant_subject_id = ?", tsid).
-			Where("sub.status = ?", models.StatusCancelled).
-			Where("(sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > ?)", now).
-			OrderExpr("sub.created_at DESC").
-			Limit(1).
-			Scan(ctx)
+		sub, err = repo.NewSubscriptionRepo(w.DB).GetLatestResumableCancelled(ctx, tsid, now)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if repo.IsNotFound(err) {
 				log.WithContext(ctx).WithField("user_id", userID).Info("no cancellable subscription to resume")
 				return nil
 			}
@@ -344,7 +335,7 @@ func (w NMIDeleteSubscriptionWorker) Work(ctx context.Context, job *river.Job[NM
 
 	sub, err := w.SubscriptionService.GetByID(ctx, job.Args.SubscriptionID)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if repo.IsNotFound(err) {
 			return nil
 		}
 		return err

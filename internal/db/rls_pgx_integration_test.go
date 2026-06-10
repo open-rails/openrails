@@ -38,7 +38,7 @@ func TestRLSEnforcement_PgxSide(t *testing.T) {
 
 	super := newDBRetry(t, superDSN)
 	defer super.Close()
-	_, err := super.GetDB().ExecContext(ctx, rlsSetupDDL)
+	_, err := super.Pool().Exec(ctx, rlsSetupDDL)
 	require.NoError(t, err)
 	_, err = super.Qx(ctx).Exec(ctx, `DELETE FROM billing.rls_probe WHERE id = ANY($1::uuid[])`,
 		[]string{

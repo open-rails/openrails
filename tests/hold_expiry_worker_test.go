@@ -29,7 +29,10 @@ func (suite *TestContainerSuite) createTestCreditType(name string) *models.Credi
 		IsActive:      true,
 		CreatedAt:     now,
 	}
-	_, err := suite.BunDB.NewInsert().Model(ct).Exec(context.Background())
+	_, err := suite.Pool.Exec(context.Background(), `
+		INSERT INTO billing.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		ct.ID, ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
 	if err != nil {
 		panic(err)
 	}
@@ -50,7 +53,10 @@ func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTy
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	_, err := suite.BunDB.NewInsert().Model(bal).Exec(ctx)
+	_, err := suite.Pool.Exec(ctx, `
+		INSERT INTO billing.credit_balances (id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		bal.ID, bal.TenantSubjectID, bal.CreditTypeID, bal.Balance, bal.HeldBalance, bal.CreatedAt, bal.UpdatedAt)
 	if err != nil {
 		panic(err)
 	}
@@ -83,17 +89,43 @@ func (suite *TestContainerSuite) createTestCreditHold(userID string, creditTypeI
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	_, err := suite.BunDB.NewInsert().Model(hold).Exec(ctx)
+	_, err := suite.Pool.Exec(ctx, `
+		INSERT INTO billing.credit_transactions (
+			id, tenant_subject_id, actor, credit_type_id, amount, balance_after,
+			transaction_type, status, authorized_amount, captured_amount,
+			source, source_id, expires_at, description, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+		hold.ID, hold.TenantSubjectID, hold.Actor, hold.CreditTypeID, hold.Amount, hold.BalanceAfter,
+		hold.TransactionType, hold.Status, hold.Authorized, hold.Captured,
+		hold.Source, hold.SourceID, hold.ExpiresAt, hold.Description, hold.CreatedAt, hold.UpdatedAt)
 	if err != nil {
 		panic(err)
 	}
 	return hold
 }
 
+// creditTransactionCols is the column list scanned into models.CreditTransaction.
+const creditTransactionCols = `id, tenant_id, tenant_subject_id, actor, resource, metadata,
+	credit_type_id, amount, balance_after, transaction_type, status, authorized_amount,
+	captured_amount, source, source_id, expires_at, description, created_at, updated_at`
+
+func scanCreditTransaction(row interface{ Scan(...any) error }) (*models.CreditTransaction, error) {
+	t := new(models.CreditTransaction)
+	err := row.Scan(
+		&t.ID, &t.TenantID, &t.TenantSubjectID, &t.Actor, &t.Resource, &t.Metadata,
+		&t.CreditTypeID, &t.Amount, &t.BalanceAfter, &t.TransactionType, &t.Status, &t.Authorized,
+		&t.Captured, &t.Source, &t.SourceID, &t.ExpiresAt, &t.Description, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
 // getCreditHold retrieves a credit hold by ID
 func (suite *TestContainerSuite) getCreditHold(id uuid.UUID) *models.CreditTransaction {
-	hold := new(models.CreditTransaction)
-	err := suite.BunDB.NewSelect().Model(hold).Where("id = ?", id).Scan(context.Background())
+	row := suite.Pool.QueryRow(context.Background(),
+		"SELECT "+creditTransactionCols+" FROM billing.credit_transactions WHERE id = $1", id)
+	hold, err := scanCreditTransaction(row)
 	if err != nil {
 		panic(err)
 	}
@@ -103,7 +135,11 @@ func (suite *TestContainerSuite) getCreditHold(id uuid.UUID) *models.CreditTrans
 // getCreditBalance retrieves a user credit balance by ID
 func (suite *TestContainerSuite) getCreditBalance(id uuid.UUID) *models.CreditBalance {
 	bal := new(models.CreditBalance)
-	err := suite.BunDB.NewSelect().Model(bal).Where("id = ?", id).Scan(context.Background())
+	err := suite.Pool.QueryRow(context.Background(), `
+		SELECT id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at
+		FROM billing.credit_balances WHERE id = $1`, id).
+		Scan(&bal.ID, &bal.TenantID, &bal.TenantSubjectID, &bal.CreditTypeID,
+			&bal.Balance, &bal.HeldBalance, &bal.CreatedAt, &bal.UpdatedAt)
 	if err != nil {
 		panic(err)
 	}

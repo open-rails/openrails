@@ -2,8 +2,6 @@ package riverjobs
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -150,7 +149,7 @@ func (w CCBillReconcileWorker) Work(ctx context.Context, job *river.Job[CCBillRe
 		missingLocal++
 		existing, err := subscriptionService.GetByProcessorSubscriptionID(ctx, "ccbill", processorSubID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if repo.IsNotFound(err) {
 				if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_local", nil, "", processorSubID, &record, nil); alertErr != nil {
 					log.WithContext(ctx).WithError(alertErr).Warn("CCBillReconcile: failed to persist missing-local repair alert")
 				}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for the migration bootstrap
 	"github.com/open-rails/migratekit"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -22,7 +23,6 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func startCryptoPostgres(t *testing.T) (*pgxpool.Pool, context.Context) {
@@ -52,7 +52,8 @@ func startCryptoPostgres(t *testing.T) (*pgxpool.Pool, context.Context) {
 		require.NoError(t, err)
 	}
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	sqlDB, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, sqlDB.PingContext(ctx))
 	_, err = sqlDB.ExecContext(ctx, `

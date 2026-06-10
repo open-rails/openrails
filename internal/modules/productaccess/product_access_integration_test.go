@@ -4,7 +4,6 @@ package productaccess
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/url"
 	"os"
@@ -13,17 +12,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -89,21 +87,18 @@ func pagStartContainer(t *testing.T) (superDSN, appDSN string) {
 	return superDSN, appDSN
 }
 
-func pagOpenBun(t *testing.T, dsn string) *bun.DB {
+func pagOpenPool(t *testing.T, dsn string) *pgxpool.Pool {
 	t.Helper()
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-	require.NoError(t, bunDB.PingContext(context.Background()))
-	t.Cleanup(func() { _ = bunDB.Close() })
-	return bunDB
+	pool, err := pgxpool.New(context.Background(), dsn)
+	require.NoError(t, err)
+	require.NoError(t, pool.Ping(context.Background()))
+	t.Cleanup(pool.Close)
+	return pool
 }
 
 func pagOpenDB(t *testing.T, dsn string) *db.DB {
 	t.Helper()
-	dbi, err := db.NewWithBun(pagOpenBun(t, dsn))
-	require.NoError(t, err)
-	return dbi
+	return dbtest.OpenAppDB(t, dsn)
 }
 
 func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
@@ -111,25 +106,25 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 	superDSN, appDSN := pagStartContainer(t)
 
 	// As superuser: the REAL consolidated Postgres migrations.
-	superBun := pagOpenBun(t, superDSN)
+	superPool := pagOpenPool(t, superDSN)
 	schema001, err := postgresmigrations.FS.ReadFile("001_schema.up.sql")
 	require.NoError(t, err)
-	_, err = superBun.ExecContext(ctx, string(schema001))
+	_, err = superPool.Exec(ctx, string(schema001))
 	require.NoError(t, err)
 	seed002, err := postgresmigrations.FS.ReadFile("002_seed.up.sql")
 	require.NoError(t, err)
-	_, err = superBun.ExecContext(ctx, string(seed002))
+	_, err = superPool.Exec(ctx, string(seed002))
 	require.NoError(t, err)
-	_, err = superBun.ExecContext(ctx, `ALTER ROLE openrails_app LOGIN PASSWORD 'app_pw'`)
+	_, err = superPool.Exec(ctx, `ALTER ROLE openrails_app LOGIN PASSWORD 'app_pw'`)
 	require.NoError(t, err)
 	for _, tt := range []struct {
 		id   tenant.ID
 		slug string
 	}{{pagTenantA, "tenant-a"}, {pagTenantB, "tenant-b"}} {
-		_, err = superBun.NewRaw(
-			`INSERT INTO billing.tenants (id, slug, name, status) VALUES (?, ?, ?, 'active') ON CONFLICT (slug) DO NOTHING`,
+		_, err = superPool.Exec(ctx,
+			`INSERT INTO billing.tenants (id, slug, name, status) VALUES ($1, $2, $3, 'active') ON CONFLICT (slug) DO NOTHING`,
 			tt.id.UUID(), tt.slug, tt.slug,
-		).Exec(ctx)
+		)
 		require.NoError(t, err)
 	}
 
@@ -145,10 +140,10 @@ func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {
 		if p.id == productB {
 			tenantID = pagTenantB.UUID()
 		}
-		_, err = superBun.NewRaw(
-			`INSERT INTO billing.products (id, tenant_id, slug, display_name, status) VALUES (?, ?, ?, 'P', 'active')`,
+		_, err = superPool.Exec(ctx,
+			`INSERT INTO billing.products (id, tenant_id, slug, display_name, status) VALUES ($1, $2, $3, 'P', 'active')`,
 			p.id, tenantID, p.slug,
-		).Exec(ctx)
+		)
 		require.NoError(t, err)
 	}
 

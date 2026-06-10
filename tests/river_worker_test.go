@@ -180,8 +180,7 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 			Seen:            true, // Seen notifications have 90-day retention
 			CreatedAt:       mockClock.Now().Add(-95 * 24 * time.Hour),
 		}
-		_, err := suite.BunDB.NewInsert().Model(notification).Exec(ctx)
-		require.NoError(t, err)
+		suite.InsertNotification(ctx, notification)
 
 		// Run cleanup worker
 		worker := riverjobs.CleanupExpiredDataWorker{
@@ -189,17 +188,11 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 			Clock:  mockClock,
 			Config: riverjobs.DefaultCleanupConfig(),
 		}
-		err = worker.Work(ctx, &river.Job[riverjobs.CleanupExpiredDataArgs]{})
+		err := worker.Work(ctx, &river.Job[riverjobs.CleanupExpiredDataArgs]{})
 		require.NoError(t, err)
 
 		// Verify notification was deleted
-		var count int
-		err = suite.BunDB.NewSelect().
-			Model((*models.NotificationQueue)(nil)).
-			Where("id = ?", notification.ID).
-			ColumnExpr("COUNT(*)").
-			Scan(ctx, &count)
-		require.NoError(t, err)
+		count := suite.Count(ctx, "SELECT COUNT(*) FROM billing.notification_queue WHERE id = $1", notification.ID)
 		assert.Equal(t, 0, count, "Old seen notification should be deleted")
 	})
 
@@ -216,8 +209,7 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 			Seen:            false,
 			CreatedAt:       mockClock.Now(),
 		}
-		_, err := suite.BunDB.NewInsert().Model(notification).Exec(ctx)
-		require.NoError(t, err)
+		suite.InsertNotification(ctx, notification)
 
 		// Run cleanup worker
 		worker := riverjobs.CleanupExpiredDataWorker{
@@ -225,20 +217,14 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 			Clock:  mockClock,
 			Config: riverjobs.DefaultCleanupConfig(),
 		}
-		err = worker.Work(ctx, &river.Job[riverjobs.CleanupExpiredDataArgs]{})
+		err := worker.Work(ctx, &river.Job[riverjobs.CleanupExpiredDataArgs]{})
 		require.NoError(t, err)
 
 		// Verify recent notification was preserved
-		var notifCount int
-		err = suite.BunDB.NewSelect().
-			Model((*models.NotificationQueue)(nil)).
-			Where("id = ?", notification.ID).
-			ColumnExpr("COUNT(*)").
-			Scan(ctx, &notifCount)
-		require.NoError(t, err)
+		notifCount := suite.Count(ctx, "SELECT COUNT(*) FROM billing.notification_queue WHERE id = $1", notification.ID)
 		assert.Equal(t, 1, notifCount, "Recent notification should be preserved")
 
 		// Clean up test data
-		suite.BunDB.NewDelete().Model(notification).WherePK().Exec(ctx)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.notification_queue WHERE id = $1", notification.ID)
 	})
 }

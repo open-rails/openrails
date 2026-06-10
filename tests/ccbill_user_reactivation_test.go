@@ -18,11 +18,9 @@ func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T
 
 	expiredAt := now
 	expiredPeriodEnd := now.Add(-time.Hour)
-	_, err := suite.BunDB.NewUpdate().
-		Model((*models.Subscription)(nil)).
-		Set("current_period_ends_at = ?", expiredPeriodEnd).
-		Where("id = ?", subscriptionID).
-		Exec(ctx)
+	_, err := suite.Pool.Exec(ctx,
+		"UPDATE billing.subscriptions SET current_period_ends_at = $1 WHERE id = $2",
+		expiredPeriodEnd, subscriptionID)
 	require.NoError(t, err)
 	postCCBillTerminalEvent(t, suite, "Expiration", "testdata/webhooks/ccbill/expiration.json", processorSubID, expiredAt)
 
@@ -143,12 +141,9 @@ func TestCCBillRenewalSuccess_BlocksTerminalChargebackTransition(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, entitled)
 
-	count, err := suite.BunDB.NewSelect().
-		Model((*models.Payment)(nil)).
-		Where("purch.processor = ?", models.ProcessorCCBill).
-		Where("purch.transaction_id = ?", renewalTxnID).
-		Count(ctx)
-	require.NoError(t, err)
+	count := suite.Count(ctx,
+		"SELECT COUNT(*) FROM billing.payments WHERE processor = $1 AND transaction_id = $2",
+		string(models.ProcessorCCBill), renewalTxnID)
 	require.Equal(t, 0, count)
 }
 
@@ -171,11 +166,10 @@ func TestCCBillChargeback_DedupesDuplicateDelivery(t *testing.T) {
 	}, 10*time.Second, 200*time.Millisecond)
 
 	require.Eventually(t, func() bool {
-		count, err := suite.BunDB.NewSelect().
-			Model((*models.NotificationQueue)(nil)).
-			Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).
-			Where("event_type = ?", models.NotificationPremiumEnded).
-			Count(ctx)
+		var count int
+		err := suite.Pool.QueryRow(ctx,
+			"SELECT COUNT(*) FROM billing.notification_queue WHERE tenant_subject_id = $1 AND event_type = $2",
+			suite.ensureTenantSubject(ctx, userID), string(models.NotificationPremiumEnded)).Scan(&count)
 		if err != nil {
 			return false
 		}
@@ -215,7 +209,7 @@ func seedCCBillActiveSubscriptionWithEntitlement(t *testing.T) (*TestContainerSu
 	startAt := now.Add(-5 * 24 * time.Hour)
 	endAt := now.Add(25 * 24 * time.Hour)
 	subID := created.ID
-	_, err := suite.BunDB.NewInsert().Model(&models.Entitlement{
+	suite.InsertEntitlement(ctx, &models.Entitlement{
 		ID:              uuid.New(),
 		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
 		Entitlement:     "premium",
@@ -225,8 +219,7 @@ func seedCCBillActiveSubscriptionWithEntitlement(t *testing.T) (*TestContainerSu
 		SourceID:        &subID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
 	return suite, userID, processorSubID, created.ID, now
 }

@@ -2,12 +2,18 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/repo"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // Severity levels for audit findings
@@ -84,18 +90,19 @@ type Check interface {
 	// Severity returns the severity level of issues found by this check
 	Severity() Severity
 	// Run executes the check and returns any findings
-	Run(ctx context.Context, db bun.IDB, opts Options) ([]Finding, error)
+	Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error)
 }
 
 // Checker runs all registered checks
 type Checker struct {
-	db     bun.IDB
+	q      *gen.Queries
 	checks []Check
 }
 
-// NewChecker creates a new audit checker with all checks registered
-func NewChecker(db bun.IDB) *Checker {
-	c := &Checker{db: db}
+// NewChecker creates a new audit checker with all checks registered.
+// qx is any sqlc queryable (*pgxpool.Pool, pgx.Tx, ...).
+func NewChecker(qx gen.DBTX) *Checker {
+	c := &Checker{q: gen.New(qx)}
 	c.registerAllChecks()
 	return c
 }
@@ -166,9 +173,11 @@ func (c *Checker) registerAllChecks() {
 		// =====================================================================
 		// Admin grant checks (cross-table business logic)
 		// =====================================================================
+		// AG-3 (revoked admin grant with active entitlement) was removed during
+		// the sqlc migration: billing.admin_grants has no revoked_at column, so
+		// the bun-era check could never have executed.
 		&CheckAdminGrantMissingEntitlements{},      // AG-1
 		&CheckOrphanAdminEntitlements{},            // AG-2
-		&CheckRevokedAdminGrantActiveEntitlement{}, // AG-3
 		&CheckExpiredAdminGrantActiveEntitlement{}, // AG-4
 
 		// =====================================================================
@@ -201,7 +210,7 @@ func (c *Checker) Run(ctx context.Context, opts Options) ([]Finding, Summary, er
 			continue
 		}
 
-		findings, err := check.Run(ctx, c.db, opts)
+		findings, err := check.Run(ctx, c.q, opts)
 		if err != nil {
 			return nil, summary, fmt.Errorf("check %s failed: %w", check.ID(), err)
 		}
@@ -237,4 +246,26 @@ func (c *Checker) GetCategories() []string {
 		}
 	}
 	return categories
+}
+
+// resolveTenantSubjectID converts an Options.UserID into the payable tenant
+// subject id used by the billing tables, mirroring repo.ResolveTenantSubjectID
+// (read-only: an unknown subject yields uuid.Nil, which matches no rows).
+func resolveTenantSubjectID(ctx context.Context, q *gen.Queries, userID string) (uuid.UUID, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return uuid.Nil, nil
+	}
+	if uid, perr := uuid.Parse(userID); perr == nil {
+		return uid, nil
+	}
+	id, err := q.GetTenantSubjectIDByIssuerSubject(ctx, gen.GetTenantSubjectIDByIssuerSubjectParams{
+		TenantID: tenant.FromContextOrDefault(ctx).UUID(),
+		Issuer:   repo.LegacyUserIssuer,
+		Subject:  userID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, nil
+	}
+	return id, err
 }

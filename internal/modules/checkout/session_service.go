@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/mail"
 	"strconv"
@@ -1111,7 +1110,7 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 	// an active Solana subscription.
 	sub, err := s.subscriptionReader.GetByID(ctx, subscriptionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			return nil, fmt.Errorf("%w: subscription not found", ErrCheckoutSessionValidation)
 		}
 		return nil, fmt.Errorf("failed to load subscription: %w", err)
@@ -1720,7 +1719,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 				return nil, err
 			}
 			return s.sessionToResponse(updated), nil
-		} else if !errors.Is(err, sql.ErrNoRows) {
+		} else if !repo.IsNotFound(err) {
 			return nil, fmt.Errorf("failed checking existing solana payment: %w", err)
 		}
 	}
@@ -1909,7 +1908,7 @@ func (s *CheckoutSessionService) FindOpenByUserPriceProcessor(ctx context.Contex
 	}
 	session, err := s.repo.GetLatestOpenByUserPriceProcessor(ctx, userID, priceID, processor)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			return nil, nil
 		}
 		return nil, err
@@ -2066,7 +2065,7 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			return nil, ErrCheckoutSessionNotFound
 		}
 		return nil, err
@@ -2143,7 +2142,7 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			return nil, ErrCheckoutSessionNotFound
 		}
 		return nil, err

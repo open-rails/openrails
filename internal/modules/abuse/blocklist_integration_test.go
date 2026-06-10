@@ -4,59 +4,49 @@ package abuse_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
-// blocklistEnv opens the shared migrated Postgres, registers models, and returns
-// a BlocklistService plus the raw bun.DB (for cleanup). All operations run under
-// the default tenant via tenant.FromContextOrDefault, exactly like the credits
-// integration harness.
-func blocklistEnv(t *testing.T) (*abuse.BlocklistService, *bun.DB, context.Context) {
+// blocklistEnv opens the shared migrated Postgres and returns a
+// BlocklistService plus the raw pgx pool (for cleanup/assertions). All
+// operations run under the default tenant via tenant.FromContextOrDefault,
+// exactly like the credits integration harness.
+func blocklistEnv(t *testing.T) (*abuse.BlocklistService, *pgxpool.Pool, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
+
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 
 	var hasTable bool
-	require.NoError(t, bunDB.NewSelect().
-		ColumnExpr("EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='payment_blocklist')").
-		Scan(ctx, &hasTable))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='payment_blocklist')",
+	).Scan(&hasTable))
 	if !hasTable {
 		t.Skip("billing.payment_blocklist missing; run migration 067")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
-
-	return abuse.NewBlocklistService(dbi), bunDB, ctx
+	return abuse.NewBlocklistService(dbi), pool, ctx
 }
 
 func TestBlocklist_TenantWideAddIsBlockedRemove(t *testing.T) {
-	svc, bunDB, ctx := blocklistEnv(t)
+	svc, pool, ctx := blocklistEnv(t)
 
 	// Use unique values so the shared (persistent) container doesn't collide
 	// across test runs.
 	value := "fp_" + uuid.NewString()
 	other := "fp_" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.PaymentBlocklistEntry)(nil)).
-			Where("value IN (?, ?)", value, other).Exec(context.Background())
+		_, _ = pool.Exec(context.Background(),
+			"DELETE FROM billing.payment_blocklist WHERE value IN ($1, $2)", value, other)
 	})
 
 	// Not blocked before adding.
@@ -90,12 +80,12 @@ func TestBlocklist_TenantWideAddIsBlockedRemove(t *testing.T) {
 }
 
 func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
-	svc, bunDB, ctx := blocklistEnv(t)
+	svc, pool, ctx := blocklistEnv(t)
 
 	value := "cust_" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.PaymentBlocklistEntry)(nil)).
-			Where("value = ?", value).Exec(context.Background())
+		_, _ = pool.Exec(context.Background(),
+			"DELETE FROM billing.payment_blocklist WHERE value = $1", value)
 	})
 
 	owner := identity.TenantSubjectIDFromString(uuid.NewString())
@@ -114,12 +104,13 @@ func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
 	require.True(t, blocked)
 
 	// Verify the stored row actually carries the owner scope.
-	entry := new(models.PaymentBlocklistEntry)
-	require.NoError(t, bunDB.NewSelect().Model(entry).
-		Where("kind = ? AND value = ?", abuse.KindProcessorCustomer, value).
-		Limit(1).Scan(ctx))
-	require.NotNil(t, entry.TenantSubjectID)
-	require.Equal(t, owner.UUID(), *entry.TenantSubjectID)
+	var storedOwner *uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT tenant_subject_id FROM billing.payment_blocklist WHERE kind = $1 AND value = $2 LIMIT 1",
+		abuse.KindProcessorCustomer, value,
+	).Scan(&storedOwner))
+	require.NotNil(t, storedOwner)
+	require.Equal(t, owner.UUID(), *storedOwner)
 
 	// Remove clears it.
 	require.NoError(t, svc.Remove(ctx, abuse.KindProcessorCustomer, value))
@@ -129,20 +120,22 @@ func TestBlocklist_OwnerScopedAddIsBlocked(t *testing.T) {
 }
 
 func TestBlocklist_AddIsIdempotent(t *testing.T) {
-	svc, bunDB, ctx := blocklistEnv(t)
+	svc, pool, ctx := blocklistEnv(t)
 
 	value := "ip_" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.PaymentBlocklistEntry)(nil)).
-			Where("value = ?", value).Exec(context.Background())
+		_, _ = pool.Exec(context.Background(),
+			"DELETE FROM billing.payment_blocklist WHERE value = $1", value)
 	})
 
 	require.NoError(t, svc.Add(ctx, nil, abuse.KindIP, value, "abuse"))
 	require.NoError(t, svc.Add(ctx, nil, abuse.KindIP, value, "abuse again"))
 
-	count, err := bunDB.NewSelect().Model((*models.PaymentBlocklistEntry)(nil)).
-		Where("kind = ? AND value = ?", abuse.KindIP, value).Count(ctx)
-	require.NoError(t, err)
+	var count int
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT count(*) FROM billing.payment_blocklist WHERE kind = $1 AND value = $2",
+		abuse.KindIP, value,
+	).Scan(&count))
 	require.Equal(t, 1, count)
 }
 

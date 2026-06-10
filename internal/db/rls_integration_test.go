@@ -15,7 +15,6 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"github.com/uptrace/bun"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -24,8 +23,8 @@ import (
 // This suite proves the migration-050 Row Level Security DESIGN actually enforces
 // cross-tenant isolation when the app connects as the unprivileged openrails_app
 // role (issue #227). It replicates 050's exact policy form on a probe table and
-// drives it through the real db.DB + RunInTenantTx, so it validates both the
-// policy semantics AND the GUC plumbing — not a reimplementation of either.
+// drives it through the real db.DB GUC plumbing (TestRLSEnforcement_PgxSide,
+// in rls_pgx_integration_test.go) — not a reimplementation of either.
 
 var (
 	rlsTenantA = mustID("00000000-0000-0000-0000-0000000000a1")
@@ -56,14 +55,6 @@ func newDBRetry(t *testing.T, dsn string) *DB {
 	}
 	require.NoError(t, lastErr)
 	return nil
-}
-
-// rlsProbe is the tenant-owned probe table, mirroring a real billing.* table.
-type rlsProbe struct {
-	bun.BaseModel `bun:"table:billing.rls_probe"`
-	ID            string `bun:"id,pk"`
-	TenantID      string `bun:"tenant_id"`
-	Val           string `bun:"val"`
 }
 
 const rlsSetupDDL = `
@@ -129,26 +120,17 @@ func startRLSContainer(t *testing.T) (superDSN string, appDSN string) {
 	return superDSN, appDSN
 }
 
-func TestRLSEnforcement_Under_OpenRailsAppRole(t *testing.T) {
+// TestRLSPosture_Reporting proves CheckRLSPosture/EnforceRLSPosture classify
+// privileged vs unprivileged roles correctly. The enforcement semantics
+// themselves (fail-closed visibility, WITH CHECK, GUC scoping) are covered by
+// TestRLSEnforcement_PgxSide.
+func TestRLSPosture_Reporting(t *testing.T) {
 	ctx := context.Background()
 	superDSN, appDSN := startRLSContainer(t)
 
-	// As the superuser: create schema/table/policy/role and seed both tenants
-	// (the superuser bypasses RLS, so it can write any tenant's rows).
 	super := newDBRetry(t, superDSN)
 	defer super.Close()
-	_, err := super.GetDB().ExecContext(ctx, rlsSetupDDL)
-	require.NoError(t, err)
-	_, err = super.GetDB().ExecContext(ctx, `DELETE FROM billing.rls_probe WHERE id IN (?::uuid, ?::uuid)`,
-		"00000000-0000-0000-0000-00000000000a",
-		"00000000-0000-0000-0000-00000000000b",
-	)
-	require.NoError(t, err)
-	seed := []rlsProbe{
-		{ID: "00000000-0000-0000-0000-00000000000a", TenantID: rlsTenantA.String(), Val: "a-row"},
-		{ID: "00000000-0000-0000-0000-00000000000b", TenantID: rlsTenantB.String(), Val: "b-row"},
-	}
-	_, err = super.GetDB().NewInsert().Model(&seed).Exec(ctx)
+	_, err := super.Pool().Exec(ctx, rlsSetupDDL)
 	require.NoError(t, err)
 
 	// The superuser BYPASSES RLS -> posture is non-enforcing, and a required
@@ -165,50 +147,4 @@ func TestRLSEnforcement_Under_OpenRailsAppRole(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, appPosture.Enforcing, "openrails_app must report enforcing")
 	require.NoError(t, app.EnforceRLSPosture(ctx, true))
-
-	// (1) Without the GUC set, the app sees NOTHING (fail-closed) — a query that
-	// forgets the tenant cannot leak another tenant's rows.
-	var leaked []rlsProbe
-	require.NoError(t, app.GetDB().NewSelect().Model(&leaked).Scan(ctx))
-	require.Len(t, leaked, 0, "no GUC => zero rows visible (fail-closed)")
-
-	// (2) Inside a tenant-A tx, only tenant A's row is visible.
-	ctxA := tenant.WithID(ctx, rlsTenantA)
-	err = app.RunInTenantTx(ctxA, func(ctx context.Context, tx bun.Tx) error {
-		var rows []rlsProbe
-		if err := tx.NewSelect().Model(&rows).Scan(ctx); err != nil {
-			return err
-		}
-		require.Len(t, rows, 1)
-		require.Equal(t, "a-row", rows[0].Val)
-		return nil
-	})
-	require.NoError(t, err)
-
-	// (3) Tenant A cannot read OR delete tenant B's row (it is simply invisible).
-	ctxB := tenant.WithID(ctx, rlsTenantB)
-	require.NoError(t, app.RunInTenantTx(ctxA, func(ctx context.Context, tx bun.Tx) error {
-		res, derr := tx.NewDelete().Model((*rlsProbe)(nil)).Where("val = ?", "b-row").Exec(ctx)
-		require.NoError(t, derr)
-		n, _ := res.RowsAffected()
-		require.Equal(t, int64(0), n, "tenant A must not be able to delete tenant B's row")
-		return nil
-	}))
-	// Confirm tenant B's row still exists (visible only under tenant B's GUC).
-	require.NoError(t, app.RunInTenantTx(ctxB, func(ctx context.Context, tx bun.Tx) error {
-		n, derr := tx.NewSelect().Model((*rlsProbe)(nil)).Count(ctx)
-		require.NoError(t, derr)
-		require.Equal(t, 1, n)
-		return nil
-	}))
-
-	// (4) WITH CHECK: inside a tenant-A tx, inserting a row stamped with tenant B's
-	// id is rejected — a tenant cannot write into another tenant's namespace.
-	err = app.RunInTenantTx(ctxA, func(ctx context.Context, tx bun.Tx) error {
-		_, ierr := tx.NewInsert().Model(&rlsProbe{
-			ID: "00000000-0000-0000-0000-00000000000c", TenantID: rlsTenantB.String(), Val: "cross",
-		}).Exec(ctx)
-		return ierr
-	})
-	require.Error(t, err, "WITH CHECK must reject a cross-tenant insert")
 }

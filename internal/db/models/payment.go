@@ -4,56 +4,53 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 // Payment represents a payment event (both one-time and subscription payments)
 // This is an immutable event log of all payments received
 type Payment struct {
-	bun.BaseModel `bun:"table:billing.payments,alias:purch"`
-
-	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	ID uuid.UUID `json:"id"`
 	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
 	// it before user_id is dropped. Join billing.tenant_subjects for issuer/subject.
-	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
-	PriceID         uuid.UUID `bun:"price_id,notnull" json:"price_id"`
+	TenantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
+	PriceID         uuid.UUID `json:"price_id"`
 
 	// Optional linkage to the subscription that generated this payment
-	SubscriptionID *uuid.UUID `bun:"subscription_id,type:uuid,nullzero" json:"subscription_id,omitempty"`
+	SubscriptionID *uuid.UUID `json:"subscription_id,omitempty"`
 
 	// Optional linkage back to the payment that this record refunds
-	RefundedPaymentID *uuid.UUID `bun:"refunded_payment_id,type:uuid,nullzero" json:"refunded_payment_id,omitempty"`
+	RefundedPaymentID *uuid.UUID `json:"refunded_payment_id,omitempty"`
 
-	Processor     Processor `bun:"processor,notnull" json:"processor"` // Processor: mobius, ccbill, solana
-	TransactionID string    `bun:"transaction_id,notnull" json:"transaction_id"`
+	Processor     Processor `json:"processor"` // Processor: mobius, ccbill, solana
+	TransactionID string    `json:"transaction_id"`
 
 	// Payment details - amount in cents (smallest currency unit)
-	Amount     int64  `bun:"amount,notnull" json:"amount"`
-	ListAmount int64  `bun:"list_amount,notnull" json:"list_amount"`
-	Currency   string `bun:"currency,notnull,default:'usd'" json:"currency"`
-	Status     string `bun:"status,notnull,default:'completed',nullzero" json:"status"`
+	Amount     int64  `json:"amount"`
+	ListAmount int64  `json:"list_amount"`
+	Currency   string `json:"currency"`
+	Status     string `json:"status"`
 
 	// Card snapshot of the payment method used for this charge, captured from
 	// Stripe charge.succeeded / payment_method.attached webhooks. Immutable per
 	// payment so history shows the card actually used even if the default later
 	// changes. Never fetched from Stripe at query time.
-	CardBrand *string `bun:"card_brand,nullzero" json:"card_brand,omitempty"`
-	CardLast4 *string `bun:"card_last4,nullzero" json:"card_last4,omitempty"`
+	CardBrand *string `json:"card_brand,omitempty"`
+	CardLast4 *string `json:"card_last4,omitempty"`
 
-	DiscountCode     *string        `bun:"discount_code,nullzero" json:"discount_code,omitempty"`
-	DiscountReason   *string        `bun:"discount_reason,nullzero" json:"discount_reason,omitempty"`
-	DiscountMetadata map[string]any `bun:"discount_metadata,type:jsonb,nullzero" json:"discount_metadata,omitempty"`
-	Metadata         map[string]any `bun:"metadata,type:jsonb,nullzero" json:"metadata,omitempty"`
+	DiscountCode     *string        `json:"discount_code,omitempty"`
+	DiscountReason   *string        `json:"discount_reason,omitempty"`
+	DiscountMetadata map[string]any `json:"discount_metadata,omitempty"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
 
-	EntitlementsSpecSnapshot map[string]*int `bun:"entitlements_spec_snapshot,type:jsonb,nullzero" json:"entitlements_spec_snapshot,omitempty"`
-	CreditsSpecSnapshot      CreditsSpec     `bun:"credits_spec_snapshot,type:jsonb,nullzero" json:"credits_spec_snapshot,omitempty"`
+	EntitlementsSpecSnapshot map[string]*int `json:"entitlements_spec_snapshot,omitempty"`
+	CreditsSpecSnapshot      CreditsSpec     `json:"credits_spec_snapshot,omitempty"`
 
-	PurchasedAt time.Time `bun:"purchased_at,notnull,default:current_timestamp" json:"purchased_at"`
-	CreatedAt   time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	PurchasedAt time.Time `json:"purchased_at"`
+	CreatedAt   time.Time `json:"created_at"`
 
 	// Relationships
-	Price        *Price         `bun:"rel:belongs-to,join:price_id=id" json:"price,omitempty"`
-	Subscription *Subscription  `bun:"rel:belongs-to,join:subscription_id=id" json:"subscription,omitempty"`
-	Entitlements []*Entitlement `bun:"rel:has-many,join:id=source_id" json:"entitlements,omitempty"`
+	Price        *Price         `json:"price,omitempty"`
+	Subscription *Subscription  `json:"subscription,omitempty"`
+	Entitlements []*Entitlement `json:"entitlements,omitempty"`
 }

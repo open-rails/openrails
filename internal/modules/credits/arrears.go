@@ -2,18 +2,18 @@ package credits
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
-	"github.com/uptrace/bun"
 )
 
 // Arrears transaction types (postpaid usage ledger, issue #241).
@@ -47,65 +47,61 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, payer identity.TenantSu
 	payerID := payer.UUID()
 	now := s.now()
 
-	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
+	var trx *models.CreditTransaction
+	// Privileged (no-GUC) transaction: this path runs with explicit tenant_id
+	// predicates, matching the bun-era plain BeginTx.
+	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+
+		// Idempotency.
+		existing, gerr := q.GetCreditTransactionByCoords(ctx, gen.GetCreditTransactionByCoordsParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			TransactionType: txOwedAccrual, Source: source, SourceID: &sourceID,
+		})
+		if gerr == nil {
+			trx, gerr = creditTransactionFromGen(existing)
+			return gerr
+		}
+		if !errors.Is(gerr, pgx.ErrNoRows) {
+			return gerr
+		}
+
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, ct.ID, BillingModeArrears, now); err != nil {
+			return err
+		}
+		if err := q.AddOutstandingOwed(ctx, gen.AddOutstandingOwedParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			Amount: amount, Now: now,
+		}); err != nil {
+			return err
+		}
+
+		trx = &models.CreditTransaction{
+			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Actor: payerID.String(),
+			CreditTypeID: ct.ID, Amount: amount, TransactionType: txOwedAccrual, Status: "posted",
+			Source: source, SourceID: &sourceID, CreatedAt: now, UpdatedAt: now,
+		}
+		return q.InsertCreditTransaction(ctx, insertParamsFromTransaction(trx))
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	// Idempotency.
-	existing := new(models.CreditTransaction)
-	err = tx.NewSelect().Model(existing).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Where("transaction_type = ?", txOwedAccrual).
-		Where("source = ? AND source_id = ?", source, sourceID).
-		Limit(1).Scan(ctx)
-	if err == nil {
-		return existing, tx.Commit()
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-
-	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, payerID, ct.ID, BillingModeArrears, now); err != nil {
-		return nil, err
-	}
-	if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
-		Set("outstanding_owed_micros = outstanding_owed_micros + ?", amount).
-		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Exec(ctx); err != nil {
-		return nil, err
-	}
-
-	trx := &models.CreditTransaction{
-		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Actor: payerID.String(),
-		CreditTypeID: ct.ID, Amount: amount, TransactionType: txOwedAccrual, Status: "posted",
-		Source: source, SourceID: &sourceID, CreatedAt: now, UpdatedAt: now,
-	}
-	if _, err := tx.NewInsert().Model(trx).Exec(ctx); err != nil {
-		return nil, err
-	}
-	return trx, tx.Commit()
+	return trx, nil
 }
 
 // ensureSettingsRowTx inserts a default settings row for (payer, credit_type) if
 // one does not exist, using the given billing mode. No-op when the row exists.
-func (s *CreditsService) ensureSettingsRowTx(ctx context.Context, tx bun.Tx, tenantID, payerID, creditTypeID uuid.UUID, mode string, now time.Time) error {
+func (s *CreditsService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, tenantID, payerID, creditTypeID uuid.UUID, mode string, now time.Time) error {
 	// Materialize the payable tenant_subjects row so the credit_account_settings
 	// FK (migration 076) is satisfied — this is the shared choke point for
 	// settings writes (suspend/resume/verify/graduate/arrears) (#317).
-	if err := ensureTenantSubject(ctx, tx, tenantID, payerID); err != nil {
+	if err := ensureTenantSubject(ctx, q, tenantID, payerID); err != nil {
 		return err
 	}
-	row := &models.CreditAccountSettings{
-		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: creditTypeID,
-		BillingMode: mode, HardStopOnBreach: true, AlertThresholdPct: 80,
-		CreatedAt: now, UpdatedAt: now,
-	}
-	_, err := tx.NewInsert().Model(row).
-		On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id) DO NOTHING").Exec(ctx)
-	return err
+	return q.InsertCreditAccountSettingsIfAbsent(ctx, gen.InsertCreditAccountSettingsIfAbsentParams{
+		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID,
+		CreditTypeID: creditTypeID, BillingMode: mode, Now: now,
+	})
 }
 
 // GetOutstandingOwed returns the current outstanding owed for (payer, credit_type).
@@ -119,12 +115,12 @@ func (s *CreditsService) GetOutstandingOwed(ctx context.Context, payer identity.
 
 // arrearsAccount is a scanned arrears-account row for the charge job.
 type arrearsAccount struct {
-	TenantID        uuid.UUID  `bun:"tenant_id"`
-	TenantSubjectID uuid.UUID  `bun:"tenant_subject_id"`
-	CreditTypeID    uuid.UUID  `bun:"credit_type_id"`
-	CreditTypeName  string     `bun:"credit_type_name"`
-	Owed            int64      `bun:"outstanding_owed_micros"`
-	PaymentMethodID *uuid.UUID `bun:"auto_topup_payment_method_id"`
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	CreditTypeID    uuid.UUID
+	CreditTypeName  string
+	Owed            int64
+	PaymentMethodID *uuid.UUID
 }
 
 // ChargeOutstanding collects outstanding owed for arrears accounts by charging
@@ -143,20 +139,22 @@ func (s *CreditsService) ChargeOutstanding(ctx context.Context, charger Charger,
 		return 0, fmt.Errorf("charger required")
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	q := s.db.Q(ctx).NewSelect().
-		ColumnExpr("s.tenant_id, s.tenant_subject_id, s.credit_type_id, ct.name AS credit_type_name, s.outstanding_owed_micros, s.auto_topup_payment_method_id").
-		TableExpr("billing.credit_account_settings AS s").
-		Join("JOIN billing.credit_types AS ct ON ct.id = s.credit_type_id").
-		Where("s.tenant_id = ?", tenantID).
-		Where("s.billing_mode = ?", BillingModeArrears).
-		Where("s.outstanding_owed_micros > 0").
-		Where("s.auto_topup_payment_method_id IS NOT NULL")
-	if minThresholdMicros > 0 {
-		q = q.Where("s.outstanding_owed_micros >= ?", minThresholdMicros)
-	}
-	var rows []arrearsAccount
-	if err := q.Scan(ctx, &rows); err != nil {
+	genRows, err := s.db.Gen(ctx).ListChargeableArrearsAccounts(ctx, gen.ListChargeableArrearsAccountsParams{
+		TenantID: tenantID, MinThreshold: minThresholdMicros,
+	})
+	if err != nil {
 		return 0, err
+	}
+	rows := make([]arrearsAccount, 0, len(genRows))
+	for _, r := range genRows {
+		rows = append(rows, arrearsAccount{
+			TenantID:        r.TenantID,
+			TenantSubjectID: r.TenantSubjectID,
+			CreditTypeID:    r.CreditTypeID,
+			CreditTypeName:  r.CreditTypeName,
+			Owed:            r.OutstandingOwedMicros,
+			PaymentMethodID: r.AutoTopupPaymentMethodID,
+		})
 	}
 
 	count := 0
@@ -198,37 +196,39 @@ func (s *CreditsService) chargeOneOutstanding(ctx context.Context, charger Charg
 	}
 
 	now := s.now()
-	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
+	charged := false
+	// Privileged (no-GUC) transaction, matching the bun-era plain BeginTx.
+	err = s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+
+		// Reduce owed by the snapshot (never below zero); CAS-style guard prevents a
+		// double-decrement if two runs race on the same snapshot.
+		n, uerr := q.ReduceOutstandingOwedSnapshot(ctx, gen.ReduceOutstandingOwedSnapshotParams{
+			TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, CreditTypeID: r.CreditTypeID,
+			Snapshot: snapshot, Now: now,
+		})
+		if uerr != nil {
+			return uerr
+		}
+		if n == 0 {
+			// Owed already reduced by a concurrent run for this snapshot; treat as done.
+			return nil
+		}
+
+		sid := key
+		trx := &models.CreditTransaction{
+			ID: uuidutil.NewV7(), TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, Actor: r.TenantSubjectID.String(),
+			CreditTypeID: r.CreditTypeID, Amount: -snapshot, TransactionType: txOwedPayment, Status: "posted",
+			Source: "arrears_charge", SourceID: &sid, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := q.InsertCreditTransactionIfAbsent(ctx, gen.InsertCreditTransactionIfAbsentParams(insertParamsFromTransaction(trx))); err != nil {
+			return err
+		}
+		charged = true
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	// Reduce owed by the snapshot (never below zero); CAS-style guard prevents a
-	// double-decrement if two runs race on the same snapshot.
-	upd, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
-		Set("outstanding_owed_micros = GREATEST(0, outstanding_owed_micros - ?)", snapshot).
-		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", r.TenantID, r.TenantSubjectID, r.CreditTypeID).
-		Where("outstanding_owed_micros >= ?", snapshot).
-		Exec(ctx)
-	if err != nil {
-		return false, err
-	}
-	if n, _ := upd.RowsAffected(); n == 0 {
-		// Owed already reduced by a concurrent run for this snapshot; treat as done.
-		return false, tx.Commit()
-	}
-
-	sid := key
-	trx := &models.CreditTransaction{
-		ID: uuidutil.NewV7(), TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, Actor: r.TenantSubjectID.String(),
-		CreditTypeID: r.CreditTypeID, Amount: -snapshot, TransactionType: txOwedPayment, Status: "posted",
-		Source: "arrears_charge", SourceID: &sid, CreatedAt: now, UpdatedAt: now,
-	}
-	if _, err := tx.NewInsert().Model(trx).
-		On("CONFLICT DO NOTHING").Exec(ctx); err != nil {
-		return false, err
-	}
-	return true, tx.Commit()
+	return charged, nil
 }

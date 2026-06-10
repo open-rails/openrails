@@ -4,14 +4,13 @@ package webhooks
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -19,99 +18,92 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := context.Background()
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-	require.NoError(t, bunDB.PingContext(ctx))
-
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+	q := gen.New(pool)
 
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	clock := clockwork.NewFakeClockAt(t0)
 
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 	productID := uuid.New()
 	priceID := uuid.New()
 
-	billingDays := 30
+	billingDays := int32(30)
 	periodStart := t0
 	paidEnd := t0.Add(30 * 24 * time.Hour) // 2026-01-31 00:00Z
 
-	_, err = bunDB.NewInsert().Model(&models.Product{
-		ID:          productID,
-		Slug:        "test_product_" + uuid.New().String(),
-		DisplayName: "Test Product",
-		Description: "Test",
-		EntitlementsSpec: map[string]*int{
-			"premium": nil,
-		},
-		Status:    models.CatalogStatusActive,
-		CreatedAt: clock.Now().UTC(),
-		UpdatedAt: clock.Now().UTC(),
-	}).Exec(ctx)
+	entitlementsSpecJSON, err := json.Marshal(map[string]*int{"premium": nil})
+	require.NoError(t, err)
+	description := "Test"
+	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
+		ID:               productID,
+		Slug:             "test_product_" + uuid.New().String(),
+		DisplayName:      "Test Product",
+		Description:      &description,
+		EntitlementsSpec: entitlementsSpecJSON,
+		Status:           string(models.CatalogStatusActive),
+		CreatedAt:        clock.Now().UTC(),
+		UpdatedAt:        clock.Now().UTC(),
+	})
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Price{
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               priceID,
 		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
+		Status:           string(models.CatalogStatusActive),
 		BillingCycleDays: &billingDays,
 		CreatedAt:        clock.Now().UTC(),
 		UpdatedAt:        clock.Now().UTC(),
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Subscription{
+	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
 		TenantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
-		PriceID:                 priceID,
-		Status:                  models.StatusActive,
-		Processor:               models.ProcessorCCBill,
+		PriceID:                 &priceID,
+		Status:                  string(models.StatusActive),
+		Processor:               string(models.ProcessorCCBill),
 		ProcessorSubscriptionID: ccbillSubID,
 		CurrentPeriodStartsAt:   &periodStart,
 		CurrentPeriodEndsAt:     &paidEnd,
 		StartedAt:               clock.Now().UTC(),
 		CreatedAt:               clock.Now().UTC(),
 		UpdatedAt:               clock.Now().UTC(),
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
-	paidEnt := &models.Entitlement{
-		ID:              uuid.New(),
+	paidEntID := uuid.New()
+	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		ID:              paidEntID,
 		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium",
 		StartAt:         periodStart,
 		EndAt:           &paidEnd,
-		SourceType:      models.EntitlementSourceSubscription,
+		SourceType:      string(models.EntitlementSourceSubscription),
 		SourceID:        &subID,
 		CreatedAt:       clock.Now().UTC(),
 		UpdatedAt:       clock.Now().UTC(),
-	}
-	_, err = bunDB.NewInsert().Model(paidEnt).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	entSvc := entitlements.NewEntitlementService(dbi)
@@ -176,8 +168,8 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	failure("2026-02-03")
 
 	// Sanity: paid window is unchanged.
-	var gotPaid models.Entitlement
-	require.NoError(t, bunDB.NewSelect().Model(&gotPaid).Where("id = ?", paidEnt.ID).Scan(ctx))
+	gotPaid, err := q.GetEntitlementByID(ctx, paidEntID)
+	require.NoError(t, err)
 	require.NotNil(t, gotPaid.EndAt)
 	require.Equal(t, paidEnd.UTC(), gotPaid.EndAt.UTC())
 	require.Nil(t, gotPaid.RevokedAt)
@@ -217,17 +209,22 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	require.NoError(t, webhook.handleRenewalSuccess(ctx))
 
 	// Grace windows should be cleared: any active grace revoked; any future grace
-	// deleted. WhereAllWithDeleted is required to see the soft-deleted future
-	// window (Entitlement.DeletedAt is a bun soft_delete field).
+	// deleted. Raw SQL sees the soft-deleted future window (deleted_at set)
+	// without any opt-in.
+	graceQuery := `SELECT start_at, end_at, revoked_at, deleted_at FROM billing.entitlements
+		WHERE tenant_subject_id = $1 AND entitlement = $2
+		  AND source_type = $3
+		  AND source_id = $4
+		ORDER BY start_at ASC`
+	rows, err := pool.Query(ctx, graceQuery, tenantSubjectID, "premium", string(models.EntitlementSourceGrace), subID)
+	require.NoError(t, err)
 	var graceRows []models.Entitlement
-	require.NoError(t, bunDB.NewSelect().
-		Model(&graceRows).
-		Where("tenant_subject_id = ? AND entitlement = ?", tenantSubjectID, "premium").
-		Where("source_type = ?", models.EntitlementSourceGrace).
-		Where("source_id = ?", subID).
-		WhereAllWithDeleted().
-		OrderExpr("start_at ASC").
-		Scan(ctx))
+	for rows.Next() {
+		var gr models.Entitlement
+		require.NoError(t, rows.Scan(&gr.StartAt, &gr.EndAt, &gr.RevokedAt, &gr.DeletedAt))
+		graceRows = append(graceRows, gr)
+	}
+	require.NoError(t, rows.Err())
 	require.Len(t, graceRows, 3)
 
 	for _, gr := range graceRows {
@@ -248,16 +245,22 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 
 	// Renewal should append a new paid window that starts now and ends at the processor-provided paid term end.
 	expectedPaidEnd := time.Date(2026, 3, 5, 23, 59, 59, 0, time.UTC)
+	paidQuery := `SELECT start_at, end_at FROM billing.entitlements
+		WHERE tenant_subject_id = $1 AND entitlement = $2
+		  AND source_type = $3
+		  AND source_id = $4
+		  AND revoked_at IS NULL
+		  AND deleted_at IS NULL
+		ORDER BY start_at ASC`
+	rows, err = pool.Query(ctx, paidQuery, tenantSubjectID, "premium", string(models.EntitlementSourceSubscription), subID)
+	require.NoError(t, err)
 	var paidWindows []models.Entitlement
-	require.NoError(t, bunDB.NewSelect().
-		Model(&paidWindows).
-		Where("tenant_subject_id = ? AND entitlement = ?", tenantSubjectID, "premium").
-		Where("source_type = ?", models.EntitlementSourceSubscription).
-		Where("source_id = ?", subID).
-		Where("revoked_at IS NULL").
-		Where("deleted_at IS NULL").
-		OrderExpr("start_at ASC").
-		Scan(ctx))
+	for rows.Next() {
+		var pw models.Entitlement
+		require.NoError(t, rows.Scan(&pw.StartAt, &pw.EndAt))
+		paidWindows = append(paidWindows, pw)
+	}
+	require.NoError(t, rows.Err())
 	require.GreaterOrEqual(t, len(paidWindows), 2) // original + new
 
 	latest := paidWindows[len(paidWindows)-1]

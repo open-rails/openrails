@@ -4,18 +4,14 @@ package productaccess
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
-	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
@@ -27,31 +23,23 @@ func newTestService(t *testing.T, now time.Time) (*Service, context.Context, uui
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
-
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 
 	productID := uuid.New()
-	product := &models.Product{
+	_, err := gen.New(pool).CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
 		Slug:        "test-product-" + productID.String(),
 		DisplayName: "Test Product",
-		Status:      models.CatalogStatusActive,
+		Status:      string(models.CatalogStatusActive),
 		CreatedAt:   now,
 		UpdatedAt:   now,
-	}
-	_, err = bunDB.NewInsert().Model(product).Exec(ctx)
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.ProductAccessGrant)(nil)).Where("product_id = ?", productID).Exec(context.Background())
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(context.Background())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.product_access_grants WHERE product_id = $1", productID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	return NewService(dbi, clockwork.NewFakeClockAt(now)), ctx, productID

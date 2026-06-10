@@ -41,8 +41,7 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry
 		ExpiresAt:       &expiredAt,
 		CreatedAt:       expiredAt.Add(-1 * time.Minute),
 	}
-	_, err := suite.BunDB.NewInsert().Model(batch).Exec(ctx)
-	require.NoError(t, err)
+	suite.insertCreditBlock(ctx, batch)
 
 	fakeClock := clockwork.NewFakeClockAt(time.Now().UTC())
 	worker := &riverjobs.CreditExpiryWorker{

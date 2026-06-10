@@ -60,7 +60,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 		   ('` + tenantID + `','tenant-azh-` + tenantID[:8] + `','AZH')
 		 ON CONFLICT (id) DO NOTHING`,
 	} {
-		_, e := super.GetDB().ExecContext(ctx, stmt)
+		_, e := super.Pool().Exec(ctx, stmt)
 		require.NoError(t, e, stmt)
 	}
 
@@ -76,26 +76,26 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 			where string
 			arg   any
 		}{
-			{"billing.credit_transactions", "tenant_subject_id = ?", payerID},
-			{"billing.credit_balances", "tenant_subject_id = ?", payerID},
-			{"billing.credit_types", "id = ?", ctID},
-			{"billing.tenants", "id = ?", tenantID},
+			{"billing.credit_transactions", "tenant_subject_id = $1", payerID},
+			{"billing.credit_balances", "tenant_subject_id = $1", payerID},
+			{"billing.credit_types", "id = $1", ctID},
+			{"billing.tenants", "id = $1", tenantID},
 		} {
-			_, _ = super.GetDB().NewRaw("DELETE FROM "+q.tbl+" WHERE "+q.where, q.arg).Exec(ctx)
+			_, _ = super.Pool().Exec(ctx, "DELETE FROM "+q.tbl+" WHERE "+q.where, q.arg)
 		}
 	})
 
 	// Seed credit type + a funded balance (1000 cents) as super (bypasses RLS),
-	// scoped to the test tenant. bun NewRaw uses ? placeholders (rewritten to $N).
-	_, err = super.GetDB().NewRaw(
+	// scoped to the test tenant.
+	_, err = super.Pool().Exec(ctx,
 		`INSERT INTO billing.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
-		 VALUES (?,?,?,'AZH','cents',2,true,?)`, ctID, tenantID, ctName, now).Exec(ctx)
+		 VALUES ($1,$2,$3,'AZH','cents',2,true,$4)`, ctID, tenantID, ctName, now)
 	require.NoError(t, err)
-	_, err = super.GetDB().NewRaw(
+	_, err = super.Pool().Exec(ctx,
 		`INSERT INTO billing.credit_balances
 		   (id, tenant_id, tenant_subject_id, actor, credit_type_id, balance, held_balance, created_at, updated_at)
-		 VALUES (?,?,?,?,?,1000,0,?,?)`,
-		uuid.New(), tenantID, payerID, payerID.String(), ctID, now, now).Exec(ctx)
+		 VALUES ($1,$2,$3,$4,$5,1000,0,$6,$7)`,
+		uuid.New(), tenantID, payerID, payerID.String(), ctID, now, now)
 	require.NoError(t, err)
 
 	// Billing service as the unprivileged openrails_app role (RLS ENFORCES).

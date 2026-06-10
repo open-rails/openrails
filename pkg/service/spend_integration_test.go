@@ -4,20 +4,16 @@ package service_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -28,23 +24,19 @@ import (
 func authzEnv(t *testing.T) (*billingservice.Service, *credits.CreditsService, identity.TenantSubjectID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
+
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 
 	var ok bool
-	require.NoError(t, bunDB.NewSelect().
-		ColumnExpr("EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_account_settings')").
-		Scan(ctx, &ok))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_account_settings')",
+	).Scan(&ok))
 	if !ok {
 		t.Skip("billing.credit_account_settings missing; run migration 043")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
 	rt := &app.Runtime{
 		DB:                 dbi,
 		CreditsService:     credits.NewCreditsService(dbi),
@@ -57,21 +49,29 @@ func authzEnv(t *testing.T) (*billingservice.Service, *credits.CreditsService, i
 	now := time.Now().UTC().Truncate(time.Second)
 	ctName := "svc_authz_" + uuid.NewString()
 	ctID := uuid.New()
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err = gen.New(pool).CreateCreditType(ctx, gen.CreateCreditTypeParams{
 		ID: ctID, Name: ctName, DisplayName: "Authz Test", Unit: "cents", DecimalPlaces: 2, IsActive: true, CreatedAt: now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_account_settings WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", ctID)
 	})
 	return svc, credits.NewCreditsService(dbi), payer, ctName, ctx
+}
+
+// testPool opens a fresh app DB handle on the shared DSN and returns its pgx
+// pool — used by tests for fixture cleanup and assertion reads (closed on test
+// cleanup).
+func testPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	return dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)).Pool()
 }
 
 func TestAuthorizeSpend_PrepaidBalanceGate(t *testing.T) {

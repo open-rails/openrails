@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -215,7 +214,7 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 	}
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "subscription not found")
 			return
 		}
@@ -294,7 +293,7 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 	}
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "subscription not found")
 			return
 		}
@@ -370,7 +369,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	// Authorize: the acting user must own the OLD lifecycle subscription.
 	oldSub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			return nil, http.StatusNotFound, "subscription not found"
 		}
 		return nil, http.StatusInternalServerError, "failed to retrieve subscription"

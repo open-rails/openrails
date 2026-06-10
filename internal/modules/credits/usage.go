@@ -2,13 +2,14 @@ package credits
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -76,78 +77,95 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 		return nil, err
 	}
 
-	tx, err := s.db.BeginTenantTx(ctx)
+	var ev *models.UsageEvent
+	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		payerID := payer.UUID()
+		now := s.now()
+
+		// Serialize per (tenant, payer, credit_type) so the idempotency check below
+		// can't race a concurrent identical record into a double charge.
+		if _, err := s.lockBalance(ctx, q, payer, params.Actor, ct.ID); err != nil {
+			return err
+		}
+
+		existingRow, gerr := q.GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
+			TenantID: tenantID, TenantSubjectID: payerID,
+			EventType: params.EventType, Source: params.Source, SourceID: params.SourceID,
+		})
+		if gerr == nil {
+			ev, gerr = usageEventFromGen(existingRow)
+			return gerr
+		}
+		if !errors.Is(gerr, pgx.ErrNoRows) {
+			return gerr
+		}
+
+		// Debit the ledger for the host-priced amount (skip for zero-cost events).
+		// Unified credit line (#302): draw prepaid balance first, then accrue to
+		// owed up to the credit line. Prepay-only accounts (no line) deny when the
+		// amount exceeds available balance.
+		var debitID *uuid.UUID
+		if params.Amount > 0 {
+			balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, q, ct, payer, params.Actor, params.Source, params.SourceID, params.Amount)
+			if derr != nil {
+				return derr
+			}
+			if balID != nil {
+				debitID = balID
+			} else {
+				debitID = owedID
+			}
+		}
+
+		occurred := params.OccurredAt.UTC()
+		if params.OccurredAt.IsZero() {
+			occurred = now
+		}
+		ev = &models.UsageEvent{
+			ID:                  uuidutil.NewV7(),
+			TenantID:            tenantID,
+			TenantSubjectID:     payerID,
+			Actor:               params.Actor,
+			CreditTypeID:        ct.ID,
+			EventType:           params.EventType,
+			Dimensions:          params.Dimensions,
+			Amount:              params.Amount,
+			Source:              params.Source,
+			SourceID:            params.SourceID,
+			CreditTransactionID: debitID,
+			Metadata:            params.Metadata,
+			OccurredAt:          occurred,
+			CreatedAt:           now,
+		}
+		dims, jerr := toJSONBC(ev.Dimensions)
+		if jerr != nil {
+			return jerr
+		}
+		meta, jerr := toJSONBC(ev.Metadata)
+		if jerr != nil {
+			return jerr
+		}
+		return q.InsertUsageEvent(ctx, gen.InsertUsageEventParams{
+			ID:                  ev.ID,
+			TenantID:            ev.TenantID,
+			TenantSubjectID:     ev.TenantSubjectID,
+			Actor:               ev.Actor,
+			Resource:            ev.Resource,
+			CreditTypeID:        ev.CreditTypeID,
+			EventType:           ev.EventType,
+			Dimensions:          dims,
+			Amount:              ev.Amount,
+			Source:              ev.Source,
+			SourceID:            ev.SourceID,
+			CreditTransactionID: ev.CreditTransactionID,
+			Metadata:            meta,
+			OccurredAt:          ev.OccurredAt,
+			CreatedAt:           ev.CreatedAt,
+		})
+	})
 	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	payerID := payer.UUID()
-	now := s.now()
-
-	// Serialize per (tenant, payer, credit_type) so the idempotency check below
-	// can't race a concurrent identical record into a double charge.
-	if _, err := s.lockBalance(ctx, tx, payer, params.Actor, ct.ID); err != nil {
-		return nil, err
-	}
-
-	existing := new(models.UsageEvent)
-	err = tx.NewSelect().Model(existing).
-		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
-		Where("event_type = ?", params.EventType).
-		Where("source = ? AND source_id = ?", params.Source, params.SourceID).
-		Limit(1).
-		Scan(ctx)
-	if err == nil {
-		return existing, tx.Commit()
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-
-	// Debit the ledger for the host-priced amount (skip for zero-cost events).
-	// Unified credit line (#302): draw prepaid balance first, then accrue to
-	// owed up to the credit line. Prepay-only accounts (no line) deny when the
-	// amount exceeds available balance.
-	var debitID *uuid.UUID
-	if params.Amount > 0 {
-		balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, tx, ct, payer, params.Actor, params.Source, params.SourceID, params.Amount)
-		if derr != nil {
-			return nil, derr
-		}
-		if balID != nil {
-			debitID = balID
-		} else {
-			debitID = owedID
-		}
-	}
-
-	occurred := params.OccurredAt.UTC()
-	if params.OccurredAt.IsZero() {
-		occurred = now
-	}
-	ev := &models.UsageEvent{
-		ID:                  uuidutil.NewV7(),
-		TenantID:            tenantID,
-		TenantSubjectID:     payerID,
-		Actor:               params.Actor,
-		CreditTypeID:        ct.ID,
-		EventType:           params.EventType,
-		Dimensions:          params.Dimensions,
-		Amount:              params.Amount,
-		Source:              params.Source,
-		SourceID:            params.SourceID,
-		CreditTransactionID: debitID,
-		Metadata:            params.Metadata,
-		OccurredAt:          occurred,
-		CreatedAt:           now,
-	}
-	if _, err := tx.NewInsert().Model(ev).Exec(ctx); err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return ev, nil
@@ -176,30 +194,14 @@ func (s *CreditsService) AggregateUsage(ctx context.Context, payer identity.Tena
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	payerID := payer.UUID()
 
-	type totalRow struct {
-		EventType   string `bun:"event_type"`
-		TotalAmount int64  `bun:"total_amount"`
-		EventCount  int64  `bun:"event_count"`
-	}
-	type dimRow struct {
-		EventType string `bun:"event_type"`
-		Key       string `bun:"key"`
-		Total     int64  `bun:"total"`
-	}
-
 	rows := map[string]*UsageRollupRow{}
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		var totals []totalRow
-		if err := s.db.Q(ctx).NewSelect().
-			Model((*models.UsageEvent)(nil)).
-			ColumnExpr("event_type").
-			ColumnExpr("COALESCE(SUM(amount), 0) AS total_amount").
-			ColumnExpr("COUNT(*) AS event_count").
-			Where("tenant_id = ?", tenantID).
-			Where("tenant_subject_id = ?", payerID).
-			Where("occurred_at >= ? AND occurred_at < ?", from.UTC(), to.UTC()).
-			GroupExpr("event_type").
-			Scan(ctx, &totals); err != nil {
+		q := s.db.Gen(ctx)
+		totals, err := q.AggregateUsageTotals(ctx, gen.AggregateUsageTotalsParams{
+			TenantID: tenantID, TenantSubjectID: payerID,
+			FromAt: from.UTC(), ToAt: to.UTC(),
+		})
+		if err != nil {
 			return err
 		}
 		for _, t := range totals {
@@ -211,18 +213,11 @@ func (s *CreditsService) AggregateUsage(ctx context.Context, payer identity.Tena
 			}
 		}
 
-		var dims []dimRow
-		if err := s.db.Q(ctx).NewSelect().
-			TableExpr("billing.usage_events AS ue").
-			ColumnExpr("ue.event_type AS event_type").
-			ColumnExpr("d.key AS key").
-			ColumnExpr("COALESCE(SUM((d.value)::bigint), 0) AS total").
-			Join("CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d").
-			Where("ue.tenant_id = ?", tenantID).
-			Where("ue.tenant_subject_id = ?", payerID).
-			Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from.UTC(), to.UTC()).
-			GroupExpr("ue.event_type, d.key").
-			Scan(ctx, &dims); err != nil {
+		dims, err := q.AggregateUsageDimensions(ctx, gen.AggregateUsageDimensionsParams{
+			TenantID: tenantID, TenantSubjectID: payerID,
+			FromAt: from.UTC(), ToAt: to.UTC(),
+		})
+		if err != nil {
 			return err
 		}
 		for _, d := range dims {

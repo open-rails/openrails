@@ -4,7 +4,6 @@ package webhooks
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -19,63 +19,73 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	svc, bunDB, ids := setupNMIAddSubscriptionTest(t, dsn, true)
+	svc, dbi, ids := setupNMIAddSubscriptionTest(t, dsn, true)
 	ctx := context.Background()
+	pool := dbi.Pool()
+	q := gen.New(pool)
 
 	require.NoError(t, svc.handleAddSubscription(ctx))
 
-	var gotSub models.Subscription
-	require.NoError(t, bunDB.NewSelect().Model(&gotSub).Where("id = ?", ids.subscriptionID).Scan(ctx))
-	require.Equal(t, models.StatusActive, gotSub.Status)
+	gotSub, err := q.GetSubscriptionByID(ctx, ids.subscriptionID)
+	require.NoError(t, err)
+	require.Equal(t, string(models.StatusActive), string(gotSub.Status))
 	require.NotNil(t, gotSub.CurrentPeriodStartsAt)
 	require.NotNil(t, gotSub.CurrentPeriodEndsAt)
 	require.Equal(t, time.Date(2026, time.June, 17, 0, 0, 0, 0, time.UTC), gotSub.CurrentPeriodEndsAt.UTC())
 
-	var payment models.Payment
-	require.NoError(t, bunDB.NewSelect().Model(&payment).Where("transaction_id = ?", ids.transactionID).Scan(ctx))
-	require.Equal(t, ids.tenantSubjectID, payment.TenantSubjectID)
-	require.Equal(t, ids.subscriptionID, *payment.SubscriptionID)
+	var paymentTenantSubjectID uuid.UUID
+	var paymentSubscriptionID *uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT tenant_subject_id, subscription_id FROM billing.payments WHERE transaction_id = $1",
+		ids.transactionID).Scan(&paymentTenantSubjectID, &paymentSubscriptionID))
+	require.Equal(t, ids.tenantSubjectID, paymentTenantSubjectID)
+	require.NotNil(t, paymentSubscriptionID)
+	require.Equal(t, ids.subscriptionID, *paymentSubscriptionID)
 
-	exists, err := bunDB.NewSelect().Model((*models.Entitlement)(nil)).
-		Where("tenant_subject_id = ?", ids.tenantSubjectID).
-		Where("entitlement = ?", "premium").
-		Where("source_type = ?", models.EntitlementSourceSubscription).
-		Where("source_id = ?", ids.subscriptionID).
-		Where("revoked_at IS NULL").
-		Where("deleted_at IS NULL").
-		Exists(ctx)
-	require.NoError(t, err)
+	var exists bool
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM billing.entitlements
+			WHERE tenant_subject_id = $1
+			  AND entitlement = $2
+			  AND source_type = $3
+			  AND source_id = $4
+			  AND revoked_at IS NULL
+			  AND deleted_at IS NULL
+		)`,
+		ids.tenantSubjectID, "premium", string(models.EntitlementSourceSubscription), ids.subscriptionID,
+	).Scan(&exists))
 	require.True(t, exists)
 
 	svc.Data = NMIWebhookEvent{EventID: uuid.New().String(), EventType: string(EventTypeNMITransactionSuccess), EventBody: ids.transactionBody}
 	require.NoError(t, svc.handleTransactionSaleSuccess(ctx))
-	count, err := bunDB.NewSelect().Model((*models.Payment)(nil)).Where("transaction_id = ?", ids.transactionID).Count(ctx)
-	require.NoError(t, err)
+	var count int
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT count(*) FROM billing.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
 	require.Equal(t, 1, count)
 }
 
 func TestHandleAddSubscription_WithoutSettledTransactionMetadataStaysPending(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	svc, bunDB, ids := setupNMIAddSubscriptionTest(t, dsn, false)
+	svc, dbi, ids := setupNMIAddSubscriptionTest(t, dsn, false)
 	ctx := context.Background()
+	pool := dbi.Pool()
 
 	require.NoError(t, svc.handleAddSubscription(ctx))
 
-	var gotSub models.Subscription
-	require.NoError(t, bunDB.NewSelect().Model(&gotSub).Where("id = ?", ids.subscriptionID).Scan(ctx))
-	require.Equal(t, models.StatusPending, gotSub.Status)
-
-	count, err := bunDB.NewSelect().Model((*models.Payment)(nil)).Where("transaction_id = ?", ids.transactionID).Count(ctx)
+	gotSub, err := gen.New(pool).GetSubscriptionByID(ctx, ids.subscriptionID)
 	require.NoError(t, err)
+	require.Equal(t, string(models.StatusPending), string(gotSub.Status))
+
+	var count int
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT count(*) FROM billing.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
 	require.Equal(t, 0, count)
 }
 
@@ -87,19 +97,13 @@ type nmiAddSubscriptionTestIDs struct {
 	transactionBody []byte
 }
 
-func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMetadata bool) (*NMIWebhookService, *bun.DB, nmiAddSubscriptionTestIDs) {
+func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMetadata bool) (*NMIWebhookService, *db.DB, nmiAddSubscriptionTestIDs) {
 	t.Helper()
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
-
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+	q := gen.New(pool)
 
 	now := time.Date(2026, time.May, 18, 13, 28, 21, 0, time.UTC)
 	fakeClock := clockwork.NewFakeClockAt(now)
@@ -108,43 +112,52 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	providerSubID := "nmi_sub_" + uuid.New().String()
 	transactionID := "txn_" + uuid.New().String()
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 	subscriptionID := uuid.New()
 	durationDays := 30
 
-	product := &models.Product{
-		ID:          productID,
-		Slug:        "nmi_add_subscription_" + uuid.New().String(),
-		DisplayName: "Premium Membership",
-		Description: "Test premium product",
-		EntitlementsSpec: map[string]*int{
-			"premium": &durationDays,
-		},
-		Status:    models.CatalogStatusActive,
-		CreatedAt: now,
-		UpdatedAt: now,
+	entitlementsSpec := map[string]*int{
+		"premium": &durationDays,
 	}
-	price := &models.Price{
-		ID:        priceID,
-		ProductID: productID,
-		Status:    models.CatalogStatusActive,
-		Amount:    2399,
-		Currency:  "USD",
-		BillingCycleDays: func() *int {
-			days := 30
-			return &days
-		}(),
-		Processors: map[string]map[string]string{
-			provider: {
-				models.ProcessorKeyPlanID:   planID,
-				models.ProcessorKeyProvider: provider,
-			},
+	entitlementsSpecJSON, err := json.Marshal(entitlementsSpec)
+	require.NoError(t, err)
+
+	description := "Test premium product"
+	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
+		ID:               productID,
+		Slug:             "nmi_add_subscription_" + uuid.New().String(),
+		DisplayName:      "Premium Membership",
+		Description:      &description,
+		EntitlementsSpec: entitlementsSpecJSON,
+		Status:           string(models.CatalogStatusActive),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	require.NoError(t, err)
+
+	processorsJSON, err := json.Marshal(map[string]map[string]string{
+		provider: {
+			models.ProcessorKeyPlanID:   planID,
+			models.ProcessorKeyProvider: provider,
 		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
+	})
+	require.NoError(t, err)
+	billingCycleDays := int32(30)
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
+		ID:               priceID,
+		ProductID:        productID,
+		Amount:           2399,
+		Currency:         "USD",
+		Status:           string(models.CatalogStatusActive),
+		BillingCycleDays: &billingCycleDays,
+		Processors:       processorsJSON,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	require.NoError(t, err)
+
 	metadata := map[string]any{
 		"order_id": "order_" + uuid.New().String(),
 	}
@@ -153,35 +166,33 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	}
 	metadataBytes, err := json.Marshal(metadata)
 	require.NoError(t, err)
-	subscription := &models.Subscription{
+
+	snapshotJSON, err := json.Marshal(models.CloneEntitlementsSpec(entitlementsSpec))
+	require.NoError(t, err)
+	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                       subscriptionID,
 		TenantSubjectID:          tenantSubjectID,
 		ProductID:                productID,
-		PriceID:                  priceID,
-		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
-		Status:                   models.StatusPending,
-		Processor:                models.ProcessorMobius,
+		PriceID:                  &priceID,
+		EntitlementsSpecSnapshot: snapshotJSON,
+		Status:                   string(models.StatusPending),
+		Processor:                string(models.ProcessorMobius),
 		ProcessorSubscriptionID:  providerSubID,
 		StartedAt:                now,
-		Metadata:                 metadataBytes,
+		GatewayResponse:          metadataBytes,
 		CreatedAt:                now,
 		UpdatedAt:                now,
-	}
-
-	_, err = bunDB.NewInsert().Model(product).Exec(ctx)
-	require.NoError(t, err)
-	_, err = bunDB.NewInsert().Model(price).Exec(ctx)
-	require.NoError(t, err)
-	_, err = bunDB.NewInsert().Model(subscription).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.NotificationQueue)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(context.Background())
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(context.Background())
-		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(context.Background())
-		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subscriptionID).Exec(context.Background())
-		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(context.Background())
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(context.Background())
+		cctx := context.Background()
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.notification_queue WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.subscriptions WHERE id = $1", subscriptionID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	body, err := json.Marshal(NMIRecurringEventBody{
@@ -220,7 +231,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 			SubscriptionService:          subscriptionSvc,
 			PaymentService:               paymentSvc,
 			SubscriptionLifecycleService: lifecycleSvc,
-		}, bunDB, nmiAddSubscriptionTestIDs{
+		}, dbi, nmiAddSubscriptionTestIDs{
 			userID:          userID,
 			tenantSubjectID: tenantSubjectID,
 			subscriptionID:  subscriptionID,

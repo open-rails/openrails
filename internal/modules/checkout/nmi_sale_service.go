@@ -2,7 +2,6 @@ package checkout
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/vault"
@@ -126,7 +126,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 			_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
 			return nil, err
 		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	} else if !repo.IsNotFound(err) {
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, fmt.Errorf("load NMI sale attempt: %w", err)
 	}

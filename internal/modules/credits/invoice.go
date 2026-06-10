@@ -2,12 +2,14 @@ package credits
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -35,7 +37,7 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 	}
 	// Materialize the payable tenant_subjects row so the invoices FK (migration
 	// 076) is satisfied even if no prior credit op touched this subject (#317).
-	if err := ensureTenantSubject(ctx, s.db.Q(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
+	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
 	ct, err := s.GetCreditTypeByName(ctx, creditType)
@@ -43,138 +45,135 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 		return nil, err
 	}
 
-	tx, err := s.db.BeginTenantTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
+	var inv *models.Invoice
+	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		payerID := payer.UUID()
+		pfrom, pto := from.UTC(), to.UTC()
 
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	payerID := payer.UUID()
-	from, to = from.UTC(), to.UTC()
-
-	// Idempotency: one invoice per (payer, credit_type, period).
-	existing := new(models.Invoice)
-	err = tx.NewSelect().Model(existing).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Where("period_from = ? AND period_to = ?", from, to).
-		Limit(1).Scan(ctx)
-	if err == nil {
-		return existing, tx.Commit()
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-
-	// --- usage line items (per event_type) ---
-	type totalRow struct {
-		EventType   string `bun:"event_type"`
-		TotalAmount int64  `bun:"total_amount"`
-		EventCount  int64  `bun:"event_count"`
-	}
-	var totals []totalRow
-	if err := tx.NewSelect().
-		Model((*models.UsageEvent)(nil)).
-		ColumnExpr("event_type").
-		ColumnExpr("COALESCE(SUM(amount), 0) AS total_amount").
-		ColumnExpr("COUNT(*) AS event_count").
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Where("occurred_at >= ? AND occurred_at < ?", from, to).
-		GroupExpr("event_type").
-		Scan(ctx, &totals); err != nil {
-		return nil, err
-	}
-	items := map[string]*models.InvoiceLineItem{}
-	for _, t := range totals {
-		items[t.EventType] = &models.InvoiceLineItem{EventType: t.EventType, Amount: t.TotalAmount, Count: t.EventCount, Dimensions: map[string]int64{}}
-	}
-
-	type dimRow struct {
-		EventType string `bun:"event_type"`
-		Key       string `bun:"key"`
-		Total     int64  `bun:"total"`
-	}
-	var dims []dimRow
-	if err := tx.NewSelect().
-		TableExpr("billing.usage_events AS ue").
-		ColumnExpr("ue.event_type AS event_type").
-		ColumnExpr("d.key AS key").
-		ColumnExpr("COALESCE(SUM((d.value)::bigint), 0) AS total").
-		Join("CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d").
-		Where("ue.tenant_id = ? AND ue.tenant_subject_id = ? AND ue.credit_type_id = ?", tenantID, payerID, ct.ID).
-		Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from, to).
-		GroupExpr("ue.event_type, d.key").
-		Scan(ctx, &dims); err != nil {
-		return nil, err
-	}
-	for _, d := range dims {
-		if it, ok := items[d.EventType]; ok {
-			it.Dimensions[d.Key] = d.Total
+		// Idempotency: one invoice per (payer, credit_type, period).
+		existing, gerr := q.GetInvoiceByPeriod(ctx, gen.GetInvoiceByPeriodParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			PeriodFrom: pfrom, PeriodTo: pto,
+		})
+		if gerr == nil {
+			inv, gerr = invoiceFromGen(existing)
+			return gerr
 		}
-	}
+		if !errors.Is(gerr, pgx.ErrNoRows) {
+			return gerr
+		}
 
-	lineItems := make([]models.InvoiceLineItem, 0, len(items))
-	var usageTotal int64
-	for _, it := range items {
-		usageTotal += it.Amount
-		lineItems = append(lineItems, *it)
-	}
+		// --- usage line items (per event_type) ---
+		ctID := ct.ID
+		totals, terr := q.AggregateUsageTotals(ctx, gen.AggregateUsageTotalsParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: &ctID,
+			FromAt: pfrom, ToAt: pto,
+		})
+		if terr != nil {
+			return terr
+		}
+		items := map[string]*models.InvoiceLineItem{}
+		for _, t := range totals {
+			items[t.EventType] = &models.InvoiceLineItem{EventType: t.EventType, Amount: t.TotalAmount, Count: t.EventCount, Dimensions: map[string]int64{}}
+		}
 
-	// --- money movements (ledger, by transaction_type) ---
-	type movRow struct {
-		Type  string `bun:"transaction_type"`
-		Total int64  `bun:"total"`
-	}
-	var movs []movRow
-	if err := tx.NewSelect().
-		Model((*models.CreditTransaction)(nil)).
-		ColumnExpr("transaction_type").
-		ColumnExpr("COALESCE(SUM(amount), 0) AS total").
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Where("created_at >= ? AND created_at < ?", from, to).
-		GroupExpr("transaction_type").
-		Scan(ctx, &movs); err != nil {
-		return nil, err
-	}
-	movements := map[string]int64{}
-	for _, m := range movs {
-		movements[m.Type] = m.Total
-	}
+		dims, derr := q.AggregateUsageDimensions(ctx, gen.AggregateUsageDimensionsParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: &ctID,
+			FromAt: pfrom, ToAt: pto,
+		})
+		if derr != nil {
+			return derr
+		}
+		for _, d := range dims {
+			if it, ok := items[d.EventType]; ok {
+				it.Dimensions[d.Key] = d.Total
+			}
+		}
 
-	// --- closing balance snapshot ---
-	bal := new(models.CreditBalance)
-	balErr := tx.NewSelect().Model(bal).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Limit(1).Scan(ctx)
-	if balErr != nil && !errors.Is(balErr, sql.ErrNoRows) {
-		return nil, balErr
-	}
+		lineItems := make([]models.InvoiceLineItem, 0, len(items))
+		var usageTotal int64
+		for _, it := range items {
+			usageTotal += it.Amount
+			lineItems = append(lineItems, *it)
+		}
 
-	now := s.now()
-	inv := &models.Invoice{
-		ID:              uuidutil.NewV7(),
-		TenantID:        tenantID,
-		TenantSubjectID: payerID,
-		CreditTypeID:    ct.ID,
-		Currency:        ct.Unit,
-		PeriodFrom:      from,
-		PeriodTo:        to,
-		UsageTotal:      usageTotal,
-		DepositsTotal:   movements["deposit"],
-		OwedAccrued:     movements[txOwedAccrual],
-		OwedPaid:        -movements[txOwedPayment], // owed_payment amounts are negative
-		ClosingBalance:  bal.Balance,
-		LineItems:       lineItems,
-		MoneyMovements:  movements,
-		Status:          "finalized",
-		FinalizedAt:     &now,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if _, err := tx.NewInsert().Model(inv).Exec(ctx); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
+		// --- money movements (ledger, by transaction_type) ---
+		movs, merr := q.SumMoneyMovementsInPeriod(ctx, gen.SumMoneyMovementsInPeriodParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			PeriodFrom: pfrom, PeriodTo: pto,
+		})
+		if merr != nil {
+			return merr
+		}
+		movements := map[string]int64{}
+		for _, m := range movs {
+			movements[m.TransactionType] = m.Total
+		}
+
+		// --- closing balance snapshot ---
+		var closing int64
+		bal, balErr := q.GetCreditBalance(ctx, gen.GetCreditBalanceParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+		})
+		if balErr == nil {
+			closing = bal.Balance
+		} else if !errors.Is(balErr, pgx.ErrNoRows) {
+			return balErr
+		}
+
+		now := s.now()
+		inv = &models.Invoice{
+			ID:              uuidutil.NewV7(),
+			TenantID:        tenantID,
+			TenantSubjectID: payerID,
+			CreditTypeID:    ct.ID,
+			Currency:        ct.Unit,
+			PeriodFrom:      pfrom,
+			PeriodTo:        pto,
+			UsageTotal:      usageTotal,
+			DepositsTotal:   movements["deposit"],
+			OwedAccrued:     movements[txOwedAccrual],
+			OwedPaid:        -movements[txOwedPayment], // owed_payment amounts are negative
+			ClosingBalance:  closing,
+			LineItems:       lineItems,
+			MoneyMovements:  movements,
+			Status:          "finalized",
+			FinalizedAt:     &now,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		lineItemsJSON, jerr := json.Marshal(inv.LineItems)
+		if jerr != nil {
+			return fmt.Errorf("credits: encode invoice line_items: %w", jerr)
+		}
+		movementsJSON, jerr := toJSONBC(inv.MoneyMovements)
+		if jerr != nil {
+			return jerr
+		}
+		return q.InsertInvoice(ctx, gen.InsertInvoiceParams{
+			ID:              inv.ID,
+			TenantID:        inv.TenantID,
+			TenantSubjectID: inv.TenantSubjectID,
+			CreditTypeID:    inv.CreditTypeID,
+			Currency:        inv.Currency,
+			PeriodFrom:      inv.PeriodFrom,
+			PeriodTo:        inv.PeriodTo,
+			UsageTotal:      inv.UsageTotal,
+			DepositsTotal:   inv.DepositsTotal,
+			OwedAccrued:     inv.OwedAccrued,
+			OwedPaid:        inv.OwedPaid,
+			ClosingBalance:  inv.ClosingBalance,
+			LineItems:       lineItemsJSON,
+			MoneyMovements:  movementsJSON,
+			Status:          inv.Status,
+			FinalizedAt:     inv.FinalizedAt,
+			CreatedAt:       inv.CreatedAt,
+			UpdatedAt:       inv.UpdatedAt,
+		})
+	})
+	if err != nil {
 		return nil, err
 	}
 	return inv, nil
@@ -182,7 +181,7 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 
 // ListInvoices lists an tenant subject's finalized invoices, newest period first,
 // paginated (issue #303). It filters tenant_subject_id directly (the payer) and is
-// RLS-scoped to the request tenant via Q(ctx), mirroring GetTransactionsByTenantSubject.
+// RLS-scoped to the request tenant via Qx(ctx), mirroring GetTransactionsByTenantSubject.
 // Returns the page plus the total count for pagination.
 func (s *CreditsService) ListInvoices(ctx context.Context, payer identity.TenantSubjectID, limit, offset int) ([]models.Invoice, int, error) {
 	if s == nil || s.db == nil {
@@ -200,15 +199,31 @@ func (s *CreditsService) ListInvoices(ctx context.Context, payer identity.Tenant
 	var items []models.Invoice
 	var total int
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		q := s.db.Q(ctx).NewSelect().Model(&items).
-			Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-			Where("tenant_subject_id = ?", payer.UUID())
-		var e error
-		total, e = q.Count(ctx)
+		q := s.db.Gen(ctx)
+		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		n, e := q.CountInvoicesByPayer(ctx, gen.CountInvoicesByPayerParams{
+			TenantID: tenantID, TenantSubjectID: payer.UUID(),
+		})
 		if e != nil {
 			return e
 		}
-		return q.OrderExpr("period_from DESC").Limit(limit).Offset(offset).Scan(ctx)
+		total = int(n)
+		rows, e := q.ListInvoicesByPayer(ctx, gen.ListInvoicesByPayerParams{
+			TenantID: tenantID, TenantSubjectID: payer.UUID(),
+			Column3: int32(limit), Column4: int32(offset),
+		})
+		if e != nil {
+			return e
+		}
+		items = make([]models.Invoice, 0, len(rows))
+		for _, r := range rows {
+			m, merr := invoiceFromGen(r)
+			if merr != nil {
+				return merr
+			}
+			items = append(items, *m)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, 0, err
@@ -218,8 +233,8 @@ func (s *CreditsService) ListInvoices(ctx context.Context, payer identity.Tenant
 
 // GetInvoiceByID returns one finalized invoice (with its snapshotted line items)
 // for an tenant subject by id (issue #303). It filters tenant + payer + id and is
-// RLS-scoped via Q(ctx); an invoice belonging to another payer/tenant is
-// unreachable (fail closed, sql.ErrNoRows).
+// RLS-scoped via Qx(ctx); an invoice belonging to another payer/tenant is
+// unreachable (fail closed, pgx.ErrNoRows).
 func (s *CreditsService) GetInvoiceByID(ctx context.Context, payer identity.TenantSubjectID, id uuid.UUID) (*models.Invoice, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
@@ -227,12 +242,18 @@ func (s *CreditsService) GetInvoiceByID(ctx context.Context, payer identity.Tena
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	inv := new(models.Invoice)
+	var inv *models.Invoice
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		return s.db.Q(ctx).NewSelect().Model(inv).
-			Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-			Where("tenant_subject_id = ? AND id = ?", payer.UUID(), id).
-			Limit(1).Scan(ctx)
+		row, e := s.db.Gen(ctx).GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{
+			TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+			TenantSubjectID: payer.UUID(),
+			ID:              id,
+		})
+		if e != nil {
+			return e
+		}
+		inv, e = invoiceFromGen(row)
+		return e
 	})
 	if err != nil {
 		return nil, err
@@ -248,31 +269,22 @@ func (s *CreditsService) FinalizeDueInvoices(ctx context.Context, from, to time.
 		return 0, fmt.Errorf("credits service not initialized")
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	type acct struct {
-		TenantSubjectID string `bun:"tenant_subject_id"`
-		CreditType      string `bun:"credit_type_name"`
-	}
-	var accts []acct
+	var accts []gen.ListCreditAccountPairsRow
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		return s.db.Q(ctx).NewSelect().
-			TableExpr("billing.credit_balances AS b").
-			ColumnExpr("b.tenant_subject_id::text AS tenant_subject_id").
-			ColumnExpr("ct.name AS credit_type_name").
-			Join("JOIN billing.credit_types AS ct ON ct.id = b.credit_type_id").
-			Where("b.tenant_id = ?", tenantID).
-			GroupExpr("b.tenant_subject_id, ct.name").
-			Scan(ctx, &accts)
+		var e error
+		accts, e = s.db.Gen(ctx).ListCreditAccountPairs(ctx, tenantID)
+		return e
 	})
 	if err != nil {
 		return 0, err
 	}
 	count := 0
 	for _, a := range accts {
-		payer := identity.TenantSubjectIDFromString(a.TenantSubjectID)
+		payer := identity.TenantSubjectID(a.TenantSubjectID)
 		if payer.IsZero() {
 			continue
 		}
-		if _, err := s.FinalizeInvoice(ctx, payer, a.CreditType, from, to); err != nil {
+		if _, err := s.FinalizeInvoice(ctx, payer, a.CreditTypeName, from, to); err != nil {
 			return count, err
 		}
 		count++

@@ -11,17 +11,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for the migration bootstrap
 	"github.com/open-rails/migratekit"
+	"github.com/open-rails/openrails/config"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // startRLSPostgres boots Postgres 18, applies the billing migrations (including
@@ -37,11 +37,12 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 	}
 	if dsn != "" {
 		superDSN = dsn
-		sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(superDSN)))
+		sqlDB, err := sql.Open("pgx", superDSN)
+		require.NoError(t, err)
 		t.Cleanup(func() { _ = sqlDB.Close() })
 		require.NoError(t, sqlDB.PingContext(ctx))
 
-		_, err := sqlDB.ExecContext(ctx, `
+		_, err = sqlDB.ExecContext(ctx, `
 			CREATE SCHEMA IF NOT EXISTS billing;
 			CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 			CREATE EXTENSION IF NOT EXISTS btree_gist;
@@ -76,7 +77,8 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 	superDSN, err = container.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(superDSN)))
+	sqlDB, err := sql.Open("pgx", superDSN)
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, sqlDB.PingContext(ctx))
 
@@ -211,26 +213,24 @@ func TestRLS_GUCScopesCorrectly(t *testing.T) {
 	require.Equal(t, 0, count(""), "no GUC set => fail-closed, zero rows")
 }
 
-// TestRunInTenantTx_ScopesGUC proves the db.DB.RunInTenantTx helper sets the GUC
-// from context so a tenant-owned query through it is RLS-scoped.
-func TestRunInTenantTx_ScopesGUC(t *testing.T) {
+// TestTenantTx_ScopesGUC proves the db.DB.TenantTx helper sets the GUC from
+// context so a tenant-owned query through it is RLS-scoped.
+func TestTenantTx_ScopesGUC(t *testing.T) {
 	superDSN, appDSN, ctx := startRLSPostgres(t)
 	tA := tenant.ID(uuid.New())
 	tB := tenant.ID(uuid.New())
 	seedTenantsAndEntitlements(t, ctx, superDSN, tA, tB)
 
-	// Open a bun DB over the APP role so RLS applies.
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(appDSN)))
-	defer func() { _ = sqlDB.Close() }()
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	d, err := NewWithBun(bunDB)
+	// Open over the APP role so RLS applies.
+	d, err := NewDB(&config.DBConfig{URL: appDSN})
 	require.NoError(t, err)
+	defer d.Close()
 
 	ctxA := tenant.WithID(ctx, tA)
 	var n int
-	err = d.RunInTenantTx(ctxA, func(ctx context.Context, tx bun.Tx) error {
-		return tx.NewRaw(`SELECT count(*) FROM billing.entitlements`).Scan(ctx, &n)
+	err = d.TenantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements`).Scan(&n)
 	})
 	require.NoError(t, err)
-	require.Equal(t, 1, n, "RunInTenantTx must scope the query to the context tenant")
+	require.Equal(t, 1, n, "TenantTx must scope the query to the context tenant")
 }

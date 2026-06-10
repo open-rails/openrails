@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 // ProductAccessSourceType describes where a product access grant came from.
@@ -45,37 +44,35 @@ const (
 // It is DISTINCT from billing.entitlements (feature access). A product may carry
 // EntitlementsSpec and/or CreditsSpec AND produce a grant.
 type ProductAccessGrant struct {
-	bun.BaseModel `bun:"table:billing.product_access_grants,alias:pag"`
-
-	ID uuid.UUID `bun:"id,pk,type:uuid,default:uuidv7()" json:"id"`
+	ID uuid.UUID `json:"id"`
 
 	// TenantID scopes this row to a tenant (issue #223/#227). Nullzero + DB
 	// default lets single-tenant inserts fall back to the resolved tenant.
-	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
+	TenantID uuid.UUID `json:"tenant_id"`
 
 	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
 	// it before user_id is dropped. Join billing.tenant_subjects for issuer/subject.
-	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
-	ProductID       uuid.UUID `bun:"product_id,type:uuid,notnull" json:"product_id"`
+	TenantSubjectID uuid.UUID `json:"tenant_subject_id,omitempty"`
+	ProductID       uuid.UUID `json:"product_id"`
 
-	SourceType ProductAccessSourceType `bun:"source_type,notnull" json:"source_type"`
+	SourceType ProductAccessSourceType `json:"source_type"`
 	// SourceID is the idempotency key component (payment id, admin grant id,
 	// subscription id as text). Stored non-null (default '') so the idempotency
 	// index treats it uniformly.
-	SourceID  string     `bun:"source_id,notnull,default:''" json:"source_id"`
-	PaymentID *uuid.UUID `bun:"payment_id,type:uuid,nullzero" json:"payment_id,omitempty"`
+	SourceID  string     `json:"source_id"`
+	PaymentID *uuid.UUID `json:"payment_id,omitempty"`
 
-	Status ProductAccessStatus `bun:"status,notnull,default:'active'" json:"status"`
+	Status ProductAccessStatus `json:"status"`
 
-	StartsAt time.Time  `bun:"starts_at,notnull,default:current_timestamp" json:"starts_at"`
-	EndsAt   *time.Time `bun:"ends_at,nullzero" json:"ends_at,omitempty"`
+	StartsAt time.Time  `json:"starts_at"`
+	EndsAt   *time.Time `json:"ends_at,omitempty"`
 
-	RevokedAt    *time.Time                 `bun:"revoked_at,nullzero" json:"revoked_at,omitempty"`
-	RevokeReason *ProductAccessRevokeReason `bun:"revoke_reason,nullzero" json:"revoke_reason,omitempty"`
+	RevokedAt    *time.Time                 `json:"revoked_at,omitempty"`
+	RevokeReason *ProductAccessRevokeReason `json:"revoke_reason,omitempty"`
 
-	CreatedAt time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt time.Time `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // IsActiveAt reports whether the grant currently confers access at time t:

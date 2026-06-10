@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -15,8 +14,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -25,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
-	"github.com/uptrace/bun"
 )
 
 type paymentPath struct {
@@ -118,11 +118,11 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 		return issuePreparedAdminRefund(ctx, r, r.State.PaymentService, prepared, req, idempotencyKey)
 	}
 	var prepared *adminRefundPrepared
-	err := r.State.DB.Q(r.Request.Context()).RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(?)", adminRefundLockKey(paymentID.String())); err != nil {
+	err := r.State.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminRefundLockKey(paymentID.String())); err != nil {
 			return fmt.Errorf("lock refund: %w", err)
 		}
-		paymentService := payments.NewPaymentService(db.NewWithTx(tx), r.Clock)
+		paymentService := payments.NewPaymentService(db.NewWithPgxTx(tx), r.Clock)
 		result, err := prepareAdminRefund(ctx, r, paymentService, paymentID, req, idempotencyKey)
 		if err != nil {
 			return err
@@ -180,7 +180,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 		default:
 			return nil, adminRefundHTTPError(http.StatusConflict, "refund request already failed; retry with a new idempotency key")
 		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	} else if !repo.IsNotFound(err) {
 		return nil, fmt.Errorf("load existing refund request: %w", err)
 	}
 	if err := paymentService.ValidateRefund(ctx, payment, req.Amount); err != nil {

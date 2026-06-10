@@ -2,13 +2,14 @@ package credits
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -164,14 +165,13 @@ func (s *CreditsService) GetAccountSettings(ctx context.Context, payer identity.
 		return nil, err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	out := new(models.CreditAccountSettings)
-	err = s.db.Q(ctx).NewSelect().Model(out).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payer.UUID(), ct.ID).
-		Limit(1).Scan(ctx)
+	row, err := s.db.Gen(ctx).GetCreditAccountSettings(ctx, gen.GetCreditAccountSettingsParams{
+		TenantID: tenantID, TenantSubjectID: payer.UUID(), CreditTypeID: ct.ID,
+	})
 	if err == nil {
-		return out, nil
+		return settingsFromGen(row), nil
 	}
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) {
 		d := DefaultAccountSettings(payer, ct.ID)
 		d.TenantID = tenantID
 		return d, nil
@@ -203,7 +203,7 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 	}
 	// Materialize the payable tenant_subjects row so the credit_account_settings
 	// FK (migration 076) is satisfied on a subject's first settings write (#317).
-	if err := ensureTenantSubject(ctx, s.db.Q(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
+	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
 	if in.BillingMode != nil {
@@ -271,22 +271,30 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 		cur.CreatedAt = now
 	}
 
-	_, err = s.db.Q(ctx).NewInsert().Model(cur).
-		On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id) DO UPDATE").
-		Set("billing_mode = EXCLUDED.billing_mode").
-		Set("max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros").
-		Set("max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros").
-		Set("max_outstanding_owed_micros = EXCLUDED.max_outstanding_owed_micros").
-		Set("low_balance_threshold_micros = EXCLUDED.low_balance_threshold_micros").
-		Set("auto_topup_enabled = EXCLUDED.auto_topup_enabled").
-		Set("auto_topup_amount_cents = EXCLUDED.auto_topup_amount_cents").
-		Set("auto_topup_payment_method_id = EXCLUDED.auto_topup_payment_method_id").
-		Set("default_credit_expiry_days = EXCLUDED.default_credit_expiry_days").
-		Set("hard_stop_on_breach = EXCLUDED.hard_stop_on_breach").
-		Set("alert_threshold_pct = EXCLUDED.alert_threshold_pct").
-		Set("updated_at = EXCLUDED.updated_at").
-		Exec(ctx)
-	if err != nil {
+	var expiry *int32
+	if cur.DefaultCreditExpiryDays != nil {
+		v := int32(*cur.DefaultCreditExpiryDays)
+		expiry = &v
+	}
+	if err := s.db.Gen(ctx).UpsertCreditAccountSettings(ctx, gen.UpsertCreditAccountSettingsParams{
+		ID:                        cur.ID,
+		TenantID:                  cur.TenantID,
+		TenantSubjectID:           cur.TenantSubjectID,
+		CreditTypeID:              cur.CreditTypeID,
+		BillingMode:               cur.BillingMode,
+		MaxSpendPerDayMicros:      cur.MaxSpendPerDayMicros,
+		MaxSpendPerMonthMicros:    cur.MaxSpendPerMonthMicros,
+		MaxOutstandingOwedMicros:  cur.MaxOutstandingOwedMicros,
+		LowBalanceThresholdMicros: cur.LowBalanceThreshold,
+		AutoTopupEnabled:          cur.AutoTopupEnabled,
+		AutoTopupAmountCents:      cur.AutoTopupAmountCents,
+		AutoTopupPaymentMethodID:  cur.AutoTopupPaymentMethod,
+		DefaultCreditExpiryDays:   expiry,
+		HardStopOnBreach:          cur.HardStopOnBreach,
+		AlertThresholdPct:         int32(cur.AlertThresholdPct),
+		CreatedAt:                 cur.CreatedAt,
+		UpdatedAt:                 cur.UpdatedAt,
+	}); err != nil {
 		return nil, err
 	}
 	return s.GetAccountSettings(ctx, payer, creditType)
@@ -308,7 +316,7 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.Tenan
 	}
 	// Materialize the payable tenant_subjects row so the credit_spend_limits FK
 	// (migration 076) is satisfied on a subject's first spend-limit write (#317).
-	if err := ensureTenantSubject(ctx, s.db.Q(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
+	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
 	actor = strings.TrimSpace(actor)
@@ -332,27 +340,30 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.Tenan
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}
-	_, err = s.db.Q(ctx).NewInsert().Model(row).
-		On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id, actor) DO UPDATE").
-		Set("max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros").
-		Set("max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros").
-		Set("updated_at = EXCLUDED.updated_at").
-		Exec(ctx)
-	if err != nil {
+	if err := s.db.Gen(ctx).UpsertCreditSpendLimit(ctx, gen.UpsertCreditSpendLimitParams{
+		ID:                     row.ID,
+		TenantID:               row.TenantID,
+		TenantSubjectID:        row.TenantSubjectID,
+		CreditTypeID:           row.CreditTypeID,
+		Actor:                  row.Actor,
+		MaxSpendPerDayMicros:   row.MaxSpendPerDayMicros,
+		MaxSpendPerMonthMicros: row.MaxSpendPerMonthMicros,
+		CreatedAt:              row.CreatedAt,
+		UpdatedAt:              row.UpdatedAt,
+	}); err != nil {
 		return nil, err
 	}
 	return row, nil
 }
 
 func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, payerID, creditTypeID uuid.UUID, actor string) (*models.CreditSpendLimit, error) {
-	row := new(models.CreditSpendLimit)
-	err := s.db.Q(ctx).NewSelect().Model(row).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ? AND actor = ?", tenantID, payerID, creditTypeID, actor).
-		Limit(1).Scan(ctx)
+	row, err := s.db.Gen(ctx).GetCreditSpendLimit(ctx, gen.GetCreditSpendLimitParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: creditTypeID, Actor: actor,
+	})
 	if err == nil {
-		return row, nil
+		return spendLimitFromGen(row), nil
 	}
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return nil, err
@@ -363,49 +374,18 @@ func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, payerID, c
 // created in the window (so concurrent in-flight holds can't overshoot a cap).
 // When actor is non-empty the sum is scoped to that actor.
 func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, payerID, creditTypeID uuid.UUID, since time.Time, actor string) (int64, error) {
-	q := s.db.Q(ctx).NewSelect().
-		Model((*models.CreditTransaction)(nil)).
-		ColumnExpr("COALESCE(SUM("+
-			"CASE "+
-			"WHEN transaction_type = 'withdrawal' THEN -amount "+
-			"WHEN transaction_type = 'hold' AND status = 'captured' THEN -amount "+
-			"WHEN transaction_type = 'hold' AND status = 'active' THEN COALESCE(authorized_amount, 0) "+
-			"ELSE 0 END), 0)").
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
-		Where("created_at >= ?", since)
-	if actor != "" {
-		q = q.Where("actor = ?", actor)
-	}
-	var total int64
-	if err := q.Scan(ctx, &total); err != nil {
-		return 0, err
-	}
-	return total, nil
+	return s.db.Gen(ctx).SumSpentInWindow(ctx, gen.SumSpentInWindowParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: creditTypeID,
+		Since: since, Actor: actor,
+	})
 }
 
 // activeHoldsTotal sums all currently-active hold authorizations for an payer
-// (current reservation exposure, regardless of window), PLUS open credit
-// windows' unsettled remainder (#335) — a window is reservation exposure
-// exactly like a hold, and held_balance reflects both.
+// (current reservation exposure, regardless of window).
 func (s *CreditsService) activeHoldsTotal(ctx context.Context, tenantID, payerID, creditTypeID uuid.UUID) (int64, error) {
-	var total int64
-	err := s.db.Q(ctx).NewSelect().
-		Model((*models.CreditTransaction)(nil)).
-		ColumnExpr("COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)").
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
-		Where("transaction_type = 'hold' AND status = 'active'").
-		Scan(ctx, &total)
-	if err != nil {
-		return 0, err
-	}
-	var windowHeld int64
-	err = s.db.Q(ctx).NewSelect().
-		Model((*models.CreditWindow)(nil)).
-		ColumnExpr("COALESCE(SUM(held_amount - settled_amount), 0)").
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
-		Where("status = 'open'").
-		Scan(ctx, &windowHeld)
-	return total + windowHeld, err
+	return s.db.Gen(ctx).SumActiveHoldAuthorizations(ctx, gen.SumActiveHoldAuthorizationsParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: creditTypeID,
+	})
 }
 
 // CheckSpendAllowed evaluates the spend policy for (payer, credit_type, actor)

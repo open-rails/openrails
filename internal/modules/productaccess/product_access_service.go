@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -20,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/uptrace/bun"
 )
 
 // Service owns the product-access-grant lifecycle.
@@ -49,21 +49,16 @@ func (s *Service) now() time.Time {
 }
 
 // withTx runs fn inside a tenant-scoped transaction so the migration-063 RLS
-// policy constrains every query to the request's tenant (RunInTenantTx pins the
+// policy constrains every query to the request's tenant (TenantTx pins the
 // app.tenant_id GUC as the first statement). repo calls inside fn use the
 // tx-scoped repo so they ride that GUC.
 func (s *Service) withTx(ctx context.Context, fn func(ctx context.Context, r *repo.ProductAccessGrantRepo) error) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("product access service not initialized")
 	}
-	switch s.db.GetDB().(type) {
-	case *bun.DB, bun.Tx:
-		return s.db.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-			return fn(ctx, repo.NewProductAccessGrantRepo(s.db.NewWithTx(tx)))
-		})
-	default:
-		return fmt.Errorf("unsupported db type for product access transaction")
-	}
+	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, repo.NewProductAccessGrantRepo(s.db.NewWithPgxTx(tx)))
+	})
 }
 
 // GrantParams describes a product access grant request.

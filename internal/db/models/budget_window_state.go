@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 // BudgetWindowState is the per-(tenant, tenant subject, actor, window_key)
@@ -25,32 +24,30 @@ import (
 // Reserve locks this row FOR UPDATE so concurrent reserves around a boundary
 // serialize on it.
 type BudgetWindowState struct {
-	bun.BaseModel `bun:"table:billing.budget_window_state,alias:bws"`
+	ID uuid.UUID `json:"id"`
 
-	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	TenantID uuid.UUID `json:"tenant_id"`
 
-	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
+	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
 
-	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
-
-	Actor string `bun:"actor,notnull" json:"actor"`
+	Actor string `json:"actor"`
 
 	// WindowKey matches BudgetWindow.Key from the caller (e.g. "5h", "7d").
-	WindowKey string `bun:"window_key,notnull" json:"window_key"`
+	WindowKey string `json:"window_key"`
 
 	// Cadence is "session" or "fixed" (see type comment).
-	Cadence string `bun:"cadence,notnull" json:"cadence"`
+	Cadence string `json:"cadence"`
 
-	WindowSeconds int64 `bun:"window_seconds,notnull" json:"window_seconds"`
+	WindowSeconds int64 `json:"window_seconds"`
 
 	// Anchor is the first-ever window open for this key; fixed-cadence
 	// boundaries derive from it.
-	Anchor time.Time `bun:"anchor,notnull" json:"anchor"`
+	Anchor time.Time `json:"anchor"`
 
 	// WindowStart is the start of the most recently OPENED window
 	// (authoritative for session cadence).
-	WindowStart time.Time `bun:"window_start,notnull" json:"window_start"`
+	WindowStart time.Time `json:"window_start"`
 
-	CreatedAt time.Time `bun:"created_at,notnull" json:"created_at"`
-	UpdatedAt time.Time `bun:"updated_at,notnull" json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

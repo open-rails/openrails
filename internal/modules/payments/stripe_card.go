@@ -2,7 +2,6 @@ package payments
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,9 +10,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/uptrace/bun"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -69,15 +68,11 @@ func SnapshotPaymentCard(ctx context.Context, database *db.DB, txnIDs []string, 
 	if database == nil || card == nil || len(txnIDs) == 0 {
 		return nil
 	}
-	_, err := database.Q(ctx).NewUpdate().
-		Model((*models.Payment)(nil)).
-		Set("card_brand = ?", card.Brand).
-		Set("card_last4 = ?", card.Last4).
-		Where("processor = ?", models.ProcessorStripe).
-		Where("transaction_id IN (?)", bun.In(txnIDs)).
-		Where("card_last4 IS NULL").
-		Exec(ctx)
-	if err != nil {
+	if err := database.Gen(ctx).SnapshotPaymentCards(ctx, gen.SnapshotPaymentCardsParams{
+		CardBrand:      card.Brand,
+		CardLast4:      card.Last4,
+		TransactionIds: txnIDs,
+	}); err != nil {
 		return fmt.Errorf("snapshot payment card: %w", err)
 	}
 	return nil
@@ -108,12 +103,10 @@ func LinkStripeInvoicePayment(ctx context.Context, database *db.DB, invoiceID, c
 		return fmt.Errorf("marshal stripe invoice payment metadata: %w", err)
 	}
 
-	if _, err := database.Q(ctx).NewUpdate().
-		Model((*models.Payment)(nil)).
-		Set("metadata = COALESCE(metadata, '{}'::jsonb) || ?::jsonb", string(encoded)).
-		Where("processor = ?", models.ProcessorStripe).
-		Where("transaction_id = ?", invoiceID).
-		Exec(ctx); err != nil {
+	if err := database.Gen(ctx).MergeStripePaymentMetadata(ctx, gen.MergeStripePaymentMetadataParams{
+		Patch:         encoded,
+		TransactionID: invoiceID,
+	}); err != nil {
 		return fmt.Errorf("link stripe invoice payment metadata: %w", err)
 	}
 
@@ -122,15 +115,8 @@ func LinkStripeInvoicePayment(ctx context.Context, database *db.DB, invoiceID, c
 		return nil
 	}
 
-	var source models.Payment
-	err = database.Q(ctx).NewSelect().Model(&source).
-		Column("card_brand", "card_last4").
-		Where("processor = ?", models.ProcessorStripe).
-		Where("transaction_id IN (?)", bun.In(aliases)).
-		Where("card_last4 IS NOT NULL").
-		Limit(1).
-		Scan(ctx)
-	if errors.Is(err, sql.ErrNoRows) {
+	source, err := database.Gen(ctx).GetStripeAliasCardSnapshot(ctx, aliases)
+	if repo.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
@@ -209,14 +195,10 @@ func UpsertStripeCardForCustomer(
 		now = clock.Now()
 	}
 
-	bdb := database.Q(ctx)
-	pm := new(models.PaymentMethod)
-	err = bdb.NewSelect().Model(pm).
-		Where("processor = ?", models.ProcessorStripe).
-		Where("vault_id = ?", vaultID).
-		Limit(1).Scan(ctx)
+	methods := repo.NewPaymentMethodRepo(database)
+	pm, err := methods.GetByVaultID(ctx, string(models.ProcessorStripe), vaultID)
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, repo.ErrPaymentMethodNotFound):
 		pm = &models.PaymentMethod{
 			ID:                   uuidutil.NewV7(),
 			TenantSubjectID:      identity.TenantSubjectIDFromString(userID).UUID(),
@@ -225,15 +207,17 @@ func UpsertStripeCardForCustomer(
 			InitialTransactionID: strings.TrimSpace(initialTxnID),
 			CardType:             &card.Brand,
 			LastFour:             &card.Last4,
+			CreatedAt:            now,
+			UpdatedAt:            now,
 		}
 		if card.Expiry != "" {
 			pm.ExpiryDate = &card.Expiry
 		}
 		// Stamp the payable tenant subject alongside the legacy user_id (#317).
-		if pm.TenantSubjectID, err = repo.EnsureTenantSubjectID(ctx, bdb, uuid.Nil, userID); err != nil {
+		if pm.TenantSubjectID, err = repo.EnsureTenantSubjectID(ctx, database.Qx(ctx), uuid.Nil, userID); err != nil {
 			return fmt.Errorf("resolve tenant subject for stripe payment method: %w", err)
 		}
-		if _, err := bdb.NewInsert().Model(pm).Exec(ctx); err != nil {
+		if err := methods.Create(ctx, pm); err != nil {
 			return fmt.Errorf("insert stripe payment method: %w", err)
 		}
 	case err != nil:
@@ -245,9 +229,7 @@ func UpsertStripeCardForCustomer(
 			pm.ExpiryDate = &card.Expiry
 		}
 		pm.UpdatedAt = now
-		if _, err := bdb.NewUpdate().Model(pm).
-			Column("card_type", "last_four", "expiry_date", "updated_at").
-			WherePK().Exec(ctx); err != nil {
+		if err := methods.Update(ctx, pm); err != nil {
 			return fmt.Errorf("update stripe payment method: %w", err)
 		}
 	}

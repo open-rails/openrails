@@ -4,59 +4,48 @@ package credits_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 
 	// Require the lifecycle migration (authorized_amount) + credit_blocks to exist.
 	var hasLifecycle bool
-	require.NoError(t, bunDB.NewSelect().
-		ColumnExpr("EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='billing' AND table_name='credit_transactions' AND column_name='authorized_amount')").
-		Scan(ctx, &hasLifecycle))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='billing' AND table_name='credit_transactions' AND column_name='authorized_amount')").
+		Scan(&hasLifecycle))
 	if !hasLifecycle {
 		t.Skip("billing.credit_transactions missing authorized_amount; run migrations before integration tests")
 	}
 	var hasBlocks bool
-	require.NoError(t, bunDB.NewSelect().
-		ColumnExpr("EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
-		Scan(ctx, &hasBlocks))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
+		Scan(&hasBlocks))
 	if !hasBlocks {
 		t.Skip("billing.credit_blocks not found; run migrations before integration tests")
 	}
-
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	creditTypeName := "test_credits_lifecycle_" + uuid.NewString()
 	creditTypeID := uuid.New()
 	userID := uuid.NewString()
 
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := gen.New(pool).CreateCreditType(ctx, gen.CreateCreditTypeParams{
 		ID:            creditTypeID,
 		Name:          creditTypeName,
 		DisplayName:   "Test Credits Lifecycle",
@@ -64,14 +53,14 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 		DecimalPlaces: 0,
 		IsActive:      true,
 		CreatedAt:     now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("credit_type_id = ?", creditTypeID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("credit_type_id = ?", creditTypeID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("credit_type_id = ?", creditTypeID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", creditTypeID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE credit_type_id = $1", creditTypeID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE credit_type_id = $1", creditTypeID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE credit_type_id = $1", creditTypeID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", creditTypeID)
 	})
 
 	creditsSvc := credits.NewCreditsService(dbi)
@@ -106,7 +95,9 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	require.Equal(t, int64(0), bal.HeldBalance)
 
 	holdAfterRelease := new(models.CreditTransaction)
-	require.NoError(t, bunDB.NewSelect().Model(holdAfterRelease).Where("id = ?", hold1.ID).Scan(ctx))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT transaction_type, status FROM billing.credit_transactions WHERE id = $1", hold1.ID).
+		Scan(&holdAfterRelease.TransactionType, &holdAfterRelease.Status))
 	require.Equal(t, "hold", holdAfterRelease.TransactionType)
 	require.Equal(t, "released", holdAfterRelease.Status)
 
@@ -145,7 +136,9 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	require.NoError(t, w.Work(ctx, job))
 
 	holdAfterExpire := new(models.CreditTransaction)
-	require.NoError(t, bunDB.NewSelect().Model(holdAfterExpire).Where("id = ?", hold4.ID).Scan(ctx))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT status FROM billing.credit_transactions WHERE id = $1", hold4.ID).
+		Scan(&holdAfterExpire.Status))
 	require.Equal(t, "expired", holdAfterExpire.Status)
 
 	bal, err = creditsSvc.GetBalance(ctx, userID, creditTypeName)

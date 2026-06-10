@@ -6,10 +6,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
-	"github.com/uptrace/bun"
 )
 
 // Charger performs an off-session (merchant-initiated) charge of a saved
@@ -43,36 +42,44 @@ type Alerter interface {
 // moneyInAccount is a scanned (settings ⨝ balance ⨝ credit_type) row for the
 // money-in workers.
 type moneyInAccount struct {
-	TenantID        uuid.UUID  `bun:"tenant_id"`
-	TenantSubjectID uuid.UUID  `bun:"tenant_subject_id"`
-	CreditTypeID    uuid.UUID  `bun:"credit_type_id"`
-	CreditTypeName  string     `bun:"credit_type_name"`
-	Available       int64      `bun:"available"`
-	Threshold       int64      `bun:"low_balance_threshold_micros"`
-	AutoTopup       bool       `bun:"auto_topup_enabled"`
-	TopupAmount     *int64     `bun:"auto_topup_amount_cents"`
-	PaymentMethodID *uuid.UUID `bun:"auto_topup_payment_method_id"`
-	LastAlertAt     *time.Time `bun:"last_alert_at"`
-	LastTopupAt     *time.Time `bun:"last_topup_at"`
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	CreditTypeID    uuid.UUID
+	CreditTypeName  string
+	Available       int64
+	Threshold       int64
+	AutoTopup       bool
+	TopupAmount     *int64
+	PaymentMethodID *uuid.UUID
+	LastAlertAt     *time.Time
+	LastTopupAt     *time.Time
 }
 
 // belowThresholdAccounts returns accounts whose available balance
 // (balance - held) is under their configured low-balance threshold.
 func (s *CreditsService) belowThresholdAccounts(ctx context.Context) ([]moneyInAccount, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	var rows []moneyInAccount
-	err := s.db.Q(ctx).NewSelect().
-		ColumnExpr("s.tenant_id, s.tenant_subject_id, s.credit_type_id, ct.name AS credit_type_name").
-		ColumnExpr("(COALESCE(b.balance,0) - COALESCE(b.held_balance,0)) AS available").
-		ColumnExpr("s.low_balance_threshold_micros, s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at").
-		TableExpr("billing.credit_account_settings AS s").
-		Join("JOIN billing.credit_types AS ct ON ct.id = s.credit_type_id").
-		Join("LEFT JOIN billing.credit_balances AS b ON b.tenant_id = s.tenant_id AND b.tenant_subject_id = s.tenant_subject_id AND b.credit_type_id = s.credit_type_id").
-		Where("s.tenant_id = ?", tenantID).
-		Where("s.low_balance_threshold_micros IS NOT NULL").
-		Where("(COALESCE(b.balance,0) - COALESCE(b.held_balance,0)) < s.low_balance_threshold_micros").
-		Scan(ctx, &rows)
-	return rows, err
+	rows, err := s.db.Gen(ctx).ListBelowThresholdCreditAccounts(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]moneyInAccount, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, moneyInAccount{
+			TenantID:        r.TenantID,
+			TenantSubjectID: r.TenantSubjectID,
+			CreditTypeID:    r.CreditTypeID,
+			CreditTypeName:  r.CreditTypeName,
+			Available:       r.Available,
+			Threshold:       r.Threshold,
+			AutoTopup:       r.AutoTopupEnabled,
+			TopupAmount:     r.AutoTopupAmountCents,
+			PaymentMethodID: r.AutoTopupPaymentMethodID,
+			LastAlertAt:     r.LastAlertAt,
+			LastTopupAt:     r.LastTopupAt,
+		})
+	}
+	return out, nil
 }
 
 // RunLowBalanceAlerts finds accounts below their low-balance threshold and emits
@@ -199,11 +206,16 @@ func (s *CreditsService) topUpAccount(ctx context.Context, charger Charger, r mo
 
 // stampMoneyInTimestamp sets a single timestamp column on the settings row.
 func (s *CreditsService) stampMoneyInTimestamp(ctx context.Context, r moneyInAccount, column string, now time.Time) error {
-	_, err := s.db.Q(ctx).NewUpdate().
-		Model((*models.CreditAccountSettings)(nil)).
-		Set("? = ?", bun.Ident(column), now).
-		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", r.TenantID, r.TenantSubjectID, r.CreditTypeID).
-		Exec(ctx)
-	return err
+	switch column {
+	case "last_alert_at":
+		return s.db.Gen(ctx).StampCreditAccountAlertAt(ctx, gen.StampCreditAccountAlertAtParams{
+			TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, CreditTypeID: r.CreditTypeID, Now: &now,
+		})
+	case "last_topup_at":
+		return s.db.Gen(ctx).StampCreditAccountTopupAt(ctx, gen.StampCreditAccountTopupAtParams{
+			TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, CreditTypeID: r.CreditTypeID, Now: &now,
+		})
+	default:
+		return fmt.Errorf("credits: unknown money-in timestamp column %q", column)
+	}
 }

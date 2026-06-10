@@ -2,14 +2,13 @@ package riverjobs
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
@@ -89,7 +88,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 		if perr == nil {
 			continue // ledger is consistent for this pull
 		}
-		if !errors.Is(perr, sql.ErrNoRows) {
+		if !repo.IsNotFound(perr) {
 			// Transient lookup failure: log and move on, don't false-alarm.
 			log.WithContext(ctx).WithError(perr).WithField("signature", sig).
 				Warn("Solana reconcile: payment lookup failed; skipping row")

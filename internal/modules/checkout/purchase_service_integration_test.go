@@ -4,41 +4,31 @@ package checkout
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
-
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 	durationDays := 30
@@ -65,16 +55,13 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 		UpdatedAt: now,
 	}
 
-	_, err = bunDB.NewInsert().Model(product).Exec(ctx)
-	require.NoError(t, err)
-	_, err = bunDB.NewInsert().Model(price).Exec(ctx)
-	require.NoError(t, err)
+	insertProductAndPrice(ctx, t, pool, product, price)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	fakeClock := clockwork.NewFakeClockAt(now)
@@ -99,18 +86,16 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	})
 	require.NoError(t, err)
 
-	var firstEnt models.Entitlement
-	require.NoError(t, bunDB.NewSelect().
-		Model(&firstEnt).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Where("entitlement = ?", "premium_duplicate_purchase").
-		Where("source_id = ?", first.PaymentID).
-		Where("revoked_at IS NULL").
-		Where("deleted_at IS NULL").
-		Limit(1).
-		Scan(ctx))
-	require.NotNil(t, firstEnt.EndAt)
-	firstEnd := firstEnt.EndAt.UTC()
+	var firstEndAt *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT end_at FROM billing.entitlements
+		 WHERE tenant_subject_id = $1 AND entitlement = $2 AND source_id = $3
+		   AND revoked_at IS NULL AND deleted_at IS NULL
+		 LIMIT 1`,
+		tenantSubjectID, "premium_duplicate_purchase", first.PaymentID,
+	).Scan(&firstEndAt))
+	require.NotNil(t, firstEndAt)
+	firstEnd := firstEndAt.UTC()
 
 	newDurationDays := 60
 	_, err = productSvc.UpdateDefinition(ctx, productID, catalog.ProductDefinitionUpdateParams{
@@ -133,14 +118,24 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	require.NoError(t, err)
 	require.Equal(t, first.PaymentID, second.PaymentID)
 
-	var ents []models.Entitlement
-	require.NoError(t, bunDB.NewSelect().
-		Model(&ents).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Where("revoked_at IS NULL").
-		Where("deleted_at IS NULL").
-		OrderExpr("entitlement ASC").
-		Scan(ctx))
+	type entRow struct {
+		Entitlement string
+		EndAt       *time.Time
+	}
+	var ents []entRow
+	rows, err := pool.Query(ctx,
+		`SELECT entitlement, end_at FROM billing.entitlements
+		 WHERE tenant_subject_id = $1 AND revoked_at IS NULL AND deleted_at IS NULL
+		 ORDER BY entitlement ASC`,
+		tenantSubjectID)
+	require.NoError(t, err)
+	for rows.Next() {
+		var r entRow
+		require.NoError(t, rows.Scan(&r.Entitlement, &r.EndAt))
+		ents = append(ents, r)
+	}
+	rows.Close()
+	require.NoError(t, rows.Err())
 	require.Len(t, ents, 1)
 	require.Equal(t, "premium_duplicate_purchase", ents[0].Entitlement)
 	require.NotNil(t, ents[0].EndAt)
@@ -155,20 +150,13 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
-
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
 	durationDays := 30
@@ -195,16 +183,13 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 		UpdatedAt: now,
 	}
 
-	_, err = bunDB.NewInsert().Model(product).Exec(ctx)
-	require.NoError(t, err)
-	_, err = bunDB.NewInsert().Model(price).Exec(ctx)
-	require.NoError(t, err)
+	insertProductAndPrice(ctx, t, pool, product, price)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	fakeClock := clockwork.NewFakeClockAt(now)
@@ -220,7 +205,7 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	)
 
 	// Initial purchase while the price is active (establishes the subscriber).
-	_, err = purchaseSvc.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
+	_, err := purchaseSvc.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        userID,
 		PriceID:       priceID,
 		Processor:     string(models.ProcessorStripe),
@@ -257,4 +242,46 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	elig, err := purchaseSvc.CheckPurchaseEligibility(ctx, uuid.New().String(), priceID)
 	require.NoError(t, err)
 	require.Equal(t, EligibilityBlocked, elig.Status, "new purchase of archived price must be blocked")
+}
+
+// insertProductAndPrice writes the catalog fixture rows through the generated
+// queries (the model structs are plain data holders here).
+func insertProductAndPrice(ctx context.Context, t *testing.T, qx gen.DBTX, product *models.Product, price *models.Price) {
+	t.Helper()
+	q := gen.New(qx)
+
+	var entSpec []byte
+	if product.EntitlementsSpec != nil {
+		var err error
+		entSpec, err = json.Marshal(product.EntitlementsSpec)
+		require.NoError(t, err)
+	}
+	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
+		ID:               product.ID,
+		Slug:             product.Slug,
+		DisplayName:      product.DisplayName,
+		Description:      &product.Description,
+		EntitlementsSpec: entSpec,
+		Status:           string(product.Status),
+		CreatedAt:        product.CreatedAt,
+		UpdatedAt:        product.UpdatedAt,
+	})
+	require.NoError(t, err)
+
+	var cycleDays *int32
+	if price.BillingCycleDays != nil {
+		d := int32(*price.BillingCycleDays)
+		cycleDays = &d
+	}
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
+		ID:               price.ID,
+		ProductID:        price.ProductID,
+		Amount:           price.Amount,
+		Currency:         price.Currency,
+		Status:           string(price.Status),
+		BillingCycleDays: cycleDays,
+		CreatedAt:        price.CreatedAt,
+		UpdatedAt:        price.UpdatedAt,
+	})
+	require.NoError(t, err)
 }

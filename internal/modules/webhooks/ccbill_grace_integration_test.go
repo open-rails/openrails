@@ -4,13 +4,12 @@ package webhooks
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -18,100 +17,92 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
-
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+	q := gen.New(pool)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 	productID := uuid.New()
 	priceID := uuid.New()
 
-	billingDays := 30
+	billingDays := int32(30)
 	periodStart := now
 	paidEnd := now.Add(30 * 24 * time.Hour)
 	nextRetryAt := paidEnd.Add(3 * 24 * time.Hour)
 
-	_, err = bunDB.NewInsert().Model(&models.Product{
-		ID:          productID,
-		Slug:        "test_product_" + uuid.New().String(),
-		DisplayName: "Test Product",
-		Description: "Test",
-		EntitlementsSpec: map[string]*int{
-			"premium": nil,
-		},
-		Status:    models.CatalogStatusActive,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}).Exec(ctx)
+	entitlementsSpecJSON, err := json.Marshal(map[string]*int{"premium": nil})
+	require.NoError(t, err)
+	description := "Test"
+	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
+		ID:               productID,
+		Slug:             "test_product_" + uuid.New().String(),
+		DisplayName:      "Test Product",
+		Description:      &description,
+		EntitlementsSpec: entitlementsSpecJSON,
+		Status:           string(models.CatalogStatusActive),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Price{
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               priceID,
 		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
+		Status:           string(models.CatalogStatusActive),
 		BillingCycleDays: &billingDays,
 		CreatedAt:        now,
 		UpdatedAt:        now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Subscription{
+	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
 		TenantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
-		PriceID:                 priceID,
-		Status:                  models.StatusActive,
-		Processor:               models.ProcessorCCBill,
+		PriceID:                 &priceID,
+		Status:                  string(models.StatusActive),
+		Processor:               string(models.ProcessorCCBill),
 		ProcessorSubscriptionID: ccbillSubID,
 		CurrentPeriodStartsAt:   &periodStart,
 		CurrentPeriodEndsAt:     &paidEnd,
 		StartedAt:               now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	// Paid subscription entitlement window [periodStart, paidEnd)
-	paidEnt := &models.Entitlement{
-		ID:              uuid.New(),
+	paidEntID := uuid.New()
+	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		ID:              paidEntID,
 		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium",
 		StartAt:         periodStart,
 		EndAt:           &paidEnd,
-		SourceType:      models.EntitlementSourceSubscription,
+		SourceType:      string(models.EntitlementSourceSubscription),
 		SourceID:        &subID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
-	}
-	_, err = bunDB.NewInsert().Model(paidEnt).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -141,24 +132,26 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	require.NoError(t, svc.handleRenewalFailure(ctx))
 
 	// Subscription entitlement remains paid-through.
-	var gotPaid models.Entitlement
-	require.NoError(t, bunDB.NewSelect().Model(&gotPaid).Where("id = ?", paidEnt.ID).Scan(ctx))
+	gotPaid, err := q.GetEntitlementByID(ctx, paidEntID)
+	require.NoError(t, err)
 	require.NotNil(t, gotPaid.EndAt)
 	require.Equal(t, paidEnd.UTC(), gotPaid.EndAt.UTC())
 
 	// Grace entitlement is appended [paidEnd, nextRetryAt)
-	var grace models.Entitlement
-	require.NoError(t, bunDB.NewSelect().
-		Model(&grace).
-		Where("tenant_subject_id = ? AND entitlement = ?", tenantSubjectID, "premium").
-		Where("source_type = ?", models.EntitlementSourceGrace).
-		Where("source_id = ?", subID).
-		Where("revoked_at IS NULL").
-		Where("deleted_at IS NULL").
-		Limit(1).
-		Scan(ctx))
-	require.Equal(t, paidEnd.UTC(), grace.StartAt.UTC())
-	require.NotNil(t, grace.EndAt)
+	var graceStartAt time.Time
+	var graceEndAt *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT start_at, end_at FROM billing.entitlements
+		 WHERE tenant_subject_id = $1 AND entitlement = $2
+		   AND source_type = $3
+		   AND source_id = $4
+		   AND revoked_at IS NULL
+		   AND deleted_at IS NULL
+		 LIMIT 1`,
+		tenantSubjectID, "premium", string(models.EntitlementSourceGrace), subID,
+	).Scan(&graceStartAt, &graceEndAt))
+	require.Equal(t, paidEnd.UTC(), graceStartAt.UTC())
+	require.NotNil(t, graceEndAt)
 	// Grace end mirrors capCCBillRetryAt: the parsed end-of-day retry date,
 	// clamped to paidTermEnd + DunningInterval (the 72h grace cap). For these
 	// fixture dates the 72h cap wins.
@@ -166,126 +159,121 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	if maxGraceEnd := paidEnd.UTC().Add(subscriptions.DunningInterval); expectedGraceEnd.After(maxGraceEnd) {
 		expectedGraceEnd = maxGraceEnd
 	}
-	require.Equal(t, expectedGraceEnd.UTC(), grace.EndAt.UTC())
+	require.Equal(t, expectedGraceEnd.UTC(), graceEndAt.UTC())
 }
 
 func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
-
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+	q := gen.New(pool)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	subID := uuid.New()
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 	productID := uuid.New()
 	priceID := uuid.New()
 
-	billingDays := 30
+	billingDays := int32(30)
 	periodStart := now.Add(-30 * 24 * time.Hour)
 	paidEnd := now.Add(-24 * time.Hour)
 
-	_, err = bunDB.NewInsert().Model(&models.Product{
-		ID:          productID,
-		Slug:        "test_product_" + uuid.New().String(),
-		DisplayName: "Test Product",
-		Description: "Test",
-		EntitlementsSpec: map[string]*int{
-			"premium": nil,
-		},
-		Status:    models.CatalogStatusActive,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}).Exec(ctx)
+	entitlementsSpecJSON, err := json.Marshal(map[string]*int{"premium": nil})
+	require.NoError(t, err)
+	description := "Test"
+	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
+		ID:               productID,
+		Slug:             "test_product_" + uuid.New().String(),
+		DisplayName:      "Test Product",
+		Description:      &description,
+		EntitlementsSpec: entitlementsSpecJSON,
+		Status:           string(models.CatalogStatusActive),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Price{
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               priceID,
 		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
 		Amount:           999,
 		Currency:         "usd",
+		Status:           string(models.CatalogStatusActive),
 		BillingCycleDays: &billingDays,
 		CreatedAt:        now,
 		UpdatedAt:        now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Subscription{
+	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      subID,
 		TenantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
-		PriceID:                 priceID,
-		Status:                  models.StatusActive,
-		Processor:               models.ProcessorCCBill,
+		PriceID:                 &priceID,
+		Status:                  string(models.StatusActive),
+		Processor:               string(models.ProcessorCCBill),
 		ProcessorSubscriptionID: ccbillSubID,
 		CurrentPeriodStartsAt:   &periodStart,
 		CurrentPeriodEndsAt:     &paidEnd,
 		StartedAt:               now,
 		CreatedAt:               now,
 		UpdatedAt:               now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
-	paidEnt := &models.Entitlement{
-		ID:              uuid.New(),
+	paidEntID := uuid.New()
+	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		ID:              paidEntID,
 		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium",
 		StartAt:         periodStart,
 		EndAt:           &paidEnd,
-		SourceType:      models.EntitlementSourceSubscription,
+		SourceType:      string(models.EntitlementSourceSubscription),
 		SourceID:        &subID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
-	}
-	_, err = bunDB.NewInsert().Model(paidEnt).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	graceEnd := now.Add(2 * 24 * time.Hour)
-	graceActive := &models.Entitlement{
-		ID:              uuid.New(),
+	graceActiveID := uuid.New()
+	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		ID:              graceActiveID,
 		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium",
 		StartAt:         paidEnd,
 		EndAt:           &graceEnd,
-		SourceType:      models.EntitlementSourceGrace,
+		SourceType:      string(models.EntitlementSourceGrace),
 		SourceID:        &subID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
-	}
-	_, err = bunDB.NewInsert().Model(graceActive).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	graceFutureEnd := graceEnd.Add(24 * time.Hour)
-	graceFuture := &models.Entitlement{
-		ID:              uuid.New(),
+	graceFutureID := uuid.New()
+	_, err = q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		ID:              graceFutureID,
 		TenantSubjectID: tenantSubjectID,
 		Entitlement:     "premium",
 		StartAt:         graceEnd,
 		EndAt:           &graceFutureEnd,
-		SourceType:      models.EntitlementSourceGrace,
+		SourceType:      string(models.EntitlementSourceGrace),
 		SourceID:        &subID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
-	}
-	_, err = bunDB.NewInsert().Model(graceFuture).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -320,14 +308,18 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	require.NoError(t, svc.handleRenewalSuccess(ctx))
 
-	var got models.Entitlement
-	require.NoError(t, bunDB.NewSelect().Model(&got).Where("id = ?", graceActive.ID).Scan(ctx))
-	require.NotNil(t, got.RevokedAt)
-	require.Nil(t, got.DeletedAt)
+	var gotRevokedAt, gotDeletedAt *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT revoked_at, deleted_at FROM billing.entitlements WHERE id = $1",
+		graceActiveID).Scan(&gotRevokedAt, &gotDeletedAt))
+	require.NotNil(t, gotRevokedAt)
+	require.Nil(t, gotDeletedAt)
 
-	// The future grace window is soft-deleted; Entitlement.DeletedAt is a bun
-	// soft_delete field, so the select must opt in to deleted rows to see it.
-	var gotFuture models.Entitlement
-	require.NoError(t, bunDB.NewSelect().Model(&gotFuture).Where("id = ?", graceFuture.ID).WhereAllWithDeleted().Scan(ctx))
-	require.NotNil(t, gotFuture.DeletedAt)
+	// The future grace window is soft-deleted (deleted_at set); raw SQL sees
+	// soft-deleted rows without any opt-in.
+	var gotFutureDeletedAt *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT deleted_at FROM billing.entitlements WHERE id = $1",
+		graceFutureID).Scan(&gotFutureDeletedAt))
+	require.NotNil(t, gotFutureDeletedAt)
 }

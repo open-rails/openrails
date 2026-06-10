@@ -2,15 +2,15 @@ package repo
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
-	"github.com/uptrace/bun"
 )
 
 type PaymentMethodRepo struct {
@@ -24,204 +24,253 @@ var (
 )
 
 func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod) error {
-	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, m.TenantSubjectID); err != nil {
+	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, m.TenantSubjectID); err != nil {
 		return err
 	}
-	res, err := r.db.Q(ctx).NewInsert().Model(m).Exec(ctx)
+	meta, err := toJSONB(m.Metadata)
 	if err != nil {
 		return err
 	}
-
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
+		ID:                   m.ID,
+		TenantSubjectID:      m.TenantSubjectID,
+		Processor:            string(m.Processor),
+		VaultID:              m.VaultID,
+		BillingID:            m.BillingID,
+		InitialTransactionID: m.InitialTransactionID,
+		LastFour:             m.LastFour,
+		CardType:             m.CardType,
+		ExpiryDate:           m.ExpiryDate,
+		FailureReason:        m.FailureReason,
+		Metadata:             meta,
+		CreatedAt:            m.CreatedAt,
+		UpdatedAt:            m.UpdatedAt,
+	})
 	if err != nil {
 		return err
 	}
-
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
+	return nil
+}
 
+// attachPaymentMethodSubscriptions loads the Subscriptions (+ their Product)
+// relation for the supplied payment methods (bun-era
+// Relation("Subscriptions").Relation("Subscriptions.Product")).
+func (r *PaymentMethodRepo) attachPaymentMethodSubscriptions(ctx context.Context, methods []*models.PaymentMethod) error {
+	if len(methods) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(methods))
+	for _, m := range methods {
+		ids = append(ids, m.ID)
+	}
+	q := r.db.Gen(ctx)
+	subRows, err := q.ListSubscriptionsByPaymentMethodIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	subs, err := subscriptionsFromGen(subRows)
+	if err != nil {
+		return err
+	}
+
+	productIDs := make([]uuid.UUID, 0, len(subs))
+	seen := map[uuid.UUID]bool{}
+	for _, s := range subs {
+		if !seen[s.ProductID] {
+			seen[s.ProductID] = true
+			productIDs = append(productIDs, s.ProductID)
+		}
+	}
+	products := map[uuid.UUID]*models.Product{}
+	if len(productIDs) > 0 {
+		rows, err := q.ListProductsByIDs(ctx, productIDs)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			p, err := productFromGen(row)
+			if err != nil {
+				return err
+			}
+			products[p.ID] = p
+		}
+	}
+
+	byPM := map[uuid.UUID][]*models.Subscription{}
+	for _, s := range subs {
+		s.Product = products[s.ProductID]
+		if s.PaymentMethodID != nil {
+			byPM[*s.PaymentMethodID] = append(byPM[*s.PaymentMethodID], s)
+		}
+	}
+	for _, m := range methods {
+		m.Subscriptions = byPM[m.ID]
+	}
 	return nil
 }
 
 func (r *PaymentMethodRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
-	pm := new(models.PaymentMethod)
-	err := r.db.Q(ctx).NewSelect().Model(pm).
-		Where("pm.id = ?", id).
-		Relation("Subscriptions").
-		Relation("Subscriptions.Product").
-		Scan(ctx)
+	row, err := r.db.Gen(ctx).GetPaymentMethodByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("payment method %s: %w", id, ErrPaymentMethodNotFound)
 		}
+		return nil, err
+	}
+	pm, err := paymentMethodFromGen(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.attachPaymentMethodSubscriptions(ctx, []*models.PaymentMethod{pm}); err != nil {
 		return nil, err
 	}
 	return pm, nil
 }
 
 func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.Q(ctx).NewDelete().Model((*models.PaymentMethod)(nil)).Where("pm.id = ?", id).Exec(ctx)
+	rows, err := r.db.Gen(ctx).DeletePaymentMethod(ctx, id)
 	if err != nil {
 		return err
 	}
-
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-
 	if rows < 1 {
 		return ErrPaymentMethodNotFound
 	}
-
 	return nil
 }
 
 func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	methods := []*models.PaymentMethod{}
-	err = r.db.Q(ctx).NewSelect().Model(&methods).
-		Where("pm.tenant_subject_id = ?", tsid).
-		OrderExpr("pm.created_at DESC").
-		Scan(ctx)
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByTenantSubject(ctx, tsid)
 	if err != nil {
 		return nil, err
 	}
-	return methods, nil
+	return paymentMethodsFromGen(rows)
 }
 
 func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*models.PaymentMethod, int64, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, 0, err
 	}
-	countQuery := r.db.Q(ctx).NewSelect().Model((*models.PaymentMethod)(nil)).
-		Where("pm.tenant_subject_id = ?", tsid)
-
-	total, err := countQuery.Count(ctx)
+	q := r.db.Gen(ctx)
+	total, err := q.CountPaymentMethodsByTenantSubject(ctx, tsid)
 	if err != nil {
 		return nil, 0, err
 	}
-
-	methods := []*models.PaymentMethod{}
-	dataQuery := r.db.Q(ctx).NewSelect().Model(&methods).
-		Where("pm.tenant_subject_id = ?", tsid).
-		Relation("Subscriptions").
-		Relation("Subscriptions.Product").
-		OrderExpr("pm.created_at DESC")
-
-	if limit > 0 {
-		dataQuery.Limit(limit)
-	}
-	if offset > 0 {
-		dataQuery.Offset(offset)
-	}
-
-	if err := dataQuery.Scan(ctx); err != nil {
+	rows, err := q.ListPaymentMethodsByTenantSubjectPaged(ctx, gen.ListPaymentMethodsByTenantSubjectPagedParams{
+		TenantSubjectID: tsid,
+		PageLimit:       int32(limit),
+		PageOffset:      int32(offset),
+	})
+	if err != nil {
 		return nil, 0, err
 	}
-
-	return methods, int64(total), nil
+	methods, err := paymentMethodsFromGen(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := r.attachPaymentMethodSubscriptions(ctx, methods); err != nil {
+		return nil, 0, err
+	}
+	return methods, total, nil
 }
 
 func (r *PaymentMethodRepo) GetByVaultID(ctx context.Context, processor, vaultID string) (*models.PaymentMethod, error) {
-	pm := new(models.PaymentMethod)
-
-	query := r.db.Q(ctx).NewSelect().Model(pm).
-		Where("pm.processor = ?", processor).
-		Where("pm.vault_id = ?", vaultID)
-
-	err := query.Scan(ctx)
+	row, err := r.db.Gen(ctx).GetPaymentMethodByVaultID(ctx, gen.GetPaymentMethodByVaultIDParams{
+		Processor: processor,
+		VaultID:   vaultID,
+	})
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrPaymentMethodNotFound
 		}
 		return nil, err
 	}
-	return pm, nil
+	return paymentMethodFromGen(row)
 }
 
 func (r *PaymentMethodRepo) GetByInitialTransactionID(ctx context.Context, processor, initialTransactionID string) (*models.PaymentMethod, error) {
-	pm := new(models.PaymentMethod)
-
-	query := r.db.Q(ctx).NewSelect().Model(pm).
-		Where("pm.processor = ?", processor).
-		Where("pm.initial_transaction_id = ?", initialTransactionID)
-
-	err := query.Scan(ctx)
+	row, err := r.db.Gen(ctx).GetPaymentMethodByInitialTransactionID(ctx, gen.GetPaymentMethodByInitialTransactionIDParams{
+		Processor:            processor,
+		InitialTransactionID: initialTransactionID,
+	})
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrPaymentMethodNotFound
 		}
 		return nil, err
 	}
-	return pm, nil
+	return paymentMethodFromGen(row)
 }
 
 func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMethod) error {
-	res, err := r.db.Q(ctx).NewUpdate().Model(method).WherePK().Exec(ctx)
+	meta, err := toJSONB(method.Metadata)
 	if err != nil {
 		return err
 	}
-
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).UpdatePaymentMethod(ctx, gen.UpdatePaymentMethodParams{
+		ID:                   method.ID,
+		TenantSubjectID:      method.TenantSubjectID,
+		Processor:            string(method.Processor),
+		VaultID:              method.VaultID,
+		BillingID:            method.BillingID,
+		InitialTransactionID: method.InitialTransactionID,
+		LastFour:             method.LastFour,
+		CardType:             method.CardType,
+		ExpiryDate:           method.ExpiryDate,
+		FailureReason:        method.FailureReason,
+		Metadata:             meta,
+		UpdatedAt:            updateTimestamp(method.UpdatedAt),
+	})
 	if err != nil {
 		return err
 	}
-
 	if rows < 1 {
 		return ErrPaymentMethodNotFound
 	}
-
 	return nil
 }
 
 // GetAllNMIBacked returns all payment methods for NMI-backed processors
 func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.PaymentMethod, error) {
-	nmiProcessors := processors.GetNMIBackedProcessorsList()
-	methods := []*models.PaymentMethod{}
-	err := r.db.Q(ctx).NewSelect().Model(&methods).
-		Where("pm.processor IN (?)", bun.In(nmiProcessors)).
-		OrderExpr("pm.created_at DESC").
-		Scan(ctx)
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByProcessors(ctx, processors.GetNMIBackedProcessorsList())
 	if err != nil {
 		return nil, err
 	}
-	return methods, nil
+	return paymentMethodsFromGen(rows)
 }
 
 // GetNMIBackedByUserID returns all payment methods for NMI-backed processors for a user
 func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	nmiProcessors := processors.GetNMIBackedProcessorsList()
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	methods := []*models.PaymentMethod{}
-	if err := r.db.Q(ctx).NewSelect().Model(&methods).
-		Where("pm.tenant_subject_id = ?", tsid).
-		Where("pm.processor IN (?)", bun.In(nmiProcessors)).
-		OrderExpr("pm.created_at DESC").
-		Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByTenantSubjectProcessors(ctx, gen.ListPaymentMethodsByTenantSubjectProcessorsParams{
+		TenantSubjectID: tsid,
+		Processors:      processors.GetNMIBackedProcessorsList(),
+	})
+	if err != nil {
 		return nil, err
 	}
-	return methods, nil
+	return paymentMethodsFromGen(rows)
 }
 
 func (r *PaymentMethodRepo) ExistsForUser(ctx context.Context, id uuid.UUID, userID string) (bool, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return false, err
 	}
-	count, err := r.db.Q(ctx).NewSelect().
-		Model((*models.PaymentMethod)(nil)).
-		Where("pm.id = ?", id).
-		Where("pm.tenant_subject_id = ?", tsid).
-		Count(ctx)
+	count, err := r.db.Gen(ctx).CountPaymentMethodForUser(ctx, gen.CountPaymentMethodForUserParams{
+		ID:              id,
+		TenantSubjectID: tsid,
+	})
 	if err != nil {
 		return false, err
 	}
@@ -233,15 +282,11 @@ func (r *PaymentMethodRepo) WithTx(txdb *db.DB) *PaymentMethodRepo {
 }
 
 func (r *PaymentMethodRepo) GetByProcessor(ctx context.Context, processor models.Processor) ([]*models.PaymentMethod, error) {
-	methods := []*models.PaymentMethod{}
-	err := r.db.Q(ctx).NewSelect().Model(&methods).
-		Where("pm.processor = ?", processor).
-		OrderExpr("pm.created_at DESC").
-		Scan(ctx)
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByProcessor(ctx, string(processor))
 	if err != nil {
 		return nil, err
 	}
-	return methods, nil
+	return paymentMethodsFromGen(rows)
 }
 
 func (r *PaymentMethodRepo) RequireByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {

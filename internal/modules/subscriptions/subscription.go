@@ -2,7 +2,6 @@ package subscriptions
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -189,7 +188,7 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 		if err == nil {
 			return ErrActiveSubscriptionExists
 		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !repo.IsNotFound(err) {
 			return fmt.Errorf("check existing subscription: %w", err)
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -26,40 +27,54 @@ func adminOperationsPagination(r *httprequest.Request) (int, int) {
 }
 
 func GetAdminRepairAlerts(r *httprequest.Request) {
+	ctx := r.Request.Context()
 	limit, offset := adminOperationsPagination(r)
-	items := []*models.NotificationQueue{}
-	tsid, err := repo.ResolveTenantSubjectID(r.Request.Context(), r.State.DB.Q(r.Request.Context()), uuid.Nil, "system")
+	tsid, err := repo.ResolveTenantSubjectID(ctx, r.State.DB.Qx(ctx), uuid.Nil, "system")
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve tenant subject")
 		return
 	}
-	q := r.State.DB.Q(r.Request.Context()).NewSelect().Model(&items).
-		Where("nq.tenant_subject_id = ?", tsid).
-		Where("nq.event_type = ?", models.NotificationSystemAlert).
-		Where("nq.data ->> 'kind' = ?", "billing_ledger_repair_required")
 
+	var seen *bool
 	seenParam := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("seen")))
 	if seenParam == "true" || seenParam == "false" {
-		q = q.Where("nq.seen = ?", seenParam == "true")
+		v := seenParam == "true"
+		seen = &v
 	}
 
-	total, err := q.Count(r.Request.Context())
+	q := r.State.DB.Gen(ctx)
+	total, err := q.CountRepairAlerts(ctx, gen.CountRepairAlertsParams{
+		TenantSubjectID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
+	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count repair alerts")
 		return
 	}
-	if err := q.OrderExpr("nq.created_at DESC").Limit(limit).Offset(offset).Scan(r.Request.Context()); err != nil {
+	rows, err := q.ListRepairAlerts(ctx, gen.ListRepairAlertsParams{
+		TenantSubjectID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
+		Column3: int32(limit), Column4: int32(offset),
+	})
+	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve repair alerts")
 		return
 	}
-	r.SuccessJSONPaginated(items, int64(total), limit, offset)
+	items := make([]*models.NotificationQueue, 0, len(rows))
+	for _, row := range rows {
+		m, merr := repo.NotificationFromGen(row)
+		if merr != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "failed to decode repair alerts")
+			return
+		}
+		items = append(items, m)
+	}
+	r.SuccessJSONPaginated(items, total, limit, offset)
 }
 
 func GetAdminManualRebillAttempts(r *httprequest.Request) {
+	ctx := r.Request.Context()
 	limit, offset := adminOperationsPagination(r)
-	items := []*models.ManualRebillAttempt{}
-	q := r.State.DB.Q(r.Request.Context()).NewSelect().Model(&items)
 
+	var statusFilter *string
 	status := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("status")))
 	if status == "" {
 		status = string(models.ManualRebillAttemptUnknown)
@@ -67,26 +82,49 @@ func GetAdminManualRebillAttempts(r *httprequest.Request) {
 	if status != "all" {
 		switch models.ManualRebillAttemptStatus(status) {
 		case models.ManualRebillAttemptPending, models.ManualRebillAttemptSucceeded, models.ManualRebillAttemptFailed, models.ManualRebillAttemptUnknown:
-			q = q.Where("mra.status = ?", status)
+			statusFilter = &status
 		default:
 			r.ErrorJSON(http.StatusBadRequest, "invalid status")
 			return
 		}
 	}
 
-	processor := strings.TrimSpace(r.Request.URL.Query().Get("processor"))
-	if processor != "" {
-		q = q.Where("mra.processor = ?", processor)
+	var processorFilter *string
+	if processor := strings.TrimSpace(r.Request.URL.Query().Get("processor")); processor != "" {
+		processorFilter = &processor
 	}
 
-	total, err := q.Count(r.Request.Context())
+	q := r.State.DB.Gen(ctx)
+	total, err := q.CountManualRebillAttempts(ctx, gen.CountManualRebillAttemptsParams{
+		Status: statusFilter, Processor: processorFilter,
+	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count manual rebill attempts")
 		return
 	}
-	if err := q.OrderExpr("mra.updated_at DESC").Limit(limit).Offset(offset).Scan(r.Request.Context()); err != nil {
+	rows, err := q.ListManualRebillAttempts(ctx, gen.ListManualRebillAttemptsParams{
+		Status: statusFilter, Processor: processorFilter,
+		Column1: int32(limit), Column2: int32(offset),
+	})
+	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve manual rebill attempts")
 		return
 	}
-	r.SuccessJSONPaginated(items, int64(total), limit, offset)
+	items := make([]*models.ManualRebillAttempt, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, &models.ManualRebillAttempt{
+			ID:             row.ID,
+			SubscriptionID: row.SubscriptionID,
+			PeriodEnd:      row.PeriodEnd,
+			Processor:      models.Processor(row.Processor),
+			OrderReference: row.OrderReference,
+			Status:         models.ManualRebillAttemptStatus(row.Status),
+			TransactionID:  row.TransactionID,
+			FailureReason:  row.FailureReason,
+			ClaimedUntil:   row.ClaimedUntil,
+			CreatedAt:      row.CreatedAt,
+			UpdatedAt:      row.UpdatedAt,
+		})
+	}
+	r.SuccessJSONPaginated(items, total, limit, offset)
 }

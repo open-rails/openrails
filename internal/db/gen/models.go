@@ -178,14 +178,31 @@ type BillingBudgetReservation struct {
 	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
 	TenantSubjectID uuid.UUID
 	// Caller-supplied principal string whose rolling money-budget windows are capped. Opaque to OpenRails.
-	Actor              string
+	Actor          string
 	AmountMicros   int64
 	CapturedMicros int64
-	Status             string
-	Source             string
-	SourceID           string
-	CreatedAt          time.Time
-	ExpiresAt          *time.Time
+	Status         string
+	Source         string
+	SourceID       string
+	CreatedAt      time.Time
+	ExpiresAt      *time.Time
+}
+
+// Per-(tenant, tenant subject, actor, window_key) fixed-window anchor (#337). session: window_start rewritten on reopen; fixed: window_start derived from anchor. Locked FOR UPDATE in Reserve as the boundary-rollover serialization point.
+type BillingBudgetWindowState struct {
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	Actor           string
+	WindowKey       string
+	Cadence         string
+	WindowSeconds   int64
+	// First-ever window open for this (subject, actor, window_key); fixed-cadence boundaries are anchor + k*window_seconds.
+	Anchor time.Time
+	// Start of the most recently OPENED window. Authoritative for session cadence; for fixed cadence the current start is derived from anchor at read time.
+	WindowStart time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.
@@ -341,6 +358,24 @@ type BillingCreditType struct {
 	CreatedAt     time.Time
 	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
 	TenantID uuid.UUID
+}
+
+// Prepaid credit windows (issue #335): one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry.
+type BillingCreditWindow struct {
+	ID uuid.UUID
+	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
+	TenantID uuid.UUID
+	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	TenantSubjectID uuid.UUID
+	CreditTypeID    uuid.UUID
+	// Total reserved for this window (open + refills). Reflected in credit_balances.held_balance while status=open.
+	HeldAmount int64
+	// Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.
+	SettledAmount int64
+	Status        string
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type BillingEntitlement struct {
