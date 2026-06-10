@@ -29,7 +29,7 @@ type TierPolicyStore struct {
 func NewTierPolicyStore(database *db.DB) *TierPolicyStore { return &TierPolicyStore{db: database} }
 
 // ResolvedPolicy is a tier's enforceable policy: throughput windows, entitled
-// resources (empty = all allowed), and rolling money-budget windows (#304).
+// resources (empty = all allowed), and fixed money-budget windows (#304, #337).
 type ResolvedPolicy struct {
 	Throughput        ratelimit.Policy
 	EntitledResources []string
@@ -105,7 +105,7 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Tena
 func toBudgetWindows(ws []models.BudgetWindowPolicy) []budgets.BudgetWindow {
 	out := make([]budgets.BudgetWindow, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros})
+		out = append(out, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence})
 	}
 	return out
 }

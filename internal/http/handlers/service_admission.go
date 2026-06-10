@@ -217,7 +217,7 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 	r.JSON(http.StatusOK, map[string]any{"items": verdicts})
 }
 
-// ServiceGetBudget returns the actor's rolling money-budget windows (#304
+// ServiceGetBudget returns the actor's fixed money-budget windows (#304
 // introspection) for a host's /status dashboard. tenant_subject_id + actor + tier are
 // query params; the tenant is pinned from the service token.
 func ServiceGetBudget(r *httprequest.Request) {
@@ -250,7 +250,7 @@ type serviceBudgetCheckRequest struct {
 	RequestedMicros int64                                   `json:"requested_micros"`
 }
 
-// ServiceBudgetCheck computes rolling money-budget windows for (payer, actor)
+// ServiceBudgetCheck computes fixed money-budget windows for (payer, actor)
 // against CALLER-SUPPLIED windows (the host owns the budget policy; OpenRails
 // owns the spend actuals) WITHOUT reserving. Powers the tensorhub delegated
 // budget-window display (#410). Operator service token, credits:read.
@@ -286,7 +286,7 @@ type serviceTierPolicyRequest struct {
 }
 
 // ServiceSetTierPolicy upserts a per-payer tier policy (#298 tier admin API):
-// throughput windows + entitled endpoints + rolling money-budget windows.
+// throughput windows + entitled endpoints + fixed money-budget windows.
 func ServiceSetTierPolicy(r *httprequest.Request) {
 	var req serviceTierPolicyRequest
 	if !r.BindJSON(&req) {

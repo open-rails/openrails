@@ -195,3 +195,12 @@ task build    # -> bin/openrails
 task test
 task docker-up / docker-down / docker-logs
 ```
+
+## Money units (#337)
+
+Integer money fields MUST carry their unit in the name: `_micros` (micro-dollars,
+1e-6 USD — ALL sub-cent amounts: budgets, credits, spend caps, pricing) or
+`_cents` (payment-gateway boundaries ONLY: NMI/CCBill charges, refunds, top-ups).
+Millicents no longer exist anywhere. Human-authored config uses dollar strings
+("$0.05") parsed once at load. Budget windows are FIXED per-user-anchored
+(session or fixed cadence — see internal/modules/budgets), never rolling.

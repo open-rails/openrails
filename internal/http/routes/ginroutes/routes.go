@@ -107,7 +107,7 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	// Cross-payer BATCH admission (#335): N admit items (mixed payers) in one
 	// hop, per-item verdicts with single-admit semantics. Same spend gates.
 	group.POST("/admit/batch", creditsWrite, creditsSpend, wrap(httphandlers.ServiceAdmitBatch))
-	// Budget introspection (#304): rolling money-budget windows for a host /status.
+	// Budget introspection (#304): fixed money-budget windows for a host /status.
 	group.GET("/budget", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetBudget))
 	// #410: budget-window status against caller-supplied windows (host owns the
 	// policy, OpenRails owns the actuals) — powers the tensorhub delegated display.

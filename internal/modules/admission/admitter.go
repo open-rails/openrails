@@ -29,7 +29,7 @@ type Admitter struct {
 	credits   *credits.CreditsService
 	policies  *TierPolicyStore
 	blocklist *abuse.BlocklistService // optional; nil disables blocklist checks
-	budgets   *budgets.Service        // optional; nil disables rolling money-budget windows (#304)
+	budgets   *budgets.Service        // optional; nil disables fixed money-budget windows (#304, #337)
 }
 
 func NewAdmitter(limiter *ratelimit.Limiter, creditsSvc *credits.CreditsService, policies *TierPolicyStore, blocklist *abuse.BlocklistService, budgetSvc *budgets.Service) *Admitter {
@@ -76,7 +76,7 @@ type AdmitDecision struct {
 	Windows     []ratelimit.WindowInfo    // for x-ratelimit-* headers
 	Hold        *models.CreditTransaction // the placed money hold when allowed
 
-	// BudgetReservationID is the rolling money-budget reservation placed when
+	// BudgetReservationID is the money-budget reservation placed when
 	// allowed (#304); BudgetWindows is the per-window state for introspection.
 	BudgetReservationID uuid.UUID
 	BudgetWindows       []budgets.WindowStatus
@@ -160,7 +160,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}, nil
 	}
 
-	// --- money-budget windows (#304): rolling per-tier spend caps on the actor ---
+	// --- money-budget windows (#304, #337 fixed): per-tier spend caps on the actor ---
 	var budgetResID uuid.UUID
 	var budgetWindows []budgets.WindowStatus
 	if a.budgets != nil && len(pol.BudgetWindows) > 0 && req.EstimateMicros > 0 {
@@ -199,7 +199,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 		if !res.Decision.Allowed {
 			// Roll back the budget reservation so a money-denied request doesn't
-			// consume the actor's rolling budget.
+			// consume the actor's budget windows.
 			if budgetResID != uuid.Nil && a.budgets != nil {
 				_ = a.budgets.Release(ctx, budgetResID)
 			}

@@ -43,6 +43,8 @@ type BudgetWindowPolicy struct {
 	Key             string `json:"key"`
 	WindowSeconds   int64  `json:"window_seconds"`
 	LimitMicros int64  `json:"limit_micros"`
+	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
+	Cadence string `json:"cadence,omitempty"`
 }
 
 // ThroughputWindow is one limit: at most Max units of Unit per WindowSeconds.

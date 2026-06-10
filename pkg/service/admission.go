@@ -80,7 +80,11 @@ type AdmitBudgetWindowDTO struct {
 	Reserved          int64  `json:"reserved"`
 	Remaining         int64  `json:"remaining"`
 	ResetAfterSeconds int64  `json:"reset_after_seconds"`
-	Allowed           bool   `json:"allowed"`
+	// ResetAt is the exact window boundary (#337 fixed windows) — displayable
+	// as "your next reset is 4:30pm". Zero when the engine predates state.
+	ResetAt time.Time `json:"reset_at,omitzero"`
+	Cadence string    `json:"cadence,omitempty"`
+	Allowed bool      `json:"allowed"`
 }
 
 // Admit runs the unified admission check (issue #298): blocklist + suspension +
@@ -236,18 +240,21 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.TenantSubject
 		}
 		out = append(out, AdmitBudgetWindowDTO{
 			Key: w.Key, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
-			Remaining: w.Remaining, ResetAfterSeconds: rs, Allowed: w.Allowed,
+			Remaining: w.Remaining, ResetAfterSeconds: rs, ResetAt: w.ResetAt,
+			Cadence: w.Cadence, Allowed: w.Allowed,
 		})
 	}
 	return out, nil
 }
 
-// BudgetCheckWindowInput is a caller-supplied rolling budget window for
+// BudgetCheckWindowInput is a caller-supplied fixed budget window for
 // BudgetCheck (the host owns the budget policy; OpenRails owns the actuals).
 type BudgetCheckWindowInput struct {
-	Key             string `json:"key"`
-	WindowSeconds   int64  `json:"window_seconds"`
-	LimitMicros int64  `json:"limit_micros"`
+	Key           string `json:"key"`
+	WindowSeconds int64  `json:"window_seconds"`
+	LimitMicros   int64  `json:"limit_micros"`
+	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
+	Cadence string `json:"cadence,omitempty"`
 }
 
 // BudgetCheck computes per-window used/reserved/remaining for (payer, actor)
@@ -265,7 +272,7 @@ func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectI
 	}
 	bw := make([]budgets.BudgetWindow, 0, len(windows))
 	for _, w := range windows {
-		bw = append(bw, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros})
+		bw = append(bw, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros, Cadence: w.Cadence})
 	}
 	bsvc := budgets.NewService(s.rt.DB)
 	statuses, _, err := bsvc.Check(ctx, payer, actor, bw, requestedMicros)
@@ -280,7 +287,8 @@ func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectI
 		}
 		out = append(out, AdmitBudgetWindowDTO{
 			Key: w.Key, Limit: w.Limit, Used: w.Used, Reserved: w.Reserved,
-			Remaining: w.Remaining, ResetAfterSeconds: rs, Allowed: w.Allowed,
+			Remaining: w.Remaining, ResetAfterSeconds: rs, ResetAt: w.ResetAt,
+			Cadence: w.Cadence, Allowed: w.Allowed,
 		})
 	}
 	return out, nil
@@ -294,9 +302,11 @@ type TierWindowInput struct {
 	Max           int64  `json:"max"`
 }
 type TierBudgetWindowInput struct {
-	Key             string `json:"key"`
-	WindowSeconds   int64  `json:"window_seconds"`
-	LimitMicros int64  `json:"limit_micros"`
+	Key           string `json:"key"`
+	WindowSeconds int64  `json:"window_seconds"`
+	LimitMicros   int64  `json:"limit_micros"`
+	// Cadence is "session" (default) or "fixed" (#337 fixed windows).
+	Cadence string `json:"cadence,omitempty"`
 }
 type TierPolicyInput struct {
 	Tier              string                  `json:"tier"`
@@ -322,7 +332,7 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.TenantSubjec
 		pol.Windows = append(pol.Windows, models.ThroughputWindow{Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max})
 	}
 	for _, b := range in.BudgetWindows {
-		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros})
+		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros, Cadence: b.Cadence})
 	}
 	return admission.NewTierPolicyStore(s.rt.DB).UpsertTierPolicyFull(ctx, payer, in.Tier, pol)
 }

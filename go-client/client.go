@@ -290,23 +290,30 @@ type UsageRollupRow struct {
 	TotalAmount int64  `json:"total_amount"`
 }
 
-// BudgetWindowInput is a caller-supplied rolling budget window sent to
+// BudgetWindowInput is a caller-supplied fixed budget window sent to
 // OpenRails. The host owns the policy; OpenRails owns the spend actuals.
 type BudgetWindowInput struct {
-	Key             string `json:"key"`
-	WindowSeconds   int64  `json:"window_seconds"`
-	LimitMicros int64  `json:"limit_micros"`
+	Key           string `json:"key"`
+	WindowSeconds int64  `json:"window_seconds"`
+	LimitMicros   int64  `json:"limit_micros"`
+	// Cadence is "session" (default) or "fixed" (#337 fixed per-user-anchored
+	// windows): session opens at the user's first charged request and closes
+	// WindowSeconds later; fixed ticks at anchor + k*WindowSeconds forever.
+	Cadence string `json:"cadence,omitempty"`
 }
 
 // BudgetWindow is one computed window from POST /v1/service/budget/check.
 type BudgetWindow struct {
-	Key               string `json:"key"`
-	Limit             int64  `json:"limit"`
-	Used              int64  `json:"used"`
-	Reserved          int64  `json:"reserved"`
-	Remaining         int64  `json:"remaining"`
-	ResetAfterSeconds int64  `json:"reset_after_seconds"`
-	Allowed           bool   `json:"allowed"`
+	Key               string    `json:"key"`
+	Limit             int64     `json:"limit"`
+	Used              int64     `json:"used"`
+	Reserved          int64     `json:"reserved"`
+	Remaining         int64     `json:"remaining"`
+	ResetAfterSeconds int64     `json:"reset_after_seconds"`
+	// ResetAt is the exact window boundary (#337 fixed windows).
+	ResetAt time.Time `json:"reset_at,omitzero"`
+	Cadence string    `json:"cadence,omitempty"`
+	Allowed bool      `json:"allowed"`
 }
 
 // Client is a thin HTTP client for the OpenRails service routes.
