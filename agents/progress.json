@@ -1,6 +1,22 @@
 {
-  "next_id": 336,
+  "next_id": 337,
   "issues": [
+    {
+      "id": 336,
+      "name": "Multi-tenant writers don't stamp tenant_id: checkout_sessions / subscriptions / payments / entitlements rows land under the DEFAULT tenant on delegated self-checkout",
+      "status": "open (found 2026-06-10 during the doujins->hentai0 cross-origin payment E2E)",
+      "completed": false,
+      "priority": "high",
+      "description": "A real /v1/self/checkout charge (delegated token: iss=http://hentai0:4000, tenant=doujins, registered in billing.tenant_delegated_issuers) produced billing.checkout_sessions, billing.subscriptions, billing.payments, and billing.entitlements rows ALL with tenant_id=00000000-0000-0000-0000-000000000001 (default tenant), while billing.tenant_subjects correctly mapped the subject to the doujins tenant in the same request. ROOT CAUSE: those tables' tenant_id columns default to the hardcoded default-tenant uuid (the migration comments say: defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers) but the checkout-path writers never stamp it - models.CheckoutSession / Subscription / Payment / Entitlement carry NO TenantID field at all, so the INSERT always takes the column default. DelegatedSelfRequired DOES pin the resolved tenant on the request ctx (internal/http/middleware/ginmw/delegated.go:97) and TenantDBConn sets the app.tenant_id GUC, but the GUC only matters for RLS (no-op under the privileged dev role) - it does not change the INSERT default. Same bug class as the CreatePrice TenantID fix (pkg/service/service_definition_catalog.go:430). IMPACT: reads still work today because the self-surface scopes by tenant_subject_id, but tenant attribution/reporting is wrong, and under openrails_app+RLS (managed multi-tenant) these inserts would fail or rows would be invisible to the owning tenant. FIX SKETCH: add a TenantID field (bun tenant_id,type:uuid,nullzero) to CheckoutSession/Subscription/Payment/Entitlement (+ payment_methods/processor_customers/invoices - audit all tables with a tenant_id column whose model lacks the field) and stamp tenant.FromContextOrDefault(ctx) at the insert sites; or change the column defaults to current_setting('app.tenant_id')::uuid so the GUC pins it. Coordinate with #334 (bun->sqlc migration) - whichever lands second must carry the stamping.",
+      "tasks": [
+        "STEPS:",
+        "[ ] Audit: list every billing.* table with tenant_id whose Go model lacks a TenantID field",
+        "[ ] Decide: explicit stamping at insert sites vs current_setting('app.tenant_id') column default (GUC is already set by TenantDBConn/TenantTx)",
+        "[ ] Implement for checkout_sessions, subscriptions, payments, entitlements (+ payment_methods, processor_customers, invoices if affected)",
+        "[ ] Integration test: delegated self-checkout under a non-default tenant asserts tenant_id on all written rows == the token's tenant",
+        "[ ] Verify against the doujins/hentai0 E2E stack (delegated issuer http://hentai0:4000, tenant doujins)"
+      ]
+    },
     {
       "id": 335,
       "name": "Batch admission: prepaid credit windows (bulk hold + batched settle) so callers stop paying an HTTP hop per request",
