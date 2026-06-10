@@ -24,7 +24,7 @@ import (
 // AuditRow is a read view of a billing.platform_audit row (list/inspect).
 type AuditRow struct {
 	ID             string    `json:"id"`
-	InvokerID      string    `json:"invoker_id"`
+	InvokerID      string    `json:"actor_user_id"`
 	ActorTenant    string    `json:"actor_tenant,omitempty"`
 	Action         string    `json:"action"`
 	TargetTenantID string    `json:"target_tenant_id,omitempty"`
@@ -112,7 +112,7 @@ func (a *AuditLog) Record(ctx context.Context, e AuditEntry) (string, error) {
 	var id string
 	err = a.pool.QueryRow(ctx, `
 		INSERT INTO billing.platform_audit
-			(invoker_id, actor_tenant, action, target_tenant_id, reason, before_state, after_state, detail)
+			(actor_user_id, actor_tenant, action, target_tenant_id, reason, before_state, after_state, detail)
 		VALUES ($1, NULLIF($2,''), $3, $4::uuid, NULLIF($5,''), $6::jsonb, $7::jsonb, $8::jsonb)
 		RETURNING id::text
 	`, actor, strings.TrimSpace(e.ActorTenant), action, targetID, strings.TrimSpace(e.Reason),
@@ -144,7 +144,7 @@ func (a *AuditLog) List(ctx context.Context, targetTenant *tenant.ID, limit int)
 	)
 	if targetTenant != nil {
 		rows, err = a.pool.Query(ctx, `
-			SELECT id::text, invoker_id, COALESCE(actor_tenant,''), action,
+			SELECT id::text, actor_user_id, COALESCE(actor_tenant,''), action,
 			       COALESCE(target_tenant_id::text,''), COALESCE(reason,''), created_at
 			  FROM billing.platform_audit
 			 WHERE target_tenant_id = $1::uuid
@@ -152,7 +152,7 @@ func (a *AuditLog) List(ctx context.Context, targetTenant *tenant.ID, limit int)
 		`, targetTenant.String(), limit)
 	} else {
 		rows, err = a.pool.Query(ctx, `
-			SELECT id::text, invoker_id, COALESCE(actor_tenant,''), action,
+			SELECT id::text, actor_user_id, COALESCE(actor_tenant,''), action,
 			       COALESCE(target_tenant_id::text,''), COALESCE(reason,''), created_at
 			  FROM billing.platform_audit
 			 ORDER BY created_at DESC LIMIT $1
