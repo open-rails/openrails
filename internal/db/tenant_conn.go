@@ -12,6 +12,12 @@ import (
 // bun.Conn is stored. Unexported so only this package manages the lifecycle.
 type tenantConnKey struct{}
 
+// tenantPgxConnKey is the pgx-side twin: the request-pinned *pgxpool.Conn
+// carrying the same app.tenant_id GUC. During the bun -> sqlc transition
+// (#334) WithTenantConn pins BOTH, so converted (sqlc) and unconverted (bun)
+// call sites within one request are each RLS-scoped.
+type tenantPgxConnKey struct{}
+
 // Q returns the queryable handle that tenant-owned reads and writes MUST use so
 // the migration-050 Row Level Security policies actually constrain them (issue
 // #227).
@@ -87,12 +93,41 @@ func (d *DB) WithTenantConn(ctx context.Context) (context.Context, func(), error
 	}
 
 	newCtx := context.WithValue(ctx, tenantConnKey{}, conn)
+
+	// pgx-side twin (#334): pin a pool connection with the same session GUC so
+	// sqlc-converted call sites in this request are RLS-scoped too.
+	var pgxRelease func()
+	if d.pool != nil {
+		pgxConn, err := d.pool.Acquire(ctx)
+		if err != nil {
+			_ = conn.Close()
+			return ctx, func() {}, fmt.Errorf("db: acquire pgx tenant connection: %w", err)
+		}
+		if err := pgxConn.QueryRow(ctx,
+			"SELECT set_config($1, $2, FALSE)", TenantGUC, id.String()).Scan(&out); err != nil {
+			pgxConn.Release()
+			_ = conn.Close()
+			return ctx, func() {}, fmt.Errorf("db: set %s on pgx tenant connection: %w", TenantGUC, err)
+		}
+		newCtx = context.WithValue(newCtx, tenantPgxConnKey{}, pgxConn)
+		pgxRelease = func() {
+			// Reset the GUC so the connection returns to the pool clean; works
+			// even after the request context is cancelled.
+			_, _ = pgxConn.Exec(context.Background(),
+				"SELECT set_config($1, '', FALSE)", TenantGUC)
+			pgxConn.Release()
+		}
+	}
+
 	release := func() {
 		// Reset the GUC so the connection returns to the pool clean, then close
 		// (Close returns it to the pool). Use a background context so release works
 		// even after the request context is cancelled.
 		_, _ = conn.ExecContext(context.Background(), "SELECT set_config('"+TenantGUC+"', '', FALSE)")
 		_ = conn.Close()
+		if pgxRelease != nil {
+			pgxRelease()
+		}
 	}
 	return newCtx, release, nil
 }

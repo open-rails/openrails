@@ -29,6 +29,36 @@ jobs:
       - name: Test
         run: go test ./...
 
+  sqlc:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: openrails_db
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin_password
+        ports:
+          - 25432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Install Task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+      # task sqlc builds a throwaway vet DB from migrations/ via
+      # scripts/sqlc-vet-db.sh (defaults target the service container above),
+      # regenerates internal/db/gen, PREPAREs every query (sqlc vet), and
+      # fails if the committed generated code is stale.
+      - name: sqlc generate + vet + diff
+        run: task sqlc-check
+
   integration:
     runs-on: ubuntu-latest
     # Advisory while the long-dormant integration suite is being revived: this

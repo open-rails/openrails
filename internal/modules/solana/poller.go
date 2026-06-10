@@ -771,6 +771,13 @@ func isDuplicatePaymentTransactionIDError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// SQLSTATE 23505 = unique_violation. Checked structurally so it works
+	// across drivers (pgx *pgconn.PgError, bun's pgdriver, lib/pq all expose
+	// SQLState()); the message check remains as a fallback.
+	var stateErr interface{ SQLState() string }
+	if errors.As(err, &stateErr) && stateErr.SQLState() == "23505" {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "payments_processor_transaction_id_key") ||
 		(strings.Contains(msg, "duplicate key value") && strings.Contains(msg, "sqlstate=23505"))

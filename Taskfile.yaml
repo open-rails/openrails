@@ -3,6 +3,8 @@ version: "3"
 vars:
   BINARY_NAME: openrails
   BIN_DIR: bin
+  SQLC_VERSION: v1.31.1
+  SQLC: go run github.com/sqlc-dev/sqlc/cmd/sqlc@{{.SQLC_VERSION}}
   GIT_COMMIT:
     sh: git rev-parse HEAD
   GIT_TAG:
@@ -93,6 +95,25 @@ tasks:
     desc: Run the self-verifying live Mobius/NMI payment lifecycle E2E harness
     cmds:
       - bash scripts/mobius_live_lifecycle_e2e.sh
+
+  sqlc:
+    desc: Regenerate internal/db/gen from internal/db/queries and vet every query (PREPARE against a fresh DB built from migrations/)
+    env:
+      # generate (database-backed analyzer) and vet (db-prepare) both need a
+      # live DB whose schema == migrations/. Use the caller's SQLC_DATABASE_URL
+      # if set; otherwise build the throwaway vet DB on the local compose
+      # postgres and use that.
+      SQLC_DATABASE_URL:
+        sh: 'if [ -n "${SQLC_DATABASE_URL:-}" ]; then echo "$SQLC_DATABASE_URL"; else scripts/sqlc-vet-db.sh; fi'
+    cmds:
+      - '{{.SQLC}} generate'
+      - '{{.SQLC}} vet'
+
+  sqlc-check:
+    desc: CI gate — sqlc generate + vet, then fail if generated code is stale
+    deps: [sqlc]
+    cmds:
+      - git diff --exit-code -- internal/db/gen
 
   test:
     desc: Run tests
