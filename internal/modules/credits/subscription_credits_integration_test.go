@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
@@ -40,8 +39,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 		t.Skip("billing.credit_blocks not found; run migrations before integration tests")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(30 * 24 * time.Hour)
@@ -53,7 +51,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	userID := uuid.New().String()
 	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := bunDB.NewInsert().Model(&models.CreditType{
 		ID:            creditTypeID,
 		Name:          creditTypeName,
 		DisplayName:   "Test Credits",
@@ -192,8 +190,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 		t.Skip("billing.credit_blocks not found; run migrations before integration tests")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(30 * 24 * time.Hour)
@@ -207,7 +204,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	userID := uuid.New().String()
 	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := bunDB.NewInsert().Model(&models.CreditType{
 		ID:            ctOnceID,
 		Name:          ctOnceName,
 		DisplayName:   "Once Credits",

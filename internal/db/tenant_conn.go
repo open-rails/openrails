@@ -68,8 +68,13 @@ func (d *DB) Q(ctx context.Context) bun.IDB {
 // Returns the original ctx + a no-op release when the underlying handle is not a
 // *bun.DB (e.g. already a tx), so callers can use it unconditionally.
 func (d *DB) WithTenantConn(ctx context.Context) (context.Context, func(), error) {
-	if d == nil || d.db == nil {
+	if d == nil || (d.db == nil && d.pgtx == nil) {
 		return ctx, func() {}, fmt.Errorf("db: WithTenantConn on nil DB")
+	}
+	if d.pgtx != nil {
+		// Already scoped to a pgx transaction (NewWithPgxTx): nothing to pin —
+		// the caller's tx carries the tenant GUC.
+		return ctx, func() {}, nil
 	}
 	base, ok := d.db.(*bun.DB)
 	if !ok {

@@ -2,18 +2,17 @@ package credits
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/db"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
-	"github.com/uptrace/bun"
 )
 
 // AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (tenant subject), the
@@ -80,15 +79,16 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 	}
 
 	var result *AuthorizeHoldResult
-	err := s.db.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		// A tx-scoped service so the policy reads (CheckSpendAllowed via Q(ctx))
+	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		// A tx-scoped service so the policy reads (CheckSpendAllowed via Qx(ctx))
 		// and the hold placement run on THIS transaction — one atomic unit.
-		txSvc := &CreditsService{db: db.NewWithTx(tx), clock: s.clock}
+		q := gen.New(tx)
+		txSvc := &CreditsService{db: s.db.NewWithPgxTx(tx), clock: s.clock}
 
 		// Resolve the credit type INSIDE the tenant tx: the GUC is set here, so the
 		// lookup is RLS-scoped to the request tenant (under the openrails_app role a
 		// lookup outside the tx would be fail-closed -> no rows). #227.
-		ct, cterr := txSvc.GetCreditTypeByName(ctx, in.CreditType)
+		ct, cterr := txSvc.getCreditTypeByNameTx(ctx, q, in.CreditType)
 		if cterr != nil {
 			return cterr
 		}
@@ -103,14 +103,15 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		// Idempotency: an existing hold for these coordinates short-circuits — return
 		// it as an allowed decision without re-evaluating (the original authorize
 		// already passed). Mirrors Hold's idempotency key.
-		existing := new(models.CreditTransaction)
-		ierr := tx.NewSelect().Model(existing).
-			Where("transaction_type = 'hold'").
-			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
-			Where("credit_type_id = ?", ct.ID).
-			Where("source = ? AND source_id = ?", in.Source, in.SourceID).
-			Limit(1).Scan(ctx)
+		existingRow, ierr := q.GetCreditTransactionByCoords(ctx, gen.GetCreditTransactionByCoordsParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			TransactionType: "hold", Source: in.Source, SourceID: &in.SourceID,
+		})
 		if ierr == nil {
+			existing, merr := creditTransactionFromGen(existingRow)
+			if merr != nil {
+				return merr
+			}
 			snap, serr := txSvc.snapshotTx(ctx, in.Payer, in.CreditType)
 			if serr != nil {
 				return serr
@@ -124,13 +125,13 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 			}
 			return nil
 		}
-		if !errors.Is(ierr, sql.ErrNoRows) {
+		if !errors.Is(ierr, pgx.ErrNoRows) {
 			return ierr
 		}
 
 		// Lock the balance row FOR UPDATE up front: every subsequent read/decision in
 		// this tx is serialized behind it for the same (tenant, payer, credit_type).
-		bal, lerr := txSvc.lockBalance(ctx, tx, in.Payer, in.Payer.UUID().String(), ct.ID)
+		bal, lerr := txSvc.lockBalance(ctx, q, in.Payer, in.Payer.UUID().String(), ct.ID)
 		if lerr != nil {
 			return lerr
 		}
@@ -170,11 +171,10 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 
 		// Place the hold within the SAME tx + held lock.
 		amount := in.EstimateMicros
-		if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-			Set("held_balance = ?", bal.HeldBalance+amount).
-			Set("updated_at = ?", now).
-			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-			Exec(ctx); err != nil {
+		if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
+		}); err != nil {
 			return err
 		}
 
@@ -197,7 +197,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
-		if _, err := tx.NewInsert().Model(hold).Exec(ctx); err != nil {
+		if err := q.InsertCreditTransaction(ctx, insertParamsFromTransaction(hold)); err != nil {
 			return err
 		}
 		res.Hold = hold

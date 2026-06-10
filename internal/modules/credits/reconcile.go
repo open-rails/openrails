@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -14,20 +14,20 @@ import (
 // HeldBalanceDrift is a balance row whose stored held_balance disagrees with the
 // sum of its currently-active holds.
 type HeldBalanceDrift struct {
-	TenantID        uuid.UUID `bun:"tenant_id" json:"tenant_id"`
-	TenantSubjectID uuid.UUID `bun:"tenant_subject_id" json:"tenant_subject_id"`
-	CreditTypeID    uuid.UUID `bun:"credit_type_id" json:"credit_type_id"`
-	Stored          int64     `bun:"stored" json:"stored_held_balance"`
-	Computed        int64     `bun:"computed" json:"computed_held_balance"`
+	TenantID        uuid.UUID `json:"tenant_id"`
+	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	CreditTypeID    uuid.UUID `json:"credit_type_id"`
+	Stored          int64     `json:"stored_held_balance"`
+	Computed        int64     `json:"computed_held_balance"`
 }
 
 // BalanceAnomaly flags a balance row that violates a hard invariant.
 type BalanceAnomaly struct {
-	TenantID        uuid.UUID `bun:"tenant_id" json:"tenant_id"`
-	TenantSubjectID uuid.UUID `bun:"tenant_subject_id" json:"tenant_subject_id"`
-	CreditTypeID    uuid.UUID `bun:"credit_type_id" json:"credit_type_id"`
-	Balance         int64     `bun:"balance" json:"balance"`
-	HeldBalance     int64     `bun:"held_balance" json:"held_balance"`
+	TenantID        uuid.UUID `json:"tenant_id"`
+	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
+	CreditTypeID    uuid.UUID `json:"credit_type_id"`
+	Balance         int64     `json:"balance"`
+	HeldBalance     int64     `json:"held_balance"`
 	Reason          string    `json:"reason"`
 }
 
@@ -83,80 +83,72 @@ func (s *CreditsService) Reconcile(ctx context.Context) (ReconcileReport, error)
 func (s *CreditsService) FindOrphanedExpiredHolds(ctx context.Context) ([]OrphanedHold, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	now := s.now()
-	var holds []models.CreditTransaction
-	err := s.db.Q(ctx).NewSelect().Model(&holds).
-		Where("tenant_id = ?", tenantID).
-		Where("transaction_type = 'hold' AND status = 'active'").
-		Where("expires_at IS NOT NULL AND expires_at <= ?", now).
-		OrderExpr("expires_at ASC").
-		Scan(ctx)
+	holds, err := s.db.Gen(ctx).ListOrphanedExpiredHolds(ctx, gen.ListOrphanedExpiredHoldsParams{
+		TenantID: tenantID, Now: now,
+	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]OrphanedHold, 0, len(holds))
 	for i := range holds {
 		var amt int64
-		if holds[i].Authorized != nil {
-			amt = *holds[i].Authorized
+		if holds[i].AuthorizedAmount != nil {
+			amt = *holds[i].AuthorizedAmount
 		}
 		out = append(out, OrphanedHold{ID: holds[i].ID, TenantSubjectID: holds[i].TenantSubjectID, Amount: amt, ExpiresAt: holds[i].ExpiresAt})
 	}
 	return out, nil
 }
 
-// activeHoldSumSubquery computes the expected held_balance: active holds PLUS
-// open credit windows' unsettled remainder (#335 — windows bump held_balance
-// without an active hold row, so drift/repair must count them or every open
-// window would read as drift).
-const activeHoldSumSubquery = `(COALESCE((SELECT SUM(COALESCE(t.authorized_amount,0)) ` +
-	`FROM billing.credit_transactions t ` +
-	`WHERE t.tenant_id = b.tenant_id AND t.tenant_subject_id = b.tenant_subject_id AND t.credit_type_id = b.credit_type_id ` +
-	`AND t.transaction_type = 'hold' AND t.status = 'active'), 0) ` +
-	`+ COALESCE((SELECT SUM(w.held_amount - w.settled_amount) ` +
-	`FROM billing.credit_windows w ` +
-	`WHERE w.tenant_id = b.tenant_id AND w.tenant_subject_id = b.tenant_subject_id AND w.credit_type_id = b.credit_type_id ` +
-	`AND w.status = 'open'), 0))`
-
 // FindHeldBalanceDrift returns balance rows whose stored held_balance differs
 // from the sum of their active holds.
 func (s *CreditsService) FindHeldBalanceDrift(ctx context.Context) ([]HeldBalanceDrift, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	var rows []HeldBalanceDrift
-	err := s.db.Q(ctx).NewSelect().
-		ColumnExpr("b.tenant_id, b.tenant_subject_id, b.credit_type_id, b.held_balance AS stored").
-		ColumnExpr(activeHoldSumSubquery+" AS computed").
-		TableExpr("billing.credit_balances AS b").
-		Where("b.tenant_id = ?", tenantID).
-		Where("b.held_balance <> "+activeHoldSumSubquery).
-		Scan(ctx, &rows)
-	return rows, err
+	rows, err := s.db.Gen(ctx).ListHeldBalanceDrift(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]HeldBalanceDrift, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, HeldBalanceDrift{
+			TenantID:        r.TenantID,
+			TenantSubjectID: r.TenantSubjectID,
+			CreditTypeID:    r.CreditTypeID,
+			Stored:          r.Stored,
+			Computed:        r.Computed,
+		})
+	}
+	return out, nil
 }
 
 // FindBalanceAnomalies returns balance rows violating hard invariants:
 // balance < 0, held_balance < 0, or held_balance > balance.
 func (s *CreditsService) FindBalanceAnomalies(ctx context.Context) ([]BalanceAnomaly, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	var rows []BalanceAnomaly
-	err := s.db.Q(ctx).NewSelect().
-		ColumnExpr("b.tenant_id, b.tenant_subject_id, b.credit_type_id, b.balance, b.held_balance").
-		TableExpr("billing.credit_balances AS b").
-		Where("b.tenant_id = ?", tenantID).
-		Where("b.balance < 0 OR b.held_balance < 0 OR b.held_balance > b.balance").
-		Scan(ctx, &rows)
+	rows, err := s.db.Gen(ctx).ListBalanceAnomalies(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	for i := range rows {
-		switch {
-		case rows[i].Balance < 0:
-			rows[i].Reason = "negative_balance"
-		case rows[i].HeldBalance < 0:
-			rows[i].Reason = "negative_held_balance"
-		default:
-			rows[i].Reason = "held_exceeds_balance"
+	out := make([]BalanceAnomaly, 0, len(rows))
+	for _, r := range rows {
+		a := BalanceAnomaly{
+			TenantID:        r.TenantID,
+			TenantSubjectID: r.TenantSubjectID,
+			CreditTypeID:    r.CreditTypeID,
+			Balance:         r.Balance,
+			HeldBalance:     r.HeldBalance,
 		}
+		switch {
+		case a.Balance < 0:
+			a.Reason = "negative_balance"
+		case a.HeldBalance < 0:
+			a.Reason = "negative_held_balance"
+		default:
+			a.Reason = "held_exceeds_balance"
+		}
+		out = append(out, a)
 	}
-	return rows, nil
+	return out, nil
 }
 
 // RepairHeldBalance recomputes held_balance for (payer, credit_type) from the sum
@@ -176,12 +168,10 @@ func (s *CreditsService) RepairHeldBalance(ctx context.Context, payer identity.T
 	if err != nil {
 		return 0, err
 	}
-	_, err = s.db.Q(ctx).NewUpdate().Model((*models.CreditBalance)(nil)).
-		Set("held_balance = ?", computed).
-		Set("updated_at = ?", s.now()).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Exec(ctx)
-	if err != nil {
+	if err := s.db.Gen(ctx).SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+		HeldBalance: computed, UpdatedAt: s.now(),
+	}); err != nil {
 		return 0, err
 	}
 	return computed, nil

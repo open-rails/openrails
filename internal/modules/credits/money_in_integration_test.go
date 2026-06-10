@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
@@ -39,13 +38,12 @@ func moneyInEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.Tenant
 		t.Skip("billing.credit_account_settings missing; run migration 043")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	ctName := "test_moneyin_" + uuid.NewString()
 	ctID := uuid.New()
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := bunDB.NewInsert().Model(&models.CreditType{
 		ID: ctID, Name: ctName, DisplayName: "Money-in Test", Unit: "cents",
 		DecimalPlaces: 2, IsActive: true, CreatedAt: now,
 	}).Exec(ctx)

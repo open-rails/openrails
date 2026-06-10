@@ -2,21 +2,21 @@ package credits
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
-	"github.com/uptrace/bun"
 )
 
 var (
@@ -85,9 +85,14 @@ func (s *CreditsService) GetCreditTypeByName(ctx context.Context, name string) (
 	// called standalone or before opening a separate balance tx. RunInTenantConn is
 	// a no-op (reuses the tx) when s.db is already a tx-scoped service, so it is
 	// safe in both call shapes.
-	ct := new(models.CreditType)
+	var ct *models.CreditType
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		return s.db.Q(ctx).NewSelect().Model(ct).Where("name = ?", name).Limit(1).Scan(ctx)
+		row, err := s.db.Gen(ctx).GetCreditTypeByName(ctx, name)
+		if err != nil {
+			return err
+		}
+		ct = creditTypeFromGen(row)
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -99,11 +104,6 @@ func (s *CreditsService) GetBalance(ctx context.Context, actorID string, creditT
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
-	ct, err := s.GetCreditTypeByName(ctx, creditType)
-	if err != nil {
-		return nil, err
-	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	// Reads are scoped by tenant + OWNER (issue #221). For the self-hosted /
 	// single-tenant personal case the payer IS the user's own account/personal tenant-subject
 	// UUID — the same row the tenant-subject-owned writers stamp — so single-user reads return
@@ -112,27 +112,7 @@ func (s *CreditsService) GetBalance(ctx context.Context, actorID string, creditT
 	if err != nil {
 		return nil, err
 	}
-	payerID := payer.UUID()
-	bal := new(models.CreditBalance)
-	err = s.db.Q(ctx).NewSelect().
-		Model(bal).
-		Where("tenant_id = ?", tenantID).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, ct.ID).
-		Limit(1).
-		Scan(ctx)
-	if err == nil {
-		return bal, nil
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return &models.CreditBalance{
-			TenantID:        tenantID,
-			TenantSubjectID: payerID,
-			CreditTypeID:    ct.ID,
-			Balance:         0,
-			HeldBalance:     0,
-		}, nil
-	}
-	return nil, err
+	return s.GetBalanceForTenantSubject(ctx, payer, creditType)
 }
 
 // GetBalanceForTenantSubject reads a balance scoped explicitly by tenant subject (issue
@@ -148,17 +128,13 @@ func (s *CreditsService) GetBalanceForTenantSubject(ctx context.Context, payer i
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	payerID := payer.UUID()
-	bal := new(models.CreditBalance)
-	err = s.db.Q(ctx).NewSelect().
-		Model(bal).
-		Where("tenant_id = ?", tenantID).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, ct.ID).
-		Limit(1).
-		Scan(ctx)
+	row, err := s.db.Gen(ctx).GetCreditBalance(ctx, gen.GetCreditBalanceParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+	})
 	if err == nil {
-		return bal, nil
+		return creditBalanceFromGen(row), nil
 	}
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return &models.CreditBalance{
 			TenantID:        tenantID,
 			TenantSubjectID: payerID,
@@ -174,41 +150,18 @@ func (s *CreditsService) GetTransactions(ctx context.Context, actorID string, cr
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("credits service not initialized")
 	}
-	ct, err := s.GetCreditTypeByName(ctx, creditType)
-	if err != nil {
-		return nil, 0, err
-	}
 	payer, err := resolveTenantSubject(nil, actorID)
 	if err != nil {
 		return nil, 0, err
 	}
-	payerID := payer.UUID()
-	var items []models.CreditTransaction
-	q := s.db.Q(ctx).NewSelect().Model(&items).
-		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, ct.ID)
-	total, err := q.Count(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	err = q.OrderExpr("created_at DESC").Limit(limit).Offset(offset).Scan(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	return items, total, nil
+	return s.GetTransactionsByTenantSubject(ctx, payer, creditType, limit, offset)
 }
 
 // GetTransactionsByTenantSubject lists credit transactions for an EXPLICIT tenant subject
 // (the payer), newest first, paginated. Unlike GetTransactions it does not derive
 // the payer from a actor id — it filters tenant_subject_id directly, which is what the
 // org-level billing-account usage view (issue #242) needs. RLS-scoped to the
-// request tenant via Q(ctx).
+// request tenant via Qx(ctx).
 func (s *CreditsService) GetTransactionsByTenantSubject(ctx context.Context, payer identity.TenantSubjectID, creditType string, limit, offset int) ([]models.CreditTransaction, int, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("credits service not initialized")
@@ -220,11 +173,12 @@ func (s *CreditsService) GetTransactionsByTenantSubject(ctx context.Context, pay
 	if err != nil {
 		return nil, 0, err
 	}
-	var items []models.CreditTransaction
-	q := s.db.Q(ctx).NewSelect().Model(&items).
-		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", payer.UUID(), ct.ID)
-	total, err := q.Count(ctx)
+	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	payerID := payer.UUID()
+	q := s.db.Gen(ctx)
+	total, err := q.CountCreditTransactionsByPayer(ctx, gen.CountCreditTransactionsByPayerParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+	})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -234,10 +188,22 @@ func (s *CreditsService) GetTransactionsByTenantSubject(ctx context.Context, pay
 	if offset < 0 {
 		offset = 0
 	}
-	if err := q.OrderExpr("created_at DESC").Limit(limit).Offset(offset).Scan(ctx); err != nil {
+	rows, err := q.ListCreditTransactionsByPayer(ctx, gen.ListCreditTransactionsByPayerParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+		Column4: int32(limit), Column5: int32(offset),
+	})
+	if err != nil {
 		return nil, 0, err
 	}
-	return items, total, nil
+	items := make([]models.CreditTransaction, 0, len(rows))
+	for _, r := range rows {
+		m, merr := creditTransactionFromGen(r)
+		if merr != nil {
+			return nil, 0, merr
+		}
+		items = append(items, *m)
+	}
+	return items, int(total), nil
 }
 
 // GetAccountSettingsForTenantSubject returns the stored credit-account settings for an
@@ -294,19 +260,18 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, actorID str
 	if err != nil {
 		return nil, err
 	}
-	payerID := payer.UUID()
-	trx := new(models.CreditTransaction)
-	if err := s.db.Q(ctx).NewSelect().
-		Model(trx).
-		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, ct.ID).
-		Where("transaction_type = ?", transactionType).
-		Where("source = ? AND source_id = ?", source, sourceID).
-		Limit(1).
-		Scan(ctx); err != nil {
+	row, err := s.db.Gen(ctx).GetCreditTransactionByCoords(ctx, gen.GetCreditTransactionByCoordsParams{
+		TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+		TenantSubjectID: payer.UUID(),
+		CreditTypeID:    ct.ID,
+		TransactionType: transactionType,
+		Source:          source,
+		SourceID:        &sourceID,
+	})
+	if err != nil {
 		return nil, err
 	}
-	return trx, nil
+	return creditTransactionFromGen(row)
 }
 
 type CreditDepositParams struct {
@@ -357,50 +322,42 @@ func (s *CreditsService) Deposit(ctx context.Context, params CreditDepositParams
 		}
 	}
 
-	tx, err := s.db.BeginTenantTx(ctx)
+	var trx *models.CreditTransaction
+	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var terr error
+		trx, terr = s.depositTx(ctx, gen.New(tx), ct, params)
+		return terr
+	})
 	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	trx, err := s.depositTx(ctx, tx, ct, params)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return trx, nil
 }
 
-func (s *CreditsService) getCreditTypeByNameTx(ctx context.Context, tx bun.Tx, name string) (*models.CreditType, error) {
-	ct := new(models.CreditType)
-	if err := tx.NewSelect().Model(ct).Where("name = ?", name).Limit(1).Scan(ctx); err != nil {
+func (s *CreditsService) getCreditTypeByNameTx(ctx context.Context, q *gen.Queries, name string) (*models.CreditType, error) {
+	row, err := q.GetCreditTypeByName(ctx, name)
+	if err != nil {
 		return nil, err
 	}
-	return ct, nil
+	return creditTypeFromGen(row), nil
 }
 
 // ensureTenantSubject upserts the billing.tenant_subjects row for a self-service
 // subject so the credit-write FKs added in migration 076 are satisfied on a
 // subject's FIRST credit operation (deposit/hold/usage). ON CONFLICT DO NOTHING.
-func ensureTenantSubject(ctx context.Context, db bun.IDB, tenantID, tsid uuid.UUID) error {
+func ensureTenantSubject(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUID) error {
 	if tsid == uuid.Nil {
 		return nil
 	}
 	if tenantID == uuid.Nil {
 		tenantID = tenant.FromContextOrDefault(ctx).UUID()
 	}
-	_, err := db.NewRaw(
-		`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
-		 VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`,
-		tsid, tenantID, "openrails:self", tsid.String(),
-	).Exec(ctx)
-	return err
+	return q.EnsureTenantSubjectRow(ctx, gen.EnsureTenantSubjectRowParams{
+		ID: tsid, TenantID: tenantID, Issuer: "openrails:self", Subject: tsid.String(),
+	})
 }
 
-func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.CreditType, params CreditDepositParams) (*models.CreditTransaction, error) {
+func (s *CreditsService) depositTx(ctx context.Context, q *gen.Queries, ct *models.CreditType, params CreditDepositParams) (*models.CreditTransaction, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	payer, err := resolveTenantSubject(params.TenantSubjectID, params.Actor)
@@ -408,10 +365,10 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 		return nil, err
 	}
 	payerID := payer.UUID()
-	if err := ensureTenantSubject(ctx, tx, tenantID, payerID); err != nil {
+	if err := ensureTenantSubject(ctx, q, tenantID, payerID); err != nil {
 		return nil, err
 	}
-	bal, err := s.lockBalance(ctx, tx, payer, params.Actor, ct.ID)
+	bal, err := s.lockBalance(ctx, q, payer, params.Actor, ct.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -423,30 +380,24 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 	if params.SourceID != nil {
 		v := params.SourceID.String()
 		sourceIDText = &v
-		existing := new(models.CreditTransaction)
-		err := tx.NewSelect().
-			Model(existing).
-			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
-			Where("credit_type_id = ?", ct.ID).
-			Where("transaction_type = 'deposit'").
-			Where("source = ? AND source_id = ?", params.Source, v).
-			Limit(1).
-			Scan(ctx)
-		if err == nil {
-			return existing, nil
+		existing, gerr := q.GetCreditTransactionByCoords(ctx, gen.GetCreditTransactionByCoordsParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			TransactionType: "deposit", Source: params.Source, SourceID: &v,
+		})
+		if gerr == nil {
+			return creditTransactionFromGen(existing)
 		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
+		if !errors.Is(gerr, pgx.ErrNoRows) {
+			return nil, gerr
 		}
 	}
 
 	newBal := bal.Balance + params.Amount
 
-	if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-		Set("balance = ?", newBal).
-		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Exec(ctx); err != nil {
+	if err := q.SetCreditBalance(ctx, gen.SetCreditBalanceParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+		Balance: newBal, UpdatedAt: now,
+	}); err != nil {
 		return nil, err
 	}
 
@@ -467,10 +418,10 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	if _, err := tx.NewInsert().Model(trx).Exec(ctx); err != nil {
+	if err := q.InsertCreditTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
 		return nil, err
 	}
-	block := &models.CreditBlock{
+	if err := q.InsertCreditBlock(ctx, gen.InsertCreditBlockParams{
 		ID:                  uuidutil.NewV7(),
 		TenantID:            tenantID,
 		TenantSubjectID:     payerID,
@@ -480,12 +431,38 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 		ExpiresAt:           params.ExpiresAt,
 		SourceTransactionID: &trx.ID,
 		CreatedAt:           now,
-	}
-	if _, err := tx.NewInsert().Model(block).Exec(ctx); err != nil {
+	}); err != nil {
 		return nil, err
 	}
 
 	return trx, nil
+}
+
+// insertParamsFromTransaction maps a fully-populated transaction model onto the
+// generated insert params (one definition shared by every ledger writer).
+// Metadata is dropped: no current ledger writer sets it (windows/settles stamp
+// resource only), and an encode error has nowhere to go from this mapper.
+func insertParamsFromTransaction(t *models.CreditTransaction) gen.InsertCreditTransactionParams {
+	return gen.InsertCreditTransactionParams{
+		ID:               t.ID,
+		TenantID:         t.TenantID,
+		TenantSubjectID:  t.TenantSubjectID,
+		Actor:            t.Actor,
+		Resource:         t.Resource,
+		CreditTypeID:     t.CreditTypeID,
+		Amount:           t.Amount,
+		BalanceAfter:     t.BalanceAfter,
+		TransactionType:  t.TransactionType,
+		Status:           t.Status,
+		AuthorizedAmount: t.Authorized,
+		CapturedAmount:   t.Captured,
+		Source:           t.Source,
+		SourceID:         t.SourceID,
+		ExpiresAt:        t.ExpiresAt,
+		Description:      t.Description,
+		CreatedAt:        t.CreatedAt,
+		UpdatedAt:        t.UpdatedAt,
+	}
 }
 
 type CreditWithdrawParams struct {
@@ -515,18 +492,13 @@ func (s *CreditsService) Withdraw(ctx context.Context, params CreditWithdrawPara
 		return nil, ErrCreditTypeInactive
 	}
 
-	tx, err := s.db.BeginTenantTx(ctx)
+	var trx *models.CreditTransaction
+	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var terr error
+		trx, terr = s.withdrawTx(ctx, gen.New(tx), ct.ID, params)
+		return terr
+	})
 	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	trx, err := s.withdrawTx(ctx, tx, ct.ID, params)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return trx, nil
@@ -552,82 +524,73 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 		return nil, ErrCreditTypeInactive
 	}
 
-	tx, err := s.db.BeginTenantTx(ctx)
+	var hold *models.CreditTransaction
+	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		now := s.now()
+		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		payerSubject, rerr := resolveTenantSubject(payer, actorID)
+		if rerr != nil {
+			return rerr
+		}
+		payerID := payerSubject.UUID()
+		if err := ensureTenantSubject(ctx, q, tenantID, payerID); err != nil {
+			return err
+		}
+
+		// Idempotency: treat (tenant, payer, credit_type, source, source_id) as a
+		// unique key for holds. This prevents duplicate held_balance reservations on
+		// caller retries.
+		existing, gerr := q.GetCreditTransactionByCoords(ctx, gen.GetCreditTransactionByCoordsParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			TransactionType: "hold", Source: source, SourceID: &sourceID,
+		})
+		if gerr == nil {
+			hold, gerr = creditTransactionFromGen(existing)
+			return gerr
+		}
+		if !errors.Is(gerr, pgx.ErrNoRows) {
+			return gerr
+		}
+
+		bal, lerr := s.lockBalance(ctx, q, payerSubject, actorID, ct.ID)
+		if lerr != nil {
+			return lerr
+		}
+		available := bal.Balance - bal.HeldBalance
+		if available < amount {
+			return ErrInsufficientCredits
+		}
+
+		if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			HeldBalance: bal.HeldBalance + amount, UpdatedAt: now,
+		}); err != nil {
+			return err
+		}
+
+		exp := expiresAt.UTC()
+		auth := amount
+		srcID := sourceID
+		hold = &models.CreditTransaction{
+			ID:              uuidutil.NewV7(),
+			TenantID:        tenantID,
+			TenantSubjectID: payerID,
+			Actor:           actorID,
+			CreditTypeID:    ct.ID,
+			Amount:          0,
+			Source:          source,
+			SourceID:        &srcID,
+			Status:          "active",
+			Authorized:      &auth,
+			ExpiresAt:       &exp,
+			TransactionType: "hold",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		return q.InsertCreditTransaction(ctx, insertParamsFromTransaction(hold))
+	})
 	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	now := s.now()
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	payerSubject, err := resolveTenantSubject(payer, actorID)
-	if err != nil {
-		return nil, err
-	}
-	payerID := payerSubject.UUID()
-	if err := ensureTenantSubject(ctx, tx, tenantID, payerID); err != nil {
-		return nil, err
-	}
-
-	// Idempotency: treat (tenant, payer, credit_type, source, source_id) as a
-	// unique key for holds. This prevents duplicate held_balance reservations on
-	// caller retries.
-	existing := new(models.CreditTransaction)
-	err = tx.NewSelect().
-		Model(existing).
-		Where("transaction_type = 'hold'").
-		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
-		Where("credit_type_id = ?", ct.ID).
-		Where("source = ? AND source_id = ?", source, sourceID).
-		Limit(1).
-		Scan(ctx)
-	if err == nil {
-		return existing, nil
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-
-	bal, err := s.lockBalance(ctx, tx, payerSubject, actorID, ct.ID)
-	if err != nil {
-		return nil, err
-	}
-	available := bal.Balance - bal.HeldBalance
-	if available < amount {
-		return nil, ErrInsufficientCredits
-	}
-
-	if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-		Set("held_balance = ?", bal.HeldBalance+amount).
-		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Exec(ctx); err != nil {
-		return nil, err
-	}
-
-	exp := expiresAt.UTC()
-	auth := amount
-	hold := &models.CreditTransaction{
-		ID:              uuidutil.NewV7(),
-		TenantID:        tenantID,
-		TenantSubjectID: payerID,
-		Actor:           actorID,
-		CreditTypeID:    ct.ID,
-		Amount:          0,
-		Source:          source,
-		SourceID:        &sourceID,
-		Status:          "active",
-		Authorized:      &auth,
-		ExpiresAt:       &exp,
-		TransactionType: "hold",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if _, err := tx.NewInsert().Model(hold).Exec(ctx); err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return hold, nil
@@ -637,69 +600,71 @@ func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actu
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
-	tx, err := s.db.BeginTenantTx(ctx)
+	var hold *models.CreditTransaction
+	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		row, gerr := q.GetCreditTransactionForUpdate(ctx, holdID)
+		if gerr != nil {
+			return gerr
+		}
+		h, gerr := creditTransactionFromGen(row)
+		if gerr != nil {
+			return gerr
+		}
+		if h.TransactionType != "hold" {
+			return fmt.Errorf("transaction is not a hold")
+		}
+		if h.Status != "active" {
+			return fmt.Errorf("hold is not active")
+		}
+		now := s.now()
+		if h.ExpiresAt != nil && !h.ExpiresAt.After(now) {
+			return fmt.Errorf("hold is expired")
+		}
+		if h.Authorized == nil || *h.Authorized <= 0 {
+			return fmt.Errorf("hold missing authorized amount")
+		}
+		authorized := *h.Authorized
+		if actualAmount <= 0 || actualAmount > authorized {
+			return fmt.Errorf("invalid capture amount")
+		}
+
+		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		holdPayer := identity.TenantSubjectID(h.TenantSubjectID)
+		bal, lerr := s.lockBalance(ctx, q, holdPayer, h.Actor, h.CreditTypeID)
+		if lerr != nil {
+			return lerr
+		}
+		if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+			TenantID: tenantID, TenantSubjectID: h.TenantSubjectID, CreditTypeID: h.CreditTypeID,
+			HeldBalance: bal.HeldBalance - authorized, UpdatedAt: now,
+		}); err != nil {
+			return err
+		}
+
+		// Settle the actual balance-first-then-owed (#302): an arrears hold spills the
+		// uncovered remainder to outstanding_owed instead of failing. availableAfter
+		// reflects this hold's reservation already released above.
+		availableAfter := bal.Balance - (bal.HeldBalance - authorized)
+		newBal, serr := s.captureSettleTx(ctx, q, holdPayer, h.Actor, h.CreditTypeID, actualAmount, availableAfter)
+		if serr != nil {
+			return serr
+		}
+		h.Status = "captured"
+		h.Captured = &actualAmount
+		h.Amount = -actualAmount
+		h.BalanceAfter = &newBal
+		h.UpdatedAt = now
+		if err := q.CaptureCreditHold(ctx, gen.CaptureCreditHoldParams{
+			ID: h.ID, CapturedAmount: &actualAmount, Amount: -actualAmount,
+			BalanceAfter: &newBal, UpdatedAt: now,
+		}); err != nil {
+			return err
+		}
+		hold = h
+		return nil
+	})
 	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	hold := new(models.CreditTransaction)
-	if err := tx.NewSelect().Model(hold).Where("id = ?", holdID).For("UPDATE").Scan(ctx); err != nil {
-		return nil, err
-	}
-	if hold.TransactionType != "hold" {
-		return nil, fmt.Errorf("transaction is not a hold")
-	}
-	if hold.Status != "active" {
-		return nil, fmt.Errorf("hold is not active")
-	}
-	now := s.now()
-	if hold.ExpiresAt != nil && !hold.ExpiresAt.After(now) {
-		return nil, fmt.Errorf("hold is expired")
-	}
-	if hold.Authorized == nil || *hold.Authorized <= 0 {
-		return nil, fmt.Errorf("hold missing authorized amount")
-	}
-	authorized := *hold.Authorized
-	if actualAmount <= 0 || actualAmount > authorized {
-		return nil, fmt.Errorf("invalid capture amount")
-	}
-
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	holdPayer := identity.TenantSubjectID(hold.TenantSubjectID)
-	bal, err := s.lockBalance(ctx, tx, holdPayer, hold.Actor, hold.CreditTypeID)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-		Set("held_balance = ?", bal.HeldBalance-authorized).
-		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, hold.TenantSubjectID, hold.CreditTypeID).
-		Exec(ctx); err != nil {
-		return nil, err
-	}
-
-	// Settle the actual balance-first-then-owed (#302): an arrears hold spills the
-	// uncovered remainder to outstanding_owed instead of failing. availableAfter
-	// reflects this hold's reservation already released above.
-	availableAfter := bal.Balance - (bal.HeldBalance - authorized)
-	newBal, err := s.captureSettleTx(ctx, tx, holdPayer, hold.Actor, hold.CreditTypeID, actualAmount, availableAfter)
-	if err != nil {
-		return nil, err
-	}
-	hold.Status = "captured"
-	hold.Captured = &actualAmount
-	hold.Amount = -actualAmount
-	hold.BalanceAfter = &newBal
-	hold.UpdatedAt = now
-	if _, err := tx.NewUpdate().Model(hold).
-		Column("status", "captured_amount", "amount", "balance_after", "updated_at").
-		WherePK().
-		Exec(ctx); err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return hold, nil
@@ -709,59 +674,45 @@ func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) erro
 	if s == nil || s.db == nil {
 		return fmt.Errorf("credits service not initialized")
 	}
-	tx, err := s.db.BeginTenantTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
+	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		row, gerr := q.GetCreditTransactionForUpdate(ctx, holdID)
+		if gerr != nil {
+			return gerr
+		}
+		if row.TransactionType != "hold" {
+			return fmt.Errorf("transaction is not a hold")
+		}
+		if row.Status != "active" {
+			return fmt.Errorf("hold is not active")
+		}
+		if row.AuthorizedAmount == nil || *row.AuthorizedAmount <= 0 {
+			return fmt.Errorf("hold missing authorized amount")
+		}
+		authorized := *row.AuthorizedAmount
 
-	hold := new(models.CreditTransaction)
-	if err := tx.NewSelect().Model(hold).Where("id = ?", holdID).For("UPDATE").Scan(ctx); err != nil {
-		return err
-	}
-	if hold.TransactionType != "hold" {
-		return fmt.Errorf("transaction is not a hold")
-	}
-	if hold.Status != "active" {
-		return fmt.Errorf("hold is not active")
-	}
-	if hold.Authorized == nil || *hold.Authorized <= 0 {
-		return fmt.Errorf("hold missing authorized amount")
-	}
-	authorized := *hold.Authorized
-
-	now := s.now()
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	holdPayer := identity.TenantSubjectID(hold.TenantSubjectID)
-	bal, err := s.lockBalance(ctx, tx, holdPayer, hold.Actor, hold.CreditTypeID)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-		Set("held_balance = ?", bal.HeldBalance-authorized).
-		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, hold.TenantSubjectID, hold.CreditTypeID).
-		Exec(ctx); err != nil {
-		return err
-	}
-
-	hold.Status = "released"
-	hold.UpdatedAt = now
-	if _, err := tx.NewUpdate().Model(hold).
-		Column("status", "updated_at").
-		WherePK().
-		Exec(ctx); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+		now := s.now()
+		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		holdPayer := identity.TenantSubjectID(row.TenantSubjectID)
+		bal, lerr := s.lockBalance(ctx, q, holdPayer, row.Actor, row.CreditTypeID)
+		if lerr != nil {
+			return lerr
+		}
+		if err := q.SetCreditHeldBalance(ctx, gen.SetCreditHeldBalanceParams{
+			TenantID: tenantID, TenantSubjectID: row.TenantSubjectID, CreditTypeID: row.CreditTypeID,
+			HeldBalance: bal.HeldBalance - authorized, UpdatedAt: now,
+		}); err != nil {
+			return err
+		}
+		return q.ReleaseCreditHold(ctx, gen.ReleaseCreditHoldParams{ID: row.ID, UpdatedAt: now})
+	})
 }
 
-func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx, payer identity.TenantSubjectID, actorID string, creditTypeID uuid.UUID, amount int64) (int64, error) {
+func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID string, creditTypeID uuid.UUID, amount int64) (int64, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	payerID := payer.UUID()
-	bal, err := s.lockBalance(ctx, tx, payer, actorID, creditTypeID)
+	bal, err := s.lockBalance(ctx, q, payer, actorID, creditTypeID)
 	if err != nil {
 		return 0, err
 	}
@@ -771,12 +722,10 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 	}
 
 	remaining := amount
-	var blocks []models.CreditBlock
-	if err := tx.NewSelect().Model(&blocks).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ? AND remaining_amount > 0 AND (expires_at IS NULL OR expires_at > ?)", tenantID, payerID, creditTypeID, now).
-		OrderExpr("expires_at ASC NULLS LAST, created_at ASC").
-		For("UPDATE").
-		Scan(ctx); err != nil {
+	blocks, err := q.ListSpendableCreditBlocksForUpdate(ctx, gen.ListSpendableCreditBlocksForUpdateParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: creditTypeID, Now: now,
+	})
+	if err != nil {
 		return 0, err
 	}
 	for i := range blocks {
@@ -790,22 +739,19 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 		if use <= 0 {
 			continue
 		}
-		blocks[i].RemainingAmount -= use
 		remaining -= use
-		if _, err := tx.NewUpdate().Model(&blocks[i]).
-			Column("remaining_amount").
-			WherePK().
-			Exec(ctx); err != nil {
+		if err := q.SetCreditBlockRemaining(ctx, gen.SetCreditBlockRemainingParams{
+			ID: blocks[i].ID, RemainingAmount: blocks[i].RemainingAmount - use,
+		}); err != nil {
 			return 0, err
 		}
 	}
 
 	newBal := bal.Balance - amount
-	if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
-		Set("balance = ?", newBal).
-		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
-		Exec(ctx); err != nil {
+	if err := q.SetCreditBalance(ctx, gen.SetCreditBalanceParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: creditTypeID,
+		Balance: newBal, UpdatedAt: now,
+	}); err != nil {
 		return 0, err
 	}
 	return newBal, nil
@@ -819,48 +765,34 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 // HARDCUT payer+tenant-scoped uniqueness (001_schema.up.sql). ON CONFLICT DO NOTHING
 // targets that constraint to avoid a duplicate-key error on concurrent
 // first-touch, after which the row is re-selected FOR UPDATE.
-func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, payer identity.TenantSubjectID, actorID string, creditTypeID uuid.UUID) (*models.CreditBalance, error) {
+func (s *CreditsService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID string, creditTypeID uuid.UUID) (*models.CreditBalance, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	payerID := payer.UUID()
-	bal := new(models.CreditBalance)
-	err := tx.NewSelect().Model(bal).
-		Where("tenant_id = ?", tenantID).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, creditTypeID).
-		For("UPDATE").
-		Scan(ctx)
-	if err == nil {
-		return bal, nil
+	key := gen.LockCreditBalanceParams{
+		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: creditTypeID,
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	row, err := q.LockCreditBalance(ctx, key)
+	if err == nil {
+		return creditBalanceFromGen(row), nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
-	now := s.now()
-	bal = &models.CreditBalance{
-		ID:              uuidutil.NewV7(),
-		TenantID:        tenantID,
-		TenantSubjectID: payerID,
-		CreditTypeID:    creditTypeID,
-		Balance:         0,
-		HeldBalance:     0,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if _, err := tx.NewInsert().Model(bal).On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id) DO NOTHING").Exec(ctx); err != nil {
+	if err := q.InsertCreditBalanceIfAbsent(ctx, gen.InsertCreditBalanceIfAbsentParams{
+		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID,
+		CreditTypeID: creditTypeID, Now: s.now(),
+	}); err != nil {
 		return nil, err
 	}
-	bal = new(models.CreditBalance)
-	if err := tx.NewSelect().Model(bal).
-		Where("tenant_id = ?", tenantID).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, creditTypeID).
-		For("UPDATE").
-		Scan(ctx); err != nil {
+	row, err = q.LockCreditBalance(ctx, key)
+	if err != nil {
 		return nil, err
 	}
-	return bal, nil
+	return creditBalanceFromGen(row), nil
 }
 
-func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID uuid.UUID, params CreditWithdrawParams) (*models.CreditTransaction, error) {
+func (s *CreditsService) withdrawTx(ctx context.Context, q *gen.Queries, creditTypeID uuid.UUID, params CreditWithdrawParams) (*models.CreditTransaction, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	payer, err := resolveTenantSubject(params.TenantSubjectID, params.Actor)
@@ -870,28 +802,23 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 	payerID := payer.UUID()
 	sourceIDText := (*string)(nil)
 	if params.SourceID != nil {
-		if _, err := s.lockBalance(ctx, tx, payer, params.Actor, creditTypeID); err != nil {
+		if _, err := s.lockBalance(ctx, q, payer, params.Actor, creditTypeID); err != nil {
 			return nil, err
 		}
 		v := params.SourceID.String()
 		sourceIDText = &v
-		existing := new(models.CreditTransaction)
-		err := tx.NewSelect().
-			Model(existing).
-			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
-			Where("credit_type_id = ?", creditTypeID).
-			Where("transaction_type = 'withdrawal'").
-			Where("source = ? AND source_id = ?", params.Source, v).
-			Limit(1).
-			Scan(ctx)
-		if err == nil {
-			return existing, nil
+		existing, gerr := q.GetCreditTransactionByCoords(ctx, gen.GetCreditTransactionByCoordsParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: creditTypeID,
+			TransactionType: "withdrawal", Source: params.Source, SourceID: &v,
+		})
+		if gerr == nil {
+			return creditTransactionFromGen(existing)
 		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
+		if !errors.Is(gerr, pgx.ErrNoRows) {
+			return nil, gerr
 		}
 	}
-	newBal, err := s.withdrawBalanceAndBlocks(ctx, tx, payer, params.Actor, creditTypeID, params.Amount)
+	newBal, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Actor, creditTypeID, params.Amount)
 	if err != nil {
 		return nil, err
 	}
@@ -911,7 +838,7 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	if _, err := tx.NewInsert().Model(trx).Exec(ctx); err != nil {
+	if err := q.InsertCreditTransaction(ctx, insertParamsFromTransaction(trx)); err != nil {
 		return nil, err
 	}
 	return trx, nil

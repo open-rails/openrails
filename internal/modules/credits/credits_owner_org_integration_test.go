@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/migratekit"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/stretchr/testify/require"
@@ -30,7 +30,7 @@ import (
 // schema + pgcrypto, and applies the billing migratekit migrations (which now
 // include 040). It returns a ready bun.DB. River migrations are intentionally
 // skipped — the credit tables do not depend on River.
-func startOwnerTenantPostgres(t *testing.T) (*bun.DB, context.Context) {
+func startOwnerTenantPostgres(t *testing.T) (*bun.DB, string, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -78,7 +78,7 @@ func startOwnerTenantPostgres(t *testing.T) (*bun.DB, context.Context) {
 
 	bunDB := bun.NewDB(sqlDB, pgdialect.New())
 	models.RegisterModels(bunDB)
-	return bunDB, ctx
+	return bunDB, dsn, ctx
 }
 
 // TestSchema_EnforcesNotNullTenantAndPayer proves the HARDCUT schema (migrations
@@ -86,7 +86,7 @@ func startOwnerTenantPostgres(t *testing.T) (*bun.DB, context.Context) {
 // tenant_subject_id for the credit tables: an insert that omits either is rejected by the
 // database, so there is no path to a tenant-less or payer-less credit row.
 func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
-	bunDB, ctx := startOwnerTenantPostgres(t)
+	bunDB, _, ctx := startOwnerTenantPostgres(t)
 
 	creditTypeID := uuid.New()
 	_, err := bunDB.NewInsert().Model(&models.CreditType{
@@ -130,7 +130,7 @@ func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
 // (tenant, payer, credit_type) collide, while the SAME payer across DISTINCT
 // tenants does NOT collide (tenant is part of the key).
 func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
-	bunDB, ctx := startOwnerTenantPostgres(t)
+	bunDB, _, ctx := startOwnerTenantPostgres(t)
 
 	creditTypeID := uuid.New()
 	_, err := bunDB.NewInsert().Model(&models.CreditType{
@@ -194,14 +194,13 @@ func seedSpendable(t *testing.T, ctx context.Context, svc *credits.CreditsServic
 // available + held returns to (initial - captured), with the unused reservation
 // fully released back to available.
 func TestReserveCapturePartial_ConservesTotal(t *testing.T) {
-	bunDB, ctx := startOwnerTenantPostgres(t)
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	bunDB, dsn, ctx := startOwnerTenantPostgres(t)
+	dbi := dbtest.OpenAppDB(t, dsn)
 	svc := credits.NewCreditsService(dbi, clockwork.NewRealClock())
 
 	ctName := "reserve_capture_" + uuid.NewString()
 	creditTypeID := uuid.New()
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := bunDB.NewInsert().Model(&models.CreditType{
 		ID: creditTypeID, Name: ctName, DisplayName: "RC", Unit: "u",
 		DecimalPlaces: 0, IsActive: true, CreatedAt: time.Now().UTC(),
 	}).Exec(ctx)
@@ -241,14 +240,13 @@ func TestReserveCapturePartial_ConservesTotal(t *testing.T) {
 // TestReserveRelease_RestoresFullBalance proves Reserve(Hold) -> ReleaseHold
 // restores the full available balance: no credits consumed.
 func TestReserveRelease_RestoresFullBalance(t *testing.T) {
-	bunDB, ctx := startOwnerTenantPostgres(t)
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	bunDB, dsn, ctx := startOwnerTenantPostgres(t)
+	dbi := dbtest.OpenAppDB(t, dsn)
 	svc := credits.NewCreditsService(dbi, clockwork.NewRealClock())
 
 	ctName := "reserve_release_" + uuid.NewString()
 	creditTypeID := uuid.New()
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := bunDB.NewInsert().Model(&models.CreditType{
 		ID: creditTypeID, Name: ctName, DisplayName: "RR", Unit: "u",
 		DecimalPlaces: 0, IsActive: true, CreatedAt: time.Now().UTC(),
 	}).Exec(ctx)

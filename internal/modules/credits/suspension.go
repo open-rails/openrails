@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -43,30 +44,16 @@ func (s *CreditsService) SetPaymentMethodVerified(ctx context.Context, payer ide
 	payerID := payer.UUID()
 	now := s.now()
 
-	tx, err := s.db.BeginTenantTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, payerID, ct.ID, BillingModePrepaid, now); err != nil {
-		return err
-	}
-
-	upd := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
-		Set("verified_payment_method = ?", verified).
-		Set("updated_at = ?", now)
-	if verified {
-		upd = upd.Set("verified_at = ?", now)
-	} else {
-		upd = upd.Set("verified_at = NULL")
-	}
-	if _, err := upd.
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Exec(ctx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, ct.ID, BillingModePrepaid, now); err != nil {
+			return err
+		}
+		return q.SetCreditAccountPaymentVerified(ctx, gen.SetCreditAccountPaymentVerifiedParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			Verified: verified, Now: now,
+		})
+	})
 }
 
 // Suspend marks (payer, credit_type) suspended: stamps suspended_at=now and
@@ -85,30 +72,16 @@ func (s *CreditsService) Suspend(ctx context.Context, payer identity.TenantSubje
 	now := s.now()
 	reason = strings.TrimSpace(reason)
 
-	tx, err := s.db.BeginTenantTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, payerID, ct.ID, BillingModePrepaid, now); err != nil {
-		return err
-	}
-
-	upd := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
-		Set("suspended_at = ?", now).
-		Set("updated_at = ?", now)
-	if reason != "" {
-		upd = upd.Set("suspend_reason = ?", reason)
-	} else {
-		upd = upd.Set("suspend_reason = NULL")
-	}
-	if _, err := upd.
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Exec(ctx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, ct.ID, BillingModePrepaid, now); err != nil {
+			return err
+		}
+		return q.SuspendCreditAccount(ctx, gen.SuspendCreditAccountParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
+			Now: now, Reason: nilIfEmpty(reason),
+		})
+	})
 }
 
 // Resume clears the suspension on (payer, credit_type): nulls suspended_at and
@@ -125,25 +98,15 @@ func (s *CreditsService) Resume(ctx context.Context, payer identity.TenantSubjec
 	payerID := payer.UUID()
 	now := s.now()
 
-	tx, err := s.db.BeginTenantTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, payerID, ct.ID, BillingModePrepaid, now); err != nil {
-		return err
-	}
-
-	if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
-		Set("suspended_at = NULL").
-		Set("suspend_reason = NULL").
-		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
-		Exec(ctx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, ct.ID, BillingModePrepaid, now); err != nil {
+			return err
+		}
+		return q.ResumeCreditAccount(ctx, gen.ResumeCreditAccountParams{
+			TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID, UpdatedAt: now,
+		})
+	})
 }
 
 // IsSuspended reports whether (payer, credit_type) is currently suspended

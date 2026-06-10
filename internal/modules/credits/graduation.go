@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -27,12 +28,11 @@ func (s *CreditsService) CumulativePaidMicros(ctx context.Context, payer identit
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	var total int64
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		return s.db.Q(ctx).NewSelect().
-			Model((*models.CreditTransaction)(nil)).
-			ColumnExpr("COALESCE(SUM(amount), 0)").
-			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payer.UUID(), ct.ID).
-			Where("transaction_type = 'deposit'").
-			Scan(ctx, &total)
+		var e error
+		total, e = s.db.Gen(ctx).SumCreditDeposits(ctx, gen.SumCreditDepositsParams{
+			TenantID: tenantID, TenantSubjectID: payer.UUID(), CreditTypeID: ct.ID,
+		})
+		return e
 	})
 	return total, err
 }
@@ -73,23 +73,18 @@ func (s *CreditsService) GraduateTier(ctx context.Context, payer identity.Tenant
 
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	now := s.now()
-	tx, err := s.db.BeginTenantTx(ctx)
+	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		// Ensure a settings row exists (prepaid mode if creating; no-op when present).
+		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payer.UUID(), ct.ID, BillingModePrepaid, now); err != nil {
+			return err
+		}
+		return q.SetCreditAccountTier(ctx, gen.SetCreditAccountTierParams{
+			TenantID: tenantID, TenantSubjectID: payer.UUID(), CreditTypeID: ct.ID,
+			Tier: tier, Now: now,
+		})
+	})
 	if err != nil {
-		return "", err
-	}
-	defer func() { _ = tx.Rollback() }()
-	// Ensure a settings row exists (prepaid mode if creating; no-op when present).
-	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, payer.UUID(), ct.ID, BillingModePrepaid, now); err != nil {
-		return "", err
-	}
-	if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
-		Set("tier = ?", tier).
-		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payer.UUID(), ct.ID).
-		Exec(ctx); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
 		return "", err
 	}
 	return tier, nil

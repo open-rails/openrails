@@ -343,6 +343,24 @@ type BillingCreditType struct {
 	TenantID uuid.UUID
 }
 
+// Prepaid credit windows (issue #335): one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry.
+type BillingCreditWindow struct {
+	ID uuid.UUID
+	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
+	TenantID uuid.UUID
+	// OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.
+	TenantSubjectID uuid.UUID
+	CreditTypeID    uuid.UUID
+	// Total reserved for this window (open + refills). Reflected in credit_balances.held_balance while status=open.
+	HeldAmount int64
+	// Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.
+	SettledAmount int64
+	Status        string
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type BillingEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -59,7 +60,8 @@ func (s *CreditsService) InsertCaptureUsageEvent(ctx context.Context, p CaptureU
 	}
 	now := s.now()
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		if err := ensureTenantSubject(ctx, s.db.Q(ctx), tenant.FromContextOrDefault(ctx).UUID(), p.TenantSubjectID); err != nil {
+		q := s.db.Gen(ctx)
+		if err := ensureTenantSubject(ctx, q, tenant.FromContextOrDefault(ctx).UUID(), p.TenantSubjectID); err != nil {
 			return err
 		}
 		ev := &models.UsageEvent{
@@ -79,10 +81,31 @@ func (s *CreditsService) InsertCaptureUsageEvent(ctx context.Context, p CaptureU
 			OccurredAt:          now,
 			CreatedAt:           now,
 		}
-		_, err := s.db.Q(ctx).NewInsert().Model(ev).
-			On("CONFLICT (tenant_id, tenant_subject_id, event_type, source, source_id) DO NOTHING").
-			Exec(ctx)
-		return err
+		dims, err := toJSONBC(ev.Dimensions)
+		if err != nil {
+			return err
+		}
+		meta, err := toJSONBC(ev.Metadata)
+		if err != nil {
+			return err
+		}
+		return q.InsertUsageEventIfAbsent(ctx, gen.InsertUsageEventIfAbsentParams{
+			ID:                  ev.ID,
+			TenantID:            ev.TenantID,
+			TenantSubjectID:     ev.TenantSubjectID,
+			Actor:               ev.Actor,
+			Resource:            ev.Resource,
+			CreditTypeID:        ev.CreditTypeID,
+			EventType:           ev.EventType,
+			Dimensions:          dims,
+			Amount:              ev.Amount,
+			Source:              ev.Source,
+			SourceID:            ev.SourceID,
+			CreditTransactionID: ev.CreditTransactionID,
+			Metadata:            meta,
+			OccurredAt:          ev.OccurredAt,
+			CreatedAt:           ev.CreatedAt,
+		})
 	})
 }
 
@@ -90,18 +113,19 @@ func (s *CreditsService) InsertCaptureUsageEvent(ctx context.Context, p CaptureU
 // number of usage events, and the summed host-priced amount.
 type ServiceUsageRollupRow struct {
 	Key         string `json:"key"`
-	EventCount  int64  `json:"event_count" bun:"event_count"`
-	TotalAmount int64  `json:"total_amount" bun:"total_amount"`
+	EventCount  int64  `json:"event_count"`
+	TotalAmount int64  `json:"total_amount"`
 }
 
-// serviceUsageGroupExpr maps a group_by selector to the SQL key expression.
-// "actor" and "resource" read the typed attribution columns; the rest read the
-// long-tail string dimensions stashed in metadata at capture time.
-var serviceUsageGroupExpr = map[string]string{
-	"resource": "ue.resource",
-	"actor":    "ue.actor",
-	"function": "ue.metadata->>'function_name'",
-	"tier":     "ue.metadata->>'availability_tier'",
+// serviceUsageGroupKeys is the allowlist of group_by selectors. "actor" and
+// "resource" read the typed attribution columns; the rest read the long-tail
+// string dimensions stashed in metadata at capture time. The SQL-side mapping
+// lives in the ServiceUsageRollup query's CASE expression.
+var serviceUsageGroupKeys = map[string]bool{
+	"resource": true,
+	"actor":    true,
+	"function": true,
+	"tier":     true,
 }
 
 // ServiceUsageRollup returns per-dimension-VALUE spend for a tenant subject over
@@ -114,23 +138,27 @@ func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	keyExpr, ok := serviceUsageGroupExpr[strings.TrimSpace(groupBy)]
-	if !ok {
+	groupBy = strings.TrimSpace(groupBy)
+	if !serviceUsageGroupKeys[groupBy] {
 		return nil, fmt.Errorf("invalid group_by %q (want resource|actor|function|tier)", groupBy)
 	}
 	var out []ServiceUsageRollupRow
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		return s.db.Q(ctx).NewSelect().
-			TableExpr("billing.usage_events AS ue").
-			ColumnExpr("COALESCE("+keyExpr+", '') AS key").
-			ColumnExpr("COUNT(*) AS event_count").
-			ColumnExpr("COALESCE(SUM(ue.amount), 0) AS total_amount").
-			Where("ue.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-			Where("ue.tenant_subject_id = ?", payer.UUID()).
-			Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from.UTC(), to.UTC()).
-			GroupExpr("COALESCE("+keyExpr+", '')").
-			OrderExpr("total_amount DESC").
-			Scan(ctx, &out)
+		rows, err := s.db.Gen(ctx).ServiceUsageRollup(ctx, gen.ServiceUsageRollupParams{
+			TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+			TenantSubjectID: payer.UUID(),
+			GroupBy:         groupBy,
+			FromAt:          from.UTC(),
+			ToAt:            to.UTC(),
+		})
+		if err != nil {
+			return err
+		}
+		out = make([]ServiceUsageRollupRow, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, ServiceUsageRollupRow{Key: r.Key, EventCount: r.EventCount, TotalAmount: r.TotalAmount})
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -140,8 +168,8 @@ func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.
 
 // ResourceRevenueDailyRow is one day's revenue for a resource (millicents).
 type ResourceRevenueDailyRow struct {
-	Date             string `json:"date" bun:"date"`
-	AmountMillicents int64  `json:"amount_millicents" bun:"amount_millicents"`
+	Date             string `json:"date"`
+	AmountMillicents int64  `json:"amount_millicents"`
 }
 
 // ResourceRevenueDaily returns per-day revenue (sum of captured usage_event
@@ -158,16 +186,20 @@ func (s *CreditsService) ResourceRevenueDaily(ctx context.Context, resource stri
 	}
 	var out []ResourceRevenueDailyRow
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		return s.db.Q(ctx).NewSelect().
-			TableExpr("billing.usage_events AS ue").
-			ColumnExpr("to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date").
-			ColumnExpr("(COALESCE(SUM(ue.amount), 0) + 9) / 10 AS amount_millicents").
-			Where("ue.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-			Where("ue.resource = ?", resource).
-			Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from.UTC(), to.UTC()).
-			GroupExpr("1").
-			OrderExpr("1").
-			Scan(ctx, &out)
+		rows, err := s.db.Gen(ctx).ResourceRevenueDaily(ctx, gen.ResourceRevenueDailyParams{
+			TenantID: tenant.FromContextOrDefault(ctx).UUID(),
+			Resource: &resource,
+			FromAt:   from.UTC(),
+			ToAt:     to.UTC(),
+		})
+		if err != nil {
+			return err
+		}
+		out = make([]ResourceRevenueDailyRow, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, ResourceRevenueDailyRow{Date: r.Date, AmountMillicents: r.AmountMillicents})
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
@@ -42,14 +41,13 @@ func windowEnv(t *testing.T, depositMicros int64) (context.Context, *bun.DB, *cr
 		t.Skip("billing.credit_windows not found; run migrations before integration tests")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 	svc := credits.NewCreditsService(dbi)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	ctName := "test_windows_" + uuid.NewString()
 	ctID := uuid.New()
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := bunDB.NewInsert().Model(&models.CreditType{
 		ID: ctID, Name: ctName, DisplayName: "Test Windows", Unit: "usd", DecimalPlaces: 6, IsActive: true, CreatedAt: now,
 	}).Exec(ctx)
 	require.NoError(t, err)
@@ -233,8 +231,7 @@ func TestCreditWindows_ExpiryReleasesRemainder(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	bunDB := bun.NewDB(sqlDB, pgdialect.New())
 	models.RegisterModels(bunDB)
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	// Already past expiry; the sweep hasn't run yet.
 	w, err := svc.OpenWindow(ctx, credits.OpenWindowParams{
