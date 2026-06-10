@@ -241,8 +241,8 @@ func GetSolanaConfig(r *httprequest.Request) {
 	resp.Features.SolanaPay = true
 	resp.Features.RecurringSubscriptions = true
 	// Some wallets reject Solana Pay transaction requests that require a merchant
-	// co-signer; keep recurring subscriptions on the connected-wallet flow.
-	resp.Features.SolanaPayRecurringSubscriptions = false
+	// co-signer; require deployments to opt in after validating target wallets.
+	resp.Features.SolanaPayRecurringSubscriptions = solanaProc.SolanaPayRecurringSubscriptions
 
 	r.SuccessJSON(resp)
 }

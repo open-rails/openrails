@@ -308,6 +308,11 @@ processors:
     # network is auto-derived from test_mode: devnet if test_mode=true, mainnet otherwise
     # Explicit network setting overrides auto-derivation (rarely needed)
 
+    # Advertise recurring Solana Pay v2 transaction-request support to clients.
+    # Keep false until the deployment has validated target wallets with merchant
+    # co-signed recurring subscription transactions.
+    solana_pay_recurring_subscriptions: false
+
     # -------------------------------------------------------------------------
     # RPC Configuration (choose one approach)
     # -------------------------------------------------------------------------
