@@ -1,5 +1,5 @@
 {
-  "next_id": 341,
+  "next_id": 342,
   "issues": [
     {
       "id": 330,
@@ -690,6 +690,14 @@
       "priority": "medium",
       "description": "TestTierGroupDetection, TestEntitlementChangesOnTierChange, TestScheduledDowngrade, TestRenewMembershipDuplicateTransactionIsNoOp, TestLifecycleServiceUsesMockClock fail identically on origin/master (bun era) and on the sqlc-migration branch — verified via worktree runs on 2026-06-10 during #334 final verification, so they are NOT migration regressions. Observed modes: duplicate key on uq_subscriptions_tenant_subject_tier_group_active across subtests (CleanupSubscriptionsForUser resolves non-UUID test user ids to uuid.Nil via identity.TenantSubjectIDFromString, so per-user cleanup deletes nothing), and mock-clock/lifecycle assertion failures. Distinct from the admin_* family (#333). Suspect shared-suite state + the broken per-user cleanup; fix the cleanup to resolve the tenant subject through billing.tenant_subjects (issuer 'openrails:legacy-user') instead of pure-parsing.",
       "status": "open (filed 2026-06-10 during #334 verification)"
+    },
+    {
+      "id": 341,
+      "name": "ResourceRevenueDaily: field renamed to amount_micros but value is still millicents (10x low)",
+      "completed": false,
+      "priority": "medium",
+      "description": "Commit de22821 (#337 millicents->micros rename) renamed ResourceRevenueDailyRow.AmountMillicents to AmountMicros (json amount_micros, mirrored in go-client) but kept the `(SUM(ue.amount)+9)/10` conversion. usage_events.amount is already micro-dollars, so the reported value is micros/10 = millicents under a name that claims micros — consumers (tensorhub endpoint revenue, #410) reading it as micros see revenue 10x low. Fix is one of: drop the /10 so the value matches the name (wire values change 10x — coordinate with tensorhub), or rename back to amount_millicents. The sqlc query (internal/db/queries/usage_events.sql ResourceRevenueDaily) preserves the current behavior verbatim pending the decision.",
+      "status": "open (filed 2026-06-10 during #334 merge review)"
     }
   ]
 }
