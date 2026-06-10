@@ -886,7 +886,7 @@ COMMENT ON COLUMN billing.payments.tenant_subject_id IS 'OpenRails payable tenan
 CREATE TABLE billing.platform_audit (
     id uuid DEFAULT uuidv7() NOT NULL,
     actor_user_id text NOT NULL,
-    actor_org text,
+    actor_tenant text,
     action text NOT NULL,
     target_tenant_id uuid,
     reason text,
