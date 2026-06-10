@@ -209,12 +209,13 @@ func runServer(cmd *cobra.Command, args []string) error {
 			Warn("control plane: initial operator service token minted; capture the secret from logs now (shown once)")
 	}
 
-	// First-run provisioning (#327): auto-apply the unified bootstrap manifest
-	// once when the control plane has no tenants yet. A no-op on later starts;
-	// operators run `billing bootstrap apply` to apply later manifest edits.
-	if err := maybeFirstRunBootstrap(context.Background(), cfg, embeddedApp.App()); err != nil {
+	// Startup provisioning (#327): apply the unified bootstrap manifest on every
+	// start. The apply is idempotent + additive, so it converges the control
+	// plane to the mounted manifest each boot (registering e.g. a delegated
+	// issuer added after first provisioning) without a separate CLI step.
+	if err := applyStartupBootstrap(context.Background(), cfg, embeddedApp.App()); err != nil {
 		cleanupOnError = true
-		return fmt.Errorf("first-run bootstrap: %w", err)
+		return fmt.Errorf("startup bootstrap: %w", err)
 	}
 
 	cleanupOnError = false

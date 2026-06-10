@@ -79,12 +79,15 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 	return applyBootstrapManifest(ctx, cfg, embeddedApp.App(), manifest, out, opts.dryRun)
 }
 
-// maybeFirstRunBootstrap auto-applies the unified bootstrap manifest exactly
-// once, on the first server start from an empty control plane (#327). On later
-// starts (tenants already provisioned) it is a no-op, and operators apply
-// manifest edits with `billing bootstrap apply`. It is also a no-op when no
-// manifest file is configured/present or the control plane is disabled.
-func maybeFirstRunBootstrap(ctx context.Context, cfg *config.Config, a *app.App) error {
+// applyStartupBootstrap applies the unified bootstrap manifest on EVERY server
+// start (#327). The apply is idempotent + additive — tenant data is reconciled
+// (upsert; issuers/principals are registered if missing) and catalogs plan with
+// ArchiveMissingProducts:false, so nothing is ever removed — so reapplying on
+// every boot is safe and lets a mounted bootstrap file converge an existing
+// control plane (e.g. register a delegated issuer that was added after the DB
+// was first provisioned). No-op when no manifest is configured/present or the
+// control plane is disabled.
+func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) error {
 	path := resolveBootstrapManifestPath(cfg)
 	if path == "" {
 		return nil
@@ -97,18 +100,7 @@ func maybeFirstRunBootstrap(ctx context.Context, cfg *config.Config, a *app.App)
 	if err != nil {
 		return err
 	}
-	slugs := make([]string, 0, len(manifest.Tenants))
-	for i := range manifest.Tenants {
-		slugs = append(slugs, manifest.Tenants[i].Slug)
-	}
-	provisioned, err := bootstrap.AnyTenantProvisioned(ctx, cp, slugs)
-	if err != nil {
-		return fmt.Errorf("first-run check: %w", err)
-	}
-	if provisioned {
-		return nil // already bootstrapped; operators run `bootstrap apply` to apply edits
-	}
-	log.WithField("file", path).Info("first-run bootstrap: applying unified manifest")
+	log.WithField("file", path).Info("startup bootstrap: applying unified manifest (idempotent)")
 	return applyBootstrapManifest(ctx, cfg, a, manifest, log.StandardLogger().Out, false)
 }
 
