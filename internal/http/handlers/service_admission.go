@@ -247,7 +247,7 @@ type serviceBudgetCheckRequest struct {
 	TenantSubjectID     string                                  `json:"tenant_subject_id"`
 	Actor               string                                  `json:"actor"`
 	Windows             []billingservice.BudgetCheckWindowInput `json:"windows"`
-	RequestedMillicents int64                                   `json:"requested_millicents"`
+	RequestedMicros int64                                   `json:"requested_micros"`
 }
 
 // ServiceBudgetCheck computes rolling money-budget windows for (payer, actor)
@@ -272,7 +272,7 @@ func ServiceBudgetCheck(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, req.Actor, req.Windows, req.RequestedMillicents)
+	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, req.Actor, req.Windows, req.RequestedMicros)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget check failed")
 		return

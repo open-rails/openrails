@@ -179,8 +179,8 @@ type BillingBudgetReservation struct {
 	TenantSubjectID uuid.UUID
 	// Caller-supplied principal string whose rolling money-budget windows are capped. Opaque to OpenRails.
 	Actor              string
-	AmountMillicents   int64
-	CapturedMillicents int64
+	AmountMicros   int64
+	CapturedMicros int64
 	Status             string
 	Source             string
 	SourceID           string

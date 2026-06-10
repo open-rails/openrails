@@ -13,8 +13,8 @@ import (
 // windowed SUM() over these rows by CreatedAt — the windows themselves are
 // PASSED IN by the caller, never read from any tier table.
 //
-// Lifecycle: Reserve -> "active" (counts against `reserved` by AmountMillicents);
-// Capture -> "captured" (counts against `used` by CapturedMillicents);
+// Lifecycle: Reserve -> "active" (counts against `reserved` by AmountMicros);
+// Capture -> "captured" (counts against `used` by CapturedMicros);
 // Release -> "released" (counts against neither).
 //
 // Idempotency is enforced by a unique index on
@@ -30,12 +30,12 @@ type BudgetReservation struct {
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
 	// Actor is the caller-supplied principal string whose spend the windows cap.
 	Actor string `bun:"actor,notnull" json:"actor"`
-	// AmountMillicents is the reserved (authorized) amount; counts against
+	// AmountMicros is the reserved (authorized) amount; counts against
 	// `reserved` while Status == "active".
-	AmountMillicents int64 `bun:"amount_millicents,notnull" json:"amount_millicents"`
-	// CapturedMillicents is the actually captured amount; counts against `used`
+	AmountMicros int64 `bun:"amount_micros,notnull" json:"amount_micros"`
+	// CapturedMicros is the actually captured amount; counts against `used`
 	// once Status == "captured". 0 until captured.
-	CapturedMillicents int64 `bun:"captured_millicents,notnull" json:"captured_millicents"`
+	CapturedMicros int64 `bun:"captured_micros,notnull" json:"captured_micros"`
 	// Status is one of "active", "captured", "released".
 	Status string `bun:"status,notnull" json:"status"`
 	// Source + SourceID form the idempotency key (SourceID is typically the request id).

@@ -57,12 +57,12 @@ func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, *bun.DB, i
 	return budgets.NewService(dbi, clk), clk, bunDB, payer, actor, ctx
 }
 
-// windows returns a "$2 per 4h, $5 per week" budget in millicents.
-// $1 = 100 cents = 100_000 millicents.
+// windows returns a "$2 per 4h, $5 per week" budget in micros.
+// $1 = 100 cents = 100_000 micros.
 func windows() []budgets.BudgetWindow {
 	return []budgets.BudgetWindow{
-		{Key: "4h", WindowSeconds: 4 * 3600, LimitMillicents: 200_000},        // $2
-		{Key: "week", WindowSeconds: 7 * 24 * 3600, LimitMillicents: 500_000}, // $5
+		{Key: "4h", WindowSeconds: 4 * 3600, LimitMicros: 200_000},        // $2
+		{Key: "week", WindowSeconds: 7 * 24 * 3600, LimitMicros: 500_000}, // $5
 	}
 }
 

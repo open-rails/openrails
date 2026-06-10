@@ -105,7 +105,7 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Tena
 func toBudgetWindows(ws []models.BudgetWindowPolicy) []budgets.BudgetWindow {
 	out := make([]budgets.BudgetWindow, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMillicents: w.LimitMillicents})
+		out = append(out, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros})
 	}
 	return out
 }

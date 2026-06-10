@@ -389,10 +389,10 @@ func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollup
 	return out, nil
 }
 
-// ResourceRevenueDailyRow is one day's revenue (millicents) for an endpoint.
+// ResourceRevenueDailyRow is one day's revenue (micros) for an endpoint.
 type ResourceRevenueDailyRow struct {
 	Date             string `json:"date"`
-	AmountMillicents int64  `json:"amount_millicents"`
+	AmountMicros int64  `json:"amount_micros"`
 }
 
 // ResourceRevenueDaily returns per-day revenue for a resource (typed
@@ -405,7 +405,7 @@ func (s *Service) ResourceRevenueDaily(ctx context.Context, resource string, fro
 	}
 	out := make([]ResourceRevenueDailyRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, ResourceRevenueDailyRow{Date: r.Date, AmountMillicents: r.AmountMillicents})
+		out = append(out, ResourceRevenueDailyRow{Date: r.Date, AmountMicros: r.AmountMicros})
 	}
 	return out, nil
 }

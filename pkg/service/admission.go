@@ -247,7 +247,7 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.TenantSubject
 type BudgetCheckWindowInput struct {
 	Key             string `json:"key"`
 	WindowSeconds   int64  `json:"window_seconds"`
-	LimitMillicents int64  `json:"limit_millicents"`
+	LimitMicros int64  `json:"limit_micros"`
 }
 
 // BudgetCheck computes per-window used/reserved/remaining for (payer, actor)
@@ -256,7 +256,7 @@ type BudgetCheckWindowInput struct {
 // budget policy and passes the windows; OpenRails owns the spend actuals
 // (billing.budget_reservations). Powers the tensorhub delegated budget-window
 // display (#410) so it no longer reads tensorhub-local money tables.
-func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectID, actor string, windows []BudgetCheckWindowInput, requestedMillicents int64) ([]AdmitBudgetWindowDTO, error) {
+func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectID, actor string, windows []BudgetCheckWindowInput, requestedMicros int64) ([]AdmitBudgetWindowDTO, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -265,10 +265,10 @@ func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectI
 	}
 	bw := make([]budgets.BudgetWindow, 0, len(windows))
 	for _, w := range windows {
-		bw = append(bw, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMillicents: w.LimitMillicents})
+		bw = append(bw, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMicros: w.LimitMicros})
 	}
 	bsvc := budgets.NewService(s.rt.DB)
-	statuses, _, err := bsvc.Check(ctx, payer, actor, bw, requestedMillicents)
+	statuses, _, err := bsvc.Check(ctx, payer, actor, bw, requestedMicros)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +296,7 @@ type TierWindowInput struct {
 type TierBudgetWindowInput struct {
 	Key             string `json:"key"`
 	WindowSeconds   int64  `json:"window_seconds"`
-	LimitMillicents int64  `json:"limit_millicents"`
+	LimitMicros int64  `json:"limit_micros"`
 }
 type TierPolicyInput struct {
 	Tier              string                  `json:"tier"`
@@ -322,7 +322,7 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.TenantSubjec
 		pol.Windows = append(pol.Windows, models.ThroughputWindow{Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max})
 	}
 	for _, b := range in.BudgetWindows {
-		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMillicents: b.LimitMillicents})
+		pol.BudgetWindows = append(pol.BudgetWindows, models.BudgetWindowPolicy{Key: b.Key, WindowSeconds: b.WindowSeconds, LimitMicros: b.LimitMicros})
 	}
 	return admission.NewTierPolicyStore(s.rt.DB).UpsertTierPolicyFull(ctx, payer, in.Tier, pol)
 }

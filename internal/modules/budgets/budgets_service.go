@@ -10,8 +10,8 @@
 // State lives in billing.budget_reservations (migration 068). Each reservation is
 // one in-flight or settled charge:
 //
-//	Reserve  -> status "active"   (counts against `reserved` by amount_millicents)
-//	Capture  -> status "captured" (counts against `used` by captured_millicents)
+//	Reserve  -> status "active"   (counts against `reserved` by amount_micros)
+//	Capture  -> status "captured" (counts against `used` by captured_micros)
 //	Release  -> status "released" (counts against neither)
 //
 // All windows are ROLLING relative to now: a reservation counts against a window
@@ -55,18 +55,18 @@ type BudgetWindow struct {
 	Key string
 	// WindowSeconds is the rolling lookback length in seconds.
 	WindowSeconds int64
-	// LimitMillicents is the spend cap over the window, in millicents.
-	LimitMillicents int64
+	// LimitMicros is the spend cap over the window, in micros.
+	LimitMicros int64
 }
 
 // WindowStatus is the computed state of one window for a Check/Reserve.
 type WindowStatus struct {
 	Key               string    `json:"key"`
 	WindowSeconds     int64     `json:"window_seconds"`
-	Limit             int64     `json:"limit_millicents"`
-	Used              int64     `json:"used_millicents"`
-	Reserved          int64     `json:"reserved_millicents"`
-	Remaining         int64     `json:"remaining_millicents"`
+	Limit             int64     `json:"limit_micros"`
+	Used              int64     `json:"used_micros"`
+	Reserved          int64     `json:"reserved_micros"`
+	Remaining         int64     `json:"remaining_micros"`
 	ResetAt           time.Time `json:"reset_at"`
 	Allowed           bool      `json:"allowed"`
 	RetryAfterSeconds int64     `json:"retry_after_seconds,omitempty"`
@@ -108,9 +108,9 @@ func firstClock(clocks ...clockwork.Clock) clockwork.Clock {
 }
 
 // Check computes per-window used/reserved/remaining for an actor and returns the
-// allow/deny decision for requestedMillicents WITHOUT writing anything. allowed
+// allow/deny decision for requestedMicros WITHOUT writing anything. allowed
 // is true iff every window can absorb the request.
-func (s *Service) Check(ctx context.Context, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, requestedMillicents int64) ([]WindowStatus, bool, error) {
+func (s *Service) Check(ctx context.Context, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, requestedMicros int64) ([]WindowStatus, bool, error) {
 	if s == nil || s.db == nil {
 		return nil, false, fmt.Errorf("budgets service not initialized")
 	}
@@ -126,7 +126,7 @@ func (s *Service) Check(ctx context.Context, payer identity.TenantSubjectID, act
 	var allowed bool
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		statuses, allowed, e = s.computeWindows(ctx, s.db.Q(ctx), payer, actor, windows, requestedMillicents)
+		statuses, allowed, e = s.computeWindows(ctx, s.db.Q(ctx), payer, actor, windows, requestedMicros)
 		return e
 	})
 	if err != nil {
@@ -135,7 +135,7 @@ func (s *Service) Check(ctx context.Context, payer identity.TenantSubjectID, act
 	return statuses, allowed, nil
 }
 
-// Reserve idempotently reserves amountMillicents against the actor's windows.
+// Reserve idempotently reserves amountMicros against the actor's windows.
 //
 // It is idempotent on (tenant, payer, actor, source, source_id): if a matching
 // reservation row already exists it is returned as-is (allowed=true), regardless
@@ -144,7 +144,7 @@ func (s *Service) Check(ctx context.Context, payer identity.TenantSubjectID, act
 // reservation and returns allowed=true, else it inserts nothing and returns
 // allowed=false. The in-window rows are SELECTed and the insert performed in one
 // tx so the decision and the write are consistent.
-func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, amountMillicents int64, source, sourceID string, ttl time.Duration) (uuid.UUID, []WindowStatus, bool, error) {
+func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, amountMicros int64, source, sourceID string, ttl time.Duration) (uuid.UUID, []WindowStatus, bool, error) {
 	if s == nil || s.db == nil {
 		return uuid.Nil, nil, false, fmt.Errorf("budgets service not initialized")
 	}
@@ -160,7 +160,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 	if source == "" || sourceID == "" {
 		return uuid.Nil, nil, false, fmt.Errorf("source and source_id required")
 	}
-	if amountMillicents < 0 {
+	if amountMicros < 0 {
 		return uuid.Nil, nil, false, fmt.Errorf("amount must be non-negative")
 	}
 
@@ -191,7 +191,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 	if err == nil {
 		// Report the current window state alongside the existing reservation; the
 		// reservation already exists, so the decision is allowed.
-		statuses, _, cerr := s.computeWindows(ctx, tx, payer, actor, windows, amountMillicents)
+		statuses, _, cerr := s.computeWindows(ctx, tx, payer, actor, windows, amountMicros)
 		if cerr != nil {
 			return uuid.Nil, nil, false, cerr
 		}
@@ -204,7 +204,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 		return uuid.Nil, nil, false, err
 	}
 
-	statuses, allowed, err := s.computeWindows(ctx, tx, payer, actor, windows, amountMillicents)
+	statuses, allowed, err := s.computeWindows(ctx, tx, payer, actor, windows, amountMicros)
 	if err != nil {
 		return uuid.Nil, nil, false, err
 	}
@@ -222,7 +222,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 		TenantID:         tenantID,
 		TenantSubjectID:  payerID,
 		Actor:            actor,
-		AmountMillicents: amountMillicents,
+		AmountMicros: amountMicros,
 		Status:           "active",
 		Source:           source,
 		SourceID:         sourceID,
@@ -237,7 +237,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 	}
 	// Recompute so the returned statuses reflect the just-inserted reservation
 	// (the caller sees this reservation already counted against `reserved`).
-	statuses, _, err = s.computeWindows(ctx, tx, payer, actor, windows, amountMillicents)
+	statuses, _, err = s.computeWindows(ctx, tx, payer, actor, windows, amountMicros)
 	if err != nil {
 		return uuid.Nil, nil, false, err
 	}
@@ -247,21 +247,21 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 	return res.ID, statuses, true, nil
 }
 
-// Capture settles an active reservation: status -> "captured", captured_millicents
-// -> actualMillicents. After capture the reservation counts against `used` (by
-// actualMillicents) instead of `reserved`.
-func (s *Service) Capture(ctx context.Context, reservationID uuid.UUID, actualMillicents int64) error {
+// Capture settles an active reservation: status -> "captured", captured_micros
+// -> actualMicros. After capture the reservation counts against `used` (by
+// actualMicros) instead of `reserved`.
+func (s *Service) Capture(ctx context.Context, reservationID uuid.UUID, actualMicros int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("budgets service not initialized")
 	}
-	if actualMillicents < 0 {
+	if actualMicros < 0 {
 		return fmt.Errorf("captured amount must be non-negative")
 	}
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		r, err := s.db.Q(ctx).NewUpdate().
 			Model((*models.BudgetReservation)(nil)).
 			Set("status = ?", "captured").
-			Set("captured_millicents = ?", actualMillicents).
+			Set("captured_micros = ?", actualMicros).
 			Where("id = ?", reservationID).
 			Where("status = ?", "active").
 			Exec(ctx)
@@ -303,7 +303,7 @@ func (s *Service) Release(ctx context.Context, reservationID uuid.UUID) error {
 // computeWindows runs the per-window aggregation on the supplied queryable handle
 // (a tx during Reserve, the pinned conn during Check). q must already be
 // tenant-scoped (BeginTenantTx / RunInTenantConn) so RLS constrains the rows.
-func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, requestedMillicents int64) ([]WindowStatus, bool, error) {
+func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, requestedMicros int64) ([]WindowStatus, bool, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	payerID := payer.UUID()
@@ -314,8 +314,8 @@ func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.
 	for _, w := range windows {
 		windowStart := now.Add(-time.Duration(w.WindowSeconds) * time.Second)
 
-		// used = SUM(captured_millicents) of captured reservations in-window.
-		// reserved = SUM(amount_millicents) of active reservations in-window.
+		// used = SUM(captured_micros) of captured reservations in-window.
+		// reserved = SUM(amount_micros) of active reservations in-window.
 		// oldest = MIN(created_at) of any active|captured reservation in-window,
 		// for the rolling ResetAt.
 		var agg struct {
@@ -325,8 +325,8 @@ func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.
 		}
 		err := q.NewSelect().
 			Model((*models.BudgetReservation)(nil)).
-			ColumnExpr("COALESCE(SUM(captured_millicents) FILTER (WHERE status = 'captured'), 0) AS used").
-			ColumnExpr("COALESCE(SUM(amount_millicents) FILTER (WHERE status = 'active'), 0) AS reserved").
+			ColumnExpr("COALESCE(SUM(captured_micros) FILTER (WHERE status = 'captured'), 0) AS used").
+			ColumnExpr("COALESCE(SUM(amount_micros) FILTER (WHERE status = 'active'), 0) AS reserved").
 			ColumnExpr("MIN(created_at) FILTER (WHERE status IN ('active','captured')) AS oldest").
 			Where("tenant_id = ?", tenantID).
 			Where("tenant_subject_id = ? AND actor = ?", payerID, actor).
@@ -337,8 +337,8 @@ func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.
 			return nil, false, err
 		}
 
-		remaining := w.LimitMillicents - agg.Used - agg.Reserved
-		allowed := requestedMillicents <= remaining
+		remaining := w.LimitMicros - agg.Used - agg.Reserved
+		allowed := requestedMicros <= remaining
 
 		// ResetAt: when in-window reservations exist, the window frees up when the
 		// oldest one ages out (its created_at + window). With none, the window is
@@ -353,7 +353,7 @@ func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.
 		st := WindowStatus{
 			Key:           w.Key,
 			WindowSeconds: w.WindowSeconds,
-			Limit:         w.LimitMillicents,
+			Limit:         w.LimitMicros,
 			Used:          agg.Used,
 			Reserved:      agg.Reserved,
 			Remaining:     remaining,

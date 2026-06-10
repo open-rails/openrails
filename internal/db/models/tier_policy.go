@@ -38,11 +38,11 @@ type ThroughputPolicy struct {
 }
 
 // BudgetWindowPolicy is one rolling money-budget window for a tier (#304): at
-// most LimitMillicents (the ledger's smallest unit) of spend per WindowSeconds.
+// most LimitMicros (the ledger's smallest unit) of spend per WindowSeconds.
 type BudgetWindowPolicy struct {
 	Key             string `json:"key"`
 	WindowSeconds   int64  `json:"window_seconds"`
-	LimitMillicents int64  `json:"limit_millicents"`
+	LimitMicros int64  `json:"limit_micros"`
 }
 
 // ThroughputWindow is one limit: at most Max units of Unit per WindowSeconds.

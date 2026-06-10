@@ -449,9 +449,9 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 	}
 	var total int64
 	for _, x := range rows {
-		total += x.AmountMillicents
+		total += x.AmountMicros
 	}
-	r.SuccessJSON(map[string]any{"revenue_millicents": total, "daily": rows})
+	r.SuccessJSON(map[string]any{"revenue_micros": total, "daily": rows})
 }
 
 // ServiceUsageRollup returns per-dimension-value spend for a tenant subject over a

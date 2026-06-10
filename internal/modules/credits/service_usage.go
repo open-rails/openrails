@@ -138,14 +138,14 @@ func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.
 	return out, nil
 }
 
-// ResourceRevenueDailyRow is one day's revenue for a resource (millicents).
+// ResourceRevenueDailyRow is one day's revenue for a resource (micros).
 type ResourceRevenueDailyRow struct {
 	Date             string `json:"date" bun:"date"`
-	AmountMillicents int64  `json:"amount_millicents" bun:"amount_millicents"`
+	AmountMicros int64  `json:"amount_micros" bun:"amount_micros"`
 }
 
 // ResourceRevenueDaily returns per-day revenue (sum of captured usage_event
-// amounts; the ledger unit is micro-dollars, so /10 -> millicents) for
+// amounts; the ledger unit is micro-dollars, so /10 -> micros) for
 // a resource (typed attribution column), across ALL payers in the tenant, over
 // [from, to). Powers e.g. tensorhub endpoint revenue analytics (#410).
 func (s *CreditsService) ResourceRevenueDaily(ctx context.Context, resource string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
@@ -161,7 +161,7 @@ func (s *CreditsService) ResourceRevenueDaily(ctx context.Context, resource stri
 		return s.db.Q(ctx).NewSelect().
 			TableExpr("billing.usage_events AS ue").
 			ColumnExpr("to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date").
-			ColumnExpr("(COALESCE(SUM(ue.amount), 0) + 9) / 10 AS amount_millicents").
+			ColumnExpr("(COALESCE(SUM(ue.amount), 0) + 9) / 10 AS amount_micros").
 			Where("ue.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 			Where("ue.resource = ?", resource).
 			Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from.UTC(), to.UTC()).

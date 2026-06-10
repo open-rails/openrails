@@ -182,19 +182,19 @@ func TestAdmit_BudgetDeny(t *testing.T) {
 	adm, cs, store, payer, ct, ctx, _ := admitEnv(t)
 	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "free", models.ThroughputPolicy{
 		Windows:       []models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 1000}},
-		BudgetWindows: []models.BudgetWindowPolicy{{Key: "1h", WindowSeconds: 3600, LimitMillicents: 500}},
+		BudgetWindows: []models.BudgetWindowPolicy{{Key: "1h", WindowSeconds: 3600, LimitMicros: 500}},
 	}))
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed"})
 	require.NoError(t, err)
 
-	// Budgets are millicents; estimates are ledger micros (1 millicent = 10 micros).
-	// First request: 4000 micros reserves 400 of the 500-millicent/hour budget -> allowed.
+	// Budgets are micros; estimates are ledger micros (1 micro-dollar = 10 micros).
+	// First request: 4000 micros reserves 400 of the 500-micro-dollar/hour budget -> allowed.
 	d, err := adm.Admit(ctx, admission.AdmitRequest{TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 4000, Source: "usage", SourceID: "b1", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
 
-	// Second request (2000 micros = 200 millicents) pushes the window to 600 > 500 -> budget deny.
+	// Second request (2000 micros = 200 micros) pushes the window to 600 > 500 -> budget deny.
 	d, err = adm.Admit(ctx, admission.AdmitRequest{TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
 		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 2000, Source: "usage", SourceID: "b2", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)

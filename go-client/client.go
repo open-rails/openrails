@@ -295,7 +295,7 @@ type UsageRollupRow struct {
 type BudgetWindowInput struct {
 	Key             string `json:"key"`
 	WindowSeconds   int64  `json:"window_seconds"`
-	LimitMillicents int64  `json:"limit_millicents"`
+	LimitMicros int64  `json:"limit_micros"`
 }
 
 // BudgetWindow is one computed window from POST /v1/service/budget/check.
@@ -595,7 +595,7 @@ func (c *Client) UsageRollup(ctx context.Context, payerTenantID string, from, to
 
 // BudgetCheck asks OpenRails to compute rolling budget usage for host-owned
 // policy windows.
-func (c *Client) BudgetCheck(ctx context.Context, tenantSubjectID, actorID string, windows []BudgetWindowInput, requestedMillicents int64) ([]BudgetWindow, error) {
+func (c *Client) BudgetCheck(ctx context.Context, tenantSubjectID, actorID string, windows []BudgetWindowInput, requestedMicros int64) ([]BudgetWindow, error) {
 	if windows == nil {
 		windows = []BudgetWindowInput{}
 	}
@@ -606,7 +606,7 @@ func (c *Client) BudgetCheck(ctx context.Context, tenantSubjectID, actorID strin
 		"tenant_subject_id":    tenantSubjectID,
 		"actor":                actorID,
 		"windows":              windows,
-		"requested_millicents": requestedMillicents,
+		"requested_micros": requestedMicros,
 	}
 	if err := c.do(ctx, http.MethodPost, "/v1/service/budget/check", body, &resp); err != nil {
 		return nil, err
@@ -614,15 +614,15 @@ func (c *Client) BudgetCheck(ctx context.Context, tenantSubjectID, actorID strin
 	return resp.Windows, nil
 }
 
-// ResourceRevenueDailyRow is one day's revenue (millicents) for an endpoint.
+// ResourceRevenueDailyRow is one day's revenue (micros) for an endpoint.
 type ResourceRevenueDailyRow struct {
 	Date             string `json:"date"`
-	AmountMillicents int64  `json:"amount_millicents"`
+	AmountMicros int64  `json:"amount_micros"`
 }
 
 // ResourceRevenueResponse is the per-resource revenue rollup (#410).
 type ResourceRevenueResponse struct {
-	RevenueMillicents int64                     `json:"revenue_millicents"`
+	RevenueMicros int64                     `json:"revenue_micros"`
 	Daily             []ResourceRevenueDailyRow `json:"daily"`
 }
 

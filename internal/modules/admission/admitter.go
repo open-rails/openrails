@@ -170,8 +170,8 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 				ttl = d
 			}
 		}
-		// Budgets are denominated in millicents; the ledger is micro-dollars
-		// (1 millicent = 10 micros). Round up so budgets never under-count.
+		// Budgets are denominated in micros; the ledger is micro-dollars
+		// (1 micro-dollar = 10 micros). Round up so budgets never under-count.
 		resID, statuses, ok, err := a.budgets.Reserve(ctx, req.TenantSubjectID, req.Actor, pol.BudgetWindows, (req.EstimateMicros+9)/10, req.Source, req.SourceID, ttl)
 		if err != nil {
 			return AdmitDecision{}, err
