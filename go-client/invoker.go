@@ -20,7 +20,7 @@ type InvokerInputs struct {
 	UserID string
 	// Subject is the raw JWT subject, used as a UserID fallback.
 	Subject string
-	// Fallback is the last-resort attribution string (typically the owner slug)
+	// Fallback is the last-resort attribution string (typically the tenant slug)
 	// when no finer-grained identity is available.
 	Fallback string
 }
@@ -30,11 +30,11 @@ type InvokerInputs struct {
 //	service-token:<key_id> for a service-token caller
 //	<issuer>:<sub>     for a delegated platform JWT
 //	user:<id>          for a direct JWT / user principal
-//	<fallback>         when nothing finer is available (e.g. owner slug)
+//	<fallback>         when nothing finer is available (e.g. tenant slug)
 //
 // The granularity matters: OpenRails attributes spend to the actual invoker, so
 // a service-token key, a delegated platform user, and a direct user are distinct invokers
-// even under the same payer org.
+// even under the same payer tenant.
 func InvokerFor(in InvokerInputs) string {
 	switch strings.TrimSpace(in.Source) {
 	case "service_token":
