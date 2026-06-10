@@ -185,3 +185,14 @@ func currencyMinorUnits(currency string) int {
 		return 2
 	}
 }
+
+// formatTokenAmount converts a base unit amount to a human-readable string
+// with the specified number of decimal places.
+func formatTokenAmount(units uint64, decimals int) string {
+	if decimals <= 0 {
+		return fmt.Sprintf("%d", units)
+	}
+	scale := math.Pow10(decimals)
+	amount := float64(units) / scale
+	return fmt.Sprintf("%.0f", amount)
+}

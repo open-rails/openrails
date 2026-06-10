@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/audit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/internal/platform"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	embgin "github.com/open-rails/openrails/pkg/embedded/gin"
@@ -190,12 +191,20 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Opt into the OpenRails-owned AuthKit control plane (#284): the embedded core
 	// no longer builds it, so the standalone attaches it here (no-op in
 	// verifier-only mode) before bootstrapping.
-	if err := embcp.Attach(context.Background(), embeddedApp, cfg, nil); err != nil {
+	if err := embcp.Attach(context.Background(), embeddedApp.App(), cfg, nil); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("attach control plane: %w", err)
 	}
-	if err := platform.InitTelemetry(); err != nil {
+	om, err := platform.InitTelemetry()
+	if err != nil {
 		log.WithError(err).Error("failed to init telemetry")
+	} else if om != nil {
+		embeddedApp.SetObservability(om)
+		defer func() {
+			if err := om.Close(context.Background()); err != nil {
+				log.WithError(err).Error("telemetry shutdown failed")
+			}
+		}()
 	}
 
 	// Bootstrap the OpenRails-owned AuthKit control plane (#224) when enabled.

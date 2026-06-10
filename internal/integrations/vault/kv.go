@@ -60,7 +60,7 @@ func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]s
 	start := time.Now()
 	defer func() {
 		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
-			m.latency.Record(ctx, time.Since(start).Seconds())
+			m.Latency.Record(ctx, time.Since(start).Seconds())
 		}
 	}()
 
@@ -89,7 +89,7 @@ func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[str
 	start := time.Now()
 	defer func() {
 		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
-			m.latency.Record(ctx, time.Since(start).Seconds())
+			m.Latency.Record(ctx, time.Since(start).Seconds())
 		}
 	}()
 
@@ -109,7 +109,7 @@ func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
 	start := time.Now()
 	defer func() {
 		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
-			m.latency.Record(ctx, time.Since(start).Seconds())
+			m.Latency.Record(ctx, time.Since(start).Seconds())
 		}
 	}()
 
@@ -124,7 +124,7 @@ func (a *KVv2Adapter) ListSecrets(ctx context.Context, path string) ([]string, e
 	start := time.Now()
 	defer func() {
 		if m, ok := ctx.Value("otel.meter").(*observability.Meter); ok {
-			m.latency.Record(ctx, time.Since(start).Seconds())
+			m.Latency.Record(ctx, time.Since(start).Seconds())
 		}
 	}()
 

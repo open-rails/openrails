@@ -144,6 +144,7 @@ func newServer(e *embedded.Embedded) (*server.Server, error) {
 		Cache:         a.Cache,
 		Runtime:       a.Runtime,
 		Redis:         a.RedisClient,
+		Observability: e.Observability(),
 		Authenticator: a.Authenticator,
 		ControlPlane:  embcp.Get(a),
 	})

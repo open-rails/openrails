@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
-	"github.com/open-rails/openrails/internal/platform"
+	"github.com/open-rails/openrails/internal/observability"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -73,9 +73,7 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 
 // NewSubscriptionLifecycleService creates a new instance of SubscriptionLifecycleService
 func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductService, priceService *catalog.PriceService, entitlementService *entitlements.EntitlementService, notificationService NotificationEmailSender, paymentService *payments.PaymentService, eventLogService LifecycleEventLogger, clocks ...clockwork.Clock) *SubscriptionLifecycleService {
-	meter, _ := platform.InitTelemetry()
-	latency, _ := meter.Float64Histogram("subscription_create_latency_seconds", metric.WithDescription("Latency of membership creation"))
-	errCounter, _ := meter.Int64Counter("subscription_create_errors_total", metric.WithDescription("Total count of subscription creation errors"))
+	om := observability.NewMeter("subscription")
 	return &SubscriptionLifecycleService{
 		DB:                  db,
 		Config:              nil,                            // Set via SetConfig if feature flags are needed
@@ -86,8 +84,8 @@ func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductS
 		NotificationService: notificationService,
 		PaymentService:      paymentService,
 		EventLogService:     eventLogService,
-		latency:             latency,
-		errCounter:          errCounter,
+		latency:             om.Latency,
+		errCounter:          om.ErrCounter,
 	}
 }
 
@@ -190,7 +188,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	entitlementService := entitlements.NewEntitlementService(dbb, s.Clock())
 	entitlementService.SetClock(s.Clock()) // Propagate clock for testing
 	notificationRepo := repo.NewNotificationQueueRepo(dbb)
-	subService := NewSubscriptionService(dbb, priceService, productService, nil, nil, s.Clock())
+	subService := NewSubscriptionService(dbb, priceService, productService, nil, nil, nil, s.Clock())
 
 	price, err := priceService.GetByID(ctx, params.PriceID)
 	if err != nil {
@@ -279,8 +277,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			"existing_status":           activeSub.Status,
 			"existing_processor":        activeSub.Processor,
 			"processor_subscription_id": activeSub.ProcessorSubscriptionID,
-		}).Warn("User already has an active, pending, or past-due subscription for this product; aborting membership creation")
-		return nil, nil, fmt.Errorf("user already has an active, pending, or past-due subscription for this product")
+		}).Warn("User already has an active, pending, or past_due subscription for this product; aborting membership creation")
+		return nil, nil, fmt.Errorf("user already has an active, pending, or past_due subscription for this product")
 	}
 
 	now := s.now()
@@ -331,6 +329,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		existingPendingSub.StartedAt = periodStartsAt
 		existingPendingSub.CancelledAt = nil
 		existingPendingSub.CancelType = nil
+		existingPendingSub.CancelFeedback = nil
 		existingPendingSub.EndedAt = nil
 
 		if err := subService.Update(ctx, existingPendingSub); err != nil {
@@ -383,7 +382,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			"processor_subscription_id": subscription.ProcessorSubscriptionID,
 			"period_start":              periodStartsAt,
 			"period_end":                periodEndsAt,
-		}).Info("Created new subscription record for membership creation")
+		}).Info("Created new subscription record for membership")
 	}
 
 	notifications := make([]*models.NotificationQueue, 0, 1)
@@ -445,8 +444,6 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 					"subscription_id": subscription.ID,
 					"user_id":         subscription.TenantSubjectID.String(),
 					"entitlement":     ent,
-					"window_start":    window.StartAt,
-					"window_end":      window.EndAt,
 				}).Info("Subscription entitlement already covered by canonical timeline")
 				continue
 			}
@@ -472,53 +469,1155 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	// Create Payment record if payment info is provided
-	if params.TransactionID != "" && s.PaymentService != nil {
-		paymentService := payments.NewPaymentService(dbb, s.Clock())
+	if params.TransactionID != "" && paymentService != nil {
+		// Use provided amount/currency or fall back to price defaults
+		amount := params.Amount
+		if !params.AmountProvided && amount == 0 {
+			amount = price.Amount
+		}
+		currency := params.Currency
+		if currency == "" {
+			currency = price.Currency
+		}
+
 		payment := &models.Payment{
-			ID:              uuidutil.NewV7(),
-			TenantSubjectID: subscription.TenantSubjectID,
-			SubscriptionID:  &subscription.ID,
-			PriceID:         price.ID,
-			Processor:       params.Processor,
-			TransactionID:   params.TransactionID,
-			Amount:          params.Amount,
-			Currency:        params.Currency,
-			Status:          payments.PaymentStatusCompletedValue,
-			PurchasedAt:     now,
-			CreatedAt:       now,
+			ID:                       uuidutil.NewV7(),
+			TenantSubjectID:          subscription.TenantSubjectID,
+			PriceID:                  price.ID,
+			SubscriptionID:           &subscription.ID,
+			Processor:                params.Processor,
+			TransactionID:            params.TransactionID,
+			Amount:                   amount,
+			ListAmount:               price.Amount,
+			Currency:                 currency,
+			Metadata:                 params.PaymentMetadata,
+			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
+			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
+			PurchasedAt:              now,
+			CreatedAt:                now,
 		}
 		if err := paymentService.Create(ctx, payment); err != nil {
-			log.WithContext(ctx).WithError(err).Error("failed to create payment record for membership")
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"transaction_id":  params.TransactionID,
+				"subscription_id": subscription.ID,
+				"user_id":         subscription.TenantSubjectID.String(),
+			}).Error("failed to create payment record for new membership")
+			return nil, nil, fmt.Errorf("failed to create payment record for new membership: %w", err)
+		} else {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"transaction_id":  params.TransactionID,
+				"subscription_id": subscription.ID,
+				"user_id":         subscription.TenantSubjectID.String(),
+				"amount_cents":    amount,
+				"currency":        currency,
+			}).Info("Recorded payment for membership creation")
 		}
 	}
 
 	return subscription, notifications, nil
 }
 
-func (s *SubscriptionLifecycleService) logPaymentEvent(ctx context.Context, subscription *models.Subscription, processor models.Processor, transactionID string, amount int64, currency string) {
+// RenewMembership renews an existing subscription and extends the membership.
+// It also creates a Payment record for the renewal transaction.
+// If a scheduled downgrade exists (ScheduledPriceID), it will be applied on renewal.
+func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, params *RenewMembershipParams) error {
+	notifications := make([]*models.NotificationQueue, 0, 1)
+	renewalApplied := false
+
+	// Variables to capture from transaction for logging/notifications.
+	var subscriptionID uuid.UUID
+	var userID string
+
+	log.WithContext(ctx).WithFields(log.Fields{
+		"processor":                 params.Processor,
+		"processor_subscription_id": params.ProcessorSubscriptionID,
+		"transaction_id":            params.TransactionID,
+		"amount_cents":              params.Amount,
+		"currency":                  params.Currency,
+		"allow_terminal_reactivate": params.AllowTerminalReactivation,
+	}).Info("Starting membership renewal flow")
+
+	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		db := db.NewWithTx(tx)
+		priceService := catalog.NewPriceService(db)
+		productService := catalog.NewProductService(db)
+		notificationRepo := repo.NewNotificationQueueRepo(db)
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		entitlementService := entitlements.NewEntitlementService(db, s.Clock())
+		paymentService := payments.NewPaymentService(db, s.Clock())
+		entitlementService.SetClock(s.Clock())
+
+		// Find subscription - use processor name for gateway lookup
+		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), params.ProcessorSubscriptionID)
+		if err != nil {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"processor":                 params.Processor,
+				"processor_subscription_id": params.ProcessorSubscriptionID,
+			}).WithError(err).Error("Failed to load subscription for renewal")
+			return fmt.Errorf("subscription not found: %w", err)
+		}
+
+		if err := s.assertActiveTransitionAllowed(ctx, subscription, "renewal", params.AllowTerminalReactivation); err != nil {
+			return err
+		}
+
+		// Capture values for Payment creation after transaction
+		subscriptionID = subscription.ID
+		userID = subscription.TenantSubjectID.String()
+
+		// Check for scheduled downgrade
+		var price *models.Price
+		var oldProduct, newProduct *models.Product
+		applyingDowngrade := subscription.ScheduledPriceID != nil
+		oldEntitlementsSpec := models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot)
+
+		if applyingDowngrade {
+			// Get old product for entitlement comparison
+			oldPrice, err := priceService.GetByID(ctx, subscription.PriceID)
+			if err != nil {
+				return fmt.Errorf("failed to get current price: %w", err)
+			}
+			oldProduct, err = productService.GetByID(ctx, oldPrice.ProductID)
+			if err != nil {
+				return fmt.Errorf("failed to get current product: %w", err)
+			}
+
+			// Apply the scheduled downgrade - switch to the new price
+			price, err = priceService.GetByID(ctx, *subscription.ScheduledPriceID)
+			if err != nil {
+				return fmt.Errorf("failed to get scheduled price: %w", err)
+			}
+
+			newProduct, err = productService.GetByID(ctx, price.ProductID)
+			if err != nil {
+				return fmt.Errorf("failed to get new product: %w", err)
+			}
+
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"user_id":         subscription.TenantSubjectID.String(),
+				"old_price_id":    subscription.PriceID,
+				"new_price_id":    price.ID,
+				"old_product":     oldProduct.DisplayName,
+				"new_product":     newProduct.DisplayName,
+			}).Info("Applying scheduled downgrade on renewal")
+
+			// Update subscription to new price and product
+			subscription.PriceID = price.ID
+			subscription.ProductID = price.ProductID
+			subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(newProduct.EntitlementsSpec)
+			subscription.CreditsSpecSnapshot = models.CloneCreditsSpec(newProduct.CreditsSpec)
+			subscription.ScheduledPriceID = nil // Clear the scheduled downgrade
+		} else {
+			// Normal renewal - use current price
+			price, err = priceService.GetByID(ctx, subscription.PriceID)
+			if err != nil {
+				return fmt.Errorf("failed to get price: %w", err)
+			}
+			if len(subscription.EntitlementsSpecSnapshot) == 0 || len(subscription.CreditsSpecSnapshot) == 0 {
+				product, err := productService.GetByID(ctx, price.ProductID)
+				if err != nil {
+					return fmt.Errorf("failed to get product for renewal snapshot: %w", err)
+				}
+				if len(subscription.EntitlementsSpecSnapshot) == 0 {
+					subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+				}
+				if len(subscription.CreditsSpecSnapshot) == 0 {
+					subscription.CreditsSpecSnapshot = models.CloneCreditsSpec(product.CreditsSpec)
+				}
+			}
+		}
+
+		amount := params.Amount
+		if !params.AmountProvided && amount <= 0 {
+			amount = price.Amount
+		}
+		currency := strings.TrimSpace(params.Currency)
+		if currency == "" {
+			currency = price.Currency
+		}
+
+		if params.TransactionID != "" {
+			now := s.now().UTC()
+			payment := &models.Payment{
+				ID:                       uuidutil.NewV7(),
+				TenantSubjectID:          subscription.TenantSubjectID,
+				PriceID:                  price.ID,
+				SubscriptionID:           &subscription.ID,
+				Processor:                params.Processor,
+				TransactionID:            params.TransactionID,
+				Amount:                   amount,
+				ListAmount:               amount,
+				Currency:                 currency,
+				Metadata:                 params.PaymentMetadata,
+				EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
+				CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
+				PurchasedAt:              now,
+				CreatedAt:                now,
+			}
+			created, err := paymentService.CreateIfNotExists(ctx, payment)
+			if err != nil {
+				return fmt.Errorf("failed to persist renewal payment marker: %w", err)
+			}
+			if !created {
+				existingPayment, loadErr := paymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
+				if loadErr != nil {
+					return fmt.Errorf("failed to load duplicate renewal payment marker: %w", loadErr)
+				}
+				if existingPayment.SubscriptionID == nil || *existingPayment.SubscriptionID != subscription.ID {
+					return fmt.Errorf("duplicate renewal payment marker belongs to a different subscription")
+				}
+				if existingPayment.TenantSubjectID.String() != subscription.TenantSubjectID.String() {
+					return fmt.Errorf("duplicate renewal payment marker belongs to a different user")
+				}
+				if existingPayment.PriceID != price.ID {
+					return fmt.Errorf("duplicate renewal payment marker belongs to a different price")
+				}
+				if err := validateCompletedPayment(existingPayment, amount, currency); err != nil {
+					return err
+				}
+				log.WithContext(ctx).WithFields(log.Fields{
+					"transaction_id":  params.TransactionID,
+					"subscription_id": subscription.ID,
+					"processor":       params.Processor,
+				}).Info("Renewal already processed; skipping duplicate lifecycle mutation")
+				return nil
+			}
+		}
+
+		// Calculate new billing period
+		var periodStartsAt, periodEndsAt time.Time
+		if params.CurrentPeriodStartsAt != nil && !params.CurrentPeriodStartsAt.IsZero() {
+			periodStartsAt = params.CurrentPeriodStartsAt.UTC()
+			if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
+				periodEndsAt = params.CurrentPeriodEndsAt.UTC()
+			} else {
+				periodEndsAt = periodStartsAt.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+			}
+		} else if subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.IsZero() {
+			periodStartsAt = *subscription.CurrentPeriodEndsAt
+			periodEndsAt = periodStartsAt.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+		} else {
+			now := s.now()
+			periodStartsAt = now
+			periodEndsAt = now.Add(time.Duration(*price.BillingCycleDays) * 24 * time.Hour)
+		}
+		if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
+			periodEndsAt = params.CurrentPeriodEndsAt.UTC()
+		}
+
+		// Update subscription
+		subscription.Status = models.StatusActive
+		// Transaction IDs now stored in Purchase table
+		subscription.CurrentPeriodStartsAt = &periodStartsAt
+		subscription.CurrentPeriodEndsAt = &periodEndsAt
+		subscription.CancelledAt = nil
+		subscription.CancelType = nil
+		subscription.CancelFeedback = nil
+		subscription.EndedAt = nil
+		// Clear any dunning/grace fields on successful renewal.
+		subscription.ClearRetrySchedule()
+
+		if err := subService.Update(ctx, subscription); err != nil {
+			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+		renewalApplied = true
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id":           subscription.ID,
+			"user_id":                   subscription.TenantSubjectID.String(),
+			"price_id":                  price.ID,
+			"processor":                 subscription.Processor,
+			"processor_subscription_id": subscription.ProcessorSubscriptionID,
+			"period_start":              periodStartsAt,
+			"period_end":                periodEndsAt,
+			"downgrade_applied":         applyingDowngrade,
+		}).Info("Updated subscription for renewal")
+
+		// Append the next paid entitlement window for the subscription's entitlements.
+		// Entitlement windows are immutable: renewals create new windows instead of extending existing ones.
+		entitlementsSpec := subscription.EntitlementsSpecSnapshot
+		if len(entitlementsSpec) == 0 {
+			effectiveProduct := newProduct
+			if effectiveProduct == nil {
+				effectiveProduct, err = productService.GetByID(ctx, price.ProductID)
+				if err != nil {
+					return fmt.Errorf("failed to get product for renewal: %w", err)
+				}
+			}
+			entitlementsSpec = effectiveProduct.EntitlementsSpec
+		}
+		if entitlementsSpec != nil {
+			notBefore := periodStartsAt.UTC()
+			endAt := periodEndsAt.UTC()
+			for entName := range entitlementsSpec {
+				// If the subscription had processor-driven grace windows (e.g. CCBill dunning),
+				// remove them before pushing the next paid window. Otherwise, the grace tail can
+				// cause the paid push to be scheduled after grace or become a no-op.
+				grace := models.EntitlementSourceGrace
+				sid := subscription.ID
+				if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+					UserID:      subscription.TenantSubjectID.String(),
+					Entitlement: entName,
+					SourceType:  &grace,
+					SourceID:    &sid,
+					Reason:      models.EntitlementRevokeSuperseded,
+				}); err != nil {
+					return fmt.Errorf("failed to clear grace entitlement %s on renewal: %w", entName, err)
+				}
+
+				if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
+					UserID:      subscription.TenantSubjectID.String(),
+					Entitlement: entName,
+					NotBefore:   &notBefore,
+					EndAt:       &endAt,
+					SourceType:  models.EntitlementSourceSubscription,
+					SourceID:    subscription.ID,
+				}); err != nil {
+					return fmt.Errorf("failed to grant renewal entitlement %s: %w", entName, err)
+				}
+			}
+		}
+
+		// Handle entitlements for downgrade
+		if applyingDowngrade && oldProduct != nil && newProduct != nil {
+			// Determine which entitlements to revoke (in old but not in new)
+			oldEnts := make(map[string]bool)
+			if len(oldEntitlementsSpec) == 0 {
+				oldEntitlementsSpec = oldProduct.EntitlementsSpec
+			}
+			for name := range oldEntitlementsSpec {
+				oldEnts[name] = true
+			}
+
+			newEnts := make(map[string]bool)
+			for name := range newProduct.EntitlementsSpec {
+				newEnts[name] = true
+			}
+
+			// Revoke entitlements that are in old product but not in new product
+			for entName := range oldEnts {
+				if !newEnts[entName] {
+					reason := models.EntitlementRevokeDowngrade
+					st := models.EntitlementSourceSubscription
+					sid := subscription.ID
+					if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+						UserID:      subscription.TenantSubjectID.String(),
+						Entitlement: entName,
+						SourceType:  &st,
+						SourceID:    &sid,
+						Reason:      reason,
+					}); err != nil {
+						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+							"subscription_id": subscription.ID,
+							"entitlement":     entName,
+						}).Warn("Failed to revoke entitlement during downgrade")
+					} else {
+						log.WithContext(ctx).WithFields(log.Fields{
+							"subscription_id": subscription.ID,
+							"entitlement":     entName,
+						}).Info("Revoked entitlement due to downgrade")
+					}
+				}
+			}
+
+			// Any new entitlements introduced by the downgrade target product are granted by the renewal push above.
+		}
+
+		// Notify user
+		eventType := models.NotificationPremiumRenewed
+		var notifData map[string]any
+		if applyingDowngrade && newProduct != nil {
+			notifData = map[string]any{
+				"downgrade_applied": true,
+				"new_product":       newProduct.DisplayName,
+			}
+		}
+
+		notification := &models.NotificationQueue{
+			ID:              uuidutil.NewV7(),
+			TenantSubjectID: subscription.TenantSubjectID,
+			EventType:       eventType,
+			Data:            notifData,
+		}
+		if err := notificationRepo.Create(ctx, notification); err != nil {
+			log.WithContext(ctx).WithError(err).Error("failed to create membership renewed notification")
+		} else {
+			notifications = append(notifications, notification)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+	if !renewalApplied {
+		return nil
+	}
+
+	s.dispatchNotifications(ctx, notifications)
+
+	// Log the charge success event to ClickHouse
 	if s.EventLogService != nil {
-		s.EventLogService.LogEvent(ctx, LifecycleEvent{
-			TenantSubjectID: subscription.TenantSubjectID.String(),
-			SubscriptionID:  subscription.ID.String(),
-			EventType:       "membership_created",
-			Processor:       string(processor),
-			TransactionID:   transactionID,
-			Amount:          amount,
-			Currency:        currency,
-			Timestamp:       time.Now(),
-		})
+		sub := &models.Subscription{ID: subscriptionID, TenantSubjectID: identity.TenantSubjectIDFromString(userID).UUID()}
+		if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, params.Processor, params.TransactionID, params.Amount, params.Currency, s.now(), map[string]interface{}{"renewal": true}); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"subscription_id": subscriptionID,
+				"event_type":      "charge_success",
+			}).Warn("failed to log renewal payment event to ClickHouse")
+		}
+	}
+
+	return nil
+}
+
+// ReactivateMembership reactivates a previously cancelled subscription and restores
+// its paid entitlement windows for the current product tier.
+func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context, params *ReactivateMembershipParams) (*models.Subscription, error) {
+	if params == nil {
+		return nil, fmt.Errorf("reactivation params are required")
+	}
+
+	processorSubID := strings.TrimSpace(params.ProcessorSubscriptionID)
+	if processorSubID == "" {
+		return nil, fmt.Errorf("processor subscription id is required")
+	}
+
+	now := s.now().UTC()
+	if params.CurrentPeriodEndsAt == nil || params.CurrentPeriodEndsAt.IsZero() || !params.CurrentPeriodEndsAt.After(now) {
+		return nil, fmt.Errorf("reactivation requires a future paid-through period end")
+	}
+
+	log.WithContext(ctx).WithFields(log.Fields{
+		"processor":                 params.Processor,
+		"processor_subscription_id": processorSubID,
+		"has_period_override":       params.CurrentPeriodEndsAt != nil,
+		"allow_terminal_reactivate": params.AllowTerminalReactivation,
+	}).Info("Starting membership reactivation flow")
+
+	var reactivated *models.Subscription
+
+	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		txdb := db.NewWithTx(tx)
+		priceService := catalog.NewPriceService(txdb)
+		productService := catalog.NewProductService(txdb)
+		subService := NewSubscriptionService(txdb, priceService, productService, nil, nil, nil, s.Clock())
+		entitlementService := entitlements.NewEntitlementService(txdb, s.Clock())
+		entitlementService.SetClock(s.Clock())
+
+		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), processorSubID)
+		if err != nil {
+			return fmt.Errorf("failed to get subscription for reactivation: %w", err)
+		}
+
+		if err := s.assertActiveTransitionAllowed(ctx, subscription, "reactivation", params.AllowTerminalReactivation); err != nil {
+			return err
+		}
+
+		price, err := priceService.GetByID(ctx, subscription.PriceID)
+		if err != nil {
+			return fmt.Errorf("failed to load subscription price: %w", err)
+		}
+
+		if len(subscription.EntitlementsSpecSnapshot) == 0 || len(subscription.CreditsSpecSnapshot) == 0 {
+			product, err := productService.GetByID(ctx, price.ProductID)
+			if err != nil {
+				return fmt.Errorf("failed to load subscription product: %w", err)
+			}
+			if len(subscription.EntitlementsSpecSnapshot) == 0 {
+				subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+			}
+			if len(subscription.CreditsSpecSnapshot) == 0 {
+				subscription.CreditsSpecSnapshot = models.CloneCreditsSpec(product.CreditsSpec)
+			}
+		}
+
+		periodStartsAt := now
+		periodEndsAt := params.CurrentPeriodEndsAt.UTC()
+
+		subscription.Status = models.StatusActive
+		subscription.CurrentPeriodStartsAt = &periodStartsAt
+		subscription.CurrentPeriodEndsAt = &periodEndsAt
+		subscription.CancelledAt = nil
+		subscription.CancelType = nil
+		subscription.CancelFeedback = nil
+		subscription.EndedAt = nil
+		subscription.ClearRetrySchedule()
+
+		if err := subService.Update(ctx, subscription); err != nil {
+			return fmt.Errorf("failed to update reactivated subscription: %w", err)
+		}
+
+		entNames := make([]string, 0)
+		entitlementsSpec := subscription.EntitlementsSpecSnapshot
+		if entitlementsSpec != nil && len(entitlementsSpec) > 0 {
+			entNames = make([]string, 0, len(entitlementsSpec))
+			for name := range entitlementsSpec {
+				entNames = append(entNames, name)
+			}
+		} else {
+			entNames = append(entNames, "premium")
+		}
+
+		notBefore := periodStartsAt.UTC()
+		endAt := periodEndsAt.UTC()
+		graceSource := models.EntitlementSourceGrace
+		subSource := models.EntitlementSourceSubscription
+		subID := subscription.ID
+
+		for _, entName := range entNames {
+			if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+				UserID:      subscription.TenantSubjectID.String(),
+				Entitlement: entName,
+				SourceType:  &graceSource,
+				SourceID:    &subID,
+				Reason:      models.EntitlementRevokeSuperseded,
+			}); err != nil {
+				return fmt.Errorf("failed to clear grace entitlement %s on reactivation: %w", entName, err)
+			}
+
+			if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
+				UserID:      subscription.TenantSubjectID.String(),
+				Entitlement: entName,
+				NotBefore:   &notBefore,
+				EndAt:       &endAt,
+				SourceType:  subSource,
+				SourceID:    subID,
+			}); err != nil {
+				return fmt.Errorf("failed to restore entitlement %s on reactivation: %w", entName, err)
+			}
+		}
+
+		reactivated = subscription
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	log.WithContext(ctx).WithFields(log.Fields{
+		"subscription_id":           reactivated.ID,
+		"user_id":                   reactivated.TenantSubjectID.String(),
+		"processor":                 reactivated.Processor,
+		"processor_subscription_id": reactivated.ProcessorSubscriptionID,
+		"current_period_ends_at":    reactivated.CurrentPeriodEndsAt,
+	}).Info("Membership reactivation flow completed")
+
+	return reactivated, nil
+}
+
+// CancelMembership cancels a subscription and revokes associated roles
+func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, params *CancelMembershipParams) error {
+	notifications := make([]*models.NotificationQueue, 0, 1)
+
+	// Variables to capture from transaction for event logging
+	var subscriptionID uuid.UUID
+	var userID string
+	var processor models.Processor
+
+	var procName string
+	if params.Processor != nil {
+		procName = string(*params.Processor)
+	}
+	procSub := normalize.FromPtr(params.ProcessorSubscriptionID)
+	subID := ""
+	if params.SubscriptionID != nil {
+		subID = params.SubscriptionID.String()
+	}
+	cancelFeedback := normalize.FromPtr(params.CancelFeedback)
+	log.WithContext(ctx).WithFields(log.Fields{
+		"subscription_id":           subID,
+		"processor":                 procName,
+		"processor_subscription_id": procSub,
+		"cancel_type":               params.CancelType,
+		"revoke_access_immediately": params.RevokeAccess,
+		"cancel_feedback_provided":  cancelFeedback != "",
+	}).Info("Starting membership cancellation flow")
+
+	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		db := db.NewWithTx(tx)
+		priceService := catalog.NewPriceService(db)
+		productService := catalog.NewProductService(db)
+		notificationRepo := repo.NewNotificationQueueRepo(db)
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		entSvc := entitlements.NewEntitlementService(db, s.Clock())
+		entSvc.SetClock(s.Clock()) // Propagate clock for testing
+
+		// Use processor name for gateway lookup
+		// Find subscription
+		var subscription *models.Subscription
+		var err error
+
+		if params.SubscriptionID != nil {
+			subscription, err = subService.GetByID(ctx, *params.SubscriptionID)
+		} else if params.ProcessorSubscriptionID != nil && params.Processor != nil {
+			subscription, err = subService.GetByProcessorSubscriptionID(ctx, string(*params.Processor), *params.ProcessorSubscriptionID)
+		} else {
+			return fmt.Errorf("either subscription_id or processor details must be provided")
+		}
+
+		if err != nil {
+			log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for cancellation")
+			return fmt.Errorf("subscription not found: %w", err)
+		}
+
+		// Capture values for event logging after transaction
+		subscriptionID = subscription.ID
+		userID = subscription.TenantSubjectID.String()
+		processor = subscription.Processor
+
+		// Update subscription status
+		now := s.now()
+		endAt := now
+		if params.RevokeAccess {
+			// Immediate revocation
+			subscription.CurrentPeriodEndsAt = &now
+			// Keep period bounds valid when revoking a future-dated window.
+			// Some records may have CurrentPeriodStartsAt in the future due to precomputed renewals.
+			if subscription.CurrentPeriodStartsAt != nil && !subscription.CurrentPeriodStartsAt.Before(now) {
+				adjustedStart := now.Add(-time.Second)
+				subscription.CurrentPeriodStartsAt = &adjustedStart
+			}
+		} else if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
+			// Period-end cancellation: keep access until paid term ends.
+			endAt = *subscription.CurrentPeriodEndsAt
+		}
+
+		subscription.Status = models.StatusCancelled
+		subscription.EndedAt = &endAt
+		subscription.CancelType = &params.CancelType
+		subscription.CancelFeedback = params.CancelFeedback
+		subscription.CancelledAt = &now
+		subscription.ClearRetrySchedule()
+
+		if err := subService.Update(ctx, subscription); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+			}).Error("Failed to update subscription during cancellation")
+			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id": subscription.ID,
+			"user_id":         subscription.TenantSubjectID.String(),
+			"status":          subscription.Status,
+			"ended_at":        subscription.EndedAt,
+			"period_end":      subscription.CurrentPeriodEndsAt,
+		}).Info("Updated subscription record during cancellation")
+
+		// Cancel cascade to stop the Solana cranker (#264). OpenRails is the only
+		// puller of recurring Solana subscriptions; the hourly cranker's ListDue
+		// query filters status = active, so flipping the linked solana_subscriptions
+		// row to cancelled stops it from ever pulling again. Runs inside the same
+		// tenant tx (via the tx-bound db handle) so the cascade commits atomically
+		// with the lifecycle cancellation. Idempotent and tolerant of a missing row
+		// (a Solana sub that was never enrolled): we log and continue rather than
+		// failing the cancel. No-op for non-Solana processors.
+		if subscription.Processor == models.ProcessorSolana {
+			if err := cancelSolanaSubscriptionCascade(ctx, db, subscription.ID); err != nil {
+				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+				}).Error("failed to cascade cancellation to solana_subscriptions row; cranker may keep pulling")
+			}
+		}
+
+		// Entitlement windows are immutable; period-end cancellations require no entitlement mutation.
+		// Only immediate cancellations/revocations remove access now by revoking the subscription's entitlement windows.
+		if entSvc != nil && (params.RevokeAccess || subscription.CurrentPeriodEndsAt == nil || !subscription.CurrentPeriodEndsAt.After(now)) {
+			revokeReason := models.EntitlementRevokeAdmin
+			if params.CancelType == models.CancelTypeChargeback {
+				revokeReason = models.EntitlementRevokeChargeback
+			}
+
+			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.TenantSubjectID.String(), subscription.ID, revokeReason, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+				}).Error("failed to revoke entitlements during cancellation")
+			}
+		}
+
+		reason := PremiumEndReasonAdmin
+		switch params.CancelType {
+		case models.CancelTypeUser:
+			reason = PremiumEndReasonUserCancel
+		case models.CancelTypeExpired:
+			reason = PremiumEndReasonExpired
+		case models.CancelTypeMerchant:
+			reason = PremiumEndReasonProcessor
+		}
+
+		notification := &models.NotificationQueue{
+			ID:              uuidutil.NewV7(),
+			TenantSubjectID: subscription.TenantSubjectID,
+			EventType:       models.NotificationPremiumEnded,
+			Data:            map[string]any{"reason": string(reason)},
+		}
+		if err := notificationRepo.Create(ctx, notification); err != nil {
+			log.WithContext(ctx).WithError(err).Error("failed to create membership ended notification")
+		} else {
+			notifications = append(notifications, notification)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	s.dispatchNotifications(ctx, notifications)
+	log.WithContext(ctx).WithFields(log.Fields{
+		"subscription_id": subscriptionID,
+		"user_id":         userID,
+	}).Info("Membership cancellation flow completed")
+
+	// Log the subscription cancelled event to ClickHouse
+	if s.EventLogService != nil {
+		if err := s.EventLogService.LogLifecycleCancellation(ctx, subscriptionID, userID, processor, params.CancelType, params.RevokeAccess, s.now()); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"subscription_id": subscriptionID,
+				"event_type":      "subscription_cancelled",
+			}).Warn("failed to log subscription cancelled event to ClickHouse")
+		}
+	}
+
+	return nil
+}
+
+// cancelSolanaSubscriptionCascade flips the linked billing.solana_subscriptions
+// row to cancelled so the hourly Solana cranker's ListDue (which filters
+// status = active) no longer returns it — billing stops because OpenRails is the
+// only puller (#264). `d` must be the tx-bound db handle so the cascade commits
+// atomically with the lifecycle cancellation. Idempotent: setting an
+// already-cancelled row to cancelled is a no-op. Tolerant of a missing row (a
+// Solana sub that was never enrolled): returns nil after logging so the cancel
+// itself never fails on the cascade.
+func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscriptionID uuid.UUID) error {
+	solanaRepo := repo.NewSolanaSubscriptionRepo(d)
+	row, err := solanaRepo.GetBySubscriptionID(ctx, subscriptionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscriptionID,
+			}).Info("no solana_subscriptions row linked to cancelled subscription; nothing to cascade")
+			return nil
+		}
+		return fmt.Errorf("lookup solana_subscriptions row: %w", err)
+	}
+	if row.Status == models.SolanaSubscriptionCancelled {
+		return nil
+	}
+	if err := solanaRepo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCancelled); err != nil {
+		return fmt.Errorf("set solana_subscriptions status cancelled: %w", err)
+	}
+	log.WithContext(ctx).WithFields(log.Fields{
+		"subscription_id":        subscriptionID,
+		"solana_subscription_id": row.ID,
+	}).Info("cascaded cancellation to solana_subscriptions row; cranker stopped")
+	return nil
+}
+
+// ExpireMembership expires a subscription and revokes associated roles
+func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, subscriptionID uuid.UUID) error {
+	notifications := make([]*models.NotificationQueue, 0, 1)
+
+	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Starting membership expiration flow")
+
+	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		db := db.NewWithTx(tx)
+		priceService := catalog.NewPriceService(db)
+		productService := catalog.NewProductService(db)
+		notificationRepo := repo.NewNotificationQueueRepo(db)
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		entSvc := entitlements.NewEntitlementService(db, s.Clock())
+		entSvc.SetClock(s.Clock()) // Propagate clock for testing
+
+		subscription, err := subService.GetByID(ctx, subscriptionID)
+		if err != nil {
+			log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for expiration")
+			return fmt.Errorf("subscription not found: %w", err)
+		}
+
+		// Update subscription status - Wave 18: expired = cancelled (never rebill again)
+		now := s.now()
+		subscription.Status = models.StatusCancelled
+		subscription.CancelledAt = &now
+		expired := models.CancelTypeExpired
+		subscription.CancelType = &expired
+		subscription.EndedAt = &now
+		subscription.ClearRetrySchedule()
+
+		if err := subService.Update(ctx, subscription); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+			}).Error("Failed to update subscription during expiration")
+			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id": subscription.ID,
+			"user_id":         subscription.TenantSubjectID.String(),
+		}).Info("Marked subscription as expired")
+
+		// Revoke entitlements
+		if entSvc != nil {
+			names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
+			if err != nil {
+				log.WithContext(ctx).WithError(err).Error("failed to list entitlements for expired subscription")
+			} else {
+				st := models.EntitlementSourceSubscription
+				sid := subscription.ID
+				for _, entName := range names {
+					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+						UserID:      subscription.TenantSubjectID.String(),
+						Entitlement: entName,
+						SourceType:  &st,
+						SourceID:    &sid,
+						Reason:      models.EntitlementRevokeDunning,
+					}); err != nil {
+						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+							"subscription_id": subscription.ID,
+							"entitlement":     entName,
+						}).Error("failed to revoke entitlement for expired subscription")
+					}
+				}
+			}
+
+			// Terminal expiration: immediately remove any grace windows for this subscription too.
+			graceNames, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceGrace, subscription.ID)
+			if err != nil {
+				log.WithContext(ctx).WithError(err).Error("failed to list grace entitlements for expired subscription")
+			} else {
+				st := models.EntitlementSourceGrace
+				sid := subscription.ID
+				for _, entName := range graceNames {
+					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+						UserID:      subscription.TenantSubjectID.String(),
+						Entitlement: entName,
+						SourceType:  &st,
+						SourceID:    &sid,
+						Reason:      models.EntitlementRevokeDunning,
+					}); err != nil {
+						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+							"subscription_id": subscription.ID,
+							"entitlement":     entName,
+						}).Error("failed to revoke grace entitlement for expired subscription")
+					}
+				}
+			}
+		}
+
+		notification := &models.NotificationQueue{
+			ID:              uuidutil.NewV7(),
+			TenantSubjectID: subscription.TenantSubjectID,
+			EventType:       models.NotificationPremiumEnded,
+			Data:            map[string]any{"reason": string(PremiumEndReasonExpired)},
+		}
+		if err := notificationRepo.Create(ctx, notification); err != nil {
+			log.WithContext(ctx).WithError(err).Error("failed to create membership expired notification")
+		} else {
+			notifications = append(notifications, notification)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	s.dispatchNotifications(ctx, notifications)
+	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Membership expiration flow completed")
+
+	return nil
+}
+
+// FailMembership marks a subscription as failed due to payment issues.
+//
+// Behavior depends on config.FeatureFlags.DunningMode:
+//   - "on" or "dry_run_only": Normal dunning flow - go to past_due, schedule retries
+//   - "off": Immediate cancellation - no grace period, no retries
+func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *FailMembershipParams) error {
+	if params == nil || params.SubscriptionID == nil || *params.SubscriptionID == uuid.Nil {
+		return fmt.Errorf("subscription_id is required")
+	}
+
+	notifications := make([]*models.NotificationQueue, 0, 1)
+
+	// Variables to capture from transaction for event logging
+	var subscriptionID uuid.UUID
+	var userID string
+	var finalStatus models.SubscriptionStatus
+
+	// Check dunning mode from feature flags
+	dunningMode := config.DunningModeOn
+	if s.Config != nil {
+		dunningMode = s.Config.GetDunningMode()
+	}
+
+	log.WithContext(ctx).WithFields(log.Fields{
+		"processor":                 params.Processor,
+		"processor_subscription_id": params.SubscriptionID,
+		"failure_reason":            normalize.FromPtr(params.FailureReason),
+		"failure_code":              normalize.FromPtr(params.FailureCode),
+		"dunning_mode":              dunningMode,
+	}).Warn("Starting membership failure flow")
+
+	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		db := db.NewWithTx(tx)
+		priceService := catalog.NewPriceService(db)
+		productService := catalog.NewProductService(db)
+		notificationRepo := repo.NewNotificationQueueRepo(db)
+		subService := NewSubscriptionService(db, priceService, productService, nil, nil, nil, s.Clock())
+		entSvc := entitlements.NewEntitlementService(db, s.Clock())
+		entSvc.SetClock(s.Clock()) // Propagate clock for testing
+
+		subscription, err := subService.GetByID(ctx, *params.SubscriptionID)
+		if err != nil {
+			log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for failure flow")
+			return fmt.Errorf("subscription not found: %w", err)
+		}
+
+		// Capture values for event logging
+		subscriptionID = subscription.ID
+		userID = subscription.TenantSubjectID.String()
+
+		now := s.now()
+
+		// If dunning is off, immediately cancel - no grace period, no retries
+		if dunningMode == config.DunningModeOff {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"user_id":         subscription.TenantSubjectID.String(),
+			}).Warn("Dunning mode is 'off'; immediately cancelling subscription (no recovery)")
+
+			expired := models.CancelTypeExpired
+			reason := normalize.FromPtr(params.FailureReason)
+			if reason == "" {
+				reason = "transaction_failure"
+			}
+			subscription.Status = models.StatusCancelled
+			subscription.CancelledAt = &now
+			subscription.CancelType = &expired
+			subscription.CancelFeedback = &reason
+			subscription.EndedAt = &now
+			subscription.ClearRetrySchedule()
+		} else {
+			// Normal dunning flow (for "on" or "dry_run_only" modes)
+			// Update subscription status - failed payment = past_due (still trying to recover)
+			subscription.Status = models.StatusPastDue
+
+			// Dunning policy for NMI-backed subscriptions: try every 3 days, up to 5 failures total
+			// Example timeline (D = day of initial failure): D+3, D+6, D+9, D+12, D+15
+			subscription.LastRetryAt = &now
+			if subscription.RetryAttempts == nil {
+				attempts := 1
+				subscription.RetryAttempts = &attempts
+			} else {
+				*subscription.RetryAttempts++
+			}
+
+			// If we've reached MaxDunningFailures, cancel; otherwise schedule next attempt in DunningInterval
+			if *subscription.RetryAttempts >= MaxDunningFailures {
+				expired := models.CancelTypeExpired
+				reason := normalize.FromPtr(params.FailureReason)
+				if reason == "" {
+					reason = "transaction_failure"
+				}
+				subscription.Status = models.StatusCancelled
+				subscription.CancelledAt = &now
+				subscription.CancelType = &expired
+				subscription.CancelFeedback = &reason
+				subscription.EndedAt = &now
+				subscription.ClearRetrySchedule()
+			} else {
+				nextRetry := now.Add(DunningInterval)
+				subscription.NextRetryAt = &nextRetry
+			}
+		}
+
+		// For OpenRails-driven processors (NMI-backed + Solana), we control retry
+		// timing; if the retry schedule would extend beyond the paid term end, model
+		// that access as explicit grace entitlement windows. (#257: Solana gets the
+		// same paid-through grace as NMI.)
+		if processors.OpenRailsDrivenDunning(subscription.Processor) && subscription.Status == models.StatusPastDue {
+			if subscription.CurrentPeriodEndsAt != nil && subscription.NextRetryAt != nil && subscription.NextRetryAt.After(*subscription.CurrentPeriodEndsAt) {
+				paidEnd := subscription.CurrentPeriodEndsAt.UTC()
+				graceUntil := subscription.NextRetryAt.UTC()
+
+				names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
+				if err != nil {
+					log.WithContext(ctx).WithError(err).Error("failed to list subscription entitlements for grace append")
+				} else {
+					for _, entName := range names {
+						notBefore := now.UTC()
+						if paidEnd.After(notBefore) {
+							notBefore = paidEnd
+						}
+						_, err := entSvc.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
+							UserID:      subscription.TenantSubjectID.String(),
+							Entitlement: entName,
+							NotBefore:   &notBefore,
+							EndAt:       &graceUntil,
+							SourceType:  models.EntitlementSourceGrace,
+							SourceID:    subscription.ID,
+						})
+						if err != nil {
+							log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+								"subscription_id": subscription.ID,
+								"entitlement":     entName,
+							}).Error("failed to append grace entitlement window during dunning failure")
+						}
+					}
+				}
+			}
+		}
+
+		if err := subService.Update(ctx, subscription); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+			}).Error("Failed to update subscription during failure flow")
+			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id": subscription.ID,
+			"user_id":         subscription.TenantSubjectID.String(),
+			"status":          subscription.Status,
+			"retry_attempts":  subscription.RetryAttempts,
+			"next_retry_at":   subscription.NextRetryAt,
+		}).Warn("Updated subscription during failure flow")
+
+		// Capture final status for event logging
+		finalStatus = subscription.Status
+
+		// Revoke entitlements if subscription is cancelled (after max retries)
+		// Skip revocation if disable_entitlement_expiration flag is set
+		if subscription.Status == models.StatusCancelled {
+			if s.Config != nil && s.Config.IsEntitlementExpirationDisabled() {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+				}).Warn("Entitlement expiration disabled; skipping entitlement revocation (subscription still cancelled)")
+			} else if entSvc != nil {
+				names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
+				if err != nil {
+					log.WithContext(ctx).WithError(err).Error("failed to list entitlements for failed subscription")
+				} else {
+					st := models.EntitlementSourceSubscription
+					sid := subscription.ID
+					for _, entName := range names {
+						if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+							UserID:      subscription.TenantSubjectID.String(),
+							Entitlement: entName,
+							SourceType:  &st,
+							SourceID:    &sid,
+							Reason:      models.EntitlementRevokeDunning,
+						}); err != nil {
+							log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+								"subscription_id": subscription.ID,
+								"entitlement":     entName,
+							}).Error("failed to revoke entitlement for failed subscription")
+						}
+					}
+					log.WithContext(ctx).WithFields(log.Fields{
+						"subscription_id": subscription.ID,
+					}).Warn("Revoked entitlements after max dunning failures")
+				}
+
+				// Terminal dunning failure: remove any grace windows too so access doesn't continue.
+				graceNames, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceGrace, subscription.ID)
+				if err != nil {
+					log.WithContext(ctx).WithError(err).Error("failed to list grace entitlements for failed subscription")
+				} else {
+					st := models.EntitlementSourceGrace
+					sid := subscription.ID
+					for _, entName := range graceNames {
+						if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+							UserID:      subscription.TenantSubjectID.String(),
+							Entitlement: entName,
+							SourceType:  &st,
+							SourceID:    &sid,
+							Reason:      models.EntitlementRevokeDunning,
+						}); err != nil {
+							log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+								"subscription_id": subscription.ID,
+								"entitlement":     entName,
+							}).Error("failed to revoke grace entitlement for failed subscription")
+						}
+					}
+				}
+			}
+		}
+
+		eventType := models.NotificationPaymentMethodFailed
+		if subscription.Status == models.StatusCancelled {
+			eventType = models.NotificationPremiumEnded
+		}
+
+		var data map[string]any
+		if eventType == models.NotificationPremiumEnded {
+			data = map[string]any{"reason": string(PremiumEndReasonExpired)}
+		}
+
+		notification := &models.NotificationQueue{
+			ID:              uuidutil.NewV7(),
+			TenantSubjectID: subscription.TenantSubjectID,
+			EventType:       eventType,
+			Data:            data,
+		}
+		if err := notificationRepo.Create(ctx, notification); err != nil {
+			log.WithContext(ctx).WithError(err).Error("failed to create payment failed notification")
+		} else {
+			notifications = append(notifications, notification)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	s.dispatchNotifications(ctx, notifications)
+
+	// Log the payment failure event to ClickHouse
+	if s.EventLogService != nil {
+		if err := s.EventLogService.LogLifecycleFailure(ctx, subscriptionID, userID, params.Processor, finalStatus, params.FailureReason, params.FailureCode, s.now()); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"subscription_id": subscriptionID,
+				"event_type":      "charge_failure",
+			}).Warn("failed to log payment failure event to ClickHouse")
+		}
+	}
+
+	return nil
+}
+
+func (s *SubscriptionLifecycleService) logPaymentEvent(ctx context.Context, sub *models.Subscription, processor models.Processor, transactionID string, amount int64, currency string) {
+	if s.EventLogService == nil || sub == nil {
+		return
+	}
+	if err := s.EventLogService.LogLifecycleChargeSuccess(ctx, sub, processor, transactionID, amount, currency, s.now(), nil); err != nil {
+		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+			"subscription_id": sub.ID,
+			"event_type":      "charge_success",
+			"processor":       processor,
+		}).Warn("failed to log payment event to ClickHouse")
 	}
 }
 
 func validateCompletedPayment(payment *models.Payment, expectedAmount int64, expectedCurrency string) error {
-	if !payments.PaymentStatusCompleted(payment.Status) {
+	if payment == nil {
+		return errors.New("payment is required")
+	}
+	status := strings.TrimSpace(payment.Status)
+	if status != "" && !strings.EqualFold(status, "completed") {
 		return fmt.Errorf("payment transaction is not completed")
 	}
 	if expectedAmount > 0 && payment.Amount != expectedAmount {
-		return fmt.Errorf("payment transaction amount mismatch (expected %d, got %d)", expectedAmount, payment.Amount)
+		return fmt.Errorf("payment transaction amount mismatch")
 	}
-	if expectedCurrency != "" && payment.Currency != expectedCurrency {
-		return fmt.Errorf("payment transaction currency mismatch (expected %s, got %s)", expectedCurrency, payment.Currency)
+	if expectedCurrency != "" && !strings.EqualFold(strings.TrimSpace(payment.Currency), strings.TrimSpace(expectedCurrency)) {
+		return fmt.Errorf("payment transaction currency mismatch")
 	}
 	return nil
 }
+
+// Parameter structs for lifecycle operations

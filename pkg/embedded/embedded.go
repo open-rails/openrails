@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
+	"github.com/open-rails/openrails/internal/observability"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/service"
@@ -32,7 +33,8 @@ type Options struct {
 }
 
 type Embedded struct {
-	app *app.App
+	app           *app.App
+	observability *observability.ObservabilityManager
 }
 
 func New(opts Options) (*Embedded, error) {
@@ -65,6 +67,23 @@ func (e *Embedded) App() *app.App {
 		return nil
 	}
 	return e.app
+}
+
+// SetObservability sets the OpenTelemetry metrics manager for HTTP middleware.
+// Call this after New() to enable Phase 1 HTTP metrics.
+func (e *Embedded) SetObservability(om *observability.ObservabilityManager) {
+	if e == nil {
+		return
+	}
+	e.observability = om
+}
+
+// Observability returns the OpenTelemetry metrics manager, if set.
+func (e *Embedded) Observability() *observability.ObservabilityManager {
+	if e == nil {
+		return nil
+	}
+	return e.observability
 }
 
 // HTTPHandlerOptions controls which billing HTTP route groups are included in the returned handler.

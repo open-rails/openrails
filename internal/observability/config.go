@@ -2,7 +2,6 @@ package observability
 
 import (
 	"os"
-	"strconv"
 	"time"
 )
 

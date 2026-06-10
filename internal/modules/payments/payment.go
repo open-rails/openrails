@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
-	"github.com/open-rails/openrails/internal/platform"
+	"github.com/open-rails/openrails/internal/observability"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/query"
@@ -20,11 +20,11 @@ import (
 )
 
 type PaymentService struct {
-	repo       *repo.PaymentRepo
-	clock      clockwork.Clock
-	latency    metric.Float64Histogram
-	errCounter metric.Int64Counter
-	memory     metric.Float64Gauge
+	repo        *repo.PaymentRepo
+	clock       clockwork.Clock
+	latency     metric.Float64Histogram
+	errCounter  metric.Int64Counter
+	memoryUsage metric.Float64Gauge
 }
 
 const (
@@ -45,16 +45,13 @@ func (s *PaymentService) now() time.Time {
 type GetPaymentsFilters = repo.PaymentFilters
 
 func NewPaymentService(db *db.DB, clocks ...clockwork.Clock) *PaymentService {
-	meter, _ := platform.InitTelemetry()
-	latency, _ := meter.Float64Histogram("payment_create_latency_seconds", metric.WithDescription("Latency of payment creation"))
-	errCounter, _ := meter.Int64Counter("payment_create_errors_total", metric.WithDescription("Total count of payment creation errors"))
-	memory, _ := meter.Float64Gauge("payment_create_memory_usage_bytes", metric.WithDescription("Memory usage of payment creation"), metric.WithUnit("B"))
+	om := observability.NewMeter("payments")
 	return &PaymentService{
-		repo:       repo.NewPaymentRepo(db),
-		clock:      timeutil.FirstClock(clocks...),
-		latency:    latency,
-		errCounter: errCounter,
-		memory:     memory,
+		repo:        repo.NewPaymentRepo(db),
+		clock:       timeutil.FirstClock(clocks...),
+		latency:     om.Latency,
+		errCounter:  om.ErrCounter,
+		memoryUsage: om.MemoryUsage,
 	}
 }
 
@@ -67,76 +64,35 @@ func (s *PaymentService) Clock() clockwork.Clock {
 }
 
 func (s *PaymentService) Create(ctx context.Context, payment *models.Payment) error {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
-
-	err := s.repo.Create(ctx, payment)
-	if err != nil {
-		s.errCounter.Add(ctx, 1)
-	}
-	return err
+	return s.repo.Create(ctx, payment)
 }
 
 func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
-
-	created, err := s.repo.CreateIfNotExists(ctx, payment)
-	if err != nil {
-		s.errCounter.Add(ctx, 1)
-	}
-	return created, err
+	return s.repo.CreateIfNotExists(ctx, payment)
 }
 
 func (s *PaymentService) GetByID(ctx context.Context, id uuid.UUID) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetByID(ctx, id)
 }
 
+// GetByIDWithDetails returns a payment with all related entities and any refund entries
 func (s *PaymentService) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*models.Payment, []*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetByIDWithDetails(ctx, id)
 }
 
 func (s *PaymentService) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetByUserID(ctx, userID)
 }
 
 func (s *PaymentService) GetByTransactionID(ctx context.Context, processor models.Processor, transactionID string) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetByTransactionID(ctx, processor, transactionID)
 }
 
 func (s *PaymentService) GetByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetByPriceID(ctx, priceID)
 }
 
 func (s *PaymentService) GetByProcessor(ctx context.Context, processor models.Processor) ([]*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetByProcessor(ctx, processor)
 }
 
@@ -149,23 +105,17 @@ func (s *PaymentService) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 // Refund records a refund as a negative payment entry linked by transaction ID
+// Note: Processors should handle the actual money movement; this persists the event.
+// amount is in cents (smallest currency unit)
 func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
-
 	orig, err := s.GetByID(ctx, originalPaymentID)
 	if err != nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, err
 	}
 	if err := s.ValidateRefund(ctx, orig, amount); err != nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, err
 	}
 	if strings.TrimSpace(refundTransactionID) == "" {
-		s.errCounter.Add(ctx, 1)
 		return nil, errors.New("refund transaction id is required")
 	}
 
@@ -188,30 +138,21 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 		CreatedAt:     s.now(),
 	}
 	if err := s.Create(ctx, refund); err != nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, err
 	}
 	return refund, nil
 }
 
 func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uuid.UUID, reservationTransactionID string, amount int64, metadata map[string]any) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
-
 	orig, err := s.GetByID(ctx, originalPaymentID)
 	if err != nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, err
 	}
 	if err := s.ValidateRefund(ctx, orig, amount); err != nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, err
 	}
 	reservationTransactionID = strings.TrimSpace(reservationTransactionID)
 	if reservationTransactionID == "" {
-		s.errCounter.Add(ctx, 1)
 		return nil, errors.New("refund reservation transaction id is required")
 	}
 
@@ -236,45 +177,33 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 		CreatedAt:     now,
 	}
 	if err := s.Create(ctx, refund); err != nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, err
 	}
 	return refund, nil
 }
 
-func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservationID uuid.UUID, refundTransactionID string, metadata map[string]any) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
+func (s *PaymentService) GetRefundByAdminIdempotencyKey(ctx context.Context, originalPaymentID uuid.UUID, key string) (*models.Payment, error) {
+	return s.repo.GetRefundByAdminIdempotencyKey(ctx, originalPaymentID, key)
+}
 
+func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservationID uuid.UUID, refundTransactionID string, metadata map[string]any) (*models.Payment, error) {
 	if strings.TrimSpace(refundTransactionID) == "" {
-		s.errCounter.Add(ctx, 1)
 		return nil, errors.New("refund transaction id is required")
 	}
 	if err := s.repo.CompleteRefundReservation(ctx, reservationID, strings.TrimSpace(refundTransactionID), metadata); err != nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, err
 	}
 	return s.GetByID(ctx, reservationID)
 }
 
 func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *models.Payment) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
-
 	if payment == nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, errors.New("payment attempt is required")
 	}
 	if strings.TrimSpace(payment.TransactionID) == "" {
-		s.errCounter.Add(ctx, 1)
 		return nil, errors.New("payment attempt transaction id is required")
 	}
 	if payment.Amount <= 0 {
-		s.errCounter.Add(ctx, 1)
 		return nil, errors.New("payment attempt amount must be > 0")
 	}
 	now := s.now()
@@ -292,7 +221,6 @@ func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *mo
 	}
 	created, err := s.CreateIfNotExists(ctx, payment)
 	if err != nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, err
 	}
 	if created {
@@ -302,38 +230,21 @@ func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *mo
 }
 
 func (s *PaymentService) GetByMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetByMetadataValue(ctx, key, value)
 }
 
 func (s *PaymentService) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
-
 	if strings.TrimSpace(providerTransactionID) == "" {
-		s.errCounter.Add(ctx, 1)
 		return nil, errors.New("provider transaction id is required")
 	}
 	if err := s.repo.CompleteProviderAttempt(ctx, attemptID, providerTransactionID, metadata); err != nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, err
 	}
 	return s.GetByID(ctx, attemptID)
 }
 
 func (s *PaymentService) CompleteProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
-
 	if err := s.repo.CompleteProviderAttemptInPlace(ctx, attemptID, metadata); err != nil {
-		s.errCounter.Add(ctx, 1)
 		return nil, err
 	}
 	return s.GetByID(ctx, attemptID)
@@ -381,34 +292,18 @@ func PaymentStatusCompleted(status string) bool {
 }
 
 func (s *PaymentService) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetRefundTotalByPaymentID(ctx, paymentID)
 }
 
 func (s *PaymentService) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.LinkRefundedPayment(ctx, paymentID, originalPaymentID)
 }
 
 func (s *PaymentService) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetPaginatedByUserID(ctx, userID, page, pageSize)
 }
 
 func (s *PaymentService) GetPayments(ctx context.Context, queryOpts query.QueryOptions[GetPaymentsFilters]) ([]*models.Payment, int64, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	repoOpts := query.QueryOptions[repo.PaymentFilters]{
 		Filters:  queryOpts.Filters,
 		Limit:    queryOpts.Limit,
@@ -422,41 +317,21 @@ func (s *PaymentService) GetPayments(ctx context.Context, queryOpts query.QueryO
 }
 
 func (s *PaymentService) GetLatestByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetLatestByUserAndProcessor(ctx, userID, processor)
 }
 
 func (s *PaymentService) GetLatestBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetLatestBySubscriptionID(ctx, subscriptionID)
 }
 
 func (s *PaymentService) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.GetLatestChargeBySubscriptionID(ctx, subscriptionID)
 }
 
 func (s *PaymentService) CountByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (successful int, failed int, err error) {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.CountByUserAndProcessor(ctx, userID, processor)
 }
 
 func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
-	start := time.Now()
-	defer func() {
-		s.latency.Record(ctx, time.Since(start).Seconds())
-	}()
 	return s.repo.MarkFailed(ctx, id)
 }

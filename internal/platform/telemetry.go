@@ -9,40 +9,24 @@ import (
 )
 
 var (
-	once       sync.Once
-	meter      observability.Meter
-	latency    observability.Float64Histogram
-	errCounter observability.Int64Counter
-	memory     observability.Float64Gauge
+	once sync.Once
 )
 
-// InitTelemetry initializes the OpenTelemetry metrics provider.
-func InitTelemetry() (observability.Meter, error) {
-	_, _ = observability.InitMetrics(context.Background(), observability.LoadMetricsConfig())
-	once.Do(func() {
-		// The actual meter is registered via InitMetrics
-	})
-	return meter, nil
+// InitTelemetry initializes the OpenTelemetry metrics provider and all collectors.
+func InitTelemetry() (*observability.ObservabilityManager, error) {
+	cfg := observability.LoadMetricsConfig()
+	om, err := observability.NewObservabilityManager(context.Background(), cfg)
+	if err != nil {
+		return nil, err
+	}
+	return om, nil
 }
 
 // MetricsHandler returns the Prometheus metrics handler.
-// Note: In this architecture, this is a placeholder as metrics are served 
-// by the OpenTelemetry Collector, not directly by the application.
+// Note: In this architecture, metrics are served by the OpenTelemetry Collector.
 func MetricsHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Metrics are served by the OTel Collector"))
 	})
-}
-
-// RegisterCoreMetrics is a helper to ensure metrics are initialized.
-func RegisterCoreMetrics(ctx context.Context) (
-	latency observability.Float64Histogram,
-	errCounter observability.Int64Counter,
-	memory observability.Float64Gauge,
-) {
-	_, _ = InitTelemetry()
-	// We need to fetch the actual instruments from the meter
-	// This will be updated once the observability package provides a way to fetch them
-	return latency, errCounter, memory
 }

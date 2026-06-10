@@ -13,11 +13,10 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/platform"
+	"github.com/open-rails/openrails/internal/observability"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
@@ -94,9 +93,7 @@ func NewSolanaPayService(
 	priceProvider TokenPriceProvider,
 	clocks ...clockwork.Clock,
 ) *SolanaPayService {
-	meter, _ := platform.InitTelemetry()
-	latency, _ := meter.Float64Histogram("solana_pay_generate_latency_seconds", metric.WithDescription("Latency of Solana Pay payment generation"))
-	errors, _ := meter.Int64Counter("solana_pay_generate_errors_total", metric.WithDescription("Total count of Solana Pay payment generation errors"))
+	om := observability.NewMeter("solana_pay")
 	return &SolanaPayService{
 		db:                 db,
 		redis:              redis,
@@ -107,8 +104,8 @@ func NewSolanaPayService(
 		fxProvider:         fxProvider,
 		priceProvider:      priceProvider,
 		clock:              timeutil.FirstClock(clocks...),
-		latency:            latency,
-		errors:             errors,
+		latency:            om.Latency,
+		errors:             om.ErrCounter,
 	}
 }
 

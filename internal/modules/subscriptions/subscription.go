@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/vault"
-	"github.com/open-rails/openrails/internal/platform"
+	"github.com/open-rails/openrails/internal/observability"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -102,10 +102,7 @@ func NewSubscriptionService(
 	paymentMethodService *vault.PaymentMethodService,
 	clocks ...clockwork.Clock,
 ) *SubscriptionService {
-	meter, _ := platform.InitTelemetry()
-	latency, _ := meter.Float64Histogram("subscription_create_latency_seconds", metric.WithDescription("Latency of subscription creation"))
-	errCounter, _ := meter.Int64Counter("subscription_create_errors_total", metric.WithDescription("Total count of subscription creation errors"))
-	memory, _ := meter.Float64Gauge("subscription_create_memory_usage_bytes", metric.WithDescription("Memory usage of subscription creation"), metric.WithUnit("B"))
+	om := observability.NewMeter("subscriptions")
 	return &SubscriptionService{
 		subscriptionRepo:     repo.NewSubscriptionRepo(db),
 		notificationRepo:     repo.NewNotificationQueueRepo(db),
@@ -115,10 +112,10 @@ func NewSubscriptionService(
 		CCBillRESTClient:     ccbillRESTClient,
 		NMIClients:           nmiClients,
 		PaymentMethodService: paymentMethodService,
-		VaultService:         nil, // Need to initialize this or pass it in
-		latency:              latency,
-		errCounter:           errCounter,
-		memory:               memory,
+		VaultService:         nil,
+		latency:              om.Latency,
+		errCounter:           om.ErrCounter,
+		memory:               om.MemoryUsage,
 	}
 }
 
