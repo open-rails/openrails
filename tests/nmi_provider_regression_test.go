@@ -188,6 +188,9 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 	price.Processors[provider] = map[string]string{
 		models.ProcessorKeyPlanID: provider + "-plan",
 	}
-	_, err = suite.BunDB.NewUpdate().Model(price).Column("processors").WherePK().Exec(context.Background())
+	processorsJSON, err := json.Marshal(price.Processors)
+	require.NoError(t, err)
+	_, err = suite.Pool.Exec(context.Background(),
+		"UPDATE billing.prices SET processors = $1 WHERE id = $2", processorsJSON, price.ID)
 	require.NoError(t, err)
 }

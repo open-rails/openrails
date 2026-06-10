@@ -3,8 +3,11 @@ package migrate
 import (
 	"context"
 	"database/sql"
+
 	"fmt"
 	"regexp"
+
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
 	authkitpostgres "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/open-rails/migratekit"
@@ -16,7 +19,6 @@ import (
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 	log "github.com/sirupsen/logrus"
-	"github.com/uptrace/bun"
 )
 
 var replicatedReplacingMergeTreePattern = regexp.MustCompile(`ReplicatedReplacingMergeTree\([^)]*\{replica\}'(?:,\s*([A-Za-z_][A-Za-z0-9_]*))?\)`)
@@ -34,17 +36,13 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("missing database config")
 	}
 
-	database, err := db.NewDB(cfg.DB)
+	// migratekit drives a database/sql handle; open one over the pgx stdlib
+	// driver for the duration of the migration run.
+	sqlDB, err := sql.Open("pgx", cfg.DB.GetConnectionString())
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
-	defer func() { _ = database.Close() }()
-
-	bunDB, ok := database.GetDB().(*bun.DB)
-	if !ok {
-		return fmt.Errorf("unexpected db type for migrator")
-	}
-	sqlDB := bunDB.DB
+	defer func() { _ = sqlDB.Close() }()
 
 	// Effective OpenRails schema (defaults to `billing`). Standalone River tables
 	// share this schema. Validated as a safe identifier during config load (#165).
@@ -138,17 +136,13 @@ func RunClickHouse(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// ClickHouse migrations are tracked/locked via Postgres (public.migrations + advisory locks).
-	database, err := db.NewDB(cfg.DB)
+	// ClickHouse migration tracking/locking rides a database/sql handle over
+	// the pgx stdlib driver.
+	sqlDB, err := sql.Open("pgx", cfg.DB.GetConnectionString())
 	if err != nil {
 		return fmt.Errorf("open db for ClickHouse migration tracking/locking: %w", err)
 	}
-	defer func() { _ = database.Close() }()
-
-	bunDB, ok := database.GetDB().(*bun.DB)
-	if !ok {
-		return fmt.Errorf("unexpected db type for ClickHouse migrator")
-	}
-	sqlDB := bunDB.DB
+	defer func() { _ = sqlDB.Close() }()
 
 	log.WithFields(log.Fields{
 		"http_addr":   cfg.ClickHouse.HTTPAddr,

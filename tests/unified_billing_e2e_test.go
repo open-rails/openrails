@@ -85,7 +85,10 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 		IsActive:      true,
 		CreatedAt:     time.Now().UTC(),
 	}
-	_, err := suite.BunDB.NewInsert().Model(ct).Exec(ctx)
+	_, err := suite.Pool.Exec(ctx, `
+		INSERT INTO billing.credit_types (id, name, display_name, unit, decimal_places, is_active, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		ct.ID, ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
 	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
@@ -211,14 +214,18 @@ func (h *billingE2EHarness) balance(userID string) balanceView {
 func (h *billingE2EHarness) ledgerRows(userID string) []models.CreditTransaction {
 	h.t.Helper()
 	owner := personalOwnerID(userID)
-	var rows []models.CreditTransaction
-	err := h.suite.BunDB.NewSelect().
-		Model(&rows).
-		Where("tenant_subject_id = ?", owner).
-		Where("credit_type_id = ?", h.creditTyID).
-		Order("created_at ASC").
-		Scan(context.Background())
+	pgRows, err := h.suite.Pool.Query(context.Background(),
+		"SELECT "+creditTransactionCols+" FROM billing.credit_transactions WHERE tenant_subject_id = $1 AND credit_type_id = $2 ORDER BY created_at ASC",
+		owner, h.creditTyID)
 	require.NoError(h.t, err)
+	defer pgRows.Close()
+	var rows []models.CreditTransaction
+	for pgRows.Next() {
+		trx, err := scanCreditTransaction(pgRows)
+		require.NoError(h.t, err)
+		rows = append(rows, *trx)
+	}
+	require.NoError(h.t, pgRows.Err())
 	return rows
 }
 
@@ -227,12 +234,13 @@ func (h *billingE2EHarness) rawBalanceRow(userID string) *models.CreditBalance {
 	h.t.Helper()
 	owner := personalOwnerID(userID)
 	bal := new(models.CreditBalance)
-	err := h.suite.BunDB.NewSelect().
-		Model(bal).
-		Where("tenant_subject_id = ?", owner).
-		Where("credit_type_id = ?", h.creditTyID).
-		Limit(1).
-		Scan(context.Background())
+	err := h.suite.Pool.QueryRow(context.Background(), `
+		SELECT id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at
+		FROM billing.credit_balances
+		WHERE tenant_subject_id = $1 AND credit_type_id = $2
+		LIMIT 1`, owner, h.creditTyID).
+		Scan(&bal.ID, &bal.TenantID, &bal.TenantSubjectID, &bal.CreditTypeID,
+			&bal.Balance, &bal.HeldBalance, &bal.CreatedAt, &bal.UpdatedAt)
 	if err != nil {
 		return nil
 	}

@@ -16,7 +16,19 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Qx is the pgx-side analogue of Q: the handle that sqlc-generated queries
+// TenantGUC is the Postgres run-time configuration parameter (GUC) that carries
+// the active tenant id for Row Level Security. Migration 050 enables RLS on every
+// tenant-owned table with a policy of the form
+//
+//	tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+//
+// so a transaction that has set this GUC sees ONLY its own tenant's rows, and a
+// transaction that forgot to set it sees NOTHING (fail-closed). For RLS to
+// actually enforce, the application must connect as a non-superuser,
+// non-BYPASSRLS role (openrails_app, created by 001_schema.up.sql).
+const TenantGUC = "app.tenant_id"
+
+// Qx returns the queryable handle that sqlc-generated queries
 // (and the rare annotated raw-pgx escape hatch) MUST run on so the
 // migration-050 RLS policies constrain them (issue #227).
 //
@@ -26,10 +38,7 @@ import (
 //     carries the app.tenant_id GUC, so RLS fail-closed semantics apply,
 //  3. the base pool (control-plane access to GLOBAL non-RLS tables, or
 //     single-tenant/self-hosted before the connection middleware runs).
-//
-// On a DB with no pgx side (NewWithSQLDB/NewWithBun/bun-tx wrappers) it
-// returns a stub whose every call errors loudly — converted code paths must
-// only ever be reached with a pgx-backed DB (#334 transition invariant).
+
 func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	if d == nil {
 		return errDBTX{fmt.Errorf("db: Qx on nil DB")}
@@ -43,7 +52,7 @@ func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	if d.pool != nil {
 		return d.pool
 	}
-	return errDBTX{fmt.Errorf("db: no pgx handle available (DB was built from *sql.DB or a bun tx; sqlc paths need a pgx-backed DB — issue #334)")}
+	return errDBTX{fmt.Errorf("db: no pgx handle available on this DB")}
 }
 
 // Gen returns the sqlc query catalog bound to Qx(ctx). The standard accessor
@@ -84,7 +93,7 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 
 // RunInTx runs fn inside a pgx transaction (no tenant GUC — for control-plane
 // and privileged background work that uses explicit tenant_id predicates).
-// The pgx analogue of Q(ctx).RunInTx. Begins on the pinned tenant connection
+// Begins on the pinned tenant connection
 // when one is in flight, so request-path transactions stay RLS-scoped via the
 // connection's session GUC.
 func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
@@ -100,9 +109,9 @@ func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx
 }
 
 // TenantTx runs fn inside a pgx transaction with the RLS tenant GUC pinned
-// from the context via set_config(..., is_local=true) — the pgx analogue of
-// RunInTenantTx. Request-path tenant-owned writes go through this (or run on
-// a connection pinned by WithTenantConn).
+// from the context via set_config(..., is_local=true). Request-path
+// tenant-owned writes go through this (or run on a connection pinned by
+// WithTenantConn).
 func (d *DB) TenantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	id := tenant.FromContextOrDefault(ctx)
 	tx, err := d.pgxBegin(ctx)
@@ -121,14 +130,14 @@ func (d *DB) TenantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.T
 
 // SetTenantGUCPgx pins the RLS tenant GUC (from the context) onto an
 // already-open pgx transaction — for callbacks that already received a
-// pgx.Tx. Counterpart of SetTenantGUC.
+// pgx.Tx.
 func SetTenantGUCPgx(ctx context.Context, tx pgx.Tx) error {
 	return setTenantLocalGUCPgx(ctx, tx, tenant.FromContextOrDefault(ctx))
 }
 
-// setTenantLocalGUCPgx is setTenantLocalGUC for the pgx side: transaction-
-// local set_config so the GUC reverts when the tx ends and can never leak
-// onto a pooled connection.
+// setTenantLocalGUCPgx sets the tenant GUC transaction-locally
+// (set_config is_local=true) so it reverts when the tx ends and can never
+// leak onto a pooled connection.
 func setTenantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id tenant.ID) error {
 	if id.IsZero() {
 		return fmt.Errorf("db: cannot set %s GUC for a zero tenant id", TenantGUC)
@@ -142,12 +151,11 @@ func setTenantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id tenant.ID) error {
 	return nil
 }
 
-// lazyTenantPgxConn is the request's pgx-side tenant connection, acquired
-// LAZILY on the first sqlc call site instead of eagerly in WithTenantConn.
-// Eager twin-pinning made every request hold two connections for its whole
-// lifetime, which collapsed under burst (issue #334 status note); lazily,
-// requests that never touch a converted call site — most traffic during the
-// transition — cost zero extra connections.
+// lazyTenantPgxConn is the request's tenant-scoped connection, acquired
+// LAZILY on the first query instead of eagerly in WithTenantConn, so requests
+// that never touch the database cost zero pool connections (the eager variant
+// collapsed under burst during the #334 transition — see that issue's status
+// for the post-mortem).
 //
 // It satisfies gen.DBTX directly: the first Exec/Query/QueryRow (or
 // pgxBegin) acquires a pool connection, sets the app.tenant_id session GUC
@@ -246,8 +254,7 @@ type errRow struct{ err error }
 func (r errRow) Scan(...interface{}) error { return r.err }
 
 // newSQLTracerFromEnv installs a query tracer on the pgx pool when
-// OPENRAILS_SQL_TRACE is set (1/true/debug). Replaces the bundebug hook from
-// the bun era (which was likewise off by default).
+// OPENRAILS_SQL_TRACE is set (1/true/debug); off by default.
 func newSQLTracerFromEnv() *tracelog.TraceLog {
 	v := os.Getenv("OPENRAILS_SQL_TRACE")
 	if v == "" || v == "0" || v == "false" {

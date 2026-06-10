@@ -32,7 +32,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	billingDays := 30
-	_, err := suite.BunDB.NewInsert().Model(&models.Product{
+	suite.InsertProduct(ctx, &models.Product{
 		ID:          productID,
 		Slug:        "test_mixed_sources_" + uuid.New().String()[:8],
 		DisplayName: "Test Product",
@@ -44,10 +44,9 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 		Status:    models.CatalogStatusActive,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
-	_, err = suite.BunDB.NewInsert().Model(&models.Price{
+	suite.InsertPrice(ctx, &models.Price{
 		ID:               priceID,
 		ProductID:        productID,
 		Status:           models.CatalogStatusActive,
@@ -56,15 +55,14 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 		BillingCycleDays: &billingDays,
 		CreatedAt:        clock.Now().UTC(),
 		UpdatedAt:        clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
 	userID := uuid.New().String()
 	subID := uuid.New()
 	periodStart := t0
 	paidEnd := t0.Add(30 * 24 * time.Hour)
 
-	_, err = suite.BunDB.NewInsert().Model(&models.Subscription{
+	suite.InsertSubscription(ctx, &models.Subscription{
 		ID:                      subID,
 		TenantSubjectID:         suite.ensureTenantSubject(ctx, userID),
 		ProductID:               productID,
@@ -77,8 +75,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 		StartedAt:               clock.Now().UTC(),
 		CreatedAt:               clock.Now().UTC(),
 		UpdatedAt:               clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
 	// Subscription grants both entitlements for 30 days.
 	for _, entName := range []string{"premium", "extra"} {
@@ -106,7 +103,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	})
 	oneOffEnd := paidEnd.Add(10 * 24 * time.Hour).UTC()
 	notBefore := clock.Now().UTC()
-	_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
+	_, err := rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 		UserID:      userID,
 		Entitlement: "premium",
 		NotBefore:   &notBefore,
@@ -124,8 +121,7 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 		Reason:          "test",
 		CreatedAt:       clock.Now().UTC(),
 	}
-	_, err = suite.BunDB.NewInsert().Model(adminGrant).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertAdminGrant(ctx, adminGrant)
 
 	d := 5 * 24 * time.Hour
 	_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
@@ -151,12 +147,12 @@ func TestEntitlements_MixedSources_MultipleEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Payment)(nil)).Where("id = ?", payment.ID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.AdminGrant)(nil)).Where("id = ?", adminGrant.ID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", suite.ensureTenantSubject(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.payments WHERE id = $1", payment.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.admin_grants WHERE id = $1", adminGrant.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// Immediately after purchase (still inside base paid window), both entitlements are active.
@@ -206,8 +202,7 @@ func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
-	require.NoError(t, err)
+	suite.InsertEntitlement(ctx, ent)
 
 	require.NotNil(t, suite.App)
 	require.NotNil(t, suite.App.Runtime)
@@ -218,8 +213,9 @@ func TestEntitlementSoftDeleteExcludedFromIsEntitled(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "entitlement should be active before soft delete")
 
-	// Soft-delete the row. The Entitlement model uses bun's soft_delete tag, so this should set deleted_at.
-	_, err = suite.BunDB.NewDelete().Model(ent).WherePK().Exec(ctx)
+	// Soft-delete the row (the bun-era model used a soft_delete tag; emulate it
+	// by setting deleted_at directly).
+	_, err = suite.Pool.Exec(ctx, "UPDATE billing.entitlements SET deleted_at = now() WHERE id = $1", ent.ID)
 	require.NoError(t, err)
 
 	ok, err = r.IsEntitled(ctx, userID, entName, now)

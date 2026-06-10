@@ -1507,7 +1507,7 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, pro
 	meta := map[string]interface{}{
 		"reconciliation_status": "unmatched",
 	}
-	if s == nil || s.DB == nil || s.DB.Q(ctx) == nil {
+	if s == nil || s.DB == nil {
 		meta["reconciliation_error"] = "database unavailable"
 		return nil, meta, nil
 	}

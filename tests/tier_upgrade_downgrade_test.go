@@ -197,7 +197,9 @@ func TestScheduledDowngrade(t *testing.T) {
 
 		// Set scheduled downgrade to Premium
 		sub.ScheduledPriceID = &premiumPriceID
-		_, err := suite.BunDB.NewUpdate().Model(sub).Column("scheduled_price_id").WherePK().Exec(ctx)
+		_, err := suite.Pool.Exec(ctx,
+			"UPDATE billing.subscriptions SET scheduled_price_id = $1 WHERE id = $2",
+			sub.ScheduledPriceID, sub.ID)
 		require.NoError(t, err, "Should update scheduled price")
 
 		// Verify subscription still has Premium+ entitlements
@@ -235,7 +237,9 @@ func TestScheduledDowngrade(t *testing.T) {
 
 		// Set scheduled downgrade to Premium
 		sub.ScheduledPriceID = &premiumPriceID
-		_, err := suite.BunDB.NewUpdate().Model(sub).Column("scheduled_price_id").WherePK().Exec(ctx)
+		_, err := suite.Pool.Exec(ctx,
+			"UPDATE billing.subscriptions SET scheduled_price_id = $1 WHERE id = $2",
+			sub.ScheduledPriceID, sub.ID)
 		require.NoError(t, err, "Should update scheduled price")
 
 		// Create entitlements

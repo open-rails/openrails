@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 // PaymentBlocklistEntry is one tenant-scoped block of a known-bad payment
@@ -15,20 +14,18 @@ import (
 // org in the tenant — or scoped to a single tenant subject (TenantSubjectID set, issue #221).
 // Uniqueness is (tenant_id, kind, value); that index is also the IsBlocked lookup.
 type PaymentBlocklistEntry struct {
-	bun.BaseModel `bun:"table:billing.payment_blocklist,alias:pbl"`
-
-	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	ID uuid.UUID `json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223/#227).
-	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
+	TenantID uuid.UUID `json:"tenant_id"`
 	// TenantSubjectID, when set, scopes the block to a single tenant subject (issue #221).
 	// Nil/zero means a tenant-wide block.
-	TenantSubjectID *uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id,omitempty"`
+	TenantSubjectID *uuid.UUID `json:"tenant_subject_id,omitempty"`
 	// Kind is the kind of identifier blocked:
 	// card_fingerprint | processor_customer | email | ip.
-	Kind string `bun:"kind,notnull" json:"kind"`
+	Kind string `json:"kind"`
 	// Value is the blocked identifier value.
-	Value string `bun:"value,notnull" json:"value"`
+	Value string `json:"value"`
 	// Reason is an optional free-form note for the block (audit).
-	Reason    *string   `bun:"reason,nullzero" json:"reason,omitempty"`
-	CreatedAt time.Time `bun:"created_at,notnull" json:"created_at"`
+	Reason    *string   `json:"reason,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }

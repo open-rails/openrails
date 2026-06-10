@@ -4,6 +4,7 @@ package tests
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,9 +18,20 @@ import (
 
 func (suite *TestContainerSuite) ensureTenantSubject(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
-	tenantSubjectID, err := dbrepo.EnsureTenantSubjectID(ctx, suite.BunDB, tenant.DefaultID.UUID(), userID)
+	tenantSubjectID, err := dbrepo.EnsureTenantSubjectID(ctx, suite.Pool, tenant.DefaultID.UUID(), userID)
 	require.NoError(suite.t, err, "Failed to ensure tenant subject")
 	return tenantSubjectID
+}
+
+// mustJSONB marshals a value for a jsonb column, mapping empty/nil to SQL NULL.
+func (suite *TestContainerSuite) mustJSONB(v any, empty bool) []byte {
+	suite.t.Helper()
+	if empty {
+		return nil
+	}
+	b, err := json.Marshal(v)
+	require.NoError(suite.t, err, "Failed to marshal jsonb value")
+	return b
 }
 
 // TestProduct represents a seeded product with its prices
@@ -339,13 +351,8 @@ func (suite *TestContainerSuite) SeedProducts() []TestProduct {
 		}
 
 		// Use ON CONFLICT to make this idempotent
-		_, err := suite.BunDB.NewInsert().Model(tp.Product).
-			On("CONFLICT (id) DO UPDATE").
-			Set("display_name = EXCLUDED.display_name").
-			Set("status = EXCLUDED.status").
-			Set("updated_at = EXCLUDED.updated_at").
-			Exec(ctx)
-		require.NoError(suite.t, err, "Failed to seed product %s", tp.Product.Slug)
+		suite.upsertProduct(ctx, tp.Product,
+			"display_name = EXCLUDED.display_name, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at")
 
 		for _, price := range tp.Prices {
 			price.ProductID = tp.Product.ID
@@ -356,14 +363,44 @@ func (suite *TestContainerSuite) SeedProducts() []TestProduct {
 			}
 
 			// Prices are immutable - use DO NOTHING to preserve existing records
-			_, err := suite.BunDB.NewInsert().Model(price).
-				On("CONFLICT (id) DO NOTHING").
-				Exec(ctx)
-			require.NoError(suite.t, err, "Failed to seed price %s", price.ID)
+			suite.insertPriceIfAbsent(ctx, price)
 		}
 	}
 
 	return testProducts
+}
+
+// upsertProduct inserts a product, applying the given ON CONFLICT (id) DO
+// UPDATE SET clause when the row already exists.
+func (suite *TestContainerSuite) upsertProduct(ctx context.Context, p *models.Product, onConflictSet string) {
+	suite.t.Helper()
+	_, err := suite.Pool.Exec(ctx, `
+		INSERT INTO billing.products (
+			id, slug, display_name, description, entitlements_spec, credits_spec,
+			tier_group, tier_rank, status, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (id) DO UPDATE SET `+onConflictSet,
+		p.ID, p.Slug, p.DisplayName, p.Description,
+		suite.mustJSONB(p.EntitlementsSpec, len(p.EntitlementsSpec) == 0),
+		suite.mustJSONB(p.CreditsSpec, len(p.CreditsSpec) == 0),
+		p.TierGroup, p.TierRank, string(p.Status), p.CreatedAt, p.UpdatedAt)
+	require.NoError(suite.t, err, "Failed to seed product %s", p.Slug)
+}
+
+// insertPriceIfAbsent inserts a price with ON CONFLICT (id) DO NOTHING.
+func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price *models.Price) {
+	suite.t.Helper()
+	_, err := suite.Pool.Exec(ctx, `
+		INSERT INTO billing.prices (
+			id, product_id, status, amount, currency, billing_cycle_days,
+			processors, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (id) DO NOTHING`,
+		price.ID, price.ProductID, string(price.Status), price.Amount, price.Currency,
+		price.BillingCycleDays,
+		suite.mustJSONB(price.Processors, len(price.Processors) == 0),
+		price.CreatedAt, price.UpdatedAt)
+	require.NoError(suite.t, err, "Failed to seed price %s", price.ID)
 }
 
 // TieredTestProducts returns test products with tier groups for upgrade/downgrade testing
@@ -471,58 +508,19 @@ func (suite *TestContainerSuite) SeedTieredProducts() []TestProduct {
 		tp.Product.CreatedAt = now
 		tp.Product.UpdatedAt = now
 
-		_, err := suite.BunDB.NewInsert().Model(tp.Product).
-			On("CONFLICT (id) DO UPDATE").
-			Set("tier_group = EXCLUDED.tier_group").
-			Set("tier_rank = EXCLUDED.tier_rank").
-			Exec(ctx)
-		require.NoError(suite.t, err, "Failed to seed tiered product %s", tp.Product.DisplayName)
+		suite.upsertProduct(ctx, tp.Product,
+			"tier_group = EXCLUDED.tier_group, tier_rank = EXCLUDED.tier_rank")
 
 		for _, price := range tp.Prices {
 			price.ProductID = tp.Product.ID
 			price.CreatedAt = now
 			price.UpdatedAt = now
 
-			_, err := suite.BunDB.NewInsert().Model(price).
-				On("CONFLICT (id) DO NOTHING").
-				Exec(ctx)
-			require.NoError(suite.t, err, "Failed to seed tiered price %s", price.ID)
+			suite.insertPriceIfAbsent(ctx, price)
 		}
 	}
 
 	return testProducts
-}
-
-// GetSeededProduct retrieves a product by slug from the database
-func (suite *TestContainerSuite) GetSeededProduct(slug string) *models.Product {
-	suite.t.Helper()
-	ctx := context.Background()
-
-	var product models.Product
-	err := suite.BunDB.NewSelect().
-		Model(&product).
-		Where("slug = ?", slug).
-		Relation("Prices").
-		Scan(ctx)
-	require.NoError(suite.t, err, "Failed to get product %s", slug)
-
-	return &product
-}
-
-// GetSeededPrice retrieves a price by ID from the database
-func (suite *TestContainerSuite) GetSeededPrice(priceID uuid.UUID) *models.Price {
-	suite.t.Helper()
-	ctx := context.Background()
-
-	var price models.Price
-	err := suite.BunDB.NewSelect().
-		Model(&price).
-		Where("id = ?", priceID).
-		Relation("Product").
-		Scan(ctx)
-	require.NoError(suite.t, err, "Failed to get price %s", priceID)
-
-	return &price
 }
 
 // CreateTestSubscription creates a test subscription for a user
@@ -553,8 +551,7 @@ func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID u
 		UpdatedAt:               now,
 	}
 
-	_, err := suite.BunDB.NewInsert().Model(sub).Exec(ctx)
-	require.NoError(suite.t, err, "Failed to create test subscription")
+	suite.InsertSubscription(ctx, sub)
 
 	return sub
 }
@@ -633,8 +630,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 		}
 	}
 
-	_, err := suite.BunDB.NewInsert().Model(sub).Exec(ctx)
-	require.NoError(suite.t, err, "Failed to create test subscription with options")
+	suite.InsertSubscription(ctx, sub)
 
 	return sub
 }
@@ -660,8 +656,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 		UpdatedAt:            now,
 	}
 
-	_, err := suite.BunDB.NewInsert().Model(pm).Exec(ctx)
-	require.NoError(suite.t, err, "Failed to create test payment method")
+	suite.InsertPaymentMethod(ctx, pm)
 
 	return pm
 }
@@ -710,8 +705,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 		UpdatedAt:            now,
 	}
 
-	_, err := suite.BunDB.NewInsert().Model(pm).Exec(ctx)
-	require.NoError(suite.t, err, "Failed to create test payment method with options")
+	suite.InsertPaymentMethod(ctx, pm)
 
 	return pm
 }
@@ -736,8 +730,7 @@ func (suite *TestContainerSuite) CreateTestPayment(userID string, priceID uuid.U
 		CreatedAt:       now,
 	}
 
-	_, err := suite.BunDB.NewInsert().Model(payment).Exec(ctx)
-	require.NoError(suite.t, err, "Failed to create test payment")
+	suite.InsertPayment(ctx, payment)
 
 	return payment
 }
@@ -791,8 +784,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 		CreatedAt:         now,
 	}
 
-	_, err := suite.BunDB.NewInsert().Model(payment).Exec(ctx)
-	require.NoError(suite.t, err, "Failed to create test payment with options")
+	suite.InsertPayment(ctx, payment)
 
 	return payment
 }
@@ -816,8 +808,7 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 				DurationDays:    nil,
 				CreatedAt:       now,
 			}
-			_, err := suite.BunDB.NewInsert().Model(adminGrant).Exec(ctx)
-			require.NoError(suite.t, err, "Failed to create test admin_grant source")
+			suite.InsertAdminGrant(ctx, adminGrant)
 			sourceID = &adminGrant.ID
 		default:
 			require.FailNow(suite.t, "sourceID is required for this sourceType", "sourceType=%s", sourceType)
@@ -844,8 +835,7 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 		UpdatedAt:       now,
 	}
 
-	_, err := suite.BunDB.NewInsert().Model(ent).Exec(ctx)
-	require.NoError(suite.t, err, "Failed to create test entitlement")
+	suite.InsertEntitlement(ctx, ent)
 
 	return ent
 }
@@ -866,8 +856,7 @@ func (suite *TestContainerSuite) CreateTestNotification(userID string, eventType
 		CreatedAt:       now,
 	}
 
-	_, err := suite.BunDB.NewInsert().Model(notif).Exec(ctx)
-	require.NoError(suite.t, err, "Failed to create test notification")
+	suite.InsertNotification(ctx, notif)
 
 	return notif
 }
@@ -879,36 +868,10 @@ func (suite *TestContainerSuite) GetSubscription(id uuid.UUID) *models.Subscript
 	suite.t.Helper()
 	ctx := context.Background()
 
-	var sub models.Subscription
-	err := suite.BunDB.NewSelect().
-		Model(&sub).
-		Where("sub.id = ?", id).
-		Relation("Price").
-		Relation("PaymentMethod").
-		Scan(ctx)
+	sub, err := dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get subscription %s", id)
 
-	return &sub
-}
-
-// GetSubscriptionByUserID retrieves the active subscription for a user
-func (suite *TestContainerSuite) GetSubscriptionByUserID(userID string) *models.Subscription {
-	suite.t.Helper()
-	ctx := context.Background()
-	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
-
-	var sub models.Subscription
-	err := suite.BunDB.NewSelect().
-		Model(&sub).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Where("status = ?", models.StatusActive).
-		Relation("Price").
-		Scan(ctx)
-	if err != nil {
-		return nil
-	}
-
-	return &sub
+	return sub
 }
 
 // GetAllSubscriptionsByUserID retrieves all subscriptions for a user
@@ -917,14 +880,15 @@ func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*m
 	ctx := context.Background()
 	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
+	repo := dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB)
 	var subs []*models.Subscription
-	err := suite.BunDB.NewSelect().
-		Model(&subs).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Order("created_at DESC").
-		Relation("Price").
-		Scan(ctx)
-	require.NoError(suite.t, err, "Failed to get subscriptions for user %s", userID)
+	for _, id := range suite.queryIDs(ctx,
+		"SELECT id FROM billing.subscriptions WHERE tenant_subject_id = $1 ORDER BY created_at DESC",
+		tenantSubjectID) {
+		sub, err := repo.GetByID(ctx, id)
+		require.NoError(suite.t, err, "Failed to get subscriptions for user %s", userID)
+		subs = append(subs, sub)
+	}
 
 	return subs
 }
@@ -935,14 +899,15 @@ func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Pa
 	ctx := context.Background()
 	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
+	repo := dbrepo.NewPaymentRepo(suite.App.Runtime.DB)
 	var payments []*models.Payment
-	err := suite.BunDB.NewSelect().
-		Model(&payments).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Order("purchased_at DESC").
-		Relation("Price").
-		Scan(ctx)
-	require.NoError(suite.t, err, "Failed to get payments for user %s", userID)
+	for _, id := range suite.queryIDs(ctx,
+		"SELECT id FROM billing.payments WHERE tenant_subject_id = $1 ORDER BY purchased_at DESC",
+		tenantSubjectID) {
+		p, err := repo.GetByID(ctx, id)
+		require.NoError(suite.t, err, "Failed to get payments for user %s", userID)
+		payments = append(payments, p)
+	}
 
 	return payments
 }
@@ -953,15 +918,33 @@ func (suite *TestContainerSuite) GetPaymentMethodsByUserID(userID string) []*mod
 	ctx := context.Background()
 	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
+	repo := dbrepo.NewPaymentMethodRepo(suite.App.Runtime.DB)
 	var pms []*models.PaymentMethod
-	err := suite.BunDB.NewSelect().
-		Model(&pms).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Order("created_at DESC").
-		Scan(ctx)
-	require.NoError(suite.t, err, "Failed to get payment methods for user %s", userID)
+	for _, id := range suite.queryIDs(ctx,
+		"SELECT id FROM billing.payment_methods WHERE tenant_subject_id = $1 ORDER BY created_at DESC",
+		tenantSubjectID) {
+		pm, err := repo.GetByID(ctx, id)
+		require.NoError(suite.t, err, "Failed to get payment methods for user %s", userID)
+		pms = append(pms, pm)
+	}
 
 	return pms
+}
+
+// queryIDs collects the uuid result column of a query.
+func (suite *TestContainerSuite) queryIDs(ctx context.Context, query string, args ...any) []uuid.UUID {
+	suite.t.Helper()
+	rows, err := suite.Pool.Query(ctx, query, args...)
+	require.NoError(suite.t, err, "Failed to query ids")
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		require.NoError(suite.t, rows.Scan(&id))
+		ids = append(ids, id)
+	}
+	require.NoError(suite.t, rows.Err())
+	return ids
 }
 
 // GetEntitlementsByUserID retrieves all active entitlements for a user
@@ -971,35 +954,19 @@ func (suite *TestContainerSuite) GetEntitlementsByUserID(userID string) []*model
 	now := time.Now()
 	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
-	var ents []*models.Entitlement
-	err := suite.BunDB.NewSelect().
-		Model(&ents).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Where("start_at <= ?", now).
-		Where("(end_at IS NULL OR end_at > ?)", now).
-		Where("revoked_at IS NULL").
-		Where("deleted_at IS NULL").
-		Scan(ctx)
-	require.NoError(suite.t, err, "Failed to get entitlements for user %s", userID)
+	rows := suite.QueryEntitlements(ctx, `
+		WHERE tenant_subject_id = $1
+		  AND start_at <= $2
+		  AND (end_at IS NULL OR end_at > $2)
+		  AND revoked_at IS NULL
+		  AND deleted_at IS NULL`,
+		tenantSubjectID, now)
 
+	ents := make([]*models.Entitlement, 0, len(rows))
+	for i := range rows {
+		ents = append(ents, &rows[i])
+	}
 	return ents
-}
-
-// GetNotificationsByUserID retrieves all notifications for a user
-func (suite *TestContainerSuite) GetNotificationsByUserID(userID string) []*models.NotificationQueue {
-	suite.t.Helper()
-	ctx := context.Background()
-	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
-
-	var notifs []*models.NotificationQueue
-	err := suite.BunDB.NewSelect().
-		Model(&notifs).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Order("created_at DESC").
-		Scan(ctx)
-	require.NoError(suite.t, err, "Failed to get notifications for user %s", userID)
-
-	return notifs
 }
 
 // CountUnreadNotifications returns the count of unread notifications for a user
@@ -1008,32 +975,9 @@ func (suite *TestContainerSuite) CountUnreadNotifications(userID string) int {
 	ctx := context.Background()
 	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
-	count, err := suite.BunDB.NewSelect().
-		Model((*models.NotificationQueue)(nil)).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Where("seen = ?", false).
-		Count(ctx)
-	require.NoError(suite.t, err, "Failed to count unread notifications for user %s", userID)
-
-	return count
-}
-
-// GetSubscriptionByProcessorID retrieves a subscription by processor subscription ID
-func (suite *TestContainerSuite) GetSubscriptionByProcessorID(processorSubID string) *models.Subscription {
-	suite.t.Helper()
-	ctx := context.Background()
-
-	var sub models.Subscription
-	err := suite.BunDB.NewSelect().
-		Model(&sub).
-		Where("processor_subscription_id = ?", processorSubID).
-		Relation("Price").
-		Scan(ctx)
-	if err != nil {
-		return nil
-	}
-
-	return &sub
+	return suite.Count(ctx,
+		"SELECT COUNT(*) FROM billing.notification_queue WHERE tenant_subject_id = $1 AND seen = false",
+		tenantSubjectID)
 }
 
 // CreateProfileUser creates a profile user for testing CCBill webhook resolution.
@@ -1045,11 +989,11 @@ func (suite *TestContainerSuite) CreateProfileUser(userID string, username strin
 
 	// Insert into profiles.users table (profiles schema, not billing schema).
 	// Columns must match authkit's migration-managed schema (no is_active column).
-	_, err := suite.BunDB.NewRaw(`
+	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO profiles.users (id, username, email, email_verified, created_at, updated_at)
-		VALUES (?, ?, ?, true, ?, ?)
+		VALUES ($1, $2, $3, true, $4, $5)
 		ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, updated_at = EXCLUDED.updated_at
-	`, userID, username, username+"@test.example.com", now, now).Exec(ctx)
+	`, userID, username, username+"@test.example.com", now, now)
 	require.NoError(suite.t, err, "Failed to create profile user")
 }
 
@@ -1096,21 +1040,15 @@ func (suite *TestContainerSuite) CleanupSubscriptionsForUser(userID string) {
 	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
 
 	// Also delete entitlements for this user
-	_, _ = suite.BunDB.NewDelete().
-		Model((*models.Entitlement)(nil)).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Exec(ctx)
+	_, _ = suite.Pool.Exec(ctx,
+		"DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
 
-	_, _ = suite.BunDB.NewDelete().
-		Model((*models.CheckoutSession)(nil)).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Exec(ctx)
+	_, _ = suite.Pool.Exec(ctx,
+		"DELETE FROM billing.checkout_sessions WHERE tenant_subject_id = $1", tenantSubjectID)
 
 	// Delete subscriptions
-	_, err := suite.BunDB.NewDelete().
-		Model((*models.Subscription)(nil)).
-		Where("tenant_subject_id = ?", tenantSubjectID).
-		Exec(ctx)
+	_, err := suite.Pool.Exec(ctx,
+		"DELETE FROM billing.subscriptions WHERE tenant_subject_id = $1", tenantSubjectID)
 	if err != nil {
 		suite.t.Logf("Warning: failed to cleanup subscriptions for user %s: %v", userID, err)
 	}

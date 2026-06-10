@@ -45,8 +45,7 @@ func TestAdminEntitlementGrantCreatesSourceRecord(t *testing.T) {
 	require.Equal(t, models.EntitlementSourceAdmin, ent.SourceType)
 	require.NotNil(t, ent.SourceID)
 
-	var grant models.AdminGrant
-	require.NoError(t, suite.BunDB.NewSelect().Model(&grant).Where("id = ?", *ent.SourceID).Scan(req.Context()))
+	grant := suite.GetAdminGrant(req.Context(), *ent.SourceID)
 	require.Equal(t, userID, grant.TenantSubjectID.String())
 	require.Equal(t, "admin_entitlement", grant.Reason)
 	require.Nil(t, grant.PriceID)
@@ -93,8 +92,7 @@ func TestAdminEntitlementAppendsAfterLatestEnd(t *testing.T) {
 		CreatedAt:       fixedNow,
 		UpdatedAt:       fixedNow,
 	}
-	_, err := suite.BunDB.NewInsert().Model(existing).Exec(context.Background())
-	require.NoError(t, err)
+	suite.InsertEntitlement(context.Background(), existing)
 
 	body, err := json.Marshal(map[string]any{
 		"entitlement": "premium",

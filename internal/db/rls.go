@@ -28,7 +28,7 @@ type RLSPosture struct {
 // CheckRLSPosture reports whether the current connection's role enforces RLS. A
 // role enforces RLS when it is neither a superuser nor a BYPASSRLS role.
 func (d *DB) CheckRLSPosture(ctx context.Context) (RLSPosture, error) {
-	if d == nil || d.db == nil {
+	if d == nil || d.pool == nil {
 		return RLSPosture{}, fmt.Errorf("db: CheckRLSPosture on nil DB")
 	}
 	var (
@@ -37,12 +37,12 @@ func (d *DB) CheckRLSPosture(ctx context.Context) (RLSPosture, error) {
 	)
 	// rolsuper OR rolbypassrls captures both ways a role skips RLS. current_user
 	// is the effective role for the session.
-	err := d.db.NewRaw(`
+	err := d.pool.QueryRow(ctx, `
 		SELECT current_user,
 		       COALESCE(bool_or(rolsuper OR rolbypassrls), TRUE)
 		  FROM pg_roles
 		 WHERE rolname = current_user
-	`).Scan(ctx, &user, &bypass)
+	`).Scan(&user, &bypass)
 	if err != nil {
 		return RLSPosture{}, fmt.Errorf("db: read RLS posture: %w", err)
 	}

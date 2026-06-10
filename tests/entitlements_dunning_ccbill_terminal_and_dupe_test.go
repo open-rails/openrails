@@ -36,7 +36,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	priceID := uuid.New()
 
 	billingDays := 30
-	_, err := suite.BunDB.NewInsert().Model(&models.Product{
+	suite.InsertProduct(ctx, &models.Product{
 		ID:          productID,
 		Slug:        "test_ccbill_multi_" + uuid.New().String()[:8],
 		DisplayName: "Test Product",
@@ -48,10 +48,9 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 		Status:    models.CatalogStatusActive,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
-	_, err = suite.BunDB.NewInsert().Model(&models.Price{
+	suite.InsertPrice(ctx, &models.Price{
 		ID:               priceID,
 		ProductID:        productID,
 		Status:           models.CatalogStatusActive,
@@ -60,8 +59,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 		BillingCycleDays: &billingDays,
 		CreatedAt:        clock.Now().UTC(),
 		UpdatedAt:        clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
 	userID := uuid.New().String()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
@@ -71,7 +69,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	periodStart := t0
 	paidEnd := t0.Add(30 * 24 * time.Hour)
 
-	_, err = suite.BunDB.NewInsert().Model(&models.Subscription{
+	suite.InsertSubscription(ctx, &models.Subscription{
 		ID:                      subID,
 		TenantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
@@ -84,8 +82,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 		StartedAt:               clock.Now().UTC(),
 		CreatedAt:               clock.Now().UTC(),
 		UpdatedAt:               clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
 	// Paid windows for both entitlements.
 	for _, entName := range []string{"premium", "extra"} {
@@ -103,10 +100,10 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	}
 
 	t.Cleanup(func() {
-		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
@@ -175,13 +172,12 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 
 	// No new paid window should have been pushed.
 	for _, entName := range []string{"premium", "extra"} {
-		n, err := suite.BunDB.NewSelect().
-			Model((*models.Entitlement)(nil)).
-			Where("tenant_subject_id = ? AND entitlement = ?", tenantSubjectID, entName).
-			Where("source_type = ?", models.EntitlementSourceSubscription).
-			Where("source_id = ?", subID).
-			Count(ctx)
-		require.NoError(t, err)
+		n := suite.Count(ctx, `
+			SELECT COUNT(*) FROM billing.entitlements
+			WHERE tenant_subject_id = $1 AND entitlement = $2
+			  AND source_type = $3 AND source_id = $4
+			  AND deleted_at IS NULL`,
+			tenantSubjectID, entName, string(models.EntitlementSourceSubscription), subID)
 		require.Equal(t, 1, n)
 	}
 }
@@ -205,7 +201,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	priceID := uuid.New()
 	billingDays := 30
 
-	_, err := suite.BunDB.NewInsert().Model(&models.Product{
+	suite.InsertProduct(ctx, &models.Product{
 		ID:          productID,
 		Slug:        "test_ccbill_dupe_" + uuid.New().String()[:8],
 		DisplayName: "Test Product",
@@ -216,10 +212,9 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 		Status:    models.CatalogStatusActive,
 		CreatedAt: clock.Now().UTC(),
 		UpdatedAt: clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
-	_, err = suite.BunDB.NewInsert().Model(&models.Price{
+	suite.InsertPrice(ctx, &models.Price{
 		ID:               priceID,
 		ProductID:        productID,
 		Status:           models.CatalogStatusActive,
@@ -228,8 +223,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 		BillingCycleDays: &billingDays,
 		CreatedAt:        clock.Now().UTC(),
 		UpdatedAt:        clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
 	userID := uuid.New().String()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
@@ -239,7 +233,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	periodStart := t0
 	paidEnd := t0.Add(30 * 24 * time.Hour)
 
-	_, err = suite.BunDB.NewInsert().Model(&models.Subscription{
+	suite.InsertSubscription(ctx, &models.Subscription{
 		ID:                      subID,
 		TenantSubjectID:         tenantSubjectID,
 		ProductID:               productID,
@@ -252,12 +246,11 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 		StartedAt:               clock.Now().UTC(),
 		CreatedAt:               clock.Now().UTC(),
 		UpdatedAt:               clock.Now().UTC(),
-	}).Exec(ctx)
-	require.NoError(t, err)
+	})
 
 	notBefore := periodStart.UTC()
 	endAt := paidEnd.UTC()
-	_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
+	_, err := rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 		UserID:      userID,
 		Entitlement: "premium",
 		NotBefore:   &notBefore,
@@ -268,10 +261,10 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.BunDB.NewDelete().Model((*models.Entitlement)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = suite.BunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
@@ -311,12 +304,12 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	require.NoError(t, webhook.HandleCCBillWebhook(ctx)) // duplicate
 
 	// Only one renewal window should exist for this subscription.
-	n, err := suite.BunDB.NewSelect().
-		Model((*models.Entitlement)(nil)).
-		Where("tenant_subject_id = ? AND entitlement = ?", suite.ensureTenantSubject(ctx, userID), "premium").
-		Where("source_type = ?", models.EntitlementSourceSubscription).
-		Where("source_id = ?", subID).
-		Count(ctx)
-	require.NoError(t, err)
+	n := suite.Count(ctx, `
+		SELECT COUNT(*) FROM billing.entitlements
+		WHERE tenant_subject_id = $1 AND entitlement = $2
+		  AND source_type = $3 AND source_id = $4
+		  AND deleted_at IS NULL`,
+		suite.ensureTenantSubject(ctx, userID), "premium",
+		string(models.EntitlementSourceSubscription), subID)
 	require.Equal(t, 2, n) // original + one renewal
 }

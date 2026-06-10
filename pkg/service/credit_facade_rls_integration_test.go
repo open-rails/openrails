@@ -50,16 +50,16 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	super, err := db.NewDB(&config.DBConfig{URL: superDSN})
 	require.NoError(t, err)
 	defer super.Close()
-	_, err = super.GetDB().NewRaw(
-		`INSERT INTO billing.tenants (id, slug, name) VALUES (?, ?, 'CF') ON CONFLICT (id) DO NOTHING`,
-		tenantID, "tenant-cf-"+tenantID[:8]).Exec(ctx)
+	_, err = super.Pool().Exec(ctx,
+		`INSERT INTO billing.tenants (id, slug, name) VALUES ($1, $2, 'CF') ON CONFLICT (id) DO NOTHING`,
+		tenantID, "tenant-cf-"+tenantID[:8])
 	require.NoError(t, err)
-	_, err = super.GetDB().NewRaw(
+	_, err = super.Pool().Exec(ctx,
 		`INSERT INTO billing.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
-		 VALUES (?,?,?,'CF','cents',2,true,?)`, ctID, tenantID, ctName, now).Exec(ctx)
+		 VALUES ($1,$2,$3,'CF','cents',2,true,$4)`, ctID, tenantID, ctName, now)
 	require.NoError(t, err)
-	_, err = super.GetDB().NewRaw(
-		`ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw'`).Exec(ctx)
+	_, err = super.Pool().Exec(ctx,
+		`ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw'`)
 	require.NoError(t, err)
 
 	// Facade connected as the unprivileged openrails_app role (RLS ENFORCES).

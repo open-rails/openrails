@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -58,9 +57,10 @@ func (a *App) SetControlPlane(cp any, ownedPool *pgxpool.Pool) {
 	}
 }
 
-// BootstrapOptions controls optional overrides for embedded use.
+// BootstrapOptions controls optional overrides for embedded use. Embedded
+// hosts supply their database as a pgx pool (PGXPool); the bun-era *sql.DB
+// override was removed with the ORM (#334).
 type BootstrapOptions struct {
-	DB      *sql.DB
 	PGXPool *pgxpool.Pool
 	Redis   *redis.Client
 	// Authenticator is the framework-neutral auth boundary (gin-free). The core
@@ -106,21 +106,12 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 	}
 
 	var dbOverride *db.DB
-	if opts != nil {
-		switch {
-		case opts.PGXPool != nil:
-			if dbo, err := db.NewWithPGXPool(opts.PGXPool); err != nil {
-				return nil, fmt.Errorf("use pgx pool: %w", err)
-			} else {
-				dbOverride = dbo
-			}
-		case opts.DB != nil:
-			if dbo, err := db.NewWithSQLDB(opts.DB); err != nil {
-				return nil, fmt.Errorf("use sql db: %w", err)
-			} else {
-				dbOverride = dbo
-			}
+	if opts != nil && opts.PGXPool != nil {
+		dbo, err := db.NewWithPGXPool(opts.PGXPool)
+		if err != nil {
+			return nil, fmt.Errorf("use pgx pool: %w", err)
 		}
+		dbOverride = dbo
 	}
 
 	runtime, err := buildRuntimeWithOverrides(cfg, &runtimeOverrides{

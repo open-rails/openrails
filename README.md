@@ -195,3 +195,18 @@ task build    # -> bin/openrails
 task test
 task docker-up / docker-down / docker-logs
 ```
+
+### Database queries (sqlc)
+
+All SQL lives in hand-written query files under `internal/db/queries/*.sql`,
+compiled by [sqlc](https://sqlc.dev) into the type-safe `internal/db/gen`
+package over pgx/v5. There is no ORM, and identifiers are never assembled at
+runtime — every query is vetted against a real database schema.
+
+```bash
+task sqlc        # regenerate internal/db/gen + vet queries against a real DB
+task sqlc-check  # same, then fail if generated code is out of date (CI)
+```
+
+Both targets need `SQLC_DATABASE_URL` (defaulting to the local dev DB);
+`scripts/sqlc-vet-db.sh` builds a throwaway vet database from the migrations.

@@ -211,16 +211,16 @@ func mustLoadJSONMap(t *testing.T, path string) map[string]any {
 
 func mustGetSubscriptionEntitlement(t *testing.T, suite *TestContainerSuite, ctx context.Context, userID string, subscriptionID uuid.UUID, entitlement string) *models.Entitlement {
 	t.Helper()
-	var ent models.Entitlement
-	err := suite.BunDB.NewSelect().
-		Model(&ent).
-		Where("tenant_subject_id = ?", suite.ensureTenantSubject(ctx, userID)).
-		Where("entitlement = ?", entitlement).
-		Where("source_type = ?", models.EntitlementSourceSubscription).
-		Where("source_id = ?", subscriptionID).
-		OrderExpr("start_at DESC").
-		Limit(1).
-		Scan(ctx)
-	require.NoError(t, err)
-	return &ent
+	ents := suite.QueryEntitlements(ctx, `
+		WHERE tenant_subject_id = $1
+		  AND entitlement = $2
+		  AND source_type = $3
+		  AND source_id = $4
+		  AND deleted_at IS NULL
+		ORDER BY start_at DESC
+		LIMIT 1`,
+		suite.ensureTenantSubject(ctx, userID), entitlement,
+		string(models.EntitlementSourceSubscription), subscriptionID)
+	require.Len(t, ents, 1, "expected a subscription entitlement window")
+	return &ents[0]
 }

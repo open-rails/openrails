@@ -1,10 +1,14 @@
 package app
 
 import (
+	"database/sql"
+
 	"context"
 	"fmt"
 	"strings"
 	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,7 +16,6 @@ import (
 	"github.com/riverqueue/river"
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	log "github.com/sirupsen/logrus"
-	"github.com/uptrace/bun"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/migratekit"
@@ -403,12 +406,17 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 		return fmt.Errorf("database is nil")
 	}
 
-	// Validate that all migrations have been applied before starting
-	bunDB, ok := database.GetDB().(*bun.DB)
-	if !ok || bunDB == nil || bunDB.DB == nil {
-		return fmt.Errorf("database must wrap *bun.DB")
+	// Validate that all migrations have been applied before starting.
+	// migratekit drives a database/sql handle; open a short-lived one over the
+	// pgx stdlib driver.
+	if cfg == nil || cfg.DB == nil {
+		return fmt.Errorf("database config is nil")
 	}
-	sqlDB := bunDB.DB
+	sqlDB, err := sql.Open("pgx", cfg.DB.GetConnectionString())
+	if err != nil {
+		return fmt.Errorf("open db for migration validation: %w", err)
+	}
+	defer func() { _ = sqlDB.Close() }()
 
 	if err := migratekit.ValidatePostgresMigrations(context.Background(), sqlDB,
 		migratekit.MigrationSource{App: "billing", FS: postgresmigrations.FS},

@@ -4,27 +4,24 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
 // TierPolicy is a per-payer, per-tier THROUGHPUT policy for the admission check
 // (issue #298). The money axis stays in CreditAccountSettings; this holds the
 // rate-limit windows. Rolling money-budget windows (#304) extend this.
 type TierPolicy struct {
-	bun.BaseModel `bun:"table:billing.tier_policies,alias:tp"`
-
-	ID       uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
-	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
+	ID       uuid.UUID `json:"id"`
+	TenantID uuid.UUID `json:"tenant_id"`
 	// TenantSubjectID the policy belongs to. The all-zero uuid is the reserved sentinel
 	// for tenant-wide defaults; a real payer id scopes policy to that payer.
-	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
 	// Tier name (e.g. "free", "tier_1"); the policy applies to actors at this tier.
-	Tier string `bun:"tier,notnull" json:"tier"`
+	Tier string `json:"tier"`
 	// Policy is the throughput windows: {"windows":[{"unit","window_seconds","max"}]}.
-	Policy        ThroughputPolicy `bun:"policy,type:jsonb,nullzero" json:"policy"`
-	PolicyVersion int64            `bun:"policy_version,notnull" json:"policy_version"`
-	CreatedAt     time.Time        `bun:"created_at,notnull" json:"created_at"`
-	UpdatedAt     time.Time        `bun:"updated_at,notnull" json:"updated_at"`
+	Policy        ThroughputPolicy `json:"policy"`
+	PolicyVersion int64            `json:"policy_version"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
 }
 
 // ThroughputPolicy is the JSONB-stored tier policy: fixed-window throughput

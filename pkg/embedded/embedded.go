@@ -2,7 +2,6 @@ package embedded
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 
@@ -19,8 +18,9 @@ import (
 )
 
 type Options struct {
-	Config  *config.Config
-	DB      *sql.DB
+	Config *config.Config
+	// PGXPool is the host-supplied database handle (pgx/v5). The bun-era
+	// *sql.DB option was removed with the ORM (#334).
 	PGXPool *pgxpool.Pool
 	Redis   *redis.Client
 	// Authenticator is the framework-neutral auth boundary (gin-free). A host
@@ -45,7 +45,6 @@ func New(opts Options) (*Embedded, error) {
 	// constructs the gin server from this App on demand (#285). Keeping the gin
 	// server out of this core type is what makes pkg/embedded gin-free.
 	application, err := bootstrap.NewApp(opts.Config, &bootstrap.Options{
-		DB:            opts.DB,
 		PGXPool:       opts.PGXPool,
 		Redis:         opts.Redis,
 		Authenticator: opts.Authenticator,

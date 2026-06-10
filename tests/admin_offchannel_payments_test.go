@@ -53,8 +53,7 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	paymentID := uuid.MustParse(resp.PaymentID)
 
-	p := new(models.Payment)
-	require.NoError(t, suite.BunDB.NewSelect().Model(p).Where("purch.id = ?", paymentID).Scan(req.Context()))
+	p := suite.GetPaymentByID(req.Context(), paymentID)
 
 	require.Equal(t, userID, p.TenantSubjectID.String())
 	require.Equal(t, lifetimePriceID, p.PriceID)
@@ -68,11 +67,8 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 	require.NotNil(t, p.DiscountCode)
 	require.Equal(t, "SUPPORT15", *p.DiscountCode)
 
-	ents := make([]models.Entitlement, 0)
-	require.NoError(t, suite.BunDB.NewSelect().
-		Model(&ents).
-		Where("ent.source_type = ?", models.EntitlementSourceOneOff).
-		Where("ent.source_id = ?", paymentID).
-		Scan(req.Context()))
+	ents := suite.QueryEntitlements(req.Context(),
+		"WHERE source_type = $1 AND source_id = $2 AND deleted_at IS NULL",
+		string(models.EntitlementSourceOneOff), paymentID)
 	require.NotEmpty(t, ents)
 }
