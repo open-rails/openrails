@@ -422,7 +422,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create checker and run audit
-	checker := audit.NewChecker(application.Runtime.DB.GetDB())
+	checker := audit.NewChecker(application.Runtime.DB.Pool())
 	findings, summary, err := checker.Run(cmd.Context(), opts)
 	if err != nil {
 		return fmt.Errorf("audit failed: %w", err)

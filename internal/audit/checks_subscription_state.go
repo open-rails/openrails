@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/uptrace/bun"
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 // SS-1: Active subscription past period end
@@ -19,24 +18,11 @@ func (c *CheckActiveSubscriptionPastPeriodEnd) Name() string {
 func (c *CheckActiveSubscriptionPastPeriodEnd) Category() string   { return "subscription_state" }
 func (c *CheckActiveSubscriptionPastPeriodEnd) Severity() Severity { return SeverityHigh }
 
-func (c *CheckActiveSubscriptionPastPeriodEnd) Run(ctx context.Context, db bun.IDB, opts Options) ([]Finding, error) {
+func (c *CheckActiveSubscriptionPastPeriodEnd) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	type result struct {
-		ID           uuid.UUID `bun:"id"`
-		UserID       string    `bun:"user_id"`
-		PeriodEndsAt time.Time `bun:"current_period_ends_at"`
-	}
-
-	var results []result
-	q := db.NewRaw(`
-		SELECT id, tenant_subject_id::text AS user_id, current_period_ends_at
-		FROM billing.subscriptions
-		WHERE status = 'active'
-		  AND current_period_ends_at < NOW()
-	`)
-
-	if err := db.NewRaw(q.String()).Scan(ctx, &results); err != nil {
+	results, err := q.AuditActiveSubscriptionPastPeriodEnd(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("query past period end subscriptions: %w", err)
 	}
 
@@ -52,12 +38,12 @@ func (c *CheckActiveSubscriptionPastPeriodEnd) Run(ctx context.Context, db bun.I
 			EntityType:     EntitySubscription,
 			EntityID:       r.ID,
 			UserID:         r.UserID,
-			Description:    fmt.Sprintf("Subscription is active but period ended at %s", r.PeriodEndsAt.Format(time.RFC3339)),
+			Description:    fmt.Sprintf("Subscription is active but period ended at %s", r.CurrentPeriodEndsAt.Format(time.RFC3339)),
 			Recommendation: "Transition to past_due and attempt rebill, or cancel if grace period exceeded",
 			AutoFixable:    true,
 			Details: map[string]any{
-				"period_ends_at": r.PeriodEndsAt,
-				"hours_overdue":  time.Since(r.PeriodEndsAt).Hours(),
+				"period_ends_at": r.CurrentPeriodEndsAt,
+				"hours_overdue":  time.Since(r.CurrentPeriodEndsAt).Hours(),
 			},
 		})
 	}
@@ -73,25 +59,10 @@ func (c *CheckCancelledWithoutMetadata) Name() string       { return "cancelled_
 func (c *CheckCancelledWithoutMetadata) Category() string   { return "subscription_state" }
 func (c *CheckCancelledWithoutMetadata) Severity() Severity { return SeverityMedium }
 
-func (c *CheckCancelledWithoutMetadata) Run(ctx context.Context, db bun.IDB, opts Options) ([]Finding, error) {
+func (c *CheckCancelledWithoutMetadata) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	type result struct {
-		ID          uuid.UUID  `bun:"id"`
-		UserID      string     `bun:"user_id"`
-		CancelledAt *time.Time `bun:"cancelled_at"`
-		CancelType  *string    `bun:"cancel_type"`
-		UpdatedAt   time.Time  `bun:"updated_at"`
-	}
-
-	var results []result
-	err := db.NewRaw(`
-		SELECT id, tenant_subject_id::text AS user_id, cancelled_at, cancel_type, updated_at
-		FROM billing.subscriptions
-		WHERE status = 'cancelled'
-		  AND (cancelled_at IS NULL OR cancel_type IS NULL)
-	`).Scan(ctx, &results)
-
+	results, err := q.AuditCancelledWithoutMetadata(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query cancelled without metadata: %w", err)
 	}
@@ -137,24 +108,10 @@ func (c *CheckPastDueWithoutRetry) Name() string       { return "past_due_withou
 func (c *CheckPastDueWithoutRetry) Category() string   { return "subscription_state" }
 func (c *CheckPastDueWithoutRetry) Severity() Severity { return SeverityMedium }
 
-func (c *CheckPastDueWithoutRetry) Run(ctx context.Context, db bun.IDB, opts Options) ([]Finding, error) {
+func (c *CheckPastDueWithoutRetry) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	type result struct {
-		ID            uuid.UUID `bun:"id"`
-		UserID        string    `bun:"user_id"`
-		RetryAttempts *int      `bun:"retry_attempts"`
-	}
-
-	var results []result
-	err := db.NewRaw(`
-		SELECT id, tenant_subject_id::text AS user_id, retry_attempts
-		FROM billing.subscriptions
-		WHERE status = 'past_due'
-		  AND next_retry_at IS NULL
-		  AND COALESCE(retry_attempts, 0) < 5
-	`).Scan(ctx, &results)
-
+	results, err := q.AuditPastDueWithoutRetry(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query past due without retry: %w", err)
 	}
@@ -166,7 +123,7 @@ func (c *CheckPastDueWithoutRetry) Run(ctx context.Context, db bun.IDB, opts Opt
 
 		attempts := 0
 		if r.RetryAttempts != nil {
-			attempts = *r.RetryAttempts
+			attempts = int(*r.RetryAttempts)
 		}
 
 		findings = append(findings, Finding{
@@ -196,25 +153,10 @@ func (c *CheckInvalidPeriodDates) Name() string       { return "invalid_period_d
 func (c *CheckInvalidPeriodDates) Category() string   { return "subscription_state" }
 func (c *CheckInvalidPeriodDates) Severity() Severity { return SeverityHigh }
 
-func (c *CheckInvalidPeriodDates) Run(ctx context.Context, db bun.IDB, opts Options) ([]Finding, error) {
+func (c *CheckInvalidPeriodDates) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	type result struct {
-		ID             uuid.UUID `bun:"id"`
-		UserID         string    `bun:"user_id"`
-		PeriodStartsAt time.Time `bun:"current_period_starts_at"`
-		PeriodEndsAt   time.Time `bun:"current_period_ends_at"`
-	}
-
-	var results []result
-	err := db.NewRaw(`
-		SELECT id, tenant_subject_id::text AS user_id, current_period_starts_at, current_period_ends_at
-		FROM billing.subscriptions
-		WHERE current_period_starts_at IS NOT NULL
-		  AND current_period_ends_at IS NOT NULL
-		  AND current_period_starts_at >= current_period_ends_at
-	`).Scan(ctx, &results)
-
+	results, err := q.AuditInvalidPeriodDates(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query invalid period dates: %w", err)
 	}
@@ -231,12 +173,12 @@ func (c *CheckInvalidPeriodDates) Run(ctx context.Context, db bun.IDB, opts Opti
 			EntityType:     EntitySubscription,
 			EntityID:       r.ID,
 			UserID:         r.UserID,
-			Description:    fmt.Sprintf("Period start (%s) >= period end (%s)", r.PeriodStartsAt.Format(time.RFC3339), r.PeriodEndsAt.Format(time.RFC3339)),
+			Description:    fmt.Sprintf("Period start (%s) >= period end (%s)", r.CurrentPeriodStartsAt.Format(time.RFC3339), r.CurrentPeriodEndsAt.Format(time.RFC3339)),
 			Recommendation: "MANUAL REVIEW - Data corruption detected",
 			AutoFixable:    false,
 			Details: map[string]any{
-				"period_starts_at": r.PeriodStartsAt,
-				"period_ends_at":   r.PeriodEndsAt,
+				"period_starts_at": r.CurrentPeriodStartsAt,
+				"period_ends_at":   r.CurrentPeriodEndsAt,
 			},
 		})
 	}
@@ -252,25 +194,10 @@ func (c *CheckEndedBeforeCancelled) Name() string       { return "ended_before_c
 func (c *CheckEndedBeforeCancelled) Category() string   { return "subscription_state" }
 func (c *CheckEndedBeforeCancelled) Severity() Severity { return SeverityLow }
 
-func (c *CheckEndedBeforeCancelled) Run(ctx context.Context, db bun.IDB, opts Options) ([]Finding, error) {
+func (c *CheckEndedBeforeCancelled) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	type result struct {
-		ID          uuid.UUID `bun:"id"`
-		UserID      string    `bun:"user_id"`
-		EndedAt     time.Time `bun:"ended_at"`
-		CancelledAt time.Time `bun:"cancelled_at"`
-	}
-
-	var results []result
-	err := db.NewRaw(`
-		SELECT id, tenant_subject_id::text AS user_id, ended_at, cancelled_at
-		FROM billing.subscriptions
-		WHERE ended_at IS NOT NULL
-		  AND cancelled_at IS NOT NULL
-		  AND ended_at < cancelled_at
-	`).Scan(ctx, &results)
-
+	results, err := q.AuditEndedBeforeCancelled(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query ended before cancelled: %w", err)
 	}

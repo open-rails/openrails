@@ -30,6 +30,60 @@ func (q *Queries) CountManualRebillAttempts(ctx context.Context, arg CountManual
 	return count, err
 }
 
+const countOpenCatalogDriftByKind = `-- name: CountOpenCatalogDriftByKind :many
+SELECT provider, kind, count(*)::bigint AS n
+FROM billing.catalog_drift_events
+WHERE resolved_at IS NULL
+GROUP BY provider, kind
+`
+
+type CountOpenCatalogDriftByKindRow struct {
+	Provider string
+	Kind     string
+	N        int64
+}
+
+func (q *Queries) CountOpenCatalogDriftByKind(ctx context.Context) ([]CountOpenCatalogDriftByKindRow, error) {
+	rows, err := q.db.Query(ctx, countOpenCatalogDriftByKind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountOpenCatalogDriftByKindRow
+	for rows.Next() {
+		var i CountOpenCatalogDriftByKindRow
+		if err := rows.Scan(&i.Provider, &i.Kind, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countOpenCatalogDriftFiltered = `-- name: CountOpenCatalogDriftFiltered :one
+SELECT count(*) FROM billing.catalog_drift_events
+WHERE resolved_at IS NULL
+  AND ($1::text IS NULL OR provider = $1::text)
+  AND ($2::text IS NULL OR kind = $2::text)
+  AND ($3::text IS NULL OR openrails_resource_type = $3::text)
+`
+
+type CountOpenCatalogDriftFilteredParams struct {
+	Provider     *string
+	Kind         *string
+	ResourceType *string
+}
+
+func (q *Queries) CountOpenCatalogDriftFiltered(ctx context.Context, arg CountOpenCatalogDriftFilteredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpenCatalogDriftFiltered, arg.Provider, arg.Kind, arg.ResourceType)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getManualRebillAttemptForUpdate = `-- name: GetManualRebillAttemptForUpdate :one
 
 SELECT id, subscription_id, period_end, processor, order_reference, status, transaction_id, failure_reason, claimed_until, created_at, updated_at, tenant_id FROM billing.manual_rebill_attempts
@@ -229,6 +283,63 @@ func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]BillingCata
 	return items, nil
 }
 
+const listOpenCatalogDriftFiltered = `-- name: ListOpenCatalogDriftFiltered :many
+SELECT id, provider, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, tenant_id FROM billing.catalog_drift_events
+WHERE resolved_at IS NULL
+  AND ($3::text IS NULL OR provider = $3::text)
+  AND ($4::text IS NULL OR kind = $4::text)
+  AND ($5::text IS NULL OR openrails_resource_type = $5::text)
+ORDER BY detected_at DESC
+LIMIT $1::int OFFSET $2::int
+`
+
+type ListOpenCatalogDriftFilteredParams struct {
+	Column1      int32
+	Column2      int32
+	Provider     *string
+	Kind         *string
+	ResourceType *string
+}
+
+func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpenCatalogDriftFilteredParams) ([]BillingCatalogDriftEvent, error) {
+	rows, err := q.db.Query(ctx, listOpenCatalogDriftFiltered,
+		arg.Column1,
+		arg.Column2,
+		arg.Provider,
+		arg.Kind,
+		arg.ResourceType,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCatalogDriftEvent
+	for rows.Next() {
+		var i BillingCatalogDriftEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.Provider,
+			&i.Kind,
+			&i.OpenrailsResourceType,
+			&i.OpenrailsResourceID,
+			&i.ExternalResourceID,
+			&i.Field,
+			&i.OpenrailsValue,
+			&i.ExternalValue,
+			&i.DetectedAt,
+			&i.ResolvedAt,
+			&i.TenantID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const resolveCatalogDriftEvent = `-- name: ResolveCatalogDriftEvent :exec
 UPDATE billing.catalog_drift_events
 SET resolved_at = $2
@@ -243,6 +354,28 @@ type ResolveCatalogDriftEventParams struct {
 func (q *Queries) ResolveCatalogDriftEvent(ctx context.Context, arg ResolveCatalogDriftEventParams) error {
 	_, err := q.db.Exec(ctx, resolveCatalogDriftEvent, arg.ID, arg.ResolvedAt)
 	return err
+}
+
+const resolveCatalogDriftForResource = `-- name: ResolveCatalogDriftForResource :execrows
+UPDATE billing.catalog_drift_events
+SET resolved_at = $1
+WHERE resolved_at IS NULL
+  AND openrails_resource_type = $2
+  AND openrails_resource_id = $3
+`
+
+type ResolveCatalogDriftForResourceParams struct {
+	ResolvedAt            *time.Time
+	OpenrailsResourceType string
+	OpenrailsResourceID   *string
+}
+
+func (q *Queries) ResolveCatalogDriftForResource(ctx context.Context, arg ResolveCatalogDriftForResourceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveCatalogDriftForResource, arg.ResolvedAt, arg.OpenrailsResourceType, arg.OpenrailsResourceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateManualRebillAttempt = `-- name: UpdateManualRebillAttempt :exec

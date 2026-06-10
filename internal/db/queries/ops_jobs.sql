@@ -47,3 +47,32 @@ INSERT INTO billing.catalog_drift_events (
 UPDATE billing.catalog_drift_events
 SET resolved_at = $2
 WHERE id = $1 AND resolved_at IS NULL;
+
+-- name: CountOpenCatalogDriftFiltered :one
+SELECT count(*) FROM billing.catalog_drift_events
+WHERE resolved_at IS NULL
+  AND (sqlc.narg(provider)::text IS NULL OR provider = sqlc.narg(provider)::text)
+  AND (sqlc.narg(kind)::text IS NULL OR kind = sqlc.narg(kind)::text)
+  AND (sqlc.narg(resource_type)::text IS NULL OR openrails_resource_type = sqlc.narg(resource_type)::text);
+
+-- name: ListOpenCatalogDriftFiltered :many
+SELECT * FROM billing.catalog_drift_events
+WHERE resolved_at IS NULL
+  AND (sqlc.narg(provider)::text IS NULL OR provider = sqlc.narg(provider)::text)
+  AND (sqlc.narg(kind)::text IS NULL OR kind = sqlc.narg(kind)::text)
+  AND (sqlc.narg(resource_type)::text IS NULL OR openrails_resource_type = sqlc.narg(resource_type)::text)
+ORDER BY detected_at DESC
+LIMIT $1::int OFFSET $2::int;
+
+-- name: ResolveCatalogDriftForResource :execrows
+UPDATE billing.catalog_drift_events
+SET resolved_at = $1
+WHERE resolved_at IS NULL
+  AND openrails_resource_type = $2
+  AND openrails_resource_id = $3;
+
+-- name: CountOpenCatalogDriftByKind :many
+SELECT provider, kind, count(*)::bigint AS n
+FROM billing.catalog_drift_events
+WHERE resolved_at IS NULL
+GROUP BY provider, kind;

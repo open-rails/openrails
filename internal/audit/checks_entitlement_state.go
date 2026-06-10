@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/uptrace/bun"
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 // ES-1: Revoked without reason
@@ -17,25 +16,10 @@ func (c *CheckRevokedWithoutReason) Name() string       { return "revoked_withou
 func (c *CheckRevokedWithoutReason) Category() string   { return "entitlement_state" }
 func (c *CheckRevokedWithoutReason) Severity() Severity { return SeverityLow }
 
-func (c *CheckRevokedWithoutReason) Run(ctx context.Context, db bun.IDB, opts Options) ([]Finding, error) {
+func (c *CheckRevokedWithoutReason) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	type result struct {
-		ID          uuid.UUID `bun:"id"`
-		UserID      string    `bun:"user_id"`
-		Entitlement string    `bun:"entitlement"`
-		RevokedAt   time.Time `bun:"revoked_at"`
-	}
-
-	var results []result
-	err := db.NewRaw(`
-		SELECT id, tenant_subject_id::text AS user_id, entitlement, revoked_at
-		FROM billing.entitlements
-		WHERE revoked_at IS NOT NULL
-		  AND revoke_reason IS NULL
-		  AND deleted_at IS NULL
-	`).Scan(ctx, &results)
-
+	results, err := q.AuditRevokedWithoutReason(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query revoked without reason: %w", err)
 	}
@@ -72,25 +56,10 @@ func (c *CheckReasonWithoutRevocation) Name() string       { return "reason_with
 func (c *CheckReasonWithoutRevocation) Category() string   { return "entitlement_state" }
 func (c *CheckReasonWithoutRevocation) Severity() Severity { return SeverityLow }
 
-func (c *CheckReasonWithoutRevocation) Run(ctx context.Context, db bun.IDB, opts Options) ([]Finding, error) {
+func (c *CheckReasonWithoutRevocation) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	type result struct {
-		ID           uuid.UUID `bun:"id"`
-		UserID       string    `bun:"user_id"`
-		Entitlement  string    `bun:"entitlement"`
-		RevokeReason string    `bun:"revoke_reason"`
-	}
-
-	var results []result
-	err := db.NewRaw(`
-		SELECT id, tenant_subject_id::text AS user_id, entitlement, revoke_reason
-		FROM billing.entitlements
-		WHERE revoke_reason IS NOT NULL
-		  AND revoked_at IS NULL
-		  AND deleted_at IS NULL
-	`).Scan(ctx, &results)
-
+	results, err := q.AuditReasonWithoutRevocation(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query reason without revocation: %w", err)
 	}
@@ -127,26 +96,10 @@ func (c *CheckInvalidTimeWindow) Name() string       { return "invalid_time_wind
 func (c *CheckInvalidTimeWindow) Category() string   { return "entitlement_state" }
 func (c *CheckInvalidTimeWindow) Severity() Severity { return SeverityHigh }
 
-func (c *CheckInvalidTimeWindow) Run(ctx context.Context, db bun.IDB, opts Options) ([]Finding, error) {
+func (c *CheckInvalidTimeWindow) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	type result struct {
-		ID          uuid.UUID `bun:"id"`
-		UserID      string    `bun:"user_id"`
-		Entitlement string    `bun:"entitlement"`
-		StartAt     time.Time `bun:"start_at"`
-		EndAt       time.Time `bun:"end_at"`
-	}
-
-	var results []result
-	err := db.NewRaw(`
-		SELECT id, tenant_subject_id::text AS user_id, entitlement, start_at, end_at
-		FROM billing.entitlements
-		WHERE end_at IS NOT NULL
-		  AND start_at >= end_at
-		  AND deleted_at IS NULL
-	`).Scan(ctx, &results)
-
+	results, err := q.AuditInvalidTimeWindow(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query invalid time window: %w", err)
 	}
@@ -186,31 +139,10 @@ func (c *CheckMultipleIndefiniteEntitlements) Name() string {
 func (c *CheckMultipleIndefiniteEntitlements) Category() string   { return "entitlement_state" }
 func (c *CheckMultipleIndefiniteEntitlements) Severity() Severity { return SeverityMedium }
 
-func (c *CheckMultipleIndefiniteEntitlements) Run(ctx context.Context, db bun.IDB, opts Options) ([]Finding, error) {
+func (c *CheckMultipleIndefiniteEntitlements) Run(ctx context.Context, q *gen.Queries, opts Options) ([]Finding, error) {
 	var findings []Finding
 
-	type result struct {
-		UserID         string      `bun:"user_id"`
-		Entitlement    string      `bun:"entitlement"`
-		Count          int         `bun:"count"`
-		EntitlementIDs []uuid.UUID `bun:"ent_ids,array"`
-	}
-
-	var results []result
-	err := db.NewRaw(`
-		SELECT
-			tenant_subject_id::text AS user_id,
-			entitlement,
-			COUNT(*) as count,
-			ARRAY_AGG(id ORDER BY created_at DESC) as ent_ids
-		FROM billing.entitlements
-		WHERE end_at IS NULL
-		  AND revoked_at IS NULL
-		  AND deleted_at IS NULL
-		GROUP BY tenant_subject_id, entitlement
-		HAVING COUNT(*) > 1
-	`).Scan(ctx, &results)
-
+	results, err := q.AuditMultipleIndefiniteEntitlements(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query multiple indefinite entitlements: %w", err)
 	}
@@ -221,7 +153,7 @@ func (c *CheckMultipleIndefiniteEntitlements) Run(ctx context.Context, db bun.ID
 		}
 
 		// Use the first (most recent) entitlement ID as the entity
-		entityID := r.EntitlementIDs[0]
+		entityID := r.EntIds[0]
 
 		findings = append(findings, Finding{
 			CheckID:        c.ID(),
@@ -234,7 +166,7 @@ func (c *CheckMultipleIndefiniteEntitlements) Run(ctx context.Context, db bun.ID
 			Recommendation: "Revoke all but the most recent",
 			AutoFixable:    true,
 			Details: map[string]any{
-				"entitlement_ids": r.EntitlementIDs,
+				"entitlement_ids": r.EntIds,
 				"entitlement":     r.Entitlement,
 			},
 		})

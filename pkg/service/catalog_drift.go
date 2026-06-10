@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -763,11 +764,15 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 	if err != nil {
 		return 0, 0, err
 	}
-	idb := dbi.GetDB()
+	q := dbi.Gen(ctx)
 
-	var existing []models.CatalogDriftEvent
-	if err := idb.NewSelect().Model(&existing).Where("resolved_at IS NULL").Scan(ctx); err != nil {
+	openRows, err := q.ListOpenCatalogDriftEvents(ctx)
+	if err != nil {
 		return 0, 0, fmt.Errorf("load open drift events: %w", err)
+	}
+	existing := make([]models.CatalogDriftEvent, 0, len(openRows))
+	for _, r := range openRows {
+		existing = append(existing, driftEventFromGen(r))
 	}
 	existingByKey := make(map[string]*models.CatalogDriftEvent, len(existing))
 	for i := range existing {
@@ -786,7 +791,18 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 		if row.ID == uuid.Nil {
 			row.ID = uuidutil.NewV7()
 		}
-		if _, err := idb.NewInsert().Model(&row).Exec(ctx); err != nil {
+		if err := q.InsertCatalogDriftEvent(ctx, gen.InsertCatalogDriftEventParams{
+			ID:                    row.ID,
+			Provider:              string(row.Provider),
+			Kind:                  string(row.Kind),
+			OpenrailsResourceType: string(row.OpenRailsResourceType),
+			OpenrailsResourceID:   nilIfEmptyText(row.OpenRailsResourceID),
+			ExternalResourceID:    nilIfEmptyText(row.ExternalResourceID),
+			Field:                 nilIfEmptyText(row.Field),
+			OpenrailsValue:        nilIfEmptyText(row.OpenRailsValue),
+			ExternalValue:         nilIfEmptyText(row.ExternalValue),
+			DetectedAt:            row.DetectedAt,
+		}); err != nil {
 			return inserted, 0, fmt.Errorf("insert drift event: %w", err)
 		}
 		inserted++
@@ -799,15 +815,46 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 			continue
 		}
 		// This open event's divergence is gone -> auto-resolve.
-		if _, err := idb.NewUpdate().Model((*models.CatalogDriftEvent)(nil)).
-			Set("resolved_at = ?", now).
-			Where("id = ? AND resolved_at IS NULL", row.ID).
-			Exec(ctx); err != nil {
+		if err := q.ResolveCatalogDriftEvent(ctx, gen.ResolveCatalogDriftEventParams{
+			ID: row.ID, ResolvedAt: &now,
+		}); err != nil {
 			return inserted, resolved, fmt.Errorf("resolve drift event: %w", err)
 		}
 		resolved++
 	}
 	return inserted, resolved, nil
+}
+
+// driftEventFromGen maps the generated row onto the domain model (NULL text
+// columns flatten to "" like the bun nullzero tags did).
+func driftEventFromGen(r gen.BillingCatalogDriftEvent) models.CatalogDriftEvent {
+	return models.CatalogDriftEvent{
+		ID:                    r.ID,
+		Provider:              models.CatalogDriftProvider(r.Provider),
+		Kind:                  models.CatalogDriftKind(r.Kind),
+		OpenRailsResourceType: models.CatalogDriftResourceType(r.OpenrailsResourceType),
+		OpenRailsResourceID:   derefText(r.OpenrailsResourceID),
+		ExternalResourceID:    derefText(r.ExternalResourceID),
+		Field:                 derefText(r.Field),
+		OpenRailsValue:        derefText(r.OpenrailsValue),
+		ExternalValue:         derefText(r.ExternalValue),
+		DetectedAt:            r.DetectedAt,
+		ResolvedAt:            r.ResolvedAt,
+	}
+}
+
+func nilIfEmptyText(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func derefText(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // CatalogDriftFilter narrows the open-drift listing.
@@ -826,7 +873,7 @@ func (s *Service) ListCatalogDrift(ctx context.Context, filter CatalogDriftFilte
 	if err != nil {
 		return nil, 0, err
 	}
-	idb := dbi.GetDB()
+	q := dbi.Gen(ctx)
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100
@@ -836,27 +883,29 @@ func (s *Service) ListCatalogDrift(ctx context.Context, filter CatalogDriftFilte
 		offset = 0
 	}
 
-	q := idb.NewSelect().Model((*models.CatalogDriftEvent)(nil)).Where("resolved_at IS NULL")
-	if p := strings.TrimSpace(filter.Provider); p != "" {
-		q = q.Where("provider = ?", p)
-	}
-	if k := strings.TrimSpace(filter.Kind); k != "" {
-		q = q.Where("kind = ?", k)
-	}
-	if rt := strings.TrimSpace(filter.ResourceType); rt != "" {
-		q = q.Where("openrails_resource_type = ?", rt)
-	}
+	provider := nilIfEmptyText(strings.TrimSpace(filter.Provider))
+	kind := nilIfEmptyText(strings.TrimSpace(filter.Kind))
+	resourceType := nilIfEmptyText(strings.TrimSpace(filter.ResourceType))
 
-	var rows []models.CatalogDriftEvent
-	count, err := q.Order("detected_at DESC").Limit(limit).Offset(offset).ScanAndCount(ctx, &rows)
+	total, err = q.CountOpenCatalogDriftFiltered(ctx, gen.CountOpenCatalogDriftFilteredParams{
+		Provider: provider, Kind: kind, ResourceType: resourceType,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("count drift events: %w", err)
+	}
+	rows, err := q.ListOpenCatalogDriftFiltered(ctx, gen.ListOpenCatalogDriftFilteredParams{
+		Provider: provider, Kind: kind, ResourceType: resourceType,
+		Column1: int32(limit), Column2: int32(offset),
+	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list drift events: %w", err)
 	}
 	out := make([]CatalogDriftEventView, 0, len(rows))
 	for i := range rows {
-		out = append(out, driftEventToView(&rows[i]))
+		ev := driftEventFromGen(rows[i])
+		out = append(out, driftEventToView(&ev))
 	}
-	return out, int64(count), nil
+	return out, total, nil
 }
 
 // listOpenDriftEvents is an internal helper returning just the open events
@@ -879,17 +928,15 @@ func (s *Service) ResolveDriftForResource(ctx context.Context, resourceType mode
 	if err != nil {
 		return 0, err
 	}
-	idb := dbi.GetDB()
-	res, err := idb.NewUpdate().Model((*models.CatalogDriftEvent)(nil)).
-		Set("resolved_at = ?", s.now().UTC()).
-		Where("resolved_at IS NULL").
-		Where("openrails_resource_type = ?", string(resourceType)).
-		Where("openrails_resource_id = ?", openRailsResourceID).
-		Exec(ctx)
+	now := s.now().UTC()
+	n, err := dbi.Gen(ctx).ResolveCatalogDriftForResource(ctx, gen.ResolveCatalogDriftForResourceParams{
+		ResolvedAt:            &now,
+		OpenrailsResourceType: string(resourceType),
+		OpenrailsResourceID:   &openRailsResourceID,
+	})
 	if err != nil {
 		return 0, fmt.Errorf("resolve drift for resource: %w", err)
 	}
-	n, _ := res.RowsAffected()
 	return int(n), nil
 }
 
@@ -901,18 +948,8 @@ func (s *Service) CountOpenDriftByKind(ctx context.Context) (map[string]int64, e
 	if err != nil {
 		return nil, err
 	}
-	idb := dbi.GetDB()
-	var rows []struct {
-		Provider string `bun:"provider"`
-		Kind     string `bun:"kind"`
-		N        int64  `bun:"n"`
-	}
-	if err := idb.NewSelect().Model((*models.CatalogDriftEvent)(nil)).
-		Column("provider", "kind").
-		ColumnExpr("count(*) AS n").
-		Where("resolved_at IS NULL").
-		Group("provider", "kind").
-		Scan(ctx, &rows); err != nil {
+	rows, err := dbi.Gen(ctx).CountOpenCatalogDriftByKind(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("count open drift: %w", err)
 	}
 	out := make(map[string]int64, len(rows))
