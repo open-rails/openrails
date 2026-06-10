@@ -544,18 +544,19 @@
         "[x] FIXED runtime bug: admin-audit (platform_audit + platform_break_glass) SQL invoker_id -> actor_user_id to match the columns; admin actor is an OpenRails superadmin user (commit 6f069f9).",
         "[ ] DECISION: collapse per-invoker billing to tenant_subject-only? (user leans yes — billing-only, attribution via metadata, detail in tensorhub).",
         "[ ] If collapsing: drop invoker_id from the 6 billing tables; key balances/transactions/reservations/spend-limits by tenant_subject_id.",
-        "[ ] Move optional attribution (invoker=tensorhub-user, endpoint/function) into flexible metadata jsonb (usage_events already has metadata + dimensions) — reconciliation only, not a billing dimension.",
         "[ ] Update billing code: internal/modules/budgets, internal/modules/credits, internal/http/handlers/service_admission, river/jobs_credit_expiry, etc. to drop the invoker dimension (BudgetCheck takes invoker_id today).",
         "[ ] Reconsider credit_spend_limits (#237/#246 per-invoker spend caps) — collapsing makes caps per-tenant_subject; confirm that's acceptable or keep per-invoker caps only here.",
         "[ ] (cosmetic) admin-audit Go field is still literally InvokerID (now maps to actor_user_id) — rename to ActorUserID for clarity.",
-        "[ ] ATTRIBUTION CONTRACT (refines this issue): every charge/usage event requires source (caller system, e.g. 'tensorhub.invoke') + source_id (the CALLER's request/event id = durable join key back to their full log). OpenRails stores who/what + the pointer, never the per-request log.",
-        "[ ] Promote the minimal who/what to REQUIRED, TYPED columns on usage_events (validated at the API boundary) instead of optional metadata: invoker + endpoint/function. Keep metadata jsonb for the long tail (tier, region, caller extras).",
-        "[ ] RENAME delegated_user_id -> invoker_id (old term; mostly superseded by tenant-subject / invoker). Touches: OpenRails usage_events.metadata key + the `metadata->>'delegated_user_id'` query (service_usage.go endpoint/dim helpers), AND tensorhub's usage-capture that populates it.",
-        "[ ] USE SLUGS, NOT UUIDs, for attribution values (preference): invoker = username slug, endpoint = endpoint slug, tenant = tenant slug — self-descriptive, human-readable billing logs. Aligns with the slug-only HTTP API (#456). NOTE: with slug values, field reads more naturally as `invoker`/`endpoint` (slug) than `invoker_id` — confirm naming.",
-        "[ ] CROSS-REPO: tensorhub (and doujins) must populate the contract per charge — invoker slug + endpoint slug + source_id(request_id). File the tensorhub-side task when this lands."
+        "[ ] ATTRIBUTION CONTRACT (decided convention): every charge/usage event carries a POINTER + slug-valued WHO/WHAT.",
+        "[ ]   POINTER: source (caller system, e.g. 'tensorhub.invoke' / 'doujins.checkout') + source_id (the CALLER's request/event UUID = durable join key back to their full per-request log). source_id stays a uuid.",
+        "[ ]   WHO/WHAT (SLUGS, not uuids — self-descriptive logs): invoker (username slug), endpoint (endpoint slug), tenant (tenant slug), function (function name). BARE names — NOT invoker_id/endpoint_id — because the values are slugs (the _id suffix is reserved for uuid keys like source_id).",
+        "[ ]   So delegated_user_id (old term) -> invoker (slug). Touches OpenRails usage_events.metadata key + the `metadata->>'delegated_user_id'` query helpers (service_usage.go), AND tensorhub's usage-capture that populates it.",
+        "[ ]   Make invoker + endpoint REQUIRED, TYPED columns on usage_events (validated at the API boundary) instead of optional metadata; keep metadata jsonb for the long tail (tier, region, caller extras).",
+        "[ ]   Example row: usage_events(tenant='cozy-art', invoker='alice', endpoint='flux-2-klein', function='generate', source='tensorhub.invoke', source_id=<uuid>, amount, occurred_at).",
+        "[ ] CROSS-REPO: tensorhub (+ doujins) populate the contract per charge — invoker/endpoint/tenant SLUGS + source_id. File the tensorhub-side task when this lands. Aligns with slug-only HTTP API (#456)."
       ],
       "completed": false,
-      "status": "OPEN 2026-06-10 (Claude): admin-audit invoker_id->actor_user_id FIXED (6f069f9). Design now spans 3 parts: (A) drop per-invoker billing dimension -> key on tenant_subject; (B) define a REQUIRED charge-attribution contract (source/source_id + typed invoker/endpoint on usage_events); (C) attribution uses SLUGS not uuids, and delegated_user_id -> invoker_id. Detailed per-request logs stay in tensorhub."
+      "status": "OPEN 2026-06-10 (Claude): admin-audit invoker_id->actor_user_id FIXED (6f069f9). Plan = (A) drop per-invoker billing dimension, key on tenant_subject; (B) charge-attribution contract: source+source_id(uuid) POINTER plus SLUG-valued invoker/endpoint/tenant/function (typed+required on usage_events), delegated_user_id -> invoker; (C) detailed per-request logs stay in tensorhub."
     }
   ]
 }
