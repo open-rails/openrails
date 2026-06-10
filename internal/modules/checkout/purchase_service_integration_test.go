@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -33,8 +32,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -65,7 +63,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 		UpdatedAt: now,
 	}
 
-	_, err = bunDB.NewInsert().Model(product).Exec(ctx)
+	_, err := bunDB.NewInsert().Model(product).Exec(ctx)
 	require.NoError(t, err)
 	_, err = bunDB.NewInsert().Model(price).Exec(ctx)
 	require.NoError(t, err)
@@ -163,8 +161,7 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -195,7 +192,7 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 		UpdatedAt: now,
 	}
 
-	_, err = bunDB.NewInsert().Model(product).Exec(ctx)
+	_, err := bunDB.NewInsert().Model(product).Exec(ctx)
 	require.NoError(t, err)
 	_, err = bunDB.NewInsert().Model(price).Exec(ctx)
 	require.NoError(t, err)

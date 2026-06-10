@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/repo"
 )
 
@@ -24,34 +24,27 @@ func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, 
 		return 0, fmt.Errorf("productID is required")
 	}
 
-	var supersededBy interface{}
+	var supersededBy *string
+	var exclude *uuid.UUID
 	if excludeID != uuid.Nil {
-		supersededBy = excludeID.String()
+		v := excludeID.String()
+		supersededBy = &v
+		exclude = &excludeID
 	}
 
-	tsid, err := repo.ResolveTenantSubjectIDBun(ctx, dbb.Q(ctx), uuid.Nil, userID)
+	tsid, err := repo.ResolveTenantSubjectID(ctx, dbb.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return 0, err
 	}
 
-	query := dbb.Q(ctx).NewUpdate().
-		TableExpr("billing.subscriptions").
-		Set("gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object' THEN gateway_response || jsonb_build_object('superseded_at', current_timestamp, 'superseded_by_subscription_id', ?) ELSE jsonb_build_object('previous_gateway_response', gateway_response, 'superseded_at', current_timestamp, 'superseded_by_subscription_id', ?) END", supersededBy, supersededBy).
-		Set("updated_at = current_timestamp").
-		Where("tenant_subject_id = ?", tsid).
-		Where("product_id = ?", productID).
-		Where("status = ?", models.StatusCancelled)
-	if excludeID != uuid.Nil {
-		query = query.Where("id != ?", excludeID)
-	}
-
-	res, err := query.Exec(ctx)
+	rows, err := dbb.Gen(ctx).MarkCancelledSubscriptionsSuperseded(ctx, gen.MarkCancelledSubscriptionsSupersededParams{
+		TenantSubjectID: tsid,
+		ProductID:       productID,
+		SupersededBy:    supersededBy,
+		ExcludeID:       exclude,
+	})
 	if err != nil {
 		return 0, fmt.Errorf("mark cancelled subscriptions superseded: %w", err)
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("read superseded subscription count: %w", err)
 	}
 	return int(rows), nil
 }

@@ -2,7 +2,6 @@ package riverjobs
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -194,7 +193,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 			Limit(1).
 			Scan(ctx)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if repo.IsNotFound(err) {
 				log.WithContext(ctx).WithField("user_id", userID).Info("no cancellable subscription to resume")
 				return nil
 			}
@@ -344,7 +343,7 @@ func (w NMIDeleteSubscriptionWorker) Work(ctx context.Context, job *river.Job[NM
 
 	sub, err := w.SubscriptionService.GetByID(ctx, job.Args.SubscriptionID)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if repo.IsNotFound(err) {
 			return nil
 		}
 		return err

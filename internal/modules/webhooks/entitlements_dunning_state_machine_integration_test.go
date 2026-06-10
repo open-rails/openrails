@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -34,8 +33,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	models.RegisterModels(bunDB)
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	clock := clockwork.NewFakeClockAt(t0)
@@ -51,7 +49,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	periodStart := t0
 	paidEnd := t0.Add(30 * 24 * time.Hour) // 2026-01-31 00:00Z
 
-	_, err = bunDB.NewInsert().Model(&models.Product{
+	_, err := bunDB.NewInsert().Model(&models.Product{
 		ID:          productID,
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",

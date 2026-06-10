@@ -23,13 +23,13 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
-	"github.com/jackc/pgx/v5"
 )
 
 type CCBillWebhookService struct {
@@ -329,7 +329,7 @@ func shouldTreatCCBillErrorAsNonRetryable(err error) bool {
 
 	// Subscription lookups can fail due to out-of-order webhook delivery.
 	// Keep these retryable.
-	if errors.Is(err, sql.ErrNoRows) {
+	if repo.IsNotFound(err) {
 		return false
 	}
 
@@ -668,7 +668,7 @@ func (s *CCBillWebhookService) findCCBillCheckoutSession(ctx context.Context, re
 	}
 	if strings.TrimSpace(reservationID) != "" {
 		session, err := s.CheckoutSessionService.FindOpenCCBillReservation(ctx, reservationID, userID, priceID)
-		if err == nil || !errors.Is(err, sql.ErrNoRows) {
+		if err == nil || !repo.IsNotFound(err) {
 			return session, err
 		}
 	}
@@ -836,7 +836,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 	paymentService := s.paymentService()
 	if paymentService != nil {
 		existingPayment, err := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, transactionID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !repo.IsNotFound(err) {
 			return fmt.Errorf("failed to check existing upgrade payment: %w", err)
 		}
 		if err == nil {
@@ -859,7 +859,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		// Find subscription by the original processor subscription ID and then transition it.
 		subscription, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), originalSubscriptionID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if repo.IsNotFound(err) {
 				return fmt.Errorf("subscription not found for original processor subscription ID: %s", originalSubscriptionID)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
@@ -1290,7 +1290,7 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if repo.IsNotFound(err) {
 				return fmt.Errorf("subscription not found for processor subscription ID: %s", pSubscriptionID)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
@@ -1374,7 +1374,7 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if repo.IsNotFound(err) {
 				return fmt.Errorf("subscription not found for processor subscription ID: %s", pSubscriptionID)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
@@ -1596,7 +1596,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if repo.IsNotFound(err) {
 				return fmt.Errorf("subscription not found for processor subscription ID: %s", pSubscriptionID)
 			}
 			return fmt.Errorf("failed to get subscription: %w", err)
@@ -1624,7 +1624,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 					"refund_transaction_id": reversalID,
 					"payment_id":            existingRefund.ID,
 				}).Info("CCBill refund payment already exists; skipping duplicate ledger insert")
-			case lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows):
+			case lookupErr != nil && !repo.IsNotFound(lookupErr):
 				err := fmt.Errorf("failed to check existing refund payment: %w", lookupErr)
 				if shouldTerminate {
 					refundLedgerErr = err
@@ -1635,11 +1635,11 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			default:
 				var originalErr error
 				originalPayment, originalErr = paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, refundTransactionID)
-				if errors.Is(originalErr, sql.ErrNoRows) {
+				if repo.IsNotFound(originalErr) {
 					originalPayment, originalErr = paymentService.GetLatestChargeBySubscriptionID(ctx, sub.ID)
 				}
 				if originalErr != nil {
-					if !errors.Is(originalErr, sql.ErrNoRows) {
+					if !repo.IsNotFound(originalErr) {
 						err := fmt.Errorf("failed to resolve original payment for refund: %w", originalErr)
 						if shouldTerminate {
 							refundLedgerErr = err
@@ -1834,7 +1834,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		// Note: For voids, the subscription might not exist yet since the transaction was voided
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if repo.IsNotFound(err) {
 				// This is expected for voids - the subscription may never have been created
 				log.WithContext(ctx).WithFields(log.Fields{
 					"processor_subscription_id": pSubscriptionID,
@@ -1889,14 +1889,14 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		}).Info("Void event for existing subscription")
 
 		originalPayment, paymentErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, voidTransactionID)
-		if paymentErr != nil && !errors.Is(paymentErr, sql.ErrNoRows) {
+		if paymentErr != nil && !repo.IsNotFound(paymentErr) {
 			return fmt.Errorf("lookup original payment for void: %w", paymentErr)
 		}
 		if originalPayment != nil {
 			reversalID := "void:" + voidTransactionID
 			if existingVoid, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, reversalID); lookupErr == nil && existingVoid != nil {
 				log.WithContext(ctx).WithField("void_transaction_id", reversalID).Info("Void reversal already recorded")
-			} else if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			} else if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing void reversal: %w", lookupErr)
 			} else {
 				amount := voidAmountCents
@@ -2018,7 +2018,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		// Find subscription by processor subscription ID
 		sub, err := subService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), pSubscriptionID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if repo.IsNotFound(err) {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"processor_subscription_id": pSubscriptionID,
 					"chargeback_amount":         chargebackAmount,
@@ -2071,12 +2071,12 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 
 		// No external user lookup (IdP-managed ID already on subscription)
 		originalPayment, paymentErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, chargebackTransactionID)
-		if paymentErr != nil && !errors.Is(paymentErr, sql.ErrNoRows) {
+		if paymentErr != nil && !repo.IsNotFound(paymentErr) {
 			return fmt.Errorf("lookup original payment for CCBill chargeback: %w", paymentErr)
 		}
 		if originalPayment == nil {
 			originalPayment, paymentErr = paymentService.GetLatestChargeBySubscriptionID(ctx, sub.ID)
-			if paymentErr != nil && !errors.Is(paymentErr, sql.ErrNoRows) {
+			if paymentErr != nil && !repo.IsNotFound(paymentErr) {
 				return fmt.Errorf("lookup latest payment for CCBill chargeback: %w", paymentErr)
 			}
 		}
@@ -2087,7 +2087,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			}
 			if existingChargeback, lookupErr := paymentService.GetByTransactionID(ctx, models.ProcessorCCBill, reversalID); lookupErr == nil && existingChargeback != nil {
 				log.WithContext(ctx).WithField("chargeback_transaction_id", reversalID).Info("CCBill chargeback reversal already recorded")
-			} else if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			} else if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing CCBill chargeback reversal: %w", lookupErr)
 			} else {
 				amount := chargebackAmountCents
@@ -2767,7 +2767,7 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 	// Get the subscription to determine cancel type and for logging
 	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			return fmt.Errorf("subscription not found for processor subscription ID: %s", ccBillSubID)
 		}
 		return fmt.Errorf("failed to get subscription: %w", err)
@@ -2856,7 +2856,7 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 	// Get the subscription for logging
 	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, string(models.ProcessorCCBill), ccBillSubID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			return fmt.Errorf("subscription not found for processor subscription ID: %s", ccBillSubID)
 		}
 		return fmt.Errorf("failed to get subscription: %w", err)

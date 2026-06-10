@@ -36,8 +36,7 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -115,8 +114,7 @@ func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()

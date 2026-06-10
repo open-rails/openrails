@@ -2,13 +2,13 @@ package riverjobs
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -185,5 +185,5 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 }
 
 func errorsIsNoRows(err error) bool {
-	return err != nil && err == sql.ErrNoRows
+	return err != nil && repo.IsNotFound(err)
 }

@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -180,7 +180,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, paymentServ
 		default:
 			return nil, adminRefundHTTPError(http.StatusConflict, "refund request already failed; retry with a new idempotency key")
 		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	} else if !repo.IsNotFound(err) {
 		return nil, fmt.Errorf("load existing refund request: %w", err)
 	}
 	if err := paymentService.ValidateRefund(ctx, payment, req.Amount); err != nil {

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"database/sql"
 	"errors"
 	"net/http"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/middleware/ginmw"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -111,7 +111,7 @@ func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
 		 LIMIT 1
 	`, tenant.FromContextOrDefault(r.Request.Context()).UUID(), issuer, subject).Scan(r.Request.Context(), &tenantSubjectID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			r.JSON(http.StatusOK, []ServiceEntitlementRecord{})
 			return
 		}

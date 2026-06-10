@@ -57,7 +57,7 @@ const createNotification = `-- name: CreateNotification :execrows
 INSERT INTO billing.notification_queue (
     id, tenant_subject_id, event_type, data, seen, created_at
 ) VALUES (
-    $1, $2, $3, $5, $4,
+    $1, $2, $3, COALESCE($5, '{}'::jsonb), $4,
     COALESCE(NULLIF($6::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `

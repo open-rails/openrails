@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -353,7 +354,7 @@ func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*Resum
 	// subscription first (active/cancelled-in-window), then fall back to recent
 	// cancelled history.
 	resp, err := userSubscriptions.GetUserSubscription(ctx, userID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !repo.IsNotFound(err) {
 		return nil, fmt.Errorf("resume subscription: %w", err)
 	}
 

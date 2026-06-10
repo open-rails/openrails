@@ -10,7 +10,10 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -193,7 +196,7 @@ func (s *NMIWebhookService) resolveSubscriptionFromReference(ctx context.Context
 	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, ref)
 	if err == nil {
 		return subscription, nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	} else if !repo.IsNotFound(err) {
 		return nil, fmt.Errorf("load subscription by processor subscription ID: %w", err)
 	}
 
@@ -203,13 +206,13 @@ func (s *NMIWebhookService) resolveSubscriptionFromReference(ctx context.Context
 	if err == nil {
 		return subscription, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !repo.IsNotFound(err) {
 		return nil, fmt.Errorf("load subscription by NMI order metadata: %w", err)
 	}
 
 	if s.PaymentService != nil {
 		attempt, lookupErr := s.PaymentService.GetByMetadataValue(ctx, "nmi_subscription_order_id", ref)
-		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+		if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 			return nil, fmt.Errorf("load NMI subscription attempt by order metadata: %w", lookupErr)
 		}
 		if lookupErr == nil && attempt != nil {
@@ -680,7 +683,7 @@ func (s *NMIWebhookService) handleDeleteSubscription(ctx context.Context) error 
 
 	subscription, err := s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			log.WithContext(ctx).
 				WithField("processor_subscription_id", nmiSubID).
 				Warn("Received NMI delete for unknown subscription; ignoring")
@@ -1086,13 +1089,13 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 
 	if s.SubscriptionService != nil {
 		subscription, fetchErr = s.resolveSubscriptionFromReference(ctx, provider, nmiSubID)
-		if fetchErr != nil && !errors.Is(fetchErr, sql.ErrNoRows) {
+		if fetchErr != nil && !repo.IsNotFound(fetchErr) {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"processor_subscription_id": nmiSubID,
 			}).WithError(fetchErr).Error("Failed to load subscription for transaction failure event")
 			return fmt.Errorf("failed to load subscription for transaction event: %w", fetchErr)
 		}
-		if errors.Is(fetchErr, sql.ErrNoRows) {
+		if repo.IsNotFound(fetchErr) {
 			log.WithContext(ctx).
 				WithField("processor_subscription_id", nmiSubID).
 				Warn("Received NMI failure event for unknown subscription; ignoring")
@@ -1145,7 +1148,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 
 	if s.PaymentService != nil && subscription != nil && txnID != "" {
 		existingPayment, err := s.PaymentService.GetByTransactionID(ctx, models.Processor(s.Processor), txnID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !repo.IsNotFound(err) {
 			return fmt.Errorf("failed to fetch existing payment for transaction: %w", err)
 		}
 
@@ -1215,7 +1218,7 @@ func (s *NMIWebhookService) handleTransactionSaleFailure(ctx context.Context) er
 	if s.EventLogService != nil && subscription != nil {
 		if updated, err := s.SubscriptionService.GetByID(ctx, subscription.ID); err == nil {
 			subscription = updated
-		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		} else if err != nil && !repo.IsNotFound(err) {
 			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
 				Warn("Failed to refresh subscription after failure flow; logging with stale status")
 		}
@@ -1392,7 +1395,7 @@ func (s *NMIWebhookService) nmiSubscriptionAddTransactionID(ctx context.Context,
 	}
 	attempt, err := s.PaymentService.GetByMetadataValue(ctx, "provider_subscription_id", nmiSubID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			return "", nil
 		}
 		return "", fmt.Errorf("lookup NMI subscription attempt metadata: %w", err)
@@ -1535,39 +1538,36 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, pro
 		return nil, meta, nil
 	}
 
-	query := s.DB.Q(ctx).
-		NewSelect().
-		TableExpr("billing.payments AS p").
-		ColumnExpr("p.id AS payment_id").
-		ColumnExpr("p.transaction_id AS payment_transaction_id").
-		ColumnExpr("p.subscription_id AS subscription_id").
-		ColumnExpr("sub.processor_subscription_id AS processor_subscription_id").
-		ColumnExpr("p.tenant_subject_id::text AS user_id").
-		ColumnExpr("p.amount AS amount_cents").
-		ColumnExpr("p.currency AS currency").
-		ColumnExpr("p.purchased_at AS purchased_at").
-		ColumnExpr("pm.last_four AS card_last4").
-		Join("JOIN billing.subscriptions AS sub ON sub.id = p.subscription_id").
-		Join("LEFT JOIN billing.payment_methods AS pm ON pm.id = sub.payment_method_id").
-		Where("p.subscription_id IS NOT NULL").
-		Where("p.processor = ?", models.Processor(processor)).
-		Where("sub.processor = ?", models.Processor(processor)).
-		Where("p.amount > 0").
-		Where("p.amount = ?", amountCents).
-		Where("RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = ?", last4).
-		Where("p.purchased_at >= ?", targetTs.Add(-7*24*time.Hour)).
-		Where("p.purchased_at <= ?", targetTs.Add(7*24*time.Hour)).
-		OrderExpr("ABS(EXTRACT(EPOCH FROM (p.purchased_at - ?::timestamptz))) ASC", targetTs).
-		Limit(2)
-
-	query = query.OrderExpr("p.purchased_at DESC")
-
-	matches := make([]nmiChargebackMatch, 0, 2)
-	if err := query.Scan(ctx, &matches); err != nil {
-		if err == sql.ErrNoRows {
+	rows, err := s.DB.Gen(ctx).MatchChargebackPayments(ctx, gen.MatchChargebackPaymentsParams{
+		Processor:   gen.BillingProcessorType(processor),
+		AmountCents: amountCents,
+		Last4:       last4,
+		FromAt:      targetTs.Add(-7 * 24 * time.Hour),
+		ToAt:        targetTs.Add(7 * 24 * time.Hour),
+		TargetAt:    targetTs,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, meta, nil
 		}
 		return nil, meta, err
+	}
+	matches := make([]nmiChargebackMatch, 0, len(rows))
+	for _, r := range rows {
+		m := nmiChargebackMatch{
+			PaymentID:               r.PaymentID,
+			PaymentTransactionID:    r.PaymentTransactionID,
+			ProcessorSubscriptionID: r.ProcessorSubscriptionID,
+			UserID:                  r.UserID,
+			AmountCents:             r.AmountCents,
+			Currency:                r.Currency,
+			PurchasedAt:             r.PurchasedAt,
+			CardLast4:               r.CardLast4,
+		}
+		if r.SubscriptionID != nil {
+			m.SubscriptionID = *r.SubscriptionID
+		}
+		matches = append(matches, m)
 	}
 	if len(matches) == 0 {
 		return nil, meta, nil
@@ -1716,7 +1716,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 				chargebackTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
 				if existing, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(processor), chargebackTransactionID); lookupErr == nil && existing != nil {
 					cbMetadata["chargeback_payment_status"] = "already_recorded"
-				} else if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+				} else if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 					reconcileErrors++
 					cbMetadata["chargeback_payment_status"] = "failed"
 					cbMetadata["chargeback_payment_error"] = lookupErr.Error()
@@ -1970,10 +1970,10 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	var subscription *models.Subscription
 	if nmiSubID != "" {
 		subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, s.Processor, nmiSubID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !repo.IsNotFound(err) {
 			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
 				Warn("Failed to look up subscription for refund (by processor_subscription_id)")
-		} else if errors.Is(err, sql.ErrNoRows) {
+		} else if repo.IsNotFound(err) {
 			log.WithContext(ctx).WithField("processor_subscription_id", nmiSubID).
 				Warn("Received refund for unknown subscription (by processor_subscription_id); continuing without lifecycle actions")
 		}
@@ -2007,7 +2007,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 				"refund_transaction_id": txnID,
 				"payment_id":            existingRefund.ID,
 			}).Info("Refund payment already exists; skipping duplicate ledger insert")
-		case lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows):
+		case lookupErr != nil && !repo.IsNotFound(lookupErr):
 			log.WithContext(ctx).WithError(lookupErr).WithField("refund_transaction_id", txnID).
 				Warn("Failed to check existing refund payment by transaction ID")
 			return fmt.Errorf("check existing refund payment: %w", lookupErr)
@@ -2017,7 +2017,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 
 			if originalTxnID != "" && originalTxnID != txnID {
 				originalPayment, originalLookupErr = s.PaymentService.GetByTransactionID(ctx, processor, originalTxnID)
-				if originalLookupErr != nil && !errors.Is(originalLookupErr, sql.ErrNoRows) {
+				if originalLookupErr != nil && !repo.IsNotFound(originalLookupErr) {
 					log.WithContext(ctx).WithError(originalLookupErr).WithField("original_transaction_id", originalTxnID).
 						Warn("Failed to resolve original payment by transaction ID for refund")
 					return fmt.Errorf("resolve original payment by transaction ID: %w", originalLookupErr)
@@ -2213,7 +2213,7 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	var subscription *models.Subscription
 	if nmiSubID != "" {
 		subscription, err = s.SubscriptionService.GetByProcessorSubscriptionID(ctx, provider, nmiSubID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !repo.IsNotFound(err) {
 			log.WithContext(ctx).WithError(err).WithField("processor_subscription_id", nmiSubID).
 				Warn("Failed to look up subscription for void")
 		}
@@ -2221,14 +2221,14 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	var voidedSubscriptionID *uuid.UUID
 	if s.PaymentService != nil && txnID != "" {
 		originalPayment, paymentErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(s.Processor), txnID)
-		if paymentErr != nil && !errors.Is(paymentErr, sql.ErrNoRows) {
+		if paymentErr != nil && !repo.IsNotFound(paymentErr) {
 			return fmt.Errorf("lookup original payment for void: %w", paymentErr)
 		}
 		if originalPayment != nil {
 			reversalID := "void:" + txnID
 			if existingVoid, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(s.Processor), reversalID); lookupErr == nil && existingVoid != nil {
 				log.WithContext(ctx).WithField("void_transaction_id", reversalID).Info("NMI void reversal already recorded")
-			} else if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			} else if lookupErr != nil && !repo.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing void reversal: %w", lookupErr)
 			} else {
 				amount := originalPayment.Amount

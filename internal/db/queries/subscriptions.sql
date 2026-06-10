@@ -170,3 +170,17 @@ LIMIT 1;
 -- name: ListSubscriptionsByPaymentMethodIDs :many
 SELECT * FROM billing.subscriptions sub
 WHERE sub.payment_method_id = ANY(sqlc.arg(payment_method_ids)::uuid[]);
+
+-- name: MarkCancelledSubscriptionsSuperseded :execrows
+-- Preserve cancelled subscriptions for refund/chargeback correlation while
+-- stamping them superseded by the new activation (gateway_response patch).
+UPDATE billing.subscriptions
+SET gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object'
+        THEN gateway_response || jsonb_build_object('superseded_at', current_timestamp, 'superseded_by_subscription_id', sqlc.narg(superseded_by)::text)
+        ELSE jsonb_build_object('previous_gateway_response', gateway_response, 'superseded_at', current_timestamp, 'superseded_by_subscription_id', sqlc.narg(superseded_by)::text)
+    END,
+    updated_at = current_timestamp
+WHERE tenant_subject_id = $1
+  AND product_id = $2
+  AND status = 'cancelled'
+  AND (sqlc.narg(exclude_id)::uuid IS NULL OR id != sqlc.narg(exclude_id)::uuid);

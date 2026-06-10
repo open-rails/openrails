@@ -679,6 +679,26 @@ func (q *Queries) GetRefundByAdminIdempotencyKey(ctx context.Context, arg GetRef
 	return i, err
 }
 
+const getStripeAliasCardSnapshot = `-- name: GetStripeAliasCardSnapshot :one
+SELECT card_brand, card_last4 FROM billing.payments
+WHERE processor = 'stripe'
+  AND transaction_id = ANY($1::text[])
+  AND card_last4 IS NOT NULL
+LIMIT 1
+`
+
+type GetStripeAliasCardSnapshotRow struct {
+	CardBrand *string
+	CardLast4 *string
+}
+
+func (q *Queries) GetStripeAliasCardSnapshot(ctx context.Context, transactionIds []string) (GetStripeAliasCardSnapshotRow, error) {
+	row := q.db.QueryRow(ctx, getStripeAliasCardSnapshot, transactionIds)
+	var i GetStripeAliasCardSnapshotRow
+	err := row.Scan(&i.CardBrand, &i.CardLast4)
+	return i, err
+}
+
 const linkRefundedPayment = `-- name: LinkRefundedPayment :execrows
 UPDATE billing.payments
 SET refunded_payment_id = $2
@@ -1137,5 +1157,130 @@ UPDATE billing.payments SET status = 'failed' WHERE id = $1
 
 func (q *Queries) MarkPaymentFailed(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markPaymentFailed, id)
+	return err
+}
+
+const matchChargebackPayments = `-- name: MatchChargebackPayments :many
+SELECT p.id AS payment_id,
+       p.transaction_id AS payment_transaction_id,
+       p.subscription_id AS subscription_id,
+       COALESCE(sub.processor_subscription_id, '')::text AS processor_subscription_id,
+       p.tenant_subject_id::text AS user_id,
+       p.amount AS amount_cents,
+       p.currency AS currency,
+       p.purchased_at AS purchased_at,
+       COALESCE(pm.last_four, '')::text AS card_last4
+FROM billing.payments p
+JOIN billing.subscriptions sub ON sub.id = p.subscription_id
+LEFT JOIN billing.payment_methods pm ON pm.id = sub.payment_method_id
+WHERE p.subscription_id IS NOT NULL
+  AND p.processor = $1
+  AND sub.processor::text = p.processor::text
+  AND p.amount > 0
+  AND p.amount = $2
+  AND RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = $3::text
+  AND p.purchased_at >= $4::timestamptz
+  AND p.purchased_at <= $5::timestamptz
+ORDER BY ABS(EXTRACT(EPOCH FROM (p.purchased_at - $6::timestamptz))) ASC,
+         p.purchased_at DESC
+LIMIT 2
+`
+
+type MatchChargebackPaymentsParams struct {
+	Processor   BillingProcessorType
+	AmountCents int64
+	Last4       string
+	FromAt      time.Time
+	ToAt        time.Time
+	TargetAt    time.Time
+}
+
+type MatchChargebackPaymentsRow struct {
+	PaymentID               uuid.UUID
+	PaymentTransactionID    string
+	SubscriptionID          *uuid.UUID
+	ProcessorSubscriptionID string
+	UserID                  string
+	AmountCents             int64
+	Currency                string
+	PurchasedAt             time.Time
+	CardLast4               string
+}
+
+// NMI chargeback reconciliation (webhooks/nmi.go): candidate subscription
+// payments matched by amount + card last4 within ±7d of the chargeback date,
+// closest-in-time first. LIMIT 2 so the caller can detect ambiguity.
+func (q *Queries) MatchChargebackPayments(ctx context.Context, arg MatchChargebackPaymentsParams) ([]MatchChargebackPaymentsRow, error) {
+	rows, err := q.db.Query(ctx, matchChargebackPayments,
+		arg.Processor,
+		arg.AmountCents,
+		arg.Last4,
+		arg.FromAt,
+		arg.ToAt,
+		arg.TargetAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MatchChargebackPaymentsRow
+	for rows.Next() {
+		var i MatchChargebackPaymentsRow
+		if err := rows.Scan(
+			&i.PaymentID,
+			&i.PaymentTransactionID,
+			&i.SubscriptionID,
+			&i.ProcessorSubscriptionID,
+			&i.UserID,
+			&i.AmountCents,
+			&i.Currency,
+			&i.PurchasedAt,
+			&i.CardLast4,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mergeStripePaymentMetadata = `-- name: MergeStripePaymentMetadata :exec
+UPDATE billing.payments
+SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb
+WHERE processor = 'stripe'
+  AND transaction_id = $2
+`
+
+type MergeStripePaymentMetadataParams struct {
+	Patch         []byte
+	TransactionID string
+}
+
+func (q *Queries) MergeStripePaymentMetadata(ctx context.Context, arg MergeStripePaymentMetadataParams) error {
+	_, err := q.db.Exec(ctx, mergeStripePaymentMetadata, arg.Patch, arg.TransactionID)
+	return err
+}
+
+const snapshotPaymentCards = `-- name: SnapshotPaymentCards :exec
+UPDATE billing.payments
+SET card_brand = $1::text,
+    card_last4 = $2::text
+WHERE processor = 'stripe'
+  AND transaction_id = ANY($3::text[])
+  AND card_last4 IS NULL
+`
+
+type SnapshotPaymentCardsParams struct {
+	CardBrand      string
+	CardLast4      string
+	TransactionIds []string
+}
+
+// Backfill a card snapshot onto Stripe payments that still lack one.
+func (q *Queries) SnapshotPaymentCards(ctx context.Context, arg SnapshotPaymentCardsParams) error {
+	_, err := q.db.Exec(ctx, snapshotPaymentCards, arg.CardBrand, arg.CardLast4, arg.TransactionIds)
 	return err
 }

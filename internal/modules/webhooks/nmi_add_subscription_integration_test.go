@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -98,8 +97,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Date(2026, time.May, 18, 13, 28, 21, 0, time.UTC)
 	fakeClock := clockwork.NewFakeClockAt(now)

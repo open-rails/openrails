@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -34,8 +33,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -50,7 +48,7 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	paidEnd := now.Add(30 * 24 * time.Hour)
 	nextRetryAt := paidEnd.Add(3 * 24 * time.Hour)
 
-	_, err = bunDB.NewInsert().Model(&models.Product{
+	_, err := bunDB.NewInsert().Model(&models.Product{
 		ID:          productID,
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
@@ -180,8 +178,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -195,7 +192,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	periodStart := now.Add(-30 * 24 * time.Hour)
 	paidEnd := now.Add(-24 * time.Hour)
 
-	_, err = bunDB.NewInsert().Model(&models.Product{
+	_, err := bunDB.NewInsert().Model(&models.Product{
 		ID:          productID,
 		Slug:        "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",

@@ -2,7 +2,6 @@ package solana
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -362,7 +362,7 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 	}
 	session, err := dbrepo.NewCheckoutSessionRepo(p.db).GetByReference(ctx, reference)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			return nil, nil
 		}
 		return nil, err
@@ -659,7 +659,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, reference
 
 	// Fast idempotency guard: skip processing if this signature is already recorded.
 	existingPayment, err := p.paymentLookup.GetByTransactionID(ctx, models.ProcessorSolana, signature)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !repo.IsNotFound(err) {
 		return fmt.Errorf("failed checking existing payment by transaction id: %w", err)
 	}
 	if err == nil {

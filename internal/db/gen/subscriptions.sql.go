@@ -1003,6 +1003,41 @@ func (q *Queries) ListSubscriptionsFiltered(ctx context.Context, arg ListSubscri
 	return items, nil
 }
 
+const markCancelledSubscriptionsSuperseded = `-- name: MarkCancelledSubscriptionsSuperseded :execrows
+UPDATE billing.subscriptions
+SET gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object'
+        THEN gateway_response || jsonb_build_object('superseded_at', current_timestamp, 'superseded_by_subscription_id', $3::text)
+        ELSE jsonb_build_object('previous_gateway_response', gateway_response, 'superseded_at', current_timestamp, 'superseded_by_subscription_id', $3::text)
+    END,
+    updated_at = current_timestamp
+WHERE tenant_subject_id = $1
+  AND product_id = $2
+  AND status = 'cancelled'
+  AND ($4::uuid IS NULL OR id != $4::uuid)
+`
+
+type MarkCancelledSubscriptionsSupersededParams struct {
+	TenantSubjectID uuid.UUID
+	ProductID       uuid.UUID
+	SupersededBy    *string
+	ExcludeID       *uuid.UUID
+}
+
+// Preserve cancelled subscriptions for refund/chargeback correlation while
+// stamping them superseded by the new activation (gateway_response patch).
+func (q *Queries) MarkCancelledSubscriptionsSuperseded(ctx context.Context, arg MarkCancelledSubscriptionsSupersededParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markCancelledSubscriptionsSuperseded,
+		arg.TenantSubjectID,
+		arg.ProductID,
+		arg.SupersededBy,
+		arg.ExcludeID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateSubscriptionAt = `-- name: UpdateSubscriptionAt :execrows
 UPDATE billing.subscriptions SET
     price_id = $2,

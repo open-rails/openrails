@@ -1,14 +1,13 @@
 package handlers
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -283,7 +282,7 @@ func GetMyInvoice(r *httprequest.Request) {
 	}
 	inv, err := svc.GetInvoice(r.Request.Context(), payer, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "invoice not found")
 			return
 		}

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -35,8 +34,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	models.RegisterModels(bunDB)
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
 	userID := uuid.New().String()
@@ -45,7 +43,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	priceID := uuid.New()
 	billingDays := 30
 
-	_, err = bunDB.NewInsert().Model(&models.Product{
+	_, err := bunDB.NewInsert().Model(&models.Product{
 		ID:               productID,
 		Slug:             "dedup_product_" + uuid.New().String(),
 		DisplayName:      "Dedup Product",

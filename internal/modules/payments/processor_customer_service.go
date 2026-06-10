@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -39,23 +39,16 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 	if err != nil {
 		return err
 	}
-	// id is a NOT NULL uuid pk; bun sends the struct's zero value rather than
-	// falling back to the column's uuidv7() default, so generate it explicitly.
-	// Without this every insert ships id=000…0 and the second distinct
-	// (tenant_id, tenant_subject_id, processor) row collides on the pk (the ON CONFLICT below
-	// covers the tenant-scoped (tenant_id, tenant_subject_id, processor) unique).
-	_, err = s.DB.Q(ctx).NewInsert().Model(&models.ProcessorCustomer{
+	// id is generated explicitly: the upsert targets the tenant-scoped
+	// (tenant_id, tenant_subject_id, processor) unique, not the pk.
+	return s.DB.Gen(ctx).UpsertProcessorCustomer(ctx, gen.UpsertProcessorCustomerParams{
 		ID:              uuidutil.NewV7(),
 		TenantSubjectID: tenantSubjectID,
 		Processor:       processor,
 		CustomerID:      customerID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
-	}).On("CONFLICT (tenant_id, tenant_subject_id, processor) DO UPDATE").
-		Set("customer_id = EXCLUDED.customer_id").
-		Set("updated_at = EXCLUDED.updated_at").
-		Exec(ctx)
-	return err
+	})
 }
 
 func (s *ProcessorCustomerService) GetCustomerID(ctx context.Context, userID, processor string) (string, error) {
@@ -71,15 +64,9 @@ func (s *ProcessorCustomerService) GetCustomerID(ctx context.Context, userID, pr
 	if err != nil {
 		return "", err
 	}
-	var customerID string
-	err = s.DB.Q(ctx).NewSelect().Model((*models.ProcessorCustomer)(nil)).
-		Column("customer_id").
-		Where("tenant_subject_id = ? AND processor = ?", tsid, processor).
-		Scan(ctx, &customerID)
-	if err != nil {
-		return "", err
-	}
-	return customerID, nil
+	return s.DB.Gen(ctx).GetProcessorCustomerID(ctx, gen.GetProcessorCustomerIDParams{
+		TenantSubjectID: tsid, Processor: processor,
+	})
 }
 
 // GetUserIDByCustomerID reverses GetCustomerID: it resolves the platform user from a
@@ -94,15 +81,7 @@ func (s *ProcessorCustomerService) GetUserIDByCustomerID(ctx context.Context, pr
 	if processor == "" || customerID == "" {
 		return "", fmt.Errorf("invalid processor customer args")
 	}
-	var userID string
-	err := s.DB.Q(ctx).NewSelect().Model((*models.ProcessorCustomer)(nil)).
-		ColumnExpr("tenant_subject_id::text").
-		Where("customer_id = ? AND processor = ?", customerID, processor).
-		Order("updated_at DESC").
-		Limit(1).
-		Scan(ctx, &userID)
-	if err != nil {
-		return "", err
-	}
-	return userID, nil
+	return s.DB.Gen(ctx).GetProcessorCustomerSubject(ctx, gen.GetProcessorCustomerSubjectParams{
+		CustomerID: customerID, Processor: processor,
+	})
 }

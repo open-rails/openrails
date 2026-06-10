@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -43,8 +42,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 		t.Skip("billing.credit_blocks not found; run migrations before integration tests")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	billingDays := 30
@@ -58,7 +56,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
 	ccbillSubID := "ccbill_sub_" + uuid.New().String()
 
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := bunDB.NewInsert().Model(&models.CreditType{
 		ID:            creditTypeID,
 		Name:          creditTypeName,
 		DisplayName:   "Test Credits",

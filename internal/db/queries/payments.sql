@@ -216,3 +216,53 @@ LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: ListPaymentsByIDs :many
 SELECT * FROM billing.payments WHERE id = ANY(sqlc.arg(ids)::uuid[]);
+
+-- name: MatchChargebackPayments :many
+-- NMI chargeback reconciliation (webhooks/nmi.go): candidate subscription
+-- payments matched by amount + card last4 within ±7d of the chargeback date,
+-- closest-in-time first. LIMIT 2 so the caller can detect ambiguity.
+SELECT p.id AS payment_id,
+       p.transaction_id AS payment_transaction_id,
+       p.subscription_id AS subscription_id,
+       COALESCE(sub.processor_subscription_id, '')::text AS processor_subscription_id,
+       p.tenant_subject_id::text AS user_id,
+       p.amount AS amount_cents,
+       p.currency AS currency,
+       p.purchased_at AS purchased_at,
+       COALESCE(pm.last_four, '')::text AS card_last4
+FROM billing.payments p
+JOIN billing.subscriptions sub ON sub.id = p.subscription_id
+LEFT JOIN billing.payment_methods pm ON pm.id = sub.payment_method_id
+WHERE p.subscription_id IS NOT NULL
+  AND p.processor = sqlc.arg(processor)
+  AND sub.processor::text = p.processor::text
+  AND p.amount > 0
+  AND p.amount = sqlc.arg(amount_cents)
+  AND RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
+  AND p.purchased_at >= sqlc.arg(from_at)::timestamptz
+  AND p.purchased_at <= sqlc.arg(to_at)::timestamptz
+ORDER BY ABS(EXTRACT(EPOCH FROM (p.purchased_at - sqlc.arg(target_at)::timestamptz))) ASC,
+         p.purchased_at DESC
+LIMIT 2;
+
+-- name: SnapshotPaymentCards :exec
+-- Backfill a card snapshot onto Stripe payments that still lack one.
+UPDATE billing.payments
+SET card_brand = sqlc.arg(card_brand)::text,
+    card_last4 = sqlc.arg(card_last4)::text
+WHERE processor = 'stripe'
+  AND transaction_id = ANY(sqlc.arg(transaction_ids)::text[])
+  AND card_last4 IS NULL;
+
+-- name: MergeStripePaymentMetadata :exec
+UPDATE billing.payments
+SET metadata = COALESCE(metadata, '{}'::jsonb) || sqlc.arg(patch)::jsonb
+WHERE processor = 'stripe'
+  AND transaction_id = sqlc.arg(transaction_id);
+
+-- name: GetStripeAliasCardSnapshot :one
+SELECT card_brand, card_last4 FROM billing.payments
+WHERE processor = 'stripe'
+  AND transaction_id = ANY(sqlc.arg(transaction_ids)::text[])
+  AND card_last4 IS NOT NULL
+LIMIT 1;

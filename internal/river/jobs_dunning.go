@@ -2,7 +2,6 @@ package riverjobs
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -336,7 +336,7 @@ func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscripti
 			Where("period_end = ?", periodEnd.UTC()).
 			For("UPDATE").
 			Scan(ctx)
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			attempt = &models.ManualRebillAttempt{
 				ID:             uuidutil.NewV7(),
 				SubscriptionID: subscriptionID,

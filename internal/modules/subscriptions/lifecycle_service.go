@@ -2,13 +2,13 @@ package subscriptions
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
-	"github.com/jackc/pgx/v5"
 )
 
 // SubscriptionLifecycleService handles the complete lifecycle of subscriptions
@@ -194,7 +193,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	var existingPendingSub *models.Subscription
 	if params.ProcessorSubscriptionID != nil && strings.TrimSpace(*params.ProcessorSubscriptionID) != "" {
 		found, err := subService.GetByProcessorSubscriptionID(ctx, string(params.Processor), strings.TrimSpace(*params.ProcessorSubscriptionID))
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !repo.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing subscription by processor subscription ID: %w", err)
 		}
 		if err == nil && found.Status == models.StatusPending {
@@ -209,7 +208,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	if params.TransactionID != "" && s.PaymentService != nil {
 		paymentService = payments.NewPaymentService(dbb, s.Clock())
 		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Processor, params.TransactionID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !repo.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
 		}
 		if err == nil {
@@ -251,7 +250,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	activeSub, err := subService.GetActiveOrPendingByUserIDAndProductID(ctx, params.UserID, price.ProductID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !repo.IsNotFound(err) {
 		return nil, nil, fmt.Errorf("failed to check existing subscriptions: %w", err)
 	}
 
@@ -1182,7 +1181,7 @@ func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscription
 	solanaRepo := repo.NewSolanaSubscriptionRepo(d)
 	row, err := solanaRepo.GetBySubscriptionID(ctx, subscriptionID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repo.IsNotFound(err) {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
 			}).Info("no solana_subscriptions row linked to cancelled subscription; nothing to cascade")
