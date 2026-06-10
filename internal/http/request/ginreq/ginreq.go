@@ -6,8 +6,6 @@
 package ginreq
 
 import (
-	"bytes"
-	"io"
 	"mime/multipart"
 
 	"github.com/gin-gonic/gin"
@@ -30,18 +28,6 @@ func (g ginTransport) WriteJSON(code int, body any) { g.c.JSON(code, body) }
 func (g ginTransport) AbortJSON(code int, body any) { g.c.AbortWithStatusJSON(code, body) }
 func (g ginTransport) Bind(data any) error          { return g.c.Bind(data) }
 func (g ginTransport) BindJSON(data any) error {
-	raw, err := io.ReadAll(g.c.Request.Body)
-	if err != nil {
-		return err
-	}
-	if err := request.RejectLegacyPayableJSONFields(raw); err != nil {
-		g.c.Request.Body = io.NopCloser(bytes.NewReader(raw))
-		return err
-	}
-	g.c.Request.Body = io.NopCloser(bytes.NewReader(raw))
-	if g.c.Request.ContentLength >= 0 {
-		g.c.Request.ContentLength = int64(len(raw))
-	}
 	return g.c.ShouldBindJSON(data)
 }
 func (g ginTransport) BindQuery(data any) error    { return g.c.ShouldBindQuery(data) }

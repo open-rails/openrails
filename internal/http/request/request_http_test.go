@@ -40,38 +40,18 @@ func TestHTTPBindJSON(t *testing.T) {
 		}
 	})
 
-	t.Run("legacy payable field rejected", func(t *testing.T) {
-		for _, field := range []string{
-			"payer_account_id",
-			"account_id",
-			"delegated_user_id",
-			"subject_type",
-			"owner_id",
-			"payer",
-		} {
-			t.Run(field, func(t *testing.T) {
-				r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"name":"ada","`+field+`":"old"}`))
-				req := NewHTTP(httptest.NewRecorder(), r, nil)
-				var b body
-				if err := req.t.BindJSON(&b); err == nil || !strings.Contains(err.Error(), field+" is no longer supported") {
-					t.Fatalf("expected %s rejection, got %v", field, err)
-				}
-			})
-		}
-	})
-
-	t.Run("legacy payable field allowed inside metadata", func(t *testing.T) {
+	t.Run("provider keys bind inside metadata maps", func(t *testing.T) {
 		type bodyWithMetadata struct {
 			Name     string         `json:"name" binding:"required"`
 			Metadata map[string]any `json:"metadata"`
 		}
-		r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"name":"ada","metadata":{"delegated_user_id":"source-user"}}`))
+		r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"name":"ada","metadata":{"provider_user_ref":"source-user"}}`))
 		req := NewHTTP(httptest.NewRecorder(), r, nil)
 		var b bodyWithMetadata
 		if err := req.t.BindJSON(&b); err != nil {
 			t.Fatalf("bindJSON err: %v", err)
 		}
-		if b.Metadata["delegated_user_id"] != "source-user" {
+		if b.Metadata["provider_user_ref"] != "source-user" {
 			t.Fatalf("metadata not bound: %#v", b.Metadata)
 		}
 	})

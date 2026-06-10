@@ -1,7 +1,6 @@
 package request
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -161,35 +160,6 @@ func (r *Request) BindJSON(data any) bool {
 		return false
 	}
 	return true
-}
-
-var legacyPayableJSONFields = map[string]struct{}{
-	"payer_account_id":  {},
-	"account_id":        {},
-	"delegated_user_id": {},
-	"subject_type":      {},
-	"owner_id":          {},
-	"payer":             {},
-}
-
-// RejectLegacyPayableJSONFields fails when a request body carries retired
-// top-level payable identity fields. It intentionally checks only the top-level
-// object, so metadata maps may still contain arbitrary provider/source keys.
-func RejectLegacyPayableJSONFields(raw []byte) error {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || raw[0] != '{' {
-		return nil
-	}
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &top); err != nil {
-		return nil
-	}
-	for field := range top {
-		if _, legacy := legacyPayableJSONFields[field]; legacy {
-			return fmt.Errorf("%s is no longer supported; use tenant_subject_id and actor", field)
-		}
-	}
-	return nil
 }
 
 func (r *Request) BindQuery(data any) bool {
@@ -407,9 +377,6 @@ func (h *httpTransport) Bind(data any) error { return h.BindJSON(data) }
 func (h *httpTransport) BindJSON(data any) error {
 	raw, err := io.ReadAll(h.r.Body)
 	if err != nil {
-		return err
-	}
-	if err := RejectLegacyPayableJSONFields(raw); err != nil {
 		return err
 	}
 	if err := json.Unmarshal(raw, data); err != nil {

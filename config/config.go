@@ -759,31 +759,6 @@ func (cp *ControlPlaneConfig) SelfHostedPosture() bool {
 	return !(cp.PublicUserRegistration && cp.PublicTenantRegistration)
 }
 
-func rejectDeprecatedConfigKeys(k *koanf.Koanf) error {
-	deprecated := map[string]string{
-		"auth.operator_tenant_slug":        "use /etc/openrails/bootstrap.yaml with manifest-declared tenants and issuers (a tenant has full authority over its own resources)",
-		"auth.operator_tenant_admin_roles": "use /etc/openrails/bootstrap.yaml with manifest-declared tenants and issuers (a tenant has full authority over its own resources)",
-		"auth.control_plane.org_mode":      "removed; tenants are always supported. Use public_user_registration + public_tenant_registration",
-		"auth.control_plane.tenant_mode":   "removed; tenants are always supported (authkit issue 60). Use public_user_registration + public_tenant_registration",
-		"auth.control_plane.locked_down":   "use auth.control_plane.public_user_registration + public_tenant_registration (both default false = restricted)",
-		"payer_account_id":                 "use tenant_subject_id and actor",
-		"payer.account_id":                 "use tenant_subject_id and actor",
-		"account_id":                       "use tenant_subject_id and actor",
-		"delegated_user_id":                "use tenant_subject_id and actor",
-		"delegated.user_id":                "use tenant_subject_id and actor",
-		"subject_type":                     "use tenant_subject_id and actor",
-		"subject.type":                     "use tenant_subject_id and actor",
-		"owner_id":                         "use tenant_subject_id and actor",
-		"owner.id":                         "use tenant_subject_id and actor",
-	}
-	for key, replacement := range deprecated {
-		if k.Exists(key) {
-			return fmt.Errorf("%s is no longer supported; %s", key, replacement)
-		}
-	}
-	return nil
-}
-
 type SolanaConfig struct {
 	// RPCEndpoint is a custom RPC endpoint override. If set, it bypasses the fallback chain entirely.
 	// Leave empty to use the automatic fallback chain: Helius (if configured) → Solana public.
@@ -1837,9 +1812,6 @@ func Load(configPath string) (*Config, error) {
 
 	if err := k.Load(env.ProviderWithValue("", ".", envCallbackWithValue), nil); err != nil {
 		return nil, fmt.Errorf("loading environment variables: %w", err)
-	}
-	if err := rejectDeprecatedConfigKeys(k); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
 	// Unmarshal into config struct (overlay onto defaults)
