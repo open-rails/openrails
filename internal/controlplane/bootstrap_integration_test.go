@@ -208,7 +208,7 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	// Every per-tenant operator permission is granted to the operator role and
 	// shows up as an effective role permission; the cross-tenant platform
 	// superadmin permission is NOT (it is seeded only to the platform role, #226).
-	eff, err := cp.Core().EffectiveRolePermissions(ctx, "operator", OperatorRole)
+	eff, err := cp.Core().EffectiveRolePermissions(ctx, tenant.DefaultSlug, OperatorRole)
 	require.NoError(t, err)
 	for _, want := range OperatorRolePermissions() {
 		require.Containsf(t, eff, want, "operator role should effectively hold %q", want)
@@ -218,7 +218,7 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	// Re-running with the same catalog keeps the grant stable (replace, not grow).
 	_, err = cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: false})
 	require.NoError(t, err)
-	eff2, err := cp.Core().EffectiveRolePermissions(ctx, "operator", OperatorRole)
+	eff2, err := cp.Core().EffectiveRolePermissions(ctx, tenant.DefaultSlug, OperatorRole)
 	require.NoError(t, err)
 	require.ElementsMatch(t, eff, eff2, fmt.Sprintf("permissions should be stable across reruns: %v vs %v", eff, eff2))
 }
