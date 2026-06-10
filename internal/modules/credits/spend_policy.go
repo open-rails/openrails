@@ -384,7 +384,9 @@ func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, payerID, c
 }
 
 // activeHoldsTotal sums all currently-active hold authorizations for an payer
-// (current reservation exposure, regardless of window).
+// (current reservation exposure, regardless of window), PLUS open credit
+// windows' unsettled remainder (#335) — a window is reservation exposure
+// exactly like a hold, and held_balance reflects both.
 func (s *CreditsService) activeHoldsTotal(ctx context.Context, tenantID, payerID, creditTypeID uuid.UUID) (int64, error) {
 	var total int64
 	err := s.db.Q(ctx).NewSelect().
@@ -393,7 +395,17 @@ func (s *CreditsService) activeHoldsTotal(ctx context.Context, tenantID, payerID
 		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
 		Where("transaction_type = 'hold' AND status = 'active'").
 		Scan(ctx, &total)
-	return total, err
+	if err != nil {
+		return 0, err
+	}
+	var windowHeld int64
+	err = s.db.Q(ctx).NewSelect().
+		Model((*models.CreditWindow)(nil)).
+		ColumnExpr("COALESCE(SUM(held_amount - settled_amount), 0)").
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
+		Where("status = 'open'").
+		Scan(ctx, &windowHeld)
+	return total + windowHeld, err
 }
 
 // CheckSpendAllowed evaluates the spend policy for (payer, credit_type, actor)
