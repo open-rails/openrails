@@ -12,9 +12,9 @@ import (
 func TestGraduateTier_ByCumulativePaid(t *testing.T) {
 	svc, _, payer, ct, ctx := moneyInEnv(t)
 	ladder := []credits.TierThreshold{
-		{Tier: "free", MinPaidCents: 0},
-		{Tier: "tier1", MinPaidCents: 5_000},
-		{Tier: "tier2", MinPaidCents: 50_000},
+		{Tier: "free", MinPaidMicros: 0},
+		{Tier: "tier1", MinPaidMicros: 5_000},
+		{Tier: "tier2", MinPaidMicros: 50_000},
 	}
 	dep := func(amt int64) {
 		_, e := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: amt, Source: "pay"})

@@ -94,7 +94,7 @@ func TestSpendPolicy_DefaultsAllow(t *testing.T) {
 func TestSpendPolicy_DailyCap(t *testing.T) {
 	svc, _, payer, ct, ctx := spendTestEnv(t)
 	cap := int64(1000)
-	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{MaxSpendPerDayCents: &cap})
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{MaxSpendPerDayMicros: &cap})
 	require.NoError(t, err)
 
 	// Spend 500 (settled withdrawal).
@@ -154,7 +154,7 @@ func TestSpendPolicy_OutstandingCeiling(t *testing.T) {
 	svc, _, payer, ct, ctx := spendTestEnv(t)
 	ceil := int64(1000)
 	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
-		BillingMode: strptr(credits.BillingModeArrears), MaxOutstandingOwedCents: &ceil,
+		BillingMode: strptr(credits.BillingModeArrears), MaxOutstandingOwedMicros: &ceil,
 	})
 	require.NoError(t, err)
 
@@ -178,7 +178,7 @@ func TestSpendPolicy_WarnOnlyDoesNotBlock(t *testing.T) {
 	cap := int64(100)
 	hard := false
 	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
-		MaxSpendPerDayCents: &cap, HardStopOnBreach: &hard,
+		MaxSpendPerDayMicros: &cap, HardStopOnBreach: &hard,
 	})
 	require.NoError(t, err)
 	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, Actor: "user:a", CreditType: ct, Amount: 100, Source: "usage"})
@@ -196,26 +196,26 @@ func TestSpendPolicy_SettingsRoundTrip(t *testing.T) {
 	thr := int64(2000)
 	pct := 90
 	out, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{
-		BillingMode: strptr(credits.BillingModeArrears), MaxSpendPerDayCents: &day,
-		MaxSpendPerMonthCents: &mon, LowBalanceThreshold: &thr, AlertThresholdPct: &pct,
+		BillingMode: strptr(credits.BillingModeArrears), MaxSpendPerDayMicros: &day,
+		MaxSpendPerMonthMicros: &mon, LowBalanceThreshold: &thr, AlertThresholdPct: &pct,
 	})
 	require.NoError(t, err)
 	require.Equal(t, credits.BillingModeArrears, out.BillingMode)
-	require.Equal(t, int64(5000), *out.MaxSpendPerDayCents)
+	require.Equal(t, int64(5000), *out.MaxSpendPerDayMicros)
 	require.Equal(t, 90, out.AlertThresholdPct)
 
 	got, err := svc.GetAccountSettings(ctx, payer, ct)
 	require.NoError(t, err)
-	require.Equal(t, int64(100000), *got.MaxSpendPerMonthCents)
+	require.Equal(t, int64(100000), *got.MaxSpendPerMonthMicros)
 	require.Equal(t, int64(2000), *got.LowBalanceThreshold)
 
 	// Update one field; others persist.
 	day2 := int64(7000)
-	_, err = svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{MaxSpendPerDayCents: &day2})
+	_, err = svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{MaxSpendPerDayMicros: &day2})
 	require.NoError(t, err)
 	got2, err := svc.GetAccountSettings(ctx, payer, ct)
 	require.NoError(t, err)
-	require.Equal(t, int64(7000), *got2.MaxSpendPerDayCents)
+	require.Equal(t, int64(7000), *got2.MaxSpendPerDayMicros)
 	require.Equal(t, credits.BillingModeArrears, got2.BillingMode, "unset field must persist")
 
 	// Invalid billing mode rejected.

@@ -22,7 +22,7 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 	require.NoError(t, err)
 
 	res, err := svc.AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
-		Payer: payer, Actor: "user:a", CreditType: ct, EstimateCents: 1000,
+		Payer: payer, Actor: "user:a", CreditType: ct, EstimateMicros: 1000,
 		Source: "req", SourceID: "h1", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)

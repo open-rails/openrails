@@ -149,7 +149,7 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 
 	account, err := svc.GetCreditAccount(ctx, payer, ct)
 	require.NoError(t, err)
-	require.Equal(t, int64(4_000), account.BalanceCents, "three captures debit exactly their captured amounts")
+	require.Equal(t, int64(4_000), account.BalanceMicros, "three captures debit exactly their captured amounts")
 
 	usageEventCount, err := cleanupDB.NewSelect().
 		Model((*models.UsageEvent)(nil)).

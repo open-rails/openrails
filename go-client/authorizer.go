@@ -145,11 +145,11 @@ func (a *Authorizer) AdmitHold(ctx context.Context, req AdmitRequest) (Decision,
 		if errors.Is(err, ErrUnreachable) {
 			// Reuse the authorize fail-policy on the credit-bearing fields.
 			return a.applyFailPolicy(ctx, AuthorizeRequest{
-				PayerTenantID: req.PayerTenantID,
-				Actor:         req.Actor,
-				CreditType:    req.CreditType,
-				EstimateCents: req.EstimateCents,
-				RequestID:     req.RequestID,
+				PayerTenantID:  req.PayerTenantID,
+				Actor:          req.Actor,
+				CreditType:     req.CreditType,
+				EstimateMicros: req.EstimateMicros,
+				RequestID:      req.RequestID,
 			}, err), nil
 		}
 		return Decision{}, err
@@ -191,8 +191,8 @@ func admitDenyCodeFor(blockedBy string) string {
 func (a *Authorizer) applyFailPolicy(ctx context.Context, req AuthorizeRequest, cause error) Decision {
 	switch a.policy {
 	case FailOpen:
-		log.Printf("[openrails] AUTHORIZE fail-open: admitting request_id=%s tenant_subject_id=%s actor=%s estimate_cents=%d cause=%v",
-			req.RequestID, req.PayerTenantID, req.Actor, req.EstimateCents, cause)
+		log.Printf("[openrails] AUTHORIZE fail-open: admitting request_id=%s tenant_subject_id=%s actor=%s estimate_micros=%d cause=%v",
+			req.RequestID, req.PayerTenantID, req.Actor, req.EstimateMicros, cause)
 		if a.reconcile != nil {
 			if err := a.reconcile.EnqueueDeferredAuthorize(ctx, req); err != nil {
 				log.Printf("[openrails] fail-open deferred-reconcile enqueue failed request_id=%s: %v", req.RequestID, err)
@@ -206,14 +206,14 @@ func (a *Authorizer) applyFailPolicy(ctx context.Context, req AuthorizeRequest, 
 	}
 }
 
-// Capture settles the hold at capturedCents (best-effort; logs on failure since
+// Capture settles the hold at capturedMicros (best-effort; logs on failure since
 // the request already succeeded). No-op for a fail-open admission (no hold).
-func (a *Authorizer) Capture(ctx context.Context, reservationID string, capturedCents int64, usage *CaptureUsage) {
+func (a *Authorizer) Capture(ctx context.Context, reservationID string, capturedMicros int64, usage *CaptureUsage) {
 	if strings.TrimSpace(reservationID) == "" {
 		return
 	}
-	if err := a.client.Capture(ctx, reservationID, capturedCents, usage); err != nil {
-		log.Printf("[openrails] capture failed reservation_id=%s captured_cents=%d: %v", reservationID, capturedCents, err)
+	if err := a.client.Capture(ctx, reservationID, capturedMicros, usage); err != nil {
+		log.Printf("[openrails] capture failed reservation_id=%s captured_micros=%d: %v", reservationID, capturedMicros, err)
 	}
 }
 

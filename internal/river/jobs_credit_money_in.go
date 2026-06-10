@@ -96,21 +96,21 @@ func (w AutoTopupWorker) Work(ctx context.Context, _ *river.Job[AutoTopupArgs]) 
 const KindArrearsCharge = "billing.arrears_charge"
 
 // Arrears collection cadence (#241/#301). The HOURLY job collects balances at or
-// above ArrearsHourlyThresholdCents (collect big balances promptly); the MONTHLY
-// sweep collects everything at or above ArrearsMonthlyFloorCents (the $1 floor,
+// above ArrearsHourlyThresholdMicros (collect big balances promptly); the MONTHLY
+// sweep collects everything at or above ArrearsMonthlyFloorMicros (the $1 floor,
 // so we don't burn processor fees on dust). "Whichever comes first." Charges are
 // idempotent per owed-snapshot, so the two cadences never double-collect.
 // TODO(#301): make these configurable per-tenant; decide calendar-month vs
 // fixed-interval boundary.
 const (
-	ArrearsHourlyThresholdCents = 5000 // $50
-	ArrearsMonthlyFloorCents    = 100  // $1
+	ArrearsHourlyThresholdMicros = 50_000_000 // $50
+	ArrearsMonthlyFloorMicros    = 1_000_000  // $1
 )
 
 // ArrearsChargeArgs carries the per-run collection threshold so one worker serves
 // both the hourly threshold trigger and the monthly $1-floor sweep.
 type ArrearsChargeArgs struct {
-	ThresholdCents int64 `json:"threshold_cents"`
+	ThresholdMicros int64 `json:"threshold_micros"`
 }
 
 func (ArrearsChargeArgs) Kind() string { return KindArrearsCharge }
@@ -129,7 +129,7 @@ func (w ArrearsChargeWorker) Work(ctx context.Context, job *river.Job[ArrearsCha
 		logger.Debug("arrears charger not configured; skipping")
 		return nil
 	}
-	n, err := w.Credits.ChargeOutstanding(ctx, w.Charger, job.Args.ThresholdCents)
+	n, err := w.Credits.ChargeOutstanding(ctx, w.Charger, job.Args.ThresholdMicros)
 	if err != nil {
 		return err
 	}

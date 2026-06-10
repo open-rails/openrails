@@ -34,10 +34,10 @@ const (
 // CapResult is the evaluation of a single cap for a spend request.
 type CapResult struct {
 	Code           string     `json:"code"`
-	Limit          int64      `json:"limit_cents"`
-	Spent          int64      `json:"spent_cents"`     // spend already counted in the window/exposure
-	Projected      int64      `json:"projected_cents"` // spent + estimate
-	Remaining      int64      `json:"remaining_cents"` // limit - spent (may be negative)
+	Limit          int64      `json:"limit_micros"`
+	Spent          int64      `json:"spent_micros"`     // spend already counted in the window/exposure
+	Projected      int64      `json:"projected_micros"` // spent + estimate
+	Remaining      int64      `json:"remaining_micros"` // limit - spent (may be negative)
 	Allowed        bool       `json:"allowed"`
 	UtilizationPct int        `json:"utilization_pct"` // projected*100/limit, capped at 1000
 	ResetAt        *time.Time `json:"reset_at,omitempty"`
@@ -182,17 +182,17 @@ func (s *CreditsService) GetAccountSettings(ctx context.Context, payer identity.
 // AccountSettingsInput is the upsert payload for an payer's spend policy. Only
 // non-nil fields are written; nil fields keep their default / existing value.
 type AccountSettingsInput struct {
-	BillingMode             *string
-	MaxSpendPerDayCents     *int64
-	MaxSpendPerMonthCents   *int64
-	MaxOutstandingOwedCents *int64
-	LowBalanceThreshold     *int64
-	AutoTopupEnabled        *bool
-	AutoTopupAmountCents    *int64
-	AutoTopupPaymentMethod  *uuid.UUID
-	DefaultCreditExpiryDays *int
-	HardStopOnBreach        *bool
-	AlertThresholdPct       *int
+	BillingMode              *string
+	MaxSpendPerDayMicros     *int64
+	MaxSpendPerMonthMicros   *int64
+	MaxOutstandingOwedMicros *int64
+	LowBalanceThreshold      *int64
+	AutoTopupEnabled         *bool
+	AutoTopupAmountCents     *int64
+	AutoTopupPaymentMethod   *uuid.UUID
+	DefaultCreditExpiryDays  *int
+	HardStopOnBreach         *bool
+	AlertThresholdPct        *int
 }
 
 // UpsertAccountSettings creates or updates the spend policy for (payer,
@@ -231,14 +231,14 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 	if in.BillingMode != nil {
 		cur.BillingMode = *in.BillingMode
 	}
-	if in.MaxSpendPerDayCents != nil {
-		cur.MaxSpendPerDayCents = nilIfNeg(in.MaxSpendPerDayCents)
+	if in.MaxSpendPerDayMicros != nil {
+		cur.MaxSpendPerDayMicros = nilIfNeg(in.MaxSpendPerDayMicros)
 	}
-	if in.MaxSpendPerMonthCents != nil {
-		cur.MaxSpendPerMonthCents = nilIfNeg(in.MaxSpendPerMonthCents)
+	if in.MaxSpendPerMonthMicros != nil {
+		cur.MaxSpendPerMonthMicros = nilIfNeg(in.MaxSpendPerMonthMicros)
 	}
-	if in.MaxOutstandingOwedCents != nil {
-		cur.MaxOutstandingOwedCents = nilIfNeg(in.MaxOutstandingOwedCents)
+	if in.MaxOutstandingOwedMicros != nil {
+		cur.MaxOutstandingOwedMicros = nilIfNeg(in.MaxOutstandingOwedMicros)
 	}
 	if in.LowBalanceThreshold != nil {
 		cur.LowBalanceThreshold = nilIfNeg(in.LowBalanceThreshold)
@@ -274,10 +274,10 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 	_, err = s.db.Q(ctx).NewInsert().Model(cur).
 		On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id) DO UPDATE").
 		Set("billing_mode = EXCLUDED.billing_mode").
-		Set("max_spend_per_day_cents = EXCLUDED.max_spend_per_day_cents").
-		Set("max_spend_per_month_cents = EXCLUDED.max_spend_per_month_cents").
-		Set("max_outstanding_owed_cents = EXCLUDED.max_outstanding_owed_cents").
-		Set("low_balance_threshold_cents = EXCLUDED.low_balance_threshold_cents").
+		Set("max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros").
+		Set("max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros").
+		Set("max_outstanding_owed_micros = EXCLUDED.max_outstanding_owed_micros").
+		Set("low_balance_threshold_micros = EXCLUDED.low_balance_threshold_micros").
 		Set("auto_topup_enabled = EXCLUDED.auto_topup_enabled").
 		Set("auto_topup_amount_cents = EXCLUDED.auto_topup_amount_cents").
 		Set("auto_topup_payment_method_id = EXCLUDED.auto_topup_payment_method_id").
@@ -322,20 +322,20 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.Tenan
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	now := s.now()
 	row := &models.CreditSpendLimit{
-		ID:                    uuidutil.NewV7(),
-		TenantID:              tenantID,
-		TenantSubjectID:       payer.UUID(),
-		CreditTypeID:          ct.ID,
-		Actor:                 actor,
-		MaxSpendPerDayCents:   nilIfNeg(maxDay),
-		MaxSpendPerMonthCents: nilIfNeg(maxMonth),
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		ID:                     uuidutil.NewV7(),
+		TenantID:               tenantID,
+		TenantSubjectID:        payer.UUID(),
+		CreditTypeID:           ct.ID,
+		Actor:                  actor,
+		MaxSpendPerDayMicros:   nilIfNeg(maxDay),
+		MaxSpendPerMonthMicros: nilIfNeg(maxMonth),
+		CreatedAt:              now,
+		UpdatedAt:              now,
 	}
 	_, err = s.db.Q(ctx).NewInsert().Model(row).
 		On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id, actor) DO UPDATE").
-		Set("max_spend_per_day_cents = EXCLUDED.max_spend_per_day_cents").
-		Set("max_spend_per_month_cents = EXCLUDED.max_spend_per_month_cents").
+		Set("max_spend_per_day_micros = EXCLUDED.max_spend_per_day_micros").
+		Set("max_spend_per_month_micros = EXCLUDED.max_spend_per_month_micros").
 		Set("updated_at = EXCLUDED.updated_at").
 		Exec(ctx)
 	if err != nil {
@@ -428,48 +428,48 @@ func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.T
 		if lerr != nil {
 			return SpendDecision{}, lerr
 		}
-		if lim != nil && (lim.MaxSpendPerDayCents != nil || lim.MaxSpendPerMonthCents != nil) {
-			if lim.MaxSpendPerDayCents != nil {
+		if lim != nil && (lim.MaxSpendPerDayMicros != nil || lim.MaxSpendPerMonthMicros != nil) {
+			if lim.MaxSpendPerDayMicros != nil {
 				spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, dayStart, actor)
 				if e != nil {
 					return SpendDecision{}, e
 				}
-				caps = append(caps, capInput{DenyActorDailyCap, lim.MaxSpendPerDayCents, spent, &dayReset})
+				caps = append(caps, capInput{DenyActorDailyCap, lim.MaxSpendPerDayMicros, spent, &dayReset})
 			}
-			if lim.MaxSpendPerMonthCents != nil {
+			if lim.MaxSpendPerMonthMicros != nil {
 				spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, monStart, actor)
 				if e != nil {
 					return SpendDecision{}, e
 				}
-				caps = append(caps, capInput{DenyActorMonthlyCap, lim.MaxSpendPerMonthCents, spent, &monReset})
+				caps = append(caps, capInput{DenyActorMonthlyCap, lim.MaxSpendPerMonthMicros, spent, &monReset})
 			}
 		}
 	}
 
 	// Tenant-level daily / monthly caps.
-	if settings.MaxSpendPerDayCents != nil {
+	if settings.MaxSpendPerDayMicros != nil {
 		spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, dayStart, "")
 		if e != nil {
 			return SpendDecision{}, e
 		}
-		caps = append(caps, capInput{DenyDailyCap, settings.MaxSpendPerDayCents, spent, &dayReset})
+		caps = append(caps, capInput{DenyDailyCap, settings.MaxSpendPerDayMicros, spent, &dayReset})
 	}
-	if settings.MaxSpendPerMonthCents != nil {
+	if settings.MaxSpendPerMonthMicros != nil {
 		spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, monStart, "")
 		if e != nil {
 			return SpendDecision{}, e
 		}
-		caps = append(caps, capInput{DenyMonthlyCap, settings.MaxSpendPerMonthCents, spent, &monReset})
+		caps = append(caps, capInput{DenyMonthlyCap, settings.MaxSpendPerMonthMicros, spent, &monReset})
 	}
 
 	// Outstanding exposure ceiling (settled owed + active holds + this estimate).
-	if settings.MaxOutstandingOwedCents != nil {
+	if settings.MaxOutstandingOwedMicros != nil {
 		held, e := s.activeHoldsTotal(ctx, tenantID, ownerID, ct.ID)
 		if e != nil {
 			return SpendDecision{}, e
 		}
-		exposure := settings.OutstandingOwedCents + held
-		caps = append(caps, capInput{DenyOutstandingCap, settings.MaxOutstandingOwedCents, exposure, nil})
+		exposure := settings.OutstandingOwedMicros + held
+		caps = append(caps, capInput{DenyOutstandingCap, settings.MaxOutstandingOwedMicros, exposure, nil})
 	}
 
 	dec := evaluateSpend(caps, estimateCents, settings.HardStopOnBreach, settings.AlertThresholdPct, now)

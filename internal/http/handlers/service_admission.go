@@ -16,7 +16,7 @@ type serviceAdmitRequest struct {
 	Resource        string                           `json:"resource"`
 	Amounts         map[string]int64                 `json:"amounts"`
 	CreditType      string                           `json:"credit_type"`
-	EstimateCents   int64                            `json:"estimate_cents"`
+	EstimateMicros  int64                            `json:"estimate_micros"`
 	RequestID       string                           `json:"request_id"`
 	Source          string                           `json:"source"`
 	ExpiresAt       *int64                           `json:"expires_at"`
@@ -34,8 +34,8 @@ func ServiceAdmit(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if req.EstimateCents < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "estimate_cents must be >= 0")
+	if req.EstimateMicros < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "estimate_micros must be >= 0")
 		return
 	}
 	actor := strings.TrimSpace(req.Actor)
@@ -61,7 +61,7 @@ func ServiceAdmit(r *httprequest.Request) {
 		Resource:         req.Resource,
 		Amounts:          req.Amounts,
 		CreditType:       req.CreditType,
-		EstimateCents:    req.EstimateCents,
+		EstimateMicros:   req.EstimateMicros,
 		Source:           req.Source,
 		SourceID:         req.RequestID,
 		BlockChecks:      req.BlockChecks,

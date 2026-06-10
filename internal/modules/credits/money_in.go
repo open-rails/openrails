@@ -48,7 +48,7 @@ type moneyInAccount struct {
 	CreditTypeID    uuid.UUID  `bun:"credit_type_id"`
 	CreditTypeName  string     `bun:"credit_type_name"`
 	Available       int64      `bun:"available"`
-	Threshold       int64      `bun:"low_balance_threshold_cents"`
+	Threshold       int64      `bun:"low_balance_threshold_micros"`
 	AutoTopup       bool       `bun:"auto_topup_enabled"`
 	TopupAmount     *int64     `bun:"auto_topup_amount_cents"`
 	PaymentMethodID *uuid.UUID `bun:"auto_topup_payment_method_id"`
@@ -64,13 +64,13 @@ func (s *CreditsService) belowThresholdAccounts(ctx context.Context) ([]moneyInA
 	err := s.db.Q(ctx).NewSelect().
 		ColumnExpr("s.tenant_id, s.tenant_subject_id, s.credit_type_id, ct.name AS credit_type_name").
 		ColumnExpr("(COALESCE(b.balance,0) - COALESCE(b.held_balance,0)) AS available").
-		ColumnExpr("s.low_balance_threshold_cents, s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at").
+		ColumnExpr("s.low_balance_threshold_micros, s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at").
 		TableExpr("billing.credit_account_settings AS s").
 		Join("JOIN billing.credit_types AS ct ON ct.id = s.credit_type_id").
 		Join("LEFT JOIN billing.credit_balances AS b ON b.tenant_id = s.tenant_id AND b.tenant_subject_id = s.tenant_subject_id AND b.credit_type_id = s.credit_type_id").
 		Where("s.tenant_id = ?", tenantID).
-		Where("s.low_balance_threshold_cents IS NOT NULL").
-		Where("(COALESCE(b.balance,0) - COALESCE(b.held_balance,0)) < s.low_balance_threshold_cents").
+		Where("s.low_balance_threshold_micros IS NOT NULL").
+		Where("(COALESCE(b.balance,0) - COALESCE(b.held_balance,0)) < s.low_balance_threshold_micros").
 		Scan(ctx, &rows)
 	return rows, err
 }
@@ -178,11 +178,13 @@ func (s *CreditsService) topUpAccount(ctx context.Context, charger Charger, r mo
 		return false, err
 	}
 
+	// auto_topup_amount_cents is the card charge in cents; the ledger is
+	// micro-dollars (1 cent = 10,000 micros).
 	if _, err := s.Deposit(ctx, CreditDepositParams{
 		TenantSubjectID:           &payer,
 		Actor:                     payer.UUID().String(),
 		CreditType:                r.CreditTypeName,
-		Amount:                    *r.TopupAmount,
+		Amount:                    *r.TopupAmount * 10_000,
 		Source:                    "auto_topup",
 		SourceID:                  &depositSourceID,
 		ApplyAccountExpiryDefault: true,

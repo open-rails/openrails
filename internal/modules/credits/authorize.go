@@ -20,10 +20,10 @@ import (
 // actor (canonical actor for per-actor caps), the credit type, the estimated
 // charge, and the idempotency-keyed source coordinates of the hold.
 type AuthorizeHoldInput struct {
-	Payer         identity.TenantSubjectID
-	Actor         string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
-	CreditType    string
-	EstimateCents int64
+	Payer          identity.TenantSubjectID
+	Actor          string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
+	CreditType     string
+	EstimateMicros int64
 	// Source + SourceID form the idempotency key for the placed hold (typically
 	// the request_id). A retry with the same coordinates returns the same hold.
 	Source   string
@@ -37,11 +37,11 @@ type AuthorizeHoldInput struct {
 type AuthorizeHoldResult struct {
 	Decision    SpendDecision
 	BillingMode string
-	// AvailableCents/OutstandingOwedCents are the snapshot AS EVALUATED inside the
+	// AvailableMicros/OutstandingOwedMicros are the snapshot AS EVALUATED inside the
 	// transaction (post-lock, pre-hold), so they reflect the balance the decision
 	// was made against.
-	AvailableCents       int64
-	OutstandingOwedCents int64
+	AvailableMicros       int64
+	OutstandingOwedMicros int64
 	// Hold is the placed reservation when Decision.Allowed; nil when denied.
 	Hold *models.CreditTransaction
 }
@@ -67,7 +67,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 	if in.Payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	if in.EstimateCents < 0 {
+	if in.EstimateMicros < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
 	in.Source = strings.TrimSpace(in.Source)
@@ -116,11 +116,11 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 				return serr
 			}
 			result = &AuthorizeHoldResult{
-				Decision:             SpendDecision{Allowed: true},
-				BillingMode:          snap.billingMode,
-				AvailableCents:       snap.available,
-				OutstandingOwedCents: snap.outstanding,
-				Hold:                 existing,
+				Decision:              SpendDecision{Allowed: true},
+				BillingMode:           snap.billingMode,
+				AvailableMicros:       snap.available,
+				OutstandingOwedMicros: snap.outstanding,
+				Hold:                  existing,
 			}
 			return nil
 		}
@@ -142,14 +142,14 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		}
 
 		// Spend policy (per-actor + org caps + outstanding ceiling).
-		dec, derr := txSvc.CheckSpendAllowed(ctx, in.Payer, in.CreditType, strings.TrimSpace(in.Actor), in.EstimateCents)
+		dec, derr := txSvc.CheckSpendAllowed(ctx, in.Payer, in.CreditType, strings.TrimSpace(in.Actor), in.EstimateMicros)
 		if derr != nil {
 			return derr
 		}
 
 		// Prepaid accounts additionally gate on available balance; arrears accounts
 		// are gated by the outstanding ceiling inside CheckSpendAllowed.
-		if settings.BillingMode != BillingModeArrears && in.EstimateCents > available {
+		if settings.BillingMode != BillingModeArrears && in.EstimateMicros > available {
 			dec.Allowed = false
 			if dec.DenyCode == "" {
 				dec.DenyCode = DenyInsufficientBalance
@@ -157,10 +157,10 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		}
 
 		res := &AuthorizeHoldResult{
-			Decision:             dec,
-			BillingMode:          settings.BillingMode,
-			AvailableCents:       available,
-			OutstandingOwedCents: settings.OutstandingOwedCents,
+			Decision:              dec,
+			BillingMode:           settings.BillingMode,
+			AvailableMicros:       available,
+			OutstandingOwedMicros: settings.OutstandingOwedMicros,
 		}
 
 		if !dec.Allowed {
@@ -169,7 +169,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		}
 
 		// Place the hold within the SAME tx + held lock.
-		amount := in.EstimateCents
+		amount := in.EstimateMicros
 		if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
 			Set("held_balance = ?", bal.HeldBalance+amount).
 			Set("updated_at = ?", now).
@@ -233,6 +233,6 @@ func (s *CreditsService) snapshotTx(ctx context.Context, payer identity.TenantSu
 	return accountSnapshot{
 		billingMode: settings.BillingMode,
 		available:   bal.Balance - bal.HeldBalance,
-		outstanding: settings.OutstandingOwedCents,
+		outstanding: settings.OutstandingOwedMicros,
 	}, nil
 }

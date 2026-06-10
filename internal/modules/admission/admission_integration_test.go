@@ -93,7 +93,7 @@ func TestAdmit_ThroughputDeny(t *testing.T) {
 		[]models.ThroughputWindow{{Unit: "request", WindowSeconds: 60, Max: 2}}))
 
 	req := admission.AdmitRequest{TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 0}
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 0}
 	for i := 0; i < 2; i++ {
 		d, err := adm.Admit(ctx, req)
 		require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestAdmit_MoneyDeny(t *testing.T) {
 	// no deposit -> balance 0, prepaid
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
 		TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 500,
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 500,
 		Source: "usage", SourceID: "m1", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestAdmit_Allow(t *testing.T) {
 
 	d, err := adm.Admit(ctx, admission.AdmitRequest{
 		TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1, "token": 50}, CreditType: ct, EstimateCents: 500,
+		Amounts: map[string]int64{"request": 1, "token": 50}, CreditType: ct, EstimateMicros: 500,
 		Source: "usage", SourceID: "ok1", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
@@ -189,13 +189,13 @@ func TestAdmit_BudgetDeny(t *testing.T) {
 
 	// First request reserves 400 of the 500/hour budget -> allowed.
 	d, err := adm.Admit(ctx, admission.AdmitRequest{TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 400, Source: "usage", SourceID: "b1", ExpiresAt: time.Now().Add(time.Hour)})
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 400, Source: "usage", SourceID: "b1", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
 
 	// Second request (200) would push the window to 600 > 500 -> budget deny.
 	d, err = adm.Admit(ctx, admission.AdmitRequest{TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 200, Source: "usage", SourceID: "b2", ExpiresAt: time.Now().Add(time.Hour)})
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 200, Source: "usage", SourceID: "b2", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.False(t, d.Allowed)
 	require.Equal(t, "budget", d.BlockedBy)
@@ -211,7 +211,7 @@ func TestAdmit_UnverifiedArrearsDeny(t *testing.T) {
 
 	// arrears (credit line) + unverified payment method -> deny.
 	d, err := adm.Admit(ctx, admission.AdmitRequest{TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 100, Source: "usage", SourceID: "u1", ExpiresAt: time.Now().Add(time.Hour)})
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 100, Source: "usage", SourceID: "u1", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.False(t, d.Allowed)
 	require.Equal(t, "unverified", d.BlockedBy)
@@ -219,7 +219,7 @@ func TestAdmit_UnverifiedArrearsDeny(t *testing.T) {
 	// verify -> allowed (arrears with unlimited line).
 	require.NoError(t, cs.SetPaymentMethodVerified(ctx, payer, ct, true))
 	d, err = adm.Admit(ctx, admission.AdmitRequest{TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateCents: 100, Source: "usage", SourceID: "u2", ExpiresAt: time.Now().Add(time.Hour)})
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 100, Source: "usage", SourceID: "u2", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
 }

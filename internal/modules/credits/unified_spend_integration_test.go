@@ -46,7 +46,7 @@ func TestSpendCredits_ArrearsAccruesBeyondBalance(t *testing.T) {
 func TestSpendCredits_HybridSpansBalanceThenOwed(t *testing.T) {
 	svc, _, payer, ct, ctx := moneyInEnv(t)
 	limit := int64(10000)
-	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears), MaxOutstandingOwedCents: &limit})
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears), MaxOutstandingOwedMicros: &limit})
 	require.NoError(t, err)
 	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func TestSpendCredits_HybridSpansBalanceThenOwed(t *testing.T) {
 func TestSpendCredits_RespectsCreditLimit(t *testing.T) {
 	svc, _, payer, ct, ctx := moneyInEnv(t)
 	limit := int64(1000)
-	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears), MaxOutstandingOwedCents: &limit})
+	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears), MaxOutstandingOwedMicros: &limit})
 	require.NoError(t, err)
 	// balance 0, credit line 1000.
 	err = svc.SpendCredits(ctx, credits.SpendParams{Payer: &payer, Actor: "u", CreditType: ct, Amount: 1500, Source: "s", SourceID: "x1"})

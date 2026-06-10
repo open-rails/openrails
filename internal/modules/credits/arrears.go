@@ -23,7 +23,7 @@ const (
 )
 
 // AccrueOwed records postpaid usage against an arrears account: instead of
-// withdrawing prepaid balance, the cost is added to outstanding_owed_cents and a
+// withdrawing prepaid balance, the cost is added to outstanding_owed_micros and a
 // ledger row is written. Idempotent on (payer, credit_type, source, source_id).
 // The payer's outstanding ceiling is enforced separately at authorize time
 // (CheckSpendAllowed); this is the settlement side. (#241)
@@ -71,7 +71,7 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, payer identity.TenantSu
 		return nil, err
 	}
 	if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
-		Set("outstanding_owed_cents = outstanding_owed_cents + ?", amount).
+		Set("outstanding_owed_micros = outstanding_owed_micros + ?", amount).
 		Set("updated_at = ?", now).
 		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 		Exec(ctx); err != nil {
@@ -114,7 +114,7 @@ func (s *CreditsService) GetOutstandingOwed(ctx context.Context, payer identity.
 	if err != nil {
 		return 0, err
 	}
-	return settings.OutstandingOwedCents, nil
+	return settings.OutstandingOwedMicros, nil
 }
 
 // arrearsAccount is a scanned arrears-account row for the charge job.
@@ -123,19 +123,19 @@ type arrearsAccount struct {
 	TenantSubjectID uuid.UUID  `bun:"tenant_subject_id"`
 	CreditTypeID    uuid.UUID  `bun:"credit_type_id"`
 	CreditTypeName  string     `bun:"credit_type_name"`
-	Owed            int64      `bun:"outstanding_owed_cents"`
+	Owed            int64      `bun:"outstanding_owed_micros"`
 	PaymentMethodID *uuid.UUID `bun:"auto_topup_payment_method_id"`
 }
 
 // ChargeOutstanding collects outstanding owed for arrears accounts by charging
-// the card on file. When minThresholdCents > 0 only accounts owing at least that
-// much are charged (the threshold trigger, e.g. $500); minThresholdCents <= 0
+// the card on file. When minThresholdMicros > 0 only accounts owing at least that
+// much are charged (the threshold trigger, e.g. $500); minThresholdMicros <= 0
 // charges every account with owed > 0 (the month-end sweep). The charge is
 // idempotent per (payer, credit_type, owed-snapshot). On success the owed is
 // reduced by the charged amount and an owed_payment row is recorded; declines
 // leave the owed in place for the next run. Returns the number of accounts
 // successfully charged. (#241)
-func (s *CreditsService) ChargeOutstanding(ctx context.Context, charger Charger, minThresholdCents int64) (int, error) {
+func (s *CreditsService) ChargeOutstanding(ctx context.Context, charger Charger, minThresholdMicros int64) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("credits service not initialized")
 	}
@@ -144,15 +144,15 @@ func (s *CreditsService) ChargeOutstanding(ctx context.Context, charger Charger,
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	q := s.db.Q(ctx).NewSelect().
-		ColumnExpr("s.tenant_id, s.tenant_subject_id, s.credit_type_id, ct.name AS credit_type_name, s.outstanding_owed_cents, s.auto_topup_payment_method_id").
+		ColumnExpr("s.tenant_id, s.tenant_subject_id, s.credit_type_id, ct.name AS credit_type_name, s.outstanding_owed_micros, s.auto_topup_payment_method_id").
 		TableExpr("billing.credit_account_settings AS s").
 		Join("JOIN billing.credit_types AS ct ON ct.id = s.credit_type_id").
 		Where("s.tenant_id = ?", tenantID).
 		Where("s.billing_mode = ?", BillingModeArrears).
-		Where("s.outstanding_owed_cents > 0").
+		Where("s.outstanding_owed_micros > 0").
 		Where("s.auto_topup_payment_method_id IS NOT NULL")
-	if minThresholdCents > 0 {
-		q = q.Where("s.outstanding_owed_cents >= ?", minThresholdCents)
+	if minThresholdMicros > 0 {
+		q = q.Where("s.outstanding_owed_micros >= ?", minThresholdMicros)
 	}
 	var rows []arrearsAccount
 	if err := q.Scan(ctx, &rows); err != nil {
@@ -180,11 +180,13 @@ func (s *CreditsService) chargeOneOutstanding(ctx context.Context, charger Charg
 	}
 	key := fmt.Sprintf("arrears:%s:%s:%d", r.TenantSubjectID, r.CreditTypeID, snapshot)
 
+	// Owed is in ledger micro-dollars; the processor charges whole cents
+	// (1 cent = 10,000 micros). Round up so we never under-collect.
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
 		Payer:           payer,
 		Actor:           payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
-		AmountCents:     snapshot,
+		AmountCents:     (snapshot + 9_999) / 10_000,
 		IdempotencyKey:  key,
 		Description:     "outstanding balance: " + r.CreditTypeName,
 	})
@@ -205,10 +207,10 @@ func (s *CreditsService) chargeOneOutstanding(ctx context.Context, charger Charg
 	// Reduce owed by the snapshot (never below zero); CAS-style guard prevents a
 	// double-decrement if two runs race on the same snapshot.
 	upd, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
-		Set("outstanding_owed_cents = GREATEST(0, outstanding_owed_cents - ?)", snapshot).
+		Set("outstanding_owed_micros = GREATEST(0, outstanding_owed_micros - ?)", snapshot).
 		Set("updated_at = ?", now).
 		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", r.TenantID, r.TenantSubjectID, r.CreditTypeID).
-		Where("outstanding_owed_cents >= ?", snapshot).
+		Where("outstanding_owed_micros >= ?", snapshot).
 		Exec(ctx)
 	if err != nil {
 		return false, err

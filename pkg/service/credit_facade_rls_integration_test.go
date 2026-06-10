@@ -92,7 +92,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	acct, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
-	require.Equal(t, int64(1000), acct.BalanceCents)
+	require.Equal(t, int64(1000), acct.BalanceMicros)
 
 	// Hold 600.
 	hold, err := svc.HoldCredits(tctx, billingservice.HoldCreditsRequest{
@@ -104,8 +104,8 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	held, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
-	require.Equal(t, int64(600), held.HeldCents)
-	require.Equal(t, int64(400), held.AvailableCents)
+	require.Equal(t, int64(600), held.HeldMicros)
+	require.Equal(t, int64(400), held.AvailableMicros)
 
 	// Capture 400 of the 600 hold.
 	_, err = svc.CaptureHold(tctx, billingservice.CaptureHoldRequest{HoldID: hold.ID, Amount: 400})
@@ -113,15 +113,15 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	final, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
-	require.Equal(t, int64(600), final.BalanceCents, "1000 - 400 captured = 600")
-	require.Equal(t, int64(0), final.HeldCents, "hold fully resolved")
+	require.Equal(t, int64(600), final.BalanceMicros, "1000 - 400 captured = 600")
+	require.Equal(t, int64(0), final.HeldMicros, "hold fully resolved")
 
 	// #242 billing-account admin surface under openrails_app: configure arrears
 	// mode + an outstanding cap, read it back, and list the org's usage.
 	arrears := "arrears"
 	var cap int64 = 5000
 	require.NoError(t, svc.SetCreditAccountSettings(tctx, payer, ctName, credits.AccountSettingsInput{
-		BillingMode: &arrears, MaxOutstandingOwedCents: &cap,
+		BillingMode: &arrears, MaxOutstandingOwedMicros: &cap,
 	}), "SetCreditAccountSettings must work under openrails_app")
 
 	settings, err := svc.GetCreditAccountSettings(tctx, payer, ctName)

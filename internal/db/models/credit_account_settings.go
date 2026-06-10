@@ -19,22 +19,22 @@ type CreditAccountSettings struct {
 	CreditTypeID    uuid.UUID `bun:"credit_type_id,notnull,type:uuid" json:"credit_type_id"`
 
 	// Policy.
-	BillingMode             string     `bun:"billing_mode,notnull" json:"billing_mode"`
-	MaxSpendPerDayCents     *int64     `bun:"max_spend_per_day_cents,nullzero" json:"max_spend_per_day_cents,omitempty"`
-	MaxSpendPerMonthCents   *int64     `bun:"max_spend_per_month_cents,nullzero" json:"max_spend_per_month_cents,omitempty"`
-	MaxOutstandingOwedCents *int64     `bun:"max_outstanding_owed_cents,nullzero" json:"max_outstanding_owed_cents,omitempty"`
-	LowBalanceThreshold     *int64     `bun:"low_balance_threshold_cents,nullzero" json:"low_balance_threshold_cents,omitempty"`
-	AutoTopupEnabled        bool       `bun:"auto_topup_enabled,notnull" json:"auto_topup_enabled"`
-	AutoTopupAmountCents    *int64     `bun:"auto_topup_amount_cents,nullzero" json:"auto_topup_amount_cents,omitempty"`
-	AutoTopupPaymentMethod  *uuid.UUID `bun:"auto_topup_payment_method_id,type:uuid,nullzero" json:"auto_topup_payment_method_id,omitempty"`
-	DefaultCreditExpiryDays *int       `bun:"default_credit_expiry_days,nullzero" json:"default_credit_expiry_days,omitempty"`
-	HardStopOnBreach        bool       `bun:"hard_stop_on_breach,notnull" json:"hard_stop_on_breach"`
-	AlertThresholdPct       int        `bun:"alert_threshold_pct,notnull" json:"alert_threshold_pct"`
+	BillingMode              string     `bun:"billing_mode,notnull" json:"billing_mode"`
+	MaxSpendPerDayMicros     *int64     `bun:"max_spend_per_day_micros,nullzero" json:"max_spend_per_day_micros,omitempty"`
+	MaxSpendPerMonthMicros   *int64     `bun:"max_spend_per_month_micros,nullzero" json:"max_spend_per_month_micros,omitempty"`
+	MaxOutstandingOwedMicros *int64     `bun:"max_outstanding_owed_micros,nullzero" json:"max_outstanding_owed_micros,omitempty"`
+	LowBalanceThreshold      *int64     `bun:"low_balance_threshold_micros,nullzero" json:"low_balance_threshold_micros,omitempty"`
+	AutoTopupEnabled         bool       `bun:"auto_topup_enabled,notnull" json:"auto_topup_enabled"`
+	AutoTopupAmountCents     *int64     `bun:"auto_topup_amount_cents,nullzero" json:"auto_topup_amount_cents,omitempty"`
+	AutoTopupPaymentMethod   *uuid.UUID `bun:"auto_topup_payment_method_id,type:uuid,nullzero" json:"auto_topup_payment_method_id,omitempty"`
+	DefaultCreditExpiryDays  *int       `bun:"default_credit_expiry_days,nullzero" json:"default_credit_expiry_days,omitempty"`
+	HardStopOnBreach         bool       `bun:"hard_stop_on_breach,notnull" json:"hard_stop_on_breach"`
+	AlertThresholdPct        int        `bun:"alert_threshold_pct,notnull" json:"alert_threshold_pct"`
 
 	// Dynamic state (money-in / alert workers).
-	OutstandingOwedCents int64      `bun:"outstanding_owed_cents,notnull" json:"outstanding_owed_cents"`
-	LastAlertAt          *time.Time `bun:"last_alert_at,nullzero" json:"last_alert_at,omitempty"`
-	LastTopupAt          *time.Time `bun:"last_topup_at,nullzero" json:"last_topup_at,omitempty"`
+	OutstandingOwedMicros int64      `bun:"outstanding_owed_micros,notnull" json:"outstanding_owed_micros"`
+	LastAlertAt           *time.Time `bun:"last_alert_at,nullzero" json:"last_alert_at,omitempty"`
+	LastTopupAt           *time.Time `bun:"last_topup_at,nullzero" json:"last_topup_at,omitempty"`
 
 	// Suspension + payment-method-verification state (issue #299).
 	VerifiedPaymentMethod bool       `bun:"verified_payment_method,notnull" json:"verified_payment_method"`
@@ -55,13 +55,13 @@ type CreditAccountSettings struct {
 type CreditSpendLimit struct {
 	bun.BaseModel `bun:"table:billing.credit_spend_limits,alias:csl"`
 
-	ID                    uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
-	TenantID              uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
-	TenantSubjectID       uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
-	CreditTypeID          uuid.UUID `bun:"credit_type_id,notnull,type:uuid" json:"credit_type_id"`
-	Actor                 string    `bun:"actor,notnull" json:"actor"`
-	MaxSpendPerDayCents   *int64    `bun:"max_spend_per_day_cents,nullzero" json:"max_spend_per_day_cents,omitempty"`
-	MaxSpendPerMonthCents *int64    `bun:"max_spend_per_month_cents,nullzero" json:"max_spend_per_month_cents,omitempty"`
-	CreatedAt             time.Time `bun:"created_at,notnull" json:"created_at"`
-	UpdatedAt             time.Time `bun:"updated_at,notnull" json:"updated_at"`
+	ID                     uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	TenantID               uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
+	TenantSubjectID        uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	CreditTypeID           uuid.UUID `bun:"credit_type_id,notnull,type:uuid" json:"credit_type_id"`
+	Actor                  string    `bun:"actor,notnull" json:"actor"`
+	MaxSpendPerDayMicros   *int64    `bun:"max_spend_per_day_micros,nullzero" json:"max_spend_per_day_micros,omitempty"`
+	MaxSpendPerMonthMicros *int64    `bun:"max_spend_per_month_micros,nullzero" json:"max_spend_per_month_micros,omitempty"`
+	CreatedAt              time.Time `bun:"created_at,notnull" json:"created_at"`
+	UpdatedAt              time.Time `bun:"updated_at,notnull" json:"updated_at"`
 }

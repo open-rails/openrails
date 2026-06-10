@@ -95,13 +95,13 @@ func requireServiceTenantSubjectScope(r *httprequest.Request, tenantSubject bill
 // serviceAuthorizeRequest is the body of POST /v1/service/credits/authorize
 // (issue #235/#247). tenant_subject_id is the subject billed; actor is the
 // canonical caller for per-(tenant_subject_id, actor) sub-budgets;
-// estimate_cents = the upper-bound charge;
+// estimate_micros = the upper-bound charge;
 // request_id = the idempotency key for the placed hold.
 type serviceAuthorizeRequest struct {
 	TenantSubjectID string `json:"tenant_subject_id"`
 	Actor           string `json:"actor"`
 	CreditType      string `json:"credit_type" binding:"required"`
-	EstimateCents   int64  `json:"estimate_cents"`
+	EstimateMicros  int64  `json:"estimate_micros"`
 	RequestID       string `json:"request_id" binding:"required"`
 	ExpiresAt       *int64 `json:"expires_at"`
 }
@@ -109,14 +109,14 @@ type serviceAuthorizeRequest struct {
 // serviceAuthorizeResponse mirrors the unified authorize contract: the policy
 // decision + the tenant subject's real available/outstanding + the placed reservation.
 type serviceAuthorizeResponse struct {
-	Allowed             bool       `json:"allowed"`
-	DenyCode            string     `json:"deny_code,omitempty"`
-	BillingMode         string     `json:"billing_mode"`
-	AvailableCents      int64      `json:"available_cents"`
-	OutstandingCents    int64      `json:"outstanding_cents"`
-	RemainingTodayCents *int64     `json:"remaining_today_cents,omitempty"`
-	RetryAfterSeconds   int64      `json:"retry_after_seconds,omitempty"`
-	ReservationID       *uuid.UUID `json:"reservation_id,omitempty"`
+	Allowed              bool       `json:"allowed"`
+	DenyCode             string     `json:"deny_code,omitempty"`
+	BillingMode          string     `json:"billing_mode"`
+	AvailableMicros      int64      `json:"available_micros"`
+	OutstandingMicros    int64      `json:"outstanding_micros"`
+	RemainingTodayMicros *int64     `json:"remaining_today_micros,omitempty"`
+	RetryAfterSeconds    int64      `json:"retry_after_seconds,omitempty"`
+	ReservationID        *uuid.UUID `json:"reservation_id,omitempty"`
 }
 
 // ServiceAuthorizeCredits is the service token-authed policy-decision + ATOMIC hold
@@ -137,8 +137,8 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if req.EstimateCents < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "estimate_cents must be >= 0")
+	if req.EstimateMicros < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "estimate_micros must be >= 0")
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -169,7 +169,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 		TenantSubjectID: *tenantSubject,
 		Actor:           req.Actor,
 		CreditType:      req.CreditType,
-		EstimateCents:   req.EstimateCents,
+		EstimateMicros:  req.EstimateMicros,
 		RequestID:       req.RequestID,
 		ExpiresAt:       expiresAt,
 	})
@@ -183,27 +183,27 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 	}
 
 	r.SuccessJSON(serviceAuthorizeResponse{
-		Allowed:             out.Allowed,
-		DenyCode:            out.DenyCode,
-		BillingMode:         out.BillingMode,
-		AvailableCents:      out.AvailableCents,
-		OutstandingCents:    out.OutstandingOwedCents,
-		RemainingTodayCents: out.RemainingTodayCents,
-		RetryAfterSeconds:   out.RetryAfterSeconds,
-		ReservationID:       out.ReservationID,
+		Allowed:              out.Allowed,
+		DenyCode:             out.DenyCode,
+		BillingMode:          out.BillingMode,
+		AvailableMicros:      out.AvailableMicros,
+		OutstandingMicros:    out.OutstandingOwedMicros,
+		RemainingTodayMicros: out.RemainingTodayMicros,
+		RetryAfterSeconds:    out.RetryAfterSeconds,
+		ReservationID:        out.ReservationID,
 	})
 }
 
 // serviceBalanceResponse is the tenant-subject balance snapshot served by
 // GET /v1/service/credits/balance (issue #235/#247).
 type serviceBalanceResponse struct {
-	TenantSubjectID      uuid.UUID `json:"tenant_subject_id"`
-	CreditType           string    `json:"credit_type"`
-	BillingMode          string    `json:"billing_mode"`
-	BalanceCents         int64     `json:"balance_cents"`
-	HeldCents            int64     `json:"held_cents"`
-	AvailableCents       int64     `json:"available_cents"`
-	OutstandingOwedCents int64     `json:"outstanding_owed_cents"`
+	TenantSubjectID       uuid.UUID `json:"tenant_subject_id"`
+	CreditType            string    `json:"credit_type"`
+	BillingMode           string    `json:"billing_mode"`
+	BalanceMicros         int64     `json:"balance_micros"`
+	HeldMicros            int64     `json:"held_micros"`
+	AvailableMicros       int64     `json:"available_micros"`
+	OutstandingOwedMicros int64     `json:"outstanding_owed_micros"`
 }
 
 // ServiceGetCreditsBalance returns the tenant subject's REAL balance snapshot (issue
@@ -240,13 +240,13 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(serviceBalanceResponse{
-		TenantSubjectID:      snap.TenantSubjectID,
-		CreditType:           snap.CreditType,
-		BillingMode:          snap.BillingMode,
-		BalanceCents:         snap.BalanceCents,
-		HeldCents:            snap.HeldCents,
-		AvailableCents:       snap.AvailableCents,
-		OutstandingOwedCents: snap.OutstandingOwedCents,
+		TenantSubjectID:       snap.TenantSubjectID,
+		CreditType:            snap.CreditType,
+		BillingMode:           snap.BillingMode,
+		BalanceMicros:         snap.BalanceMicros,
+		HeldMicros:            snap.HeldMicros,
+		AvailableMicros:       snap.AvailableMicros,
+		OutstandingOwedMicros: snap.OutstandingOwedMicros,
 	})
 }
 
@@ -259,19 +259,19 @@ func serviceQueryTenantSubject(r *httprequest.Request) (*identity.TenantSubjectI
 // billing account (issue #242). All settings are optional pointers (only the
 // supplied fields are changed); tenant_subject_id + credit_type identify the account.
 type serviceAccountSettingsRequest struct {
-	TenantSubjectID         string  `json:"tenant_subject_id"`
-	CreditType              string  `json:"credit_type"`
-	BillingMode             *string `json:"billing_mode"` // "prepaid" | "arrears"
-	MaxSpendPerDayCents     *int64  `json:"max_spend_per_day_cents"`
-	MaxSpendPerMonthCents   *int64  `json:"max_spend_per_month_cents"`
-	MaxOutstandingOwedCents *int64  `json:"max_outstanding_owed_cents"`
-	LowBalanceThreshold     *int64  `json:"low_balance_threshold_cents"`
-	AutoTopupEnabled        *bool   `json:"auto_topup_enabled"`
-	AutoTopupAmountCents    *int64  `json:"auto_topup_amount_cents"`
-	AutoTopupPaymentMethod  *string `json:"auto_topup_payment_method_id"`
-	DefaultCreditExpiryDays *int    `json:"default_credit_expiry_days"`
-	HardStopOnBreach        *bool   `json:"hard_stop_on_breach"`
-	AlertThresholdPct       *int    `json:"alert_threshold_pct"`
+	TenantSubjectID          string  `json:"tenant_subject_id"`
+	CreditType               string  `json:"credit_type"`
+	BillingMode              *string `json:"billing_mode"` // "prepaid" | "arrears"
+	MaxSpendPerDayMicros     *int64  `json:"max_spend_per_day_micros"`
+	MaxSpendPerMonthMicros   *int64  `json:"max_spend_per_month_micros"`
+	MaxOutstandingOwedMicros *int64  `json:"max_outstanding_owed_micros"`
+	LowBalanceThreshold      *int64  `json:"low_balance_threshold_micros"`
+	AutoTopupEnabled         *bool   `json:"auto_topup_enabled"`
+	AutoTopupAmountCents     *int64  `json:"auto_topup_amount_cents"`
+	AutoTopupPaymentMethod   *string `json:"auto_topup_payment_method_id"`
+	DefaultCreditExpiryDays  *int    `json:"default_credit_expiry_days"`
+	HardStopOnBreach         *bool   `json:"hard_stop_on_breach"`
+	AlertThresholdPct        *int    `json:"alert_threshold_pct"`
 }
 
 // ServiceSetCreditAccountSettings (PUT /v1/service/credits/account-settings)
@@ -296,16 +296,16 @@ func ServiceSetCreditAccountSettings(r *httprequest.Request) {
 		creditType = "api_credits"
 	}
 	in := credits.AccountSettingsInput{
-		BillingMode:             req.BillingMode,
-		MaxSpendPerDayCents:     req.MaxSpendPerDayCents,
-		MaxSpendPerMonthCents:   req.MaxSpendPerMonthCents,
-		MaxOutstandingOwedCents: req.MaxOutstandingOwedCents,
-		LowBalanceThreshold:     req.LowBalanceThreshold,
-		AutoTopupEnabled:        req.AutoTopupEnabled,
-		AutoTopupAmountCents:    req.AutoTopupAmountCents,
-		DefaultCreditExpiryDays: req.DefaultCreditExpiryDays,
-		HardStopOnBreach:        req.HardStopOnBreach,
-		AlertThresholdPct:       req.AlertThresholdPct,
+		BillingMode:              req.BillingMode,
+		MaxSpendPerDayMicros:     req.MaxSpendPerDayMicros,
+		MaxSpendPerMonthMicros:   req.MaxSpendPerMonthMicros,
+		MaxOutstandingOwedMicros: req.MaxOutstandingOwedMicros,
+		LowBalanceThreshold:      req.LowBalanceThreshold,
+		AutoTopupEnabled:         req.AutoTopupEnabled,
+		AutoTopupAmountCents:     req.AutoTopupAmountCents,
+		DefaultCreditExpiryDays:  req.DefaultCreditExpiryDays,
+		HardStopOnBreach:         req.HardStopOnBreach,
+		AlertThresholdPct:        req.AlertThresholdPct,
 	}
 	if req.AutoTopupPaymentMethod != nil {
 		if pm, perr := uuid.Parse(strings.TrimSpace(*req.AutoTopupPaymentMethod)); perr == nil {

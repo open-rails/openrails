@@ -28,13 +28,13 @@ func TestAuthorizeAllowed(t *testing.T) {
 		gotPath = r.URL.Path
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_ = json.NewEncoder(w).Encode(AuthorizeResponse{
-			Allowed: true, AvailableCents: 5000, ReservationID: "res-1",
+			Allowed: true, AvailableMicros: 5000, ReservationID: "res-1",
 		})
 	}))
 	defer srv.Close()
 
 	resp, err := newTestClient(t, srv.URL).Authorize(context.Background(), AuthorizeRequest{
-		PayerTenantID: "org-1", Actor: "oat:k1", EstimateCents: 100, RequestID: "req-1",
+		PayerTenantID: "org-1", Actor: "oat:k1", EstimateMicros: 100, RequestID: "req-1",
 	})
 	if err != nil {
 		t.Fatalf("Authorize: %v", err)
@@ -48,7 +48,7 @@ func TestAuthorizeAllowed(t *testing.T) {
 	if gotPath != "/v1/service/credits/authorize" {
 		t.Fatalf("path = %q", gotPath)
 	}
-	if gotBody.PayerTenantID != "org-1" || gotBody.Actor != "oat:k1" || gotBody.RequestID != "req-1" || gotBody.EstimateCents != 100 {
+	if gotBody.PayerTenantID != "org-1" || gotBody.Actor != "oat:k1" || gotBody.RequestID != "req-1" || gotBody.EstimateMicros != 100 {
 		t.Fatalf("body threaded wrong: %+v", gotBody)
 	}
 }
@@ -152,7 +152,7 @@ func TestBalance(t *testing.T) {
 	var gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
-		_ = json.NewEncoder(w).Encode(BalanceResponse{AvailableCents: 1234})
+		_ = json.NewEncoder(w).Encode(BalanceResponse{AvailableMicros: 1234})
 	}))
 	defer srv.Close()
 
@@ -160,8 +160,8 @@ func TestBalance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Balance: %v", err)
 	}
-	if resp.AvailableCents != 1234 {
-		t.Fatalf("available = %d", resp.AvailableCents)
+	if resp.AvailableMicros != 1234 {
+		t.Fatalf("available = %d", resp.AvailableMicros)
 	}
 	if !strings.Contains(gotQuery, "tenant_subject_id=org-1") || strings.Contains(gotQuery, "actor") {
 		t.Fatalf("query = %q", gotQuery)

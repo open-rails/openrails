@@ -54,12 +54,12 @@ type AdmitRequest struct {
 	// {"request":1,"token":150}.
 	Amounts map[string]int64
 
-	// Money axis (skipped when EstimateCents == 0).
-	CreditType    string
-	EstimateCents int64
-	Source        string    // idempotency namespace (e.g. "usage")
-	SourceID      string    // idempotency id (e.g. request id)
-	ExpiresAt     time.Time // hold expiry
+	// Money axis (skipped when EstimateMicros == 0).
+	CreditType     string
+	EstimateMicros int64
+	Source         string    // idempotency namespace (e.g. "usage")
+	SourceID       string    // idempotency id (e.g. request id)
+	ExpiresAt      time.Time // hold expiry
 
 	// BlockChecks (optional) are payment identifiers to test against the #300
 	// blocklist (card fingerprint, processor customer, email, ip).
@@ -163,14 +163,16 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// --- money-budget windows (#304): rolling per-tier spend caps on the actor ---
 	var budgetResID uuid.UUID
 	var budgetWindows []budgets.WindowStatus
-	if a.budgets != nil && len(pol.BudgetWindows) > 0 && req.EstimateCents > 0 {
+	if a.budgets != nil && len(pol.BudgetWindows) > 0 && req.EstimateMicros > 0 {
 		ttl := time.Hour
 		if !req.ExpiresAt.IsZero() {
 			if d := time.Until(req.ExpiresAt); d > 0 {
 				ttl = d
 			}
 		}
-		resID, statuses, ok, err := a.budgets.Reserve(ctx, req.TenantSubjectID, req.Actor, pol.BudgetWindows, req.EstimateCents, req.Source, req.SourceID, ttl)
+		// Budgets are denominated in millicents; the ledger is micro-dollars
+		// (1 millicent = 10 micros). Round up so budgets never under-count.
+		resID, statuses, ok, err := a.budgets.Reserve(ctx, req.TenantSubjectID, req.Actor, pol.BudgetWindows, (req.EstimateMicros+9)/10, req.Source, req.SourceID, ttl)
 		if err != nil {
 			return AdmitDecision{}, err
 		}
@@ -182,15 +184,15 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	}
 
 	// --- money axis (reserve the estimate via the existing ledger gate) ---
-	if req.EstimateCents > 0 {
+	if req.EstimateMicros > 0 {
 		res, err := a.credits.AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
-			Payer:         req.TenantSubjectID,
-			Actor:         req.Actor,
-			CreditType:    req.CreditType,
-			EstimateCents: req.EstimateCents,
-			Source:        req.Source,
-			SourceID:      req.SourceID,
-			ExpiresAt:     req.ExpiresAt,
+			Payer:          req.TenantSubjectID,
+			Actor:          req.Actor,
+			CreditType:     req.CreditType,
+			EstimateMicros: req.EstimateMicros,
+			Source:         req.Source,
+			SourceID:       req.SourceID,
+			ExpiresAt:      req.ExpiresAt,
 		})
 		if err != nil {
 			return AdmitDecision{}, err

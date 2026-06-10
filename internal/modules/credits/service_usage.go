@@ -145,7 +145,7 @@ type ResourceRevenueDailyRow struct {
 }
 
 // ResourceRevenueDaily returns per-day revenue (sum of captured usage_event
-// amounts; the credit type's smallest unit is cents, so x1000 -> millicents) for
+// amounts; the ledger unit is micro-dollars, so /10 -> millicents) for
 // a resource (typed attribution column), across ALL payers in the tenant, over
 // [from, to). Powers e.g. tensorhub endpoint revenue analytics (#410).
 func (s *CreditsService) ResourceRevenueDaily(ctx context.Context, resource string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
@@ -161,7 +161,7 @@ func (s *CreditsService) ResourceRevenueDaily(ctx context.Context, resource stri
 		return s.db.Q(ctx).NewSelect().
 			TableExpr("billing.usage_events AS ue").
 			ColumnExpr("to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date").
-			ColumnExpr("COALESCE(SUM(ue.amount), 0) * 1000 AS amount_millicents").
+			ColumnExpr("(COALESCE(SUM(ue.amount), 0) + 9) / 10 AS amount_millicents").
 			Where("ue.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
 			Where("ue.resource = ?", resource).
 			Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from.UTC(), to.UTC()).

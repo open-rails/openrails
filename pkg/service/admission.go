@@ -28,7 +28,7 @@ type AdmitInput struct {
 	Resource        string
 	Amounts         map[string]int64
 	CreditType      string
-	EstimateCents   int64
+	EstimateMicros  int64
 	Source          string
 	SourceID        string
 	ExpiresAtUnix   int64
@@ -141,7 +141,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	switch {
 	case in.ExpiresAtUnix > 0:
 		exp = time.Unix(in.ExpiresAtUnix, 0).UTC()
-	case in.EstimateCents > 0:
+	case in.EstimateMicros > 0:
 		exp = s.now().Add(time.Hour)
 	}
 	source := in.Source
@@ -161,7 +161,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		Resource:        in.Resource,
 		Amounts:         in.Amounts,
 		CreditType:      in.CreditType,
-		EstimateCents:   in.EstimateCents,
+		EstimateMicros:  in.EstimateMicros,
 		Source:          source,
 		SourceID:        in.SourceID,
 		ExpiresAt:       exp,

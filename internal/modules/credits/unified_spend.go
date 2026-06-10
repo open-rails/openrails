@@ -18,8 +18,8 @@ import (
 // Unified credit-line model (issue #302). Credit is ONE dial: an account spends
 // its prepaid balance FIRST, then accrues to outstanding_owed up to its credit
 // limit. Prepay-only = credit limit 0 (cannot go negative). Arrears = credit
-// limit > 0 (a credit line). The limit is BillingMode + MaxOutstandingOwedCents:
-// prepaid -> 0; arrears -> MaxOutstandingOwedCents (nil = unlimited line).
+// limit > 0 (a credit line). The limit is BillingMode + MaxOutstandingOwedMicros:
+// prepaid -> 0; arrears -> MaxOutstandingOwedMicros (nil = unlimited line).
 //
 // This unifies the two IMMEDIATE-debit paths (prepaid Withdraw + arrears
 // AccrueOwed) into one balance-first-then-owed spend. The hold->capture path and
@@ -141,8 +141,8 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 		if settings.BillingMode != BillingModeArrears {
 			return nil, nil, ErrInsufficientCredits // prepay-only: credit limit 0
 		}
-		if settings.MaxOutstandingOwedCents != nil &&
-			settings.OutstandingOwedCents+fromOwed > *settings.MaxOutstandingOwedCents {
+		if settings.MaxOutstandingOwedMicros != nil &&
+			settings.OutstandingOwedMicros+fromOwed > *settings.MaxOutstandingOwedMicros {
 			return nil, nil, ErrInsufficientCredits // would exceed the credit line
 		}
 	}
@@ -167,7 +167,7 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 
 	if fromOwed > 0 {
 		if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
-			Set("outstanding_owed_cents = outstanding_owed_cents + ?", fromOwed).
+			Set("outstanding_owed_micros = outstanding_owed_micros + ?", fromOwed).
 			Set("updated_at = ?", now).
 			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 			Exec(ctx); err != nil {
@@ -237,7 +237,7 @@ func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, payer i
 			return 0, err
 		}
 		if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
-			Set("outstanding_owed_cents = outstanding_owed_cents + ?", fromOwed).
+			Set("outstanding_owed_micros = outstanding_owed_micros + ?", fromOwed).
 			Set("updated_at = ?", now).
 			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
 			Exec(ctx); err != nil {

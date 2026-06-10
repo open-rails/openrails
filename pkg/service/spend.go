@@ -16,13 +16,13 @@ import (
 // CreditAccountSnapshot is the balance + policy view of an payer's credit
 // account, served by the authorize/balance route (issue #235).
 type CreditAccountSnapshot struct {
-	TenantSubjectID      uuid.UUID `json:"tenant_subject_id"`
-	CreditType           string    `json:"credit_type"`
-	BillingMode          string    `json:"billing_mode"`
-	BalanceCents         int64     `json:"balance_cents"`
-	HeldCents            int64     `json:"held_cents"`
-	AvailableCents       int64     `json:"available_cents"`
-	OutstandingOwedCents int64     `json:"outstanding_owed_cents"`
+	TenantSubjectID       uuid.UUID `json:"tenant_subject_id"`
+	CreditType            string    `json:"credit_type"`
+	BillingMode           string    `json:"billing_mode"`
+	BalanceMicros         int64     `json:"balance_micros"`
+	HeldMicros            int64     `json:"held_micros"`
+	AvailableMicros       int64     `json:"available_micros"`
+	OutstandingOwedMicros int64     `json:"outstanding_owed_micros"`
 }
 
 // GetCreditAccount returns the balance + policy snapshot for an tenant subject.
@@ -49,13 +49,13 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.TenantSub
 			return err
 		}
 		snap = &CreditAccountSnapshot{
-			TenantSubjectID:      payer.UUID(),
-			CreditType:           creditType,
-			BillingMode:          settings.BillingMode,
-			BalanceCents:         bal.Balance,
-			HeldCents:            bal.HeldBalance,
-			AvailableCents:       bal.Balance - bal.HeldBalance,
-			OutstandingOwedCents: settings.OutstandingOwedCents,
+			TenantSubjectID:       payer.UUID(),
+			CreditType:            creditType,
+			BillingMode:           settings.BillingMode,
+			BalanceMicros:         bal.Balance,
+			HeldMicros:            bal.HeldBalance,
+			AvailableMicros:       bal.Balance - bal.HeldBalance,
+			OutstandingOwedMicros: settings.OutstandingOwedMicros,
 		}
 		return nil
 	})
@@ -221,20 +221,20 @@ type AuthorizeSpendRequest struct {
 	TenantSubjectID identity.TenantSubjectID
 	Actor           string
 	CreditType      string
-	EstimateCents   int64
+	EstimateMicros  int64
 }
 
 // AuthorizeSpendResult is the decision returned to the caller (mirrors the
 // authorize route payload).
 type AuthorizeSpendResult struct {
-	Allowed              bool                `json:"allowed"`
-	DenyCode             string              `json:"deny_code,omitempty"`
-	BillingMode          string              `json:"billing_mode"`
-	AvailableCents       int64               `json:"available_cents"`
-	OutstandingOwedCents int64               `json:"outstanding_owed_cents"`
-	RetryAfterSeconds    int64               `json:"retry_after_seconds,omitempty"`
-	NextAllowedAt        *time.Time          `json:"next_allowed_at,omitempty"`
-	Caps                 []credits.CapResult `json:"caps,omitempty"`
+	Allowed               bool                `json:"allowed"`
+	DenyCode              string              `json:"deny_code,omitempty"`
+	BillingMode           string              `json:"billing_mode"`
+	AvailableMicros       int64               `json:"available_micros"`
+	OutstandingOwedMicros int64               `json:"outstanding_owed_micros"`
+	RetryAfterSeconds     int64               `json:"retry_after_seconds,omitempty"`
+	NextAllowedAt         *time.Time          `json:"next_allowed_at,omitempty"`
+	Caps                  []credits.CapResult `json:"caps,omitempty"`
 }
 
 // DenyInsufficientBalance is the deny code when a prepaid account lacks the
@@ -249,7 +249,7 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 	if req.CreditType == "" {
 		return nil, fmt.Errorf("credit_type required")
 	}
-	if req.EstimateCents < 0 {
+	if req.EstimateMicros < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
 	if req.TenantSubjectID.IsZero() {
@@ -260,25 +260,25 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 	if err != nil {
 		return nil, err
 	}
-	dec, err := s.creditsService().CheckSpendAllowed(ctx, req.TenantSubjectID, req.CreditType, strings.TrimSpace(req.Actor), req.EstimateCents)
+	dec, err := s.creditsService().CheckSpendAllowed(ctx, req.TenantSubjectID, req.CreditType, strings.TrimSpace(req.Actor), req.EstimateMicros)
 	if err != nil {
 		return nil, err
 	}
 
 	res := &AuthorizeSpendResult{
-		Allowed:              dec.Allowed,
-		DenyCode:             dec.DenyCode,
-		BillingMode:          snap.BillingMode,
-		AvailableCents:       snap.AvailableCents,
-		OutstandingOwedCents: snap.OutstandingOwedCents,
-		RetryAfterSeconds:    dec.RetryAfterSeconds,
-		NextAllowedAt:        dec.NextAllowedAt,
-		Caps:                 dec.Caps,
+		Allowed:               dec.Allowed,
+		DenyCode:              dec.DenyCode,
+		BillingMode:           snap.BillingMode,
+		AvailableMicros:       snap.AvailableMicros,
+		OutstandingOwedMicros: snap.OutstandingOwedMicros,
+		RetryAfterSeconds:     dec.RetryAfterSeconds,
+		NextAllowedAt:         dec.NextAllowedAt,
+		Caps:                  dec.Caps,
 	}
 
 	// Prepaid accounts are additionally gated on available balance; arrears
 	// accounts are gated by the outstanding ceiling inside CheckSpendAllowed.
-	if snap.BillingMode != credits.BillingModeArrears && req.EstimateCents > snap.AvailableCents {
+	if snap.BillingMode != credits.BillingModeArrears && req.EstimateMicros > snap.AvailableMicros {
 		res.Allowed = false
 		if res.DenyCode == "" {
 			res.DenyCode = DenyInsufficientBalance
@@ -296,7 +296,7 @@ type AuthorizeAndHoldRequest struct {
 	TenantSubjectID identity.TenantSubjectID
 	Actor           string
 	CreditType      string
-	EstimateCents   int64
+	EstimateMicros  int64
 	RequestID       string
 	// ExpiresAt bounds the placed hold; when zero a default TTL is applied.
 	ExpiresAt time.Time
@@ -305,15 +305,15 @@ type AuthorizeAndHoldRequest struct {
 // AuthorizeAndHoldResult is the combined decision + reservation returned by
 // AuthorizeAndHold. ReservationID is the placed hold's id when Allowed, else nil.
 type AuthorizeAndHoldResult struct {
-	Allowed              bool                `json:"allowed"`
-	DenyCode             string              `json:"deny_code,omitempty"`
-	BillingMode          string              `json:"billing_mode"`
-	AvailableCents       int64               `json:"available_cents"`
-	OutstandingOwedCents int64               `json:"outstanding_owed_cents"`
-	RemainingTodayCents  *int64              `json:"remaining_today_cents,omitempty"`
-	RetryAfterSeconds    int64               `json:"retry_after_seconds,omitempty"`
-	ReservationID        *uuid.UUID          `json:"reservation_id,omitempty"`
-	Caps                 []credits.CapResult `json:"caps,omitempty"`
+	Allowed               bool                `json:"allowed"`
+	DenyCode              string              `json:"deny_code,omitempty"`
+	BillingMode           string              `json:"billing_mode"`
+	AvailableMicros       int64               `json:"available_micros"`
+	OutstandingOwedMicros int64               `json:"outstanding_owed_micros"`
+	RemainingTodayMicros  *int64              `json:"remaining_today_micros,omitempty"`
+	RetryAfterSeconds     int64               `json:"retry_after_seconds,omitempty"`
+	ReservationID         *uuid.UUID          `json:"reservation_id,omitempty"`
+	Caps                  []credits.CapResult `json:"caps,omitempty"`
 }
 
 // authorizeHoldSource is the source label recorded on holds placed by the
@@ -339,7 +339,7 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	if req.TenantSubjectID.IsZero() {
 		return nil, fmt.Errorf("tenant_subject_id required")
 	}
-	if req.EstimateCents < 0 {
+	if req.EstimateMicros < 0 {
 		return nil, fmt.Errorf("estimate must be >= 0")
 	}
 	req.RequestID = strings.TrimSpace(req.RequestID)
@@ -352,29 +352,29 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 	}
 
 	out, err := s.creditsService().AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
-		Payer:         req.TenantSubjectID,
-		Actor:         strings.TrimSpace(req.Actor),
-		CreditType:    req.CreditType,
-		EstimateCents: req.EstimateCents,
-		Source:        authorizeHoldSource,
-		SourceID:      req.RequestID,
-		ExpiresAt:     expires,
+		Payer:          req.TenantSubjectID,
+		Actor:          strings.TrimSpace(req.Actor),
+		CreditType:     req.CreditType,
+		EstimateMicros: req.EstimateMicros,
+		Source:         authorizeHoldSource,
+		SourceID:       req.RequestID,
+		ExpiresAt:      expires,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	res := &AuthorizeAndHoldResult{
-		Allowed:              out.Decision.Allowed,
-		DenyCode:             out.Decision.DenyCode,
-		BillingMode:          out.BillingMode,
-		AvailableCents:       out.AvailableCents,
-		OutstandingOwedCents: out.OutstandingOwedCents,
-		RetryAfterSeconds:    out.Decision.RetryAfterSeconds,
-		Caps:                 out.Decision.Caps,
+		Allowed:               out.Decision.Allowed,
+		DenyCode:              out.Decision.DenyCode,
+		BillingMode:           out.BillingMode,
+		AvailableMicros:       out.AvailableMicros,
+		OutstandingOwedMicros: out.OutstandingOwedMicros,
+		RetryAfterSeconds:     out.Decision.RetryAfterSeconds,
+		Caps:                  out.Decision.Caps,
 	}
 	if r := remainingTodayCents(out.Decision.Caps); r != nil {
-		res.RemainingTodayCents = r
+		res.RemainingTodayMicros = r
 	}
 	if out.Hold != nil {
 		id := out.Hold.ID
@@ -385,7 +385,7 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 
 // remainingTodayCents extracts the remaining headroom under a daily cap (org or
 // per-actor) from the evaluated caps, for the authorize response's
-// remaining_today_cents field. Returns nil when no daily cap applies.
+// remaining_today_micros field. Returns nil when no daily cap applies.
 func remainingTodayCents(caps []credits.CapResult) *int64 {
 	for _, c := range caps {
 		if c.Code == credits.DenyDailyCap || c.Code == credits.DenyActorDailyCap {

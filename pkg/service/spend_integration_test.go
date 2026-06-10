@@ -79,12 +79,12 @@ func TestAuthorizeSpend_PrepaidBalanceGate(t *testing.T) {
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 
-	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, Actor: "user:a", EstimateCents: 500})
+	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, Actor: "user:a", EstimateMicros: 500})
 	require.NoError(t, err)
 	require.True(t, ok.Allowed)
-	require.Equal(t, int64(1000), ok.AvailableCents)
+	require.Equal(t, int64(1000), ok.AvailableMicros)
 
-	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, Actor: "user:a", EstimateCents: 1500})
+	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, Actor: "user:a", EstimateMicros: 1500})
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, billingservice.DenyInsufficientBalance, deny.DenyCode)
@@ -95,17 +95,17 @@ func TestAuthorizeSpend_DailyCapDeny(t *testing.T) {
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 100000, Source: "seed"})
 	require.NoError(t, err)
 	cap := int64(1000)
-	require.NoError(t, svc.SetCreditAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{MaxSpendPerDayCents: &cap}))
+	require.NoError(t, svc.SetCreditAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{MaxSpendPerDayMicros: &cap}))
 	_, err = cs.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, Actor: "user:a", CreditType: ct, Amount: 800, Source: "usage"})
 	require.NoError(t, err)
 
-	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, Actor: "user:a", EstimateCents: 300})
+	deny, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, Actor: "user:a", EstimateMicros: 300})
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
 	require.Equal(t, credits.DenyDailyCap, deny.DenyCode)
 	require.Greater(t, deny.RetryAfterSeconds, int64(0))
 
-	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, Actor: "user:a", EstimateCents: 100})
+	ok, err := svc.AuthorizeSpend(ctx, billingservice.AuthorizeSpendRequest{TenantSubjectID: payer, CreditType: ct, Actor: "user:a", EstimateMicros: 100})
 	require.NoError(t, err)
 	require.True(t, ok.Allowed)
 }
@@ -119,8 +119,8 @@ func TestGetCreditAccount_Snapshot(t *testing.T) {
 
 	snap, err := svc.GetCreditAccount(ctx, payer, ct)
 	require.NoError(t, err)
-	require.Equal(t, int64(5000), snap.BalanceCents)
-	require.Equal(t, int64(1500), snap.HeldCents)
-	require.Equal(t, int64(3500), snap.AvailableCents)
+	require.Equal(t, int64(5000), snap.BalanceMicros)
+	require.Equal(t, int64(1500), snap.HeldMicros)
+	require.Equal(t, int64(3500), snap.AvailableMicros)
 	require.Equal(t, credits.BillingModePrepaid, snap.BillingMode)
 }

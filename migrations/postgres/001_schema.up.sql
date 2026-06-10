@@ -313,17 +313,17 @@ CREATE TABLE billing.credit_account_settings (
     tenant_subject_id uuid CONSTRAINT credit_account_settings_tenant_subject_id_not_null NOT NULL,
     credit_type_id uuid NOT NULL,
     billing_mode text DEFAULT 'prepaid'::text NOT NULL,
-    max_spend_per_day_cents bigint,
-    max_spend_per_month_cents bigint,
-    max_outstanding_owed_cents bigint,
-    low_balance_threshold_cents bigint,
+    max_spend_per_day_micros bigint,
+    max_spend_per_month_micros bigint,
+    max_outstanding_owed_micros bigint,
+    low_balance_threshold_micros bigint,
     auto_topup_enabled boolean DEFAULT false NOT NULL,
     auto_topup_amount_cents bigint,
     auto_topup_payment_method_id uuid,
     default_credit_expiry_days integer,
     hard_stop_on_breach boolean DEFAULT true NOT NULL,
     alert_threshold_pct integer DEFAULT 80 NOT NULL,
-    outstanding_owed_cents bigint DEFAULT 0 NOT NULL,
+    outstanding_owed_micros bigint DEFAULT 0 NOT NULL,
     last_alert_at timestamp with time zone,
     last_topup_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -335,7 +335,7 @@ CREATE TABLE billing.credit_account_settings (
     tier text,
     CONSTRAINT credit_account_settings_alert_pct_chk CHECK (((alert_threshold_pct >= 0) AND (alert_threshold_pct <= 100))),
     CONSTRAINT credit_account_settings_billing_mode_chk CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text]))),
-    CONSTRAINT credit_account_settings_owed_nonneg_chk CHECK ((outstanding_owed_cents >= 0))
+    CONSTRAINT credit_account_settings_owed_nonneg_chk CHECK ((outstanding_owed_micros >= 0))
 );
 
 ALTER TABLE ONLY billing.credit_account_settings FORCE ROW LEVEL SECURITY;
@@ -412,8 +412,8 @@ CREATE TABLE billing.credit_spend_limits (
     tenant_subject_id uuid CONSTRAINT credit_spend_limits_tenant_subject_id_not_null NOT NULL,
     credit_type_id uuid NOT NULL,
     actor text CONSTRAINT credit_spend_limits_actor_not_null NOT NULL,
-    max_spend_per_day_cents bigint,
-    max_spend_per_month_cents bigint,
+    max_spend_per_day_micros bigint,
+    max_spend_per_month_micros bigint,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );

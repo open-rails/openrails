@@ -51,25 +51,25 @@ func (id PayerTenantID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 
 // AuthorizeRequest is the body for POST /v1/service/credits/authorize. It is the
 // atomic authorize+hold: OpenRails checks the payer's balance and, if allowed,
-// places a hold for EstimateCents in a single idempotent call keyed on RequestID.
+// places a hold for EstimateMicros in a single idempotent call keyed on RequestID.
 type AuthorizeRequest struct {
-	PayerTenantID string `json:"tenant_subject_id"`
-	Actor         string `json:"actor"`
-	CreditType    string `json:"credit_type,omitempty"`
-	EstimateCents int64  `json:"estimate_cents"`
-	RequestID     string `json:"request_id"`
+	PayerTenantID  string `json:"tenant_subject_id"`
+	Actor          string `json:"actor"`
+	CreditType     string `json:"credit_type,omitempty"`
+	EstimateMicros int64  `json:"estimate_micros"`
+	RequestID      string `json:"request_id"`
 }
 
 // AuthorizeResponse is the OpenRails decision. Allowed=false with a DenyCode is a
 // definitive deny (insufficient funds, frozen tenant, etc.); ReservationID is the
 // hold handle to later capture or release.
 type AuthorizeResponse struct {
-	Allowed             bool   `json:"allowed"`
-	DenyCode            string `json:"deny_code"`
-	AvailableCents      int64  `json:"available_cents"`
-	OutstandingCents    int64  `json:"outstanding_cents"`
-	RemainingTodayCents int64  `json:"remaining_today_cents"`
-	ReservationID       string `json:"reservation_id"`
+	Allowed              bool   `json:"allowed"`
+	DenyCode             string `json:"deny_code"`
+	AvailableMicros      int64  `json:"available_micros"`
+	OutstandingMicros    int64  `json:"outstanding_micros"`
+	RemainingTodayMicros int64  `json:"remaining_today_micros"`
+	ReservationID        string `json:"reservation_id"`
 }
 
 // HoldCreditsRequest reserves credits for an estimate.
@@ -113,6 +113,20 @@ type WithdrawCreditsRequest struct {
 	SourceID      *uuid.UUID
 }
 
+// DepositCreditsRequest mints a credit block for a payer (admin funding,
+// promotions, money-in settlement). Amount is in the credit type's ledger
+// unit (micro-dollars for "usd_micro").
+type DepositCreditsRequest struct {
+	PayerTenantID *PayerTenantID
+	Actor         string
+	CreditType    string
+	Amount        int64
+	Source        string
+	SourceID      *uuid.UUID
+	ExpiresAt     *time.Time
+	Description   string
+}
+
 // CreditTransaction is the ledger row returned by capture/withdraw.
 type CreditTransaction struct {
 	ID              uuid.UUID
@@ -142,20 +156,20 @@ type CreditTransaction struct {
 // in-process tensorhub pricing, then calls this once.
 //
 // Tier/Resource select the throughput + budget policy + resource gating; Amounts is
-// the per-request throughput consumption (e.g. {"request":1}). EstimateCents is
-// the upper-bound charge to hold. A zero EstimateCents runs the limit checks
+// the per-request throughput consumption (e.g. {"request":1}). EstimateMicros is
+// the upper-bound charge to hold. A zero EstimateMicros runs the limit checks
 // without placing a money hold.
 type AdmitRequest struct {
-	PayerTenantID string           `json:"tenant_subject_id"`
-	Actor         string           `json:"actor"`
-	Tier          string           `json:"tier,omitempty"`
-	Resource      string           `json:"resource,omitempty"`
-	Amounts       map[string]int64 `json:"amounts,omitempty"`
-	CreditType    string           `json:"credit_type,omitempty"`
-	EstimateCents int64            `json:"estimate_cents"`
-	RequestID     string           `json:"request_id"`
-	Source        string           `json:"source,omitempty"`
-	ExpiresAt     *int64           `json:"expires_at,omitempty"`
+	PayerTenantID  string           `json:"tenant_subject_id"`
+	Actor          string           `json:"actor"`
+	Tier           string           `json:"tier,omitempty"`
+	Resource       string           `json:"resource,omitempty"`
+	Amounts        map[string]int64 `json:"amounts,omitempty"`
+	CreditType     string           `json:"credit_type,omitempty"`
+	EstimateMicros int64            `json:"estimate_micros"`
+	RequestID      string           `json:"request_id"`
+	Source         string           `json:"source,omitempty"`
+	ExpiresAt      *int64           `json:"expires_at,omitempty"`
 	// TenantThroughput is the per-TENANT fixed-window throughput policy OpenRails
 	// should enforce on this invoke (#404) — tensorhub no longer rate-limits the
 	// invoke path locally.
@@ -202,15 +216,15 @@ func (c *Client) Admit(ctx context.Context, req AdmitRequest) (*AdmitResponse, e
 	return &out, nil
 }
 
-// CaptureRequest settles a hold at the actual (final) amount. CapturedCents may be
+// CaptureRequest settles a hold at the actual (final) amount. CapturedMicros may be
 // less than the held estimate; OpenRails releases the difference.
 //
 // The wire field is "amount": OpenRails' capture handler (serviceCaptureRequest)
 // binds `amount` as REQUIRED, so this MUST serialize to "amount" or every capture
-// 400s. (Unit tests use a fake that echoed the old "captured_cents" name, which is
+// 400s. (Unit tests use a fake that echoed the old "captured_micros" name, which is
 // why this contract drift wasn't caught there — the deployed-stack e2e is.)
 type CaptureRequest struct {
-	CapturedCents int64 `json:"amount"`
+	CapturedMicros int64 `json:"amount"`
 
 	// Usage analytics (#311/#410): when EventType is set, OpenRails also appends
 	// a usage_event linked to this capture (no second debit) so the platform's
@@ -238,35 +252,35 @@ type CaptureUsage struct {
 
 // BalanceResponse is the GET /v1/service/credits/balance snapshot.
 type BalanceResponse struct {
-	AvailableCents      int64 `json:"available_cents"`
-	OutstandingCents    int64 `json:"outstanding_cents"`
-	RemainingTodayCents int64 `json:"remaining_today_cents"`
+	AvailableMicros      int64 `json:"available_micros"`
+	OutstandingMicros    int64 `json:"outstanding_micros"`
+	RemainingTodayMicros int64 `json:"remaining_today_micros"`
 }
 
 // CreditAccount is the OpenRails service balance/policy snapshot.
 type CreditAccount struct {
-	PayerTenantID        string `json:"tenant_subject_id"`
-	CreditType           string `json:"credit_type"`
-	BillingMode          string `json:"billing_mode"`
-	BalanceCents         int64  `json:"balance_cents"`
-	HeldCents            int64  `json:"held_cents"`
-	AvailableCents       int64  `json:"available_cents"`
-	OutstandingOwedCents int64  `json:"outstanding_owed_cents"`
+	PayerTenantID         string `json:"tenant_subject_id"`
+	CreditType            string `json:"credit_type"`
+	BillingMode           string `json:"billing_mode"`
+	BalanceMicros         int64  `json:"balance_micros"`
+	HeldMicros            int64  `json:"held_micros"`
+	AvailableMicros       int64  `json:"available_micros"`
+	OutstandingOwedMicros int64  `json:"outstanding_owed_micros"`
 }
 
 // AccountSettingsInput patches an OpenRails credit account policy.
 type AccountSettingsInput struct {
-	BillingMode             *string `json:"billing_mode,omitempty"`
-	MaxSpendPerDayCents     *int64  `json:"max_spend_per_day_cents,omitempty"`
-	MaxSpendPerMonthCents   *int64  `json:"max_spend_per_month_cents,omitempty"`
-	MaxOutstandingOwedCents *int64  `json:"max_outstanding_owed_cents,omitempty"`
-	LowBalanceThreshold     *int64  `json:"low_balance_threshold_cents,omitempty"`
-	AutoTopupEnabled        *bool   `json:"auto_topup_enabled,omitempty"`
-	AutoTopupAmountCents    *int64  `json:"auto_topup_amount_cents,omitempty"`
-	AutoTopupPaymentMethod  *string `json:"auto_topup_payment_method_id,omitempty"`
-	DefaultCreditExpiryDays *int    `json:"default_credit_expiry_days,omitempty"`
-	HardStopOnBreach        *bool   `json:"hard_stop_on_breach,omitempty"`
-	AlertThresholdPct       *int    `json:"alert_threshold_pct,omitempty"`
+	BillingMode              *string `json:"billing_mode,omitempty"`
+	MaxSpendPerDayMicros     *int64  `json:"max_spend_per_day_micros,omitempty"`
+	MaxSpendPerMonthMicros   *int64  `json:"max_spend_per_month_micros,omitempty"`
+	MaxOutstandingOwedMicros *int64  `json:"max_outstanding_owed_micros,omitempty"`
+	LowBalanceThreshold      *int64  `json:"low_balance_threshold_micros,omitempty"`
+	AutoTopupEnabled         *bool   `json:"auto_topup_enabled,omitempty"`
+	AutoTopupAmountCents     *int64  `json:"auto_topup_amount_cents,omitempty"`
+	AutoTopupPaymentMethod   *string `json:"auto_topup_payment_method_id,omitempty"`
+	DefaultCreditExpiryDays  *int    `json:"default_credit_expiry_days,omitempty"`
+	HardStopOnBreach         *bool   `json:"hard_stop_on_breach,omitempty"`
+	AlertThresholdPct        *int    `json:"alert_threshold_pct,omitempty"`
 }
 
 // UsageRollupRow is one grouped spend bucket from OpenRails.
@@ -406,16 +420,16 @@ func (c *Client) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cred
 	return &out, nil
 }
 
-// Capture settles the hold reservationID at capturedCents. Idempotent on the
+// Capture settles the hold reservationID at capturedMicros. Idempotent on the
 // reservation. A nil error means OpenRails accepted the capture.
-func (c *Client) Capture(ctx context.Context, reservationID string, capturedCents int64, usage *CaptureUsage) error {
+func (c *Client) Capture(ctx context.Context, reservationID string, capturedMicros int64, usage *CaptureUsage) error {
 	if c == nil {
 		return fmt.Errorf("openrails: nil client")
 	}
 	if strings.TrimSpace(reservationID) == "" {
 		return fmt.Errorf("openrails: capture requires reservation_id")
 	}
-	req := CaptureRequest{CapturedCents: capturedCents}
+	req := CaptureRequest{CapturedMicros: capturedMicros}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
 		req.EventType = usage.EventType
 		req.Resource = usage.Resource
@@ -476,19 +490,31 @@ func (c *Client) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest
 	return &out, nil
 }
 
-// EnsureCreditType idempotently creates the Tensorhub credit type when needed.
-func (c *Client) EnsureCreditType(ctx context.Context, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "tensorhub_api_credits"
+// DepositCredits mints a credit block for the payer.
+func (c *Client) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
+	var sourceID any
+	if req.SourceID != nil {
+		sourceID = req.SourceID.String()
 	}
-	displayName := strings.ReplaceAll(name, "_", " ")
-	return c.do(ctx, http.MethodPost, "/v1/service/credit-types", map[string]any{
-		"name":           name,
-		"display_name":   displayName,
-		"unit":           "USD",
-		"decimal_places": 2,
-	}, nil)
+	body := map[string]any{
+		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
+		"actor":             req.Actor,
+		"credit_type":       req.CreditType,
+		"amount":            req.Amount,
+		"source":            req.Source,
+		"source_id":         sourceID,
+	}
+	if req.ExpiresAt != nil {
+		body["expires_at"] = req.ExpiresAt.Unix()
+	}
+	if strings.TrimSpace(req.Description) != "" {
+		body["description"] = req.Description
+	}
+	var out CreditTransaction
+	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/deposit", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // Balance returns the payer's balance snapshot.
@@ -622,17 +648,17 @@ func addAccountSettingFields(body map[string]any, in AccountSettingsInput) {
 	if in.BillingMode != nil {
 		body["billing_mode"] = *in.BillingMode
 	}
-	if in.MaxSpendPerDayCents != nil {
-		body["max_spend_per_day_cents"] = *in.MaxSpendPerDayCents
+	if in.MaxSpendPerDayMicros != nil {
+		body["max_spend_per_day_micros"] = *in.MaxSpendPerDayMicros
 	}
-	if in.MaxSpendPerMonthCents != nil {
-		body["max_spend_per_month_cents"] = *in.MaxSpendPerMonthCents
+	if in.MaxSpendPerMonthMicros != nil {
+		body["max_spend_per_month_micros"] = *in.MaxSpendPerMonthMicros
 	}
-	if in.MaxOutstandingOwedCents != nil {
-		body["max_outstanding_owed_cents"] = *in.MaxOutstandingOwedCents
+	if in.MaxOutstandingOwedMicros != nil {
+		body["max_outstanding_owed_micros"] = *in.MaxOutstandingOwedMicros
 	}
 	if in.LowBalanceThreshold != nil {
-		body["low_balance_threshold_cents"] = *in.LowBalanceThreshold
+		body["low_balance_threshold_micros"] = *in.LowBalanceThreshold
 	}
 	if in.AutoTopupEnabled != nil {
 		body["auto_topup_enabled"] = *in.AutoTopupEnabled
@@ -657,7 +683,7 @@ func addAccountSettingFields(body map[string]any, in AccountSettingsInput) {
 func normalizeCreditType(creditType string) string {
 	creditType = strings.TrimSpace(creditType)
 	if creditType == "" {
-		return "tensorhub_api_credits"
+		return "usd_micro" // the built-in micro-dollar ledger unit (migration 003)
 	}
 	return creditType
 }

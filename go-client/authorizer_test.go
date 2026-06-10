@@ -125,7 +125,7 @@ func TestAdmitHoldAllowed(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(AdmitResponse{Allowed: true, ReservationID: "res-admit"})
 	}, nil)
 	defer done()
-	d, err := a.AdmitHold(context.Background(), AdmitRequest{RequestID: "r", EstimateCents: 10})
+	d, err := a.AdmitHold(context.Background(), AdmitRequest{RequestID: "r", EstimateMicros: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestAdmitHoldThroughputDeny(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(AdmitResponse{Allowed: false, BlockedBy: "throughput", RetryAfterSeconds: 7})
 	}, nil)
 	defer done()
-	d, err := a.AdmitHold(context.Background(), AdmitRequest{RequestID: "r", EstimateCents: 10})
+	d, err := a.AdmitHold(context.Background(), AdmitRequest{RequestID: "r", EstimateMicros: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestAdmitHoldMoneyDenyHonored(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(AdmitResponse{Allowed: false, BlockedBy: "money", DenyCode: "insufficient_credits"})
 	}, nil)
 	defer done()
-	d, err := a.AdmitHold(context.Background(), AdmitRequest{RequestID: "r", EstimateCents: 10})
+	d, err := a.AdmitHold(context.Background(), AdmitRequest{RequestID: "r", EstimateMicros: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestAdmitHoldFailClosedOnTimeout(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(AdmitResponse{Allowed: true})
 	}, nil)
 	defer done()
-	d, err := a.AdmitHold(context.Background(), AdmitRequest{RequestID: "r", EstimateCents: 10})
+	d, err := a.AdmitHold(context.Background(), AdmitRequest{RequestID: "r", EstimateMicros: 10})
 	if err != nil {
 		t.Fatalf("fail-policy must absorb the unreachable error: %v", err)
 	}

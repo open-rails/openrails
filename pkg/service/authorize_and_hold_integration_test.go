@@ -122,22 +122,22 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 
 	// (1) Authorize WITHIN balance => allowed + hold placed + available reduced.
 	res, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateCents: 600,
+		TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateMicros: 600,
 		RequestID: "req-1", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
 	require.True(t, res.Allowed)
 	require.NotNil(t, res.ReservationID)
-	require.Equal(t, int64(1000), res.AvailableCents, "snapshot is pre-hold available")
+	require.Equal(t, int64(1000), res.AvailableMicros, "snapshot is pre-hold available")
 
 	snap, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
-	require.Equal(t, int64(600), snap.HeldCents)
-	require.Equal(t, int64(400), snap.AvailableCents)
+	require.Equal(t, int64(600), snap.HeldMicros)
+	require.Equal(t, int64(400), snap.AvailableMicros)
 
 	// (2) Authorize OVER remaining balance => denied, NO new hold.
 	deny, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateCents: 700,
+		TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateMicros: 700,
 		RequestID: "req-2", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -147,7 +147,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 
 	snap2, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
-	require.Equal(t, int64(600), snap2.HeldCents, "denied authorize must not change held")
+	require.Equal(t, int64(600), snap2.HeldMicros, "denied authorize must not change held")
 
 	// (3) Concurrent double-authorize on the remaining 400: two requests for 300
 	// each. Only ONE may pass (300+300 > 400). The FOR UPDATE lock serializes them.
@@ -159,7 +159,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			results[i], errs[i] = svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-				TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateCents: 300,
+				TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateMicros: 300,
 				RequestID: "req-conc-" + string(rune('a'+i)), ExpiresAt: exp,
 			})
 		}(i)
@@ -178,8 +178,8 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	// Final held = 600 + 300 (the one winner) = 900; available = 100.
 	final, err := svc.GetCreditAccount(tctx, payer, ctName)
 	require.NoError(t, err)
-	require.Equal(t, int64(900), final.HeldCents)
-	require.Equal(t, int64(100), final.AvailableCents)
+	require.Equal(t, int64(900), final.HeldMicros)
+	require.Equal(t, int64(100), final.AvailableMicros)
 }
 
 func mustTenantID(t *testing.T, s string) tenant.ID {

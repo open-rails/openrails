@@ -199,11 +199,11 @@ func (h *billingE2EHarness) balance(userID string) balanceView {
 	w := h.do(http.MethodGet, "/v1/service/credits/balance?tenant_subject_id="+personalOwnerID(userID).String()+"&credit_type="+h.creditType, nil)
 	require.Equal(h.t, http.StatusOK, w.Code, "balance body: %s", w.Body.String())
 	var payload struct {
-		BalanceCents int64 `json:"balance_cents"`
-		HeldCents    int64 `json:"held_cents"`
+		BalanceMicros int64 `json:"balance_micros"`
+		HeldMicros    int64 `json:"held_micros"`
 	}
 	require.NoError(h.t, json.Unmarshal(w.Body.Bytes(), &payload))
-	return balanceView{Balance: payload.BalanceCents, HeldBalance: payload.HeldCents}
+	return balanceView{Balance: payload.BalanceMicros, HeldBalance: payload.HeldMicros}
 }
 
 // ledgerRows returns all credit_transactions for a tenant subject and this credit

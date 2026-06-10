@@ -6,9 +6,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/credits"
 )
 
-// TestRemainingTodayCents picks the daily-cap headroom (org or per-actor) from
+// TestRemainingTodayMicros picks the daily-cap headroom (org or per-actor) from
 // the evaluated caps for the authorize response, and clamps negatives to zero.
-func TestRemainingTodayCents(t *testing.T) {
+func TestRemainingTodayMicros(t *testing.T) {
 	if r := remainingTodayCents(nil); r != nil {
 		t.Fatalf("no caps => nil, got %v", *r)
 	}

@@ -10,16 +10,16 @@ import (
 )
 
 // TierThreshold is one rung of the trust ladder: an account reaches Tier once its
-// cumulative PAID spend is at least MinPaidCents (#298 graduation). Order the
-// ladder ascending by MinPaidCents.
+// cumulative PAID spend is at least MinPaidMicros (#298 graduation). Order the
+// ladder ascending by MinPaidMicros.
 type TierThreshold struct {
-	Tier         string
-	MinPaidCents int64
+	Tier          string
+	MinPaidMicros int64
 }
 
-// CumulativePaidCents is the total a (payer, credit_type) has PAID in (sum of
+// CumulativePaidMicros is the total a (payer, credit_type) has PAID in (sum of
 // deposit transactions) — the trust signal that graduates the tier.
-func (s *CreditsService) CumulativePaidCents(ctx context.Context, payer identity.TenantSubjectID, creditType string) (int64, error) {
+func (s *CreditsService) CumulativePaidMicros(ctx context.Context, payer identity.TenantSubjectID, creditType string) (int64, error) {
 	ct, err := s.GetCreditTypeByName(ctx, creditType)
 	if err != nil {
 		return 0, err
@@ -51,7 +51,7 @@ func (s *CreditsService) GetTier(ctx context.Context, payer identity.TenantSubje
 
 // GraduateTier recomputes the account's tier from cumulative paid spend against
 // the ladder and persists it (#298). Returns the assigned tier (highest rung
-// whose MinPaidCents the account meets; "" if it meets none).
+// whose MinPaidMicros the account meets; "" if it meets none).
 func (s *CreditsService) GraduateTier(ctx context.Context, payer identity.TenantSubjectID, creditType string, ladder []TierThreshold) (string, error) {
 	if s == nil || s.db == nil {
 		return "", fmt.Errorf("credits service not initialized")
@@ -60,13 +60,13 @@ func (s *CreditsService) GraduateTier(ctx context.Context, payer identity.Tenant
 	if err != nil {
 		return "", err
 	}
-	paid, err := s.CumulativePaidCents(ctx, payer, creditType)
+	paid, err := s.CumulativePaidMicros(ctx, payer, creditType)
 	if err != nil {
 		return "", err
 	}
 	tier := ""
 	for _, t := range ladder {
-		if paid >= t.MinPaidCents {
+		if paid >= t.MinPaidMicros {
 			tier = t.Tier
 		}
 	}
