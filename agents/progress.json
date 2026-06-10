@@ -1,6 +1,44 @@
 {
- "next_id": 335,
+ "next_id": 336,
  "issues": [
+  {
+   "id": 335,
+   "name": "Batch admission: prepaid credit windows (bulk hold + batched settle) so callers stop paying an HTTP hop per request",
+   "status": "open (planned 2026-06-10; Paul approved the design direction from tensorhub #443: 'adding a batch endpoint to openrails is a great idea')",
+   "description": "Tensorhub's hot path pays ~30-40ms per request for the synchronous /v1/service/admit hop (authorize+hold per request). Replace per-request holds with a PREPAID WINDOW the caller admits against locally: one bulk hold worth ~N requests, batched settlement of actuals, async refill. External hops drop to ~1/N; over-spend is bounded by the window size; an abandoned window's remainder releases at hold expiry (existing TTL machinery). Settlement reuses the existing per-request capture-dedup (idempotent on request_id) so re-sent batches never double-charge.",
+   "tasks": [
+    {
+     "k": "1",
+     "desc": "POST /v1/service/credits/windows {tenant_subject_id, actor, credit_type, amount, ttl} -> {window_id, expires_at}: one bulk hold (existing hold machinery, source='window')",
+     "done": false
+    },
+    {
+     "k": "2",
+     "desc": "POST /v1/service/credits/windows/:id/settle {items: [{request_id, amount, usage{...}}]} \u2014 batched captures against the window, idempotent per request_id (capture dedup), partial-failure reporting per item; remainder stays held",
+     "done": false
+    },
+    {
+     "k": "3",
+     "desc": "POST /v1/service/credits/windows/:id/refill {amount} (extend hold + ttl) and /close (release remainder). Window expiry = hold expiry (auto-release, already exists)",
+     "done": false
+    },
+    {
+     "k": "4",
+     "desc": "Decide the non-credit admit axes for window mode: throughput/budget/blocklist checks are per-request in /v1/service/admit \u2014 either the window grants 'N requests within T' alongside funds, or the caller keeps a local limiter while in window mode. Document the contract",
+     "done": false
+    },
+    {
+     "k": "5",
+     "desc": "go-client: OpenWindow/SettleWindow/RefillWindow/CloseWindow + a WindowedAuthorizer that admits locally and flushes settlement batches (size-or-deadline)",
+     "done": false
+    },
+    {
+     "k": "6",
+     "desc": "Tests: concurrent local admits vs window balance; idempotent re-settle; expiry releases remainder; burst benchmark proving ~1/N external calls",
+     "done": false
+    }
+   ]
+  },
   {
    "id": 330,
    "name": "nmi-immediate-subscription-checkout-stuck-pending",
