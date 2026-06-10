@@ -227,3 +227,43 @@ func TestAdmit_SuspendedDeny(t *testing.T) {
 	require.False(t, d.Allowed)
 	require.Equal(t, "suspended", d.BlockedBy)
 }
+
+// TestAdmit_BudgetReservedEqualsEstimate locks unit parity between the credit
+// ledger and the budget windows (both micro-dollars, #337/#463): an admit
+// with EstimateMicros=X must reserve exactly X against every budget window.
+// Regression test for the (estimate+9)/10 residue (the pre-#337
+// micros->millicents conversion) that under-reserved budgets 10x.
+func TestAdmit_BudgetReservedEqualsEstimate(t *testing.T) {
+	adm, cs, store, payer, ct, ctx, _ := admitEnv(t)
+	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 10_000_000, Source: "seed"}) // $10
+	require.NoError(t, err)
+	require.NoError(t, store.UpsertTierPolicyFull(ctx, payer, "paid", models.ThroughputPolicy{
+		Windows: []models.ThroughputWindow{{Unit: "request", WindowSeconds: 3600, Max: 1000}},
+		BudgetWindows: []models.BudgetWindowPolicy{
+			{Key: "5h", WindowSeconds: 5 * 3600, LimitMicros: 5_000_000, Cadence: "session"}, // $5
+		},
+	}))
+
+	const estimate = int64(3_000_000) // $3
+	dec, err := adm.Admit(ctx, admission.AdmitRequest{
+		TenantSubjectID: payer, Actor: "actor-parity", Tier: "paid",
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: estimate,
+		Source: "gen", SourceID: "req-parity-1", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	require.True(t, dec.Allowed, "expected allow: $3 within the $5 window")
+	require.NotEmpty(t, dec.BudgetWindows)
+	require.Equal(t, estimate, dec.BudgetWindows[0].Reserved,
+		"budget must reserve the estimate 1:1 in micros — a 10x divergence means a unit-conversion residue came back")
+
+	// A second $3 must now be denied: 3+3 > 5. With the old /10 bug this
+	// passed trivially (0.6 reserved against a 5_000_000 limit).
+	dec2, err := adm.Admit(ctx, admission.AdmitRequest{
+		TenantSubjectID: payer, Actor: "actor-parity", Tier: "paid",
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: estimate,
+		Source: "gen", SourceID: "req-parity-2", ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	require.False(t, dec2.Allowed, "second $3 must exceed the $5 window")
+	require.Equal(t, "budget", dec2.BlockedBy)
+}

@@ -170,9 +170,11 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 				ttl = d
 			}
 		}
-		// Budgets are denominated in micros; the ledger is micro-dollars
-		// (1 micro-dollar = 10 micros). Round up so budgets never under-count.
-		resID, statuses, ok, err := a.budgets.Reserve(ctx, req.TenantSubjectID, req.Actor, pol.BudgetWindows, (req.EstimateMicros+9)/10, req.Source, req.SourceID, ttl)
+		// Budgets and the ledger are BOTH micro-dollars (#337/#463 — millicents
+		// are gone). The estimate reserves 1:1 against the actor's windows; the
+		// old (x+9)/10 here was the micros->millicents conversion and survived
+		// the rename as a 10x under-reservation bug.
+		resID, statuses, ok, err := a.budgets.Reserve(ctx, req.TenantSubjectID, req.Actor, pol.BudgetWindows, req.EstimateMicros, req.Source, req.SourceID, ttl)
 		if err != nil {
 			return AdmitDecision{}, err
 		}

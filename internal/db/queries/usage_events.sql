@@ -68,9 +68,11 @@ ORDER BY total_amount DESC;
 
 -- name: ResourceRevenueDaily :many
 -- Per-day revenue for a resource across ALL payers in the tenant (#410).
--- Ceil-divide by 10, preserving the #337 rename (amount_micros).
+-- ue.amount is already micro-dollars (#337/#463): no conversion. The old
+-- ceil-divide-by-10 was the micros->millicents conversion and survived the
+-- rename as a 10x revenue under-report.
 SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
-       ((COALESCE(SUM(ue.amount), 0) + 9) / 10)::bigint AS amount_micros
+       COALESCE(SUM(ue.amount), 0)::bigint AS amount_micros
 FROM billing.usage_events ue
 WHERE ue.tenant_id = $1 AND ue.resource = $2
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
