@@ -34,21 +34,22 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 		BillingMode: strptr(credits.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "r1", 500)
+	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "r1", 5_000_000) // $5 owed, in ledger micros
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
-	// Below threshold first: owed 500, threshold 1000 -> no charge.
-	n, err := svc.ChargeOutstanding(ctx, ch, 1000)
+	// Below threshold first: owed $5, threshold $10 (both micros) -> no charge.
+	n, err := svc.ChargeOutstanding(ctx, ch, 10_000_000)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Empty(t, ch.charges)
 
-	// At/over threshold: owed 500, threshold 500 -> charge.
-	n, err = svc.ChargeOutstanding(ctx, ch, 500)
+	// At/over threshold: owed $5, threshold $5 -> charge.
+	n, err = svc.ChargeOutstanding(ctx, ch, 5_000_000)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.Len(t, ch.charges, 1)
+	// Card charge is whole cents: ceil(5_000_000 micros / 10_000) = 500 cents.
 	require.Equal(t, int64(500), ch.charges[0].AmountCents)
 
 	owed, err := svc.GetOutstandingOwed(ctx, payer, ct)
@@ -63,7 +64,7 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 		BillingMode: strptr(credits.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "r1", 300)
+	_, err = svc.AccrueOwed(ctx, payer, ct, "usage", "r1", 3_000_001) // $3 + 1 micro owed
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
@@ -71,7 +72,8 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 	n, err := svc.ChargeOutstanding(ctx, ch, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
-	require.Equal(t, int64(300), ch.charges[0].AmountCents)
+	// Sub-cent owed rounds UP: ceil(3_000_001 micros / 10_000) = 301 cents.
+	require.Equal(t, int64(301), ch.charges[0].AmountCents)
 	owed, err := svc.GetOutstandingOwed(ctx, payer, ct)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), owed)
