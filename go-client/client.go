@@ -61,7 +61,7 @@ type AuthorizeRequest struct {
 }
 
 // AuthorizeResponse is the OpenRails decision. Allowed=false with a DenyCode is a
-// definitive deny (insufficient funds, frozen org, etc.); ReservationID is the
+// definitive deny (insufficient funds, frozen tenant, etc.); ReservationID is the
 // hold handle to later capture or release.
 type AuthorizeResponse struct {
 	Allowed             bool   `json:"allowed"`
@@ -215,7 +215,7 @@ type CaptureRequest struct {
 	// Usage analytics (#311/#410): when EventType is set, OpenRails also appends
 	// a usage_event linked to this capture (no second debit) so the platform's
 	// /budget-usage + revenue analytics are served from OpenRails. EventType is
-	// the metered model (owner/endpoint); Metadata carries string grouping dims.
+	// the metered model (tenant/endpoint); Metadata carries string grouping dims.
 	EventType string         `json:"event_type,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	Source    string         `json:"source,omitempty"`
@@ -503,7 +503,7 @@ func (c *Client) Balance(ctx context.Context, payerTenantID string) (*BalanceRes
 	return &out, nil
 }
 
-// GetCreditAccount reads a payer org's balance + policy snapshot.
+// GetCreditAccount reads a payer tenant's balance + policy snapshot.
 func (c *Client) GetCreditAccount(ctx context.Context, payerTenantID, creditType string) (*CreditAccount, error) {
 	q := url.Values{}
 	q.Set("tenant_subject_id", strings.TrimSpace(payerTenantID))
@@ -515,7 +515,7 @@ func (c *Client) GetCreditAccount(ctx context.Context, payerTenantID, creditType
 	return &out, nil
 }
 
-// SetCreditAccountSettings upserts an org's billing account settings and returns
+// SetCreditAccountSettings upserts a tenant's billing account settings and returns
 // the refreshed account snapshot.
 func (c *Client) SetCreditAccountSettings(ctx context.Context, payerTenantID, creditType string, in AccountSettingsInput) (*CreditAccount, error) {
 	body := map[string]any{
@@ -529,7 +529,7 @@ func (c *Client) SetCreditAccountSettings(ctx context.Context, payerTenantID, cr
 	return c.GetCreditAccount(ctx, payerTenantID, creditType)
 }
 
-// ListCreditTransactions reads an org's usage/transaction history from
+// ListCreditTransactions reads a tenant's usage/transaction history from
 // OpenRails and passes the canonical JSON through.
 func (c *Client) ListCreditTransactions(ctx context.Context, payerTenantID, creditType string, limit int) (json.RawMessage, error) {
 	q := url.Values{}
