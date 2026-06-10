@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/query"
-	"github.com/uptrace/bun"
 )
 
 type SubscriptionFilters struct {
@@ -33,24 +33,70 @@ type SubscriptionRepo struct {
 
 func NewSubscriptionRepo(d *db.DB) *SubscriptionRepo { return &SubscriptionRepo{db: d} }
 
+func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionParams, error) {
+	entSnap, err := toJSONB(s.EntitlementsSpecSnapshot)
+	if err != nil {
+		return gen.CreateSubscriptionParams{}, err
+	}
+	credSnap, err := toJSONB(s.CreditsSpecSnapshot)
+	if err != nil {
+		return gen.CreateSubscriptionParams{}, err
+	}
+	var priceID *uuid.UUID
+	if s.PriceID != uuid.Nil {
+		priceID = &s.PriceID
+	}
+	var cancelType *string
+	if s.CancelType != nil {
+		ct := string(*s.CancelType)
+		cancelType = &ct
+	}
+	return gen.CreateSubscriptionParams{
+		ID:                       s.ID,
+		TenantSubjectID:          s.TenantSubjectID,
+		ProductID:                s.ProductID,
+		PriceID:                  priceID,
+		ScheduledPriceID:         s.ScheduledPriceID,
+		EntitlementsSpecSnapshot: entSnap,
+		CreditsSpecSnapshot:      credSnap,
+		Status:                   string(s.Status),
+		StartedAt:                s.StartedAt,
+		EndedAt:                  s.EndedAt,
+		CurrentPeriodStartsAt:    s.CurrentPeriodStartsAt,
+		CurrentPeriodEndsAt:      s.CurrentPeriodEndsAt,
+		Processor:                string(s.Processor),
+		ProcessorSubscriptionID:  s.ProcessorSubscriptionID,
+		UserEmail:                s.UserEmail,
+		PaymentMethodID:          s.PaymentMethodID,
+		LastRetryAt:              s.LastRetryAt,
+		RetryAttempts:            intPtrTo32(s.RetryAttempts),
+		NextRetryAt:              s.NextRetryAt,
+		GraceEndsAt:              s.GraceEndsAt,
+		CancelFeedback:           s.CancelFeedback,
+		CancelType:               cancelType,
+		CancelledAt:              s.CancelledAt,
+		DeletionScheduledAt:      s.DeletionScheduledAt,
+		GatewayResponse:          s.Metadata,
+		CreatedAt:                s.CreatedAt,
+		UpdatedAt:                s.UpdatedAt,
+	}, nil
+}
+
 func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) error {
-	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, s.TenantSubjectID); err != nil {
+	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, s.TenantSubjectID); err != nil {
 		return err
 	}
-	res, err := r.db.Q(ctx).NewInsert().Model(s).Exec(ctx)
+	params, err := subscriptionInsertParams(s)
 	if err != nil {
 		return err
 	}
-
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).CreateSubscription(ctx, params)
 	if err != nil {
 		return err
 	}
-
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-
 	return nil
 }
 
@@ -59,136 +105,228 @@ func (r *SubscriptionRepo) Update(ctx context.Context, s *models.Subscription) e
 }
 
 func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription, now time.Time) error {
-	// Note: We explicitly list all columns to ensure nil values are set correctly.
-	// Bun's default behavior with nullzero tags skips nil fields, which prevents
-	// clearing fields like CancelledAt, EndedAt when reactivating subscriptions.
+	// All columns are written explicitly so nil values CLEAR fields
+	// (CancelledAt, EndedAt, ...) when reactivating subscriptions.
 	if now.IsZero() {
 		now = time.Now()
 	}
 	s.UpdatedAt = now
-	res, err := r.db.Q(ctx).NewUpdate().Model(s).
-		Column(
-			"price_id",
-			"product_id",
-			"entitlements_spec_snapshot",
-			"credits_spec_snapshot",
-			"status",
-			"started_at",
-			"ended_at",
-			"current_period_starts_at",
-			"current_period_ends_at",
-			"processor",
-			"processor_subscription_id",
-			"user_email",
-			"payment_method_id",
-			"last_retry_at",
-			"retry_attempts",
-			"next_retry_at",
-			"grace_ends_at",
-			"cancel_feedback",
-			"cancel_type",
-			"cancelled_at",
-			"gateway_response",
-			"scheduled_price_id",
-			"updated_at",
-		).
-		WherePK().
-		Exec(ctx)
+
+	entSnap, err := toJSONB(s.EntitlementsSpecSnapshot)
 	if err != nil {
 		return err
 	}
-
-	rows, err := res.RowsAffected()
+	credSnap, err := toJSONB(s.CreditsSpecSnapshot)
 	if err != nil {
 		return err
 	}
-
+	var priceID *uuid.UUID
+	if s.PriceID != uuid.Nil {
+		priceID = &s.PriceID
+	}
+	var cancelType *string
+	if s.CancelType != nil {
+		ct := string(*s.CancelType)
+		cancelType = &ct
+	}
+	rows, err := r.db.Gen(ctx).UpdateSubscriptionAt(ctx, gen.UpdateSubscriptionAtParams{
+		ID:                       s.ID,
+		PriceID:                  priceID,
+		ProductID:                s.ProductID,
+		EntitlementsSpecSnapshot: entSnap,
+		CreditsSpecSnapshot:      credSnap,
+		Status:                   gen.BillingSubscriptionStatus(s.Status),
+		StartedAt:                s.StartedAt,
+		EndedAt:                  s.EndedAt,
+		CurrentPeriodStartsAt:    s.CurrentPeriodStartsAt,
+		CurrentPeriodEndsAt:      s.CurrentPeriodEndsAt,
+		Processor:                string(s.Processor),
+		ProcessorSubscriptionID:  s.ProcessorSubscriptionID,
+		UserEmail:                s.UserEmail,
+		PaymentMethodID:          s.PaymentMethodID,
+		LastRetryAt:              s.LastRetryAt,
+		RetryAttempts:            intPtrTo32(s.RetryAttempts),
+		NextRetryAt:              s.NextRetryAt,
+		GraceEndsAt:              s.GraceEndsAt,
+		CancelFeedback:           s.CancelFeedback,
+		CancelType:               cancelType,
+		CancelledAt:              s.CancelledAt,
+		GatewayResponse:          s.Metadata,
+		ScheduledPriceID:         s.ScheduledPriceID,
+		UpdatedAt:                s.UpdatedAt,
+	})
+	if err != nil {
+		return err
+	}
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-
 	return nil
 }
 
 func (r *SubscriptionRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.Q(ctx).NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", id).Exec(ctx)
+	rows, err := r.db.Gen(ctx).DeleteSubscription(ctx, id)
 	if err != nil {
 		return err
 	}
-
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-
 	return nil
 }
 
-func (r *SubscriptionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Subscription, error) {
-	sub := new(models.Subscription)
-	err := r.selectWithDetails(ctx, sub).Where("sub.id = ?", id).Scan(ctx)
+// attachSubscriptionRelations stitches Price and PaymentMethod (the bun-era
+// selectWithDetails relations) onto subs; withProduct additionally loads
+// Price.Product (selectWithProduct).
+func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs []*models.Subscription, withProduct bool) error {
+	if len(subs) == 0 {
+		return nil
+	}
+	priceIDs := make([]uuid.UUID, 0, len(subs))
+	pmIDs := make([]uuid.UUID, 0, len(subs))
+	seenPrice := map[uuid.UUID]bool{}
+	seenPM := map[uuid.UUID]bool{}
+	for _, s := range subs {
+		if s.PriceID != uuid.Nil && !seenPrice[s.PriceID] {
+			seenPrice[s.PriceID] = true
+			priceIDs = append(priceIDs, s.PriceID)
+		}
+		if s.PaymentMethodID != nil && !seenPM[*s.PaymentMethodID] {
+			seenPM[*s.PaymentMethodID] = true
+			pmIDs = append(pmIDs, *s.PaymentMethodID)
+		}
+	}
+
+	q := r.db.Gen(ctx)
+	prices := map[uuid.UUID]*models.Price{}
+	if len(priceIDs) > 0 {
+		if withProduct {
+			rows, err := q.ListPricesWithProductByIDs(ctx, priceIDs)
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				price, err := priceFromGen(row.BillingPrice)
+				if err != nil {
+					return err
+				}
+				product, err := productFromGen(row.BillingProduct)
+				if err != nil {
+					return err
+				}
+				price.Product = product
+				prices[price.ID] = price
+			}
+		} else {
+			rows, err := q.ListPricesByIDs(ctx, priceIDs)
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				price, err := priceFromGen(row)
+				if err != nil {
+					return err
+				}
+				prices[price.ID] = price
+			}
+		}
+	}
+	pms := map[uuid.UUID]*models.PaymentMethod{}
+	if len(pmIDs) > 0 {
+		rows, err := q.ListPaymentMethodsByIDs(ctx, pmIDs)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			pm, err := paymentMethodFromGen(row)
+			if err != nil {
+				return err
+			}
+			pms[pm.ID] = pm
+		}
+	}
+	for _, s := range subs {
+		s.Price = prices[s.PriceID]
+		if s.PaymentMethodID != nil {
+			s.PaymentMethod = pms[*s.PaymentMethodID]
+		}
+	}
+	return nil
+}
+
+// oneWithDetails maps a single gen row and attaches the standard relations.
+func (r *SubscriptionRepo) oneWithDetails(ctx context.Context, row gen.BillingSubscription, withProduct bool) (*models.Subscription, error) {
+	sub, err := subscriptionFromGen(row)
 	if err != nil {
 		return nil, err
 	}
+	if err := r.attachSubscriptionRelations(ctx, []*models.Subscription{sub}, withProduct); err != nil {
+		return nil, err
+	}
 	return sub, nil
+}
+
+func (r *SubscriptionRepo) manyWithDetails(ctx context.Context, rows []gen.BillingSubscription) ([]*models.Subscription, error) {
+	subs, err := subscriptionsFromGen(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.attachSubscriptionRelations(ctx, subs, false); err != nil {
+		return nil, err
+	}
+	return subs, nil
+}
+
+func (r *SubscriptionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Subscription, error) {
+	row, err := r.db.Gen(ctx).GetSubscriptionByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return r.oneWithDetails(ctx, row, false)
 }
 
 func (r *SubscriptionRepo) GetLatestByUserID(ctx context.Context, userID string) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	sub := new(models.Subscription)
-	err = r.selectWithDetails(ctx, sub).
-		Where("sub.tenant_subject_id = ?", tsid).
-		Order("sub.created_at DESC").
-		Limit(1).
-		Scan(ctx)
+	row, err := r.db.Gen(ctx).GetLatestSubscriptionByTenantSubject(ctx, tsid)
 	if err != nil {
 		return nil, err
 	}
-	return sub, nil
+	return r.oneWithDetails(ctx, row, false)
 }
 
 func (r *SubscriptionRepo) GetByUserIDAndPriceID(ctx context.Context, userID string, priceID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	sub := new(models.Subscription)
-	err = r.selectWithDetails(ctx, sub).
-		Where("sub.tenant_subject_id = ?", tsid).
-		Where("sub.price_id = ?", priceID).
-		Scan(ctx)
+	row, err := r.db.Gen(ctx).GetSubscriptionByTenantSubjectAndPrice(ctx, gen.GetSubscriptionByTenantSubjectAndPriceParams{
+		TenantSubjectID: tsid,
+		PriceID:         &priceID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return sub, nil
+	return r.oneWithDetails(ctx, row, false)
 }
 
 // GetActiveOrPendingByUserIDAndProductID finds any lifecycle-owning subscription for a user and product.
 // Returns the subscription with the latest period end date.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	sub := new(models.Subscription)
-	err = r.selectWithDetails(ctx, sub).
-		Where("sub.tenant_subject_id = ?", tsid).
-		Where("sub.product_id = ?", productID).
-		Where("sub.status IN (?, ?, ?)", models.StatusActive, models.StatusPending, models.StatusPastDue).
-		Order("sub.current_period_ends_at DESC NULLS FIRST"). // NULLS FIRST prioritizes indefinite subscriptions
-		Limit(1).
-		Scan(ctx)
+	row, err := r.db.Gen(ctx).GetLifecycleSubscriptionByTenantSubjectAndProduct(ctx, gen.GetLifecycleSubscriptionByTenantSubjectAndProductParams{
+		TenantSubjectID: tsid,
+		ProductID:       productID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return sub, nil
+	return r.oneWithDetails(ctx, row, false)
 }
 
 func (r *SubscriptionRepo) GetActiveSubscription(ctx context.Context, userID string) (*models.Subscription, error) {
@@ -199,268 +337,215 @@ func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID s
 	if now.IsZero() {
 		now = time.Now()
 	}
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	sub := new(models.Subscription)
-	err = r.selectWithDetails(ctx, sub).
-		Where("sub.tenant_subject_id = ?", tsid).
-		Where("sub.status = ?", models.StatusActive).
-		Where("(sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > ?)", now).
-		Order("sub.created_at DESC").
-		Limit(1).
-		Scan(ctx)
+	row, err := r.db.Gen(ctx).GetActiveSubscriptionByTenantSubjectAt(ctx, gen.GetActiveSubscriptionByTenantSubjectAtParams{
+		TenantSubjectID: tsid,
+		Now:             now,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return sub, nil
+	return r.oneWithDetails(ctx, row, false)
 }
 
 // GetByProcessorSubscriptionID finds a subscription by processor and processor_subscription_id.
 func (r *SubscriptionRepo) GetByProcessorSubscriptionID(ctx context.Context, processor, processorSubscriptionID string) (*models.Subscription, error) {
-	sub := new(models.Subscription)
-	query := r.selectWithDetails(ctx, sub).
-		Where("sub.processor = ?", processor).
-		Where("sub.processor_subscription_id = ?", processorSubscriptionID)
-
-	err := query.Scan(ctx)
+	row, err := r.db.Gen(ctx).GetSubscriptionByProcessorSubID(ctx, gen.GetSubscriptionByProcessorSubIDParams{
+		Processor:               processor,
+		ProcessorSubscriptionID: processorSubscriptionID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return sub, nil
+	return r.oneWithDetails(ctx, row, false)
 }
 
 func (r *SubscriptionRepo) GetByProcessorMetadataValue(ctx context.Context, processor, key, value string) (*models.Subscription, error) {
-	sub := new(models.Subscription)
-	if err := r.selectWithDetails(ctx, sub).
-		Where("sub.processor = ?", strings.TrimSpace(processor)).
-		Where("sub.gateway_response ->> ? = ?", strings.TrimSpace(key), strings.TrimSpace(value)).
-		Limit(1).
-		Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetSubscriptionByProcessorMetadataValue(ctx, gen.GetSubscriptionByProcessorMetadataValueParams{
+		Processor: strings.TrimSpace(processor),
+		Key:       strings.TrimSpace(key),
+		Value:     strings.TrimSpace(value),
+	})
+	if err != nil {
 		return nil, err
 	}
-	return sub, nil
+	return r.oneWithDetails(ctx, row, false)
 }
 
 func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, userID string) ([]models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	subs := []models.Subscription{}
-	query := r.selectWithDetails(ctx, &subs).
-		Where("sub.tenant_subject_id = ?", tsid).
-		Where("sub.status = ?", models.StatusActive).
-		Order("sub.created_at DESC")
-
-	if err := query.Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByTenantSubject(ctx, tsid)
+	if err != nil {
 		return nil, err
 	}
-	return subs, nil
+	subs, err := r.manyWithDetails(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return derefSubs(subs), nil
 }
 
 func (r *SubscriptionRepo) GetSubscriptionsByProcessorAndUserID(ctx context.Context, userID string, processor models.Processor) ([]models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	subs := []models.Subscription{}
-	query := r.selectWithDetails(ctx, &subs).
-		Where("sub.tenant_subject_id = ?", tsid).
-		Where("sub.processor = ?", processor).
-		Order("sub.created_at DESC")
-
-	if err := query.Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListSubscriptionsByTenantSubjectProcessor(ctx, gen.ListSubscriptionsByTenantSubjectProcessorParams{
+		TenantSubjectID: tsid,
+		Processor:       string(processor),
+	})
+	if err != nil {
 		return nil, err
 	}
-	return subs, nil
+	subs, err := r.manyWithDetails(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return derefSubs(subs), nil
 }
 
 func (r *SubscriptionRepo) GetActiveSubscriptionsByProcessor(ctx context.Context, processor string) ([]*models.Subscription, error) {
-	subs := []*models.Subscription{}
-	query := r.selectWithDetails(ctx, &subs).
-		Where("sub.processor = ?", processor).
-		Where("sub.status = ?", models.StatusActive)
-
-	if err := query.Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByProcessor(ctx, processor)
+	if err != nil {
 		return nil, err
 	}
-	return subs, nil
+	return r.manyWithDetails(ctx, rows)
 }
 
 func (r *SubscriptionRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
-	if err != nil {
-		return nil, 0, err
-	}
-	offset := (page - 1) * pageSize
-	countQuery := r.db.Q(ctx).NewSelect().Model((*models.Subscription)(nil)).Where("sub.tenant_subject_id = ?", tsid)
-	total, err := countQuery.Count(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	subs := []models.Subscription{}
-	dataQuery := r.selectWithDetails(ctx, &subs).
-		Where("sub.tenant_subject_id = ?", tsid).
-		Order("sub.created_at DESC").
-		Limit(pageSize).
-		Offset(offset)
-
-	if err := dataQuery.Scan(ctx); err != nil {
-		return nil, 0, err
-	}
-
-	return subs, total, nil
+	return r.GetSubscriptionsWithDetailsForUser(ctx, userID, page, pageSize)
 }
 
 func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, 0, err
 	}
-	offset := (page - 1) * pageSize
-	countQuery := r.db.Q(ctx).NewSelect().Model((*models.Subscription)(nil)).Where("sub.tenant_subject_id = ?", tsid)
-	total, err := countQuery.Count(ctx)
+	q := r.db.Gen(ctx)
+	total, err := q.CountSubscriptionsByTenantSubject(ctx, tsid)
 	if err != nil {
 		return nil, 0, err
 	}
-
-	subs := []models.Subscription{}
-	dataQuery := r.selectWithDetails(ctx, &subs).
-		Where("sub.tenant_subject_id = ?", tsid).
-		Order("sub.created_at DESC").
-		Limit(pageSize).
-		Offset(offset)
-
-	if err := dataQuery.Scan(ctx); err != nil {
+	rows, err := q.ListSubscriptionsByTenantSubjectPaged(ctx, gen.ListSubscriptionsByTenantSubjectPagedParams{
+		TenantSubjectID: tsid,
+		PageLimit:       int32(pageSize),
+		PageOffset:      int32((page - 1) * pageSize),
+	})
+	if err != nil {
 		return nil, 0, err
 	}
-
-	return subs, total, nil
+	subs, err := r.manyWithDetails(ctx, rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return derefSubs(subs), int(total), nil
 }
 
 func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.QueryOptions[SubscriptionFilters]) ([]*models.Subscription, int64, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, params.Filters.UserID)
+	f := params.Filters
+	tsidResolved, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, f.UserID)
+	if err != nil {
+		return nil, 0, err
+	}
+	var tsid *uuid.UUID
+	if f.UserID != "" {
+		tsid = &tsidResolved
+	}
+	var status, processor *string
+	if f.Status != "" {
+		status = &f.Status
+	}
+	if f.Processor != "" {
+		processor = &f.Processor
+	}
+	var priceID *uuid.UUID
+	if f.PriceID != uuid.Nil {
+		priceID = &f.PriceID
+	}
+
+	q := r.db.Gen(ctx)
+	total, err := q.CountSubscriptionsFiltered(ctx, gen.CountSubscriptionsFilteredParams{
+		TenantSubjectID: tsid,
+		Status:          status,
+		PriceID:         priceID,
+		Processor:       processor,
+		CreatedAfter:    f.CreatedAfter,
+		CreatedBefore:   f.CreatedBefore,
+		CancelledAfter:  f.CancelledAfter,
+		CancelledBefore: f.CancelledBefore,
+		ExpiresBefore:   f.ExpiresBefore,
+	})
 	if err != nil {
 		return nil, 0, err
 	}
 
-	base := r.db.Q(ctx).NewSelect().Model((*models.Subscription)(nil))
-	base = applySubscriptionFilters(base, params.Filters, tsid)
-
-	total, err := base.Count(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	subs := []*models.Subscription{}
-	dataQuery := r.selectWithDetails(ctx, &subs)
-	dataQuery = applySubscriptionFilters(dataQuery, params.Filters, tsid)
-
-	if params.Limit > 0 {
-		dataQuery = dataQuery.Limit(params.Limit)
-	}
-	if params.Offset > 0 {
-		dataQuery = dataQuery.Offset(params.Offset)
-	}
-
-	// Apply sorting
-	dataQuery = applySorting(dataQuery, params.Filters.SortBy, params.Filters.SortOrder)
-
-	if err := dataQuery.Scan(ctx); err != nil {
-		return nil, 0, err
-	}
-
-	return subs, int64(total), nil
-}
-
-func applySorting(q *bun.SelectQuery, sortBy, sortOrder string) *bun.SelectQuery {
-	// Validate and map sort field
-	var column string
+	sortBy := f.SortBy
 	switch sortBy {
-	case "expires_at":
-		column = "sub.current_period_ends_at"
-	case "cancelled_at":
-		column = "sub.cancelled_at"
+	case "expires_at", "cancelled_at":
 	default:
-		column = "sub.created_at"
+		sortBy = "created_at"
 	}
-
-	// Validate sort order
-	order := "DESC"
-	if sortOrder == "asc" {
-		order = "ASC"
+	rows, err := q.ListSubscriptionsFiltered(ctx, gen.ListSubscriptionsFilteredParams{
+		TenantSubjectID: tsid,
+		Status:          status,
+		PriceID:         priceID,
+		Processor:       processor,
+		CreatedAfter:    f.CreatedAfter,
+		CreatedBefore:   f.CreatedBefore,
+		CancelledAfter:  f.CancelledAfter,
+		CancelledBefore: f.CancelledBefore,
+		ExpiresBefore:   f.ExpiresBefore,
+		SortBy:          sortBy,
+		SortDesc:        f.SortOrder != "asc",
+		PageLimit:       int32(params.Limit),
+		PageOffset:      int32(params.Offset),
+	})
+	if err != nil {
+		return nil, 0, err
 	}
-
-	return q.OrderExpr(column + " " + order)
-}
-
-func applySubscriptionFilters(q *bun.SelectQuery, filters SubscriptionFilters, tsid uuid.UUID) *bun.SelectQuery {
-	if filters.UserID != "" {
-		q = q.Where("sub.tenant_subject_id = ?", tsid)
+	subs, err := r.manyWithDetails(ctx, rows)
+	if err != nil {
+		return nil, 0, err
 	}
-	if filters.Status != "" {
-		q = q.Where("sub.status = ?", filters.Status)
-	}
-	if filters.PriceID != uuid.Nil {
-		q = q.Where("sub.price_id = ?", filters.PriceID)
-	}
-	if filters.Processor != "" {
-		q = q.Where("sub.processor = ?", filters.Processor)
-	}
-	if filters.CreatedAfter != nil {
-		q = q.Where("sub.created_at >= ?", filters.CreatedAfter)
-	}
-	if filters.CreatedBefore != nil {
-		q = q.Where("sub.created_at <= ?", filters.CreatedBefore)
-	}
-	if filters.CancelledAfter != nil {
-		q = q.Where("sub.cancelled_at >= ?", filters.CancelledAfter)
-	}
-	if filters.CancelledBefore != nil {
-		q = q.Where("sub.cancelled_at <= ?", filters.CancelledBefore)
-	}
-	if filters.ExpiresBefore != nil {
-		q = q.Where("sub.current_period_ends_at <= ?", filters.ExpiresBefore)
-	}
-	return q
-}
-
-func (r *SubscriptionRepo) selectWithDetails(ctx context.Context, model any) *bun.SelectQuery {
-	return r.db.Q(ctx).NewSelect().Model(model).
-		Relation("Price").
-		Relation("PaymentMethod")
-}
-
-func (r *SubscriptionRepo) selectWithProduct(ctx context.Context, model any) *bun.SelectQuery {
-	return r.db.Q(ctx).NewSelect().Model(model).
-		Relation("Price").
-		Relation("Price.Product").
-		Relation("PaymentMethod")
+	return subs, total, nil
 }
 
 // GetActiveOrPendingByUserIDAndTierGroup finds a lifecycle-owning subscription for a user
 // where the product belongs to the specified tier group.
 // Returns the subscription with its Price and Product loaded.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
-	sub := new(models.Subscription)
-	err = r.selectWithProduct(ctx, sub).
-		Where("sub.tenant_subject_id = ?", tsid).
-		Where("sub.status IN (?, ?, ?)", models.StatusActive, models.StatusPending, models.StatusPastDue).
-		// Join to products table to filter by tier_group
-		Join("JOIN billing.products AS prod ON prod.id = sub.product_id").
-		Where("prod.tier_group = ?", tierGroup).
-		Order("sub.current_period_ends_at DESC NULLS FIRST"). // Prioritize indefinite subscriptions
-		Limit(1).
-		Scan(ctx)
+	row, err := r.db.Gen(ctx).GetLifecycleSubscriptionByTenantSubjectAndTierGroup(ctx, gen.GetLifecycleSubscriptionByTenantSubjectAndTierGroupParams{
+		TenantSubjectID: tsid,
+		TierGroup:       &tierGroup,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return sub, nil
+	return r.oneWithDetails(ctx, row, true)
+}
+
+func derefSubs(subs []*models.Subscription) []models.Subscription {
+	out := make([]models.Subscription, 0, len(subs))
+	for _, s := range subs {
+		out = append(out, *s)
+	}
+	return out
+}
+
+func intPtrTo32(v *int) *int32 {
+	if v == nil {
+		return nil
+	}
+	i := int32(*v)
+	return &i
 }

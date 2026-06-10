@@ -230,7 +230,7 @@ func UpsertStripeCardForCustomer(
 			pm.ExpiryDate = &card.Expiry
 		}
 		// Stamp the payable tenant subject alongside the legacy user_id (#317).
-		if pm.TenantSubjectID, err = repo.EnsureTenantSubjectID(ctx, bdb, uuid.Nil, userID); err != nil {
+		if pm.TenantSubjectID, err = repo.EnsureTenantSubjectIDBun(ctx, bdb, uuid.Nil, userID); err != nil {
 			return fmt.Errorf("resolve tenant subject for stripe payment method: %w", err)
 		}
 		if _, err := bdb.NewInsert().Model(pm).Exec(ctx); err != nil {

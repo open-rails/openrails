@@ -175,7 +175,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 
 	// Materialize the payable tenant_subjects row so the budget_reservations FK
 	// (migration 076) is satisfied on a subject's first reservation (#317).
-	if _, err := repo.EnsureTenantSubjectID(ctx, tx, tenantID, payerID.String()); err != nil {
+	if _, err := repo.EnsureTenantSubjectIDBun(ctx, tx, tenantID, payerID.String()); err != nil {
 		return uuid.Nil, nil, false, err
 	}
 

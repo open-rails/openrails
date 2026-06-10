@@ -36,7 +36,7 @@ func (c *CheckActiveSubscriptionMissingEntitlements) Run(ctx context.Context, db
 		Where("sub.status = ?", models.StatusActive)
 
 	if opts.UserID != "" {
-		tsid, err := repo.ResolveTenantSubjectID(ctx, db, uuid.Nil, opts.UserID)
+		tsid, err := repo.ResolveTenantSubjectIDBun(ctx, db, uuid.Nil, opts.UserID)
 		if err != nil {
 			return nil, err
 		}

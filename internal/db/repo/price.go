@@ -3,9 +3,11 @@ package repo
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
@@ -15,12 +17,27 @@ type PriceRepo struct {
 
 func NewPriceRepo(d *db.DB) *PriceRepo { return &PriceRepo{db: d} }
 
+func priceProcessorsJSONB(p *models.Price) ([]byte, error) {
+	return toJSONB(p.Processors)
+}
+
 func (r *PriceRepo) Create(ctx context.Context, price *models.Price) error {
-	res, err := r.db.Q(ctx).NewInsert().Model(price).Exec(ctx)
+	processors, err := priceProcessorsJSONB(price)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
+		ID:               price.ID,
+		TenantID:         price.TenantID,
+		ProductID:        price.ProductID,
+		Status:           string(price.Status),
+		Amount:           price.Amount,
+		Currency:         price.Currency,
+		BillingCycleDays: intPtrTo32(price.BillingCycleDays),
+		Processors:       processors,
+		CreatedAt:        price.CreatedAt,
+		UpdatedAt:        price.UpdatedAt,
+	})
 	if err != nil {
 		return err
 	}
@@ -31,43 +48,84 @@ func (r *PriceRepo) Create(ctx context.Context, price *models.Price) error {
 }
 
 func (r *PriceRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Price, error) {
-	price := new(models.Price)
-	if err := r.db.Q(ctx).NewSelect().Model(price).Where("price.id = ?", id).Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetPriceByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return price, nil
+	return priceFromGen(row)
+}
+
+func pricesFromGen(rows []gen.BillingPrice) ([]*models.Price, error) {
+	out := make([]*models.Price, 0, len(rows))
+	for _, r := range rows {
+		p, err := priceFromGen(r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func (r *PriceRepo) GetByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
-	prices := []*models.Price{}
-	if err := r.db.Q(ctx).NewSelect().Model(&prices).Where("price.product_id = ?", productID).Where("price.status = ?", models.CatalogStatusActive).Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListActivePricesByProduct(ctx, productID)
+	if err != nil {
 		return nil, err
 	}
-	return prices, nil
+	return pricesFromGen(rows)
 }
 
 func (r *PriceRepo) GetActiveByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
-	prices := []*models.Price{}
-	if err := r.db.Q(ctx).NewSelect().Model(&prices).Where("price.product_id = ?", productID).Where("price.status = ?", models.CatalogStatusActive).OrderExpr("price.amount ASC").Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListActivePricesByProductOrdered(ctx, productID)
+	if err != nil {
 		return nil, err
 	}
-	return prices, nil
+	return pricesFromGen(rows)
 }
 
 func (r *PriceRepo) GetAllActive(ctx context.Context) ([]*models.Price, error) {
-	prices := []*models.Price{}
-	if err := r.db.Q(ctx).NewSelect().Model(&prices).Relation("Product").Where("price.status = ?", models.CatalogStatusActive).OrderExpr("price.amount ASC").Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListAllActivePricesWithProduct(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return prices, nil
+	out := make([]*models.Price, 0, len(rows))
+	for _, row := range rows {
+		price, err := priceWithProduct(row.BillingPrice, row.BillingProduct)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, price)
+	}
+	return out, nil
 }
 
 func (r *PriceRepo) GetAll(ctx context.Context) ([]*models.Price, error) {
-	prices := []*models.Price{}
-	if err := r.db.Q(ctx).NewSelect().Model(&prices).Relation("Product").OrderExpr("price.amount ASC").Scan(ctx); err != nil {
+	rows, err := r.db.Gen(ctx).ListAllPricesWithProduct(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return prices, nil
+	out := make([]*models.Price, 0, len(rows))
+	for _, row := range rows {
+		price, err := priceWithProduct(row.BillingPrice, row.BillingProduct)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, price)
+	}
+	return out, nil
+}
+
+func priceWithProduct(p gen.BillingPrice, prod gen.BillingProduct) (*models.Price, error) {
+	price, err := priceFromGen(p)
+	if err != nil {
+		return nil, err
+	}
+	product, err := productFromGen(prod)
+	if err != nil {
+		return nil, err
+	}
+	price.Product = product
+	return price, nil
 }
 
 // PriceFilter contains optional filters for listing prices
@@ -81,91 +139,103 @@ type PriceFilter struct {
 
 // ListPaginated returns prices with pagination and optional filters
 func (r *PriceRepo) ListPaginated(ctx context.Context, filter PriceFilter, limit, offset int) ([]*models.Price, int64, error) {
-	prices := []*models.Price{}
-	query := r.db.Q(ctx).NewSelect().
-		Model(&prices).
-		Relation("Product").
-		Order("price.created_at DESC")
-
-	// Apply filters. Active is interpreted against the status enum:
-	//   Active=true  -> status = 'active' (purchasable)
-	//   Active=false -> status <> 'active' (draft or archived; admin-only view)
-	if filter.Active != nil {
-		if *filter.Active {
-			query = query.Where("price.status = ?", models.CatalogStatusActive)
-		} else {
-			query = query.Where("price.status <> ?", models.CatalogStatusActive)
-		}
-	}
+	onlyActive := filter.Active != nil && *filter.Active
+	onlyInactive := filter.Active != nil && !*filter.Active
+	var status *string
 	if filter.Status != nil {
-		query = query.Where("price.status = ?", *filter.Status)
+		s := string(*filter.Status)
+		status = &s
 	}
+	var currency *string
 	if filter.Currency != "" {
-		query = query.Where("LOWER(price.currency) = LOWER(?)", filter.Currency)
+		currency = &filter.Currency
 	}
-	if filter.ProductID != nil {
-		query = query.Where("price.product_id = ?", *filter.ProductID)
-	}
-	if filter.Type == "recurring" {
-		query = query.Where("price.billing_cycle_days IS NOT NULL AND price.billing_cycle_days > 0")
-	} else if filter.Type == "one_time" {
-		query = query.Where("price.billing_cycle_days IS NULL OR price.billing_cycle_days = 0")
-	}
+	onlyRecurring := filter.Type == "recurring"
+	onlyOneTime := filter.Type == "one_time"
 
-	count, err := query.Limit(limit).Offset(offset).ScanAndCount(ctx)
+	q := r.db.Gen(ctx)
+	total, err := q.CountPricesFiltered(ctx, gen.CountPricesFilteredParams{
+		OnlyActive:    onlyActive,
+		OnlyInactive:  onlyInactive,
+		Status:        status,
+		Currency:      currency,
+		ProductID:     filter.ProductID,
+		OnlyRecurring: onlyRecurring,
+		OnlyOneTime:   onlyOneTime,
+	})
 	if err != nil {
 		return nil, 0, err
 	}
-	return prices, int64(count), nil
+	rows, err := q.ListPricesFiltered(ctx, gen.ListPricesFilteredParams{
+		OnlyActive:    onlyActive,
+		OnlyInactive:  onlyInactive,
+		Status:        status,
+		Currency:      currency,
+		ProductID:     filter.ProductID,
+		OnlyRecurring: onlyRecurring,
+		OnlyOneTime:   onlyOneTime,
+		PageLimit:     int32(limit),
+		PageOffset:    int32(offset),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]*models.Price, 0, len(rows))
+	for _, row := range rows {
+		price, err := priceWithProduct(row.BillingPrice, row.BillingProduct)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, price)
+	}
+	return out, total, nil
 }
 
 func (r *PriceRepo) GetByNMIPlan(ctx context.Context, provider, nmiPlanID string) (*models.Price, error) {
-	price := new(models.Price)
-
 	// Resolve any non-draft price (active or archived). Archived prices must
 	// still resolve here so grandfathered subscriptions keep billing.
-	query := r.db.Q(ctx).NewSelect().Model(price).
-		Where("price.status <> ?", models.CatalogStatusDraft)
-	if provider == "nmi" {
-		query = query.Where("price.processors -> ? ->> ? = ?", provider, "plan_id", nmiPlanID)
-	} else {
-		query = query.Where("(price.processors -> ? ->> ? = ? OR price.processors -> ? ->> ? = ?)", provider, "plan_id", nmiPlanID, "nmi", "plan_id", nmiPlanID)
-	}
-
-	if err := query.Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetPriceByNMIPlan(ctx, gen.GetPriceByNMIPlanParams{
+		Provider:           provider,
+		PlanID:             nmiPlanID,
+		IncludeNmiFallback: provider != "nmi",
+	})
+	if err != nil {
 		return nil, err
 	}
-	return price, nil
+	return priceFromGen(row)
 }
 
 func (r *PriceRepo) GetByCCBillPriceID(ctx context.Context, ccbillPriceID string) (*models.Price, error) {
-	price := new(models.Price)
-	if err := r.db.Q(ctx).NewSelect().Model(price).Relation("Product").
-		Where("price.processors->'ccbill'->>'flex_id' = ?", ccbillPriceID).
-		Where("price.status <> ?", models.CatalogStatusDraft).
-		Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetPriceWithProductByCCBillPriceID(ctx, ccbillPriceID)
+	if err != nil {
 		return nil, err
 	}
-	return price, nil
+	return priceWithProduct(row.BillingPrice, row.BillingProduct)
 }
 
 func (r *PriceRepo) GetByStripePriceID(ctx context.Context, stripePriceID string) (*models.Price, error) {
-	price := new(models.Price)
-	if err := r.db.Q(ctx).NewSelect().Model(price).Relation("Product").
-		Where("price.processors->'stripe'->>'price_id' = ?", stripePriceID).
-		Where("price.status <> ?", models.CatalogStatusDraft).
-		Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetPriceWithProductByStripePriceID(ctx, stripePriceID)
+	if err != nil {
 		return nil, err
 	}
-	return price, nil
+	return priceWithProduct(row.BillingPrice, row.BillingProduct)
 }
 
 func (r *PriceRepo) Update(ctx context.Context, price *models.Price) error {
-	res, err := r.db.Q(ctx).NewUpdate().Model(price).WherePK().Exec(ctx)
+	processors, err := priceProcessorsJSONB(price)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).UpdatePrice(ctx, gen.UpdatePriceParams{
+		ID:               price.ID,
+		ProductID:        price.ProductID,
+		Status:           string(price.Status),
+		Amount:           price.Amount,
+		Currency:         price.Currency,
+		BillingCycleDays: intPtrTo32(price.BillingCycleDays),
+		Processors:       processors,
+		UpdatedAt:        updateTimestamp(price.UpdatedAt),
+	})
 	if err != nil {
 		return err
 	}
@@ -176,11 +246,7 @@ func (r *PriceRepo) Update(ctx context.Context, price *models.Price) error {
 }
 
 func (r *PriceRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.Q(ctx).NewDelete().Model((*models.Price)(nil)).Where("price.id = ?", id).Exec(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).DeletePrice(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -188,4 +254,13 @@ func (r *PriceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 		return errors.New("no rows affected")
 	}
 	return nil
+}
+
+// updateTimestamp keeps a zero UpdatedAt from clobbering the column with
+// 0001-01-01 on full-row updates.
+func updateTimestamp(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Now()
+	}
+	return t
 }

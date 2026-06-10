@@ -205,3 +205,13 @@ func waitForDB(ctx context.Context, sqlDB *sql.DB) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 }
+
+// SharedPGXPool returns a pgx/v5 pool on the shared integration postgres —
+// the handle for exercising sqlc-converted code paths (#334).
+func SharedPGXPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), SharedPostgresDSN(t))
+	require.NoError(t, err, "open pgx pool on shared integration postgres")
+	t.Cleanup(pool.Close)
+	return pool
+}

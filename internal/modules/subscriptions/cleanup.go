@@ -29,7 +29,7 @@ func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, 
 		supersededBy = excludeID.String()
 	}
 
-	tsid, err := repo.ResolveTenantSubjectID(ctx, dbb.Q(ctx), uuid.Nil, userID)
+	tsid, err := repo.ResolveTenantSubjectIDBun(ctx, dbb.Q(ctx), uuid.Nil, userID)
 	if err != nil {
 		return 0, err
 	}

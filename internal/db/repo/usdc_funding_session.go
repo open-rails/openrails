@@ -2,14 +2,15 @@ package repo
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
@@ -24,12 +25,39 @@ func NewUSDCFundingSessionRepo(d *db.DB) *USDCFundingSessionRepo {
 	return &USDCFundingSessionRepo{db: d}
 }
 
+func usdcFundingSessionFromGen(s gen.BillingUsdcFundingSession) (*models.USDCFundingSession, error) {
+	m := &models.USDCFundingSession{
+		ID:                s.ID,
+		TenantID:          s.TenantID,
+		TenantSubjectID:   s.TenantSubjectID,
+		CheckoutSessionID: s.CheckoutSessionID,
+		Provider:          s.Provider,
+		WalletAddress:     s.WalletAddress,
+		Asset:             s.Asset,
+		Network:           s.Network,
+		RequestedAmount:   s.RequestedAmount,
+		ProviderSessionID: s.ProviderSessionID,
+		ProviderURL:       s.ProviderUrl,
+		Status:            models.USDCFundingSessionStatus(s.Status),
+		ReturnURL:         s.ReturnUrl,
+		IdempotencyKey:    s.IdempotencyKey,
+		LastCheckedAt:     s.LastCheckedAt,
+		ExpiresAt:         s.ExpiresAt,
+		CreatedAt:         s.CreatedAt,
+		UpdatedAt:         s.UpdatedAt,
+	}
+	if err := fromJSONB(s.Metadata, &m.Metadata, "usdc_funding_sessions.metadata"); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID string, session *models.USDCFundingSession) error {
-	tsid, err := EnsureTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := EnsureTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return err
 	}
-	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, tsid); err != nil {
+	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, tsid); err != nil {
 		return err
 	}
 	session.TenantID = tenant.FromContextOrDefault(ctx).UUID()
@@ -37,40 +65,63 @@ func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID str
 	if session.Metadata == nil {
 		session.Metadata = map[string]any{}
 	}
-	_, err = r.db.Q(ctx).NewInsert().Model(session).Exec(ctx)
-	return err
+	meta, err := toJSONB(session.Metadata)
+	if err != nil {
+		return err
+	}
+	return r.db.Gen(ctx).CreateUSDCFundingSession(ctx, gen.CreateUSDCFundingSessionParams{
+		ID:                session.ID,
+		TenantID:          session.TenantID,
+		TenantSubjectID:   session.TenantSubjectID,
+		CheckoutSessionID: session.CheckoutSessionID,
+		Provider:          session.Provider,
+		WalletAddress:     session.WalletAddress,
+		Asset:             session.Asset,
+		Network:           session.Network,
+		RequestedAmount:   session.RequestedAmount,
+		ProviderSessionID: session.ProviderSessionID,
+		ProviderUrl:       session.ProviderURL,
+		Status:            string(session.Status),
+		ReturnUrl:         session.ReturnURL,
+		IdempotencyKey:    session.IdempotencyKey,
+		Metadata:          meta,
+		LastCheckedAt:     session.LastCheckedAt,
+		ExpiresAt:         session.ExpiresAt,
+		CreatedAt:         session.CreatedAt,
+		UpdatedAt:         session.UpdatedAt,
+	})
 }
 
 func (r *USDCFundingSessionRepo) GetByIDForUserID(ctx context.Context, id uuid.UUID, userID string) (*models.USDCFundingSession, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
 	if tsid == uuid.Nil {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	session := new(models.USDCFundingSession)
-	err = r.db.Q(ctx).NewSelect().Model(session).
-		Where("ufs.id = ?", id).
-		Where("ufs.tenant_subject_id = ?", tsid).
-		Limit(1).
-		Scan(ctx)
-	if errors.Is(err, sql.ErrNoRows) {
+	row, err := r.db.Gen(ctx).GetUSDCFundingSessionByIDForTenantSubject(ctx, gen.GetUSDCFundingSessionByIDForTenantSubjectParams{
+		ID:              id,
+		TenantSubjectID: tsid,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	return session, err
+	if err != nil {
+		return nil, err
+	}
+	return usdcFundingSessionFromGen(row)
 }
 
 func (r *USDCFundingSessionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.USDCFundingSession, error) {
-	session := new(models.USDCFundingSession)
-	err := r.db.Q(ctx).NewSelect().Model(session).
-		Where("ufs.id = ?", id).
-		Limit(1).
-		Scan(ctx)
-	if errors.Is(err, sql.ErrNoRows) {
+	row, err := r.db.Gen(ctx).GetUSDCFundingSessionByID(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	return session, err
+	if err != nil {
+		return nil, err
+	}
+	return usdcFundingSessionFromGen(row)
 }
 
 func (r *USDCFundingSessionRepo) GetByIdempotencyKeyForUserID(ctx context.Context, userID, key string) (*models.USDCFundingSession, error) {
@@ -78,23 +129,24 @@ func (r *USDCFundingSessionRepo) GetByIdempotencyKeyForUserID(ctx context.Contex
 	if key == "" {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return nil, err
 	}
 	if tsid == uuid.Nil {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	session := new(models.USDCFundingSession)
-	err = r.db.Q(ctx).NewSelect().Model(session).
-		Where("ufs.tenant_subject_id = ?", tsid).
-		Where("ufs.idempotency_key = ?", key).
-		Limit(1).
-		Scan(ctx)
-	if errors.Is(err, sql.ErrNoRows) {
+	row, err := r.db.Gen(ctx).GetUSDCFundingSessionByIdempotencyKey(ctx, gen.GetUSDCFundingSessionByIdempotencyKeyParams{
+		TenantSubjectID: tsid,
+		IdempotencyKey:  &key,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	return session, err
+	if err != nil {
+		return nil, err
+	}
+	return usdcFundingSessionFromGen(row)
 }
 
 func (r *USDCFundingSessionRepo) UpdateStatus(ctx context.Context, session *models.USDCFundingSession, status models.USDCFundingSessionStatus, checkedAt *time.Time, metadata map[string]any) error {
@@ -104,9 +156,15 @@ func (r *USDCFundingSessionRepo) UpdateStatus(ctx context.Context, session *mode
 		session.Metadata = metadata
 	}
 	session.UpdatedAt = time.Now().UTC()
-	_, err := r.db.Q(ctx).NewUpdate().Model(session).
-		Column("status", "last_checked_at", "metadata", "updated_at").
-		WherePK().
-		Exec(ctx)
-	return err
+	meta, err := toJSONB(session.Metadata)
+	if err != nil {
+		return err
+	}
+	return r.db.Gen(ctx).UpdateUSDCFundingSessionStatus(ctx, gen.UpdateUSDCFundingSessionStatusParams{
+		ID:            session.ID,
+		Status:        string(session.Status),
+		LastCheckedAt: session.LastCheckedAt,
+		Metadata:      meta,
+		UpdatedAt:     session.UpdatedAt,
+	})
 }

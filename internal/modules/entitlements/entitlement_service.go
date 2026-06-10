@@ -177,7 +177,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 	var created *models.Entitlement
 
 	err := s.withTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		if err := repo.LockEntitlementTimeline(ctx, tx, p.UserID, p.Entitlement); err != nil {
+		if err := repo.LockEntitlementTimelineBun(ctx, tx, p.UserID, p.Entitlement); err != nil {
 			return err
 		}
 
@@ -187,7 +187,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		// tenant_subjects row whose id IS that UUID (see repo.EnsureTenantSubjectID),
 		// converging with the credits/commerce payable identity.
 		if p.TenantSubjectID == uuid.Nil {
-			tsid, terr := repo.EnsureTenantSubjectID(ctx, tx, uuid.Nil, p.UserID)
+			tsid, terr := repo.EnsureTenantSubjectIDBun(ctx, tx, uuid.Nil, p.UserID)
 			if terr != nil {
 				return terr
 			}
@@ -396,13 +396,13 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 		userID := p.UserID
 		entitlement := p.Entitlement
 		if p.EntitlementID != nil {
-			ent, err := repo.GetEntitlementByIDTx(ctx, tx, *p.EntitlementID)
+			ent, err := repo.GetEntitlementByIDTxBun(ctx, tx, *p.EntitlementID)
 			if err != nil {
 				return err
 			}
 			userID = ent.TenantSubjectID.String()
 			entitlement = ent.Entitlement
-			if err := repo.LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
+			if err := repo.LockEntitlementTimelineBun(ctx, tx, userID, entitlement); err != nil {
 				return err
 			}
 			if ent.RevokedAt != nil || ent.DeletedAt != nil {
@@ -442,13 +442,13 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 			return nil
 		}
 
-		if err := repo.LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
+		if err := repo.LockEntitlementTimelineBun(ctx, tx, userID, entitlement); err != nil {
 			return err
 		}
 
 		// Filter the entitlement timeline by the payable tenant subject (#317);
 		// the lock above still serializes on the userID string key.
-		tsid, terr := repo.ResolveTenantSubjectID(ctx, tx, uuid.Nil, userID)
+		tsid, terr := repo.ResolveTenantSubjectIDBun(ctx, tx, uuid.Nil, userID)
 		if terr != nil {
 			return terr
 		}

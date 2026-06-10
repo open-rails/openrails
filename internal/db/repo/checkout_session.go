@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/uptrace/bun"
 )
 
 type CheckoutSessionRepo struct {
@@ -21,15 +21,48 @@ func NewCheckoutSessionRepo(d *db.DB) *CheckoutSessionRepo {
 	return &CheckoutSessionRepo{db: d}
 }
 
+func checkoutSessionJSONB(s *models.CheckoutSession) (meta, fields, state []byte, err error) {
+	if meta, err = toJSONB(s.Metadata); err != nil {
+		return nil, nil, nil, err
+	}
+	if fields, err = toJSONB(s.ProcessorFields); err != nil {
+		return nil, nil, nil, err
+	}
+	if state, err = toJSONB(s.ProcessorState); err != nil {
+		return nil, nil, nil, err
+	}
+	return meta, fields, state, nil
+}
+
 func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.CheckoutSession) error {
-	if err := ensureTenantSubjectRow(ctx, r.db.Q(ctx), uuid.Nil, session.TenantSubjectID); err != nil {
+	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, session.TenantSubjectID); err != nil {
 		return err
 	}
-	res, err := r.db.Q(ctx).NewInsert().Model(session).Exec(ctx)
+	meta, fields, state, err := checkoutSessionJSONB(session)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).CreateCheckoutSession(ctx, gen.CreateCheckoutSessionParams{
+		ID:              session.ID,
+		TenantSubjectID: session.TenantSubjectID,
+		PriceID:         session.PriceID,
+		Mode:            string(session.Mode),
+		Processor:       string(session.Processor),
+		Status:          string(session.Status),
+		Amount:          session.Amount,
+		Currency:        session.Currency,
+		ExpiresAt:       session.ExpiresAt,
+		Reference:       session.Reference,
+		TransactionID:   session.TransactionID,
+		PaymentID:       session.PaymentID,
+		SubscriptionID:  session.SubscriptionID,
+		Metadata:        meta,
+		ProcessorFields: fields,
+		ProcessorState:  state,
+		IdempotencyKey:  session.IdempotencyKey,
+		CreatedAt:       session.CreatedAt,
+		UpdatedAt:       session.UpdatedAt,
+	})
 	if err != nil {
 		return err
 	}
@@ -40,19 +73,38 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 }
 
 func (r *CheckoutSessionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.CheckoutSession, error) {
-	session := new(models.CheckoutSession)
-	if err := r.db.Q(ctx).NewSelect().Model(session).Where("cs.id = ?", id).Scan(ctx); err != nil {
+	row, err := r.db.Gen(ctx).GetCheckoutSessionByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return session, nil
+	return checkoutSessionFromGen(row)
 }
 
 func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.CheckoutSession) error {
-	res, err := r.db.Q(ctx).NewUpdate().Model(session).WherePK().Exec(ctx)
+	meta, fields, state, err := checkoutSessionJSONB(session)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).UpdateCheckoutSession(ctx, gen.UpdateCheckoutSessionParams{
+		ID:              session.ID,
+		TenantSubjectID: session.TenantSubjectID,
+		PriceID:         session.PriceID,
+		Mode:            string(session.Mode),
+		Processor:       string(session.Processor),
+		Status:          string(session.Status),
+		Amount:          session.Amount,
+		Currency:        session.Currency,
+		ExpiresAt:       session.ExpiresAt,
+		Reference:       session.Reference,
+		TransactionID:   session.TransactionID,
+		PaymentID:       session.PaymentID,
+		SubscriptionID:  session.SubscriptionID,
+		Metadata:        meta,
+		ProcessorFields: fields,
+		ProcessorState:  state,
+		IdempotencyKey:  session.IdempotencyKey,
+		UpdatedAt:       updateTimestamp(session.UpdatedAt),
+	})
 	if err != nil {
 		return err
 	}
@@ -81,21 +133,17 @@ func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, 
 		now = time.Now()
 	}
 	session.UpdatedAt = now
-	res, err := r.db.Q(ctx).NewUpdate().
-		Model((*models.CheckoutSession)(nil)).
-		Set("reference = ?", ref).
-		Set("processor_state = ?", session.ProcessorState).
-		Set("updated_at = ?", now).
-		Where("id = ?", session.ID).
-		Where("processor = ?", models.ProcessorSolana).
-		Where("status = ?", models.CheckoutSessionStatusRequiresAction).
-		Where("(reference IS NULL OR reference = ?)", ref).
-		Where("(COALESCE(processor_state ->> 'payer', '') = '' OR processor_state ->> 'payer' = ?)", payer).
-		Exec(ctx)
+	state, err := toJSONB(session.ProcessorState)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	rows, err := r.db.Gen(ctx).BindSolanaCheckoutSession(ctx, gen.BindSolanaCheckoutSessionParams{
+		ID:             session.ID,
+		Reference:      &ref,
+		ProcessorState: state,
+		UpdatedAt:      now,
+		Payer:          payer,
+	})
 	if err != nil {
 		return err
 	}
@@ -106,38 +154,27 @@ func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, 
 }
 
 func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference string) (*models.CheckoutSession, error) {
-	session := new(models.CheckoutSession)
-	if err := r.db.Q(ctx).NewSelect().
-		Model(session).
-		Where("cs.reference = ?", strings.TrimSpace(reference)).
-		Limit(1).
-		Scan(ctx); err != nil {
-		return nil, err
-	}
-	return session, nil
-}
-
-func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceProcessor(ctx context.Context, userID string, priceID uuid.UUID, processor models.Processor) (*models.CheckoutSession, error) {
-	session := new(models.CheckoutSession)
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Q(ctx), uuid.Nil, userID)
+	ref := strings.TrimSpace(reference)
+	row, err := r.db.Gen(ctx).GetCheckoutSessionByReference(ctx, &ref)
 	if err != nil {
 		return nil, err
 	}
-	openStatuses := []models.CheckoutSessionStatus{
-		models.CheckoutSessionStatusCreated,
-		models.CheckoutSessionStatusRequiresAction,
-	}
-	if err := r.db.Q(ctx).NewSelect().
-		Model(session).
-		Where("cs.tenant_subject_id = ?", tsid).
-		Where("cs.price_id = ?", priceID).
-		Where("cs.processor = ?", processor).
-		Where("cs.status IN (?)", bun.In(openStatuses)).
-		Where("(cs.expires_at IS NULL OR cs.expires_at > ?)", time.Now()).
-		OrderExpr("cs.created_at DESC").
-		Limit(1).
-		Scan(ctx); err != nil {
+	return checkoutSessionFromGen(row)
+}
+
+func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceProcessor(ctx context.Context, userID string, priceID uuid.UUID, processor models.Processor) (*models.CheckoutSession, error) {
+	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	if err != nil {
 		return nil, err
 	}
-	return session, nil
+	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutSession(ctx, gen.GetLatestOpenCheckoutSessionParams{
+		TenantSubjectID: tsid,
+		PriceID:         priceID,
+		Processor:       string(processor),
+		Now:             time.Now(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return checkoutSessionFromGen(row)
 }

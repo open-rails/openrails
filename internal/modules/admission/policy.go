@@ -58,7 +58,7 @@ func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identi
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		// Materialize the payable tenant_subjects row so the tier_policies FK
 		// (migration 076) is satisfied on a subject's first policy write (#317).
-		if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Q(ctx), tenantID, payer.UUID().String()); err != nil {
+		if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
 			return err
 		}
 		_, err := s.db.Q(ctx).NewInsert().Model(row).

@@ -2,13 +2,13 @@ package repo
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -36,7 +36,7 @@ const SelfIssuer = "openrails:self"
 // row itself belongs to. Multi-tenant writers that already hold an explicit
 // tenant may pass it directly. An empty userID returns the zero id without
 // touching the database (nothing to resolve).
-func EnsureTenantSubjectID(ctx context.Context, db bun.IDB, tenantID uuid.UUID, userID string) (uuid.UUID, error) {
+func EnsureTenantSubjectID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, userID string) (uuid.UUID, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return uuid.Nil, nil
@@ -44,6 +44,7 @@ func EnsureTenantSubjectID(ctx context.Context, db bun.IDB, tenantID uuid.UUID, 
 	if tenantID == uuid.Nil {
 		tenantID = tenant.FromContextOrDefault(ctx).UUID()
 	}
+	q := gen.New(qx)
 
 	// Self-service identities are their OWN UUID: the credits/self-service hot path
 	// uses identity.TenantSubjectIDFromString(user.ID) — i.e. the user UUID itself —
@@ -53,27 +54,20 @@ func EnsureTenantSubjectID(ctx context.Context, db bun.IDB, tenantID uuid.UUID, 
 	// unchanged. If a federated/self-service row with that payable id already
 	// exists, refresh last_seen_at and return it; the id is the identity here.
 	if uid, perr := uuid.Parse(userID); perr == nil {
-		var id uuid.UUID
-		err := db.NewRaw(
-			`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
-			 VALUES (?, ?, ?, ?)
-			 ON CONFLICT (id) DO UPDATE SET last_seen_at = now()
-			 RETURNING id`,
-			uid, tenantID, SelfIssuer, userID,
-		).Scan(ctx, &id)
-		return id, err
+		return q.UpsertSelfTenantSubject(ctx, gen.UpsertSelfTenantSubjectParams{
+			ID:       uid,
+			TenantID: tenantID,
+			Issuer:   SelfIssuer,
+			Subject:  userID,
+		})
 	}
 
 	// Non-UUID external subject: key by the legacy-user issuer with a generated id.
-	var id uuid.UUID
-	err := db.NewRaw(
-		`INSERT INTO billing.tenant_subjects (tenant_id, issuer, subject)
-		 VALUES (?, ?, ?)
-		 ON CONFLICT (tenant_id, issuer, subject) DO UPDATE SET last_seen_at = now()
-		 RETURNING id`,
-		tenantID, LegacyUserIssuer, userID,
-	).Scan(ctx, &id)
-	return id, err
+	return q.UpsertLegacyTenantSubject(ctx, gen.UpsertLegacyTenantSubjectParams{
+		TenantID: tenantID,
+		Issuer:   LegacyUserIssuer,
+		Subject:  userID,
+	})
 }
 
 // ResolveTenantSubjectID returns the payable tenant subject id for a legacy
@@ -86,7 +80,7 @@ func EnsureTenantSubjectID(ctx context.Context, db bun.IDB, tenantID uuid.UUID, 
 // and migrations 075–077 use). A non-UUID external subject is looked up under the
 // legacy-user issuer; an unknown subject yields the zero id (no matching rows),
 // which callers translate to an empty result set.
-func ResolveTenantSubjectID(ctx context.Context, db bun.IDB, tenantID uuid.UUID, userID string) (uuid.UUID, error) {
+func ResolveTenantSubjectID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, userID string) (uuid.UUID, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return uuid.Nil, nil
@@ -97,13 +91,12 @@ func ResolveTenantSubjectID(ctx context.Context, db bun.IDB, tenantID uuid.UUID,
 	if tenantID == uuid.Nil {
 		tenantID = tenant.FromContextOrDefault(ctx).UUID()
 	}
-	var id uuid.UUID
-	err := db.NewRaw(
-		`SELECT id FROM billing.tenant_subjects
-		  WHERE tenant_id = ? AND issuer = ? AND subject = ?`,
-		tenantID, LegacyUserIssuer, userID,
-	).Scan(ctx, &id)
-	if errors.Is(err, sql.ErrNoRows) {
+	id, err := gen.New(qx).GetTenantSubjectIDByIssuerSubject(ctx, gen.GetTenantSubjectIDByIssuerSubjectParams{
+		TenantID: tenantID,
+		Issuer:   LegacyUserIssuer,
+		Subject:  userID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, nil
 	}
 	return id, err
@@ -116,18 +109,17 @@ func ResolveTenantSubjectID(ctx context.Context, db bun.IDB, tenantID uuid.UUID,
 // (id, tenant, 'openrails:self', id::text); a federated subject already has its
 // row and the ON CONFLICT makes this a no-op. A zero id is a no-op (the caller
 // must set model.TenantSubjectID before Create).
-func ensureTenantSubjectRow(ctx context.Context, db bun.IDB, tenantID uuid.UUID, tsid uuid.UUID) error {
+func ensureTenantSubjectRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsid uuid.UUID) error {
 	if tsid == uuid.Nil {
 		return nil
 	}
 	if tenantID == uuid.Nil {
 		tenantID = tenant.FromContextOrDefault(ctx).UUID()
 	}
-	_, err := db.NewRaw(
-		`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT DO NOTHING`,
-		tsid, tenantID, SelfIssuer, tsid.String(),
-	).Exec(ctx)
-	return err
+	return gen.New(qx).EnsureTenantSubjectRow(ctx, gen.EnsureTenantSubjectRowParams{
+		ID:       tsid,
+		TenantID: tenantID,
+		Issuer:   SelfIssuer,
+		Subject:  tsid.String(),
+	})
 }

@@ -30,7 +30,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
+	dbi, err := db.NewWithPGXPool(dbtest.SharedPGXPool(t))
 	require.NoError(t, err)
 
 	r := NewEntitlementRepo(dbi)
@@ -108,7 +108,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
+	dbi, err := db.NewWithPGXPool(dbtest.SharedPGXPool(t))
 	require.NoError(t, err)
 
 	r := NewEntitlementRepo(dbi)
@@ -191,7 +191,7 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
+	dbi, err := db.NewWithPGXPool(dbtest.SharedPGXPool(t))
 	require.NoError(t, err)
 
 	r := NewEntitlementRepo(dbi)

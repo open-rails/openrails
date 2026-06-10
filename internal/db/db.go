@@ -18,11 +18,19 @@ import (
 )
 
 // DB wraps the application's database handles. During the bun -> sqlc
-// transition (issue #334) it carries BOTH sides over ONE underlying pgx pool:
+// transition (issue #334) it carries both sides over SEPARATE pools:
 //
 //   - pool: the pgx/v5 pool that sqlc-generated queries run on (Qx/Gen).
-//   - db:   the bun handle, served by the SAME pool through pgx's
-//     database/sql adapter (stdlib.OpenDBFromPool). Removed in Phase 2.
+//   - db:   the bun handle on its OWN database/sql pool (pgx stdlib driver).
+//     Removed in Phase 2.
+//
+// The pools MUST be separate: serving both sides from one pool means a
+// request that holds a bun connection and then waits for a pgx connection
+// can deadlock the whole pool under burst (hold-and-wait on a single
+// resource class — the Phase-0 twin-pinning wedge, see issue #334 status).
+// With separate pools, requests queue on the first pool BEFORE holding
+// anything, so cross-pool starvation cannot occur. The transitional cost is
+// a higher combined connection ceiling (2x30), removed with the bun side.
 //
 // A DB can also be transaction-scoped (one of pgtx / bun.Tx set) so services
 // can hand repos a tx-bound DB.
@@ -62,7 +70,11 @@ func NewDB(cfg *config.DBConfig) (_ *DB, err error) {
 		return nil, err
 	}
 
-	db, sqldb := newBunOverPool(pool)
+	db, sqldb, err := newBunSideDB(url)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
 	if err := pingWithRetry(context.Background(), func(ctx context.Context) error {
 		return db.PingContext(ctx)
 	}, "database"); err != nil {
@@ -76,15 +88,21 @@ func NewDB(cfg *config.DBConfig) (_ *DB, err error) {
 	return &DB{db: db, pool: pool, ownsPool: true}, nil
 }
 
-// newBunOverPool builds the transition-era bun handle on top of the pgx pool
-// via the database/sql adapter, so bun and sqlc traffic share one pool and
-// one connection budget.
-func newBunOverPool(pool *pgxpool.Pool) (*bun.DB, *sql.DB) {
-	sqldb := stdlib.OpenDBFromPool(pool)
+// newBunSideDB builds the transition-era bun handle on its OWN
+// database/sql pool (pgx stdlib driver) — deliberately NOT sharing the pgx
+// pool (see the DB doc comment on the twin-pinning deadlock).
+func newBunSideDB(url string) (*bun.DB, *sql.DB, error) {
+	// pgxpool.ParseConfig (not pgx.ParseConfig) so pool_* DSN params an
+	// operator set for the pgx side are tolerated rather than fatal.
+	pcfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse postgres config: %w", err)
+	}
+	sqldb := stdlib.OpenDB(*pcfg.ConnConfig)
 	applySQLPoolTuning(sqldb)
 	db := bun.NewDB(sqldb, pgdialect.New())
 	models.RegisterModels(db)
-	return db, sqldb
+	return db, sqldb, nil
 }
 
 // newTunedPGXPool parses the connection string, applies the pool tuning that
@@ -212,15 +230,22 @@ func NewWithBun(bunDB *bun.DB) (*DB, error) {
 	return &DB{db: bunDB}, nil
 }
 
-// NewWithPGXPool wraps a host-supplied pgx pool (the embedded-host path). The
-// pool serves both sides: sqlc directly, bun through the stdlib adapter. The
-// host keeps ownership of the pool; Close() does not close it.
+// NewWithPGXPool wraps a host-supplied pgx pool (the embedded-host path).
+// The host pool serves the sqlc side; the transitional bun side gets its own
+// database/sql pool built from the same connection config (separate pools —
+// see the DB doc comment on the twin-pinning deadlock). The host keeps
+// ownership of its pool; Close() closes only the bun-side pool.
 func NewWithPGXPool(pool *pgxpool.Pool) (*DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pgx pool is nil")
 	}
-	db, _ := newBunOverPool(pool)
+	connCfg := pool.Config().ConnConfig.Copy()
+	sqldb := stdlib.OpenDB(*connCfg)
+	applySQLPoolTuning(sqldb)
+	db := bun.NewDB(sqldb, pgdialect.New())
+	models.RegisterModels(db)
 	if err := db.PingContext(context.Background()); err != nil {
+		_ = sqldb.Close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 	return &DB{db: db, pool: pool}, nil

@@ -104,31 +104,14 @@ func (d *DB) WithTenantConn(ctx context.Context) (context.Context, func(), error
 
 	newCtx := context.WithValue(ctx, tenantConnKey{}, conn)
 
-	// pgx-side twin (#334): pin a pool connection with the same session GUC so
-	// sqlc-converted call sites in this request are RLS-scoped too.
-	var pgxRelease func()
+	// pgx-side twin (#334): a LAZY pinned connection carrying the same session
+	// GUC. Nothing is acquired here — the first sqlc call site in the request
+	// acquires and pins it (see lazyTenantPgxConn). Eagerly acquiring a second
+	// connection per request collapsed under burst (issue #334 status note).
+	var lazyPgx *lazyTenantPgxConn
 	if d.pool != nil {
-		pgxAcqCtx, pgxAcqCancel := context.WithTimeout(ctx, tenantConnAcquireTimeout)
-		pgxConn, err := d.pool.Acquire(pgxAcqCtx)
-		pgxAcqCancel()
-		if err != nil {
-			_ = conn.Close()
-			return ctx, func() {}, fmt.Errorf("db: acquire pgx tenant connection: %w", err)
-		}
-		if err := pgxConn.QueryRow(ctx,
-			"SELECT set_config($1, $2, FALSE)", TenantGUC, id.String()).Scan(&out); err != nil {
-			pgxConn.Release()
-			_ = conn.Close()
-			return ctx, func() {}, fmt.Errorf("db: set %s on pgx tenant connection: %w", TenantGUC, err)
-		}
-		newCtx = context.WithValue(newCtx, tenantPgxConnKey{}, pgxConn)
-		pgxRelease = func() {
-			// Reset the GUC so the connection returns to the pool clean; works
-			// even after the request context is cancelled.
-			_, _ = pgxConn.Exec(context.Background(),
-				"SELECT set_config($1, '', FALSE)", TenantGUC)
-			pgxConn.Release()
-		}
+		lazyPgx = &lazyTenantPgxConn{pool: d.pool, tenantID: id.String()}
+		newCtx = context.WithValue(newCtx, tenantPgxConnKey{}, lazyPgx)
 	}
 
 	release := func() {
@@ -137,8 +120,8 @@ func (d *DB) WithTenantConn(ctx context.Context) (context.Context, func(), error
 		// even after the request context is cancelled.
 		_, _ = conn.ExecContext(context.Background(), "SELECT set_config('"+TenantGUC+"', '', FALSE)")
 		_ = conn.Close()
-		if pgxRelease != nil {
-			pgxRelease()
+		if lazyPgx != nil {
+			lazyPgx.release()
 		}
 	}
 	return newCtx, release, nil

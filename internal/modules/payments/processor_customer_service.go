@@ -35,7 +35,7 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 	now := time.Now().UTC()
 	// Resolve the payable tenant subject for this (tenant, user) so the row carries
 	// tenant_subject_id alongside the legacy user_id (#317).
-	tenantSubjectID, err := repo.EnsureTenantSubjectID(ctx, s.DB.Q(ctx), uuid.Nil, userID)
+	tenantSubjectID, err := repo.EnsureTenantSubjectID(ctx, s.DB.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func (s *ProcessorCustomerService) GetCustomerID(ctx context.Context, userID, pr
 	if userID == "" || processor == "" {
 		return "", fmt.Errorf("invalid processor customer args")
 	}
-	tsid, err := repo.ResolveTenantSubjectID(ctx, s.DB.Q(ctx), uuid.Nil, userID)
+	tsid, err := repo.ResolveTenantSubjectID(ctx, s.DB.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return "", err
 	}

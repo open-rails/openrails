@@ -79,7 +79,7 @@ func recordLedgerRepairAlert(ctx context.Context, notificationService *subscript
 	// The alert is owned by the "system" tenant subject sentinel (non-UUID), which
 	// cannot use the pure deterministic parse — resolve/materialize its row (#317).
 	if database != nil {
-		sysTSID, err := repo.EnsureTenantSubjectID(ctx, database.Q(ctx), uuid.Nil, "system")
+		sysTSID, err := repo.EnsureTenantSubjectIDBun(ctx, database.Q(ctx), uuid.Nil, "system")
 		if err != nil {
 			return fmt.Errorf("resolve system tenant subject for ledger repair alert: %w", err)
 		}

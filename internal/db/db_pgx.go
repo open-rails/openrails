@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -35,8 +37,8 @@ func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	if d.pgtx != nil {
 		return d.pgtx
 	}
-	if c, ok := ctx.Value(tenantPgxConnKey{}).(*pgxpool.Conn); ok {
-		return c
+	if lc, ok := ctx.Value(tenantPgxConnKey{}).(*lazyTenantPgxConn); ok {
+		return lc
 	}
 	if d.pool != nil {
 		return d.pool
@@ -65,15 +67,19 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 		// Nested: pgx models nesting as savepoints via tx.Begin.
 		return d.pgtx.Begin(ctx)
 	}
-	var b pgxBeginner
-	if c, ok := ctx.Value(tenantPgxConnKey{}).(*pgxpool.Conn); ok {
-		b = c
-	} else if d.pool != nil {
-		b = d.pool
-	} else {
-		return nil, fmt.Errorf("db: no pgx handle available to begin transaction (issue #334)")
+	if lc, ok := ctx.Value(tenantPgxConnKey{}).(*lazyTenantPgxConn); ok {
+		// Begin on the pinned tenant connection (acquiring it now if this is
+		// the request's first sqlc touch) so the tx inherits the session GUC.
+		conn, err := lc.get(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return conn.Begin(ctx)
 	}
-	return b.Begin(ctx)
+	if d.pool != nil {
+		return d.pool.Begin(ctx)
+	}
+	return nil, fmt.Errorf("db: no pgx handle available to begin transaction (issue #334)")
 }
 
 // RunInTx runs fn inside a pgx transaction (no tenant GUC — for control-plane
@@ -134,6 +140,90 @@ func setTenantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id tenant.ID) error {
 		return fmt.Errorf("db: set %s GUC: %w", TenantGUC, err)
 	}
 	return nil
+}
+
+// lazyTenantPgxConn is the request's pgx-side tenant connection, acquired
+// LAZILY on the first sqlc call site instead of eagerly in WithTenantConn.
+// Eager twin-pinning made every request hold two connections for its whole
+// lifetime, which collapsed under burst (issue #334 status note); lazily,
+// requests that never touch a converted call site — most traffic during the
+// transition — cost zero extra connections.
+//
+// It satisfies gen.DBTX directly: the first Exec/Query/QueryRow (or
+// pgxBegin) acquires a pool connection, sets the app.tenant_id session GUC
+// on it, and pins it until release().
+type lazyTenantPgxConn struct {
+	pool     *pgxpool.Pool
+	tenantID string
+
+	mu   sync.Mutex
+	conn *pgxpool.Conn
+}
+
+// lazyTenantAcquireTimeout bounds the lazy acquisition (same rationale as
+// tenantConnAcquireTimeout: never park forever on a pool when client aborts
+// don't propagate).
+const lazyTenantAcquireTimeout = 4 * time.Second
+
+func (l *lazyTenantPgxConn) get(ctx context.Context) (*pgxpool.Conn, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.conn != nil {
+		return l.conn, nil
+	}
+	acqCtx, cancel := context.WithTimeout(ctx, lazyTenantAcquireTimeout)
+	conn, err := l.pool.Acquire(acqCtx)
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("db: acquire pgx tenant connection: %w", err)
+	}
+	var out string
+	if err := conn.QueryRow(ctx,
+		"SELECT set_config($1, $2, FALSE)", TenantGUC, l.tenantID).Scan(&out); err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("db: set %s on pgx tenant connection: %w", TenantGUC, err)
+	}
+	l.conn = conn
+	return l.conn, nil
+}
+
+// release resets the GUC and returns the connection to the pool (no-op when
+// the request never touched a sqlc call site).
+func (l *lazyTenantPgxConn) release() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.conn == nil {
+		return
+	}
+	// Background context so release works even after request cancellation.
+	_, _ = l.conn.Exec(context.Background(),
+		"SELECT set_config($1, '', FALSE)", TenantGUC)
+	l.conn.Release()
+	l.conn = nil
+}
+
+func (l *lazyTenantPgxConn) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+	conn, err := l.get(ctx)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	return conn.Exec(ctx, sql, args...)
+}
+
+func (l *lazyTenantPgxConn) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	conn, err := l.get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return conn.Query(ctx, sql, args...)
+}
+
+func (l *lazyTenantPgxConn) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	conn, err := l.get(ctx)
+	if err != nil {
+		return errRow{err}
+	}
+	return conn.QueryRow(ctx, sql, args...)
 }
 
 // errDBTX satisfies gen.DBTX but fails every call with a descriptive error.

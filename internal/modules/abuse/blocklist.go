@@ -108,7 +108,7 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjec
 		// Owner-scoped blocks reference a payable tenant subject; materialize its
 		// tenant_subjects row so the payment_blocklist FK (migration 076) holds (#317).
 		if payerTenantID != nil {
-			if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Q(ctx), tenantID, payerTenantID.String()); err != nil {
+			if _, err := repo.EnsureTenantSubjectID(ctx, s.db.Qx(ctx), tenantID, payerTenantID.String()); err != nil {
 				return err
 			}
 		}

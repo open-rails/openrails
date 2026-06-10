@@ -35,7 +35,7 @@ func (c *CheckCompletedPaymentMissingEntitlements) Run(ctx context.Context, db b
 		Where("purch.amount > 0") // Exclude refunds (negative amounts)
 
 	if opts.UserID != "" {
-		tsid, err := repo.ResolveTenantSubjectID(ctx, db, uuid.Nil, opts.UserID)
+		tsid, err := repo.ResolveTenantSubjectIDBun(ctx, db, uuid.Nil, opts.UserID)
 		if err != nil {
 			return nil, err
 		}

@@ -46,7 +46,7 @@ func TestEnsureTenantSubjectID_UUIDReusesExistingPayableID(t *testing.T) {
 			Exec(ctx)
 	})
 
-	resolved, err := EnsureTenantSubjectID(ctx, bunDB, tenantID, userID.String())
+	resolved, err := EnsureTenantSubjectID(ctx, dbtest.SharedPGXPool(t), tenantID, userID.String())
 	require.NoError(t, err)
 	require.Equal(t, userID, resolved)
 

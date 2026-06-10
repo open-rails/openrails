@@ -28,7 +28,7 @@ func adminOperationsPagination(r *httprequest.Request) (int, int) {
 func GetAdminRepairAlerts(r *httprequest.Request) {
 	limit, offset := adminOperationsPagination(r)
 	items := []*models.NotificationQueue{}
-	tsid, err := repo.ResolveTenantSubjectID(r.Request.Context(), r.State.DB.Q(r.Request.Context()), uuid.Nil, "system")
+	tsid, err := repo.ResolveTenantSubjectID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, "system")
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve tenant subject")
 		return
