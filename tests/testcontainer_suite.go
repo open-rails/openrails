@@ -426,6 +426,22 @@ func (suite *TestContainerSuite) initializeServer() {
 		suite.workersErrCh <- suite.App.Runtime.RunWorkers(workersCtx)
 	}()
 
+	// Wait for the River client: tests assume workers are up, and RunWorkers
+	// initialises River asynchronously. (The bun-era double database init was
+	// slow enough to mask this race; the pgx-only boot is faster and loses it.)
+	riverDeadline := time.Now().Add(30 * time.Second)
+	for suite.App.Runtime.RiverClient == nil {
+		select {
+		case werr := <-suite.workersErrCh:
+			suite.workersErrCh <- werr
+			require.NoError(suite.t, werr, "RunWorkers exited before River init")
+			require.Fail(suite.t, "RunWorkers returned before River init")
+		default:
+		}
+		require.True(suite.t, time.Now().Before(riverDeadline), "timed out waiting for River client")
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	// Create HTTP server
 	httpServer := &http.Server{
 		Handler: suite.Server.Handler(),

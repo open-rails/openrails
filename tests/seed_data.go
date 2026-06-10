@@ -383,20 +383,31 @@ func (suite *TestContainerSuite) upsertProduct(ctx context.Context, p *models.Pr
 		p.ID, p.Slug, p.DisplayName, p.Description,
 		suite.mustJSONB(p.EntitlementsSpec, len(p.EntitlementsSpec) == 0),
 		suite.mustJSONB(p.CreditsSpec, len(p.CreditsSpec) == 0),
-		p.TierGroup, p.TierRank, string(p.Status), p.CreatedAt, p.UpdatedAt)
+		p.TierGroup, p.TierRank, catalogStatusOrDefault(p.Status), p.CreatedAt, p.UpdatedAt)
 	require.NoError(suite.t, err, "Failed to seed product %s", p.Slug)
+}
+
+// catalogStatusOrDefault maps a zero-value catalog status to 'active' — bun
+// omitted zero-value status columns so the DB default applied; raw inserts
+// must do it explicitly.
+func catalogStatusOrDefault(s models.CatalogStatus) string {
+	if s == "" {
+		return string(models.CatalogStatusActive)
+	}
+	return string(s)
 }
 
 // insertPriceIfAbsent inserts a price with ON CONFLICT (id) DO NOTHING.
 func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price *models.Price) {
 	suite.t.Helper()
+	status := catalogStatusOrDefault(price.Status)
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO billing.prices (
 			id, product_id, status, amount, currency, billing_cycle_days,
 			processors, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (id) DO NOTHING`,
-		price.ID, price.ProductID, string(price.Status), price.Amount, price.Currency,
+		price.ID, price.ProductID, status, price.Amount, price.Currency,
 		price.BillingCycleDays,
 		suite.mustJSONB(price.Processors, len(price.Processors) == 0),
 		price.CreatedAt, price.UpdatedAt)
