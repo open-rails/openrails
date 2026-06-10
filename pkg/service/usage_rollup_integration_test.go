@@ -3,17 +3,11 @@
 package service_test
 
 import (
-	"database/sql"
 	"testing"
 	"time"
 
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension proves #311:
@@ -24,14 +18,9 @@ import (
 func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	_, cs, payer, ct, ctx := authzEnv(t)
 
-	cleanupDB := bun.NewDB(
-		sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.SharedPostgresDSN(t)))),
-		pgdialect.New(),
-	)
-	models.RegisterModels(cleanupDB)
+	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = cleanupDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
-		_ = cleanupDB.Close()
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	ctType, err := cs.GetCreditTypeByName(ctx, ct)

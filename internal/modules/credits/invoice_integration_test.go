@@ -21,10 +21,10 @@ func findItem(items []models.InvoiceLineItem, eventType string) *models.InvoiceL
 }
 
 func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
-	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
+	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Invoice)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "purchase"})
@@ -69,10 +69,10 @@ func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 }
 
 func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
-	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
+	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Invoice)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE tenant_subject_id = $1", payer.UUID())
 	})
 	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears)})
 	require.NoError(t, err)
@@ -92,10 +92,10 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 }
 
 func TestFinalizeDueInvoices_EnumeratesAccount(t *testing.T) {
-	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
+	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Invoice)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE tenant_subject_id = $1", payer.UUID())
 	})
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 5_000, Source: "seed"})
 	require.NoError(t, err)
@@ -107,9 +107,11 @@ func TestFinalizeDueInvoices_EnumeratesAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, n, 1)
 
-	// This payer's invoice exists with the right usage total (bunDB bypasses RLS).
+	// This payer's invoice exists with the right usage total (pool bypasses RLS).
 	inv := new(models.Invoice)
-	require.NoError(t, bunDB.NewSelect().Model(inv).Where("tenant_subject_id = ?", payer.UUID()).Limit(1).Scan(ctx))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT usage_total, status FROM billing.invoices WHERE tenant_subject_id = $1 LIMIT 1",
+		payer.UUID()).Scan(&inv.UsageTotal, &inv.Status))
 	require.Equal(t, int64(2_000), inv.UsageTotal)
 	require.Equal(t, "finalized", inv.Status)
 }

@@ -4,17 +4,15 @@ package subscriptions
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -28,14 +26,7 @@ import (
 func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
-
 	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -47,7 +38,7 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	periodStart := now
 	paidEnd := now.Add(30 * 24 * time.Hour)
 
-	insertCatalogAndSub(ctx, t, bunDB, now, billingDays, productID, priceID, subID, userID, periodStart, paidEnd)
+	insertCatalogAndSub(ctx, t, dbi, now, billingDays, productID, priceID, subID, userID, periodStart, paidEnd)
 
 	// Linked active solana_subscriptions row, due now so it would be cranked.
 	solRepo := dbrepo.NewSolanaSubscriptionRepo(dbi)
@@ -70,10 +61,10 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	require.NoError(t, solRepo.Upsert(ctx, solRow))
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.SolanaSubscription)(nil)).Where("subscription_id = ?", subID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.solana_subscriptions WHERE subscription_id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// Sanity: ListDue returns it before cancellation.
@@ -106,14 +97,7 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
-
 	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -123,12 +107,12 @@ func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 	priceID := uuid.New()
 	billingDays := 30
 
-	insertCatalogAndSub(ctx, t, bunDB, now, billingDays, productID, priceID, subID, userID, now, now.Add(30*24*time.Hour))
+	insertCatalogAndSub(ctx, t, dbi, now, billingDays, productID, priceID, subID, userID, now, now.Add(30*24*time.Hour))
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	lifecycle := newLifecycleForTest(dbi)
@@ -139,52 +123,59 @@ func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 		RevokeAccess:   true,
 	}), "cancel must succeed even with no enrolled solana row")
 
-	var sub models.Subscription
-	require.NoError(t, bunDB.NewSelect().Model(&sub).Where("id = ?", subID).Scan(ctx))
-	require.Equal(t, models.StatusCancelled, sub.Status)
+	var subStatus string
+	require.NoError(t, dbi.Pool().QueryRow(ctx,
+		"SELECT status FROM billing.subscriptions WHERE id = $1", subID,
+	).Scan(&subStatus))
+	require.Equal(t, string(models.StatusCancelled), subStatus)
 }
 
-func insertCatalogAndSub(ctx context.Context, t *testing.T, bunDB *bun.DB, now time.Time, billingDays int, productID, priceID, subID uuid.UUID, userID string, periodStart, paidEnd time.Time) {
+func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time.Time, billingDays int, productID, priceID, subID uuid.UUID, userID string, periodStart, paidEnd time.Time) {
 	t.Helper()
-	_, err := bunDB.NewInsert().Model(&models.Product{
-		ID:          productID,
-		Slug:        "test_product_" + uuid.NewString(),
-		DisplayName: "Test Product",
-		Description: "Test",
-		EntitlementsSpec: map[string]*int{
-			"premium": nil,
-		},
-		Status:    models.CatalogStatusActive,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}).Exec(ctx)
-	require.NoError(t, err)
+	q := gen.New(dbi.Pool())
 
-	_, err = bunDB.NewInsert().Model(&models.Price{
-		ID:               priceID,
-		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
-		Amount:           999,
-		Currency:         "usd",
-		BillingCycleDays: &billingDays,
+	entSpec, err := json.Marshal(map[string]*int{"premium": nil})
+	require.NoError(t, err)
+	desc := "Test"
+	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
+		ID:               productID,
+		Slug:             "test_product_" + uuid.NewString(),
+		DisplayName:      "Test Product",
+		Description:      &desc,
+		EntitlementsSpec: entSpec,
+		Status:           string(models.CatalogStatusActive),
 		CreatedAt:        now,
 		UpdatedAt:        now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Subscription{
+	cycleDays := int32(billingDays)
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
+		ID:               priceID,
+		ProductID:        productID,
+		Status:           string(models.CatalogStatusActive),
+		Amount:           999,
+		Currency:         "usd",
+		BillingCycleDays: &cycleDays,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	require.NoError(t, err)
+
+	subPriceID := priceID
+	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
-		TenantSubjectID:       dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID),
+		TenantSubjectID:       dbtest.EnsureTenantSubjectIDPgx(ctx, t, dbi.Pool(), userID),
 		ProductID:             productID,
-		PriceID:               priceID,
-		Status:                models.StatusActive,
-		Processor:             models.ProcessorSolana,
+		PriceID:               &subPriceID,
+		Status:                string(models.StatusActive),
+		Processor:             string(models.ProcessorSolana),
 		CurrentPeriodStartsAt: &periodStart,
 		CurrentPeriodEndsAt:   &paidEnd,
 		StartedAt:             now,
 		CreatedAt:             now,
 		UpdatedAt:             now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 }
 

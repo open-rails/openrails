@@ -5,7 +5,6 @@ package credits_test
 import (
 	"testing"
 
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/stretchr/testify/require"
 )
@@ -89,9 +88,9 @@ func TestSpendCredits_Idempotent(t *testing.T) {
 }
 
 func TestRecordUsage_ArrearsDrawsThenAccrues(t *testing.T) {
-	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
+	svc, pool, payer, ct, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears)})
 	require.NoError(t, err)

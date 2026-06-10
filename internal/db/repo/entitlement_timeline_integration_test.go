@@ -4,40 +4,30 @@ package repo
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/tenant"
-	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
+	pool := dbtest.SharedPGXPool(t)
 
-	dbi, err := db.NewWithPGXPool(dbtest.SharedPGXPool(t))
+	dbi, err := db.NewWithPGXPool(pool)
 	require.NoError(t, err)
 
 	r := NewEntitlementRepo(dbi)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	entName := "premium_timeline_test_" + uuid.New().String()
 	subID := uuid.New()
 	adminGrantID := uuid.New()
@@ -75,47 +65,38 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 	require.NoError(t, r.Insert(ctx, adminEnt))
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().
-			Model((*models.Entitlement)(nil)).
-			Where("tenant_subject_id = ? AND entitlement = ?", tenantSubjectID, entName).
-			Exec(ctx)
+		_, _ = pool.Exec(ctx,
+			`DELETE FROM billing.entitlements WHERE tenant_subject_id = $1 AND entitlement = $2`,
+			tenantSubjectID, entName)
 	})
 
 	// Extend subscription window to t1+5d and expect the admin window to shift by +5d.
 	newEnd := t1.Add(5 * 24 * time.Hour)
 	require.NoError(t, r.ExtendActiveBySubscription(ctx, subID, newEnd, now))
 
-	var gotAdmin models.Entitlement
-	require.NoError(t, bunDB.NewSelect().
-		Model(&gotAdmin).
-		Where("id = ?", adminEnt.ID).
-		Limit(1).
-		Scan(ctx))
+	var gotStartAt time.Time
+	var gotEndAt *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT start_at, end_at FROM billing.entitlements WHERE id = $1`, adminEnt.ID,
+	).Scan(&gotStartAt, &gotEndAt))
 
-	require.Equal(t, t1.Add(5*24*time.Hour), gotAdmin.StartAt.UTC())
-	require.NotNil(t, gotAdmin.EndAt)
-	require.Equal(t, t2.Add(5*24*time.Hour), gotAdmin.EndAt.UTC())
+	require.Equal(t, t1.Add(5*24*time.Hour), gotStartAt.UTC())
+	require.NotNil(t, gotEndAt)
+	require.Equal(t, t2.Add(5*24*time.Hour), gotEndAt.UTC())
 }
 
 func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
+	pool := dbtest.SharedPGXPool(t)
 
-	dbi, err := db.NewWithPGXPool(dbtest.SharedPGXPool(t))
+	dbi, err := db.NewWithPGXPool(pool)
 	require.NoError(t, err)
 
 	r := NewEntitlementRepo(dbi)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	entName := "premium_payment_revoke_" + uuid.New().String()
 	paymentID := uuid.New()
 
@@ -152,28 +133,25 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 	reason := models.EntitlementRevokeRefund
 	require.NoError(t, r.EndActiveByPayment(ctx, paymentID, now, now, &reason))
 
-	var gotActive models.Entitlement
-	require.NoError(t, bunDB.NewSelect().
-		Model(&gotActive).
-		Where("id = ?", active.ID).
-		Limit(1).
-		Scan(ctx))
-	require.NotNil(t, gotActive.EndAt)
-	require.Equal(t, now, gotActive.EndAt.UTC())
-	require.NotNil(t, gotActive.RevokedAt)
-	require.Equal(t, now, gotActive.RevokedAt.UTC())
-	require.NotNil(t, gotActive.RevokeReason)
-	require.Equal(t, reason, *gotActive.RevokeReason)
+	var gotEndAt, gotRevokedAt *time.Time
+	var gotRevokeReason *string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT end_at, revoked_at, revoke_reason FROM billing.entitlements WHERE id = $1`, active.ID,
+	).Scan(&gotEndAt, &gotRevokedAt, &gotRevokeReason))
+	require.NotNil(t, gotEndAt)
+	require.Equal(t, now, gotEndAt.UTC())
+	require.NotNil(t, gotRevokedAt)
+	require.Equal(t, now, gotRevokedAt.UTC())
+	require.NotNil(t, gotRevokeReason)
+	require.Equal(t, reason, models.EntitlementRevokeReason(*gotRevokeReason))
 
-	var gotFuture models.Entitlement
-	require.NoError(t, bunDB.NewSelect().
-		Model(&gotFuture).
-		Where("id = ?", future.ID).
-		WhereAllWithDeleted().
-		Limit(1).
-		Scan(ctx))
-	require.NotNil(t, gotFuture.DeletedAt)
-	require.Equal(t, now, gotFuture.DeletedAt.UTC())
+	// The future window is soft-deleted; query it without the deleted_at filter.
+	var gotDeletedAt *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT deleted_at FROM billing.entitlements WHERE id = $1`, future.ID,
+	).Scan(&gotDeletedAt))
+	require.NotNil(t, gotDeletedAt)
+	require.Equal(t, now, gotDeletedAt.UTC())
 
 	ok, err := r.IsEntitled(ctx, userID, entName, now.Add(time.Second))
 	require.NoError(t, err)
@@ -181,17 +159,10 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 }
 
 func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
-	dsn := dbtest.SharedPostgresDSN(t)
-
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
+	pool := dbtest.SharedPGXPool(t)
 
-	dbi, err := db.NewWithPGXPool(dbtest.SharedPGXPool(t))
+	dbi, err := db.NewWithPGXPool(pool)
 	require.NoError(t, err)
 
 	r := NewEntitlementRepo(dbi)
@@ -203,13 +174,13 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 	finiteSourceID := uuid.New()
 	indefiniteSourceID := uuid.New()
 
-	_, err = bunDB.NewRaw(
-		`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject) VALUES (?, ?, ?, ?)`,
+	_, err = pool.Exec(ctx,
+		`INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject) VALUES ($1, $2, $3, $4)`,
 		tenantSubjectID,
 		tenant.FromContextOrDefault(ctx).UUID(),
 		"https://issuer.example",
 		"subject-"+tenantSubjectID.String(),
-	).Exec(ctx)
+	)
 	require.NoError(t, err)
 
 	finiteStart := now.Add(-24 * time.Hour)
@@ -241,10 +212,9 @@ func TestEntitlementRepo_TenantSubjectQueries(t *testing.T) {
 	require.NoError(t, r.Insert(ctx, indefinite))
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().
-			Model((*models.Entitlement)(nil)).
-			Where("tenant_subject_id = ? AND entitlement IN (?)", tenantSubjectID, bun.In([]string{entName, indefiniteName})).
-			Exec(ctx)
+		_, _ = pool.Exec(ctx,
+			`DELETE FROM billing.entitlements WHERE tenant_subject_id = $1 AND entitlement = ANY($2)`,
+			tenantSubjectID, []string{entName, indefiniteName})
 	})
 
 	ok, err := r.IsTenantSubjectEntitled(ctx, tenantSubjectID, entName, now)

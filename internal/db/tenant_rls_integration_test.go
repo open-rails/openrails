@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for the migration bootstrap
 	"github.com/open-rails/migratekit"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -37,11 +38,12 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 	}
 	if dsn != "" {
 		superDSN = dsn
-		sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(superDSN)))
+		sqlDB, err := sql.Open("pgx", superDSN)
+		require.NoError(t, err)
 		t.Cleanup(func() { _ = sqlDB.Close() })
 		require.NoError(t, sqlDB.PingContext(ctx))
 
-		_, err := sqlDB.ExecContext(ctx, `
+		_, err = sqlDB.ExecContext(ctx, `
 			CREATE SCHEMA IF NOT EXISTS billing;
 			CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 			CREATE EXTENSION IF NOT EXISTS btree_gist;
@@ -76,7 +78,8 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 	superDSN, err = container.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(superDSN)))
+	sqlDB, err := sql.Open("pgx", superDSN)
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, sqlDB.PingContext(ctx))
 

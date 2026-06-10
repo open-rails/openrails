@@ -4,55 +4,46 @@ package budgets_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // budgetEnv spins up the budget engine over the shared migrated Postgres with an
 // injectable fake clock and a fresh payer+actor, and returns a cleanup-scoped
 // context. State is scoped by the freshly generated payer id.
-func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, *bun.DB, identity.TenantSubjectID, string, context.Context) {
+func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, identity.TenantSubjectID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
+
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 
 	var hasTable bool
-	require.NoError(t, bunDB.NewSelect().
-		ColumnExpr("EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='budget_reservations')").
-		Scan(ctx, &hasTable))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='budget_reservations')",
+	).Scan(&hasTable))
 	if !hasTable {
 		t.Skip("billing.budget_reservations missing; run migration 068")
 	}
-
-	dbi := dbtest.OpenAppDB(t, dsn)
 
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	actor := "actor_" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.BudgetReservation)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.budget_reservations WHERE tenant_subject_id = $1", payerID)
 	})
 
 	// Fixed wall clock so window math is deterministic; advance it to age rows out.
 	clk := clockwork.NewFakeClockAt(time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC))
-	return budgets.NewService(dbi, clk), clk, bunDB, payer, actor, ctx
+	return budgets.NewService(dbi, clk), clk, payer, actor, ctx
 }
 
 // windows returns a "$2 per 4h, $5 per week" budget in millicents.
@@ -65,7 +56,7 @@ func windows() []budgets.BudgetWindow {
 }
 
 func TestReserve_WithinBudget_Allowed(t *testing.T) {
-	svc, _, _, payer, actor, ctx := budgetEnv(t)
+	svc, _, payer, actor, ctx := budgetEnv(t)
 
 	id, statuses, allowed, err := svc.Reserve(ctx, payer, actor, windows(), 100_000, "gen", "req-1", time.Hour)
 	require.NoError(t, err)
@@ -78,7 +69,7 @@ func TestReserve_WithinBudget_Allowed(t *testing.T) {
 }
 
 func TestReserve_OverWindowLimit_Denied(t *testing.T) {
-	svc, _, _, payer, actor, ctx := budgetEnv(t)
+	svc, _, payer, actor, ctx := budgetEnv(t)
 
 	// $3 request exceeds the $2 / 4h window even though it fits the $5 / week.
 	id, statuses, allowed, err := svc.Reserve(ctx, payer, actor, windows(), 300_000, "gen", "req-big", time.Hour)
@@ -98,7 +89,7 @@ func TestReserve_OverWindowLimit_Denied(t *testing.T) {
 }
 
 func TestCapture_ConsumesUsed(t *testing.T) {
-	svc, _, _, payer, actor, ctx := budgetEnv(t)
+	svc, _, payer, actor, ctx := budgetEnv(t)
 
 	id, _, allowed, err := svc.Reserve(ctx, payer, actor, windows(), 100_000, "gen", "req-cap", time.Hour)
 	require.NoError(t, err)
@@ -115,7 +106,7 @@ func TestCapture_ConsumesUsed(t *testing.T) {
 }
 
 func TestRelease_FreesReserved(t *testing.T) {
-	svc, _, _, payer, actor, ctx := budgetEnv(t)
+	svc, _, payer, actor, ctx := budgetEnv(t)
 
 	id, _, allowed, err := svc.Reserve(ctx, payer, actor, windows(), 150_000, "gen", "req-rel", time.Hour)
 	require.NoError(t, err)
@@ -137,7 +128,7 @@ func TestRelease_FreesReserved(t *testing.T) {
 }
 
 func TestReserve_RollsOutOfWindow(t *testing.T) {
-	svc, clk, _, payer, actor, ctx := budgetEnv(t)
+	svc, clk, payer, actor, ctx := budgetEnv(t)
 
 	// Capture the full $2 / 4h budget.
 	id, _, allowed, err := svc.Reserve(ctx, payer, actor, windows(), 200_000, "gen", "req-roll", time.Hour)
@@ -164,7 +155,7 @@ func TestReserve_RollsOutOfWindow(t *testing.T) {
 }
 
 func TestReserve_Idempotent(t *testing.T) {
-	svc, _, _, payer, actor, ctx := budgetEnv(t)
+	svc, _, payer, actor, ctx := budgetEnv(t)
 
 	id1, _, allowed1, err := svc.Reserve(ctx, payer, actor, windows(), 100_000, "gen", "req-idem", time.Hour)
 	require.NoError(t, err)

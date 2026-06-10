@@ -4,18 +4,15 @@ package webhooks
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // TestStripeInvoicePaymentAlreadyRecorded covers the Bug 2 cross-key dedup: the
@@ -28,49 +25,47 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := context.Background()
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
-	require.NoError(t, bunDB.PingContext(ctx))
-
 	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+	q := gen.New(pool)
 
 	now := time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
 	userID := uuid.New().String()
-	tenantSubjectID := dbtest.EnsureTenantSubjectID(ctx, t, bunDB, userID)
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 	productID := uuid.New()
 	priceID := uuid.New()
-	billingDays := 30
+	billingDays := int32(30)
 
-	_, err := bunDB.NewInsert().Model(&models.Product{
+	entitlementsSpecJSON := []byte(`{"premium":null}`)
+	description := "Test"
+	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:               productID,
 		Slug:             "dedup_product_" + uuid.New().String(),
 		DisplayName:      "Dedup Product",
-		Description:      "Test",
-		EntitlementsSpec: map[string]*int{"premium": nil},
-		Status:           models.CatalogStatusActive,
+		Description:      &description,
+		EntitlementsSpec: entitlementsSpecJSON,
+		Status:           string(models.CatalogStatusActive),
 		CreatedAt:        now,
 		UpdatedAt:        now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
-	_, err = bunDB.NewInsert().Model(&models.Price{
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:               priceID,
 		ProductID:        productID,
-		Status:           models.CatalogStatusActive,
 		Amount:           2900,
 		Currency:         "usd",
+		Status:           string(models.CatalogStatusActive),
 		BillingCycleDays: &billingDays,
 		CreatedAt:        now,
 		UpdatedAt:        now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	paymentSvc := payments.NewPaymentService(dbi)

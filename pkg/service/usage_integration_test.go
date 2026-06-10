@@ -3,19 +3,13 @@
 package service_test
 
 import (
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // TestGetUsage_Breakdown proves the facade method backing GET /v1/self/usage
@@ -26,16 +20,11 @@ import (
 func TestGetUsage_Breakdown(t *testing.T) {
 	svc, cs, payer, ct, ctx := authzEnv(t)
 
-	// Separate connection used only to clean up the usage_events rows this test
+	// Separate pool used only to clean up the usage_events rows this test
 	// writes, scoped by payer.
-	cleanupDB := bun.NewDB(
-		sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.SharedPostgresDSN(t)))),
-		pgdialect.New(),
-	)
-	models.RegisterModels(cleanupDB)
+	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = cleanupDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
-		_ = cleanupDB.Close()
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
@@ -91,14 +80,9 @@ func TestGetUsage_Breakdown(t *testing.T) {
 func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 	svc, cs, payer, ct, ctx := authzEnv(t)
 
-	cleanupDB := bun.NewDB(
-		sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.SharedPostgresDSN(t)))),
-		pgdialect.New(),
-	)
-	models.RegisterModels(cleanupDB)
+	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = cleanupDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
-		_ = cleanupDB.Close()
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
@@ -151,28 +135,25 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(4_000), account.BalanceMicros, "three captures debit exactly their captured amounts")
 
-	usageEventCount, err := cleanupDB.NewSelect().
-		Model((*models.UsageEvent)(nil)).
-		Where("tenant_subject_id = ?", payer.UUID()).
-		Where("event_type = ?", "endpoint.capture").
-		Count(ctx)
-	require.NoError(t, err)
+	var usageEventCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT count(*) FROM billing.usage_events WHERE tenant_subject_id = $1 AND event_type = $2",
+		payer.UUID(), "endpoint.capture",
+	).Scan(&usageEventCount))
 	require.Equal(t, 2, usageEventCount, "duplicate usage source_id is idempotent")
 
-	captureCount, err := cleanupDB.NewSelect().
-		Model((*models.CreditTransaction)(nil)).
-		Where("tenant_subject_id = ?", payer.UUID()).
-		Where("transaction_type = ?", "hold").
-		Where("status = ?", "captured").
-		Count(ctx)
-	require.NoError(t, err)
+	var captureCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT count(*) FROM billing.credit_transactions WHERE tenant_subject_id = $1 AND transaction_type = $2 AND status = $3",
+		payer.UUID(), "hold", "captured",
+	).Scan(&captureCount))
 	require.Equal(t, 3, captureCount)
 
-	ledgerCount, err := cleanupDB.NewSelect().
-		Model((*models.CreditTransaction)(nil)).
-		Where("tenant_subject_id = ?", payer.UUID()).
-		Count(ctx)
-	require.NoError(t, err)
+	var ledgerCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT count(*) FROM billing.credit_transactions WHERE tenant_subject_id = $1",
+		payer.UUID(),
+	).Scan(&ledgerCount))
 	require.Equal(t, 4, ledgerCount, "usage analytics must not create extra ledger debits")
 
 	assertRollup := func(groupBy string, want map[string]int64) {

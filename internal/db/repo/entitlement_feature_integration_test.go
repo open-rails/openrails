@@ -4,27 +4,24 @@ package repo
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
+
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/tenant"
-	"github.com/stretchr/testify/require"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // startFeatureRLSPostgres boots Postgres, applies all billing migrations
 // (including 050 RLS + the openrails_app role, and 062 which puts FORCE RLS on the
 // entitlement-feature tables), and returns a *db.DB connected AS the unprivileged
 // openrails_app role — the only role for which RLS actually enforces. Driving the
-// feature repo through this DB + RunInTenantTx exercises the SAME tenant-scoping
+// feature repo through this DB + TenantTx exercises the SAME tenant-scoping
 // chokepoint as production (GUC pinned per tx) on real tables.
 func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 	t.Helper()
@@ -34,11 +31,6 @@ func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 	// RLS on the feature tables). The app DSN connects as the unprivileged
 	// openrails_app role — the only role for which RLS actually enforces.
 	_, appDSN := dbtest.SharedRLSPostgres(t)
-	appSQL := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(appDSN)))
-	t.Cleanup(func() { _ = appSQL.Close() })
-	bunDB := bun.NewDB(appSQL, pgdialect.New())
-	models.RegisterModels(bunDB)
-	require.NoError(t, bunDB.PingContext(ctx))
 
 	pool, err := pgxpool.New(ctx, appDSN)
 	require.NoError(t, err)
@@ -52,17 +44,17 @@ func startFeatureRLSPostgres(t *testing.T) (appDB *db.DB, ctx context.Context) {
 // RLS, but here we run everything as the app role inside the correct tenant tx).
 func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid tenant.ID, productID uuid.UUID, slug string) {
 	t.Helper()
-	require.NoError(t, appDB.RunInTenantTx(tenant.WithID(ctx, tid), func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.NewRaw(
-			`INSERT INTO billing.tenants (id, slug, name, status) VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING`,
-			tid.UUID(), "t-"+tid.String()[:8], "t-"+tid.String()[:8],
-		).Exec(ctx); err != nil {
+	require.NoError(t, appDB.TenantTx(tenant.WithID(ctx, tid), func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO billing.tenants (id, slug, name, status) VALUES ($1, $2, $2, 'active') ON CONFLICT (id) DO NOTHING`,
+			tid.UUID(), "t-"+tid.String()[:8],
+		); err != nil {
 			return err
 		}
-		_, err := tx.NewRaw(
-			`INSERT INTO billing.products (id, tenant_id, slug, display_name) VALUES (?, ?, ?, ?)`,
-			productID, tid.UUID(), slug, slug,
-		).Exec(ctx)
+		_, err := tx.Exec(ctx,
+			`INSERT INTO billing.products (id, tenant_id, slug, display_name) VALUES ($1, $2, $3, $3)`,
+			productID, tid.UUID(), slug,
+		)
 		return err
 	}))
 }

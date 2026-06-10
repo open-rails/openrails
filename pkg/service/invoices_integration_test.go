@@ -3,17 +3,11 @@
 package service_test
 
 import (
-	"database/sql"
 	"testing"
 	"time"
 
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // TestListInvoices_Statement proves the facade methods backing
@@ -25,18 +19,13 @@ import (
 func TestListInvoices_Statement(t *testing.T) {
 	svc, cs, payer, ct, ctx := authzEnv(t)
 
-	// Separate connection (bypasses RLS) used only to clean up the usage_events
-	// and invoices rows this test writes, scoped by payer. authzEnv cleans up the
-	// ledger/balance rows but not these.
-	cleanupDB := bun.NewDB(
-		sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.SharedPostgresDSN(t)))),
-		pgdialect.New(),
-	)
-	models.RegisterModels(cleanupDB)
+	// Separate pool used only to clean up the usage_events and invoices rows
+	// this test writes, scoped by payer. authzEnv cleans up the ledger/balance
+	// rows but not these.
+	pool := testPool(t)
 	t.Cleanup(func() {
-		_, _ = cleanupDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
-		_, _ = cleanupDB.NewDelete().Model((*models.Invoice)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
-		_ = cleanupDB.Close()
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE tenant_subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE tenant_subject_id = $1", payer.UUID())
 	})
 
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{

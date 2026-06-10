@@ -4,51 +4,44 @@ package credits_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // spendTestEnv connects to the integration DB, verifies the #237 schema, and
 // seeds a fresh credit type + payer. It returns the service, the tenant subject, the
 // credit-type name, and a cleanup-registered context.
-func spendTestEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.TenantSubjectID, string, context.Context) {
+func spendTestEnv(t *testing.T) (*credits.CreditsService, *pgxpool.Pool, identity.TenantSubjectID, string, context.Context) {
 	t.Helper()
 	dsn := dbtest.SharedPostgresDSN(t)
-	sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	bunDB := bun.NewDB(sqlDB, pgdialect.New())
-	models.RegisterModels(bunDB)
 	ctx := context.Background()
-	require.NoError(t, bunDB.PingContext(ctx))
+
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
 
 	var hasSettings bool
-	require.NoError(t, bunDB.NewSelect().
-		ColumnExpr("EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_account_settings')").
-		Scan(ctx, &hasSettings))
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_account_settings')").
+		Scan(&hasSettings))
 	if !hasSettings {
 		t.Skip("billing.credit_account_settings missing; run migration 043 before integration tests")
 	}
 
-	dbi := dbtest.OpenAppDB(t, dsn)
-
 	now := time.Now().UTC().Truncate(time.Second)
 	ctName := "test_spend_" + uuid.NewString()
 	ctID := uuid.New()
-	_, err := bunDB.NewInsert().Model(&models.CreditType{
+	_, err := gen.New(pool).CreateCreditType(ctx, gen.CreateCreditTypeParams{
 		ID: ctID, Name: ctName, DisplayName: "Spend Policy Test", Unit: "cents",
 		DecimalPlaces: 2, IsActive: true, CreatedAt: now,
-	}).Exec(ctx)
+	})
 	require.NoError(t, err)
 
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
@@ -56,12 +49,12 @@ func spendTestEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.Tena
 	payerID := payer.UUID()
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditSpendLimit)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_spend_limits WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_account_settings WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_blocks WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_transactions WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_balances WHERE tenant_subject_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.credit_types WHERE id = $1", ctID)
 	})
 
 	svc := credits.NewCreditsService(dbi)
@@ -70,7 +63,7 @@ func spendTestEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.Tena
 		TenantSubjectID: &payer, Actor: payerID.String(), CreditType: ctName, Amount: 1_000_000, Source: "test_seed",
 	})
 	require.NoError(t, err)
-	return svc, bunDB, payer, ctName, ctx
+	return svc, pool, payer, ctName, ctx
 }
 
 func TestSpendPolicy_DefaultsAllow(t *testing.T) {
