@@ -170,7 +170,7 @@ func TestAdmit_EndpointGating(t *testing.T) {
 		Resource: "gpt-4o", Amounts: map[string]int64{"request": 1}, CreditType: ct})
 	require.NoError(t, err)
 	require.False(t, d.Allowed)
-	require.Equal(t, "endpoint", d.BlockedBy)
+	require.Equal(t, "resource", d.BlockedBy) // deny axis renamed endpoint->resource (#332)
 
 	d, err = adm.Admit(ctx, admission.AdmitRequest{TenantSubjectID: payer, Actor: "user:a", Tier: "free",
 		Resource: "dall-e-3", Amounts: map[string]int64{"request": 1}, CreditType: ct})
@@ -187,15 +187,16 @@ func TestAdmit_BudgetDeny(t *testing.T) {
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed"})
 	require.NoError(t, err)
 
-	// First request reserves 400 of the 500/hour budget -> allowed.
+	// Budgets are millicents; estimates are ledger micros (1 millicent = 10 micros).
+	// First request: 4000 micros reserves 400 of the 500-millicent/hour budget -> allowed.
 	d, err := adm.Admit(ctx, admission.AdmitRequest{TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 400, Source: "usage", SourceID: "b1", ExpiresAt: time.Now().Add(time.Hour)})
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 4000, Source: "usage", SourceID: "b1", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
 
-	// Second request (200) would push the window to 600 > 500 -> budget deny.
+	// Second request (2000 micros = 200 millicents) pushes the window to 600 > 500 -> budget deny.
 	d, err = adm.Admit(ctx, admission.AdmitRequest{TenantSubjectID: payer, Actor: "user:a", Tier: "free", Resource: "gpt-4o",
-		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 200, Source: "usage", SourceID: "b2", ExpiresAt: time.Now().Add(time.Hour)})
+		Amounts: map[string]int64{"request": 1}, CreditType: ct, EstimateMicros: 2000, Source: "usage", SourceID: "b2", ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.False(t, d.Allowed)
 	require.Equal(t, "budget", d.BlockedBy)
