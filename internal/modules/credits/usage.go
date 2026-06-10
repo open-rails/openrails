@@ -83,7 +83,7 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	defer func() { _ = tx.Rollback() }()
 
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	now := s.now()
 
 	// Serialize per (tenant, payer, credit_type) so the idempotency check below
@@ -94,7 +94,7 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 
 	existing := new(models.UsageEvent)
 	err = tx.NewSelect().Model(existing).
-		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, ownerID).
+		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
 		Where("event_type = ?", params.EventType).
 		Where("source = ? AND source_id = ?", params.Source, params.SourceID).
 		Limit(1).
@@ -130,7 +130,7 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	ev := &models.UsageEvent{
 		ID:                  uuidutil.NewV7(),
 		TenantID:            tenantID,
-		TenantSubjectID:     ownerID,
+		TenantSubjectID:     payerID,
 		Actor:               params.Actor,
 		CreditTypeID:        ct.ID,
 		EventType:           params.EventType,
@@ -174,7 +174,7 @@ func (s *CreditsService) AggregateUsage(ctx context.Context, payer identity.Tena
 		return nil, fmt.Errorf("payer required")
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 
 	type totalRow struct {
 		EventType   string `bun:"event_type"`
@@ -196,7 +196,7 @@ func (s *CreditsService) AggregateUsage(ctx context.Context, payer identity.Tena
 			ColumnExpr("COALESCE(SUM(amount), 0) AS total_amount").
 			ColumnExpr("COUNT(*) AS event_count").
 			Where("tenant_id = ?", tenantID).
-			Where("tenant_subject_id = ?", ownerID).
+			Where("tenant_subject_id = ?", payerID).
 			Where("occurred_at >= ? AND occurred_at < ?", from.UTC(), to.UTC()).
 			GroupExpr("event_type").
 			Scan(ctx, &totals); err != nil {
@@ -219,7 +219,7 @@ func (s *CreditsService) AggregateUsage(ctx context.Context, payer identity.Tena
 			ColumnExpr("COALESCE(SUM((d.value)::bigint), 0) AS total").
 			Join("CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d").
 			Where("ue.tenant_id = ?", tenantID).
-			Where("ue.tenant_subject_id = ?", ownerID).
+			Where("ue.tenant_subject_id = ?", payerID).
 			Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from.UTC(), to.UTC()).
 			GroupExpr("ue.event_type, d.key").
 			Scan(ctx, &dims); err != nil {

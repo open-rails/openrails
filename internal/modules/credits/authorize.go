@@ -97,7 +97,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		}
 
 		tenantID := tenant.FromContextOrDefault(ctx).UUID()
-		ownerID := in.Payer.UUID()
+		payerID := in.Payer.UUID()
 		now := s.now()
 
 		// Idempotency: an existing hold for these coordinates short-circuits — return
@@ -106,7 +106,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		existing := new(models.CreditTransaction)
 		ierr := tx.NewSelect().Model(existing).
 			Where("transaction_type = 'hold'").
-			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, ownerID).
+			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
 			Where("credit_type_id = ?", ct.ID).
 			Where("source = ? AND source_id = ?", in.Source, in.SourceID).
 			Limit(1).Scan(ctx)
@@ -173,7 +173,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
 			Set("held_balance = ?", bal.HeldBalance+amount).
 			Set("updated_at = ?", now).
-			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 			Exec(ctx); err != nil {
 			return err
 		}
@@ -184,7 +184,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 		hold := &models.CreditTransaction{
 			ID:              uuidutil.NewV7(),
 			TenantID:        tenantID,
-			TenantSubjectID: ownerID,
+			TenantSubjectID: payerID,
 			Actor:           strings.TrimSpace(in.Actor),
 			CreditTypeID:    ct.ID,
 			Amount:          0,

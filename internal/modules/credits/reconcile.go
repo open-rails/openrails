@@ -163,15 +163,15 @@ func (s *CreditsService) RepairHeldBalance(ctx context.Context, payer identity.T
 		return 0, err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
-	computed, err := s.activeHoldsTotal(ctx, tenantID, ownerID, ct.ID)
+	payerID := payer.UUID()
+	computed, err := s.activeHoldsTotal(ctx, tenantID, payerID, ct.ID)
 	if err != nil {
 		return 0, err
 	}
 	_, err = s.db.Q(ctx).NewUpdate().Model((*models.CreditBalance)(nil)).
 		Set("held_balance = ?", computed).
 		Set("updated_at = ?", s.now()).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Exec(ctx)
 	if err != nil {
 		return 0, err

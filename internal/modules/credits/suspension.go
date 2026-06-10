@@ -40,7 +40,7 @@ func (s *CreditsService) SetPaymentMethodVerified(ctx context.Context, payer ide
 		return err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	now := s.now()
 
 	tx, err := s.db.BeginTenantTx(ctx)
@@ -49,7 +49,7 @@ func (s *CreditsService) SetPaymentMethodVerified(ctx context.Context, payer ide
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, ownerID, ct.ID, BillingModePrepaid, now); err != nil {
+	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, payerID, ct.ID, BillingModePrepaid, now); err != nil {
 		return err
 	}
 
@@ -62,7 +62,7 @@ func (s *CreditsService) SetPaymentMethodVerified(ctx context.Context, payer ide
 		upd = upd.Set("verified_at = NULL")
 	}
 	if _, err := upd.
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Exec(ctx); err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func (s *CreditsService) Suspend(ctx context.Context, payer identity.TenantSubje
 		return err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	now := s.now()
 	reason = strings.TrimSpace(reason)
 
@@ -91,7 +91,7 @@ func (s *CreditsService) Suspend(ctx context.Context, payer identity.TenantSubje
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, ownerID, ct.ID, BillingModePrepaid, now); err != nil {
+	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, payerID, ct.ID, BillingModePrepaid, now); err != nil {
 		return err
 	}
 
@@ -104,7 +104,7 @@ func (s *CreditsService) Suspend(ctx context.Context, payer identity.TenantSubje
 		upd = upd.Set("suspend_reason = NULL")
 	}
 	if _, err := upd.
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Exec(ctx); err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func (s *CreditsService) Resume(ctx context.Context, payer identity.TenantSubjec
 		return err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	now := s.now()
 
 	tx, err := s.db.BeginTenantTx(ctx)
@@ -131,7 +131,7 @@ func (s *CreditsService) Resume(ctx context.Context, payer identity.TenantSubjec
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, ownerID, ct.ID, BillingModePrepaid, now); err != nil {
+	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, payerID, ct.ID, BillingModePrepaid, now); err != nil {
 		return err
 	}
 
@@ -139,7 +139,7 @@ func (s *CreditsService) Resume(ctx context.Context, payer identity.TenantSubjec
 		Set("suspended_at = NULL").
 		Set("suspend_reason = NULL").
 		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Exec(ctx); err != nil {
 		return err
 	}

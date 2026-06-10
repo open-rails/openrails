@@ -55,21 +55,21 @@ func spendTestEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.Tena
 
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
 	require.False(t, payer.IsZero())
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditSpendLimit)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditSpendLimit)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
 	})
 
 	svc := credits.NewCreditsService(dbi)
 	// Fund the payer generously so balance is never the binding constraint here.
 	_, err = svc.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, Actor: ownerID.String(), CreditType: ctName, Amount: 1_000_000, Source: "test_seed",
+		TenantSubjectID: &payer, Actor: payerID.String(), CreditType: ctName, Amount: 1_000_000, Source: "test_seed",
 	})
 	require.NoError(t, err)
 	return svc, bunDB, payer, ctName, ctx

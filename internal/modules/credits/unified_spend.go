@@ -108,7 +108,7 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 	}
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 
 	bal, err := s.lockBalance(ctx, tx, payer, userID, ct.ID)
 	if err != nil {
@@ -128,7 +128,7 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 	if fromOwed > 0 {
 		settings := new(models.CreditAccountSettings)
 		serr := tx.NewSelect().Model(settings).
-			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 			For("UPDATE").
 			Scan(ctx)
 		if errors.Is(serr, sql.ErrNoRows) {
@@ -154,7 +154,7 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 		newBal := bal.Balance - fromBalance
 		neg := -fromBalance
 		trx := &models.CreditTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, Actor: userID,
+			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Actor: userID,
 			CreditTypeID: ct.ID, Amount: neg, BalanceAfter: &newBal,
 			TransactionType: "withdrawal", Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
@@ -169,12 +169,12 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 		if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
 			Set("outstanding_owed_micros = outstanding_owed_micros + ?", fromOwed).
 			Set("updated_at = ?", now).
-			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 			Exec(ctx); err != nil {
 			return nil, nil, err
 		}
 		trx := &models.CreditTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, Actor: userID,
+			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Actor: userID,
 			CreditTypeID: ct.ID, Amount: fromOwed, TransactionType: txOwedAccrual, Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
 		}
@@ -204,7 +204,7 @@ func nullStr(s string) *string {
 func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, payer identity.TenantSubjectID, userID string, creditTypeID uuid.UUID, amount, availableAfter int64) (int64, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	if availableAfter < 0 {
 		availableAfter = 0
 	}
@@ -224,7 +224,7 @@ func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, payer i
 	} else {
 		b := new(models.CreditBalance)
 		if err := tx.NewSelect().Model(b).
-			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
 			Limit(1).Scan(ctx); err != nil {
 			return 0, err
 		}
@@ -233,13 +233,13 @@ func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, payer i
 
 	if fromOwed > 0 {
 		// Only reachable for an arrears credit line (a prepaid hold reserves balance).
-		if err := s.ensureSettingsRowTx(ctx, tx, tenantID, ownerID, creditTypeID, BillingModeArrears, now); err != nil {
+		if err := s.ensureSettingsRowTx(ctx, tx, tenantID, payerID, creditTypeID, BillingModeArrears, now); err != nil {
 			return 0, err
 		}
 		if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
 			Set("outstanding_owed_micros = outstanding_owed_micros + ?", fromOwed).
 			Set("updated_at = ?", now).
-			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
 			Exec(ctx); err != nil {
 			return 0, err
 		}

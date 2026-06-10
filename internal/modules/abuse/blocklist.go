@@ -64,7 +64,7 @@ func NewBlocklistService(database *db.DB) *BlocklistService {
 	return &BlocklistService{db: database}
 }
 
-// Add records a block for (kind, value). When owner is nil (or zero) the block
+// Add records a block for (kind, value). When the payer subject is nil (or zero) the block
 // is tenant-wide (applies to every tenant subject in the tenant); when set the block
 // is scoped to that tenant subject. reason is an optional free-form note.
 //
@@ -147,8 +147,8 @@ func (s *BlocklistService) Remove(ctx context.Context, kind, value string) error
 }
 
 // IsBlocked reports whether (kind, value) is blocked in the request tenant. It
-// returns true if a matching TENANT-WIDE row (owner_id IS NULL) OR ANY
-// owner-scoped row exists for that (kind, value).
+// returns true if a matching TENANT-WIDE row (tenant_subject_id IS NULL) OR ANY
+// subject-scoped row exists for that (kind, value).
 func (s *BlocklistService) IsBlocked(ctx context.Context, kind, value string) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fmt.Errorf("blocklist service not initialized")

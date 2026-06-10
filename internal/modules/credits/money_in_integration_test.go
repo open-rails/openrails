@@ -52,13 +52,13 @@ func moneyInEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.Tenant
 	require.NoError(t, err)
 
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.CreditSpendLimit)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditSpendLimit)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
 	})
 	return credits.NewCreditsService(dbi), bunDB, payer, ctName, ctx
@@ -86,10 +86,10 @@ func (f *fakeAlerter) LowBalanceAlert(_ context.Context, _ identity.TenantSubjec
 	return nil
 }
 
-func latestBlock(t *testing.T, bunDB *bun.DB, ctx context.Context, ownerID uuid.UUID) *models.CreditBlock {
+func latestBlock(t *testing.T, bunDB *bun.DB, ctx context.Context, payerID uuid.UUID) *models.CreditBlock {
 	t.Helper()
 	b := new(models.CreditBlock)
-	require.NoError(t, bunDB.NewSelect().Model(b).Where("tenant_subject_id = ?", ownerID).OrderExpr("created_at DESC").Limit(1).Scan(ctx))
+	require.NoError(t, bunDB.NewSelect().Model(b).Where("tenant_subject_id = ?", payerID).OrderExpr("created_at DESC").Limit(1).Scan(ctx))
 	return b
 }
 

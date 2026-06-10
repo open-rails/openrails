@@ -47,9 +47,10 @@ func (s *CreditsService) now() time.Time {
 	return time.Now().UTC()
 }
 
-// ErrOwnerRequired is returned when a credit operation cannot resolve a real
-// owner org id. HARDCUT (#221): owner_id is supplied by the caller and is NOT
-// synthesized — there is no deterministic stand-in derivation. For the
+// ErrTenantSubjectRequired is returned when a credit operation cannot resolve a
+// real payer tenant-subject id. HARDCUT (#221): tenant_subject_id is supplied by
+// the caller and is NOT synthesized — there is no deterministic stand-in
+// derivation. For the
 // self-hosted / single-tenant personal case the tenant subject IS the authenticated
 // user's own account/personal tenant-subject UUID, so a non-UUID actor with no explicit
 // payer is a programming error rather than something to paper over.
@@ -111,12 +112,12 @@ func (s *CreditsService) GetBalance(ctx context.Context, actorID string, creditT
 	if err != nil {
 		return nil, err
 	}
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	bal := new(models.CreditBalance)
 	err = s.db.Q(ctx).NewSelect().
 		Model(bal).
 		Where("tenant_id = ?", tenantID).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", ownerID, ct.ID).
+		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, ct.ID).
 		Limit(1).
 		Scan(ctx)
 	if err == nil {
@@ -125,7 +126,7 @@ func (s *CreditsService) GetBalance(ctx context.Context, actorID string, creditT
 	if errors.Is(err, sql.ErrNoRows) {
 		return &models.CreditBalance{
 			TenantID:        tenantID,
-			TenantSubjectID: ownerID,
+			TenantSubjectID: payerID,
 			CreditTypeID:    ct.ID,
 			Balance:         0,
 			HeldBalance:     0,
@@ -146,12 +147,12 @@ func (s *CreditsService) GetBalanceForTenantSubject(ctx context.Context, payer i
 		return nil, err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	bal := new(models.CreditBalance)
 	err = s.db.Q(ctx).NewSelect().
 		Model(bal).
 		Where("tenant_id = ?", tenantID).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", ownerID, ct.ID).
+		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, ct.ID).
 		Limit(1).
 		Scan(ctx)
 	if err == nil {
@@ -160,7 +161,7 @@ func (s *CreditsService) GetBalanceForTenantSubject(ctx context.Context, payer i
 	if errors.Is(err, sql.ErrNoRows) {
 		return &models.CreditBalance{
 			TenantID:        tenantID,
-			TenantSubjectID: ownerID,
+			TenantSubjectID: payerID,
 			CreditTypeID:    ct.ID,
 			Balance:         0,
 			HeldBalance:     0,
@@ -181,11 +182,11 @@ func (s *CreditsService) GetTransactions(ctx context.Context, actorID string, cr
 	if err != nil {
 		return nil, 0, err
 	}
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	var items []models.CreditTransaction
 	q := s.db.Q(ctx).NewSelect().Model(&items).
 		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", ownerID, ct.ID)
+		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, ct.ID)
 	total, err := q.Count(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -293,12 +294,12 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, actorID str
 	if err != nil {
 		return nil, err
 	}
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	trx := new(models.CreditTransaction)
 	if err := s.db.Q(ctx).NewSelect().
 		Model(trx).
 		Where("tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", ownerID, ct.ID).
+		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, ct.ID).
 		Where("transaction_type = ?", transactionType).
 		Where("source = ? AND source_id = ?", source, sourceID).
 		Limit(1).
@@ -406,8 +407,8 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 	if err != nil {
 		return nil, err
 	}
-	ownerID := payer.UUID()
-	if err := ensureTenantSubject(ctx, tx, tenantID, ownerID); err != nil {
+	payerID := payer.UUID()
+	if err := ensureTenantSubject(ctx, tx, tenantID, payerID); err != nil {
 		return nil, err
 	}
 	bal, err := s.lockBalance(ctx, tx, payer, params.Actor, ct.ID)
@@ -425,7 +426,7 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 		existing := new(models.CreditTransaction)
 		err := tx.NewSelect().
 			Model(existing).
-			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, ownerID).
+			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
 			Where("credit_type_id = ?", ct.ID).
 			Where("transaction_type = 'deposit'").
 			Where("source = ? AND source_id = ?", params.Source, v).
@@ -444,7 +445,7 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 	if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
 		Set("balance = ?", newBal).
 		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Exec(ctx); err != nil {
 		return nil, err
 	}
@@ -452,7 +453,7 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 	trx := &models.CreditTransaction{
 		ID:              uuidutil.NewV7(),
 		TenantID:        tenantID,
-		TenantSubjectID: ownerID,
+		TenantSubjectID: payerID,
 		Actor:           params.Actor,
 		CreditTypeID:    ct.ID,
 		Amount:          params.Amount,
@@ -472,7 +473,7 @@ func (s *CreditsService) depositTx(ctx context.Context, tx bun.Tx, ct *models.Cr
 	block := &models.CreditBlock{
 		ID:                  uuidutil.NewV7(),
 		TenantID:            tenantID,
-		TenantSubjectID:     ownerID,
+		TenantSubjectID:     payerID,
 		CreditTypeID:        ct.ID,
 		OriginalAmount:      params.Amount,
 		RemainingAmount:     params.Amount,
@@ -559,12 +560,12 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerTenant, err := resolveTenantSubject(payer, actorID)
+	payerSubject, err := resolveTenantSubject(payer, actorID)
 	if err != nil {
 		return nil, err
 	}
-	ownerID := ownerTenant.UUID()
-	if err := ensureTenantSubject(ctx, tx, tenantID, ownerID); err != nil {
+	payerID := payerSubject.UUID()
+	if err := ensureTenantSubject(ctx, tx, tenantID, payerID); err != nil {
 		return nil, err
 	}
 
@@ -575,7 +576,7 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 	err = tx.NewSelect().
 		Model(existing).
 		Where("transaction_type = 'hold'").
-		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, ownerID).
+		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
 		Where("credit_type_id = ?", ct.ID).
 		Where("source = ? AND source_id = ?", source, sourceID).
 		Limit(1).
@@ -587,7 +588,7 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 		return nil, err
 	}
 
-	bal, err := s.lockBalance(ctx, tx, ownerTenant, actorID, ct.ID)
+	bal, err := s.lockBalance(ctx, tx, payerSubject, actorID, ct.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -599,7 +600,7 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 	if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
 		Set("held_balance = ?", bal.HeldBalance+amount).
 		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Exec(ctx); err != nil {
 		return nil, err
 	}
@@ -609,7 +610,7 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 	hold := &models.CreditTransaction{
 		ID:              uuidutil.NewV7(),
 		TenantID:        tenantID,
-		TenantSubjectID: ownerID,
+		TenantSubjectID: payerID,
 		Actor:           actorID,
 		CreditTypeID:    ct.ID,
 		Amount:          0,
@@ -759,7 +760,7 @@ func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) erro
 func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx, payer identity.TenantSubjectID, actorID string, creditTypeID uuid.UUID, amount int64) (int64, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	bal, err := s.lockBalance(ctx, tx, payer, actorID, creditTypeID)
 	if err != nil {
 		return 0, err
@@ -772,7 +773,7 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 	remaining := amount
 	var blocks []models.CreditBlock
 	if err := tx.NewSelect().Model(&blocks).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ? AND remaining_amount > 0 AND (expires_at IS NULL OR expires_at > ?)", tenantID, ownerID, creditTypeID, now).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ? AND remaining_amount > 0 AND (expires_at IS NULL OR expires_at > ?)", tenantID, payerID, creditTypeID, now).
 		OrderExpr("expires_at ASC NULLS LAST, created_at ASC").
 		For("UPDATE").
 		Scan(ctx); err != nil {
@@ -803,7 +804,7 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 	if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
 		Set("balance = ?", newBal).
 		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
 		Exec(ctx); err != nil {
 		return 0, err
 	}
@@ -820,11 +821,11 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, tx bun.Tx
 // first-touch, after which the row is re-selected FOR UPDATE.
 func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, payer identity.TenantSubjectID, actorID string, creditTypeID uuid.UUID) (*models.CreditBalance, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	bal := new(models.CreditBalance)
 	err := tx.NewSelect().Model(bal).
 		Where("tenant_id = ?", tenantID).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", ownerID, creditTypeID).
+		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, creditTypeID).
 		For("UPDATE").
 		Scan(ctx)
 	if err == nil {
@@ -838,7 +839,7 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, payer ident
 	bal = &models.CreditBalance{
 		ID:              uuidutil.NewV7(),
 		TenantID:        tenantID,
-		TenantSubjectID: ownerID,
+		TenantSubjectID: payerID,
 		CreditTypeID:    creditTypeID,
 		Balance:         0,
 		HeldBalance:     0,
@@ -851,7 +852,7 @@ func (s *CreditsService) lockBalance(ctx context.Context, tx bun.Tx, payer ident
 	bal = new(models.CreditBalance)
 	if err := tx.NewSelect().Model(bal).
 		Where("tenant_id = ?", tenantID).
-		Where("tenant_subject_id = ? AND credit_type_id = ?", ownerID, creditTypeID).
+		Where("tenant_subject_id = ? AND credit_type_id = ?", payerID, creditTypeID).
 		For("UPDATE").
 		Scan(ctx); err != nil {
 		return nil, err
@@ -866,7 +867,7 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 	if err != nil {
 		return nil, err
 	}
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	sourceIDText := (*string)(nil)
 	if params.SourceID != nil {
 		if _, err := s.lockBalance(ctx, tx, payer, params.Actor, creditTypeID); err != nil {
@@ -877,7 +878,7 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 		existing := new(models.CreditTransaction)
 		err := tx.NewSelect().
 			Model(existing).
-			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, ownerID).
+			Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
 			Where("credit_type_id = ?", creditTypeID).
 			Where("transaction_type = 'withdrawal'").
 			Where("source = ? AND source_id = ?", params.Source, v).
@@ -898,7 +899,7 @@ func (s *CreditsService) withdrawTx(ctx context.Context, tx bun.Tx, creditTypeID
 	trx := &models.CreditTransaction{
 		ID:              uuidutil.NewV7(),
 		TenantID:        tenantID,
-		TenantSubjectID: ownerID,
+		TenantSubjectID: payerID,
 		Actor:           params.Actor,
 		CreditTypeID:    creditTypeID,
 		Amount:          -params.Amount,

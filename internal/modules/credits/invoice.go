@@ -50,13 +50,13 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 	defer func() { _ = tx.Rollback() }()
 
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	from, to = from.UTC(), to.UTC()
 
 	// Idempotency: one invoice per (payer, credit_type, period).
 	existing := new(models.Invoice)
 	err = tx.NewSelect().Model(existing).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Where("period_from = ? AND period_to = ?", from, to).
 		Limit(1).Scan(ctx)
 	if err == nil {
@@ -78,7 +78,7 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 		ColumnExpr("event_type").
 		ColumnExpr("COALESCE(SUM(amount), 0) AS total_amount").
 		ColumnExpr("COUNT(*) AS event_count").
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Where("occurred_at >= ? AND occurred_at < ?", from, to).
 		GroupExpr("event_type").
 		Scan(ctx, &totals); err != nil {
@@ -101,7 +101,7 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 		ColumnExpr("d.key AS key").
 		ColumnExpr("COALESCE(SUM((d.value)::bigint), 0) AS total").
 		Join("CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d").
-		Where("ue.tenant_id = ? AND ue.tenant_subject_id = ? AND ue.credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("ue.tenant_id = ? AND ue.tenant_subject_id = ? AND ue.credit_type_id = ?", tenantID, payerID, ct.ID).
 		Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from, to).
 		GroupExpr("ue.event_type, d.key").
 		Scan(ctx, &dims); err != nil {
@@ -130,7 +130,7 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 		Model((*models.CreditTransaction)(nil)).
 		ColumnExpr("transaction_type").
 		ColumnExpr("COALESCE(SUM(amount), 0) AS total").
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Where("created_at >= ? AND created_at < ?", from, to).
 		GroupExpr("transaction_type").
 		Scan(ctx, &movs); err != nil {
@@ -144,7 +144,7 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 	// --- closing balance snapshot ---
 	bal := new(models.CreditBalance)
 	balErr := tx.NewSelect().Model(bal).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Limit(1).Scan(ctx)
 	if balErr != nil && !errors.Is(balErr, sql.ErrNoRows) {
 		return nil, balErr
@@ -154,7 +154,7 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 	inv := &models.Invoice{
 		ID:              uuidutil.NewV7(),
 		TenantID:        tenantID,
-		TenantSubjectID: ownerID,
+		TenantSubjectID: payerID,
 		CreditTypeID:    ct.ID,
 		Currency:        ct.Unit,
 		PeriodFrom:      from,

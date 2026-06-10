@@ -169,7 +169,7 @@ func parseTimeParam(v string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
-// GetMyUsage returns the authenticated owner's metered usage rolled up by
+// GetMyUsage returns the authenticated payer's metered usage rolled up by
 // event_type (endpoint/model) over a [from, to) window, with summed per-dimension
 // counts (issue #289). The acting user is the delegated token's subject
 // (r.GetUser()); their tenant subject is that subject's personal org
@@ -182,9 +182,9 @@ func GetMyUsage(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	owner := identity.TenantSubjectIDFromString(user.ID)
-	if owner.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "owner could not be resolved from subject")
+	payer := identity.TenantSubjectIDFromString(user.ID)
+	if payer.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
 		return
 	}
 
@@ -207,7 +207,7 @@ func GetMyUsage(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	rows, err := svc.GetUsage(r.Request.Context(), owner, from, to)
+	rows, err := svc.GetUsage(r.Request.Context(), payer, from, to)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load usage")
 		return
@@ -215,7 +215,7 @@ func GetMyUsage(r *httprequest.Request) {
 	r.SuccessJSON(rows)
 }
 
-// GetMyInvoices lists the authenticated owner's finalized monthly invoices,
+// GetMyInvoices lists the authenticated payer's finalized monthly invoices,
 // newest period first, paginated via limit/offset query params (issue #303). The
 // acting user is the delegated token's subject (r.GetUser()); their tenant subject is
 // that subject's personal org (identity.TenantSubjectIDFromString), matching how the
@@ -226,9 +226,9 @@ func GetMyInvoices(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	owner := identity.TenantSubjectIDFromString(user.ID)
-	if owner.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "owner could not be resolved from subject")
+	payer := identity.TenantSubjectIDFromString(user.ID)
+	if payer.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
 		return
 	}
 
@@ -246,7 +246,7 @@ func GetMyInvoices(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	items, total, err := svc.ListInvoices(r.Request.Context(), owner, limit, offset)
+	items, total, err := svc.ListInvoices(r.Request.Context(), payer, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load invoices")
 		return
@@ -254,19 +254,19 @@ func GetMyInvoices(r *httprequest.Request) {
 	r.SuccessJSONPaginated(items, int64(total), limit, offset)
 }
 
-// GetMyInvoice returns one of the authenticated owner's invoices with its line
-// items, addressed by :id (issue #303). RLS + the owner filter scope it to the
-// acting user's own invoices: an id belonging to another owner/tenant returns
-// 404 (fail closed). The acting owner is resolved exactly as in GetMyInvoices.
+// GetMyInvoice returns one of the authenticated payer's invoices with its line
+// items, addressed by :id (issue #303). RLS + the payer filter scope it to the
+// acting user's own invoices: an id belonging to another payer/tenant returns
+// 404 (fail closed). The acting payer is resolved exactly as in GetMyInvoices.
 func GetMyInvoice(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-	owner := identity.TenantSubjectIDFromString(user.ID)
-	if owner.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "owner could not be resolved from subject")
+	payer := identity.TenantSubjectIDFromString(user.ID)
+	if payer.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
 		return
 	}
 
@@ -281,7 +281,7 @@ func GetMyInvoice(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	inv, err := svc.GetInvoice(r.Request.Context(), owner, id)
+	inv, err := svc.GetInvoice(r.Request.Context(), payer, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			r.ErrorJSON(http.StatusNotFound, "invoice not found")

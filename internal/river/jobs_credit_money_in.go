@@ -166,7 +166,7 @@ func (w InvoiceFinalizeWorker) Work(ctx context.Context, _ *river.Job[InvoiceFin
 		now = w.Clock.Now().UTC()
 	}
 	// Finalize the PREVIOUS calendar month [firstOfPrevMonth, firstOfThisMonth).
-	// Idempotent per (owner, credit_type, period), so running daily is safe and
+	// Idempotent per (payer, credit_type, period), so running daily is safe and
 	// guarantees the prior month is finalized shortly after rollover.
 	firstThis := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	from := firstThis.AddDate(0, -1, 0)

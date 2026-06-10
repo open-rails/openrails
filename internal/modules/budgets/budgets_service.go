@@ -165,7 +165,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 	}
 
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 
 	tx, err := s.db.BeginTenantTx(ctx)
 	if err != nil {
@@ -175,7 +175,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 
 	// Materialize the payable tenant_subjects row so the budget_reservations FK
 	// (migration 076) is satisfied on a subject's first reservation (#317).
-	if _, err := repo.EnsureTenantSubjectID(ctx, tx, tenantID, ownerID.String()); err != nil {
+	if _, err := repo.EnsureTenantSubjectID(ctx, tx, tenantID, payerID.String()); err != nil {
 		return uuid.Nil, nil, false, err
 	}
 
@@ -183,7 +183,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 	existing := new(models.BudgetReservation)
 	err = tx.NewSelect().
 		Model(existing).
-		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, ownerID).
+		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
 		Where("actor = ?", actor).
 		Where("source = ? AND source_id = ?", source, sourceID).
 		Limit(1).
@@ -220,7 +220,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 	res := &models.BudgetReservation{
 		ID:               uuidutil.NewV7(),
 		TenantID:         tenantID,
-		TenantSubjectID:  ownerID,
+		TenantSubjectID:  payerID,
 		Actor:            actor,
 		AmountMillicents: amountMillicents,
 		Status:           "active",
@@ -306,7 +306,7 @@ func (s *Service) Release(ctx context.Context, reservationID uuid.UUID) error {
 func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, requestedMillicents int64) ([]WindowStatus, bool, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 
 	statuses := make([]WindowStatus, 0, len(windows))
 	allAllowed := true
@@ -329,7 +329,7 @@ func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.
 			ColumnExpr("COALESCE(SUM(amount_millicents) FILTER (WHERE status = 'active'), 0) AS reserved").
 			ColumnExpr("MIN(created_at) FILTER (WHERE status IN ('active','captured')) AS oldest").
 			Where("tenant_id = ?", tenantID).
-			Where("tenant_subject_id = ? AND actor = ?", ownerID, actor).
+			Where("tenant_subject_id = ? AND actor = ?", payerID, actor).
 			Where("created_at >= ?", windowStart).
 			Where("status IN ('active','captured')").
 			Scan(ctx, &agg)

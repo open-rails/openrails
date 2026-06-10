@@ -44,7 +44,7 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, payer identity.TenantSu
 		return nil, err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	now := s.now()
 
 	tx, err := s.db.GetDB().(*bun.DB).BeginTx(ctx, nil)
@@ -56,7 +56,7 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, payer identity.TenantSu
 	// Idempotency.
 	existing := new(models.CreditTransaction)
 	err = tx.NewSelect().Model(existing).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Where("transaction_type = ?", txOwedAccrual).
 		Where("source = ? AND source_id = ?", source, sourceID).
 		Limit(1).Scan(ctx)
@@ -67,19 +67,19 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, payer identity.TenantSu
 		return nil, err
 	}
 
-	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, ownerID, ct.ID, BillingModeArrears, now); err != nil {
+	if err := s.ensureSettingsRowTx(ctx, tx, tenantID, payerID, ct.ID, BillingModeArrears, now); err != nil {
 		return nil, err
 	}
 	if _, err := tx.NewUpdate().Model((*models.CreditAccountSettings)(nil)).
 		Set("outstanding_owed_micros = outstanding_owed_micros + ?", amount).
 		Set("updated_at = ?", now).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, ct.ID).
 		Exec(ctx); err != nil {
 		return nil, err
 	}
 
 	trx := &models.CreditTransaction{
-		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, Actor: ownerID.String(),
+		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, Actor: payerID.String(),
 		CreditTypeID: ct.ID, Amount: amount, TransactionType: txOwedAccrual, Status: "posted",
 		Source: source, SourceID: &sourceID, CreatedAt: now, UpdatedAt: now,
 	}
@@ -91,15 +91,15 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, payer identity.TenantSu
 
 // ensureSettingsRowTx inserts a default settings row for (payer, credit_type) if
 // one does not exist, using the given billing mode. No-op when the row exists.
-func (s *CreditsService) ensureSettingsRowTx(ctx context.Context, tx bun.Tx, tenantID, ownerID, creditTypeID uuid.UUID, mode string, now time.Time) error {
+func (s *CreditsService) ensureSettingsRowTx(ctx context.Context, tx bun.Tx, tenantID, payerID, creditTypeID uuid.UUID, mode string, now time.Time) error {
 	// Materialize the payable tenant_subjects row so the credit_account_settings
 	// FK (migration 076) is satisfied — this is the shared choke point for
 	// settings writes (suspend/resume/verify/graduate/arrears) (#317).
-	if err := ensureTenantSubject(ctx, tx, tenantID, ownerID); err != nil {
+	if err := ensureTenantSubject(ctx, tx, tenantID, payerID); err != nil {
 		return err
 	}
 	row := &models.CreditAccountSettings{
-		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, CreditTypeID: creditTypeID,
+		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: creditTypeID,
 		BillingMode: mode, HardStopOnBreach: true, AlertThresholdPct: 80,
 		CreatedAt: now, UpdatedAt: now,
 	}

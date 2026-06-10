@@ -68,7 +68,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 	ctName := "azh_" + uuid.NewString()
 	ctID := uuid.New()
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 
 	t.Cleanup(func() {
 		for _, q := range []struct {
@@ -76,8 +76,8 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 			where string
 			arg   any
 		}{
-			{"billing.credit_transactions", "tenant_subject_id = ?", ownerID},
-			{"billing.credit_balances", "tenant_subject_id = ?", ownerID},
+			{"billing.credit_transactions", "tenant_subject_id = ?", payerID},
+			{"billing.credit_balances", "tenant_subject_id = ?", payerID},
 			{"billing.credit_types", "id = ?", ctID},
 			{"billing.tenants", "id = ?", tenantID},
 		} {
@@ -95,7 +95,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 		`INSERT INTO billing.credit_balances
 		   (id, tenant_id, tenant_subject_id, actor, credit_type_id, balance, held_balance, created_at, updated_at)
 		 VALUES (?,?,?,?,?,1000,0,?,?)`,
-		uuid.New(), tenantID, ownerID, ownerID.String(), ctID, now, now).Exec(ctx)
+		uuid.New(), tenantID, payerID, payerID.String(), ctID, now, now).Exec(ctx)
 	require.NoError(t, err)
 
 	// Billing service as the unprivileged openrails_app role (RLS ENFORCES).

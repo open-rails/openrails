@@ -344,10 +344,10 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.Tenan
 	return row, nil
 }
 
-func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, actor string) (*models.CreditSpendLimit, error) {
+func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, payerID, creditTypeID uuid.UUID, actor string) (*models.CreditSpendLimit, error) {
 	row := new(models.CreditSpendLimit)
 	err := s.db.Q(ctx).NewSelect().Model(row).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ? AND actor = ?", tenantID, ownerID, creditTypeID, actor).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ? AND actor = ?", tenantID, payerID, creditTypeID, actor).
 		Limit(1).Scan(ctx)
 	if err == nil {
 		return row, nil
@@ -362,7 +362,7 @@ func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, ownerID, c
 // settled spend (withdrawals + captured holds) PLUS currently-active holds
 // created in the window (so concurrent in-flight holds can't overshoot a cap).
 // When actor is non-empty the sum is scoped to that actor.
-func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, since time.Time, actor string) (int64, error) {
+func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, payerID, creditTypeID uuid.UUID, since time.Time, actor string) (int64, error) {
 	q := s.db.Q(ctx).NewSelect().
 		Model((*models.CreditTransaction)(nil)).
 		ColumnExpr("COALESCE(SUM("+
@@ -371,7 +371,7 @@ func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, c
 			"WHEN transaction_type = 'hold' AND status = 'captured' THEN -amount "+
 			"WHEN transaction_type = 'hold' AND status = 'active' THEN COALESCE(authorized_amount, 0) "+
 			"ELSE 0 END), 0)").
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
 		Where("created_at >= ?", since)
 	if actor != "" {
 		q = q.Where("actor = ?", actor)
@@ -385,12 +385,12 @@ func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, c
 
 // activeHoldsTotal sums all currently-active hold authorizations for an payer
 // (current reservation exposure, regardless of window).
-func (s *CreditsService) activeHoldsTotal(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID) (int64, error) {
+func (s *CreditsService) activeHoldsTotal(ctx context.Context, tenantID, payerID, creditTypeID uuid.UUID) (int64, error) {
 	var total int64
 	err := s.db.Q(ctx).NewSelect().
 		Model((*models.CreditTransaction)(nil)).
 		ColumnExpr("COALESCE(SUM(COALESCE(authorized_amount, 0)), 0)").
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, payerID, creditTypeID).
 		Where("transaction_type = 'hold' AND status = 'active'").
 		Scan(ctx, &total)
 	return total, err
@@ -414,7 +414,7 @@ func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.T
 		return SpendDecision{}, err
 	}
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	now := s.now()
 	dayStart, dayReset := dayWindow(now)
 	monStart, monReset := monthWindow(now)
@@ -424,20 +424,20 @@ func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.T
 	// Per-actor caps (only when a limit row exists for this actor).
 	actor = strings.TrimSpace(actor)
 	if actor != "" {
-		lim, lerr := s.getSpendLimit(ctx, tenantID, ownerID, ct.ID, actor)
+		lim, lerr := s.getSpendLimit(ctx, tenantID, payerID, ct.ID, actor)
 		if lerr != nil {
 			return SpendDecision{}, lerr
 		}
 		if lim != nil && (lim.MaxSpendPerDayMicros != nil || lim.MaxSpendPerMonthMicros != nil) {
 			if lim.MaxSpendPerDayMicros != nil {
-				spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, dayStart, actor)
+				spent, e := s.spentInWindow(ctx, tenantID, payerID, ct.ID, dayStart, actor)
 				if e != nil {
 					return SpendDecision{}, e
 				}
 				caps = append(caps, capInput{DenyActorDailyCap, lim.MaxSpendPerDayMicros, spent, &dayReset})
 			}
 			if lim.MaxSpendPerMonthMicros != nil {
-				spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, monStart, actor)
+				spent, e := s.spentInWindow(ctx, tenantID, payerID, ct.ID, monStart, actor)
 				if e != nil {
 					return SpendDecision{}, e
 				}
@@ -448,14 +448,14 @@ func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.T
 
 	// Tenant-level daily / monthly caps.
 	if settings.MaxSpendPerDayMicros != nil {
-		spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, dayStart, "")
+		spent, e := s.spentInWindow(ctx, tenantID, payerID, ct.ID, dayStart, "")
 		if e != nil {
 			return SpendDecision{}, e
 		}
 		caps = append(caps, capInput{DenyDailyCap, settings.MaxSpendPerDayMicros, spent, &dayReset})
 	}
 	if settings.MaxSpendPerMonthMicros != nil {
-		spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, monStart, "")
+		spent, e := s.spentInWindow(ctx, tenantID, payerID, ct.ID, monStart, "")
 		if e != nil {
 			return SpendDecision{}, e
 		}
@@ -464,7 +464,7 @@ func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.T
 
 	// Outstanding exposure ceiling (settled owed + active holds + this estimate).
 	if settings.MaxOutstandingOwedMicros != nil {
-		held, e := s.activeHoldsTotal(ctx, tenantID, ownerID, ct.ID)
+		held, e := s.activeHoldsTotal(ctx, tenantID, payerID, ct.ID)
 		if e != nil {
 			return SpendDecision{}, e
 		}

@@ -46,10 +46,10 @@ func budgetEnv(t *testing.T) (*budgets.Service, *clockwork.FakeClock, *bun.DB, i
 	require.NoError(t, err)
 
 	payer := identity.TenantSubjectIDFromString(uuid.NewString())
-	ownerID := payer.UUID()
+	payerID := payer.UUID()
 	actor := "actor_" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = bunDB.NewDelete().Model((*models.BudgetReservation)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.BudgetReservation)(nil)).Where("tenant_subject_id = ?", payerID).Exec(ctx)
 	})
 
 	// Fixed wall clock so window math is deterministic; advance it to age rows out.
