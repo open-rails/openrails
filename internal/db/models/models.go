@@ -36,6 +36,7 @@ var ModelRegistry = []any{
 	(*CreditBalance)(nil),
 	(*CreditTransaction)(nil),
 	(*CreditBlock)(nil),
+	(*CreditWindow)(nil),
 	(*CreditAccountSettings)(nil),
 	(*CreditSpendLimit)(nil),
 	(*ProcessorCustomer)(nil),

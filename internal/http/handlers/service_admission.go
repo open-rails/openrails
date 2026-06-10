@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -54,22 +56,7 @@ func ServiceAdmit(r *httprequest.Request) {
 		return
 	}
 
-	in := billingservice.AdmitInput{
-		TenantSubjectID:  *payer,
-		Actor:            actor,
-		Tier:             req.Tier,
-		Resource:         req.Resource,
-		Amounts:          req.Amounts,
-		CreditType:       req.CreditType,
-		EstimateMicros:   req.EstimateMicros,
-		Source:           req.Source,
-		SourceID:         req.RequestID,
-		BlockChecks:      req.BlockChecks,
-		TenantThroughput: req.TenantThroughput,
-	}
-	if req.ExpiresAt != nil {
-		in.ExpiresAtUnix = *req.ExpiresAt
-	}
+	in := admitInputFromRequest(req, *payer, actor)
 
 	res, err := svc.Admit(r.Request.Context(), in)
 	if err != nil {
@@ -99,6 +86,135 @@ func ServiceAdmit(r *httprequest.Request) {
 	default: // suspended, blocked, endpoint
 		r.JSON(http.StatusForbidden, res)
 	}
+}
+
+// admitInputFromRequest maps one admit body onto the service-facade input —
+// shared by the single /admit route and each /admit/batch item.
+func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.TenantSubjectID, actor string) billingservice.AdmitInput {
+	in := billingservice.AdmitInput{
+		TenantSubjectID:  payer,
+		Actor:            actor,
+		Tier:             req.Tier,
+		Resource:         req.Resource,
+		Amounts:          req.Amounts,
+		CreditType:       req.CreditType,
+		EstimateMicros:   req.EstimateMicros,
+		Source:           req.Source,
+		SourceID:         req.RequestID,
+		BlockChecks:      req.BlockChecks,
+		TenantThroughput: req.TenantThroughput,
+	}
+	if req.ExpiresAt != nil {
+		in.ExpiresAtUnix = *req.ExpiresAt
+	}
+	return in
+}
+
+// admitVerdictStatus maps an admission result onto the HTTP status the single
+// /admit route would return — reused per-item by the batch route.
+func admitVerdictStatus(res *billingservice.AdmitResult) int {
+	if res.Allowed {
+		return http.StatusOK
+	}
+	switch res.BlockedBy {
+	case "throughput":
+		return http.StatusTooManyRequests
+	case "money":
+		return http.StatusPaymentRequired
+	default: // suspended, blocked, unverified, endpoint
+		return http.StatusForbidden
+	}
+}
+
+type serviceAdmitBatchRequest struct {
+	Items []serviceAdmitRequest `json:"items"`
+}
+
+// serviceAdmitVerdict is one per-item batch outcome (#335). Status is the
+// HTTP-equivalent status the single /admit route would have returned for this
+// item; Result carries the full admission decision when one was reached.
+type serviceAdmitVerdict struct {
+	Status int                         `json:"status"`
+	Error  string                      `json:"error,omitempty"`
+	Result *billingservice.AdmitResult `json:"result,omitempty"`
+}
+
+// serviceAdmitBatchVerdicts runs the per-item admission loop with FULL per-item
+// isolation: a bad payer id, scope denial, deny, or backend error on one item
+// never fails the others. allows gates each item's payer against the service
+// token's tenant-subject scope; admit is the (injected) single-admit core.
+//
+// Follow-up (#335): each item currently runs the full single-admit path
+// (suspension/settings/balance queries per item). An obvious optimization is
+// batching the shared reads (suspension + settings per distinct payer, one
+// Redis pipeline for throughput) inside one transaction — deferred for v1.
+func serviceAdmitBatchVerdicts(
+	ctx context.Context,
+	items []serviceAdmitRequest,
+	allows func(billingidentity.TenantSubjectID) bool,
+	admit func(context.Context, billingservice.AdmitInput) (*billingservice.AdmitResult, error),
+) []serviceAdmitVerdict {
+	out := make([]serviceAdmitVerdict, len(items))
+	for i, item := range items {
+		if item.EstimateMicros < 0 {
+			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "estimate_micros must be >= 0"}
+			continue
+		}
+		payer, err := parseServiceTenantSubjectID(item.TenantSubjectID)
+		if err != nil || payer == nil {
+			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "tenant_subject_id required"}
+			continue
+		}
+		if !allows(*payer) {
+			out[i] = serviceAdmitVerdict{Status: http.StatusForbidden, Error: "service_token_tenant_subject_scope_denied"}
+			continue
+		}
+		res, err := admit(ctx, admitInputFromRequest(item, *payer, strings.TrimSpace(item.Actor)))
+		if err != nil {
+			out[i] = serviceAdmitVerdict{Status: http.StatusInternalServerError, Error: "admission check failed"}
+			continue
+		}
+		out[i] = serviceAdmitVerdict{Status: admitVerdictStatus(res), Result: res}
+	}
+	return out
+}
+
+// ServiceAdmitBatch is the cross-payer batch admission endpoint (#335): one
+// request carries N admit items (mixed payers); the response carries N
+// positional verdicts with the same semantics as /v1/service/admit per item.
+// The batch itself always answers 200 — per-item denial/errors live in the
+// items, so cold payers conflating admits collapse N hops into one without one
+// broke payer poisoning the flight.
+func ServiceAdmitBatch(r *httprequest.Request) {
+	var req serviceAdmitBatchRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	if len(req.Items) == 0 {
+		r.ErrorJSON(http.StatusBadRequest, "items required")
+		return
+	}
+	if len(req.Items) > maxWindowBatchItems {
+		r.ErrorJSON(http.StatusBadRequest, "too many items")
+		return
+	}
+	resolved, status, msg := serviceTokenFromRequest(r)
+	if resolved == nil {
+		r.ErrorJSON(status, msg)
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	verdicts := serviceAdmitBatchVerdicts(
+		r.Request.Context(),
+		req.Items,
+		func(ts billingidentity.TenantSubjectID) bool { return resolved.AllowsTenantSubject(ts.UUID()) },
+		svc.Admit,
+	)
+	r.JSON(http.StatusOK, map[string]any{"items": verdicts})
 }
 
 // ServiceGetBudget returns the actor's rolling money-budget windows (#304

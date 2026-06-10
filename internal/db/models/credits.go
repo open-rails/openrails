@@ -84,4 +84,28 @@ type CreditBlock struct {
 	CreatedAt           time.Time  `bun:"created_at,notnull" json:"created_at"`
 }
 
+// CreditWindow is a prepaid credit window (issue #335): one bulk reservation a
+// host admits requests against locally. Opening it moves funds into the payer's
+// held_balance (hold mechanics); settles decrement held+balance per request;
+// close/expiry releases the unsettled remainder. First-class — NOT a reused hold.
+type CreditWindow struct {
+	bun.BaseModel `bun:"table:billing.credit_windows,alias:cw"`
+
+	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
+	// TenantID scopes this row to a tenant / billing namespace (issue #223).
+	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
+	// TenantSubjectID is the payer whose funds this window reserves (issue #221).
+	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
+	CreditTypeID    uuid.UUID `bun:"credit_type_id,notnull" json:"credit_type_id"`
+	// HeldAmount is the total reserved (open + refills); mirrored in held_balance
+	// while the window is open.
+	HeldAmount int64 `bun:"held_amount,notnull" json:"held_amount"`
+	// SettledAmount is the sum of settled actuals; settled <= held is enforced.
+	SettledAmount int64     `bun:"settled_amount,notnull" json:"settled_amount"`
+	Status        string    `bun:"status,notnull" json:"status"` // open | closed | expired
+	ExpiresAt     time.Time `bun:"expires_at,notnull" json:"expires_at"`
+	CreatedAt     time.Time `bun:"created_at,notnull" json:"created_at"`
+	UpdatedAt     time.Time `bun:"updated_at,notnull" json:"updated_at"`
+}
+
 // Note: subscription_credit_grants table was removed in favor of deterministic deposit SourceIDs.
