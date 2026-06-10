@@ -117,7 +117,7 @@ func (s *CreditsService) FindHeldBalanceDrift(ctx context.Context) ([]HeldBalanc
 	err := s.db.Q(ctx).NewSelect().
 		ColumnExpr("b.tenant_id, b.tenant_subject_id, b.credit_type_id, b.held_balance AS stored").
 		ColumnExpr(activeHoldSumSubquery+" AS computed").
-		TableExpr("billing.user_credit_balances AS b").
+		TableExpr("billing.credit_balances AS b").
 		Where("b.tenant_id = ?", tenantID).
 		Where("b.held_balance <> "+activeHoldSumSubquery).
 		Scan(ctx, &rows)
@@ -131,7 +131,7 @@ func (s *CreditsService) FindBalanceAnomalies(ctx context.Context) ([]BalanceAno
 	var rows []BalanceAnomaly
 	err := s.db.Q(ctx).NewSelect().
 		ColumnExpr("b.tenant_id, b.tenant_subject_id, b.credit_type_id, b.balance, b.held_balance").
-		TableExpr("billing.user_credit_balances AS b").
+		TableExpr("billing.credit_balances AS b").
 		Where("b.tenant_id = ?", tenantID).
 		Where("b.balance < 0 OR b.held_balance < 0 OR b.held_balance > b.balance").
 		Scan(ctx, &rows)
@@ -168,7 +168,7 @@ func (s *CreditsService) RepairHeldBalance(ctx context.Context, payer identity.T
 	if err != nil {
 		return 0, err
 	}
-	_, err = s.db.Q(ctx).NewUpdate().Model((*models.UserCreditBalance)(nil)).
+	_, err = s.db.Q(ctx).NewUpdate().Model((*models.CreditBalance)(nil)).
 		Set("held_balance = ?", computed).
 		Set("updated_at = ?", s.now()).
 		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).

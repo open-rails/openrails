@@ -39,24 +39,24 @@ func TestGetUsage_Breakdown(t *testing.T) {
 	})
 
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed",
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
 	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "gpt-4o",
+		Payer: &payer, Actor: "user:a", CreditType: ct, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 100, "output_tokens": 50},
 		Amount:     5_000, Source: "req", SourceID: "u1",
 	})
 	require.NoError(t, err)
 	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "gpt-4o",
+		Payer: &payer, Actor: "user:a", CreditType: ct, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 60, "output_tokens": 30},
 		Amount:     3_000, Source: "req", SourceID: "u2",
 	})
 	require.NoError(t, err)
 	_, err = cs.RecordUsage(ctx, credits.RecordUsageParams{
-		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "embeddings",
+		Payer: &payer, Actor: "user:a", CreditType: ct, EventType: "embeddings",
 		Dimensions: map[string]int64{"input_tokens": 200},
 		Amount:     1_000, Source: "req", SourceID: "u3",
 	})
@@ -103,18 +103,18 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 
 	_, err := cs.Deposit(ctx, credits.CreditDepositParams{
 		TenantSubjectID: &payer,
-		InvokerID:       payer.UUID().String(),
+		Actor:           payer.UUID().String(),
 		CreditType:      ct,
 		Amount:          10_000,
 		Source:          "seed",
 	})
 	require.NoError(t, err)
 
-	capture := func(amount int64, holdSource, usageSourceID string, metadata map[string]any) {
+	capture := func(amount int64, holdSource, usageSourceID, actor, resource string, metadata map[string]any) {
 		t.Helper()
 		hold, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
 			TenantSubjectID: &payer,
-			InvokerID:       payer.UUID().String(),
+			Actor:           actor,
 			CreditType:      ct,
 			Amount:          amount,
 			Source:          "hold",
@@ -126,6 +126,7 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 			HoldID:    hold.ID,
 			Amount:    amount,
 			EventType: "endpoint.capture",
+			Resource:  resource,
 			Metadata:  metadata,
 			Source:    "capture",
 			SourceID:  usageSourceID,
@@ -133,23 +134,17 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	capture(1_000, uuid.NewString(), "usage-replay", map[string]any{
-		"endpoint_name":     "ep-a",
+	capture(1_000, uuid.NewString(), "usage-replay", "u1", "ep-a", map[string]any{
 		"function_name":     "txt2img",
 		"availability_tier": "fast",
-		"delegated_user_id": "u1",
 	})
-	capture(2_000, uuid.NewString(), "usage-replay", map[string]any{
-		"endpoint_name":     "ep-a",
+	capture(2_000, uuid.NewString(), "usage-replay", "u1", "ep-a", map[string]any{
 		"function_name":     "txt2img",
 		"availability_tier": "fast",
-		"delegated_user_id": "u1",
 	})
-	capture(3_000, uuid.NewString(), "usage-unique", map[string]any{
-		"endpoint_name":     "ep-b",
+	capture(3_000, uuid.NewString(), "usage-unique", "u2", "ep-b", map[string]any{
 		"function_name":     "img2img",
 		"availability_tier": "batch",
-		"delegated_user_id": "u2",
 	})
 
 	account, err := svc.GetCreditAccount(ctx, payer, ct)
@@ -196,8 +191,8 @@ func TestCaptureHold_WritesIdempotentUsageEventAndServiceRollup(t *testing.T) {
 		require.Equal(t, want, got)
 	}
 
-	assertRollup("endpoint", map[string]int64{"ep-a": 1_000, "ep-b": 3_000})
+	assertRollup("resource", map[string]int64{"ep-a": 1_000, "ep-b": 3_000})
 	assertRollup("function", map[string]int64{"txt2img": 1_000, "img2img": 3_000})
 	assertRollup("tier", map[string]int64{"fast": 1_000, "batch": 3_000})
-	assertRollup("user", map[string]int64{"u1": 1_000, "u2": 3_000})
+	assertRollup("actor", map[string]int64{"u1": 1_000, "u2": 3_000})
 }

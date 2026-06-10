@@ -38,7 +38,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = cs.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed",
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
@@ -57,15 +57,14 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	for _, e := range events {
 		require.NoError(t, cs.InsertCaptureUsageEvent(ctx, credits.CaptureUsageEventParams{
 			TenantSubjectID: payer.UUID(),
-			InvokerID:       "user:a",
+			Actor:           "user:a",
 			CreditTypeID:    ctType.ID,
 			EventType:       "owner/" + e.endpoint,
 			Amount:          e.amount,
+			Resource:        e.endpoint,
 			Metadata: map[string]any{
-				"endpoint_name":     e.endpoint,
 				"function_name":     "gen",
 				"availability_tier": e.tier,
-				"delegated_user_id": "user:a",
 			},
 			Source:   "invoke",
 			SourceID: e.src,
@@ -79,8 +78,8 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
 
-	// Rollup by endpoint: alpha=8 over 2 events, beta=4 over 1.
-	byEndpoint, err := cs.ServiceUsageRollup(ctx, payer, from, to, "endpoint")
+	// Rollup by resource: alpha=8 over 2 events, beta=4 over 1.
+	byEndpoint, err := cs.ServiceUsageRollup(ctx, payer, from, to, "resource")
 	require.NoError(t, err)
 	endpoints := map[string]credits.ServiceUsageRollupRow{}
 	for _, r := range byEndpoint {

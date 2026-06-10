@@ -17,11 +17,11 @@ import (
 )
 
 // AuthorizeHoldInput is the input to AuthorizeAndHold: the payer (tenant subject), the
-// invoker (canonical invoker for per-invoker caps), the credit type, the estimated
+// actor (canonical actor for per-actor caps), the credit type, the estimated
 // charge, and the idempotency-keyed source coordinates of the hold.
 type AuthorizeHoldInput struct {
 	Payer         identity.TenantSubjectID
-	Invoker       string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
+	Actor         string // canonical: 'serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>'
 	CreditType    string
 	EstimateCents int64
 	// Source + SourceID form the idempotency key for the placed hold (typically
@@ -141,8 +141,8 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 			return serr
 		}
 
-		// Spend policy (per-invoker + org caps + outstanding ceiling).
-		dec, derr := txSvc.CheckSpendAllowed(ctx, in.Payer, in.CreditType, strings.TrimSpace(in.Invoker), in.EstimateCents)
+		// Spend policy (per-actor + org caps + outstanding ceiling).
+		dec, derr := txSvc.CheckSpendAllowed(ctx, in.Payer, in.CreditType, strings.TrimSpace(in.Actor), in.EstimateCents)
 		if derr != nil {
 			return derr
 		}
@@ -170,7 +170,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 
 		// Place the hold within the SAME tx + held lock.
 		amount := in.EstimateCents
-		if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
+		if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
 			Set("held_balance = ?", bal.HeldBalance+amount).
 			Set("updated_at = ?", now).
 			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
@@ -185,7 +185,7 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 			ID:              uuidutil.NewV7(),
 			TenantID:        tenantID,
 			TenantSubjectID: ownerID,
-			InvokerID:       strings.TrimSpace(in.Invoker),
+			Actor:           strings.TrimSpace(in.Actor),
 			CreditTypeID:    ct.ID,
 			Amount:          0,
 			Source:          in.Source,

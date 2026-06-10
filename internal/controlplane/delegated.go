@@ -47,7 +47,7 @@ type ResolvedDelegated struct {
 	DelegatedSubject string
 	// Issuer is the VALIDATED token `iss`: the registered tenant issuer the tenant
 	// was pinned from (every delegated token is FEDERATED tenant-signed, #259).
-	// Used for audit and as the `iss:sub` invoker form (#246).
+	// Used for audit and as the `iss:sub` actor form (#246).
 	Issuer string
 	// Permissions are the token's granted permission strings — a subset of the
 	// `openrails:self:*` (self) and `openrails:tenant:*` (tenant-admin) catalogs

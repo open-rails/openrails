@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS billing.payments (
 
 CREATE TABLE IF NOT EXISTS billing.platform_audit (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    invoker_id    TEXT NOT NULL,
+    actor_user_id    TEXT NOT NULL,
     actor_tenant        TEXT,
     action           TEXT NOT NULL,
     target_tenant_id UUID,
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS billing.platform_audit (
 
 CREATE TABLE IF NOT EXISTS billing.platform_break_glass (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    invoker_id    TEXT NOT NULL,
+    actor_user_id    TEXT NOT NULL,
     target_tenant_id UUID,
     justification    TEXT NOT NULL,
     granted_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
@@ -158,7 +158,7 @@ func TestAuditLog_RecordAndList(t *testing.T) {
 	require.NoError(t, err)
 
 	id, err := audit.Record(ctx, AuditEntry{
-		InvokerID:      "platform-admin",
+		ActorUserID:    "platform-admin",
 		ActorTenant:    "openrails-platform",
 		Action:         ActionTenantSuspend,
 		TargetTenantID: &tid,
@@ -170,13 +170,13 @@ func TestAuditLog_RecordAndList(t *testing.T) {
 	require.NotEmpty(t, id)
 
 	// A second, platform-wide action (no target).
-	_, err = audit.Record(ctx, AuditEntry{InvokerID: "platform-admin", Action: ActionMetricsRead})
+	_, err = audit.Record(ctx, AuditEntry{ActorUserID: "platform-admin", Action: ActionMetricsRead})
 	require.NoError(t, err)
 
 	// Missing actor / action are rejected (every action is attributable).
 	_, err = audit.Record(ctx, AuditEntry{Action: ActionMetricsRead})
 	require.Error(t, err)
-	_, err = audit.Record(ctx, AuditEntry{InvokerID: "x"})
+	_, err = audit.Record(ctx, AuditEntry{ActorUserID: "x"})
 	require.Error(t, err)
 
 	// List all.
@@ -212,12 +212,12 @@ func TestBreakGlass_GrantExpiresAuditsAndAlerts(t *testing.T) {
 	require.NoError(t, err)
 
 	// Justification is required.
-	_, err = bg.Grant(ctx, GrantRequest{InvokerID: "admin", TargetTenant: &tid})
+	_, err = bg.Grant(ctx, GrantRequest{ActorUserID: "admin", TargetTenant: &tid})
 	require.ErrorIs(t, err, ErrBreakGlassJustificationRequired)
 
 	// Over-long TTL is clamped.
 	grant, err := bg.Grant(ctx, GrantRequest{
-		InvokerID:     "admin",
+		ActorUserID:   "admin",
 		TargetTenant:  &tid,
 		Justification: "incident #42: investigate stuck dunning",
 		TTL:           100 * time.Hour,
@@ -267,7 +267,7 @@ func TestBreakGlass_GrantExpiresAuditsAndAlerts(t *testing.T) {
 	require.Empty(t, listed, "expired grant must not be listed active")
 
 	// Revoke audits a revocation and is idempotent.
-	live, err := bg.Grant(ctx, GrantRequest{InvokerID: "admin", TargetTenant: &tid, Justification: "second incident"})
+	live, err := bg.Grant(ctx, GrantRequest{ActorUserID: "admin", TargetTenant: &tid, Justification: "second incident"})
 	require.NoError(t, err)
 	require.NoError(t, bg.Revoke(ctx, live.ID, "admin", "openrails-platform"))
 	require.NoError(t, bg.Revoke(ctx, live.ID, "admin", "openrails-platform")) // idempotent

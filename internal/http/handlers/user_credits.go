@@ -49,7 +49,7 @@ func GetMyCredits(r *httprequest.Request) {
 		ColumnExpr("ct.decimal_places").
 		ColumnExpr("ucb.balance").
 		ColumnExpr("ucb.held_balance").
-		Join("LEFT JOIN billing.user_credit_balances ucb ON ucb.credit_type_id = ct.id AND ucb.user_id = ?", user.ID).
+		Join("LEFT JOIN billing.credit_balances ucb ON ucb.credit_type_id = ct.id AND ucb.user_id = ?", user.ID).
 		Where("ct.is_active = true").
 		Scan(r.Request.Context(), &rows)
 	if err != nil {

@@ -116,7 +116,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Payment)(nil)).Where("subscription_id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)

@@ -35,7 +35,6 @@ func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry
 		ID:              uuid.New(),
 		TenantID:        tenant.DefaultID.UUID(),
 		TenantSubjectID: suite.ensureTenantSubject(ctx, userID),
-		InvokerID:       userID,
 		CreditTypeID:    creditType.ID,
 		OriginalAmount:  100,
 		RemainingAmount: 100,

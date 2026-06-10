@@ -77,7 +77,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 			arg   any
 		}{
 			{"billing.credit_transactions", "tenant_subject_id = ?", ownerID},
-			{"billing.user_credit_balances", "tenant_subject_id = ?", ownerID},
+			{"billing.credit_balances", "tenant_subject_id = ?", ownerID},
 			{"billing.credit_types", "id = ?", ctID},
 			{"billing.tenants", "id = ?", tenantID},
 		} {
@@ -92,8 +92,8 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 		 VALUES (?,?,?,'AZH','cents',2,true,?)`, ctID, tenantID, ctName, now).Exec(ctx)
 	require.NoError(t, err)
 	_, err = super.GetDB().NewRaw(
-		`INSERT INTO billing.user_credit_balances
-		   (id, tenant_id, tenant_subject_id, invoker_id, credit_type_id, balance, held_balance, created_at, updated_at)
+		`INSERT INTO billing.credit_balances
+		   (id, tenant_id, tenant_subject_id, actor, credit_type_id, balance, held_balance, created_at, updated_at)
 		 VALUES (?,?,?,?,?,1000,0,?,?)`,
 		uuid.New(), tenantID, ownerID, ownerID.String(), ctID, now, now).Exec(ctx)
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 
 	// (1) Authorize WITHIN balance => allowed + hold placed + available reduced.
 	res, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		TenantSubjectID: payer, InvokerID: "serviceToken:k1", CreditType: ctName, EstimateCents: 600,
+		TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateCents: 600,
 		RequestID: "req-1", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -137,7 +137,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 
 	// (2) Authorize OVER remaining balance => denied, NO new hold.
 	deny, err := svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-		TenantSubjectID: payer, InvokerID: "serviceToken:k1", CreditType: ctName, EstimateCents: 700,
+		TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateCents: 700,
 		RequestID: "req-2", ExpiresAt: exp,
 	})
 	require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestAuthorizeAndHold_Atomic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			results[i], errs[i] = svc.AuthorizeAndHold(tctx, billingservice.AuthorizeAndHoldRequest{
-				TenantSubjectID: payer, InvokerID: "serviceToken:k1", CreditType: ctName, EstimateCents: 300,
+				TenantSubjectID: payer, Actor: "serviceToken:k1", CreditType: ctName, EstimateCents: 300,
 				RequestID: "req-conc-" + string(rune('a'+i)), ExpiresAt: exp,
 			})
 		}(i)

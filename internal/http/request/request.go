@@ -186,7 +186,7 @@ func RejectLegacyPayableJSONFields(raw []byte) error {
 	}
 	for field := range top {
 		if _, legacy := legacyPayableJSONFields[field]; legacy {
-			return fmt.Errorf("%s is no longer supported; use tenant_subject_id and invoker_id", field)
+			return fmt.Errorf("%s is no longer supported; use tenant_subject_id and actor", field)
 		}
 	}
 	return nil

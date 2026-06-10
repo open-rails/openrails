@@ -6,7 +6,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/credits"
 )
 
-// TestRemainingTodayCents picks the daily-cap headroom (org or per-invoker) from
+// TestRemainingTodayCents picks the daily-cap headroom (org or per-actor) from
 // the evaluated caps for the authorize response, and clamps negatives to zero.
 func TestRemainingTodayCents(t *testing.T) {
 	if r := remainingTodayCents(nil); r != nil {
@@ -29,11 +29,11 @@ func TestRemainingTodayCents(t *testing.T) {
 		t.Fatalf("org daily remaining = %v, want 300", r)
 	}
 
-	// Per-invoker daily cap also counts as "today".
-	inv := []credits.CapResult{{Code: credits.DenyInvokerDailyCap, Remaining: 42}}
+	// Per-actor daily cap also counts as "today".
+	inv := []credits.CapResult{{Code: credits.DenyActorDailyCap, Remaining: 42}}
 	r = remainingTodayCents(inv)
 	if r == nil || *r != 42 {
-		t.Fatalf("invoker daily remaining = %v, want 42", r)
+		t.Fatalf("actor daily remaining = %v, want 42", r)
 	}
 
 	// Negative remaining (over cap) clamps to zero.

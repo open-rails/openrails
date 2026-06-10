@@ -184,7 +184,7 @@ CREATE TABLE billing.budget_reservations (
     id uuid DEFAULT uuidv7() NOT NULL,
     tenant_id uuid NOT NULL,
     tenant_subject_id uuid CONSTRAINT budget_reservations_tenant_subject_id_not_null NOT NULL,
-    invoker_id text CONSTRAINT budget_reservations_actor_not_null NOT NULL,
+    actor text CONSTRAINT budget_reservations_actor_not_null NOT NULL,
     amount_millicents bigint NOT NULL,
     captured_millicents bigint DEFAULT 0 NOT NULL,
     status text DEFAULT 'active'::text NOT NULL,
@@ -202,7 +202,7 @@ ALTER TABLE ONLY billing.budget_reservations FORCE ROW LEVEL SECURITY;
 -- Name: TABLE budget_reservations; Type: COMMENT; Schema: billing; Owner: -
 --
 
-COMMENT ON TABLE billing.budget_reservations IS 'Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an invoker''s passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, invoker, source, source_id).';
+COMMENT ON TABLE billing.budget_reservations IS 'Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor''s passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).';
 
 
 --
@@ -213,10 +213,10 @@ COMMENT ON COLUMN billing.budget_reservations.tenant_subject_id IS 'OpenRails pa
 
 
 --
--- Name: COLUMN budget_reservations.invoker_id; Type: COMMENT; Schema: billing; Owner: -
+-- Name: COLUMN budget_reservations.actor; Type: COMMENT; Schema: billing; Owner: -
 --
 
-COMMENT ON COLUMN billing.budget_reservations.invoker_id IS 'Principal whose rolling money-budget windows are capped.';
+COMMENT ON COLUMN billing.budget_reservations.actor IS 'Caller-supplied principal string whose rolling money-budget windows are capped. Opaque to OpenRails.';
 
 
 --
@@ -375,7 +375,6 @@ COMMENT ON COLUMN billing.credit_account_settings.suspended_at IS 'When set, the
 
 CREATE TABLE billing.credit_blocks (
     id uuid DEFAULT uuidv7() NOT NULL,
-    invoker_id text CONSTRAINT credit_blocks_invoker_id_not_null NOT NULL,
     credit_type_id uuid NOT NULL,
     original_amount bigint NOT NULL,
     remaining_amount bigint NOT NULL,
@@ -387,13 +386,6 @@ CREATE TABLE billing.credit_blocks (
 );
 
 ALTER TABLE ONLY billing.credit_blocks FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN credit_blocks.invoker_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN billing.credit_blocks.invoker_id IS 'Principal that caused this credit block to be created.';
 
 
 --
@@ -419,7 +411,7 @@ CREATE TABLE billing.credit_spend_limits (
     tenant_id uuid NOT NULL,
     tenant_subject_id uuid CONSTRAINT credit_spend_limits_tenant_subject_id_not_null NOT NULL,
     credit_type_id uuid NOT NULL,
-    invoker_id text CONSTRAINT credit_spend_limits_invoker_not_null NOT NULL,
+    actor text CONSTRAINT credit_spend_limits_actor_not_null NOT NULL,
     max_spend_per_day_cents bigint,
     max_spend_per_month_cents bigint,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -433,7 +425,7 @@ ALTER TABLE ONLY billing.credit_spend_limits FORCE ROW LEVEL SECURITY;
 -- Name: TABLE credit_spend_limits; Type: COMMENT; Schema: billing; Owner: -
 --
 
-COMMENT ON TABLE billing.credit_spend_limits IS 'Optional per-invoker spend caps for a tenant subject (issue #237/#246). invoker_id is the actor.';
+COMMENT ON TABLE billing.credit_spend_limits IS 'Optional per-actor spend caps for a tenant subject (issue #237/#246). actor is a caller-supplied opaque principal string.';
 
 
 --
@@ -444,10 +436,10 @@ COMMENT ON COLUMN billing.credit_spend_limits.tenant_subject_id IS 'OpenRails pa
 
 
 --
--- Name: COLUMN credit_spend_limits.invoker_id; Type: COMMENT; Schema: billing; Owner: -
+-- Name: COLUMN credit_spend_limits.actor; Type: COMMENT; Schema: billing; Owner: -
 --
 
-COMMENT ON COLUMN billing.credit_spend_limits.invoker_id IS 'Principal whose spend is capped by this row.';
+COMMENT ON COLUMN billing.credit_spend_limits.actor IS 'Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.';
 
 
 --
@@ -456,7 +448,9 @@ COMMENT ON COLUMN billing.credit_spend_limits.invoker_id IS 'Principal whose spe
 
 CREATE TABLE billing.credit_transactions (
     id uuid DEFAULT uuidv7() NOT NULL,
-    invoker_id text CONSTRAINT credit_transactions_invoker_id_not_null NOT NULL,
+    actor text CONSTRAINT credit_transactions_actor_not_null NOT NULL,
+    resource text,
+    metadata jsonb,
     credit_type_id uuid NOT NULL,
     amount bigint NOT NULL,
     balance_after bigint,
@@ -478,10 +472,24 @@ ALTER TABLE ONLY billing.credit_transactions FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: COLUMN credit_transactions.invoker_id; Type: COMMENT; Schema: billing; Owner: -
+-- Name: COLUMN credit_transactions.metadata; Type: COMMENT; Schema: billing; Owner: -
 --
 
-COMMENT ON COLUMN billing.credit_transactions.invoker_id IS 'Principal that invoked the billable operation.';
+COMMENT ON COLUMN billing.credit_transactions.metadata IS 'Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.';
+
+
+--
+-- Name: COLUMN credit_transactions.actor; Type: COMMENT; Schema: billing; Owner: -
+--
+
+COMMENT ON COLUMN billing.credit_transactions.actor IS 'Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.';
+
+
+--
+-- Name: COLUMN credit_transactions.resource; Type: COMMENT; Schema: billing; Owner: -
+--
+
+COMMENT ON COLUMN billing.credit_transactions.resource IS 'Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.';
 
 
 --
@@ -1509,7 +1517,8 @@ CREATE TABLE billing.usage_events (
     id uuid DEFAULT uuidv7() NOT NULL,
     tenant_id uuid NOT NULL,
     tenant_subject_id uuid CONSTRAINT usage_events_tenant_subject_id_not_null NOT NULL,
-    invoker_id text CONSTRAINT usage_events_user_id_not_null NOT NULL,
+    actor text CONSTRAINT usage_events_actor_not_null NOT NULL,
+    resource text,
     credit_type_id uuid NOT NULL,
     event_type text NOT NULL,
     dimensions jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -1541,10 +1550,17 @@ COMMENT ON COLUMN billing.usage_events.tenant_subject_id IS 'OpenRails payable t
 
 
 --
--- Name: COLUMN usage_events.invoker_id; Type: COMMENT; Schema: billing; Owner: -
+-- Name: COLUMN usage_events.actor; Type: COMMENT; Schema: billing; Owner: -
 --
 
-COMMENT ON COLUMN billing.usage_events.invoker_id IS 'Principal that invoked this metered usage event.';
+COMMENT ON COLUMN billing.usage_events.actor IS 'Caller-supplied principal string (e.g. a username slug) that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.';
+
+
+--
+-- Name: COLUMN usage_events.resource; Type: COMMENT; Schema: billing; Owner: -
+--
+
+COMMENT ON COLUMN billing.usage_events.resource IS 'Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.';
 
 
 --
@@ -1586,43 +1602,35 @@ COMMENT ON TABLE billing.usdc_funding_sessions IS 'External Robinhood/Coinbase h
 
 
 --
--- Name: user_credit_balances; Type: TABLE; Schema: billing; Owner: -
+-- Name: credit_balances; Type: TABLE; Schema: billing; Owner: -
 --
 
-CREATE TABLE billing.user_credit_balances (
+CREATE TABLE billing.credit_balances (
     id uuid DEFAULT uuidv7() NOT NULL,
-    invoker_id text CONSTRAINT user_credit_balances_user_id_not_null NOT NULL,
     credit_type_id uuid NOT NULL,
     balance bigint DEFAULT 0 NOT NULL,
     held_balance bigint DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT user_credit_balances_tenant_subject_id_not_null NOT NULL
+    tenant_subject_id uuid CONSTRAINT credit_balances_tenant_subject_id_not_null NOT NULL
 );
 
-ALTER TABLE ONLY billing.user_credit_balances FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY billing.credit_balances FORCE ROW LEVEL SECURITY;
 
 
 --
--- Name: COLUMN user_credit_balances.invoker_id; Type: COMMENT; Schema: billing; Owner: -
+-- Name: COLUMN credit_balances.tenant_id; Type: COMMENT; Schema: billing; Owner: -
 --
 
-COMMENT ON COLUMN billing.user_credit_balances.invoker_id IS 'Principal that caused the balance row to be created or updated.';
-
-
---
--- Name: COLUMN user_credit_balances.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN billing.user_credit_balances.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
+COMMENT ON COLUMN billing.credit_balances.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
 
 
 --
--- Name: COLUMN user_credit_balances.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
+-- Name: COLUMN credit_balances.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
 --
 
-COMMENT ON COLUMN billing.user_credit_balances.tenant_subject_id IS 'OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.';
+COMMENT ON COLUMN billing.credit_balances.tenant_subject_id IS 'OpenRails payable tenant subject id. Join billing.tenant_subjects for tenant_id, issuer, and subject.';
 
 
 --
@@ -2034,11 +2042,11 @@ ALTER TABLE ONLY billing.usdc_funding_sessions
 
 
 --
--- Name: user_credit_balances user_credit_balances_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
+-- Name: credit_balances credit_balances_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
 --
 
-ALTER TABLE ONLY billing.user_credit_balances
-    ADD CONSTRAINT user_credit_balances_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY billing.credit_balances
+    ADD CONSTRAINT credit_balances_pkey PRIMARY KEY (id);
 
 
 --
@@ -2147,27 +2155,6 @@ CREATE INDEX idx_credit_blocks_tenant_id ON billing.credit_blocks USING btree (t
 
 
 --
--- Name: idx_credit_blocks_tenant_invoker; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_blocks_tenant_invoker ON billing.credit_blocks USING btree (tenant_id, invoker_id, credit_type_id, expires_at);
-
-
---
--- Name: idx_credit_blocks_user_expires; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_blocks_user_expires ON billing.credit_blocks USING btree (invoker_id, credit_type_id, expires_at);
-
-
---
--- Name: idx_credit_blocks_user_expires_created; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_blocks_user_expires_created ON billing.credit_blocks USING btree (invoker_id, credit_type_id, expires_at, created_at);
-
-
---
 -- Name: idx_credit_holds_active_expires; Type: INDEX; Schema: billing; Owner: -
 --
 
@@ -2182,10 +2169,10 @@ CREATE INDEX idx_credit_transactions_payer ON billing.credit_transactions USING 
 
 
 --
--- Name: idx_credit_transactions_payer_invoker; Type: INDEX; Schema: billing; Owner: -
+-- Name: idx_credit_transactions_payer_actor; Type: INDEX; Schema: billing; Owner: -
 --
 
-CREATE INDEX idx_credit_transactions_payer_invoker ON billing.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, invoker_id, created_at DESC);
+CREATE INDEX idx_credit_transactions_payer_actor ON billing.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, actor, created_at DESC);
 
 
 --
@@ -2193,20 +2180,6 @@ CREATE INDEX idx_credit_transactions_payer_invoker ON billing.credit_transaction
 --
 
 CREATE INDEX idx_credit_transactions_tenant_id ON billing.credit_transactions USING btree (tenant_id);
-
-
---
--- Name: idx_credit_transactions_tenant_invoker; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_transactions_tenant_invoker ON billing.credit_transactions USING btree (tenant_id, invoker_id, credit_type_id, created_at DESC);
-
-
---
--- Name: idx_credit_transactions_user_created; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_transactions_user_created ON billing.credit_transactions USING btree (invoker_id, credit_type_id, created_at DESC);
 
 
 --
@@ -2679,31 +2652,17 @@ CREATE INDEX idx_usdc_funding_sessions_tenant_subject ON billing.usdc_funding_se
 
 
 --
--- Name: idx_user_credit_balances_tenant_id; Type: INDEX; Schema: billing; Owner: -
+-- Name: idx_credit_balances_tenant_id; Type: INDEX; Schema: billing; Owner: -
 --
 
-CREATE INDEX idx_user_credit_balances_tenant_id ON billing.user_credit_balances USING btree (tenant_id);
-
-
---
--- Name: idx_user_credit_balances_tenant_invoker; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_user_credit_balances_tenant_invoker ON billing.user_credit_balances USING btree (tenant_id, invoker_id, credit_type_id);
-
-
---
--- Name: idx_user_credit_balances_user; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_user_credit_balances_user ON billing.user_credit_balances USING btree (invoker_id);
+CREATE INDEX idx_credit_balances_tenant_id ON billing.credit_balances USING btree (tenant_id);
 
 
 --
 -- Name: ix_budget_reservations_window; Type: INDEX; Schema: billing; Owner: -
 --
 
-CREATE INDEX ix_budget_reservations_window ON billing.budget_reservations USING btree (tenant_id, tenant_subject_id, invoker_id, created_at);
+CREATE INDEX ix_budget_reservations_window ON billing.budget_reservations USING btree (tenant_id, tenant_subject_id, actor, created_at);
 
 
 --
@@ -2766,7 +2725,7 @@ CREATE UNIQUE INDEX uniq_manual_rebill_processor_transaction ON billing.manual_r
 -- Name: uq_budget_reservations_idem; Type: INDEX; Schema: billing; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_budget_reservations_idem ON billing.budget_reservations USING btree (tenant_id, tenant_subject_id, invoker_id, source, source_id);
+CREATE UNIQUE INDEX uq_budget_reservations_idem ON billing.budget_reservations USING btree (tenant_id, tenant_subject_id, actor, source, source_id);
 
 
 --
@@ -2784,10 +2743,10 @@ CREATE UNIQUE INDEX uq_credit_account_settings_payer_type ON billing.credit_acco
 
 
 --
--- Name: uq_credit_spend_limits_payer_invoker; Type: INDEX; Schema: billing; Owner: -
+-- Name: uq_credit_spend_limits_payer_actor; Type: INDEX; Schema: billing; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_credit_spend_limits_payer_invoker ON billing.credit_spend_limits USING btree (tenant_id, tenant_subject_id, credit_type_id, invoker_id);
+CREATE UNIQUE INDEX uq_credit_spend_limits_payer_actor ON billing.credit_spend_limits USING btree (tenant_id, tenant_subject_id, credit_type_id, actor);
 
 
 --
@@ -2896,10 +2855,10 @@ CREATE UNIQUE INDEX uq_usage_events_idem ON billing.usage_events USING btree (te
 
 
 --
--- Name: uq_user_credit_balances_payer_type; Type: INDEX; Schema: billing; Owner: -
+-- Name: uq_credit_balances_payer_type; Type: INDEX; Schema: billing; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_user_credit_balances_payer_type ON billing.user_credit_balances USING btree (tenant_id, tenant_subject_id, credit_type_id);
+CREATE UNIQUE INDEX uq_credit_balances_payer_type ON billing.credit_balances USING btree (tenant_id, tenant_subject_id, credit_type_id);
 
 
 --
@@ -3278,19 +3237,19 @@ ALTER TABLE ONLY billing.usdc_funding_sessions
 
 
 --
--- Name: user_credit_balances user_credit_balances_credit_type_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
+-- Name: credit_balances credit_balances_credit_type_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
 --
 
-ALTER TABLE ONLY billing.user_credit_balances
-    ADD CONSTRAINT user_credit_balances_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES billing.credit_types(id);
+ALTER TABLE ONLY billing.credit_balances
+    ADD CONSTRAINT credit_balances_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES billing.credit_types(id);
 
 
 --
--- Name: user_credit_balances user_credit_balances_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
+-- Name: credit_balances credit_balances_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
 --
 
-ALTER TABLE ONLY billing.user_credit_balances
-    ADD CONSTRAINT user_credit_balances_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES billing.tenant_subjects(id);
+ALTER TABLE ONLY billing.credit_balances
+    ADD CONSTRAINT credit_balances_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES billing.tenant_subjects(id);
 
 
 --
@@ -3607,10 +3566,10 @@ CREATE POLICY tenant_isolation ON billing.usage_events USING ((tenant_id = (NULL
 
 
 --
--- Name: user_credit_balances tenant_isolation; Type: POLICY; Schema: billing; Owner: -
+-- Name: credit_balances tenant_isolation; Type: POLICY; Schema: billing; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON billing.user_credit_balances USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+CREATE POLICY tenant_isolation ON billing.credit_balances USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 
 
 --
@@ -3626,10 +3585,10 @@ ALTER TABLE billing.tier_policies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE billing.usage_events ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: user_credit_balances; Type: ROW SECURITY; Schema: billing; Owner: -
+-- Name: credit_balances; Type: ROW SECURITY; Schema: billing; Owner: -
 --
 
-ALTER TABLE billing.user_credit_balances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE billing.credit_balances ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: SCHEMA billing; Type: ACL; Schema: -; Owner: -
@@ -3898,10 +3857,10 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE billing.usdc_funding_sessions TO open
 
 
 --
--- Name: TABLE user_credit_balances; Type: ACL; Schema: billing; Owner: -
+-- Name: TABLE credit_balances; Type: ACL; Schema: billing; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE billing.user_credit_balances TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE billing.credit_balances TO openrails_app;
 
 
 --

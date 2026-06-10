@@ -219,7 +219,7 @@ func (s *Service) GetInvoice(ctx context.Context, payer identity.TenantSubjectID
 // HoldCredits once this allows it.
 type AuthorizeSpendRequest struct {
 	TenantSubjectID identity.TenantSubjectID
-	InvokerID       string
+	Actor           string
 	CreditType      string
 	EstimateCents   int64
 }
@@ -242,7 +242,7 @@ type AuthorizeSpendResult struct {
 const DenyInsufficientBalance = "insufficient_balance"
 
 // AuthorizeSpend evaluates whether an estimated charge is permitted for an
-// payer: the per-account/per-invoker spend policy (CheckSpendAllowed) AND, for
+// payer: the per-account/per-actor spend policy (CheckSpendAllowed) AND, for
 // prepaid accounts, available balance. It does NOT move money. (#235)
 func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest) (*AuthorizeSpendResult, error) {
 	req.CreditType = strings.TrimSpace(req.CreditType)
@@ -260,7 +260,7 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 	if err != nil {
 		return nil, err
 	}
-	dec, err := s.creditsService().CheckSpendAllowed(ctx, req.TenantSubjectID, req.CreditType, strings.TrimSpace(req.InvokerID), req.EstimateCents)
+	dec, err := s.creditsService().CheckSpendAllowed(ctx, req.TenantSubjectID, req.CreditType, strings.TrimSpace(req.Actor), req.EstimateCents)
 	if err != nil {
 		return nil, err
 	}
@@ -289,12 +289,12 @@ func (s *Service) AuthorizeSpend(ctx context.Context, req AuthorizeSpendRequest)
 
 // AuthorizeAndHoldRequest is the input to AuthorizeAndHold — the atomic
 // policy-decision + hold placement that backs POST /v1/service/credits/authorize
-// (issue #235/#247). Payer is the tenant subject billed; Invoker is the canonical
-// invoker for per-invoker sub-budgets; RequestID is the idempotency key for the
+// (issue #235/#247). Payer is the tenant subject billed; Actor is the canonical
+// actor for per-actor sub-budgets; RequestID is the idempotency key for the
 // placed hold.
 type AuthorizeAndHoldRequest struct {
 	TenantSubjectID identity.TenantSubjectID
-	InvokerID       string
+	Actor           string
 	CreditType      string
 	EstimateCents   int64
 	RequestID       string
@@ -353,7 +353,7 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 
 	out, err := s.creditsService().AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
 		Payer:         req.TenantSubjectID,
-		Invoker:       strings.TrimSpace(req.InvokerID),
+		Actor:         strings.TrimSpace(req.Actor),
 		CreditType:    req.CreditType,
 		EstimateCents: req.EstimateCents,
 		Source:        authorizeHoldSource,
@@ -384,11 +384,11 @@ func (s *Service) AuthorizeAndHold(ctx context.Context, req AuthorizeAndHoldRequ
 }
 
 // remainingTodayCents extracts the remaining headroom under a daily cap (org or
-// per-invoker) from the evaluated caps, for the authorize response's
+// per-actor) from the evaluated caps, for the authorize response's
 // remaining_today_cents field. Returns nil when no daily cap applies.
 func remainingTodayCents(caps []credits.CapResult) *int64 {
 	for _, c := range caps {
-		if c.Code == credits.DenyDailyCap || c.Code == credits.DenyInvokerDailyCap {
+		if c.Code == credits.DenyDailyCap || c.Code == credits.DenyActorDailyCap {
 			r := c.Remaining
 			if r < 0 {
 				r = 0
@@ -438,11 +438,11 @@ func (s *Service) GetTenantSubjectCreditTransactions(ctx context.Context, payer 
 	return items, total, err
 }
 
-// SetSpendLimit upserts a per-invoker spend cap under an payer (issue #237).
-func (s *Service) SetSpendLimit(ctx context.Context, payer identity.TenantSubjectID, creditType, invoker string, maxDay, maxMonth *int64) error {
+// SetSpendLimit upserts a per-actor spend cap under an payer (issue #237).
+func (s *Service) SetSpendLimit(ctx context.Context, payer identity.TenantSubjectID, creditType, actor string, maxDay, maxMonth *int64) error {
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	_, err := s.creditsService().SetSpendLimit(ctx, payer, strings.TrimSpace(creditType), invoker, maxDay, maxMonth)
+	_, err := s.creditsService().SetSpendLimit(ctx, payer, strings.TrimSpace(creditType), actor, maxDay, maxMonth)
 	return err
 }

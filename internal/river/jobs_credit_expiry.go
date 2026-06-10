@@ -77,7 +77,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 		}
 
 		// HARDCUT (#221/#223): credit rows are payer+tenant-scoped. Expiry rolls up
-		// per (tenant, payer, credit_type); invoker_id is carried for invoker attribution
+		// per (tenant, payer, credit_type); actor is carried for actor attribution
 		// only and is not part of the balance key.
 		type key struct {
 			TenantID        uuid.UUID
@@ -85,9 +85,6 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			CreditTypeID    uuid.UUID
 		}
 		expiredTotals := make(map[key]int64)
-		// invokerFor preserves a representative invoker_id per key for attribution on any
-		// balance/transaction row this job has to create.
-		invokerFor := make(map[key]string)
 		for i := range blocks {
 			if blocks[i].RemainingAmount <= 0 {
 				continue
@@ -98,9 +95,6 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 				CreditTypeID:    blocks[i].CreditTypeID,
 			}
 			expiredTotals[k] += blocks[i].RemainingAmount
-			if _, ok := invokerFor[k]; !ok {
-				invokerFor[k] = blocks[i].InvokerID
-			}
 			blocks[i].RemainingAmount = 0
 			if _, err := tx.NewUpdate().Model(&blocks[i]).
 				Column("remaining_amount").
@@ -115,7 +109,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			if amount <= 0 {
 				continue
 			}
-			bal := new(models.UserCreditBalance)
+			bal := new(models.CreditBalance)
 			err := tx.NewSelect().
 				Model(bal).
 				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
@@ -126,11 +120,10 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 				return err
 			}
 			if errorsIsNoRows(err) {
-				bal = &models.UserCreditBalance{
+				bal = &models.CreditBalance{
 					ID:              uuidutil.NewV7(),
 					TenantID:        k.TenantID,
 					TenantSubjectID: k.TenantSubjectID,
-					InvokerID:       invokerFor[k],
 					CreditTypeID:    k.CreditTypeID,
 					Balance:         0,
 					HeldBalance:     0,
@@ -148,7 +141,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 				newBalance = 0
 			}
 
-			if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
+			if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
 				Set("balance = ?", newBalance).
 				Set("updated_at = ?", now).
 				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
@@ -161,7 +154,8 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 				ID:              uuidutil.NewV7(),
 				TenantID:        k.TenantID,
 				TenantSubjectID: k.TenantSubjectID,
-				InvokerID:       invokerFor[k],
+				// System event: no caller actor; payer-derived per money_in convention.
+				Actor:           k.TenantSubjectID.String(),
 				CreditTypeID:    k.CreditTypeID,
 				Amount:          -amount,
 				BalanceAfter:    &newBalance,

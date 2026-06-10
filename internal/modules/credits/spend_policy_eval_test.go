@@ -46,17 +46,17 @@ func TestEvaluateSpend_OverDailyCap(t *testing.T) {
 	}
 }
 
-func TestEvaluateSpend_InvokerCapBindsFirst(t *testing.T) {
+func TestEvaluateSpend_ActorCapBindsFirst(t *testing.T) {
 	now := time.Now()
 	reset := now.Add(time.Hour)
-	// Invoker cap listed first and is the binding one even though the org cap is also over.
+	// Actor cap listed first and is the binding one even though the org cap is also over.
 	caps := []capInput{
-		{DenyInvokerDailyCap, p64(100), 100, &reset},
+		{DenyActorDailyCap, p64(100), 100, &reset},
 		{DenyDailyCap, p64(100000), 0, &reset},
 	}
 	dec := evaluateSpend(caps, 50, true, 80, now)
-	if dec.Allowed || dec.DenyCode != DenyInvokerDailyCap {
-		t.Fatalf("expected invoker deny first, got %+v", dec)
+	if dec.Allowed || dec.DenyCode != DenyActorDailyCap {
+		t.Fatalf("expected actor deny first, got %+v", dec)
 	}
 }
 

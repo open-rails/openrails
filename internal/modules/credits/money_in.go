@@ -22,7 +22,7 @@ type Charger interface {
 
 type ChargeRequest struct {
 	Payer           identity.TenantSubjectID
-	InvokerID       string
+	Actor           string
 	PaymentMethodID uuid.UUID
 	AmountCents     int64
 	IdempotencyKey  string
@@ -67,7 +67,7 @@ func (s *CreditsService) belowThresholdAccounts(ctx context.Context) ([]moneyInA
 		ColumnExpr("s.low_balance_threshold_cents, s.auto_topup_enabled, s.auto_topup_amount_cents, s.auto_topup_payment_method_id, s.last_alert_at, s.last_topup_at").
 		TableExpr("billing.credit_account_settings AS s").
 		Join("JOIN billing.credit_types AS ct ON ct.id = s.credit_type_id").
-		Join("LEFT JOIN billing.user_credit_balances AS b ON b.tenant_id = s.tenant_id AND b.tenant_subject_id = s.tenant_subject_id AND b.credit_type_id = s.credit_type_id").
+		Join("LEFT JOIN billing.credit_balances AS b ON b.tenant_id = s.tenant_id AND b.tenant_subject_id = s.tenant_subject_id AND b.credit_type_id = s.credit_type_id").
 		Where("s.tenant_id = ?", tenantID).
 		Where("s.low_balance_threshold_cents IS NOT NULL").
 		Where("(COALESCE(b.balance,0) - COALESCE(b.held_balance,0)) < s.low_balance_threshold_cents").
@@ -162,7 +162,7 @@ func (s *CreditsService) topUpAccount(ctx context.Context, charger Charger, r mo
 
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
 		Payer:           payer,
-		InvokerID:       payer.UUID().String(),
+		Actor:           payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
 		AmountCents:     *r.TopupAmount,
 		IdempotencyKey:  episode,
@@ -180,7 +180,7 @@ func (s *CreditsService) topUpAccount(ctx context.Context, charger Charger, r mo
 
 	if _, err := s.Deposit(ctx, CreditDepositParams{
 		TenantSubjectID:           &payer,
-		InvokerID:                 payer.UUID().String(),
+		Actor:                     payer.UUID().String(),
 		CreditType:                r.CreditTypeName,
 		Amount:                    *r.TopupAmount,
 		Source:                    "auto_topup",

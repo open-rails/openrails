@@ -18,11 +18,11 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 	bm := credits.BillingModeArrears
 	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: &bm})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 300, Source: "seed"})
+	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 300, Source: "seed"})
 	require.NoError(t, err)
 
 	res, err := svc.AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
-		Payer: payer, Invoker: "user:a", CreditType: ct, EstimateCents: 1000,
+		Payer: payer, Actor: "user:a", CreditType: ct, EstimateCents: 1000,
 		Source: "req", SourceID: "h1", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)

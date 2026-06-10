@@ -105,28 +105,28 @@ func TestSchema_EnforcesNotNullTenantAndPayer(t *testing.T) {
 
 	// tenant_subject_id has no default: an insert that leaves it unset must be rejected.
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, balance, held_balance)
-		 VALUES (?, ?, ?, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID)
+		`INSERT INTO billing.credit_balances (id, credit_type_id, balance, held_balance)
+		 VALUES (?, ?, 0, 0)`,
+		uuid.New(), creditTypeID)
 	require.Error(t, err, "insert with NULL tenant_subject_id must violate NOT NULL")
 
 	// tenant_id is NOT NULL but defaulted; an explicit NULL must still be rejected.
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
-		 VALUES (?, ?, ?, ?, NULL, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID, payer)
+		`INSERT INTO billing.credit_balances (id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
+		 VALUES (?, ?, ?, NULL, 0, 0)`,
+		uuid.New(), creditTypeID, payer)
 	require.Error(t, err, "insert with explicit NULL tenant_id must violate NOT NULL")
 
 	// A fully-specified payer+tenant row inserts cleanly.
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, tenant_subject_id, balance, held_balance)
-		 VALUES (?, ?, ?, ?, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID, payer)
+		`INSERT INTO billing.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
+		 VALUES (?, ?, ?, 0, 0)`,
+		uuid.New(), creditTypeID, payer)
 	require.NoError(t, err, "payer+tenant-defaulted insert must succeed")
 }
 
 // TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness proves the HARDCUT
-// payer+tenant-scoped uniqueness on user_credit_balances: two rows with the same
+// payer+tenant-scoped uniqueness on credit_balances: two rows with the same
 // (tenant, payer, credit_type) collide, while the SAME payer across DISTINCT
 // tenants does NOT collide (tenant is part of the key).
 func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
@@ -149,16 +149,16 @@ func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
 
 	// First row in the default tenant.
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, tenant_subject_id, balance, held_balance)
-		 VALUES (?, ?, ?, ?, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID, payer)
+		`INSERT INTO billing.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
+		 VALUES (?, ?, ?, 0, 0)`,
+		uuid.New(), creditTypeID, payer)
 	require.NoError(t, err)
 
 	// Duplicate (tenant, payer, credit_type) -> unique violation.
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, tenant_subject_id, balance, held_balance)
-		 VALUES (?, ?, ?, ?, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID, payer)
+		`INSERT INTO billing.credit_balances (id, credit_type_id, tenant_subject_id, balance, held_balance)
+		 VALUES (?, ?, ?, 0, 0)`,
+		uuid.New(), creditTypeID, payer)
 	require.Error(t, err, "duplicate (tenant, payer, credit_type) must violate uniqueness")
 
 	// Same payer + credit_type in a DIFFERENT tenant -> allowed.
@@ -168,9 +168,9 @@ func TestSchema_EnforcesOwnerTenantScopedBalanceUniqueness(t *testing.T) {
 		otherTenant, "other_"+uuid.NewString())
 	require.NoError(t, err)
 	_, err = bunDB.ExecContext(ctx,
-		`INSERT INTO billing.user_credit_balances (id, invoker_id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
-		 VALUES (?, ?, ?, ?, ?, 0, 0)`,
-		uuid.New(), uuid.NewString(), creditTypeID, payer, otherTenant)
+		`INSERT INTO billing.credit_balances (id, credit_type_id, tenant_subject_id, tenant_id, balance, held_balance)
+		 VALUES (?, ?, ?, ?, 0, 0)`,
+		uuid.New(), creditTypeID, payer, otherTenant)
 	require.NoError(t, err, "same payer in a different tenant must NOT collide")
 }
 
@@ -180,7 +180,7 @@ func seedSpendable(t *testing.T, ctx context.Context, svc *credits.CreditsServic
 	t.Helper()
 	src := uuid.New()
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
-		InvokerID:  userID,
+		Actor:      userID,
 		CreditType: creditType,
 		Amount:     amount,
 		Source:     "test_seed",

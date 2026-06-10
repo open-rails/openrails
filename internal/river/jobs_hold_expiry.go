@@ -88,9 +88,9 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 
 		// Group holds by the BALANCE KEY to batch balance updates. The unified
 		// lifecycle balance row (issue #221/#223) is keyed by
-		// (tenant_id, tenant_subject_id, credit_type_id) — invoker_id is ACTOR attribution
+		// (tenant_id, tenant_subject_id, credit_type_id) — actor is ACTOR attribution
 		// only and is NOT part of the balance identity, so releasing held_balance
-		// must target the payer's row, not the invoker's.
+		// must target the payer's row, not the actor's.
 		type key struct {
 			TenantID        uuid.UUID
 			TenantSubjectID uuid.UUID
@@ -124,7 +124,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				continue
 			}
 
-			bal := new(models.UserCreditBalance)
+			bal := new(models.CreditBalance)
 			err := tx.NewSelect().
 				Model(bal).
 				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).
@@ -142,7 +142,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				newHeldBalance = 0
 			}
 
-			if _, err := tx.NewUpdate().Model((*models.UserCreditBalance)(nil)).
+			if _, err := tx.NewUpdate().Model((*models.CreditBalance)(nil)).
 				Set("held_balance = ?", newHeldBalance).
 				Set("updated_at = ?", now).
 				Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", k.TenantID, k.TenantSubjectID, k.CreditTypeID).

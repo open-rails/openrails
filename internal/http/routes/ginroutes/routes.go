@@ -87,8 +87,8 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	users := group.Group("/users/:user_id")
 	users.GET("/product-access", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetUserProductAccess))
 
-	invokers := group.Group("/invokers/:invoker_id")
-	invokers.GET("/credits", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
+	actors := group.Group("/actors/:actor")
+	actors.GET("/credits", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetActorCredits))
 
 	credits := group.Group("/credits")
 	// SPEND (hot-path billing) operations — authorize/hold/capture draw down a
@@ -126,10 +126,10 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 	credits.POST("/hold/:id/release", creditsWrite, wrap(httphandlers.ServiceReleaseHold))
 	// #311: per-dimension spend rollup for the platform usage/revenue surfaces.
 	credits.POST("/usage/rollup", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceUsageRollup))
-	// #410: per-endpoint daily revenue (by usage_event endpoint_name, cross-payer).
-	credits.POST("/usage/endpoint-revenue", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceEndpointRevenue))
+	// #410: per-resource daily revenue (by the usage_event resource column, cross-payer).
+	credits.POST("/usage/resource-revenue", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceResourceRevenue))
 	credits.GET("/transactions/lookup", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceLookupCreditTransaction))
-	credits.GET("/invokers/:invoker_id", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetInvokerCredits))
+	credits.GET("/actors/:actor", ginmw.RequireServiceTokenPermission(controlplane.PermCreditsRead), wrap(httphandlers.ServiceGetActorCredits))
 
 	// Tenant billing-account admin surface (issue #242): configure prepaid|arrears
 	// mode + spend caps + auto-top-up, read settings, and list usage. Tensorhub's

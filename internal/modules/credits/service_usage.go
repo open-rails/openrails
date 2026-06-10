@@ -20,13 +20,18 @@ import (
 // the service usage rollup (#311) so the tensorhub platform's /budget-usage +
 // revenue analytics can be served from OpenRails as the billing source of truth.
 type CaptureUsageEventParams struct {
-	TenantSubjectID     uuid.UUID
-	InvokerID           string
-	CreditTypeID        uuid.UUID
-	EventType           string // the metered model/endpoint, e.g. "owner/endpoint"
-	Amount              int64  // host-priced captured amount (>= 0)
+	TenantSubjectID uuid.UUID
+	// Actor is the caller-supplied principal string attributable to this usage
+	// (opaque to OpenRails). Required.
+	Actor        string
+	CreditTypeID uuid.UUID
+	EventType    string // the metered event kind, e.g. "owner/endpoint"
+	Amount       int64  // host-priced captured amount (>= 0)
+	// Resource is the caller-supplied free-form string for what was metered
+	// (opaque to OpenRails; e.g. tensorhub maps its endpoint slug here). Optional.
+	Resource            string
 	Dimensions          map[string]int64
-	Metadata            map[string]any // string grouping dims (function_name, tier, delegated_user_id, ...)
+	Metadata            map[string]any // string long-tail dims (function_name, tier, ...)
 	Source              string
 	SourceID            string
 	CreditTransactionID *uuid.UUID
@@ -41,8 +46,13 @@ func (s *CreditsService) InsertCaptureUsageEvent(ctx context.Context, p CaptureU
 	p.EventType = strings.TrimSpace(p.EventType)
 	p.Source = strings.TrimSpace(p.Source)
 	p.SourceID = strings.TrimSpace(p.SourceID)
+	p.Actor = strings.TrimSpace(p.Actor)
+	p.Resource = strings.TrimSpace(p.Resource)
 	if p.EventType == "" || p.Source == "" || p.SourceID == "" {
 		return fmt.Errorf("event_type, source, source_id required for usage event")
+	}
+	if p.Actor == "" {
+		return fmt.Errorf("actor required for usage event")
 	}
 	if p.Amount < 0 {
 		return fmt.Errorf("amount must be >= 0")
@@ -56,7 +66,8 @@ func (s *CreditsService) InsertCaptureUsageEvent(ctx context.Context, p CaptureU
 			ID:                  uuidutil.NewV7(),
 			TenantID:            tenant.FromContextOrDefault(ctx).UUID(),
 			TenantSubjectID:     p.TenantSubjectID,
-			InvokerID:           p.InvokerID,
+			Actor:               p.Actor,
+			Resource:            nilIfEmpty(p.Resource),
 			CreditTypeID:        p.CreditTypeID,
 			EventType:           p.EventType,
 			Dimensions:          p.Dimensions,
@@ -84,13 +95,13 @@ type ServiceUsageRollupRow struct {
 }
 
 // serviceUsageGroupExpr maps a group_by selector to the SQL key expression.
-// "endpoint" groups by event_type (the metered model/endpoint); the rest read
-// the string grouping dimensions stashed in metadata at capture time.
+// "actor" and "resource" read the typed attribution columns; the rest read the
+// long-tail string dimensions stashed in metadata at capture time.
 var serviceUsageGroupExpr = map[string]string{
-	"endpoint": "ue.metadata->>'endpoint_name'",
+	"resource": "ue.resource",
+	"actor":    "ue.actor",
 	"function": "ue.metadata->>'function_name'",
 	"tier":     "ue.metadata->>'availability_tier'",
-	"user":     "ue.metadata->>'delegated_user_id'",
 }
 
 // ServiceUsageRollup returns per-dimension-VALUE spend for a tenant subject over
@@ -105,7 +116,7 @@ func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.
 	}
 	keyExpr, ok := serviceUsageGroupExpr[strings.TrimSpace(groupBy)]
 	if !ok {
-		return nil, fmt.Errorf("invalid group_by %q (want endpoint|function|tier|user)", groupBy)
+		return nil, fmt.Errorf("invalid group_by %q (want resource|actor|function|tier)", groupBy)
 	}
 	var out []ServiceUsageRollupRow
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
@@ -127,32 +138,32 @@ func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.
 	return out, nil
 }
 
-// EndpointRevenueDailyRow is one day's revenue for an endpoint (millicents).
-type EndpointRevenueDailyRow struct {
+// ResourceRevenueDailyRow is one day's revenue for a resource (millicents).
+type ResourceRevenueDailyRow struct {
 	Date             string `json:"date" bun:"date"`
 	AmountMillicents int64  `json:"amount_millicents" bun:"amount_millicents"`
 }
 
-// EndpointRevenueDaily returns per-day revenue (sum of captured usage_event
+// ResourceRevenueDaily returns per-day revenue (sum of captured usage_event
 // amounts; the credit type's smallest unit is cents, so x1000 -> millicents) for
-// an endpoint identified by metadata->>'endpoint_name', across ALL payers in the
-// tenant, over [from, to). Powers tensorhub endpoint revenue analytics (#410).
-func (s *CreditsService) EndpointRevenueDaily(ctx context.Context, endpointName string, from, to time.Time) ([]EndpointRevenueDailyRow, error) {
+// a resource (typed attribution column), across ALL payers in the tenant, over
+// [from, to). Powers e.g. tensorhub endpoint revenue analytics (#410).
+func (s *CreditsService) ResourceRevenueDaily(ctx context.Context, resource string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
-	endpointName = strings.TrimSpace(endpointName)
-	if endpointName == "" {
-		return nil, fmt.Errorf("endpoint_name required")
+	resource = strings.TrimSpace(resource)
+	if resource == "" {
+		return nil, fmt.Errorf("resource required")
 	}
-	var out []EndpointRevenueDailyRow
+	var out []ResourceRevenueDailyRow
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		return s.db.Q(ctx).NewSelect().
 			TableExpr("billing.usage_events AS ue").
 			ColumnExpr("to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date").
 			ColumnExpr("COALESCE(SUM(ue.amount), 0) * 1000 AS amount_millicents").
 			Where("ue.tenant_id = ?", tenant.FromContextOrDefault(ctx).UUID()).
-			Where("ue.metadata->>'endpoint_name' = ?", endpointName).
+			Where("ue.resource = ?", resource).
 			Where("ue.occurred_at >= ? AND ue.occurred_at < ?", from.UTC(), to.UTC()).
 			GroupExpr("1").
 			OrderExpr("1").
@@ -162,4 +173,12 @@ func (s *CreditsService) EndpointRevenueDaily(ctx context.Context, endpointName 
 		return nil, err
 	}
 	return out, nil
+}
+
+// nilIfEmpty returns nil for "", else a pointer to s (nullable text columns).
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

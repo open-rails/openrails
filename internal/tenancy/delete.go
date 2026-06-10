@@ -16,7 +16,7 @@ var tenantOwnedTables = []string{
 	"products", "prices", "catalog_drift_events", "payment_methods",
 	"subscriptions", "entitlements", "payments", "admin_grants",
 	"notification_queue", "processor_customers", "credit_types",
-	"credit_transactions", "credit_blocks", "user_credit_balances",
+	"credit_transactions", "credit_blocks", "credit_balances",
 	"checkout_sessions", "manual_rebill_attempts",
 }
 

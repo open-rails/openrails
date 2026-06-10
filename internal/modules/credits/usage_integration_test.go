@@ -18,18 +18,18 @@ func TestRecordUsage_DebitsAndAggregates(t *testing.T) {
 	})
 
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed",
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
 	_, err = svc.RecordUsage(ctx, credits.RecordUsageParams{
-		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "gpt-4o",
+		Payer: &payer, Actor: "user:a", CreditType: ct, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 100, "output_tokens": 50},
 		Amount:     5_000, Source: "req", SourceID: "r1",
 	})
 	require.NoError(t, err)
 	_, err = svc.RecordUsage(ctx, credits.RecordUsageParams{
-		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "gpt-4o",
+		Payer: &payer, Actor: "user:a", CreditType: ct, EventType: "gpt-4o",
 		Dimensions: map[string]int64{"input_tokens": 60, "output_tokens": 30},
 		Amount:     3_000, Source: "req", SourceID: "r2",
 	})
@@ -59,12 +59,12 @@ func TestRecordUsage_Idempotent(t *testing.T) {
 	})
 
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 10_000, Source: "seed",
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 10_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
 	p := credits.RecordUsageParams{
-		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "gpt-4o",
+		Payer: &payer, Actor: "user:a", CreditType: ct, EventType: "gpt-4o",
 		Amount: 2_000, Source: "req", SourceID: "dup",
 	}
 	ev1, err := svc.RecordUsage(ctx, p)
@@ -86,12 +86,12 @@ func TestRecordUsage_ZeroCostNoDebit(t *testing.T) {
 	})
 
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 5_000, Source: "seed",
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 5_000, Source: "seed",
 	})
 	require.NoError(t, err)
 
 	ev, err := svc.RecordUsage(ctx, credits.RecordUsageParams{
-		Payer: &payer, InvokerID: "user:a", CreditType: ct, EventType: "cached-hit",
+		Payer: &payer, Actor: "user:a", CreditType: ct, EventType: "cached-hit",
 		Dimensions: map[string]int64{"cached_input_tokens": 200, "requests": 1},
 		Amount:     0, Source: "req", SourceID: "z1",
 	})

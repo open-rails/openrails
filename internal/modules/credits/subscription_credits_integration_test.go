@@ -109,7 +109,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", creditTypeID).Exec(ctx)
@@ -154,7 +154,7 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	require.NotNil(t, dep.SourceID)
 	require.Equal(t, expectedGrantID.String(), *dep.SourceID)
 
-	bal := new(models.UserCreditBalance)
+	bal := new(models.CreditBalance)
 	require.NoError(t, bunDB.NewSelect().
 		Model(bal).
 		Where("tenant_subject_id = ? AND credit_type_id = ?", tenantSubjectID, creditTypeID).
@@ -273,7 +273,7 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 
 	t.Cleanup(func() {
 		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", tenantSubjectID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Subscription)(nil)).Where("id = ?", subID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Price)(nil)).Where("id = ?", priceID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Product)(nil)).Where("id = ?", productID).Exec(ctx)
@@ -311,10 +311,10 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	}))
 
 	// Total should be 10 + 100 across two types, each exactly once.
-	balOnce := new(models.UserCreditBalance)
+	balOnce := new(models.CreditBalance)
 	require.NoError(t, bunDB.NewSelect().Model(balOnce).Where("tenant_subject_id = ? AND credit_type_id = ?", tenantSubjectID, ctOnceID).Scan(ctx))
 	require.Equal(t, int64(10), balOnce.Balance)
-	balRenew := new(models.UserCreditBalance)
+	balRenew := new(models.CreditBalance)
 	require.NoError(t, bunDB.NewSelect().Model(balRenew).Where("tenant_subject_id = ? AND credit_type_id = ?", tenantSubjectID, ctRenewID).Scan(ctx))
 	require.Equal(t, int64(100), balRenew.Balance)
 }

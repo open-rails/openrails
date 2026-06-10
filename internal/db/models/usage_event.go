@@ -23,8 +23,12 @@ type UsageEvent struct {
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	// TenantSubjectID is the tenant subject BILLED for this usage (issue #221, the payer).
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
-	// InvokerID is the invoker that caused usage (attribution only; not the payer).
-	InvokerID string `bun:"invoker_id,notnull" json:"invoker_id"`
+	// Actor is the caller-supplied principal string that caused usage
+	// (opaque to OpenRails; attribution + grouping only, not the payer).
+	Actor string `bun:"actor,notnull" json:"actor"`
+	// Resource is the caller-supplied free-form string for what was metered
+	// (opaque to OpenRails; e.g. tensorhub endpoint slug). Nullable.
+	Resource *string `bun:"resource,nullzero" json:"resource,omitempty"`
 	// CreditTypeID is the credit type debited for this event.
 	CreditTypeID uuid.UUID `bun:"credit_type_id,type:uuid,notnull" json:"credit_type_id"`
 	// EventType is the metered endpoint / model (e.g. "gpt-4o").

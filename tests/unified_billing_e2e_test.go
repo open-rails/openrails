@@ -34,7 +34,7 @@ package tests
 // that is the standalone server-to-server contract gen-orchestrator / Tensorhub
 // actually use. Ledger correctness (rows, statuses, balances, conservation) is
 // then asserted directly against the billing.credit_transactions /
-// user_credit_balances tables. We fall back to the in-process facade only where
+// credit_balances tables. We fall back to the in-process facade only where
 // no public route exists; every scenario below has one, so all flow over HTTP.
 
 import (
@@ -136,7 +136,7 @@ func (h *billingE2EHarness) deposit(userID string, amount int64) {
 	srcID := uuid.New()
 	w := h.do(http.MethodPost, "/v1/service/credits/deposit", map[string]any{
 		"tenant_subject_id": personalOwnerID(userID).String(),
-		"invoker_id":        userID,
+		"actor":             userID,
 		"credit_type":       h.creditType,
 		"amount":            amount,
 		"source":            "e2e_deposit",
@@ -157,7 +157,7 @@ func (h *billingE2EHarness) hold(userID, source, sourceID string, amount int64) 
 	h.t.Helper()
 	return h.do(http.MethodPost, "/v1/service/credits/hold", map[string]any{
 		"tenant_subject_id": personalOwnerID(userID).String(),
-		"invoker_id":        userID,
+		"actor":             userID,
 		"credit_type":       h.creditType,
 		"amount":            amount,
 		"source":            source,
@@ -223,10 +223,10 @@ func (h *billingE2EHarness) ledgerRows(userID string) []models.CreditTransaction
 }
 
 // rawBalanceRow returns the persisted balance row for a tenant subject, or nil.
-func (h *billingE2EHarness) rawBalanceRow(userID string) *models.UserCreditBalance {
+func (h *billingE2EHarness) rawBalanceRow(userID string) *models.CreditBalance {
 	h.t.Helper()
 	owner := personalOwnerID(userID)
-	bal := new(models.UserCreditBalance)
+	bal := new(models.CreditBalance)
 	err := h.suite.BunDB.NewSelect().
 		Model(bal).
 		Where("tenant_subject_id = ?", owner).
@@ -459,7 +459,7 @@ func TestUnifiedBilling_LifecycleViaPublicServiceTokenRoutes(t *testing.T) {
 
 	// Lookup the hold by source the way an orchestrator reconciles state.
 	lookup := h.do(http.MethodGet, fmt.Sprintf(
-		"/v1/service/credits/transactions/lookup?user_id=%s&credit_type=%s&transaction_type=hold&source=gen_job&source_id=lifecycle-job-1",
+		"/v1/service/credits/transactions/lookup?actor=%s&credit_type=%s&transaction_type=hold&source=gen_job&source_id=lifecycle-job-1",
 		user, h.creditType), nil)
 	require.Equal(t, http.StatusOK, lookup.Code, "lookup body: %s", lookup.Body.String())
 	require.Contains(t, lookup.Body.String(), holdID)

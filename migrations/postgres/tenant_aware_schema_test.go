@@ -21,7 +21,7 @@ var tenantOwnedTables = []string{
 	"credit_types",
 	"credit_transactions",
 	"credit_blocks",
-	"user_credit_balances",
+	"credit_balances",
 	"checkout_sessions",
 	"manual_rebill_attempts",
 }

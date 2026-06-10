@@ -85,11 +85,10 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	_, err := suite.BunDB.NewInsert().Model(ct).Exec(ctx)
 	require.NoError(t, err)
 
-	ucb := &models.UserCreditBalance{
+	ucb := &models.CreditBalance{
 		ID:              uuid.New(),
 		TenantID:        tenant.DefaultID.UUID(),
 		TenantSubjectID: tenantSubjectID,
-		InvokerID:       userID,
 		CreditTypeID:    ct.ID,
 		Balance:         10_000,
 		HeldBalance:     0,
@@ -173,7 +172,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// 1) Create hold via Service facade, release via service HTTP.
 	hold1, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
 		TenantSubjectID: &tenantSubject,
-		InvokerID:       userID,
+		Actor:           userID,
 		CreditType:      creditTypeName,
 		Amount:          123,
 		Source:          "svc_test",
@@ -192,7 +191,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	// 2) Create hold via service HTTP, capture via Service facade.
 	bodyHold, _ := json.Marshal(map[string]any{
 		"tenant_subject_id": tenantSubjectID.String(),
-		"invoker_id":        userID,
+		"actor":             userID,
 		"credit_type":       creditTypeName,
 		"amount":            456,
 		"source":            "svc_test",

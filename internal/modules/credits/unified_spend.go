@@ -28,7 +28,7 @@ import (
 // SpendParams is a unified immediate spend (balance first, then owed).
 type SpendParams struct {
 	Payer      *identity.TenantSubjectID
-	InvokerID  string
+	Actor      string
 	CreditType string
 	Amount     int64
 	Source     string
@@ -55,7 +55,7 @@ func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) e
 	if !ct.IsActive {
 		return ErrCreditTypeInactive
 	}
-	payer, err := resolveTenantSubject(params.Payer, params.InvokerID)
+	payer, err := resolveTenantSubject(params.Payer, params.Actor)
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) e
 	defer func() { _ = tx.Rollback() }()
 
 	// Serialize per account and guard idempotency on the spend coordinates.
-	if _, err := s.lockBalance(ctx, tx, payer, params.InvokerID, ct.ID); err != nil {
+	if _, err := s.lockBalance(ctx, tx, payer, params.Actor, ct.ID); err != nil {
 		return err
 	}
 	if params.SourceID != "" {
@@ -88,7 +88,7 @@ func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) e
 		}
 	}
 
-	if _, _, err := s.spendBalanceThenOwedTx(ctx, tx, ct, payer, params.InvokerID, params.Source, params.SourceID, params.Amount); err != nil {
+	if _, _, err := s.spendBalanceThenOwedTx(ctx, tx, ct, payer, params.Actor, params.Source, params.SourceID, params.Amount); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -154,7 +154,7 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 		newBal := bal.Balance - fromBalance
 		neg := -fromBalance
 		trx := &models.CreditTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, InvokerID: userID,
+			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, Actor: userID,
 			CreditTypeID: ct.ID, Amount: neg, BalanceAfter: &newBal,
 			TransactionType: "withdrawal", Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
@@ -174,7 +174,7 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 			return nil, nil, err
 		}
 		trx := &models.CreditTransaction{
-			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, InvokerID: userID,
+			ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, Actor: userID,
 			CreditTypeID: ct.ID, Amount: fromOwed, TransactionType: txOwedAccrual, Status: "posted",
 			Source: source, SourceID: nullStr(sourceID), CreatedAt: now, UpdatedAt: now,
 		}
@@ -222,7 +222,7 @@ func (s *CreditsService) captureSettleTx(ctx context.Context, tx bun.Tx, payer i
 		}
 		newBal = nb
 	} else {
-		b := new(models.UserCreditBalance)
+		b := new(models.CreditBalance)
 		if err := tx.NewSelect().Model(b).
 			Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
 			Limit(1).Scan(ctx); err != nil {

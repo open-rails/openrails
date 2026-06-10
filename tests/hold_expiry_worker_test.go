@@ -37,14 +37,13 @@ func (suite *TestContainerSuite) createTestCreditType(name string) *models.Credi
 }
 
 // createTestCreditBalance creates a user credit balance for testing
-func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTypeID uuid.UUID, balance, heldBalance int64) *models.UserCreditBalance {
+func (suite *TestContainerSuite) createTestCreditBalance(userID string, creditTypeID uuid.UUID, balance, heldBalance int64) *models.CreditBalance {
 	ctx := context.Background()
 	now := suite.GetClock().Now()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
-	bal := &models.UserCreditBalance{
+	bal := &models.CreditBalance{
 		ID:              uuid.New(),
 		TenantSubjectID: tenantSubjectID,
-		InvokerID:       userID,
 		CreditTypeID:    creditTypeID,
 		Balance:         balance,
 		HeldBalance:     heldBalance,
@@ -69,7 +68,7 @@ func (suite *TestContainerSuite) createTestCreditHold(userID string, creditTypeI
 	hold := &models.CreditTransaction{
 		ID:              uuid.New(),
 		TenantSubjectID: tenantSubjectID,
-		InvokerID:       userID,
+		Actor:           userID,
 		CreditTypeID:    creditTypeID,
 		Amount:          0,
 		BalanceAfter:    nil,
@@ -102,8 +101,8 @@ func (suite *TestContainerSuite) getCreditHold(id uuid.UUID) *models.CreditTrans
 }
 
 // getCreditBalance retrieves a user credit balance by ID
-func (suite *TestContainerSuite) getCreditBalance(id uuid.UUID) *models.UserCreditBalance {
-	bal := new(models.UserCreditBalance)
+func (suite *TestContainerSuite) getCreditBalance(id uuid.UUID) *models.CreditBalance {
+	bal := new(models.CreditBalance)
 	err := suite.BunDB.NewSelect().Model(bal).Where("id = ?", id).Scan(context.Background())
 	if err != nil {
 		panic(err)
@@ -243,7 +242,7 @@ func TestHoldExpiryWorkerMultipleUserHolds(t *testing.T) {
 	// Create 3 users with expired holds
 	type testUser struct {
 		userID  string
-		balance *models.UserCreditBalance
+		balance *models.CreditBalance
 		hold    *models.CreditTransaction
 		holdAmt int64
 		heldAmt int64

@@ -33,7 +33,7 @@ var ModelRegistry = []any{
 	(*ProductEntitlementFeature)(nil),
 	(*AdminGrant)(nil),
 	(*CreditType)(nil),
-	(*UserCreditBalance)(nil),
+	(*CreditBalance)(nil),
 	(*CreditTransaction)(nil),
 	(*CreditBlock)(nil),
 	(*CreditAccountSettings)(nil),

@@ -34,7 +34,7 @@ func TestAuthorizeAllowed(t *testing.T) {
 	defer srv.Close()
 
 	resp, err := newTestClient(t, srv.URL).Authorize(context.Background(), AuthorizeRequest{
-		PayerTenantID: "org-1", InvokerID: "oat:k1", EstimateCents: 100, RequestID: "req-1",
+		PayerTenantID: "org-1", Actor: "oat:k1", EstimateCents: 100, RequestID: "req-1",
 	})
 	if err != nil {
 		t.Fatalf("Authorize: %v", err)
@@ -48,7 +48,7 @@ func TestAuthorizeAllowed(t *testing.T) {
 	if gotPath != "/v1/service/credits/authorize" {
 		t.Fatalf("path = %q", gotPath)
 	}
-	if gotBody.PayerTenantID != "org-1" || gotBody.InvokerID != "oat:k1" || gotBody.RequestID != "req-1" || gotBody.EstimateCents != 100 {
+	if gotBody.PayerTenantID != "org-1" || gotBody.Actor != "oat:k1" || gotBody.RequestID != "req-1" || gotBody.EstimateCents != 100 {
 		t.Fatalf("body threaded wrong: %+v", gotBody)
 	}
 }
@@ -99,7 +99,7 @@ func TestAuthorize5xxIsUnreachable(t *testing.T) {
 
 func TestAuthorize4xxIsNotUnreachable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "bad invoker", http.StatusBadRequest)
+		http.Error(w, "bad actor", http.StatusBadRequest)
 	}))
 	defer srv.Close()
 
@@ -163,7 +163,7 @@ func TestBalance(t *testing.T) {
 	if resp.AvailableCents != 1234 {
 		t.Fatalf("available = %d", resp.AvailableCents)
 	}
-	if !strings.Contains(gotQuery, "tenant_subject_id=org-1") || strings.Contains(gotQuery, "invoker") {
+	if !strings.Contains(gotQuery, "tenant_subject_id=org-1") || strings.Contains(gotQuery, "actor") {
 		t.Fatalf("query = %q", gotQuery)
 	}
 }

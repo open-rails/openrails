@@ -142,7 +142,7 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 	}
 
 	// --- closing balance snapshot ---
-	bal := new(models.UserCreditBalance)
+	bal := new(models.CreditBalance)
 	balErr := tx.NewSelect().Model(bal).
 		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, ct.ID).
 		Limit(1).Scan(ctx)
@@ -255,7 +255,7 @@ func (s *CreditsService) FinalizeDueInvoices(ctx context.Context, from, to time.
 	var accts []acct
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		return s.db.Q(ctx).NewSelect().
-			TableExpr("billing.user_credit_balances AS b").
+			TableExpr("billing.credit_balances AS b").
 			ColumnExpr("b.tenant_subject_id::text AS tenant_subject_id").
 			ColumnExpr("ct.name AS credit_type_name").
 			Join("JOIN billing.credit_types AS ct ON ct.id = b.credit_type_id").

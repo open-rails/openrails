@@ -86,7 +86,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	// Deposit 1000 — exercises BeginTenantTx + GetCreditTypeByName under RLS.
 	depSrc := uuid.New()
 	_, err = svc.DepositCredits(tctx, billingservice.DepositCreditsRequest{
-		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ctName, Amount: 1000, Source: "test", SourceID: &depSrc,
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ctName, Amount: 1000, Source: "test", SourceID: &depSrc,
 	})
 	require.NoError(t, err, "DepositCredits must work under openrails_app (GUC set)")
 
@@ -96,7 +96,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 
 	// Hold 600.
 	hold, err := svc.HoldCredits(tctx, billingservice.HoldCreditsRequest{
-		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ctName, Amount: 600,
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ctName, Amount: 600,
 		Source: "test", SourceID: uuid.NewString(), ExpiresAt: now.Add(time.Hour),
 	})
 	require.NoError(t, err, "HoldCredits must work under openrails_app")

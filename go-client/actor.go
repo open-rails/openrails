@@ -2,12 +2,12 @@ package openrails
 
 import "strings"
 
-// InvokerInputs is the narrow projection of an authenticated principal needed to
-// derive the canonical OpenRails invoker. It mirrors the relevant fields of
+// ActorInputs is the narrow projection of an authenticated principal needed to
+// derive the canonical OpenRails actor. It mirrors the relevant fields of
 // types.AuthInfo without importing it (keeps this package free of HTTP-layer
-// deps and trivially testable). Callers populate it via InvokerForAuth in the
+// deps and trivially testable). Callers populate it via ActorForAuth in the
 // HTTP layer.
-type InvokerInputs struct {
+type ActorInputs struct {
 	// Source is the auth path: service_token | platform_delegated_jwt
 	// | authkit | api_key | dev.
 	Source string
@@ -25,17 +25,17 @@ type InvokerInputs struct {
 	Fallback string
 }
 
-// InvokerFor derives the canonical OpenRails invoker (#246):
+// ActorFor derives the canonical OpenRails actor (#246):
 //
 //	service-token:<key_id> for a service-token caller
 //	<issuer>:<sub>     for a delegated platform JWT
 //	user:<id>          for a direct JWT / user principal
 //	<fallback>         when nothing finer is available (e.g. tenant slug)
 //
-// The granularity matters: OpenRails attributes spend to the actual invoker, so
-// a service-token key, a delegated platform user, and a direct user are distinct invokers
+// The granularity matters: OpenRails attributes spend to the actual actor, so
+// a service-token key, a delegated platform user, and a direct user are distinct actors
 // even under the same payer tenant.
-func InvokerFor(in InvokerInputs) string {
+func ActorFor(in ActorInputs) string {
 	switch strings.TrimSpace(in.Source) {
 	case "service_token":
 		if k := strings.TrimSpace(in.ServiceTokenKeyID); k != "" {

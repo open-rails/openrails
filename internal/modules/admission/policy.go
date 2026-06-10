@@ -29,10 +29,10 @@ type TierPolicyStore struct {
 func NewTierPolicyStore(database *db.DB) *TierPolicyStore { return &TierPolicyStore{db: database} }
 
 // ResolvedPolicy is a tier's enforceable policy: throughput windows, entitled
-// endpoints (empty = all allowed), and rolling money-budget windows (#304).
+// resources (empty = all allowed), and rolling money-budget windows (#304).
 type ResolvedPolicy struct {
 	Throughput        ratelimit.Policy
-	EntitledEndpoints []string
+	EntitledResources []string
 	BudgetWindows     []budgets.BudgetWindow
 }
 
@@ -41,7 +41,7 @@ func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, payer identity.T
 	return s.UpsertTierPolicyFull(ctx, payer, tier, models.ThroughputPolicy{Windows: windows})
 }
 
-// UpsertTierPolicyFull sets the full tier policy (windows + entitled endpoints).
+// UpsertTierPolicyFull sets the full tier policy (windows + entitled resources).
 func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identity.TenantSubjectID, tier string, policy models.ThroughputPolicy) error {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	now := time.Now().UTC()
@@ -71,7 +71,7 @@ func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identi
 }
 
 // GetTierPolicy returns the enforceable policy for (payer, tier). A missing row
-// yields an empty policy (no throughput limit, all endpoints allowed).
+// yields an empty policy (no throughput limit, all resources allowed).
 func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.TenantSubjectID, tier string) (ResolvedPolicy, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	row := new(models.TierPolicy)
@@ -97,7 +97,7 @@ func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.Tena
 	}
 	return ResolvedPolicy{
 		Throughput:        toRatelimitPolicy(row.Policy),
-		EntitledEndpoints: row.Policy.EntitledEndpoints,
+		EntitledResources: row.Policy.EntitledResources,
 		BudgetWindows:     toBudgetWindows(row.Policy.BudgetWindows),
 	}, nil
 }

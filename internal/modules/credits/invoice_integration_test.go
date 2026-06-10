@@ -27,10 +27,10 @@ func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 		_, _ = bunDB.NewDelete().Model((*models.Invoice)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
 	})
 
-	_, err := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "purchase"})
+	_, err := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 100_000, Source: "purchase"})
 	require.NoError(t, err)
 	rec := func(et string, amt int64, dims map[string]int64, sid string) {
-		_, e := svc.RecordUsage(ctx, credits.RecordUsageParams{Payer: &payer, InvokerID: "u", CreditType: ct, EventType: et, Dimensions: dims, Amount: amt, Source: "req", SourceID: sid})
+		_, e := svc.RecordUsage(ctx, credits.RecordUsageParams{Payer: &payer, Actor: "u", CreditType: ct, EventType: et, Dimensions: dims, Amount: amt, Source: "req", SourceID: sid})
 		require.NoError(t, e)
 	}
 	rec("gpt-4o", 5_000, map[string]int64{"input_tokens": 100, "output_tokens": 50}, "r1")
@@ -76,9 +76,9 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	})
 	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: strptr(credits.BillingModeArrears)})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1_000, Source: "seed"})
+	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 1_000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = svc.RecordUsage(ctx, credits.RecordUsageParams{Payer: &payer, InvokerID: "u", CreditType: ct, EventType: "gpt-4o", Amount: 1_500, Source: "req", SourceID: "r1"})
+	_, err = svc.RecordUsage(ctx, credits.RecordUsageParams{Payer: &payer, Actor: "u", CreditType: ct, EventType: "gpt-4o", Amount: 1_500, Source: "req", SourceID: "r1"})
 	require.NoError(t, err)
 
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
@@ -97,9 +97,9 @@ func TestFinalizeDueInvoices_EnumeratesAccount(t *testing.T) {
 		_, _ = bunDB.NewDelete().Model((*models.UsageEvent)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.Invoice)(nil)).Where("tenant_subject_id = ?", payer.UUID()).Exec(ctx)
 	})
-	_, err := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 5_000, Source: "seed"})
+	_, err := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 5_000, Source: "seed"})
 	require.NoError(t, err)
-	_, err = svc.RecordUsage(ctx, credits.RecordUsageParams{Payer: &payer, InvokerID: "u", CreditType: ct, EventType: "gpt-4o", Amount: 2_000, Source: "req", SourceID: "r1"})
+	_, err = svc.RecordUsage(ctx, credits.RecordUsageParams{Payer: &payer, Actor: "u", CreditType: ct, EventType: "gpt-4o", Amount: 2_000, Source: "req", SourceID: "r1"})
 	require.NoError(t, err)
 
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)

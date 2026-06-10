@@ -18,7 +18,7 @@ type TierPolicy struct {
 	// TenantSubjectID the policy belongs to. The all-zero uuid is the reserved sentinel
 	// for tenant-wide defaults; a real payer id scopes policy to that payer.
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
-	// Tier name (e.g. "free", "tier_1"); the policy applies to invokers at this tier.
+	// Tier name (e.g. "free", "tier_1"); the policy applies to actors at this tier.
 	Tier string `bun:"tier,notnull" json:"tier"`
 	// Policy is the throughput windows: {"windows":[{"unit","window_seconds","max"}]}.
 	Policy        ThroughputPolicy `bun:"policy,type:jsonb,nullzero" json:"policy"`
@@ -33,7 +33,7 @@ type TierPolicy struct {
 // denies a request whose model is not entitled (#298).
 type ThroughputPolicy struct {
 	Windows           []ThroughputWindow   `json:"windows"`
-	EntitledEndpoints []string             `json:"entitled_endpoints,omitempty"`
+	EntitledResources []string             `json:"entitled_resources,omitempty"`
 	BudgetWindows     []BudgetWindowPolicy `json:"budget_windows,omitempty"`
 }
 

@@ -11,9 +11,9 @@ import (
 
 type serviceAdmitRequest struct {
 	TenantSubjectID string                           `json:"tenant_subject_id"`
-	InvokerID       string                           `json:"invoker_id"`
+	Actor           string                           `json:"actor"`
 	Tier            string                           `json:"tier"`
-	Model           string                           `json:"model"`
+	Resource        string                           `json:"resource"`
 	Amounts         map[string]int64                 `json:"amounts"`
 	CreditType      string                           `json:"credit_type"`
 	EstimateCents   int64                            `json:"estimate_cents"`
@@ -38,7 +38,7 @@ func ServiceAdmit(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "estimate_cents must be >= 0")
 		return
 	}
-	invoker := strings.TrimSpace(req.InvokerID)
+	actor := strings.TrimSpace(req.Actor)
 	payer, err := parseServiceTenantSubjectID(req.TenantSubjectID)
 	if err != nil || payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "tenant_subject_id required")
@@ -56,9 +56,9 @@ func ServiceAdmit(r *httprequest.Request) {
 
 	in := billingservice.AdmitInput{
 		TenantSubjectID:  *payer,
-		InvokerID:        invoker,
+		Actor:            actor,
 		Tier:             req.Tier,
-		Model:            req.Model,
+		Resource:         req.Resource,
 		Amounts:          req.Amounts,
 		CreditType:       req.CreditType,
 		EstimateCents:    req.EstimateCents,
@@ -101,8 +101,8 @@ func ServiceAdmit(r *httprequest.Request) {
 	}
 }
 
-// ServiceGetBudget returns the invoker's rolling money-budget windows (#304
-// introspection) for a host's /status dashboard. tenant_subject_id + invoker_id + tier are
+// ServiceGetBudget returns the actor's rolling money-budget windows (#304
+// introspection) for a host's /status dashboard. tenant_subject_id + actor + tier are
 // query params; the tenant is pinned from the service token.
 func ServiceGetBudget(r *httprequest.Request) {
 	payer, err := parseServiceTenantSubjectID(r.Query("tenant_subject_id"))
@@ -118,8 +118,8 @@ func ServiceGetBudget(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	invoker := r.Query("invoker_id")
-	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, invoker, r.Query("tier"))
+	actor := r.Query("actor")
+	windows, err := svc.BudgetStatus(r.Request.Context(), *payer, actor, r.Query("tier"))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget lookup failed")
 		return
@@ -129,12 +129,12 @@ func ServiceGetBudget(r *httprequest.Request) {
 
 type serviceBudgetCheckRequest struct {
 	TenantSubjectID     string                                  `json:"tenant_subject_id"`
-	InvokerID           string                                  `json:"invoker_id"`
+	Actor               string                                  `json:"actor"`
 	Windows             []billingservice.BudgetCheckWindowInput `json:"windows"`
 	RequestedMillicents int64                                   `json:"requested_millicents"`
 }
 
-// ServiceBudgetCheck computes rolling money-budget windows for (payer, invoker)
+// ServiceBudgetCheck computes rolling money-budget windows for (payer, actor)
 // against CALLER-SUPPLIED windows (the host owns the budget policy; OpenRails
 // owns the spend actuals) WITHOUT reserving. Powers the tensorhub delegated
 // budget-window display (#410). Operator service token, credits:read.
@@ -156,7 +156,7 @@ func ServiceBudgetCheck(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, req.InvokerID, req.Windows, req.RequestedMillicents)
+	windows, err := svc.BudgetCheck(r.Request.Context(), *payer, req.Actor, req.Windows, req.RequestedMillicents)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "budget check failed")
 		return

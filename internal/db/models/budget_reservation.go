@@ -8,7 +8,7 @@ import (
 )
 
 // BudgetReservation is one in-flight or settled charge against a delegated
-// invoker's rolling money-budget windows (issue #304). The budget engine
+// actor's rolling money-budget windows (issue #304). The budget engine
 // (internal/modules/budgets) computes per-window used/reserved/remaining as
 // windowed SUM() over these rows by CreatedAt — the windows themselves are
 // PASSED IN by the caller, never read from any tier table.
@@ -18,7 +18,7 @@ import (
 // Release -> "released" (counts against neither).
 //
 // Idempotency is enforced by a unique index on
-// (tenant_id, tenant_subject_id, invoker_id, source, source_id): a replayed Reserve returns
+// (tenant_id, tenant_subject_id, actor, source, source_id): a replayed Reserve returns
 // the existing row rather than double-reserving.
 type BudgetReservation struct {
 	bun.BaseModel `bun:"table:billing.budget_reservations,alias:br"`
@@ -28,8 +28,8 @@ type BudgetReservation struct {
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	// TenantSubjectID is the tenant subject the budget is charged against (issue #221, the payer).
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
-	// InvokerID is the delegated subject whose spend the windows cap.
-	InvokerID string `bun:"invoker_id,notnull" json:"invoker_id"`
+	// Actor is the caller-supplied principal string whose spend the windows cap.
+	Actor string `bun:"actor,notnull" json:"actor"`
 	// AmountMillicents is the reserved (authorized) amount; counts against
 	// `reserved` while Status == "active".
 	AmountMillicents int64 `bun:"amount_millicents,notnull" json:"amount_millicents"`

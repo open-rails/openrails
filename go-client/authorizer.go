@@ -69,7 +69,7 @@ type Decision struct {
 
 	// BlockedBy is the deny axis from the unified admit verdict (#403/#404):
 	// "throughput" | "money" | "budget" | "blocked" | "suspended" |
-	// "unverified" | "endpoint". Empty for a plain credit-only authorize or an
+	// "unverified" | "resource". Empty for a plain credit-only authorize or an
 	// allowed verdict.
 	BlockedBy string
 	// RetryAfterSeconds is the throughput/budget backoff hint when BlockedBy is a
@@ -146,7 +146,7 @@ func (a *Authorizer) AdmitHold(ctx context.Context, req AdmitRequest) (Decision,
 			// Reuse the authorize fail-policy on the credit-bearing fields.
 			return a.applyFailPolicy(ctx, AuthorizeRequest{
 				PayerTenantID: req.PayerTenantID,
-				InvokerID:     req.InvokerID,
+				Actor:         req.Actor,
 				CreditType:    req.CreditType,
 				EstimateCents: req.EstimateCents,
 				RequestID:     req.RequestID,
@@ -174,8 +174,8 @@ func admitDenyCodeFor(blockedBy string) string {
 		return "rate_limit_exceeded"
 	case "budget":
 		return "insufficient_budget_window"
-	case "endpoint":
-		return "endpoint_not_allowed"
+	case "resource":
+		return "resource_not_allowed"
 	case "suspended":
 		return "tenant_inactive"
 	case "unverified":
@@ -191,8 +191,8 @@ func admitDenyCodeFor(blockedBy string) string {
 func (a *Authorizer) applyFailPolicy(ctx context.Context, req AuthorizeRequest, cause error) Decision {
 	switch a.policy {
 	case FailOpen:
-		log.Printf("[openrails] AUTHORIZE fail-open: admitting request_id=%s tenant_subject_id=%s invoker_id=%s estimate_cents=%d cause=%v",
-			req.RequestID, req.PayerTenantID, req.InvokerID, req.EstimateCents, cause)
+		log.Printf("[openrails] AUTHORIZE fail-open: admitting request_id=%s tenant_subject_id=%s actor=%s estimate_cents=%d cause=%v",
+			req.RequestID, req.PayerTenantID, req.Actor, req.EstimateCents, cause)
 		if a.reconcile != nil {
 			if err := a.reconcile.EnqueueDeferredAuthorize(ctx, req); err != nil {
 				log.Printf("[openrails] fail-open deferred-reconcile enqueue failed request_id=%s: %v", req.RequestID, err)
@@ -200,8 +200,8 @@ func (a *Authorizer) applyFailPolicy(ctx context.Context, req AuthorizeRequest, 
 		}
 		return Decision{Allowed: true, FailedOpen: true}
 	default: // FailClosed
-		log.Printf("[openrails] AUTHORIZE fail-closed: rejecting request_id=%s tenant_subject_id=%s invoker_id=%s cause=%v",
-			req.RequestID, req.PayerTenantID, req.InvokerID, cause)
+		log.Printf("[openrails] AUTHORIZE fail-closed: rejecting request_id=%s tenant_subject_id=%s actor=%s cause=%v",
+			req.RequestID, req.PayerTenantID, req.Actor, cause)
 		return Decision{Allowed: false, DenyCode: "openrails_unreachable"}
 	}
 }
@@ -228,10 +228,10 @@ func (a *Authorizer) Release(ctx context.Context, reservationID string) {
 	}
 }
 
-// EndpointRevenueDaily returns per-day revenue for an endpoint (#410), delegating
+// ResourceRevenueDaily returns per-day revenue for a resource (#410), delegating
 // to the OpenRails client. Read-only; not on the hot path.
-func (a *Authorizer) EndpointRevenueDaily(ctx context.Context, endpointName string, fromUnix, toUnix int64) (*EndpointRevenueResponse, error) {
-	return a.client.EndpointRevenueDaily(ctx, endpointName, fromUnix, toUnix)
+func (a *Authorizer) ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error) {
+	return a.client.ResourceRevenueDaily(ctx, resource, fromUnix, toUnix)
 }
 
 func firstNonEmpty(vals ...string) string {

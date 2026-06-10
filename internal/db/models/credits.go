@@ -19,24 +19,21 @@ type CreditType struct {
 	CreatedAt     time.Time `bun:"created_at,notnull" json:"created_at"`
 }
 
-type UserCreditBalance struct {
-	bun.BaseModel `bun:"table:billing.user_credit_balances,alias:ucb"`
+type CreditBalance struct {
+	bun.BaseModel `bun:"table:billing.credit_balances,alias:ucb"`
 
 	ID uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
 	// TenantID scopes this row to a tenant / billing namespace (issue #223).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	// TenantSubjectID is the tenant subject that OWNS this balance / is billed (issue #221,
 	// payer/billing payer). Nullable during the additive rollout; defaults to the
-	// invoker's deterministic personal tenant-subject id. See pkg/identity.TenantSubjectID.
+	// actor's deterministic personal tenant-subject id. See pkg/identity.TenantSubjectID.
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
-	// InvokerID is the invoker that caused usage (issue #221). Kept for attribution;
-	// it is NOT the financial payer. See pkg/identity.InvokerID.
-	InvokerID    string    `bun:"invoker_id,notnull" json:"invoker_id"`
-	CreditTypeID uuid.UUID `bun:"credit_type_id,notnull" json:"credit_type_id"`
-	Balance      int64     `bun:"balance,notnull" json:"balance"`
-	HeldBalance  int64     `bun:"held_balance,notnull" json:"held_balance"`
-	CreatedAt    time.Time `bun:"created_at,notnull" json:"created_at"`
-	UpdatedAt    time.Time `bun:"updated_at,notnull" json:"updated_at"`
+	CreditTypeID    uuid.UUID `bun:"credit_type_id,notnull" json:"credit_type_id"`
+	Balance         int64     `bun:"balance,notnull" json:"balance"`
+	HeldBalance     int64     `bun:"held_balance,notnull" json:"held_balance"`
+	CreatedAt       time.Time `bun:"created_at,notnull" json:"created_at"`
+	UpdatedAt       time.Time `bun:"updated_at,notnull" json:"updated_at"`
 }
 
 type CreditTransaction struct {
@@ -48,21 +45,27 @@ type CreditTransaction struct {
 	// TenantSubjectID is the tenant subject that OWNS / is billed for this transaction (issue
 	// #221, payer/billing payer). See pkg/identity.TenantSubjectID.
 	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
-	// InvokerID is the invoker that caused usage (issue #221, attribution only).
-	InvokerID       string     `bun:"invoker_id,notnull" json:"invoker_id"`
-	CreditTypeID    uuid.UUID  `bun:"credit_type_id,notnull" json:"credit_type_id"`
-	Amount          int64      `bun:"amount,notnull" json:"amount"`
-	BalanceAfter    *int64     `bun:"balance_after,nullzero" json:"balance_after,omitempty"`
-	TransactionType string     `bun:"transaction_type,notnull" json:"transaction_type"`
-	Status          string     `bun:"status,notnull" json:"status"`
-	Authorized      *int64     `bun:"authorized_amount,nullzero" json:"authorized_amount,omitempty"`
-	Captured        *int64     `bun:"captured_amount,nullzero" json:"captured_amount,omitempty"`
-	Source          string     `bun:"source,notnull" json:"source"`
-	SourceID        *string    `bun:"source_id,nullzero" json:"source_id,omitempty"`
-	ExpiresAt       *time.Time `bun:"expires_at,nullzero" json:"expires_at,omitempty"`
-	Description     *string    `bun:"description,nullzero" json:"description,omitempty"`
-	CreatedAt       time.Time  `bun:"created_at,notnull" json:"created_at"`
-	UpdatedAt       time.Time  `bun:"updated_at,notnull" json:"updated_at"`
+	// Actor is the caller-supplied principal string that caused this charge
+	// (opaque to OpenRails; also the per-actor spend-cap grouping key).
+	Actor string `bun:"actor,notnull" json:"actor"`
+	// Resource is the caller-supplied free-form string for what the charge was
+	// for (opaque to OpenRails; e.g. tensorhub endpoint slug, doujins plan slug).
+	Resource *string `bun:"resource,nullzero" json:"resource,omitempty"`
+	// Metadata is optional caller-supplied long-tail attribution (opaque).
+	Metadata        map[string]any `bun:"metadata,type:jsonb,nullzero" json:"metadata,omitempty"`
+	CreditTypeID    uuid.UUID      `bun:"credit_type_id,notnull" json:"credit_type_id"`
+	Amount          int64          `bun:"amount,notnull" json:"amount"`
+	BalanceAfter    *int64         `bun:"balance_after,nullzero" json:"balance_after,omitempty"`
+	TransactionType string         `bun:"transaction_type,notnull" json:"transaction_type"`
+	Status          string         `bun:"status,notnull" json:"status"`
+	Authorized      *int64         `bun:"authorized_amount,nullzero" json:"authorized_amount,omitempty"`
+	Captured        *int64         `bun:"captured_amount,nullzero" json:"captured_amount,omitempty"`
+	Source          string         `bun:"source,notnull" json:"source"`
+	SourceID        *string        `bun:"source_id,nullzero" json:"source_id,omitempty"`
+	ExpiresAt       *time.Time     `bun:"expires_at,nullzero" json:"expires_at,omitempty"`
+	Description     *string        `bun:"description,nullzero" json:"description,omitempty"`
+	CreatedAt       time.Time      `bun:"created_at,notnull" json:"created_at"`
+	UpdatedAt       time.Time      `bun:"updated_at,notnull" json:"updated_at"`
 }
 
 type CreditBlock struct {
@@ -72,9 +75,7 @@ type CreditBlock struct {
 	// TenantID scopes this row to a tenant / billing namespace (issue #223).
 	TenantID uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	// TenantSubjectID is the tenant subject that OWNS this block of credits (issue #221).
-	TenantSubjectID uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
-	// InvokerID is the invoker that caused usage (issue #221, attribution only).
-	InvokerID           string     `bun:"invoker_id,notnull" json:"invoker_id"`
+	TenantSubjectID     uuid.UUID  `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
 	CreditTypeID        uuid.UUID  `bun:"credit_type_id,notnull" json:"credit_type_id"`
 	OriginalAmount      int64      `bun:"original_amount,notnull" json:"original_amount"`
 	RemainingAmount     int64      `bun:"remaining_amount,notnull" json:"remaining_amount"`

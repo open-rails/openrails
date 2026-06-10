@@ -58,7 +58,7 @@ func moneyInEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.Tenant
 		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
 	})
 	return credits.NewCreditsService(dbi), bunDB, payer, ctName, ctx
@@ -98,7 +98,7 @@ func latestBlock(t *testing.T, bunDB *bun.DB, ctx context.Context, ownerID uuid.
 func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
 	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000,
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
 func TestDeposit_NoFlag_Permanent(t *testing.T) {
 	svc, bunDB, payer, ct, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000, Source: "grant",
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 1000, Source: "grant",
 	})
 	require.NoError(t, err)
 	b := latestBlock(t, bunDB, ctx, payer.UUID())
@@ -124,7 +124,7 @@ func TestDeposit_ConfiguredExpiryDays(t *testing.T) {
 	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{DefaultCreditExpiryDays: &days})
 	require.NoError(t, err)
 	_, err = svc.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 1000,
+		TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 1000,
 		Source: "purchase", ApplyAccountExpiryDefault: true,
 	})
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestRunLowBalanceAlerts(t *testing.T) {
 	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{LowBalanceThreshold: &thr})
 	require.NoError(t, err)
 	// available 500 < 1000
-	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	al := &fakeAlerter{}
@@ -168,7 +168,7 @@ func TestRunAutoTopups_ChargesAndDeposits(t *testing.T) {
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
@@ -199,7 +199,7 @@ func TestRunAutoTopups_Declined(t *testing.T) {
 		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmountCents: &amt, AutoTopupPaymentMethod: &pm,
 	})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
+	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 500, Source: "seed"})
 	require.NoError(t, err)
 
 	ch := &fakeCharger{declineAll: true}

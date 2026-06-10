@@ -191,7 +191,6 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 		ID:              uuid.New(),
 		TenantID:        tenant.DefaultID.UUID(),
 		TenantSubjectID: suite.ensureTenantSubject(ctx, creditUserID),
-		InvokerID:       creditUserID,
 		CreditTypeID:    creditType.ID,
 		OriginalAmount:  75,
 		RemainingAmount: 75,

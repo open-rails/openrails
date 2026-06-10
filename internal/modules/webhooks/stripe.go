@@ -765,7 +765,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 				expiresAt = &t
 			}
 			_, err = s.CreditsService.Deposit(ctx, credits.CreditDepositParams{
-				InvokerID:  userID,
+				Actor:      userID,
 				CreditType: creditType,
 				Amount:     spec.Amount,
 				Source:     "purchase",

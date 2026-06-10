@@ -24,11 +24,11 @@ const (
 // Spend deny codes (the shared contract surfaced as the deny_code on
 // authorize/hold and mapped to a 402 by callers — issue #237/#238).
 const (
-	DenyInvokerDailyCap   = "invoker_daily_cap_exceeded"
-	DenyInvokerMonthlyCap = "invoker_monthly_cap_exceeded"
-	DenyDailyCap          = "daily_cap_exceeded"
-	DenyMonthlyCap        = "monthly_cap_exceeded"
-	DenyOutstandingCap    = "outstanding_cap_exceeded"
+	DenyActorDailyCap   = "actor_daily_cap_exceeded"
+	DenyActorMonthlyCap = "actor_monthly_cap_exceeded"
+	DenyDailyCap        = "daily_cap_exceeded"
+	DenyMonthlyCap      = "monthly_cap_exceeded"
+	DenyOutstandingCap  = "outstanding_cap_exceeded"
 )
 
 // CapResult is the evaluation of a single cap for a spend request.
@@ -299,10 +299,10 @@ func nilIfNeg(v *int64) *int64 {
 	return v
 }
 
-// SetSpendLimit upserts a per-invoker sub-limit under (payer, credit_type).
-// A nil day/month cap clears that cap. invoker is a canonical invoker string
+// SetSpendLimit upserts a per-actor sub-limit under (payer, credit_type).
+// A nil day/month cap clears that cap. actor is a canonical actor string
 // ('serviceToken:<key_id>', 'user:<id>', '<issuer>:<sub>').
-func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.TenantSubjectID, creditType, invoker string, maxDay, maxMonth *int64) (*models.CreditSpendLimit, error) {
+func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.TenantSubjectID, creditType, actor string, maxDay, maxMonth *int64) (*models.CreditSpendLimit, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
@@ -311,9 +311,9 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.Tenan
 	if err := ensureTenantSubject(ctx, s.db.Q(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
-	invoker = strings.TrimSpace(invoker)
-	if invoker == "" {
-		return nil, fmt.Errorf("invoker required")
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return nil, fmt.Errorf("actor required")
 	}
 	ct, err := s.GetCreditTypeByName(ctx, creditType)
 	if err != nil {
@@ -326,14 +326,14 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.Tenan
 		TenantID:              tenantID,
 		TenantSubjectID:       payer.UUID(),
 		CreditTypeID:          ct.ID,
-		InvokerID:             invoker,
+		Actor:                 actor,
 		MaxSpendPerDayCents:   nilIfNeg(maxDay),
 		MaxSpendPerMonthCents: nilIfNeg(maxMonth),
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
 	_, err = s.db.Q(ctx).NewInsert().Model(row).
-		On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id, invoker_id) DO UPDATE").
+		On("CONFLICT (tenant_id, tenant_subject_id, credit_type_id, actor) DO UPDATE").
 		Set("max_spend_per_day_cents = EXCLUDED.max_spend_per_day_cents").
 		Set("max_spend_per_month_cents = EXCLUDED.max_spend_per_month_cents").
 		Set("updated_at = EXCLUDED.updated_at").
@@ -344,10 +344,10 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.Tenan
 	return row, nil
 }
 
-func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, invoker string) (*models.CreditSpendLimit, error) {
+func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, actor string) (*models.CreditSpendLimit, error) {
 	row := new(models.CreditSpendLimit)
 	err := s.db.Q(ctx).NewSelect().Model(row).
-		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ? AND invoker_id = ?", tenantID, ownerID, creditTypeID, invoker).
+		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ? AND actor = ?", tenantID, ownerID, creditTypeID, actor).
 		Limit(1).Scan(ctx)
 	if err == nil {
 		return row, nil
@@ -361,8 +361,8 @@ func (s *CreditsService) getSpendLimit(ctx context.Context, tenantID, ownerID, c
 // spentInWindow sums spend counted against a rate cap since `since`:
 // settled spend (withdrawals + captured holds) PLUS currently-active holds
 // created in the window (so concurrent in-flight holds can't overshoot a cap).
-// When invoker is non-empty the sum is scoped to that invoker.
-func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, since time.Time, invoker string) (int64, error) {
+// When actor is non-empty the sum is scoped to that actor.
+func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, creditTypeID uuid.UUID, since time.Time, actor string) (int64, error) {
 	q := s.db.Q(ctx).NewSelect().
 		Model((*models.CreditTransaction)(nil)).
 		ColumnExpr("COALESCE(SUM("+
@@ -373,8 +373,8 @@ func (s *CreditsService) spentInWindow(ctx context.Context, tenantID, ownerID, c
 			"ELSE 0 END), 0)").
 		Where("tenant_id = ? AND tenant_subject_id = ? AND credit_type_id = ?", tenantID, ownerID, creditTypeID).
 		Where("created_at >= ?", since)
-	if invoker != "" {
-		q = q.Where("invoker_id = ?", invoker)
+	if actor != "" {
+		q = q.Where("actor = ?", actor)
 	}
 	var total int64
 	if err := q.Scan(ctx, &total); err != nil {
@@ -396,12 +396,12 @@ func (s *CreditsService) activeHoldsTotal(ctx context.Context, tenantID, ownerID
 	return total, err
 }
 
-// CheckSpendAllowed evaluates the spend policy for (payer, credit_type, invoker)
+// CheckSpendAllowed evaluates the spend policy for (payer, credit_type, actor)
 // against an estimated charge, WITHOUT moving money. It enforces, in order:
-// per-invoker daily/monthly caps, org daily/monthly caps, and the outstanding
+// per-actor daily/monthly caps, org daily/monthly caps, and the outstanding
 // exposure ceiling (settled owed + active holds + this estimate). The balance
 // itself is enforced separately by Hold.
-func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.TenantSubjectID, creditType, invoker string, estimateCents int64) (SpendDecision, error) {
+func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.TenantSubjectID, creditType, actor string, estimateCents int64) (SpendDecision, error) {
 	if s == nil || s.db == nil {
 		return SpendDecision{}, fmt.Errorf("credits service not initialized")
 	}
@@ -421,27 +421,27 @@ func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.T
 
 	var caps []capInput
 
-	// Per-invoker caps (only when a limit row exists for this invoker).
-	invoker = strings.TrimSpace(invoker)
-	if invoker != "" {
-		lim, lerr := s.getSpendLimit(ctx, tenantID, ownerID, ct.ID, invoker)
+	// Per-actor caps (only when a limit row exists for this actor).
+	actor = strings.TrimSpace(actor)
+	if actor != "" {
+		lim, lerr := s.getSpendLimit(ctx, tenantID, ownerID, ct.ID, actor)
 		if lerr != nil {
 			return SpendDecision{}, lerr
 		}
 		if lim != nil && (lim.MaxSpendPerDayCents != nil || lim.MaxSpendPerMonthCents != nil) {
 			if lim.MaxSpendPerDayCents != nil {
-				spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, dayStart, invoker)
+				spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, dayStart, actor)
 				if e != nil {
 					return SpendDecision{}, e
 				}
-				caps = append(caps, capInput{DenyInvokerDailyCap, lim.MaxSpendPerDayCents, spent, &dayReset})
+				caps = append(caps, capInput{DenyActorDailyCap, lim.MaxSpendPerDayCents, spent, &dayReset})
 			}
 			if lim.MaxSpendPerMonthCents != nil {
-				spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, monStart, invoker)
+				spent, e := s.spentInWindow(ctx, tenantID, ownerID, ct.ID, monStart, actor)
 				if e != nil {
 					return SpendDecision{}, e
 				}
-				caps = append(caps, capInput{DenyInvokerMonthlyCap, lim.MaxSpendPerMonthCents, spent, &monReset})
+				caps = append(caps, capInput{DenyActorMonthlyCap, lim.MaxSpendPerMonthCents, spent, &monReset})
 			}
 		}
 	}

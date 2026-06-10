@@ -79,7 +79,7 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, payer identity.TenantSu
 	}
 
 	trx := &models.CreditTransaction{
-		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, InvokerID: ownerID.String(),
+		ID: uuidutil.NewV7(), TenantID: tenantID, TenantSubjectID: ownerID, Actor: ownerID.String(),
 		CreditTypeID: ct.ID, Amount: amount, TransactionType: txOwedAccrual, Status: "posted",
 		Source: source, SourceID: &sourceID, CreatedAt: now, UpdatedAt: now,
 	}
@@ -182,7 +182,7 @@ func (s *CreditsService) chargeOneOutstanding(ctx context.Context, charger Charg
 
 	res, err := charger.ChargeSavedMethod(ctx, ChargeRequest{
 		Payer:           payer,
-		InvokerID:       payer.UUID().String(),
+		Actor:           payer.UUID().String(),
 		PaymentMethodID: *r.PaymentMethodID,
 		AmountCents:     snapshot,
 		IdempotencyKey:  key,
@@ -220,7 +220,7 @@ func (s *CreditsService) chargeOneOutstanding(ctx context.Context, charger Charg
 
 	sid := key
 	trx := &models.CreditTransaction{
-		ID: uuidutil.NewV7(), TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, InvokerID: r.TenantSubjectID.String(),
+		ID: uuidutil.NewV7(), TenantID: r.TenantID, TenantSubjectID: r.TenantSubjectID, Actor: r.TenantSubjectID.String(),
 		CreditTypeID: r.CreditTypeID, Amount: -snapshot, TransactionType: txOwedPayment, Status: "posted",
 		Source: "arrears_charge", SourceID: &sid, CreatedAt: now, UpdatedAt: now,
 	}

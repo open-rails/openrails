@@ -20,7 +20,7 @@ import (
 
 type serviceWithdrawRequest struct {
 	TenantSubjectID string     `json:"tenant_subject_id"`
-	InvokerID       string     `json:"invoker_id" binding:"required"`
+	Actor           string     `json:"actor" binding:"required"`
 	CreditType      string     `json:"credit_type" binding:"required"`
 	Amount          int64      `json:"amount" binding:"required"`
 	Source          string     `json:"source" binding:"required"`
@@ -29,7 +29,7 @@ type serviceWithdrawRequest struct {
 
 type serviceDepositRequest struct {
 	TenantSubjectID string     `json:"tenant_subject_id"`
-	InvokerID       string     `json:"invoker_id" binding:"required"`
+	Actor           string     `json:"actor" binding:"required"`
 	CreditType      string     `json:"credit_type" binding:"required"`
 	Amount          int64      `json:"amount" binding:"required"`
 	Source          string     `json:"source" binding:"required"`
@@ -40,7 +40,7 @@ type serviceDepositRequest struct {
 
 type serviceHoldRequest struct {
 	TenantSubjectID string `json:"tenant_subject_id"`
-	InvokerID       string `json:"invoker_id" binding:"required"`
+	Actor           string `json:"actor" binding:"required"`
 	CreditType      string `json:"credit_type" binding:"required"`
 	Amount          int64  `json:"amount" binding:"required"`
 	Source          string `json:"source" binding:"required"`
@@ -54,6 +54,7 @@ type serviceCaptureRequest struct {
 	// Usage analytics (#311): when event_type is set, the capture also appends a
 	// usage_event (no second debit) for the platform usage/revenue rollup.
 	EventType  string           `json:"event_type,omitempty"`
+	Resource   string           `json:"resource,omitempty"`
 	Dimensions map[string]int64 `json:"dimensions,omitempty"`
 	Metadata   map[string]any   `json:"metadata,omitempty"`
 	Source     string           `json:"source,omitempty"`
@@ -92,13 +93,13 @@ func requireServiceTenantSubjectScope(r *httprequest.Request, tenantSubject bill
 }
 
 // serviceAuthorizeRequest is the body of POST /v1/service/credits/authorize
-// (issue #235/#247). tenant_subject_id is the subject billed; invoker_id is the
-// canonical caller for per-(tenant_subject_id, invoker_id) sub-budgets;
+// (issue #235/#247). tenant_subject_id is the subject billed; actor is the
+// canonical caller for per-(tenant_subject_id, actor) sub-budgets;
 // estimate_cents = the upper-bound charge;
 // request_id = the idempotency key for the placed hold.
 type serviceAuthorizeRequest struct {
 	TenantSubjectID string `json:"tenant_subject_id"`
-	InvokerID       string `json:"invoker_id"`
+	Actor           string `json:"actor"`
 	CreditType      string `json:"credit_type" binding:"required"`
 	EstimateCents   int64  `json:"estimate_cents"`
 	RequestID       string `json:"request_id" binding:"required"`
@@ -166,7 +167,7 @@ func ServiceAuthorizeCredits(r *httprequest.Request) {
 
 	out, err := svc.AuthorizeAndHold(r.Request.Context(), billingservice.AuthorizeAndHoldRequest{
 		TenantSubjectID: *tenantSubject,
-		InvokerID:       req.InvokerID,
+		Actor:           req.Actor,
 		CreditType:      req.CreditType,
 		EstimateCents:   req.EstimateCents,
 		RequestID:       req.RequestID,
@@ -387,7 +388,7 @@ func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
 	out := make([]serviceTxnResponse, 0, len(items))
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{
-			ID: t.ID, TenantSubjectID: t.TenantSubjectID, InvokerID: t.InvokerID, Amount: t.Amount,
+			ID: t.ID, TenantSubjectID: t.TenantSubjectID, Actor: t.Actor, Amount: t.Amount,
 			TransactionType: t.TransactionType, Status: t.Status, Source: t.Source,
 			CreatedAt: t.CreatedAt,
 		})
@@ -398,7 +399,7 @@ func ServiceListTenantSubjectCreditTransactions(r *httprequest.Request) {
 type serviceTxnResponse struct {
 	ID              uuid.UUID `json:"id"`
 	TenantSubjectID uuid.UUID `json:"tenant_subject_id"`
-	InvokerID       string    `json:"invoker_id"`
+	Actor           string    `json:"actor"`
 	Amount          int64     `json:"amount"`
 	TransactionType string    `json:"transaction_type"`
 	Status          string    `json:"status"`
@@ -414,15 +415,15 @@ type serviceUsageRollupRequest struct {
 }
 
 type serviceEndpointRevenueRequest struct {
-	EndpointName string `json:"endpoint_name" binding:"required"`
-	From         int64  `json:"from" binding:"required"`
-	To           int64  `json:"to" binding:"required"`
+	Resource string `json:"resource" binding:"required"`
+	From     int64  `json:"from" binding:"required"`
+	To       int64  `json:"to" binding:"required"`
 }
 
-// ServiceEndpointRevenue returns per-day revenue for an endpoint (by usage_event
-// metadata endpoint_name) across all tenant subjects in the tenant (#410) — powers
+// ServiceResourceRevenue returns per-day revenue for a resource (by usage_event
+// the typed resource column) across all tenant subjects in the tenant (#410) — powers
 // tensorhub endpoint revenue analytics. Operator service token, credits:read.
-func ServiceEndpointRevenue(r *httprequest.Request) {
+func ServiceResourceRevenue(r *httprequest.Request) {
 	var req serviceEndpointRevenueRequest
 	if !r.BindJSON(&req) {
 		return
@@ -432,7 +433,7 @@ func ServiceEndpointRevenue(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	rows, err := svc.EndpointRevenueDaily(r.Request.Context(), req.EndpointName, time.Unix(req.From, 0).UTC(), time.Unix(req.To, 0).UTC())
+	rows, err := svc.ResourceRevenueDaily(r.Request.Context(), req.Resource, time.Unix(req.From, 0).UTC(), time.Unix(req.To, 0).UTC())
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -514,7 +515,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
 		TenantSubjectID: tenantSubjectID,
-		InvokerID:       req.InvokerID,
+		Actor:           req.Actor,
 		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
@@ -557,7 +558,7 @@ func ServiceWithdrawCredits(r *httprequest.Request) {
 	}
 	trx, err := svc.WithdrawCredits(r.Request.Context(), billingservice.WithdrawCreditsRequest{
 		TenantSubjectID: tenantSubjectID,
-		InvokerID:       req.InvokerID,
+		Actor:           req.Actor,
 		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
@@ -602,7 +603,7 @@ func ServiceHoldCredits(r *httprequest.Request) {
 	}
 	hold, err := svc.HoldCredits(r.Request.Context(), billingservice.HoldCreditsRequest{
 		TenantSubjectID: tenantSubjectID,
-		InvokerID:       req.InvokerID,
+		Actor:           req.Actor,
 		CreditType:      req.CreditType,
 		Amount:          req.Amount,
 		Source:          req.Source,
@@ -643,6 +644,7 @@ func ServiceCaptureHold(r *httprequest.Request) {
 		HoldID:     holdID,
 		Amount:     req.Amount,
 		EventType:  req.EventType,
+		Resource:   req.Resource,
 		Dimensions: req.Dimensions,
 		Metadata:   req.Metadata,
 		Source:     req.Source,
@@ -677,10 +679,10 @@ func ServiceReleaseHold(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"ok": true})
 }
 
-func ServiceGetInvokerCredits(r *httprequest.Request) {
-	invokerID := strings.TrimSpace(r.Param("invoker_id"))
-	if invokerID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "invoker_id required")
+func ServiceGetActorCredits(r *httprequest.Request) {
+	actorID := strings.TrimSpace(r.Param("actor"))
+	if actorID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "actor required")
 		return
 	}
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("type"))
@@ -704,7 +706,7 @@ func ServiceGetInvokerCredits(r *httprequest.Request) {
 			heldBalance = bal.HeldBalance
 		}
 	} else {
-		bal, err := r.State.CreditsService.GetBalance(r.Request.Context(), invokerID, creditType)
+		bal, err := r.State.CreditsService.GetBalance(r.Request.Context(), actorID, creditType)
 		if err == nil {
 			balance = bal.Balance
 			heldBalance = bal.HeldBalance
@@ -722,9 +724,9 @@ func ServiceGetInvokerCredits(r *httprequest.Request) {
 }
 
 func ServiceLookupCreditTransaction(r *httprequest.Request) {
-	invokerID := strings.TrimSpace(r.Request.URL.Query().Get("invoker_id"))
-	if invokerID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "invoker_id required")
+	actorID := strings.TrimSpace(r.Request.URL.Query().Get("actor"))
+	if actorID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "actor required")
 		return
 	}
 	creditType := strings.TrimSpace(r.Request.URL.Query().Get("credit_type"))
@@ -747,7 +749,7 @@ func ServiceLookupCreditTransaction(r *httprequest.Request) {
 		transactionType = "hold"
 	}
 
-	trx, err := r.State.CreditsService.GetTransactionBySource(r.Request.Context(), invokerID, creditType, transactionType, source, sourceID)
+	trx, err := r.State.CreditsService.GetTransactionBySource(r.Request.Context(), actorID, creditType, transactionType, source, sourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			r.ErrorJSON(http.StatusNotFound, "not found")

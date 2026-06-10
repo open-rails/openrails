@@ -17,7 +17,7 @@ func TestGraduateTier_ByCumulativePaid(t *testing.T) {
 		{Tier: "tier2", MinPaidCents: 50_000},
 	}
 	dep := func(amt int64) {
-		_, e := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, InvokerID: payer.UUID().String(), CreditType: ct, Amount: amt, Source: "pay"})
+		_, e := svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: amt, Source: "pay"})
 		require.NoError(t, e)
 	}
 

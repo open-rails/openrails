@@ -808,7 +808,7 @@ func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalanc
 		ColumnExpr("ct.decimal_places").
 		ColumnExpr("ucb.balance").
 		ColumnExpr("ucb.held_balance").
-		Join("LEFT JOIN billing.user_credit_balances ucb ON ucb.credit_type_id = ct.id AND ucb.user_id = ?", userID).
+		Join("LEFT JOIN billing.credit_balances ucb ON ucb.credit_type_id = ct.id AND ucb.user_id = ?", userID).
 		Where("ct.is_active = true").
 		Scan(ctx, &rows)
 	if err != nil {
@@ -898,7 +898,7 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, creditType 
 		result = append(result, CreditTransaction{
 			ID:              t.ID,
 			TenantSubjectID: t.TenantSubjectID,
-			InvokerID:       t.InvokerID,
+			Actor:           t.Actor,
 			Amount:          t.Amount,
 			TransactionType: t.TransactionType,
 			Source:          t.Source,

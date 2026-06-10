@@ -48,9 +48,9 @@ type CreditAccountSettings struct {
 	UpdatedAt time.Time `bun:"updated_at,notnull" json:"updated_at"`
 }
 
-// CreditSpendLimit is an optional per-invoker spend cap under a tenant subject
-// (issue #237 per_invoker_caps / #246). The invoker_id string is matched against
-// credit_transactions.invoker_id (the principal that caused usage), in one of the
+// CreditSpendLimit is an optional per-actor spend cap under a tenant subject
+// (issue #237 per_actor_caps / #246). The actor string is matched against
+// credit_transactions.actor (the principal that caused usage), in one of the
 // canonical forms: 'serviceToken:<key_id>', 'user:<user_id>', or '<issuer>:<sub>'.
 type CreditSpendLimit struct {
 	bun.BaseModel `bun:"table:billing.credit_spend_limits,alias:csl"`
@@ -59,7 +59,7 @@ type CreditSpendLimit struct {
 	TenantID              uuid.UUID `bun:"tenant_id,type:uuid,nullzero" json:"tenant_id"`
 	TenantSubjectID       uuid.UUID `bun:"tenant_subject_id,type:uuid,nullzero" json:"tenant_subject_id"`
 	CreditTypeID          uuid.UUID `bun:"credit_type_id,notnull,type:uuid" json:"credit_type_id"`
-	InvokerID             string    `bun:"invoker_id,notnull" json:"invoker_id"`
+	Actor                 string    `bun:"actor,notnull" json:"actor"`
 	MaxSpendPerDayCents   *int64    `bun:"max_spend_per_day_cents,nullzero" json:"max_spend_per_day_cents,omitempty"`
 	MaxSpendPerMonthCents *int64    `bun:"max_spend_per_month_cents,nullzero" json:"max_spend_per_month_cents,omitempty"`
 	CreatedAt             time.Time `bun:"created_at,notnull" json:"created_at"`

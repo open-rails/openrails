@@ -23,9 +23,9 @@ type AdmitBlockCheck struct {
 // AdmitInput is the host's admission request: throughput + money + gates.
 type AdmitInput struct {
 	TenantSubjectID identity.TenantSubjectID
-	InvokerID       string
+	Actor           string
 	Tier            string
-	Model           string
+	Resource        string
 	Amounts         map[string]int64
 	CreditType      string
 	EstimateCents   int64
@@ -35,7 +35,7 @@ type AdmitInput struct {
 	BlockChecks     []AdmitBlockCheck
 	// TenantThroughput is the host's per-TENANT fixed-window throughput policy
 	// (#404). When set, OpenRails enforces these tenant-scoped windows on the
-	// invoke path BEFORE the per-invoker policy + any hold, so the host (tensorhub)
+	// invoke path BEFORE the per-actor policy + any hold, so the host (tensorhub)
 	// no longer rate-limits invokes locally. Empty = no tenant throughput limit.
 	TenantThroughput []AdmitThroughputWindow
 }
@@ -104,7 +104,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	adm := admission.NewAdmitter(lim, s.creditsService(), store, bl, bsvc)
 
 	// #404: tenant-scoped throughput. The host passes its per-tenant RPM/RPD
-	// windows; OpenRails enforces them on the invoke path BEFORE the per-invoker
+	// windows; OpenRails enforces them on the invoke path BEFORE the per-actor
 	// policy + any credit hold, so a tenant breach places no hold and the host
 	// stops rate-limiting invokes locally.
 	if len(in.TenantThroughput) > 0 {
@@ -156,9 +156,9 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 
 	dec, err := adm.Admit(ctx, admission.AdmitRequest{
 		TenantSubjectID: in.TenantSubjectID,
-		Invoker:         in.InvokerID,
+		Actor:           in.Actor,
 		Tier:            in.Tier,
-		Model:           in.Model,
+		Resource:        in.Resource,
 		Amounts:         in.Amounts,
 		CreditType:      in.CreditType,
 		EstimateCents:   in.EstimateCents,
@@ -205,10 +205,10 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	return res, nil
 }
 
-// BudgetStatus returns the rolling money-budget windows for (payer, invoker) at a
+// BudgetStatus returns the rolling money-budget windows for (payer, actor) at a
 // tier WITHOUT reserving (issue #304 introspection) — powers a host's /status
 // dashboard (e.g. cozy-art useGenerationBudgetStatus).
-func (s *Service) BudgetStatus(ctx context.Context, payer identity.TenantSubjectID, invoker, tier string) ([]AdmitBudgetWindowDTO, error) {
+func (s *Service) BudgetStatus(ctx context.Context, payer identity.TenantSubjectID, actor, tier string) ([]AdmitBudgetWindowDTO, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -224,7 +224,7 @@ func (s *Service) BudgetStatus(ctx context.Context, payer identity.TenantSubject
 		return nil, err
 	}
 	bsvc := budgets.NewService(s.rt.DB)
-	statuses, _, err := bsvc.Check(ctx, payer, invoker, pol.BudgetWindows, 0)
+	statuses, _, err := bsvc.Check(ctx, payer, actor, pol.BudgetWindows, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -250,13 +250,13 @@ type BudgetCheckWindowInput struct {
 	LimitMillicents int64  `json:"limit_millicents"`
 }
 
-// BudgetCheck computes per-window used/reserved/remaining for (payer, invoker)
+// BudgetCheck computes per-window used/reserved/remaining for (payer, actor)
 // against CALLER-SUPPLIED windows WITHOUT reserving. Unlike BudgetStatus it does
 // NOT read an OpenRails tier policy — the host (tensorhub) owns the platform
 // budget policy and passes the windows; OpenRails owns the spend actuals
 // (billing.budget_reservations). Powers the tensorhub delegated budget-window
 // display (#410) so it no longer reads tensorhub-local money tables.
-func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectID, invoker string, windows []BudgetCheckWindowInput, requestedMillicents int64) ([]AdmitBudgetWindowDTO, error) {
+func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectID, actor string, windows []BudgetCheckWindowInput, requestedMillicents int64) ([]AdmitBudgetWindowDTO, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -268,7 +268,7 @@ func (s *Service) BudgetCheck(ctx context.Context, payer identity.TenantSubjectI
 		bw = append(bw, budgets.BudgetWindow{Key: w.Key, WindowSeconds: w.WindowSeconds, LimitMillicents: w.LimitMillicents})
 	}
 	bsvc := budgets.NewService(s.rt.DB)
-	statuses, _, err := bsvc.Check(ctx, payer, invoker, bw, requestedMillicents)
+	statuses, _, err := bsvc.Check(ctx, payer, actor, bw, requestedMillicents)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,7 @@ type TierBudgetWindowInput struct {
 type TierPolicyInput struct {
 	Tier              string                  `json:"tier"`
 	Windows           []TierWindowInput       `json:"windows"`
-	EntitledEndpoints []string                `json:"entitled_endpoints"`
+	EntitledResources []string                `json:"entitled_resources"`
 	BudgetWindows     []TierBudgetWindowInput `json:"budget_windows"`
 }
 
@@ -317,7 +317,7 @@ func (s *Service) SetTierPolicy(ctx context.Context, payer identity.TenantSubjec
 	if in.Tier == "" {
 		return fmt.Errorf("tier required")
 	}
-	pol := models.ThroughputPolicy{EntitledEndpoints: in.EntitledEndpoints}
+	pol := models.ThroughputPolicy{EntitledResources: in.EntitledResources}
 	for _, w := range in.Windows {
 		pol.Windows = append(pol.Windows, models.ThroughputWindow{Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max})
 	}

@@ -20,11 +20,11 @@ import (
 // records the event AND debits the ledger atomically.
 type RecordUsageParams struct {
 	// Payer is the tenant subject BILLED for this usage (the payer). When nil it is
-	// resolved from InvokerID (self-hosted/personal case), never synthesized.
+	// resolved from Actor (self-hosted/personal case), never synthesized.
 	Payer      *identity.TenantSubjectID
-	InvokerID  string // invoker (attribution only)
+	Actor      string // actor (attribution only)
 	CreditType string
-	EventType  string // metered endpoint / model, e.g. "gpt-4o"
+	EventType  string // metered event kind, e.g. "gpt-4o"
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
 	// cached_input_tokens, requests, ...). Used for reporting + #298 throughput.
 	Dimensions map[string]int64
@@ -71,7 +71,7 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	if !ct.IsActive {
 		return nil, ErrCreditTypeInactive
 	}
-	payer, err := resolveTenantSubject(params.Payer, params.InvokerID)
+	payer, err := resolveTenantSubject(params.Payer, params.Actor)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 
 	// Serialize per (tenant, payer, credit_type) so the idempotency check below
 	// can't race a concurrent identical record into a double charge.
-	if _, err := s.lockBalance(ctx, tx, payer, params.InvokerID, ct.ID); err != nil {
+	if _, err := s.lockBalance(ctx, tx, payer, params.Actor, ct.ID); err != nil {
 		return nil, err
 	}
 
@@ -112,7 +112,7 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	// amount exceeds available balance.
 	var debitID *uuid.UUID
 	if params.Amount > 0 {
-		balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, tx, ct, payer, params.InvokerID, params.Source, params.SourceID, params.Amount)
+		balID, owedID, derr := s.spendBalanceThenOwedTx(ctx, tx, ct, payer, params.Actor, params.Source, params.SourceID, params.Amount)
 		if derr != nil {
 			return nil, derr
 		}
@@ -131,7 +131,7 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 		ID:                  uuidutil.NewV7(),
 		TenantID:            tenantID,
 		TenantSubjectID:     ownerID,
-		InvokerID:           params.InvokerID,
+		Actor:               params.Actor,
 		CreditTypeID:        ct.ID,
 		EventType:           params.EventType,
 		Dimensions:          params.Dimensions,

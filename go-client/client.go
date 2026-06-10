@@ -12,9 +12,9 @@
 //
 // Auth is a single OpenRails-issued service token (Bearer) holding
 // openrails:credits:spend (+ openrails:credits:write). The `tenant_subject_id`
-// is the OpenRails subject being billed; the `invoker_id` is the principal in
+// is the OpenRails subject being billed; the `actor` is the principal in
 // canonical form (service-token:<key_id> | user:<id> | <issuer>:<sub>) — see
-// InvokerFor.
+// ActorFor.
 package openrails
 
 import (
@@ -54,7 +54,7 @@ func (id PayerTenantID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 // places a hold for EstimateCents in a single idempotent call keyed on RequestID.
 type AuthorizeRequest struct {
 	PayerTenantID string `json:"tenant_subject_id"`
-	InvokerID     string `json:"invoker_id"`
+	Actor         string `json:"actor"`
 	CreditType    string `json:"credit_type,omitempty"`
 	EstimateCents int64  `json:"estimate_cents"`
 	RequestID     string `json:"request_id"`
@@ -75,7 +75,7 @@ type AuthorizeResponse struct {
 // HoldCreditsRequest reserves credits for an estimate.
 type HoldCreditsRequest struct {
 	PayerTenantID *PayerTenantID
-	InvokerID     string
+	Actor         string
 	CreditType    string
 	Amount        int64
 	Source        string
@@ -86,7 +86,7 @@ type HoldCreditsRequest struct {
 // CreditHold is the reservation returned by a successful hold.
 type CreditHold struct {
 	ID        uuid.UUID
-	InvokerID string
+	Actor     string
 	Amount    int64
 	Source    string
 	SourceID  string
@@ -106,7 +106,7 @@ type CaptureHoldRequest struct {
 // WithdrawCreditsRequest debits credits directly.
 type WithdrawCreditsRequest struct {
 	PayerTenantID *PayerTenantID
-	InvokerID     string
+	Actor         string
 	CreditType    string
 	Amount        int64
 	Source        string
@@ -117,7 +117,7 @@ type WithdrawCreditsRequest struct {
 type CreditTransaction struct {
 	ID              uuid.UUID
 	PayerTenantID   uuid.UUID
-	InvokerID       string
+	Actor           string
 	CreditTypeID    uuid.UUID
 	Amount          int64
 	BalanceAfter    *int64
@@ -141,15 +141,15 @@ type CreditTransaction struct {
 // the legacy tensorhub broker admit (Path B): gen-orch sizes the cost from the
 // in-process tensorhub pricing, then calls this once.
 //
-// Tier/Model select the throughput + budget policy + endpoint gating; Amounts is
+// Tier/Resource select the throughput + budget policy + resource gating; Amounts is
 // the per-request throughput consumption (e.g. {"request":1}). EstimateCents is
 // the upper-bound charge to hold. A zero EstimateCents runs the limit checks
 // without placing a money hold.
 type AdmitRequest struct {
 	PayerTenantID string           `json:"tenant_subject_id"`
-	InvokerID     string           `json:"invoker_id"`
+	Actor         string           `json:"actor"`
 	Tier          string           `json:"tier,omitempty"`
-	Model         string           `json:"model,omitempty"`
+	Resource      string           `json:"resource,omitempty"`
 	Amounts       map[string]int64 `json:"amounts,omitempty"`
 	CreditType    string           `json:"credit_type,omitempty"`
 	EstimateCents int64            `json:"estimate_cents"`
@@ -172,7 +172,7 @@ type AdmitThroughputWindow struct {
 
 // AdmitResponse is the unified verdict. Allowed=false carries a BlockedBy axis
 // ("throughput" | "money" | "budget" | "blocked" | "suspended" | "unverified" |
-// "endpoint") and, on a money deny, a DenyCode. ReservationID is the placed
+// "resource") and, on a money deny, a DenyCode. ReservationID is the placed
 // credit hold to capture/release; BudgetReservationID is the rolling-budget
 // reservation (settled implicitly with the hold).
 type AdmitResponse struct {
@@ -215,18 +215,22 @@ type CaptureRequest struct {
 	// Usage analytics (#311/#410): when EventType is set, OpenRails also appends
 	// a usage_event linked to this capture (no second debit) so the platform's
 	// /budget-usage + revenue analytics are served from OpenRails. EventType is
-	// the metered model (tenant/endpoint); Metadata carries string grouping dims.
+	// the metered event kind; Resource is the caller-supplied what-was-it-for
+	// string (e.g. tensorhub maps its endpoint slug); Metadata carries long-tail
+	// string dims.
 	EventType string         `json:"event_type,omitempty"`
+	Resource  string         `json:"resource,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	Source    string         `json:"source,omitempty"`
 	SourceID  string         `json:"source_id,omitempty"`
 }
 
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
-// OpenRails can serve per-endpoint/function/tier/user spend (#410). Nil = no
+// OpenRails can serve per-resource/function/tier/actor spend (#410). Nil = no
 // usage event (a plain capture).
 type CaptureUsage struct {
 	EventType string
+	Resource  string
 	Metadata  map[string]any
 	Source    string
 	SourceID  string
@@ -389,7 +393,7 @@ func (c *Client) HoldCredits(ctx context.Context, req HoldCreditsRequest) (*Cred
 	var out CreditHold
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/hold", map[string]any{
 		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
-		"invoker_id":        req.InvokerID,
+		"actor":             req.Actor,
 		"credit_type":       req.CreditType,
 		"amount":            req.Amount,
 		"source":            req.Source,
@@ -414,6 +418,7 @@ func (c *Client) Capture(ctx context.Context, reservationID string, capturedCent
 	req := CaptureRequest{CapturedCents: capturedCents}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
 		req.EventType = usage.EventType
+		req.Resource = usage.Resource
 		req.Metadata = usage.Metadata
 		req.Source = usage.Source
 		req.SourceID = usage.SourceID
@@ -459,7 +464,7 @@ func (c *Client) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest
 	var out CreditTransaction
 	err := c.do(ctx, http.MethodPost, "/v1/service/credits/withdraw", map[string]any{
 		"tenant_subject_id": payerTenantIDString(req.PayerTenantID),
-		"invoker_id":        req.InvokerID,
+		"actor":             req.Actor,
 		"credit_type":       req.CreditType,
 		"amount":            req.Amount,
 		"source":            req.Source,
@@ -564,7 +569,7 @@ func (c *Client) UsageRollup(ctx context.Context, payerTenantID string, from, to
 
 // BudgetCheck asks OpenRails to compute rolling budget usage for host-owned
 // policy windows.
-func (c *Client) BudgetCheck(ctx context.Context, tenantSubjectID, invokerID string, windows []BudgetWindowInput, requestedMillicents int64) ([]BudgetWindow, error) {
+func (c *Client) BudgetCheck(ctx context.Context, tenantSubjectID, actorID string, windows []BudgetWindowInput, requestedMillicents int64) ([]BudgetWindow, error) {
 	if windows == nil {
 		windows = []BudgetWindowInput{}
 	}
@@ -573,7 +578,7 @@ func (c *Client) BudgetCheck(ctx context.Context, tenantSubjectID, invokerID str
 	}
 	body := map[string]any{
 		"tenant_subject_id":    tenantSubjectID,
-		"invoker_id":           invokerID,
+		"actor":                actorID,
 		"windows":              windows,
 		"requested_millicents": requestedMillicents,
 	}
@@ -583,31 +588,31 @@ func (c *Client) BudgetCheck(ctx context.Context, tenantSubjectID, invokerID str
 	return resp.Windows, nil
 }
 
-// EndpointRevenueDailyRow is one day's revenue (millicents) for an endpoint.
-type EndpointRevenueDailyRow struct {
+// ResourceRevenueDailyRow is one day's revenue (millicents) for an endpoint.
+type ResourceRevenueDailyRow struct {
 	Date             string `json:"date"`
 	AmountMillicents int64  `json:"amount_millicents"`
 }
 
-// EndpointRevenueResponse is the per-endpoint revenue rollup (#410).
-type EndpointRevenueResponse struct {
+// ResourceRevenueResponse is the per-resource revenue rollup (#410).
+type ResourceRevenueResponse struct {
 	RevenueMillicents int64                     `json:"revenue_millicents"`
-	Daily             []EndpointRevenueDailyRow `json:"daily"`
+	Daily             []ResourceRevenueDailyRow `json:"daily"`
 }
 
-// EndpointRevenueDaily returns per-day revenue for an endpoint (by usage_event
-// endpoint_name) from OpenRails (#410) — backs tensorhub endpoint analytics.
-func (c *Client) EndpointRevenueDaily(ctx context.Context, endpointName string, fromUnix, toUnix int64) (*EndpointRevenueResponse, error) {
+// ResourceRevenueDaily returns per-day revenue for a resource (by usage_event
+// resource) from OpenRails (#410) — backs tensorhub endpoint analytics.
+func (c *Client) ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error) {
 	if c == nil {
 		return nil, fmt.Errorf("openrails: nil client")
 	}
 	body := map[string]any{
-		"endpoint_name": strings.TrimSpace(endpointName),
-		"from":          fromUnix,
-		"to":            toUnix,
+		"resource": strings.TrimSpace(resource),
+		"from":     fromUnix,
+		"to":       toUnix,
 	}
-	var out EndpointRevenueResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/usage/endpoint-revenue", body, &out); err != nil {
+	var out ResourceRevenueResponse
+	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/usage/resource-revenue", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

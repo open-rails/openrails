@@ -62,14 +62,14 @@ func spendTestEnv(t *testing.T) (*credits.CreditsService, *bun.DB, identity.Tena
 		_, _ = bunDB.NewDelete().Model((*models.CreditAccountSettings)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditBlock)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditTransaction)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
-		_, _ = bunDB.NewDelete().Model((*models.UserCreditBalance)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
+		_, _ = bunDB.NewDelete().Model((*models.CreditBalance)(nil)).Where("tenant_subject_id = ?", ownerID).Exec(ctx)
 		_, _ = bunDB.NewDelete().Model((*models.CreditType)(nil)).Where("id = ?", ctID).Exec(ctx)
 	})
 
 	svc := credits.NewCreditsService(dbi)
 	// Fund the payer generously so balance is never the binding constraint here.
 	_, err = svc.Deposit(ctx, credits.CreditDepositParams{
-		TenantSubjectID: &payer, InvokerID: ownerID.String(), CreditType: ctName, Amount: 1_000_000, Source: "test_seed",
+		TenantSubjectID: &payer, Actor: ownerID.String(), CreditType: ctName, Amount: 1_000_000, Source: "test_seed",
 	})
 	require.NoError(t, err)
 	return svc, bunDB, payer, ctName, ctx
@@ -98,7 +98,7 @@ func TestSpendPolicy_DailyCap(t *testing.T) {
 	require.NoError(t, err)
 
 	// Spend 500 (settled withdrawal).
-	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, InvokerID: "user:a", CreditType: ct, Amount: 500, Source: "usage"})
+	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, Actor: "user:a", CreditType: ct, Amount: 500, Source: "usage"})
 	require.NoError(t, err)
 
 	allow, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:a", 400) // 500+400 <= 1000
@@ -123,28 +123,28 @@ func TestSpendPolicy_DailyCap(t *testing.T) {
 	require.True(t, allow2.Allowed)
 }
 
-func TestSpendPolicy_PerInvokerCap(t *testing.T) {
+func TestSpendPolicy_PerActorCap(t *testing.T) {
 	svc, _, payer, ct, ctx := spendTestEnv(t)
 	day := int64(100)
 	_, err := svc.SetSpendLimit(ctx, payer, ct, "user:alice", &day, nil)
 	require.NoError(t, err)
 
 	// alice spends 80; bob spends 80 (bob has no limit).
-	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, InvokerID: "user:alice", CreditType: ct, Amount: 80, Source: "usage"})
+	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, Actor: "user:alice", CreditType: ct, Amount: 80, Source: "usage"})
 	require.NoError(t, err)
-	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, InvokerID: "user:bob", CreditType: ct, Amount: 80, Source: "usage"})
+	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, Actor: "user:bob", CreditType: ct, Amount: 80, Source: "usage"})
 	require.NoError(t, err)
 
 	deny, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:alice", 30) // 80+30 > 100
 	require.NoError(t, err)
 	require.False(t, deny.Allowed)
-	require.Equal(t, credits.DenyInvokerDailyCap, deny.DenyCode)
+	require.Equal(t, credits.DenyActorDailyCap, deny.DenyCode)
 
 	allow, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:alice", 20) // 80+20 == 100
 	require.NoError(t, err)
 	require.True(t, allow.Allowed)
 
-	// bob has no per-invoker limit and there's no org cap -> allowed even for a big estimate.
+	// bob has no per-actor limit and there's no org cap -> allowed even for a big estimate.
 	bob, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:bob", 100_000)
 	require.NoError(t, err)
 	require.True(t, bob.Allowed, "%+v", bob)
@@ -181,7 +181,7 @@ func TestSpendPolicy_WarnOnlyDoesNotBlock(t *testing.T) {
 		MaxSpendPerDayCents: &cap, HardStopOnBreach: &hard,
 	})
 	require.NoError(t, err)
-	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, InvokerID: "user:a", CreditType: ct, Amount: 100, Source: "usage"})
+	_, err = svc.Withdraw(ctx, credits.CreditWithdrawParams{TenantSubjectID: &payer, Actor: "user:a", CreditType: ct, Amount: 100, Source: "usage"})
 	require.NoError(t, err)
 
 	dec, err := svc.CheckSpendAllowed(ctx, payer, ct, "user:a", 50) // over cap but warn-only

@@ -45,13 +45,13 @@ CREATE TABLE IF NOT EXISTS billing.tenants (
 CREATE TABLE IF NOT EXISTS billing.subscriptions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, status TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS billing.payments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID, amount BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'completed');
 CREATE TABLE IF NOT EXISTS billing.platform_audit (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), invoker_id TEXT NOT NULL, actor_tenant TEXT,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), actor_user_id TEXT NOT NULL, actor_tenant TEXT,
     action TEXT NOT NULL, target_tenant_id UUID, reason TEXT,
     before_state JSONB, after_state JSONB, detail JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
 );
 CREATE TABLE IF NOT EXISTS billing.platform_break_glass (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), invoker_id TEXT NOT NULL, target_tenant_id UUID,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), actor_user_id TEXT NOT NULL, target_tenant_id UUID,
     justification TEXT NOT NULL, granted_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ,
     CONSTRAINT chk_break_glass_window CHECK (expires_at > granted_at)
@@ -204,6 +204,6 @@ func TestPlatformAPI_GateAndAudit(t *testing.T) {
 
 	var grantCount int
 	require.NoError(t, pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM billing.platform_break_glass WHERE invoker_id='platform-admin'`).Scan(&grantCount))
+		`SELECT count(*) FROM billing.platform_break_glass WHERE actor_user_id='platform-admin'`).Scan(&grantCount))
 	require.Equal(t, 1, grantCount, "break-glass grant must be persisted")
 }
