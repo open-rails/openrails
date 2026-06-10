@@ -455,6 +455,10 @@ type ProcessorConfig struct {
 	Network         string                 `koanf:"network"`
 	RecipientWallet string                 `koanf:"recipient_wallet"`
 	Tokens          map[string]TokenConfig `koanf:"tokens"`
+	// SolanaPayRecurringSubscriptions advertises recurring Solana Pay v2
+	// transaction-request support to browser clients. Keep disabled unless the
+	// deployment has validated its target wallet set with merchant co-signed txs.
+	SolanaPayRecurringSubscriptions bool `koanf:"solana_pay_recurring_subscriptions"`
 
 	// PrivateKey is the merchant/cranker Solana signing keypair (base58) for a
 	// SINGLE-TENANT install that configures Solana via global config rather than
@@ -539,11 +543,12 @@ func (p *ProcessorConfig) ToStripeConfig() *StripeConfig {
 // Only valid for Solana-type processors.
 func (p *ProcessorConfig) ToSolanaConfig() *SolanaConfig {
 	return &SolanaConfig{
-		RPCEndpoint:     p.RPCEndpoint,
-		HeliusAPIKey:    p.HeliusAPIKey,
-		Network:         p.Network,
-		RecipientWallet: p.RecipientWallet,
-		Tokens:          p.Tokens,
+		RPCEndpoint:                     p.RPCEndpoint,
+		HeliusAPIKey:                    p.HeliusAPIKey,
+		Network:                         p.Network,
+		RecipientWallet:                 p.RecipientWallet,
+		Tokens:                          p.Tokens,
+		SolanaPayRecurringSubscriptions: p.SolanaPayRecurringSubscriptions,
 	}
 }
 
@@ -773,6 +778,9 @@ type SolanaConfig struct {
 	RecipientWallet string `koanf:"recipient_wallet"`
 
 	Tokens map[string]TokenConfig `koanf:"tokens,omitempty"`
+	// SolanaPayRecurringSubscriptions controls the public runtime capability flag
+	// for recurring Solana Pay transaction-request checkout.
+	SolanaPayRecurringSubscriptions bool `koanf:"solana_pay_recurring_subscriptions"`
 }
 
 type PythConfig struct {

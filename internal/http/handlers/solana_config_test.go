@@ -14,12 +14,42 @@ import (
 )
 
 func TestGetSolanaConfig(t *testing.T) {
+	t.Run("default disables recurring Solana Pay", func(t *testing.T) {
+		runtime := &app.Runtime{
+			Config: &config.Config{
+				Processors: map[string]*config.ProcessorConfig{
+					"solana": {
+						Network:     "devnet",
+						RPCEndpoint: "https://api.devnet.solana.com",
+						Tokens: map[string]config.TokenConfig{
+							"USDC": {
+								Name:     "Dev USDC",
+								Mint:     "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ",
+								Decimals: 6,
+							},
+						},
+					},
+				},
+			},
+		}
+		recorder := httptest.NewRecorder()
+		req := httprequest.NewHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/solana/config", nil), runtime)
+
+		GetSolanaConfig(req)
+
+		require.Equal(t, http.StatusOK, recorder.Code)
+		var response SolanaRuntimeConfigResponse
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		require.False(t, response.Features.SolanaPayRecurringSubscriptions)
+	})
+
 	runtime := &app.Runtime{
 		Config: &config.Config{
 			Processors: map[string]*config.ProcessorConfig{
 				"solana": {
-					Network:     "devnet",
-					RPCEndpoint: "https://api.devnet.solana.com",
+					Network:                         "devnet",
+					RPCEndpoint:                     "https://api.devnet.solana.com",
+					SolanaPayRecurringSubscriptions: true,
 					Tokens: map[string]config.TokenConfig{
 						"USDC": {
 							Name:     "Dev USDC",
@@ -46,7 +76,7 @@ func TestGetSolanaConfig(t *testing.T) {
 	require.Equal(t, config.PreferredStablecoin, response.PreferredToken)
 	require.True(t, response.Features.SolanaPay)
 	require.True(t, response.Features.RecurringSubscriptions)
-	require.False(t, response.Features.SolanaPayRecurringSubscriptions)
+	require.True(t, response.Features.SolanaPayRecurringSubscriptions)
 	require.Len(t, response.Tokens, 1)
 	require.Equal(t, "USDC", response.Tokens[0].Symbol)
 	require.Equal(t, "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ", response.Tokens[0].Mint)
