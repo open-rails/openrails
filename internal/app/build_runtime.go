@@ -386,10 +386,10 @@ func createDatabase(cfg *config.Config) (*db.DB, error) {
 func createHealthManager(database *db.DB, redisClient *redis.Client) *health.ServiceHealthManager {
 	manager := health.NewServiceHealthManager()
 	if database != nil {
-		if bunDB, ok := database.GetDB().(*bun.DB); ok && bunDB != nil {
-			manager.RegisterChecker(health.NewPostgresHealthChecker(bunDB))
+		if pool := database.Pool(); pool != nil {
+			manager.RegisterChecker(health.NewPostgresHealthChecker(pool))
 		} else {
-			log.Warn("database health checker not registered: runtime DB is not *bun.DB")
+			log.Warn("database health checker not registered: runtime DB has no pgx pool")
 		}
 	}
 	if redisClient != nil {

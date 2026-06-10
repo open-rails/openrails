@@ -5,27 +5,27 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/uptrace/bun"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // PostgresHealthChecker verifies Postgres connectivity.
 type PostgresHealthChecker struct {
-	db *bun.DB
+	pool *pgxpool.Pool
 }
 
-// NewPostgresHealthChecker creates a Postgres checker.
-func NewPostgresHealthChecker(db *bun.DB) *PostgresHealthChecker {
-	return &PostgresHealthChecker{db: db}
+// NewPostgresHealthChecker creates a Postgres checker over the pgx pool.
+func NewPostgresHealthChecker(pool *pgxpool.Pool) *PostgresHealthChecker {
+	return &PostgresHealthChecker{pool: pool}
 }
 
 func (p *PostgresHealthChecker) Name() string           { return "postgres" }
 func (p *PostgresHealthChecker) Timeout() time.Duration { return 3 * time.Second }
 
 func (p *PostgresHealthChecker) Check(ctx context.Context) error {
-	if p == nil || p.db == nil {
-		return fmt.Errorf("postgres db is nil")
+	if p == nil || p.pool == nil {
+		return fmt.Errorf("postgres pool is nil")
 	}
-	if _, err := p.db.ExecContext(ctx, "SELECT 1"); err != nil {
+	if _, err := p.pool.Exec(ctx, "SELECT 1"); err != nil {
 		return fmt.Errorf("postgres health check failed: %w", err)
 	}
 	return nil

@@ -21,6 +21,7 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
 	"github.com/riverqueue/river"
 )
@@ -788,30 +789,11 @@ func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalanc
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	// Query all credit types with user balances using a direct query
-	// This matches the pattern used in the HTTP handler
-	var rows []struct {
-		CreditTypeID  uuid.UUID `bun:"credit_type_id"`
-		Name          string    `bun:"name"`
-		DisplayName   string    `bun:"display_name"`
-		Unit          string    `bun:"unit"`
-		DecimalPlaces int       `bun:"decimal_places"`
-		Balance       *int64    `bun:"balance"`
-		HeldBalance   *int64    `bun:"held_balance"`
-	}
-
-	err = database.GetDB().NewSelect().
-		TableExpr("billing.credit_types ct").
-		ColumnExpr("ct.id as credit_type_id").
-		ColumnExpr("ct.name").
-		ColumnExpr("ct.display_name").
-		ColumnExpr("ct.unit").
-		ColumnExpr("ct.decimal_places").
-		ColumnExpr("ucb.balance").
-		ColumnExpr("ucb.held_balance").
-		Join("LEFT JOIN billing.credit_balances ucb ON ucb.credit_type_id = ct.id AND ucb.user_id = ?", userID).
-		Where("ct.is_active = true").
-		Scan(ctx, &rows)
+	// Balance rows are keyed by tenant_subject_id — the user's own personal
+	// tenant-subject UUID for self-service identities. (The bun-era query
+	// joined on a nonexistent credit_balances.user_id column and errored.)
+	payerID := identity.TenantSubjectIDFromString(userID).UUID()
+	rows, err := database.Gen(ctx).ListActiveCreditTypesWithBalance(ctx, payerID)
 	if err != nil {
 		return nil, fmt.Errorf("get credits: %w", err)
 	}
@@ -822,7 +804,7 @@ func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalanc
 			Type:          row.Name,
 			DisplayName:   row.DisplayName,
 			Unit:          row.Unit,
-			DecimalPlaces: row.DecimalPlaces,
+			DecimalPlaces: int(row.DecimalPlaces),
 			Balance:       derefInt64(row.Balance),
 			HeldBalance:   derefInt64(row.HeldBalance),
 		})
