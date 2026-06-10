@@ -14,7 +14,6 @@ package abuse
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -112,11 +112,15 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjec
 				return err
 			}
 		}
-		_, err := s.db.Q(ctx).NewInsert().
-			Model(entry).
-			On("CONFLICT (tenant_id, kind, value) DO NOTHING").
-			Exec(ctx)
-		return err
+		return s.db.Gen(ctx).InsertPaymentBlockIfAbsent(ctx, gen.InsertPaymentBlockIfAbsentParams{
+			ID:              entry.ID,
+			TenantID:        entry.TenantID,
+			TenantSubjectID: entry.TenantSubjectID,
+			Kind:            entry.Kind,
+			Value:           entry.Value,
+			Reason:          entry.Reason,
+			CreatedAt:       entry.CreatedAt,
+		})
 	})
 }
 
@@ -137,12 +141,9 @@ func (s *BlocklistService) Remove(ctx context.Context, kind, value string) error
 
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		_, err := s.db.Q(ctx).NewDelete().
-			Model((*models.PaymentBlocklistEntry)(nil)).
-			Where("tenant_id = ?", tenantID).
-			Where("kind = ? AND value = ?", kind, value).
-			Exec(ctx)
-		return err
+		return s.db.Gen(ctx).DeletePaymentBlock(ctx, gen.DeletePaymentBlockParams{
+			TenantID: tenantID, Kind: kind, Value: value,
+		})
 	})
 }
 
@@ -165,16 +166,13 @@ func (s *BlocklistService) IsBlocked(ctx context.Context, kind, value string) (b
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	var blocked bool
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		count, err := s.db.Q(ctx).NewSelect().
-			Model((*models.PaymentBlocklistEntry)(nil)).
-			Where("tenant_id = ?", tenantID).
-			Where("kind = ? AND value = ?", kind, value).
-			Limit(1).
-			Count(ctx)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		exists, err := s.db.Gen(ctx).PaymentBlockExists(ctx, gen.PaymentBlockExistsParams{
+			TenantID: tenantID, Kind: kind, Value: value,
+		})
+		if err != nil {
 			return err
 		}
-		blocked = count > 0
+		blocked = exists
 		return nil
 	})
 	if err != nil {

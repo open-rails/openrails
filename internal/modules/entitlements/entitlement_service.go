@@ -2,19 +2,18 @@ package entitlements
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/uptrace/bun"
 )
 
 type EntitlementService struct {
@@ -27,20 +26,15 @@ func NewEntitlementService(db *db.DB, clocks ...clockwork.Clock) *EntitlementSer
 	return &EntitlementService{db: db, repo: repo.NewEntitlementRepo(db), clock: timeutil.FirstClock(clocks...)}
 }
 
-func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Context, tx bun.Tx) error) error {
+func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
 	// Run inside a tenant-scoped transaction so the migration-050 RLS policies
-	// constrain every entitlement query to the request's tenant (db.RunInTenantTx
+	// constrain every entitlement query to the request's tenant (db.TenantTx
 	// sets the app.tenant_id GUC from the context as the first statement). This is
 	// the shared chokepoint for tenant-owned entitlement writes/reads.
-	switch s.db.GetDB().(type) {
-	case *bun.DB, bun.Tx:
-		return s.db.RunInTenantTx(ctx, fn)
-	default:
-		return fmt.Errorf("unsupported db type for entitlement transaction")
-	}
+	return s.db.TenantTx(ctx, fn)
 }
 
 // SetClock sets the clock for this service. Used for testing.
@@ -176,8 +170,8 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 	now := s.now().UTC()
 	var created *models.Entitlement
 
-	err := s.withTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		if err := repo.LockEntitlementTimelineBun(ctx, tx, p.UserID, p.Entitlement); err != nil {
+	err := s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := repo.LockEntitlementTimeline(ctx, tx, p.UserID, p.Entitlement); err != nil {
 			return err
 		}
 
@@ -187,7 +181,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		// tenant_subjects row whose id IS that UUID (see repo.EnsureTenantSubjectID),
 		// converging with the credits/commerce payable identity.
 		if p.TenantSubjectID == uuid.Nil {
-			tsid, terr := repo.EnsureTenantSubjectIDBun(ctx, tx, uuid.Nil, p.UserID)
+			tsid, terr := repo.EnsureTenantSubjectID(ctx, tx, uuid.Nil, p.UserID)
 			if terr != nil {
 				return terr
 			}
@@ -195,45 +189,20 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		}
 
 		// If an indefinite entitlement exists, the timeline is terminal.
-		var hasIndefinite bool
-		if err := tx.NewSelect().
-			Model((*models.Entitlement)(nil)).
-			ColumnExpr("COUNT(*) > 0").
-			Where("ent.tenant_subject_id = ?", p.TenantSubjectID).
-			Where("ent.entitlement = ?", p.Entitlement).
-			Where("ent.revoked_at IS NULL").
-			Where("ent.deleted_at IS NULL").
-			Where("ent.end_at IS NULL").
-			Scan(ctx, &hasIndefinite); err != nil {
+		hasIndefinite, err := repo.TimelineHasIndefinite(ctx, tx, p.TenantSubjectID, p.Entitlement)
+		if err != nil {
 			return err
 		}
 		if hasIndefinite {
-			created = new(models.Entitlement)
-			if err := tx.NewSelect().
-				Model(created).
-				Where("ent.tenant_subject_id = ?", p.TenantSubjectID).
-				Where("ent.entitlement = ?", p.Entitlement).
-				Where("ent.revoked_at IS NULL").
-				Where("ent.deleted_at IS NULL").
-				Where("ent.end_at IS NULL").
-				OrderExpr("ent.start_at ASC").
-				Limit(1).
-				Scan(ctx); err != nil {
+			created, err = repo.GetTimelineIndefinite(ctx, tx, p.TenantSubjectID, p.Entitlement)
+			if err != nil {
 				return err
 			}
-			return attachTenantSubjectIfMissingTx(ctx, tx, created, p.TenantSubjectID, now)
+			return repo.AttachTenantSubjectIfMissing(ctx, tx, created, p.TenantSubjectID, now)
 		}
 
-		var tailEnd *time.Time
-		if err := tx.NewSelect().
-			Model((*models.Entitlement)(nil)).
-			ColumnExpr("MAX(ent.end_at)").
-			Where("ent.tenant_subject_id = ?", p.TenantSubjectID).
-			Where("ent.entitlement = ?", p.Entitlement).
-			Where("ent.revoked_at IS NULL").
-			Where("ent.deleted_at IS NULL").
-			Where("ent.end_at IS NOT NULL").
-			Scan(ctx, &tailEnd); err != nil {
+		tailEnd, err := repo.GetTimelineTailEnd(ctx, tx, p.TenantSubjectID, p.Entitlement)
+		if err != nil {
 			return err
 		}
 
@@ -258,26 +227,15 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		case p.EndAt != nil:
 			e := p.EndAt.UTC()
 			if !e.After(start) {
-				covered := new(models.Entitlement)
-				err := tx.NewSelect().
-					Model(covered).
-					Where("ent.tenant_subject_id = ?", p.TenantSubjectID).
-					Where("ent.entitlement = ?", p.Entitlement).
-					Where("ent.revoked_at IS NULL").
-					Where("ent.deleted_at IS NULL").
-					Where("ent.start_at < ?", e).
-					Where("ent.end_at IS NULL OR ent.end_at >= ?", e).
-					OrderExpr("ent.end_at DESC NULLS LAST").
-					Limit(1).
-					Scan(ctx)
-				if err != nil {
-					if errors.Is(err, sql.ErrNoRows) {
+				covered, cerr := repo.GetTimelineCoveringWindow(ctx, tx, p.TenantSubjectID, p.Entitlement, e)
+				if cerr != nil {
+					if errors.Is(cerr, pgx.ErrNoRows) {
 						return fmt.Errorf("requested entitlement window is already covered by timeline tail but no covering row was found")
 					}
-					return err
+					return cerr
 				}
 				created = covered
-				return attachTenantSubjectIfMissingTx(ctx, tx, created, p.TenantSubjectID, now)
+				return repo.AttachTenantSubjectIfMissing(ctx, tx, created, p.TenantSubjectID, now)
 			}
 			endAt = &e
 		}
@@ -293,32 +251,12 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
-		_, err := tx.NewInsert().Model(created).Exec(ctx)
-		return err
+		return repo.InsertTimelineWindow(ctx, tx, created)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return created, nil
-}
-
-func attachTenantSubjectIfMissingTx(ctx context.Context, tx bun.Tx, ent *models.Entitlement, tenantSubjectID uuid.UUID, now time.Time) error {
-	if ent == nil || tenantSubjectID == uuid.Nil || ent.TenantSubjectID != uuid.Nil {
-		return nil
-	}
-	_, err := tx.NewUpdate().
-		Model((*models.Entitlement)(nil)).
-		Set("tenant_subject_id = ?", tenantSubjectID).
-		Set("updated_at = ?", now).
-		Where("ent.id = ?", ent.ID).
-		Where("ent.tenant_subject_id IS NULL").
-		Exec(ctx)
-	if err != nil {
-		return err
-	}
-	ent.TenantSubjectID = tenantSubjectID
-	ent.UpdatedAt = now
-	return nil
 }
 
 func (s *EntitlementService) ExtendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
@@ -392,17 +330,17 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 	}
 
 	now := s.now().UTC()
-	return s.withTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		userID := p.UserID
 		entitlement := p.Entitlement
 		if p.EntitlementID != nil {
-			ent, err := repo.GetEntitlementByIDTxBun(ctx, tx, *p.EntitlementID)
+			ent, err := repo.GetEntitlementByIDTx(ctx, tx, *p.EntitlementID)
 			if err != nil {
 				return err
 			}
 			userID = ent.TenantSubjectID.String()
 			entitlement = ent.Entitlement
-			if err := repo.LockEntitlementTimelineBun(ctx, tx, userID, entitlement); err != nil {
+			if err := repo.LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
 				return err
 			}
 			if ent.RevokedAt != nil || ent.DeletedAt != nil {
@@ -417,77 +355,28 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 				}
 			}
 			if ent.StartAt.After(now) {
-				_, err := tx.NewUpdate().
-					Model((*models.Entitlement)(nil)).
-					Set("deleted_at = ?", now).
-					Set("updated_at = ?", now).
-					Where("ent.id = ?", ent.ID).
-					Where("ent.revoked_at IS NULL").
-					Where("ent.deleted_at IS NULL").
-					Exec(ctx)
-				return err
+				return repo.SoftDeleteEntitlementByID(ctx, tx, ent.ID, now)
 			}
 			if ent.EndAt == nil || ent.EndAt.After(now) {
-				_, err := tx.NewUpdate().
-					Model((*models.Entitlement)(nil)).
-					Set("revoked_at = ?", now).
-					Set("revoke_reason = ?", &p.Reason).
-					Set("updated_at = ?", now).
-					Where("ent.id = ?", ent.ID).
-					Where("ent.revoked_at IS NULL").
-					Where("ent.deleted_at IS NULL").
-					Exec(ctx)
-				return err
+				return repo.RevokeEntitlementByID(ctx, tx, ent.ID, p.Reason, now)
 			}
 			return nil
 		}
 
-		if err := repo.LockEntitlementTimelineBun(ctx, tx, userID, entitlement); err != nil {
+		if err := repo.LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
 			return err
 		}
 
 		// Filter the entitlement timeline by the payable tenant subject (#317);
 		// the lock above still serializes on the userID string key.
-		tsid, terr := repo.ResolveTenantSubjectIDBun(ctx, tx, uuid.Nil, userID)
+		tsid, terr := repo.ResolveTenantSubjectID(ctx, tx, uuid.Nil, userID)
 		if terr != nil {
 			return terr
 		}
 
-		active := tx.NewUpdate().
-			Model((*models.Entitlement)(nil)).
-			Set("revoked_at = ?", now).
-			Set("revoke_reason = ?", &p.Reason).
-			Set("updated_at = ?", now).
-			Where("ent.tenant_subject_id = ?", tsid).
-			Where("ent.entitlement = ?", entitlement).
-			Where("ent.revoked_at IS NULL").
-			Where("ent.deleted_at IS NULL").
-			Where("ent.start_at <= ?", now).
-			Where("(ent.end_at IS NULL OR ent.end_at > ?)", now)
-
-		future := tx.NewUpdate().
-			Model((*models.Entitlement)(nil)).
-			Set("deleted_at = ?", now).
-			Set("updated_at = ?", now).
-			Where("ent.tenant_subject_id = ?", tsid).
-			Where("ent.entitlement = ?", entitlement).
-			Where("ent.revoked_at IS NULL").
-			Where("ent.deleted_at IS NULL").
-			Where("ent.start_at > ?", now)
-
-		if p.SourceType != nil {
-			active = active.Where("ent.source_type = ?", *p.SourceType)
-			future = future.Where("ent.source_type = ?", *p.SourceType)
-		}
-		if p.SourceID != nil && *p.SourceID != uuid.Nil {
-			active = active.Where("ent.source_id = ?", *p.SourceID)
-			future = future.Where("ent.source_id = ?", *p.SourceID)
-		}
-
-		if _, err := active.Exec(ctx); err != nil {
+		if err := repo.RevokeActiveTimelineWindows(ctx, tx, tsid, entitlement, p.Reason, p.SourceType, p.SourceID, now); err != nil {
 			return err
 		}
-		_, err := future.Exec(ctx)
-		return err
+		return repo.SoftDeleteFutureTimelineWindows(ctx, tx, tsid, entitlement, p.SourceType, p.SourceID, now)
 	})
 }

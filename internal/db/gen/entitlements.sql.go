@@ -23,6 +23,26 @@ func (q *Queries) AcquireEntitlementTimelineLock(ctx context.Context, key int64)
 	return err
 }
 
+const attachEntitlementTenantSubject = `-- name: AttachEntitlementTenantSubject :exec
+UPDATE billing.entitlements ent SET
+    tenant_subject_id = $2,
+    updated_at = $3
+WHERE ent.id = $1
+  AND ent.tenant_subject_id IS NULL
+`
+
+type AttachEntitlementTenantSubjectParams struct {
+	ID              uuid.UUID
+	TenantSubjectID uuid.UUID
+	UpdatedAt       time.Time
+}
+
+// Backfill the payable subject onto a legacy row that predates #317.
+func (q *Queries) AttachEntitlementTenantSubject(ctx context.Context, arg AttachEntitlementTenantSubjectParams) error {
+	_, err := q.db.Exec(ctx, attachEntitlementTenantSubject, arg.ID, arg.TenantSubjectID, arg.UpdatedAt)
+	return err
+}
+
 const countInvalidEndBySubscription = `-- name: CountInvalidEndBySubscription :one
 SELECT count(*) FROM billing.entitlements ent
 WHERE ent.source_type = 'subscription'
@@ -333,6 +353,109 @@ func (q *Queries) GetLatestFiniteActiveEntitlement(ctx context.Context, arg GetL
 		&i.TenantSubjectID,
 	)
 	return i, err
+}
+
+const getTimelineCoveringWindow = `-- name: GetTimelineCoveringWindow :one
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+WHERE ent.tenant_subject_id = $1
+  AND ent.entitlement = $2
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at < $3::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at >= $3::timestamptz)
+ORDER BY ent.end_at DESC NULLS LAST
+LIMIT 1
+`
+
+type GetTimelineCoveringWindowParams struct {
+	TenantSubjectID uuid.UUID
+	Entitlement     string
+	At              time.Time
+}
+
+// The window covering instant `at` (for already-covered EndAt requests).
+func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimelineCoveringWindowParams) (BillingEntitlement, error) {
+	row := q.db.QueryRow(ctx, getTimelineCoveringWindow, arg.TenantSubjectID, arg.Entitlement, arg.At)
+	var i BillingEntitlement
+	err := row.Scan(
+		&i.ID,
+		&i.Entitlement,
+		&i.StartAt,
+		&i.EndAt,
+		&i.SourceID,
+		&i.SourceType,
+		&i.RevokedAt,
+		&i.RevokeReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.Period,
+		&i.TenantID,
+		&i.TenantSubjectID,
+	)
+	return i, err
+}
+
+const getTimelineIndefinite = `-- name: GetTimelineIndefinite :one
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, tenant_id, tenant_subject_id FROM billing.entitlements ent
+WHERE ent.tenant_subject_id = $1
+  AND ent.entitlement = $2
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.end_at IS NULL
+ORDER BY ent.start_at ASC
+LIMIT 1
+`
+
+type GetTimelineIndefiniteParams struct {
+	TenantSubjectID uuid.UUID
+	Entitlement     string
+}
+
+func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineIndefiniteParams) (BillingEntitlement, error) {
+	row := q.db.QueryRow(ctx, getTimelineIndefinite, arg.TenantSubjectID, arg.Entitlement)
+	var i BillingEntitlement
+	err := row.Scan(
+		&i.ID,
+		&i.Entitlement,
+		&i.StartAt,
+		&i.EndAt,
+		&i.SourceID,
+		&i.SourceType,
+		&i.RevokedAt,
+		&i.RevokeReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.Period,
+		&i.TenantID,
+		&i.TenantSubjectID,
+	)
+	return i, err
+}
+
+const getTimelineTailEnd = `-- name: GetTimelineTailEnd :one
+SELECT ent.end_at FROM billing.entitlements ent
+WHERE ent.tenant_subject_id = $1
+  AND ent.entitlement = $2
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.end_at IS NOT NULL
+ORDER BY ent.end_at DESC
+LIMIT 1
+`
+
+type GetTimelineTailEndParams struct {
+	TenantSubjectID uuid.UUID
+	Entitlement     string
+}
+
+// The latest finite end on the timeline (the tail a new window starts after).
+func (q *Queries) GetTimelineTailEnd(ctx context.Context, arg GetTimelineTailEndParams) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, getTimelineTailEnd, arg.TenantSubjectID, arg.Entitlement)
+	var end_at *time.Time
+	err := row.Scan(&end_at)
+	return end_at, err
 }
 
 const listActiveEntitlementNames = `-- name: ListActiveEntitlementNames :many
@@ -737,6 +860,44 @@ func (q *Queries) RevokeActiveOneOffEntitlements(ctx context.Context, arg Revoke
 	return err
 }
 
+const revokeActiveTimelineWindows = `-- name: RevokeActiveTimelineWindows :exec
+UPDATE billing.entitlements ent SET
+    revoked_at = $3::timestamptz,
+    revoke_reason = $4::text,
+    updated_at = $3::timestamptz
+WHERE ent.tenant_subject_id = $1
+  AND ent.entitlement = $2
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at <= $3::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
+  AND ($5::text IS NULL OR ent.source_type = $5::text)
+  AND ($6::uuid IS NULL OR ent.source_id = $6::uuid)
+`
+
+type RevokeActiveTimelineWindowsParams struct {
+	TenantSubjectID uuid.UUID
+	Entitlement     string
+	Now             time.Time
+	RevokeReason    string
+	SourceType      *string
+	SourceID        *uuid.UUID
+}
+
+// Revoke every currently-active window on the timeline, optionally filtered
+// to one source (NULL filter = any).
+func (q *Queries) RevokeActiveTimelineWindows(ctx context.Context, arg RevokeActiveTimelineWindowsParams) error {
+	_, err := q.db.Exec(ctx, revokeActiveTimelineWindows,
+		arg.TenantSubjectID,
+		arg.Entitlement,
+		arg.Now,
+		arg.RevokeReason,
+		arg.SourceType,
+		arg.SourceID,
+	)
+	return err
+}
+
 const revokeEntitlementByID = `-- name: RevokeEntitlementByID :execrows
 UPDATE billing.entitlements ent SET
     revoked_at = $2::timestamptz,
@@ -877,6 +1038,25 @@ func (q *Queries) ShiftEntitlementTimelineWindows(ctx context.Context, arg Shift
 	return err
 }
 
+const softDeleteEntitlementByID = `-- name: SoftDeleteEntitlementByID :exec
+UPDATE billing.entitlements ent SET
+    deleted_at = $2::timestamptz,
+    updated_at = $2::timestamptz
+WHERE ent.id = $1
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+`
+
+type SoftDeleteEntitlementByIDParams struct {
+	ID  uuid.UUID
+	Now time.Time
+}
+
+func (q *Queries) SoftDeleteEntitlementByID(ctx context.Context, arg SoftDeleteEntitlementByIDParams) error {
+	_, err := q.db.Exec(ctx, softDeleteEntitlementByID, arg.ID, arg.Now)
+	return err
+}
+
 const softDeleteFutureGraceBySubscription = `-- name: SoftDeleteFutureGraceBySubscription :exec
 UPDATE billing.entitlements ent SET
     deleted_at = $2::timestamptz,
@@ -917,6 +1097,40 @@ type SoftDeleteFutureOneOffEntitlementsParams struct {
 
 func (q *Queries) SoftDeleteFutureOneOffEntitlements(ctx context.Context, arg SoftDeleteFutureOneOffEntitlementsParams) error {
 	_, err := q.db.Exec(ctx, softDeleteFutureOneOffEntitlements, arg.SourceID, arg.Now, arg.EndAt)
+	return err
+}
+
+const softDeleteFutureTimelineWindows = `-- name: SoftDeleteFutureTimelineWindows :exec
+UPDATE billing.entitlements ent SET
+    deleted_at = $3::timestamptz,
+    updated_at = $3::timestamptz
+WHERE ent.tenant_subject_id = $1
+  AND ent.entitlement = $2
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at > $3::timestamptz
+  AND ($4::text IS NULL OR ent.source_type = $4::text)
+  AND ($5::uuid IS NULL OR ent.source_id = $5::uuid)
+`
+
+type SoftDeleteFutureTimelineWindowsParams struct {
+	TenantSubjectID uuid.UUID
+	Entitlement     string
+	Now             time.Time
+	SourceType      *string
+	SourceID        *uuid.UUID
+}
+
+// Soft-delete every future scheduled window on the timeline, optionally
+// filtered to one source (NULL filter = any).
+func (q *Queries) SoftDeleteFutureTimelineWindows(ctx context.Context, arg SoftDeleteFutureTimelineWindowsParams) error {
+	_, err := q.db.Exec(ctx, softDeleteFutureTimelineWindows,
+		arg.TenantSubjectID,
+		arg.Entitlement,
+		arg.Now,
+		arg.SourceType,
+		arg.SourceID,
+	)
 	return err
 }
 
@@ -969,6 +1183,34 @@ func (q *Queries) SoftDeleteLaterEntitlementWindows(ctx context.Context, arg Sof
 		arg.ExcludeID,
 	)
 	return err
+}
+
+const timelineHasIndefinite = `-- name: TimelineHasIndefinite :one
+
+SELECT EXISTS (
+    SELECT 1 FROM billing.entitlements ent
+    WHERE ent.tenant_subject_id = $1
+      AND ent.entitlement = $2
+      AND ent.revoked_at IS NULL
+      AND ent.deleted_at IS NULL
+      AND ent.end_at IS NULL
+)
+`
+
+type TimelineHasIndefiniteParams struct {
+	TenantSubjectID uuid.UUID
+	Entitlement     string
+}
+
+// Timeline-service queries (#334: modules/entitlements PushNewEntitlement /
+// RevokeExistingEntitlement). Tenant scoping comes from RLS via TenantTx; the
+// timeline key is (tenant_subject_id, entitlement), matching the bun-era
+// service which never added an explicit tenant predicate here.
+func (q *Queries) TimelineHasIndefinite(ctx context.Context, arg TimelineHasIndefiniteParams) (bool, error) {
+	row := q.db.QueryRow(ctx, timelineHasIndefinite, arg.TenantSubjectID, arg.Entitlement)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const updateEntitlementEndAtIfMatch = `-- name: UpdateEntitlementEndAtIfMatch :exec

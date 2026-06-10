@@ -15,7 +15,6 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
@@ -35,8 +34,7 @@ func newTestService(t *testing.T, now time.Time) (*Service, context.Context, uui
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	productID := uuid.New()
 	product := &models.Product{
@@ -47,7 +45,7 @@ func newTestService(t *testing.T, now time.Time) (*Service, context.Context, uui
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	_, err = bunDB.NewInsert().Model(product).Exec(ctx)
+	_, err := bunDB.NewInsert().Model(product).Exec(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = bunDB.NewDelete().Model((*models.ProductAccessGrant)(nil)).Where("product_id = ?", productID).Exec(context.Background())

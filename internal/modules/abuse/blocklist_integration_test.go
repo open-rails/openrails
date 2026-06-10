@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -41,8 +40,7 @@ func blocklistEnv(t *testing.T) (*abuse.BlocklistService, *bun.DB, context.Conte
 		t.Skip("billing.payment_blocklist missing; run migration 067")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	return abuse.NewBlocklistService(dbi), bunDB, ctx
 }

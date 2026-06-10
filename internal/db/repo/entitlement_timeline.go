@@ -2,11 +2,13 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 )
@@ -193,4 +195,141 @@ func RevokeEntitlementNowTx(
 	}
 	// Indefinite windows should have no later windows; nothing to shift.
 	return nil
+}
+
+// --- Timeline-service helpers (#334): the pgx/sqlc surface used by
+// modules/entitlements.EntitlementService for PushNewEntitlement and
+// RevokeExistingEntitlement. All take an open transaction (gen.DBTX) so they
+// run inside the service's TenantTx with the timeline advisory lock held.
+
+// TimelineHasIndefinite reports whether an unrevoked indefinite window exists
+// for (tenant subject, entitlement) — the timeline-terminal state.
+func TimelineHasIndefinite(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string) (bool, error) {
+	return gen.New(qx).TimelineHasIndefinite(ctx, gen.TimelineHasIndefiniteParams{
+		TenantSubjectID: tenantSubjectID, Entitlement: entitlement,
+	})
+}
+
+// GetTimelineIndefinite returns the (earliest) indefinite window.
+func GetTimelineIndefinite(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string) (*models.Entitlement, error) {
+	row, err := gen.New(qx).GetTimelineIndefinite(ctx, gen.GetTimelineIndefiniteParams{
+		TenantSubjectID: tenantSubjectID, Entitlement: entitlement,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entitlementFromGen(row), nil
+}
+
+// GetTimelineTailEnd returns the latest finite end_at on the timeline, or nil
+// when the timeline has no finite windows.
+func GetTimelineTailEnd(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string) (*time.Time, error) {
+	end, err := gen.New(qx).GetTimelineTailEnd(ctx, gen.GetTimelineTailEndParams{
+		TenantSubjectID: tenantSubjectID, Entitlement: entitlement,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return end, nil
+}
+
+// GetTimelineCoveringWindow returns the window covering instant `at`
+// (pgx.ErrNoRows when none does).
+func GetTimelineCoveringWindow(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
+	row, err := gen.New(qx).GetTimelineCoveringWindow(ctx, gen.GetTimelineCoveringWindowParams{
+		TenantSubjectID: tenantSubjectID, Entitlement: entitlement, At: at,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entitlementFromGen(row), nil
+}
+
+// InsertTimelineWindow persists a fully-populated new window.
+func InsertTimelineWindow(ctx context.Context, qx gen.DBTX, ent *models.Entitlement) error {
+	var sourceID *uuid.UUID
+	if ent.SourceID != nil && *ent.SourceID != uuid.Nil {
+		sourceID = ent.SourceID
+	}
+	_, err := gen.New(qx).CreateEntitlement(ctx, gen.CreateEntitlementParams{
+		ID:              ent.ID,
+		TenantID:        ent.TenantID,
+		TenantSubjectID: ent.TenantSubjectID,
+		Entitlement:     ent.Entitlement,
+		StartAt:         ent.StartAt,
+		EndAt:           ent.EndAt,
+		SourceID:        sourceID,
+		SourceType:      string(ent.SourceType),
+		RevokedAt:       ent.RevokedAt,
+		RevokeReason:    revokeReasonPtr(ent.RevokeReason),
+		CreatedAt:       ent.CreatedAt,
+		UpdatedAt:       ent.UpdatedAt,
+	})
+	return err
+}
+
+// AttachTenantSubjectIfMissing backfills tenant_subject_id onto a legacy row
+// (#317); no-op when the row already carries one.
+func AttachTenantSubjectIfMissing(ctx context.Context, qx gen.DBTX, ent *models.Entitlement, tenantSubjectID uuid.UUID, now time.Time) error {
+	if ent == nil || tenantSubjectID == uuid.Nil || ent.TenantSubjectID != uuid.Nil {
+		return nil
+	}
+	if err := gen.New(qx).AttachEntitlementTenantSubject(ctx, gen.AttachEntitlementTenantSubjectParams{
+		ID: ent.ID, TenantSubjectID: tenantSubjectID, UpdatedAt: now,
+	}); err != nil {
+		return err
+	}
+	ent.TenantSubjectID = tenantSubjectID
+	ent.UpdatedAt = now
+	return nil
+}
+
+// SoftDeleteEntitlementByID soft-deletes one (future) window.
+func SoftDeleteEntitlementByID(ctx context.Context, qx gen.DBTX, id uuid.UUID, now time.Time) error {
+	return gen.New(qx).SoftDeleteEntitlementByID(ctx, gen.SoftDeleteEntitlementByIDParams{ID: id, Now: now})
+}
+
+// RevokeEntitlementByID revokes one active window with a reason.
+func RevokeEntitlementByID(ctx context.Context, qx gen.DBTX, id uuid.UUID, reason models.EntitlementRevokeReason, now time.Time) error {
+	_, err := gen.New(qx).RevokeEntitlementByID(ctx, gen.RevokeEntitlementByIDParams{
+		ID: id, Now: now, RevokeReason: string(reason),
+	})
+	return err
+}
+
+// RevokeActiveTimelineWindows revokes every currently-active window on the
+// timeline; nil source filters mean "any source".
+func RevokeActiveTimelineWindows(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string, reason models.EntitlementRevokeReason, sourceType *models.EntitlementSourceType, sourceID *uuid.UUID, now time.Time) error {
+	var st *string
+	if sourceType != nil {
+		v := string(*sourceType)
+		st = &v
+	}
+	if sourceID != nil && *sourceID == uuid.Nil {
+		sourceID = nil
+	}
+	return gen.New(qx).RevokeActiveTimelineWindows(ctx, gen.RevokeActiveTimelineWindowsParams{
+		TenantSubjectID: tenantSubjectID, Entitlement: entitlement,
+		Now: now, RevokeReason: string(reason), SourceType: st, SourceID: sourceID,
+	})
+}
+
+// SoftDeleteFutureTimelineWindows soft-deletes every future scheduled window
+// on the timeline; nil source filters mean "any source".
+func SoftDeleteFutureTimelineWindows(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string, sourceType *models.EntitlementSourceType, sourceID *uuid.UUID, now time.Time) error {
+	var st *string
+	if sourceType != nil {
+		v := string(*sourceType)
+		st = &v
+	}
+	if sourceID != nil && *sourceID == uuid.Nil {
+		sourceID = nil
+	}
+	return gen.New(qx).SoftDeleteFutureTimelineWindows(ctx, gen.SoftDeleteFutureTimelineWindowsParams{
+		TenantSubjectID: tenantSubjectID, Entitlement: entitlement,
+		Now: now, SourceType: st, SourceID: sourceID,
+	})
 }

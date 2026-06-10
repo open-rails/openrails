@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -45,13 +44,12 @@ func admitEnv(t *testing.T) (*admission.Admitter, *credits.CreditsService, *admi
 		t.Skip("billing.tier_policies missing; run migration 066")
 	}
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	ctName := "admit_" + uuid.NewString()
 	ctID := uuid.New()
-	_, err = bunDB.NewInsert().Model(&models.CreditType{
+	_, err := bunDB.NewInsert().Model(&models.CreditType{
 		ID: ctID, Name: ctName, DisplayName: "Admit Test", Unit: "cents", DecimalPlaces: 2, IsActive: true, CreatedAt: now,
 	}).Exec(ctx)
 	require.NoError(t, err)

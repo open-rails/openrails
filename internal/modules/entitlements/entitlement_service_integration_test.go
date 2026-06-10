@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/stretchr/testify/require"
@@ -30,8 +29,7 @@ func TestPushNewEntitlement_CoveredFiniteGrantReturnsExistingWindow(t *testing.T
 	ctx := context.Background()
 	require.NoError(t, bunDB.PingContext(ctx))
 
-	dbi, err := db.NewWithBun(bunDB)
-	require.NoError(t, err)
+	dbi := dbtest.OpenAppDB(t, dsn)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	svc := NewEntitlementService(dbi, clockwork.NewFakeClockAt(now))

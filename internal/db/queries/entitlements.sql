@@ -298,3 +298,97 @@ UPDATE billing.entitlements ent SET
 WHERE ent.id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
+
+-- Timeline-service queries (#334: modules/entitlements PushNewEntitlement /
+-- RevokeExistingEntitlement). Tenant scoping comes from RLS via TenantTx; the
+-- timeline key is (tenant_subject_id, entitlement), matching the bun-era
+-- service which never added an explicit tenant predicate here.
+
+-- name: TimelineHasIndefinite :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.entitlements ent
+    WHERE ent.tenant_subject_id = $1
+      AND ent.entitlement = $2
+      AND ent.revoked_at IS NULL
+      AND ent.deleted_at IS NULL
+      AND ent.end_at IS NULL
+);
+
+-- name: GetTimelineIndefinite :one
+SELECT * FROM billing.entitlements ent
+WHERE ent.tenant_subject_id = $1
+  AND ent.entitlement = $2
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.end_at IS NULL
+ORDER BY ent.start_at ASC
+LIMIT 1;
+
+-- name: GetTimelineTailEnd :one
+-- The latest finite end on the timeline (the tail a new window starts after).
+SELECT ent.end_at FROM billing.entitlements ent
+WHERE ent.tenant_subject_id = $1
+  AND ent.entitlement = $2
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.end_at IS NOT NULL
+ORDER BY ent.end_at DESC
+LIMIT 1;
+
+-- name: GetTimelineCoveringWindow :one
+-- The window covering instant `at` (for already-covered EndAt requests).
+SELECT * FROM billing.entitlements ent
+WHERE ent.tenant_subject_id = $1
+  AND ent.entitlement = $2
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at < sqlc.arg(at)::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at >= sqlc.arg(at)::timestamptz)
+ORDER BY ent.end_at DESC NULLS LAST
+LIMIT 1;
+
+-- name: AttachEntitlementTenantSubject :exec
+-- Backfill the payable subject onto a legacy row that predates #317.
+UPDATE billing.entitlements ent SET
+    tenant_subject_id = $2,
+    updated_at = $3
+WHERE ent.id = $1
+  AND ent.tenant_subject_id IS NULL;
+
+-- name: SoftDeleteEntitlementByID :exec
+UPDATE billing.entitlements ent SET
+    deleted_at = sqlc.arg(now)::timestamptz,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE ent.id = $1
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL;
+
+-- name: RevokeActiveTimelineWindows :exec
+-- Revoke every currently-active window on the timeline, optionally filtered
+-- to one source (NULL filter = any).
+UPDATE billing.entitlements ent SET
+    revoked_at = sqlc.arg(now)::timestamptz,
+    revoke_reason = sqlc.arg(revoke_reason)::text,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE ent.tenant_subject_id = $1
+  AND ent.entitlement = $2
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at <= sqlc.arg(now)::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(now)::timestamptz)
+  AND (sqlc.narg(source_type)::text IS NULL OR ent.source_type = sqlc.narg(source_type)::text)
+  AND (sqlc.narg(source_id)::uuid IS NULL OR ent.source_id = sqlc.narg(source_id)::uuid);
+
+-- name: SoftDeleteFutureTimelineWindows :exec
+-- Soft-delete every future scheduled window on the timeline, optionally
+-- filtered to one source (NULL filter = any).
+UPDATE billing.entitlements ent SET
+    deleted_at = sqlc.arg(now)::timestamptz,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE ent.tenant_subject_id = $1
+  AND ent.entitlement = $2
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at > sqlc.arg(now)::timestamptz
+  AND (sqlc.narg(source_type)::text IS NULL OR ent.source_type = sqlc.narg(source_type)::text)
+  AND (sqlc.narg(source_id)::uuid IS NULL OR ent.source_id = sqlc.narg(source_id)::uuid);

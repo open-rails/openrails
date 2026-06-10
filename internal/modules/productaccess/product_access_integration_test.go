@@ -23,6 +23,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/db/models"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 	"github.com/open-rails/openrails/pkg/tenant"
@@ -101,9 +102,7 @@ func pagOpenBun(t *testing.T, dsn string) *bun.DB {
 
 func pagOpenDB(t *testing.T, dsn string) *db.DB {
 	t.Helper()
-	dbi, err := db.NewWithBun(pagOpenBun(t, dsn))
-	require.NoError(t, err)
-	return dbi
+	return dbtest.OpenAppDB(t, dsn)
 }
 
 func TestProductAccessGrants_RealMigration_RLS(t *testing.T) {

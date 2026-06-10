@@ -21,7 +21,6 @@ package budgets
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"math"
@@ -29,14 +28,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
-	"github.com/uptrace/bun"
 )
 
 // ErrTenantSubjectRequired is returned when a budget operation is given a zero tenant subject
@@ -126,7 +126,7 @@ func (s *Service) Check(ctx context.Context, payer identity.TenantSubjectID, act
 	var allowed bool
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
-		statuses, allowed, e = s.computeWindows(ctx, s.db.Q(ctx), payer, actor, windows, requestedMillicents)
+		statuses, allowed, e = s.computeWindows(ctx, s.db.Qx(ctx), payer, actor, windows, requestedMillicents)
 		return e
 	})
 	if err != nil {
@@ -167,84 +167,92 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	payerID := payer.UUID()
 
-	tx, err := s.db.BeginTenantTx(ctx)
+	var (
+		reservationID uuid.UUID
+		statuses      []WindowStatus
+		allowed       bool
+	)
+	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+
+		// Materialize the payable tenant_subjects row so the budget_reservations FK
+		// (migration 076) is satisfied on a subject's first reservation (#317).
+		if _, err := repo.EnsureTenantSubjectID(ctx, tx, tenantID, payerID.String()); err != nil {
+			return err
+		}
+
+		// Idempotency: a replayed Reserve returns the existing row verbatim.
+		existing, gerr := q.GetBudgetReservationByCoords(ctx, gen.GetBudgetReservationByCoordsParams{
+			TenantID: tenantID, TenantSubjectID: payerID,
+			Actor: actor, Source: source, SourceID: sourceID,
+		})
+		if gerr == nil {
+			// Report the current window state alongside the existing reservation; the
+			// reservation already exists, so the decision is allowed.
+			sts, _, cerr := s.computeWindows(ctx, tx, payer, actor, windows, amountMillicents)
+			if cerr != nil {
+				return cerr
+			}
+			reservationID, statuses, allowed = existing.ID, sts, true
+			return nil
+		}
+		if !errors.Is(gerr, pgx.ErrNoRows) {
+			return gerr
+		}
+
+		sts, ok, err := s.computeWindows(ctx, tx, payer, actor, windows, amountMillicents)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			// No insert when denied; the (read-only) tx commits cleanly.
+			statuses, allowed = sts, false
+			return nil
+		}
+
+		now := s.now()
+		res := &models.BudgetReservation{
+			ID:               uuidutil.NewV7(),
+			TenantID:         tenantID,
+			TenantSubjectID:  payerID,
+			Actor:            actor,
+			AmountMillicents: amountMillicents,
+			Status:           "active",
+			Source:           source,
+			SourceID:         sourceID,
+			CreatedAt:        now,
+		}
+		if ttl > 0 {
+			exp := now.Add(ttl)
+			res.ExpiresAt = &exp
+		}
+		if err := q.InsertBudgetReservation(ctx, gen.InsertBudgetReservationParams{
+			ID:               res.ID,
+			TenantID:         res.TenantID,
+			TenantSubjectID:  res.TenantSubjectID,
+			Actor:            res.Actor,
+			AmountMillicents: res.AmountMillicents,
+			Status:           res.Status,
+			Source:           res.Source,
+			SourceID:         res.SourceID,
+			ExpiresAt:        res.ExpiresAt,
+			CreatedAt:        res.CreatedAt,
+		}); err != nil {
+			return err
+		}
+		// Recompute so the returned statuses reflect the just-inserted reservation
+		// (the caller sees this reservation already counted against `reserved`).
+		sts, _, err = s.computeWindows(ctx, tx, payer, actor, windows, amountMillicents)
+		if err != nil {
+			return err
+		}
+		reservationID, statuses, allowed = res.ID, sts, true
+		return nil
+	})
 	if err != nil {
 		return uuid.Nil, nil, false, err
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	// Materialize the payable tenant_subjects row so the budget_reservations FK
-	// (migration 076) is satisfied on a subject's first reservation (#317).
-	if _, err := repo.EnsureTenantSubjectIDBun(ctx, tx, tenantID, payerID.String()); err != nil {
-		return uuid.Nil, nil, false, err
-	}
-
-	// Idempotency: a replayed Reserve returns the existing row verbatim.
-	existing := new(models.BudgetReservation)
-	err = tx.NewSelect().
-		Model(existing).
-		Where("tenant_id = ? AND tenant_subject_id = ?", tenantID, payerID).
-		Where("actor = ?", actor).
-		Where("source = ? AND source_id = ?", source, sourceID).
-		Limit(1).
-		Scan(ctx)
-	if err == nil {
-		// Report the current window state alongside the existing reservation; the
-		// reservation already exists, so the decision is allowed.
-		statuses, _, cerr := s.computeWindows(ctx, tx, payer, actor, windows, amountMillicents)
-		if cerr != nil {
-			return uuid.Nil, nil, false, cerr
-		}
-		if cerr := tx.Commit(); cerr != nil {
-			return uuid.Nil, nil, false, cerr
-		}
-		return existing.ID, statuses, true, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return uuid.Nil, nil, false, err
-	}
-
-	statuses, allowed, err := s.computeWindows(ctx, tx, payer, actor, windows, amountMillicents)
-	if err != nil {
-		return uuid.Nil, nil, false, err
-	}
-	if !allowed {
-		// No insert when denied; commit (nothing written) so the tx releases cleanly.
-		if cerr := tx.Commit(); cerr != nil {
-			return uuid.Nil, nil, false, cerr
-		}
-		return uuid.Nil, statuses, false, nil
-	}
-
-	now := s.now()
-	res := &models.BudgetReservation{
-		ID:               uuidutil.NewV7(),
-		TenantID:         tenantID,
-		TenantSubjectID:  payerID,
-		Actor:            actor,
-		AmountMillicents: amountMillicents,
-		Status:           "active",
-		Source:           source,
-		SourceID:         sourceID,
-		CreatedAt:        now,
-	}
-	if ttl > 0 {
-		exp := now.Add(ttl)
-		res.ExpiresAt = &exp
-	}
-	if _, err := tx.NewInsert().Model(res).Exec(ctx); err != nil {
-		return uuid.Nil, nil, false, err
-	}
-	// Recompute so the returned statuses reflect the just-inserted reservation
-	// (the caller sees this reservation already counted against `reserved`).
-	statuses, _, err = s.computeWindows(ctx, tx, payer, actor, windows, amountMillicents)
-	if err != nil {
-		return uuid.Nil, nil, false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return uuid.Nil, nil, false, err
-	}
-	return res.ID, statuses, true, nil
+	return reservationID, statuses, allowed, nil
 }
 
 // Capture settles an active reservation: status -> "captured", captured_millicents
@@ -258,17 +266,12 @@ func (s *Service) Capture(ctx context.Context, reservationID uuid.UUID, actualMi
 		return fmt.Errorf("captured amount must be non-negative")
 	}
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		r, err := s.db.Q(ctx).NewUpdate().
-			Model((*models.BudgetReservation)(nil)).
-			Set("status = ?", "captured").
-			Set("captured_millicents = ?", actualMillicents).
-			Where("id = ?", reservationID).
-			Where("status = ?", "active").
-			Exec(ctx)
+		n, err := s.db.Gen(ctx).CaptureBudgetReservation(ctx, gen.CaptureBudgetReservationParams{
+			ID: reservationID, CapturedMillicents: actualMillicents,
+		})
 		if err != nil {
 			return err
 		}
-		n, _ := r.RowsAffected()
 		if n == 0 {
 			return ErrReservationNotFound
 		}
@@ -283,16 +286,10 @@ func (s *Service) Release(ctx context.Context, reservationID uuid.UUID) error {
 		return fmt.Errorf("budgets service not initialized")
 	}
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
-		r, err := s.db.Q(ctx).NewUpdate().
-			Model((*models.BudgetReservation)(nil)).
-			Set("status = ?", "released").
-			Where("id = ?", reservationID).
-			Where("status = ?", "active").
-			Exec(ctx)
+		n, err := s.db.Gen(ctx).ReleaseBudgetReservation(ctx, reservationID)
 		if err != nil {
 			return err
 		}
-		n, _ := r.RowsAffected()
 		if n == 0 {
 			return ErrReservationNotFound
 		}
@@ -301,9 +298,9 @@ func (s *Service) Release(ctx context.Context, reservationID uuid.UUID) error {
 }
 
 // computeWindows runs the per-window aggregation on the supplied queryable handle
-// (a tx during Reserve, the pinned conn during Check). q must already be
-// tenant-scoped (BeginTenantTx / RunInTenantConn) so RLS constrains the rows.
-func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, requestedMillicents int64) ([]WindowStatus, bool, error) {
+// (a tx during Reserve, the pinned conn during Check). qx must already be
+// tenant-scoped (TenantTx / RunInTenantConn) so RLS constrains the rows.
+func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, requestedMillicents int64) ([]WindowStatus, bool, error) {
 	now := s.now()
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
 	payerID := payer.UUID()
@@ -317,22 +314,11 @@ func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.
 		// used = SUM(captured_millicents) of captured reservations in-window.
 		// reserved = SUM(amount_millicents) of active reservations in-window.
 		// oldest = MIN(created_at) of any active|captured reservation in-window,
-		// for the rolling ResetAt.
-		var agg struct {
-			Used     int64        `bun:"used"`
-			Reserved int64        `bun:"reserved"`
-			Oldest   sql.NullTime `bun:"oldest"`
-		}
-		err := q.NewSelect().
-			Model((*models.BudgetReservation)(nil)).
-			ColumnExpr("COALESCE(SUM(captured_millicents) FILTER (WHERE status = 'captured'), 0) AS used").
-			ColumnExpr("COALESCE(SUM(amount_millicents) FILTER (WHERE status = 'active'), 0) AS reserved").
-			ColumnExpr("MIN(created_at) FILTER (WHERE status IN ('active','captured')) AS oldest").
-			Where("tenant_id = ?", tenantID).
-			Where("tenant_subject_id = ? AND actor = ?", payerID, actor).
-			Where("created_at >= ?", windowStart).
-			Where("status IN ('active','captured')").
-			Scan(ctx, &agg)
+		// for the rolling ResetAt (zero-time sentinel = none).
+		agg, err := gen.New(qx).AggregateBudgetWindow(ctx, gen.AggregateBudgetWindowParams{
+			TenantID: tenantID, TenantSubjectID: payerID, Actor: actor,
+			WindowStart: windowStart,
+		})
 		if err != nil {
 			return nil, false, err
 		}
@@ -344,8 +330,8 @@ func (s *Service) computeWindows(ctx context.Context, q bun.IDB, payer identity.
 		// oldest one ages out (its created_at + window). With none, the window is
 		// empty now, so the soonest meaningful boundary is now + window.
 		var resetAt time.Time
-		if agg.Oldest.Valid {
-			resetAt = agg.Oldest.Time.UTC().Add(time.Duration(w.WindowSeconds) * time.Second)
+		if !agg.Oldest.IsZero() {
+			resetAt = agg.Oldest.UTC().Add(time.Duration(w.WindowSeconds) * time.Second)
 		} else {
 			resetAt = now.Add(time.Duration(w.WindowSeconds) * time.Second)
 		}

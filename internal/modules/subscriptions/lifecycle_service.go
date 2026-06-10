@@ -23,7 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
-	"github.com/uptrace/bun"
+	"github.com/jackc/pgx/v5"
 )
 
 // SubscriptionLifecycleService handles the complete lifecycle of subscriptions
@@ -138,8 +138,8 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 		"currency":                  params.Currency,
 	}).Info("Starting membership creation flow")
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		dbb := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		dbb := db.NewWithPgxTx(tx)
 		var err error
 		subscription, notifications, err = s.createMembershipCore(ctx, dbb, params)
 		return err
@@ -524,8 +524,8 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		"allow_terminal_reactivate": params.AllowTerminalReactivation,
 	}).Info("Starting membership renewal flow")
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		db := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
@@ -884,8 +884,8 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 
 	var reactivated *models.Subscription
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		txdb := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
 		subService := NewSubscriptionService(txdb, priceService, productService, nil, nil, nil, s.Clock())
@@ -1021,8 +1021,8 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		"cancel_feedback_provided":  cancelFeedback != "",
 	}).Info("Starting membership cancellation flow")
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		db := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
@@ -1209,8 +1209,8 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 
 	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Starting membership expiration flow")
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		db := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
@@ -1348,8 +1348,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		"dunning_mode":              dunningMode,
 	}).Warn("Starting membership failure flow")
 
-	err := s.DB.RunInTenantTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		db := db.NewWithTx(tx)
+	err := s.DB.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := repo.NewNotificationQueueRepo(db)
