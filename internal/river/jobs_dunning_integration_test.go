@@ -208,7 +208,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
 	creditsSvc := credits.NewCreditsService(dbi, nil)
 
-	require.True(t, worker.processSubscription(ctx, sub, lifecycle, priceSvc, creditsSvc))
+	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(ctx, sub, lifecycle, priceSvc, creditsSvc))
 
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,

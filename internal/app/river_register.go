@@ -10,6 +10,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 
+	"github.com/open-rails/openrails/internal/intents"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -84,13 +85,27 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add resume subscription worker: %w", err)
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.NMIDeleteSubscriptionWorker{
-		DB:                  r.DB,
-		Config:              r.Config,
-		SubscriptionService: r.SubscriptionService,
-		NMIClients:          r.NMIClients,
+	// Provider intent ledger (#358 phase A): the executor drains due outbound
+	// provider mutations (deferred NMI deletes today; refunds/Stripe ops/
+	// manual rebills in phases B-C), the verifier resolves ambiguous outcomes
+	// via provider reads. These replaced the NMIDeleteSubscription worker +
+	// boot rescan.
+	intentRegistry := r.buildIntentRegistry(clock)
+	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentExecuteWorker{
+		DB:       r.DB,
+		Config:   r.Config,
+		Clock:    clock,
+		Registry: intentRegistry,
 	}); err != nil {
-		return fmt.Errorf("add nmi delete subscription worker: %w", err)
+		return fmt.Errorf("add provider intent execute worker: %w", err)
+	}
+	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentVerifyWorker{
+		DB:       r.DB,
+		Config:   r.Config,
+		Clock:    clock,
+		Registry: intentRegistry,
+	}); err != nil {
+		return fmt.Errorf("add provider intent verify worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.WebhookProcessWorker{
 		Dispatcher: r.WebhookDispatcher,
@@ -171,6 +186,16 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add solana reconcile worker: %w", err)
 	}
 	return nil
+}
+
+// buildIntentRegistry assembles the per-type intent semantics for the
+// provider intent executor/verifier (#358). Phase A registers
+// nmi_delete_subscription; phases B-D add refunds, Stripe ops, manual rebills
+// and catalog archive ops.
+func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
+	return intents.NewRegistry(
+		intents.NewNMIDeleteHandler(r.DB, r.Config, r.NMIClients, clock),
+	)
 }
 
 // catalogReconciliationInterval returns the schedule for the alert-only Stripe
@@ -264,6 +289,35 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 
 	// Webhook retry job removed - webhooks are now processed synchronously only.
 	// Payment processors (CCBill, NMI) will retry failed webhooks from their end.
+
+	// Every minute: drain due provider intents (#358 — the ACTION pipeline;
+	// deliberately scheduled, unlike reconcile runs which stay manual).
+	// RunOnStart drains parked/overdue intents right after boot — when a mode
+	// change, kill-switch flip or restart is exactly what unblocked them —
+	// replacing the retired #344 boot rescan.
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(time.Minute),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.ProviderIntentExecuteArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: true},
+	))
+
+	// Every 5 minutes: resolve unknown_needs_verify intents via provider
+	// reads (#358 verifier) before any retry.
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(5*time.Minute),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.ProviderIntentVerifyArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
 
 	// Every hour: cleanup expired data (wallet challenges, payment intents, etc.)
 	jobs = append(jobs, river.NewPeriodicJob(

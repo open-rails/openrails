@@ -508,7 +508,8 @@ FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true
 (or `MODE=readonly` for a strictly-observing boot where even user checkouts must fail.)
 
 Exit path, in order: (1) unset `DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS` and restart —
-the boot rescan replays every delete skipped while the switch was on; (2) once converged,
+deletes skipped while the switch was on parked as pending intents on the provider intent
+ledger (#358) and the scheduled intent executor drains them; (2) once converged,
 set `MODE=full` — dunning resumes, and the derived staleness window guarantees the stale
 backlog is cancelled + downgraded rather than charged.
 

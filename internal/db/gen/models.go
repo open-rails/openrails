@@ -642,6 +642,40 @@ type BillingProductEntitlementFeature struct {
 	UpdatedAt            time.Time
 }
 
+// Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
+type BillingProviderIntent struct {
+	ID uuid.UUID
+	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
+	TenantID uuid.UUID
+	// Provider/processor key the mutation targets (e.g. 'mobius' for an NMI-backed processor, 'stripe').
+	Provider string
+	// Registry key selecting the per-type semantics (executor, verifier, relevance, backoff): nmi_delete_subscription, and in later phases manual_rebill, refund, plan_archive, ...
+	IntentType     string
+	SubscriptionID *uuid.UUID
+	PaymentID      *uuid.UUID
+	PriceID        *uuid.UUID
+	Payload        []byte
+	// Deterministic identity of the logical intent within the tenant. Re-enqueues conflict here: a pending intent is refreshed, a superseded/expired one revived (relevance returned), anything else untouched — effectively-once per logical intent.
+	IdempotencyKey string
+	Status         string
+	Attempts       int32
+	NextAttemptAt  time.Time
+	// Single-executor lease (SKIP LOCKED claim). An in_flight row whose lease elapsed was orphaned by a crashed executor and becomes claimable again; per-type execute semantics (verify-then-execute, verifier-before-retry) make the reclaim safe.
+	ClaimedUntil *time.Time
+	// Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.
+	Origin       string
+	OriginReason *string
+	// Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.
+	LastFailureReason *string
+	// End of the relevance window: past this instant the intent expires with a finding instead of firing stale (NULL = relevance governed solely by the type's relevance check).
+	ExpiresAt *time.Time
+	// How the terminal status was established (e.g. {"verified_absent": true} for a delete confirmed by a provider read).
+	ResultEvidence []byte
+	CreatedAt      time.Time
+	ExecutedAt     *time.Time
+	UpdatedAt      time.Time
+}
+
 // Durable local-vs-processor drift ledger (#107 PS-1..PS-9). Stable identity per (tenant, provider, finding_type, subject_key): re-runs update, disappearance auto-resolves as auto_vanished. requires_admin = true rows are the admin action queue.
 type BillingReconciliationFinding struct {
 	ID uuid.UUID
