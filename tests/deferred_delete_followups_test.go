@@ -13,40 +13,42 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/riverqueue/river"
-
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/riverqueue/river"
 )
 
-// queryNMIDeleteJobs returns (count, state, scheduledAt) for deferred NMI
-// delete jobs matching the subscription, across all job states.
-func queryNMIDeleteJobs(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) (count int, state string, scheduledAt time.Time) {
+// queryNMIDeleteIntents returns (count, status, nextAttemptAt) for
+// nmi_delete_subscription intents on the provider intent ledger (#358) for
+// the subscription, across all statuses.
+func queryNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) (count int, status string, nextAttemptAt time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	err := suite.Pool.QueryRow(ctx, `
 		SELECT COUNT(*),
-		       COALESCE(MAX(state::text), ''),
-		       COALESCE(MAX(scheduled_at), '0001-01-01'::timestamptz)
-		FROM billing.river_job
-		WHERE kind = $1 AND args->>'subscription_id' = $2`,
-		riverjobs.KindSubscriptionNMIDelete, subID.String()).Scan(&count, &state, &scheduledAt)
+		       COALESCE(MAX(status), ''),
+		       COALESCE(MAX(next_attempt_at), '0001-01-01'::timestamptz)
+		FROM billing.provider_intents
+		WHERE intent_type = $1 AND subscription_id = $2`,
+		intents.TypeNMIDeleteSubscription, subID).Scan(&count, &status, &nextAttemptAt)
 	require.NoError(t, err)
-	return count, state, scheduledAt
+	return count, status, nextAttemptAt
 }
 
-// countLiveNMIDeleteJobs counts not-yet-finalized deferred delete jobs for the
-// subscription (the states the scheduler's UniqueOpts deduplicate across).
-func countLiveNMIDeleteJobs(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) int {
+// countLiveNMIDeleteIntents counts not-yet-resolved delete intents for the
+// subscription (the statuses an idempotent re-enqueue deduplicates into one
+// row).
+func countLiveNMIDeleteIntents(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) int {
 	t.Helper()
 	ctx := context.Background()
 	var count int
 	err := suite.Pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM billing.river_job
-		WHERE kind = $1 AND args->>'subscription_id' = $2
-		  AND state IN ('available', 'pending', 'running', 'retryable', 'scheduled')`,
-		riverjobs.KindSubscriptionNMIDelete, subID.String()).Scan(&count)
+		SELECT COUNT(*) FROM billing.provider_intents
+		WHERE intent_type = $1 AND subscription_id = $2
+		  AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')`,
+		intents.TypeNMIDeleteSubscription, subID).Scan(&count)
 	require.NoError(t, err)
 	return count
 }
@@ -72,12 +74,13 @@ func (r *recordingDeferredDeleteScheduler) CancelNMIDelete(context.Context, stri
 	return nil
 }
 
-// TestBootRescanReenqueuesPendingDeferredDeletes verifies the #344 follow-up
-// boot rescan: cancelled subscriptions whose DeletionScheduledAt marker
-// survived (e.g. the deletion kill switch skipped the remote delete) get their
-// deferred NMI delete job re-enqueued on worker startup, at
-// max(now, deletion_scheduled_at).
-func TestBootRescanReenqueuesPendingDeferredDeletes(t *testing.T) {
+// TestMarkerConversionSweepEnqueuesIntents verifies the #358 startup sweep
+// that replaced the #344 boot rescan: cancelled subscriptions whose
+// DeletionScheduledAt marker survived (kill switch skipped the delete, or a
+// pre-ledger job was lost) get a durable nmi_delete_subscription intent
+// enqueued, due at max(now, deletion_scheduled_at). Idempotent via the intent
+// idempotency_key.
+func TestMarkerConversionSweepEnqueuesIntents(t *testing.T) {
 	suite := setupTestSuite(t)
 	ctx := context.Background()
 
@@ -88,7 +91,8 @@ func TestBootRescanReenqueuesPendingDeferredDeletes(t *testing.T) {
 	futureDelete := now.Add(2 * time.Hour)
 	pastDelete := now.Add(-48 * time.Hour)
 
-	// Marker with a still-open undo window: must be re-enqueued AT the marker time.
+	// Marker with a still-open undo window: the intent must be due AT the
+	// marker time (undo window honored).
 	futureSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:              uuid.New().String(),
 		PriceID:             priceID,
@@ -97,7 +101,7 @@ func TestBootRescanReenqueuesPendingDeferredDeletes(t *testing.T) {
 		DeletionScheduledAt: &futureDelete,
 	})
 
-	// Overdue marker (e.g. kill switch was on for two days): re-enqueued at ~now.
+	// Overdue marker (e.g. kill switch was on for two days): due at ~now.
 	pastSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:              uuid.New().String(),
 		PriceID:             priceID,
@@ -106,36 +110,37 @@ func TestBootRescanReenqueuesPendingDeferredDeletes(t *testing.T) {
 		DeletionScheduledAt: &pastDelete,
 	})
 
-	reenqueued, err := suite.App.Runtime.RescanPendingDeferredDeletes(ctx)
+	converted, err := suite.App.Runtime.ConvertDeferredDeleteMarkersToIntents(ctx)
 	require.NoError(t, err)
 	// Other tests in the shared suite may have left markers too.
-	assert.GreaterOrEqual(t, reenqueued, 2, "both seeded markers should be re-enqueued")
+	assert.GreaterOrEqual(t, converted, 2, "both seeded markers should be converted")
 
-	// Future marker: a scheduled job exists at the marker time (undo window honored).
-	count, state, scheduledAt := queryNMIDeleteJobs(t, suite, futureSub.ID)
-	require.Equal(t, 1, count, "exactly one delete job for the future-marker subscription")
-	assert.Equal(t, "scheduled", state)
-	assert.WithinDuration(t, futureDelete, scheduledAt, time.Minute)
+	// Future marker: one intent due at the marker time.
+	count, status, nextAt := queryNMIDeleteIntents(t, suite, futureSub.ID)
+	require.Equal(t, 1, count, "exactly one delete intent for the future-marker subscription")
+	assert.Equal(t, intents.StatusPending, status)
+	assert.WithinDuration(t, futureDelete, nextAt, time.Minute)
 
-	// Past marker: a job exists scheduled at ~now (clamped, never in the past).
-	count, _, scheduledAt = queryNMIDeleteJobs(t, suite, pastSub.ID)
-	require.GreaterOrEqual(t, count, 1, "a delete job exists for the overdue-marker subscription")
-	assert.True(t, scheduledAt.After(pastDelete), "overdue delete is clamped to now, not the stale marker time")
-	assert.WithinDuration(t, now, scheduledAt, time.Minute)
+	// Past marker: one intent due at ~now (clamped, never in the past).
+	count, _, nextAt = queryNMIDeleteIntents(t, suite, pastSub.ID)
+	require.GreaterOrEqual(t, count, 1, "a delete intent exists for the overdue-marker subscription")
+	assert.True(t, nextAt.After(pastDelete), "overdue delete is clamped to now, not the stale marker time")
+	assert.WithinDuration(t, now, nextAt, time.Minute)
 
-	// Idempotency: a second rescan must not stack a duplicate job for the
-	// still-scheduled future delete (river.UniqueOpts ByArgs).
-	_, err = suite.App.Runtime.RescanPendingDeferredDeletes(ctx)
+	// Idempotency: a second sweep must not stack a duplicate intent
+	// (idempotency_key conflict refreshes the pending row).
+	_, err = suite.App.Runtime.ConvertDeferredDeleteMarkersToIntents(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 1, countLiveNMIDeleteJobs(t, suite, futureSub.ID), "rescan is idempotent for pending jobs")
+	assert.Equal(t, 1, countLiveNMIDeleteIntents(t, suite, futureSub.ID), "sweep is idempotent for pending intents")
+	assert.Equal(t, 1, countLiveNMIDeleteIntents(t, suite, pastSub.ID))
 }
 
 // TestFailMembershipDunningExhaustionSchedulesNMIDelete verifies the #344
 // follow-up webhook-path fix end-to-end via the runtime's shared lifecycle
 // service (the instance the NMI webhook handlers use): a past_due NMI-backed
 // subscription within the dunning window whose 5th failure exhausts dunning is
-// cancelled AND a deferred remote-delete job is scheduled (so NMI stops
-// retrying the dead subscription).
+// cancelled AND a deferred remote-delete intent is enqueued on the ledger
+// (#358), so NMI stops retrying the dead subscription.
 func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 	suite := setupTestSuite(t)
 	ctx := context.Background()
@@ -147,7 +152,7 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 	pm := suite.CreateTestPaymentMethod(userID)
 
 	pastRetry := time.Now().Add(-1 * time.Hour)
-	recentPeriodEnd := time.Now().Add(-2 * 24 * time.Hour) // within the derived monthly dunning window (#359)
+	recentPeriodEnd := time.Now().Add(-2 * 24 * time.Hour)    // within the derived monthly dunning window (#359)
 	retryAttempts := subscriptions.DunningMaxFailures(30) - 1 // the next failure is the 5th = terminal
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
@@ -175,16 +180,23 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 	require.NotNil(t, updated.CancelType)
 	assert.Equal(t, models.CancelTypeExpired, *updated.CancelType)
 
-	// The deferred delete job was enqueued synchronously before FailMembership
-	// returned (scheduled at ~now).
-	count, state, _ := queryNMIDeleteJobs(t, suite, sub.ID)
-	require.GreaterOrEqual(t, count, 1, "a deferred NMI delete job must be scheduled on dunning exhaustion")
+	// The delete intent was enqueued synchronously before FailMembership
+	// returned, due ~now, system-origin (dunning exhaustion is proactive).
+	count, status, _ := queryNMIDeleteIntents(t, suite, sub.ID)
+	require.GreaterOrEqual(t, count, 1, "a deferred NMI delete intent must be enqueued on dunning exhaustion")
 
-	// The durable marker was persisted with the cancellation. The in-process
-	// delete worker may already have picked the job up (it runs at "now"); the
-	// marker is only legitimately cleared once the job finalized successfully.
+	var origin string
+	require.NoError(t, suite.Pool.QueryRow(ctx, `
+		SELECT origin FROM billing.provider_intents
+		WHERE intent_type = $1 AND subscription_id = $2`,
+		intents.TypeNMIDeleteSubscription, sub.ID).Scan(&origin))
+	assert.Equal(t, string(intents.OriginSystem), origin, "dunning-exhaustion deletes are system-origin")
+
+	// The durable marker was persisted with the cancellation. The scheduled
+	// intent executor may already have picked the intent up; the marker is
+	// only legitimately cleared once the intent succeeded.
 	if updated.DeletionScheduledAt == nil {
-		assert.Equal(t, "completed", state, "marker may only be cleared by a finalized delete job")
+		assert.Equal(t, intents.StatusSucceeded, status, "marker may only be cleared by a succeeded delete intent")
 	} else {
 		assert.WithinDuration(t, time.Now(), *updated.DeletionScheduledAt, time.Minute)
 	}
@@ -285,14 +297,14 @@ func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
 	assert.Nil(t, updated.DeletionScheduledAt, "limited mode must not stamp a proactive deletion marker")
 	assert.Empty(t, recorder.scheduled, "limited mode must not schedule a remote delete")
 
-	count, _, _ := queryNMIDeleteJobs(t, suite, sub.ID)
-	assert.Zero(t, count, "no delete job may exist for the limited-mode cancellation")
+	count, _, _ := queryNMIDeleteIntents(t, suite, sub.ID)
+	assert.Zero(t, count, "no delete intent may exist for the limited-mode cancellation")
 }
 
 // TestDunningWorkerWindowExpirySchedulesDeferredDelete closes the #344 tail:
-// the dunning worker's terminal cancellations now route the processor-side
+// the dunning worker's terminal cancellations route the processor-side
 // delete through the shared deferred scheduler (no inline delete), so window
-// expiry persists the durable marker and schedules exactly one delete job.
+// expiry persists the durable marker and schedules exactly one delete.
 func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 	suite := setupTestSuite(t)
 
@@ -335,4 +347,74 @@ func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
 
 	require.Len(t, recorder.scheduled, 1, "exactly one deferred delete scheduled (no inline delete)")
 	require.Equal(t, sub.ID, recorder.scheduled[0].SubscriptionID)
+}
+
+// TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes covers the
+// public-behavior contract end-to-end on the ledger: a user cancel with an
+// open undo window enqueues a USER-origin intent due at deleteAt (period end
+// minus the safety margin), and the resume worker supersedes it.
+func TestUserCancelEnqueuesUserOriginIntentAndResumeSupersedes(t *testing.T) {
+	suite := setupTestSuite(t)
+	ctx := context.Background()
+	rt := suite.App.Runtime
+
+	products := suite.SeedProducts()
+	priceID := products[0].Prices[0].ID
+
+	userID := uuid.New().String()
+	periodEnd := time.Now().Add(20 * 24 * time.Hour).UTC()
+
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              userID,
+		PriceID:             priceID,
+		Status:              models.StatusActive,
+		Processor:           models.ProcessorMobius,
+		CurrentPeriodEndsAt: &periodEnd,
+	})
+
+	require.NoError(t, rt.UserSubscriptionService.CancelUserSubscription(ctx, userID, "changed my mind"))
+
+	updated := suite.GetSubscription(sub.ID)
+	require.Equal(t, models.StatusCancelled, updated.Status)
+	require.NotNil(t, updated.DeletionScheduledAt, "undo-window cancel defers the delete")
+	deleteAt, deferred := subscriptions.NMIDeferredDeleteAt(updated, time.Now().UTC())
+	_ = deferred // marker already proves deferral; deleteAt pins the schedule
+
+	count, status, nextAt := queryNMIDeleteIntents(t, suite, sub.ID)
+	require.Equal(t, 1, count, "user cancel enqueues exactly one delete intent")
+	assert.Equal(t, intents.StatusPending, status)
+	assert.WithinDuration(t, *updated.DeletionScheduledAt, nextAt, time.Minute, "intent due at deleteAt (undo window honored)")
+	if deferred {
+		assert.WithinDuration(t, deleteAt, nextAt, time.Minute)
+	}
+
+	var origin string
+	require.NoError(t, suite.Pool.QueryRow(ctx, `
+		SELECT origin FROM billing.provider_intents
+		WHERE intent_type = $1 AND subscription_id = $2`,
+		intents.TypeNMIDeleteSubscription, sub.ID).Scan(&origin))
+	assert.Equal(t, string(intents.OriginUser), origin, "user cancels are user-origin (execute under limited)")
+
+	// Resume within the window: the worker supersedes the intent and
+	// reactivates the subscription.
+	resumeWorker := &riverjobs.ResumeSubscriptionWorker{
+		DB:                           rt.DB,
+		Config:                       rt.Config,
+		EntitlementService:           rt.EntitlementService,
+		SubscriptionService:          rt.SubscriptionService,
+		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
+		NMIClients:                   rt.NMIClients,
+	}
+	require.NoError(t, resumeWorker.Work(ctx, &river.Job[riverjobs.ResumeSubscriptionArgs]{
+		Args: riverjobs.ResumeSubscriptionArgs{UserID: userID, SubscriptionID: sub.ID},
+	}))
+
+	resumed := suite.GetSubscription(sub.ID)
+	assert.Equal(t, models.StatusActive, resumed.Status, "resume reactivates")
+	assert.Nil(t, resumed.DeletionScheduledAt, "resume clears the marker")
+
+	count, status, _ = queryNMIDeleteIntents(t, suite, sub.ID)
+	require.Equal(t, 1, count)
+	assert.Equal(t, intents.StatusSuperseded, status, "resume supersedes the pending delete intent")
+	assert.Zero(t, countLiveNMIDeleteIntents(t, suite, sub.ID))
 }

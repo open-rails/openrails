@@ -1122,7 +1122,7 @@ func TestIntentAnnotationForRecordedDelete(t *testing.T) {
 	assert.Equal(t, FindingStatusOpen, ps3[0].Status, "intent-annotated drift must not escalate to the admin queue")
 	assert.False(t, ps3[0].RequiresAdmin)
 	require.NotNil(t, ps3[0].IntentEvidence)
-	assert.Contains(t, ps3[0].IntentEvidence["explanation"], "boot rescan")
+	assert.Contains(t, ps3[0].IntentEvidence["explanation"], "intent executor")
 	assert.Equal(t, deletionIntentAction, ps3[0].RecommendedAction)
 	assert.Zero(t, writer.totalCalls(), "intent-annotated PS-3 is never auto-applied")
 }

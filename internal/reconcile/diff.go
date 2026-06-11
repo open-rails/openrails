@@ -360,11 +360,11 @@ func deletionIntent(s *LocalSubscription) map[string]any {
 	}
 	return map[string]any{
 		"deletion_scheduled_at": s.DeletionScheduledAt.Format(time.RFC3339),
-		"explanation":           "local cancellation recorded a deferred processor delete that has not executed yet; the boot rescan replays the recorded delete",
+		"explanation":           "local cancellation recorded a deferred processor delete that has not executed yet; the provider intent executor (#358) replays the recorded delete",
 	}
 }
 
-const deletionIntentAction = "no admin action needed: boot rescan replays the recorded delete (deletion_scheduled_at marker present)"
+const deletionIntentAction = "no admin action needed: the provider intent executor replays the recorded delete (deletion_scheduled_at marker present)"
 
 // diffOptions carries per-run diff behavior switches.
 type diffOptions struct {

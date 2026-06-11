@@ -494,6 +494,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	// has already opened (now >= period_end - margin, common near rebill) or the
 	// period end is unknown/past, we delete IMMEDIATELY exactly as before.
 	deleteAt, defer_ := NMIDeferredDeleteAt(subscription, now)
+	scheduleKillSwitchedDelete := false
 	if defer_ && s.deferDelete != nil {
 		if err := s.deferDelete.ScheduleNMIDelete(ctx, userID, subscription.ID, deleteAt); err != nil {
 			return fmt.Errorf("failed to schedule deferred subscription delete: %w", err)
@@ -514,6 +515,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 							"processor":       provider,
 						}).Warn("processor subscription deletes disabled; cancelling locally, remote subscription left for reconciliation")
 						subscription.DeletionScheduledAt = &now
+						scheduleKillSwitchedDelete = true
 					} else {
 						return fmt.Errorf("failed to cancel subscription with processor '%s': %w", provider, err)
 					}
@@ -534,6 +536,20 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 
 	if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
 		return fmt.Errorf("failed to update subscription status: %w", err)
+	}
+
+	// Kill-switched inline delete: enqueue it on the provider intent ledger
+	// (#358) so it replays as soon as the switch lifts — no reboot needed.
+	// AFTER the cancellation persisted, so the executor's relevance check
+	// (status==cancelled && marker set) cannot race a not-yet-committed
+	// cancel. Best-effort: on failure the marker keeps it discoverable
+	// (startup sweep / #107 reconciliation).
+	if scheduleKillSwitchedDelete && s.deferDelete != nil {
+		if err := s.deferDelete.ScheduleNMIDelete(ctx, userID, subscription.ID, now); err != nil {
+			log.WithError(err).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+			}).Error("failed to enqueue delete intent under kill switch; marker persisted for sweep/reconciliation")
+		}
 	}
 
 	// Add notification

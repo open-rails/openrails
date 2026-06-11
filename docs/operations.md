@@ -28,18 +28,32 @@ mechanism:
 ## Durability model
 
 **Outbound — durability is OUR job.** Every mutation OpenRails wants to make
-against a provider must survive failure of the attempt. Today this exists as
-specialized mechanisms (deferred NMI-delete markers + boot rescan, the
-`manual_rebill_attempts` claim table, catalog `pending_manual_link` states
-converged by re-apply-on-boot). The end state (#358, planned) is one
-generalized **provider intent ledger**: every outbound mutation is durably
-recorded with an idempotency key, origin (user/admin/system), and a relevance
-window; an executor worker drains whatever is currently executable. Failure
-reasons — provider down, `readonly`/`limited` mode, kill switch, bad
-credentials — are not errors, they are reasons an intent stays pending. When
-the blocker lifts, the queue drains. Intents that outlive their relevance
-window (a delete after the subscription resumed; a rebill past the dunning
-window) expire into reconcile findings instead of firing stale.
+against a provider must survive failure of the attempt. The mechanism is the
+**provider intent ledger** (`billing.provider_intents`, #358 phase A —
+shipped): every outbound mutation is durably recorded with an idempotency key
+(one row per logical intent; re-enqueues dedupe), origin (user/admin/system),
+and a relevance window. Two scheduled workers drain it: the **executor**
+(every minute, and on startup) claims due intents under a SKIP LOCKED lease,
+checks the type's relevance, gates on operating mode × origin (user/admin
+intents execute under `limited`; system intents need `full`; nothing writes
+under `readonly`), executes, and classifies the outcome; the **verifier**
+(every 5 minutes) resolves `unknown_needs_verify` intents via provider READS
+before any retry. Failure reasons — provider down, `readonly`/`limited` mode,
+kill switch, bad credentials — are not errors, they are reasons an intent
+stays *pending*, recorded on the row. When the blocker lifts, the queue
+drains. Intents that outlive their relevance window (a delete after the
+subscription resumed; a rebill past the dunning window) are superseded or
+expire instead of firing stale.
+
+Phase A migrated the deferred NMI `delete_subscription` onto the ledger
+(verify-then-execute: query the subscription first, absent = success) and
+retired the boot rescan + the dedicated delete River job — a startup sweep
+converts any surviving `DeletionScheduledAt` markers into ledger intents
+(idempotent), and `DeletionScheduledAt` remains as the read model, cleared by
+the intent's finalize. Still on their specialized mechanisms until phases
+B–D: refunds/Stripe ops (B), the `manual_rebill_attempts` claim table (C,
+folds in as `intent_type=manual_rebill`), and catalog archive ops (D);
+catalog `pending_manual_link` states remain converged by re-apply-on-boot.
 
 Execution is **effectively-once**, never assumed exactly-once (impossible over
 a network). Per class: money-movers (rebills, refunds) park ambiguous outcomes
@@ -169,13 +183,13 @@ dunning; this section governs NMI-backed manual dunning.)
   probing. Dev-only.
 - `feature_flags.disable_processor_subscription_deletions` — kill switch on
   NMI deletes, stricter than `limited` (blocks even user-asked deletes);
-  skipped deletes leave durable markers, replayed by the boot rescan (and,
-  later, the intent executor) once lifted.
+  blocked deletes PARK as pending intents on the ledger (reason recorded) and
+  the intent executor drains them once the switch lifts.
 
 **Cutover posture** (migration/reconciliation against production
 credentials): `MODE=limited` +
 `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true` (+ optionally
 `FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true`). Exit in order: lift the
-deletion switch and restart (rescan replays skipped deletes), then
-`MODE=full`. All paused work is delayed, not lost; missed billing periods are
-never back-billed.
+deletion switch (the intent executor drains the parked deletes within a
+minute — no restart needed), then `MODE=full`. All paused work is delayed,
+not lost; missed billing periods are never back-billed.

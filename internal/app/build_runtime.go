@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/pyth"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -342,25 +343,31 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	} else {
 		runtime.RiverProducer = producer
 		runtime.riverProducerPool = pool
-		// Wire the deferred NMI delete scheduler now that the producer exists
-		// (issue 216). Without it, NMI cancellations fall back to deleting inline.
-		deferredDeletes := newRiverDeferredDeleteScheduler(producer)
-		runtime.DeferredDeletes = deferredDeletes
-		if runtime.UserSubscriptionService != nil {
-			runtime.UserSubscriptionService.SetDeferredDeleteScheduler(deferredDeletes)
-		}
-		// #344 follow-up: the lifecycle service needs it too so webhook-driven
-		// dunning exhaustion (FailMembership -> cancelled) stops the remote NMI
-		// recurring subscription instead of stranding it. This is the shared
-		// instance used by the webhook handlers (and the Solana crank worker,
-		// where the NMI-backed gate makes it a no-op). The dunning worker's
-		// per-run lifecycle is wired with the SAME scheduler via
-		// Runtime.DeferredDeletes (river_register), and its window-expiry path
-		// no longer deletes inline — every terminal cancellation funnels through
-		// the one scheduled-delete mechanism, so no double-delete is possible.
-		if runtime.SubscriptionLifecycleService != nil {
-			runtime.SubscriptionLifecycleService.SetDeferredDeleteScheduler(deferredDeletes)
-		}
+	}
+
+	// Wire the deferred NMI delete schedulers (issue 216). Since #358 phase A
+	// scheduling enqueues a durable nmi_delete_subscription intent on the
+	// provider intent ledger (no River producer involved); the scheduled
+	// intent executor drains it. Two instances of the one mechanism,
+	// differing only in origin:
+	//   - user-origin for user-asked cancellations (UserSubscriptionService):
+	//     reactive completion, executes under mode=limited;
+	//   - system-origin for dunning exhaustion (the lifecycle service shared
+	//     by the webhook handlers, and Runtime.DeferredDeletes threaded into
+	//     the dunning worker's per-run lifecycle): proactive, requires
+	//     mode=full. The window-expiry path no longer deletes inline — every
+	//     terminal cancellation funnels through the one ledger, so no
+	//     double-delete is possible.
+	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, intents.OriginUser,
+		"user cancellation retained an undo window; processor delete deferred to its close")
+	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, intents.OriginSystem,
+		"terminal dunning failure; remote NMI subscription must stop rebilling")
+	runtime.DeferredDeletes = systemDeferredDeletes
+	if runtime.UserSubscriptionService != nil {
+		runtime.UserSubscriptionService.SetDeferredDeleteScheduler(userDeferredDeletes)
+	}
+	if runtime.SubscriptionLifecycleService != nil {
+		runtime.SubscriptionLifecycleService.SetDeferredDeleteScheduler(systemDeferredDeletes)
 	}
 
 	if cfg.ClickHouse != nil {

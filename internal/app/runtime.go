@@ -130,13 +130,15 @@ type Runtime struct {
 
 	riverStarted        bool
 	externalRiverClient bool // true if River client was provided externally
-	// DeferredDeletes is the shared deferred NMI-delete scheduler (issue 216 /
-	// #344). Set once the River producer exists (build_runtime); nil until then
-	// and in producer-less wirings. The dunning worker threads it into its
-	// per-run lifecycle so terminal cancellations schedule the processor-side
-	// delete through the ONE mechanism (no inline deletes).
+	// DeferredDeletes is the SYSTEM-origin deferred NMI-delete scheduler
+	// (issue 216 / #344). Since #358 phase A it enqueues durable
+	// nmi_delete_subscription intents on the provider intent ledger (no River
+	// producer involved); the scheduled intent executor drains them. The
+	// dunning worker threads it into its per-run lifecycle so terminal
+	// cancellations schedule the processor-side delete through the ONE
+	// mechanism (no inline deletes). User-asked cancellations use a separate
+	// user-origin instance wired into UserSubscriptionService.
 	DeferredDeletes subscriptions.DeferredDeleteScheduler
-
 }
 
 // Close gracefully shuts down runtime resources.
@@ -241,6 +243,18 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 		go r.SolanaPayPoller.Start(ctx)
 	}
 
+	// Startup sweep (#358, replacing the #344 boot rescan): convert any
+	// cancelled subscription still carrying a DeletionScheduledAt marker into
+	// a durable nmi_delete_subscription intent on the ledger (idempotent via
+	// the intent idempotency_key — markers already on the ledger are a no-op,
+	// pre-ledger in-flight deferred deletes are migrated losslessly). Pure DB
+	// work, so it runs in both the in-process and external River wirings.
+	// Best-effort: on failure the markers stay discoverable for #107
+	// reconciliation and the next boot retries.
+	if _, err := r.ConvertDeferredDeleteMarkersToIntents(ctx); err != nil {
+		log.WithError(err).Warn("Deferred-delete marker sweep failed; markers remain for reconciliation")
+	}
+
 	// If external client, don't start River workers - host is responsible
 	if r.externalRiverClient {
 		log.Info("External River client configured - skipping River worker startup")
@@ -269,13 +283,6 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 	if err := r.RiverClient.Start(ctx); err != nil {
 		r.riverStarted = false
 		return err
-	}
-
-	// Boot rescan (#344 follow-up): re-enqueue deferred NMI deletes whose
-	// markers survived a kill-switch skip or a lost job. Best-effort — the
-	// markers stay discoverable for #107 reconciliation on failure.
-	if _, err := r.RescanPendingDeferredDeletes(ctx); err != nil {
-		log.WithError(err).Warn("Boot rescan of pending deferred NMI deletes failed; markers remain for reconciliation")
 	}
 
 	<-ctx.Done()

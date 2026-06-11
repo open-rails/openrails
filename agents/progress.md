@@ -1222,8 +1222,8 @@ Hard cut, no aliases: ModeTest constant deleted, IsTestMode() renamed/reimplemen
 ---
 # #358: provider intent ledger: durable, effectively-once outbox for ALL outbound provider mutations
 
-**Completed:** no
-**Status:** open (designed with Paul 2026-06-11): "Every action we want to happen on an external payment provider is durably logged + execution attempted. If execution fails (remote down, readonly mode, limited mode, insufficient credentials) we queue and re-attempt for as long as it is still relevant. These intents are applied exactly once."
+**Completed:** no (phase A done 2026-06-11; phases B-D open)
+**Status:** PHASE A SHIPPED 2026-06-11. Migration 010 (billing.provider_intents: RLS/tenancy per 008 conventions; unique (tenant_id, idempotency_key); statuses pending|in_flight|succeeded|unknown_needs_verify|failed_retryable|failed_terminal|superseded|expired) + sqlc (internal/db/queries/provider_intents.sql: idempotent enqueue with revive-on-supersede/expire conflict semantics, SKIP LOCKED lease claims for executor+verifier, all transitions, supersede-by-subject, expire-overdue). Core: internal/intents (Handler registry with per-type CheckRelevance/Execute/Verify/Backoff; GateExecution origin×mode matrix — user/admin execute under limited, system needs full, readonly parks everything; parks recorded as last_failure_reason, never errors, and don't burn attempts). River: ProviderIntentExecuteWorker (every 1m + RunOnStart, expires overdue then claims/executes) + ProviderIntentVerifyWorker (every 5m, reads-only resolution) in river_register — the endorsed scheduled ACTION pipeline. NMI delete migrated: intent_type=nmi_delete_subscription, verify-then-execute (query recurring report; absent=success), kill switch parks pending at execution; producers (user_service cancel incl. its kill-switch inline path, lifecycle FailMembership, dunning worker via Runtime.DeferredDeletes) enqueue intents through the kept DeferredDeleteScheduler interface (user-origin for user cancels, system-origin for dunning exhaustion); DeletionScheduledAt kept as read model, cleared by the handler's finalize. RETIRED: NMIDeleteSubscriptionWorker + Runtime.RescanPendingDeferredDeletes — replaced by Runtime.ConvertDeferredDeleteMarkersToIntents startup sweep (idempotent marker→intent conversion, runs in both river wirings; converted markers user-origin to preserve execute-under-limited behavior). Resume supersedes via SupersedeBySubject (ResumeSubscriptionWorker + CancelNMIDelete); executor relevance re-check stays the authoritative resume guard. Verified: unit (gate matrix, backoff, registry, runner classification, NMI parse/kill-switch) + integration internal/intents (fake-NMI executor/verifier flows, ambiguous→verify→resolve, kill-switch park+drain, limited/readonly origin gating, supersede/revive, expiry, lease reclaim) + adapted #344 regression suite (tests/deferred_delete_followups_test.go: marker sweep, FailMembership system-origin intents, limited-mode, user-cancel→user-origin intent→resume supersede) + dunning integration regressions all green.
 
 ## The unifying insight
 
@@ -1265,7 +1265,7 @@ NON-GOAL — no inbound/webhook durable queue: we are one system; if the DB is d
 - D: catalog archive ops (#357 --exhaustive executes through the ledger).
 
 **Tasks:**
-- [ ] Phase A: schema + executor + verifier + NMI deletes migrated + rescan retired
+- [x] Phase A: schema + executor + verifier + NMI deletes migrated + rescan retired (2026-06-11; migration 010, internal/intents, #107 stuck-intent finding type deferred to the reconcile follow-up)
 - [ ] Phase B: refunds/Stripe ops + Idempotency-Key
 - [ ] Phase C: manual rebills folded in
 - [ ] Phase D: #357 archive ops through the ledger

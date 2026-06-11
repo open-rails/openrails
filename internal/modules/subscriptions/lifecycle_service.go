@@ -1646,9 +1646,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 	// Schedule the deferred NMI delete AFTER the cancellation committed. Runs
 	// at "now": the undo-window semantics of user cancellations do not apply to
-	// dunning exhaustion. Idempotent via river.UniqueOpts ByArgs. On failure the
-	// persisted DeletionScheduledAt marker keeps the pending delete discoverable
-	// (boot rescan / #107 reconciliation), so we log instead of failing the flow.
+	// dunning exhaustion. Idempotent via the intent ledger's idempotency_key
+	// (#358). On failure the persisted DeletionScheduledAt marker keeps the
+	// pending delete discoverable (startup marker sweep / #107
+	// reconciliation), so we log instead of failing the flow.
 	if scheduleDeferredDelete {
 		if err := s.deferDelete.ScheduleNMIDelete(ctx, userID, subscriptionID, s.now()); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
