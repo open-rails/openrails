@@ -40,45 +40,226 @@ As a result, self-hosted instances only need to meet PCI compliance requirements
 
 ## Two ways to run it
 
-### 1. Standalone service (self-hosted)
+| | **Standalone service** | **Embedded library** |
+|---|---|---|
+| Deployment | Separate HTTP service (own process, port `:2053`) | Compiled into your Go binary |
+| Your backend calls it via | HTTP (`/v1/service/*`, service token) | In-process function calls (`pkg/service`) or HTTP |
+| Your frontend calls it via | HTTP, browser-direct (`/v1/self/*`, delegated token) | HTTP routes mounted on **your** server, **your** credential |
+| Auth | OpenRails verifies tokens at its network edge | You hand OpenRails an identity; it never sees a credential |
+| Language requirement | None — any stack that speaks HTTP | Host must be Go |
+| Database | Owns its schema (can share your Postgres instance) | Shares your `pgx` pool (or connects itself) |
 
-Run OpenRails as its own HTTP service. Your frontend and backend call it over HTTP; it owns
-its database and workers.
+Pick **standalone** when OpenRails should be its own service, when non-Go services need it,
+or when one OpenRails instance serves multiple applications (multi-tenant). Pick **embedded**
+for one-binary deployments where your app is the only consumer. The two modes expose the
+same billing engine and the same route surface; the difference is **where the trust boundary
+sits**, which is also what decides how authentication works in each mode — read the next
+section first, it makes both guides below make sense.
+
+---
+
+## The auth model: one credential or two?
+
+The rule across both modes is: **one credential per trust domain.**
+
+- **Embedded:** your app and OpenRails are the same process — one trust domain. The frontend
+  uses its normal session credential for everything, including the mounted billing routes.
+  Your code verifies it and hands OpenRails the resulting identity through a Go interface.
+  **One token.** OpenRails never parses your credential at all.
+- **Standalone:** OpenRails is a separate system across a network boundary. Identity claims
+  that cross that boundary must be independently verifiable, so each caller class gets a
+  credential scoped to exactly what it may do:
+  - your **backend** uses a **service token** (`openrails_st_...`) or a first-party OIDC
+    service JWT — server-to-server, never sent to browsers;
+  - your **frontend** uses a short-lived **delegated access token** that *your own backend*
+    mints and signs — browser-direct, self-service-scoped.
+
+So in standalone mode the browser does hold two tokens: its normal session token for your
+API, and a delegated token for OpenRails. **This is deliberate, not incidental.** The
+alternative — OpenRails accepting your webserver's session JWTs directly — was considered
+and rejected for four reasons:
+
+1. **Your session tokens would leave your trust domain.** Every billing call would ship a
+   full-power webapp credential to another system. If that system (or its logs) is ever
+   compromised, the attacker holds tokens that unlock *your* API. A delegated token is
+   worthless anywhere except the OpenRails self-service surface — a fully compromised
+   OpenRails yields nothing replayable against you.
+2. **Every session leak would become a billing leak.** Session tokens pass through many
+   hands (browser extensions, analytics, your own microservices). Today none of those
+   exposures touch billing; with pass-through acceptance, all of them would.
+3. **Audience discipline.** A JWT recipient must reject tokens not addressed to it
+   (RFC 7519 `aud`). Accepting foreign-audience tokens is the classic confused-deputy
+   anti-pattern, and OpenRails fails closed on it: a token carrying a normal `sub` is
+   rejected on sight.
+4. **Least privilege.** Delegated tokens carry only `openrails:self:*` permissions and a
+   short TTL. Your session token can do everything your app allows; it should never be
+   spendable as a billing credential.
+
+The cost is small, because **your backend mints the delegated token itself** — with the
+same signing key it already uses for its own auth, if you like. "Getting a token for
+OpenRails" is one authenticated fetch to *your own* API, not a separate login or a
+round-trip to a foreign identity provider. Wrap it in a token-exchange endpoint plus a
+small frontend helper that fetches and auto-refreshes, and client code sees one system
+(this is the same shape as Stripe's ephemeral keys or Plaid's link tokens). The full flow
+is in the standalone guide below.
+
+The two modes have exact design parity here: both translate *your* credential into a billing
+principal at the trust boundary. Embedded does the translation through an in-process
+interface (`billingauth.Authenticator` / `DelegatedAuthenticator`); standalone does the same
+translation as a signed wire artifact (the delegated token, verified against your registered
+JWKS). Same seam, two serializations.
+
+| Surface | Standalone credential | Embedded credential |
+|---|---|---|
+| Backend / server-to-server | Service token (`/v1/service/*`) | In-process call — no credential |
+| Browser self-service | Delegated token, minted by your backend (`/v1/self/*`) | Your session credential, via `DelegatedAuthenticator` |
+| User billing routes | AuthKit user JWT (AuthKit-backed deployments) | Your session credential, via `Authenticator` |
+| Admin routes | Live `openrails:admin` permission, checked per request | Same (requires the control plane) |
+
+---
+
+## Integration guide: standalone service
+
+### 1. Run it
 
 ```bash
 task docker-up            # Postgres + Garnet(Redis) + ClickHouse + OpenRails, zero-config
 curl http://localhost:2053/health
 ```
 
-- **Public API** on `:2053` — user billing routes, admin routes, and webhooks.
-- **Server-to-server** calls hit `/v1/service/*` on the same port, authenticated with a
-  generated OpenRails **service token** (`openrails_st_...`) or a first-party OIDC
-  service JWT signed by a registered tenant issuer.
-- Your services authorize the user, then call OpenRails to hold/capture/release credits or
-  read entitlements.
+The public API listens on `:2053`: user routes, the self-service surface, admin routes,
+webhooks, and the server-to-server `/v1/service/*` routes all share the port. See
+[docs/api/endpoints.md](docs/api/endpoints.md) for the full HTTP reference and
+[docs/tenant-provisioning.md](docs/tenant-provisioning.md) for creating your tenant and
+its first service token.
 
-This is the right mode when OpenRails is a separate service, or when non-Go services
-need to call it. See [docs/api/endpoints.md](docs/api/endpoints.md) for the full HTTP API.
+### 2. Backend integration (service tokens)
 
-### 2. Embedded library (single binary)
+Your backend authorizes its user however it normally does, then calls OpenRails
+server-to-server with its service token. The high-traffic surface is credits/usage:
 
-Embed OpenRails inside your Go app for one-binary deployment, shared DB pools, and direct
-in-process calls. The embedded surface is **framework-neutral** (`net/http`) — mount it in
-`net/http`, gin, or chi — and makes **no assumption about your auth stack**.
+```bash
+# Pre-authorize + place a hold atomically before doing expensive work
+curl -X POST https://openrails.example/v1/service/credits/authorize \
+  -H "Authorization: Bearer openrails_st_..." \
+  -d '{"tenant_subject_id": "...", "actor": "user-123", "credit_type": "api_credits",
+       "estimate_micros": 50000, "request_id": "req-789"}'
 
-> **Note:** the embedded library is mid-refactor toward a fully `net/http`, AuthKit-optional
-> surface. The API below reflects the new shape (`NewHTTPHandler` + the `billingauth`
-> boundary); the older gin `RegisterUserRoutes(*gin.RouterGroup, …)` helpers still exist as
-> a transitional path. Admin authority is moving to an **OpenRails-defined capability the
-> host sets** (`CanAdministerBilling`) rather than OpenRails interpreting your role names —
-> shown below.
+# Settle the real cost (or POST .../holds/{id}/release on failure)
+curl -X POST https://openrails.example/v1/service/credits/holds/{id}/capture \
+  -H "Authorization: Bearer openrails_st_..." \
+  -d '{"amount": 43000, "event_type": "chat.completion"}'
+```
 
-**a. Bring your auth** by implementing one tiny interface — any token scheme works:
+Service tokens carry explicit permissions (`openrails:credits:write`,
+`openrails:credits:read`, `openrails:catalog:write`, …) and are bound to your tenant —
+a token can never act on another tenant's data. Other `/v1/service/*` groups cover
+admission/rate-limiting (`/admit`, `/budget`, `/tier-policies`), account settings, credit
+windows, usage rollups, and the issuer registry used in the next step.
+
+### 3. Frontend integration (delegated tokens)
+
+Your users are not OpenRails users — they are *subjects of your tenant*. The browser talks
+to OpenRails directly using a short-lived delegated token that **your backend signs**.
+
+**3a. Register your issuer (one-time setup).** Tell OpenRails which signing keys speak for
+your tenant. Publish a JWKS endpoint (you almost certainly already have one for your own
+auth) and register it:
+
+```bash
+curl -X POST https://openrails.example/v1/service/tenant/issuers \
+  -H "Authorization: Bearer openrails_st_..." \
+  -d '{"issuer": "https://api.yourapp.com",
+       "jwks_uri": "https://api.yourapp.com/.well-known/jwks.json",
+       "audiences": ["openrails"]}'
+```
+
+The tenant is bound from your service token, so you can only register issuers for your own
+tenant; issuer strings are globally unique, which is what makes cross-tenant token forgery
+impossible. `POST /v1/service/tenant/issuers/disable` is the per-issuer kill switch;
+key *rotation* is just re-`POST`ing with the new JWKS.
+
+**3b. Mint delegated tokens on your backend.** Add one endpoint to your API that exchanges
+a logged-in session for a delegated token. The claim contract:
+
+```jsonc
+{
+  "iss": "https://api.yourapp.com",          // your registered issuer
+  "aud": ["openrails"],                       // a registered audience
+  "delegated_sub": "user-123",                // YOUR user id — becomes the billing subject
+  "permissions": ["openrails:self:billing:read",
+                  "openrails:self:checkout:create"],
+  "iat": 1760000000,
+  "exp": 1760000300                           // keep it short; minutes, not hours
+}
+// No "sub" claim — a token with a normal `sub` is rejected as not-delegated.
+// Sign RS256 with a `kid` header that resolves in your registered JWKS.
+```
+
+Go backends can use the AuthKit helper instead of hand-rolling claims:
+
+```go
+import authhttp "github.com/open-rails/authkit/http"
+
+token, err := authhttp.MintDelegatedAccessToken(ctx, signer, authhttp.DelegatedAccessParams{
+    Issuer:           "https://api.yourapp.com",
+    Audiences:        []string{"openrails"},
+    DelegatedSubject: user.ID,
+    Permissions:      []string{"openrails:self:billing:read", "openrails:self:checkout:create"},
+    TTL:              5 * time.Minute,
+})
+```
+
+Grant only the permissions the page needs:
+
+| Permission | Allows |
+|---|---|
+| `openrails:self:billing:read` | Read own balance, credits, usage, invoices, subscriptions, payments |
+| `openrails:self:billing:write` | Configure own account settings (billing mode, caps, auto-top-up) |
+| `openrails:self:checkout:create` | Create own checkout sessions |
+| `openrails:self:subscriptions:cancel` | Cancel / resume / change-tier own subscriptions |
+| `openrails:self:payment-methods:manage` | Add / update / remove own payment methods |
+| `openrails:self:wallets:manage` | Manage own Solana wallet link |
+
+**3c. Call the self-service API from the browser.** Have your frontend fetch the delegated
+token from your exchange endpoint (cache it, re-fetch on expiry — a ~30-line helper makes
+this invisible to the rest of your client code), then hit `/v1/self/*` directly:
+
+```
+GET  /v1/self/status                      balance + account overview
+GET  /v1/self/credits[/:type]             credit balances and transactions
+GET  /v1/self/usage                       metered usage rolled up by event type
+GET  /v1/self/invoices[/:id]              monthly itemized statements
+GET  /v1/self/subscriptions               own subscriptions
+POST /v1/self/subscriptions/:id/cancel    …cancel/resume/change-tier
+GET|POST|PUT|DELETE /v1/self/payment-methods
+POST /v1/self/checkout                    hosted/tokenized checkout session
+```
+
+There is no `:user_id` anywhere on this surface — every route is scoped to the token's
+`delegated_sub`, so a browser token can only ever act on its own subject. CORS origins for
+browser-direct calls are configured per tenant. A parallel `/v1/tenant-admin/*` surface
+exists for your staff, using the same token mechanism with `openrails:tenant:*` permissions.
+
+### 4. Webhooks
+
+Point each payment processor's webhook at OpenRails directly (Stripe/NMI/CCBill →
+OpenRails, not through your app). OpenRails verifies processor signatures, updates
+subscriptions/entitlements, and your app just reads the results. See
+[docs/cloudflared-webhooks.md](docs/cloudflared-webhooks.md) for exposing webhooks in dev.
+
+---
+
+## Integration guide: embedded library
+
+### 1. Bring your auth
+
+Implement one interface — any credential scheme works (JWT, session cookie, API key,
+gateway header). OpenRails never inspects your tokens; it consumes the identity you return:
 
 ```go
 import "github.com/open-rails/openrails/pkg/billingauth"
 
-// Validate the request however you like, then hand OpenRails an identity.
 var myAuth billingauth.Authenticator = billingauth.AuthenticatorFunc(
     func(ctx context.Context, r *http.Request) (billingauth.UserContext, error) {
         claims, err := myIdP.Verify(r.Header.Get("Authorization"))
@@ -86,34 +267,30 @@ var myAuth billingauth.Authenticator = billingauth.AuthenticatorFunc(
             return billingauth.UserContext{}, billingauth.ErrUnauthenticated
         }
         return billingauth.UserContext{
-            UserID: claims.Subject, // required: the payer/principal
-            Email:  claims.Email,
-            Org:    claims.Org,     // optional: empty if you have no tenants
-
-            // YOU decide who may administer billing. OpenRails never inspects
-            // your role *names* — it only honors the capability you set here.
-            CanAdministerBilling: claims.HasRole("billing-admin"),
-
-            Entitlements: claims.Entitlements, // optional: drives feature gating
+            UserID:       claims.Subject,      // required: the payer/principal (opaque to OpenRails)
+            Email:        claims.Email,        // optional
+            Username:     claims.Username,     // optional
+            Tenant:       claims.Tenant,       // optional: empty if you have no tenant model
+            Roles:        claims.Roles,        // optional
+            Entitlements: claims.Entitlements, // optional
         }, nil
     })
 ```
 
-**b. Initialize, mount, and run workers:**
+### 2. Initialize, mount, and run workers
 
 ```go
 import (
     "github.com/open-rails/openrails/config"
-    "github.com/open-rails/openrails/pkg/authprovider"
     "github.com/open-rails/openrails/pkg/embedded"
 )
 
 cfg, _ := config.Load()
 openrails, err := embedded.New(embedded.Options{
-    Config:       cfg,
-    PGXPool:      myPool,   // share your pools, or omit to let OpenRails connect from cfg
-    Redis:        myRedis,
-    AuthProvider: authprovider.ProviderFromAuthenticator(myAuth),
+    Config:        cfg,
+    PGXPool:       myPool,  // share your pgx pool, or omit to let OpenRails connect from cfg
+    Redis:         myRedis,
+    Authenticator: myAuth,  // nil => default AuthKit-backed verifier built from cfg
 })
 if err != nil {
     log.Fatal(err)
@@ -123,9 +300,9 @@ defer openrails.Close(ctx)
 // Background workers: renewals, dunning, credit/hold expiry, reconciliation.
 go openrails.RunWorkers(ctx)
 
-// Mount the OpenRails surface anywhere.
+// Mount the billing surface. Routes live under /billing/v1/*.
 //   user routes  → products, prices, checkout, subscriptions, payments, credits
-//   admin routes → subscription/payment/user management, metrics  (admin-gated)
+//   admin routes → subscription/payment/user management, metrics (see §5)
 //   webhooks     → processor callbacks
 handler := openrails.NewHTTPHandler(embedded.HTTPHandlerOptions{
     IncludeUser:     true,
@@ -133,17 +310,26 @@ handler := openrails.NewHTTPHandler(embedded.HTTPHandlerOptions{
     IncludeWebhooks: true,
 })
 mux := http.NewServeMux()
-mux.Handle("/openrails/v1/", handler) // plain net/http; or gin.WrapH(handler) / chi r.Mount
+mux.Handle("/billing/v1/", handler) // plain net/http; or gin.WrapH(handler) / chi Mount
 ```
 
-**c. Call OpenRails in-process** (no HTTP) for your hot paths — e.g. metered usage:
+The handler is framework-neutral `net/http` with zero gin on the request path. Hosts on gin
+can instead use `pkg/embedded/gin` (`embgin.RegisterUserRoutes(e, group, …)` /
+`embgin.Handler(e)` for the full standalone surface).
+
+Your frontend now calls these routes with its **normal session credential** — your
+`Authenticator` is the only gate. One system, one token.
+
+### 3. Call OpenRails in-process
+
+Skip HTTP entirely on hot paths — e.g. metered usage:
 
 ```go
 svc, _ := openrails.Service()
 
 // Pre-authorize before doing expensive work…
 hold, _ := svc.HoldCredits(ctx, service.HoldCreditsRequest{
-    UserID: userID, CreditType: "api_credits", Amount: 100,
+    Actor: userID, CreditType: "api_credits", Amount: 100,
     Source: "api_call", SourceID: requestID,          // idempotent on (type, source, id)
     ExpiresAt: time.Now().Add(5 * time.Minute),
 })
@@ -156,19 +342,59 @@ svc.CaptureHold(ctx, service.CaptureHoldRequest{HoldID: hold.ID, Amount: actualC
 ents, _ := svc.ListActiveEntitlements(ctx, userID, time.Now())
 ```
 
+### 4. Browser self-service in embedded mode (one credential)
+
+The browser-direct self-service surface (`/v1/self/*`, `/v1/tenant-admin/*`) exists in
+embedded mode too — authenticated by **your** credential, not a delegated token. Implement
+`billingauth.DelegatedAuthenticator`: verify the request however you like, then return the
+explicitly mapped principal:
+
+```go
+opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
+    func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+        user, err := myIdP.Verify(r.Header.Get("Authorization")) // your own session check
+        if err != nil {
+            return nil, billingauth.ErrUnauthenticated
+        }
+        return &billingauth.DelegatedPrincipal{
+            // Single-tenant deployments use the well-known default tenant id.
+            TenantID:    "00000000-0000-0000-0000-000000000001",
+            SubjectID:   user.ID,                       // the billing subject (= delegated_sub)
+            Actor:       "https://auth.yourapp.com",    // audit: who vouched
+            Permissions: []string{"openrails:self:billing:read",
+                                  "openrails:self:checkout:create"},
+        }, nil
+    })
+```
+
+The mapping is **explicit and fail-closed**: an empty tenant or subject is rejected with
+401, and a principal carrying any non-`self`/`tenant` permission is refused — the same
+catalog gate real delegated tokens pass through. This interface is the in-process twin of
+the standalone delegated token: same translation, no wire credential, because there is no
+wire. The self surface is mounted by the gin/standalone handler (`embgin.Handler`); the
+plain `NewHTTPHandler` mux carries the user/admin/webhook groups.
+
+### 5. Admin routes
+
+Admin authority is the **live `openrails:admin` permission in the caller's own tenant**,
+checked per request against the control plane — OpenRails never interprets your role names,
+and there is no role-string fallback. The control plane is opt-in for embedded hosts
+(`pkg/embedded/controlplane.Attach`); if you don't attach one, mount with
+`IncludeAdmin: false` and run admin operations through the in-process `Service()` facade
+or your own tooling instead — admin routes without a permission checker fail closed.
+
 ---
 
 ## How it integrates with your app
 
 - **Premium access:** read `billing.entitlements` (current time ∈ `[start_at, end_at)` and
   `revoked_at IS NULL`). Don't infer premium status from subscription rows.
-- **User email/identity:** OpenRails treats `UserContext.UserID` as an opaque principal. In
-  AuthKit-backed deployments it can enrich from `profiles.users`; for any other host, identity
-  comes entirely from your `Authenticator`.
-- **Admin authority:** the host decides. Set `UserContext.CanAdministerBilling` (a capability
-  OpenRails defines; your `Authenticator` populates it from whatever roles/claims you use) and
-  OpenRails honors it -- it never interprets your role names or invents admin rights. Standalone
-  deployments derive the same signal from bootstrap-managed admin claims.
+- **User identity:** OpenRails treats the subject id (`UserContext.UserID` embedded,
+  `delegated_sub` standalone) as an opaque principal — it is your user id, and OpenRails
+  keys billing state to it verbatim. Identity attributes (email, username) are optional,
+  non-authoritative metadata for things like checkout prefill.
+- **Admin authority:** the live `openrails:admin` permission evaluated at request time in
+  the caller's own tenant (see embedded guide §5). Never derived from role names.
 - **Sandbox vs live:** `test_mode` (default `true`) routes every processor to its
   test/sandbox environment so you can't accidentally charge a real card.
 
@@ -215,6 +441,13 @@ Exit path, in order: (1) unset `DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS` and re
 the boot rescan replays every delete skipped while the switch was on; (2) once converged,
 unset `LIMITED_MODE` — dunning resumes, and the dunning window guarantees the stale
 backlog is cancelled + downgraded rather than charged.
+
+All paused work is **delayed, not lost** — the workers are state-scan loops, so the first
+enabled run processes whatever is still outstanding (low balances top up, owed arrears
+collect, due Solana subscriptions pull). Missed periods are never back-billed: a Solana
+subscription that skipped whole periods gets exactly ONE pull with the new period anchored
+at the pull moment (the on-chain program independently caps pulls at one plan-amount per
+period), and dunning past the window cancels instead of charging.
 
 ## Documentation
 

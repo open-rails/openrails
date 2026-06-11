@@ -76,6 +76,19 @@ type resolvedPlan struct {
 // plan amount on-chain, then RenewMembership (extends the paid period + records
 // the payment, idempotent on the tx signature) and advance next_pull_at. A failed
 // pull routes to FailMembership -> the existing dunning state machine.
+//
+// MISSED PERIODS ARE NEVER BACK-BILLED. If the cranker was down (outage,
+// limited_mode, #345) across one or more whole periods, resuming produces
+// exactly ONE pull per subscription, and the new period anchors at the pull
+// moment (RenewMembership gets CurrentPeriodStartsAt=now, not the lapsed
+// boundary): one due row -> one pull -> next_pull_at = now + period. There is
+// deliberately no catch-up loop charging elapsed periods. The on-chain program
+// independently enforces the same bound — the subscriber's delegate approval
+// authorizes ONE plan-amount per period (a second pull in the same period
+// fails Custom:400 "period already paid"), and missed periods do not bank up
+// into a withdrawable balance — so even a buggy cranker cannot collect more
+// than the current period. Access stays fair: the entitlement lapsed with the
+// unpaid period, so the subscriber pays one period and receives one period.
 type SolanaCrankWorker struct {
 	river.WorkerDefaults[SolanaCrankArgs]
 	DB        *db.DB
