@@ -3,8 +3,8 @@ package riverjobs
 import (
 	"context"
 	"fmt"
-	"math"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -69,8 +69,9 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 			q := gen.New(tx)
 
 			// Find expired active holds (stored as credit_transactions rows with transaction_type='hold')
+			batchSize32, _ := safecast.Convert[int32](batchSize)
 			holds, err := q.ListExpiredActiveHoldsForUpdate(ctx, gen.ListExpiredActiveHoldsForUpdateParams{
-				Now: now, BatchSize: int32(min(batchSize, math.MaxInt32)),
+				Now: now, BatchSize: batchSize32,
 			})
 			if err != nil {
 				return err

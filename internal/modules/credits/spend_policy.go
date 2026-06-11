@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
+
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"time"
 
 	"github.com/google/uuid"
@@ -274,9 +275,10 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 
 	var expiry *int32
 	if cur.DefaultCreditExpiryDays != nil {
-		v := int32(min(*cur.DefaultCreditExpiryDays, math.MaxInt32))
+		v, _ := safecast.Convert[int32](*cur.DefaultCreditExpiryDays)
 		expiry = &v
 	}
+	alertPct, _ := safecast.Convert[int32](cur.AlertThresholdPct)
 	if err := s.db.Gen(ctx).UpsertCreditAccountSettings(ctx, gen.UpsertCreditAccountSettingsParams{
 		ID:                        cur.ID,
 		TenantID:                  cur.TenantID,
@@ -292,7 +294,7 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 		AutoTopupPaymentMethodID:  cur.AutoTopupPaymentMethod,
 		DefaultCreditExpiryDays:   expiry,
 		HardStopOnBreach:          cur.HardStopOnBreach,
-		AlertThresholdPct:         int32(min(cur.AlertThresholdPct, math.MaxInt32)),
+		AlertThresholdPct:         alertPct,
 		CreatedAt:                 cur.CreatedAt,
 		UpdatedAt:                 cur.UpdatedAt,
 	}); err != nil {

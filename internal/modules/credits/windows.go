@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -563,8 +563,9 @@ func (s *CreditsService) ExpireWindows(ctx context.Context, batchSize int) (int,
 		// explicit tenant_id predicates, like the hold expiry worker.
 		err := s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			q := gen.New(tx)
+			batchSize32, _ := safecast.Convert[int32](batchSize)
 			windows, err := q.ListExpiredOpenCreditWindowsForUpdate(ctx, gen.ListExpiredOpenCreditWindowsForUpdateParams{
-				Now: now, BatchSize: int32(min(batchSize, math.MaxInt32)),
+				Now: now, BatchSize: batchSize32,
 			})
 			if err != nil {
 				return err

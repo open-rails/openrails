@@ -1,11 +1,11 @@
 package handlers
 
 import (
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -51,9 +51,11 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count repair alerts")
 		return
 	}
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListRepairAlerts(ctx, gen.ListRepairAlertsParams{
 		TenantSubjectID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
-		Column3: int32(min(limit, math.MaxInt32)), Column4: int32(min(offset, math.MaxInt32)),
+		Column3: limit32, Column4: offset32,
 	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve repair alerts")
@@ -103,9 +105,11 @@ func GetAdminManualRebillAttempts(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count manual rebill attempts")
 		return
 	}
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListManualRebillAttempts(ctx, gen.ListManualRebillAttemptsParams{
 		Status: statusFilter, Processor: processorFilter,
-		Column1: int32(min(limit, math.MaxInt32)), Column2: int32(min(offset, math.MaxInt32)),
+		Column1: limit32, Column2: offset32,
 	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve manual rebill attempts")

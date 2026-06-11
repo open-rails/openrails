@@ -2,8 +2,8 @@ package repo
 
 import (
 	"context"
-	"math"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -136,10 +136,12 @@ func (r *AdminGrantRepo) ListByUserID(ctx context.Context, userID string, limit,
 	if err != nil {
 		return nil, 0, err
 	}
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListAdminGrantsByTenantSubject(ctx, gen.ListAdminGrantsByTenantSubjectParams{
 		TenantSubjectID: tsid,
-		PageLimit:       int32(limit),
-		PageOffset:      int32(offset),
+		PageLimit:       limit32,
+		PageOffset:      offset32,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -154,10 +156,12 @@ func (r *AdminGrantRepo) ListByGrantedBy(ctx context.Context, grantedBy string, 
 	if err != nil {
 		return nil, 0, err
 	}
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListAdminGrantsByGrantedBy(ctx, gen.ListAdminGrantsByGrantedByParams{
 		GrantedBy:  grantedBy,
-		PageLimit:  int32(min(limit, math.MaxInt32)),
-		PageOffset: int32(min(offset, math.MaxInt32)),
+		PageLimit:  limit32,
+		PageOffset: offset32,
 	})
 	if err != nil {
 		return nil, 0, err

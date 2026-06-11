@@ -3,10 +3,10 @@ package repo
 import (
 	"context"
 	"errors"
-	"math"
 	"strings"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -434,10 +434,12 @@ func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Contex
 	if err != nil {
 		return nil, 0, err
 	}
+	pageSize32, _ := safecast.Convert[int32](pageSize)
+	pageOffset32, _ := safecast.Convert[int32]((page - 1) * pageSize)
 	rows, err := q.ListSubscriptionsByTenantSubjectPaged(ctx, gen.ListSubscriptionsByTenantSubjectPagedParams{
 		TenantSubjectID: tsid,
-		PageLimit:       int32(min(pageSize, math.MaxInt32)),
-		PageOffset:      int32(min((page-1)*pageSize, math.MaxInt32)),
+		PageLimit:       pageSize32,
+		PageOffset:      pageOffset32,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -493,6 +495,8 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 	default:
 		sortBy = "created_at"
 	}
+	paramsLimit32, _ := safecast.Convert[int32](params.Limit)
+	paramsOffset32, _ := safecast.Convert[int32](params.Offset)
 	rows, err := q.ListSubscriptionsFiltered(ctx, gen.ListSubscriptionsFilteredParams{
 		TenantSubjectID: tsid,
 		Status:          status,
@@ -505,8 +509,8 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 		ExpiresBefore:   f.ExpiresBefore,
 		SortBy:          sortBy,
 		SortDesc:        f.SortOrder != "asc",
-		PageLimit:       int32(min(params.Limit, math.MaxInt32)),
-		PageOffset:      int32(min(params.Offset, math.MaxInt32)),
+		PageLimit:       paramsLimit32,
+		PageOffset:      paramsOffset32,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -548,7 +552,7 @@ func intPtrTo32(v *int) *int32 {
 	if v == nil {
 		return nil
 	}
-	i := int32(min(*v, math.MaxInt32))
+	i, _ := safecast.Convert[int32](*v)
 	return &i
 }
 

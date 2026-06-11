@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
@@ -164,10 +164,12 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 	if err != nil {
 		return nil, 0, err
 	}
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListPaymentMethodsByTenantSubjectPaged(ctx, gen.ListPaymentMethodsByTenantSubjectPagedParams{
 		TenantSubjectID: tsid,
-		PageLimit:       int32(min(limit, math.MaxInt32)),
-		PageOffset:      int32(min(offset, math.MaxInt32)),
+		PageLimit:       limit32,
+		PageOffset:      offset32,
 	})
 	if err != nil {
 		return nil, 0, err

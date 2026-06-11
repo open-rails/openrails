@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
@@ -365,10 +365,12 @@ func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, p
 	if err != nil {
 		return nil, 0, err
 	}
+	pageSize32, _ := safecast.Convert[int32](pageSize)
+	pageOffset32, _ := safecast.Convert[int32]((page - 1) * pageSize)
 	rows, err := q.ListPaymentsByTenantSubjectPaged(ctx, gen.ListPaymentsByTenantSubjectPagedParams{
 		TenantSubjectID: tsid,
-		PageLimit:       int32(min(pageSize, math.MaxInt32)),
-		PageOffset:      int32(min((page-1)*pageSize, math.MaxInt32)),
+		PageLimit:       pageSize32,
+		PageOffset:      pageOffset32,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -432,6 +434,8 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 	default:
 		sortBy = "created_at"
 	}
+	optsLimit32, _ := safecast.Convert[int32](opts.GetLimit())
+	optsOffset32, _ := safecast.Convert[int32](opts.GetOffset())
 	rows, err := q.ListPaymentsFiltered(ctx, gen.ListPaymentsFilteredParams{
 		TenantSubjectID: tsid,
 		PriceID:         priceID,
@@ -445,8 +449,8 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 		RefundsOnly:     f.RefundsOnly,
 		SortBy:          sortBy,
 		SortDesc:        f.SortOrder != "asc",
-		PageLimit:       int32(min(opts.GetLimit(), math.MaxInt32)),
-		PageOffset:      int32(min(opts.GetOffset(), math.MaxInt32)),
+		PageLimit:       optsLimit32,
+		PageOffset:      optsOffset32,
 	})
 	if err != nil {
 		return nil, 0, err

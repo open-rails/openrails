@@ -3,8 +3,8 @@ package repo
 import (
 	"context"
 	"errors"
-	"math"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -30,12 +30,13 @@ func creditTypeFromGen(ct gen.BillingCreditType) *models.CreditType {
 }
 
 func (r *CreditTypeRepo) Create(ctx context.Context, ct *models.CreditType) error {
+	decimalPlaces32, _ := safecast.Convert[int32](ct.DecimalPlaces)
 	rows, err := r.db.Gen(ctx).CreateCreditType(ctx, gen.CreateCreditTypeParams{
 		ID:            ct.ID,
 		Name:          ct.Name,
 		DisplayName:   ct.DisplayName,
 		Unit:          ct.Unit,
-		DecimalPlaces: int32(min(ct.DecimalPlaces, math.MaxInt32)),
+		DecimalPlaces: decimalPlaces32,
 		IsActive:      ct.IsActive,
 		CreatedAt:     ct.CreatedAt,
 	})
@@ -77,12 +78,13 @@ func (r *CreditTypeRepo) List(ctx context.Context, activeOnly bool) ([]*models.C
 }
 
 func (r *CreditTypeRepo) Update(ctx context.Context, ct *models.CreditType) error {
+	decimalPlaces32, _ := safecast.Convert[int32](ct.DecimalPlaces)
 	rows, err := r.db.Gen(ctx).UpdateCreditType(ctx, gen.UpdateCreditTypeParams{
 		ID:            ct.ID,
 		Name:          ct.Name,
 		DisplayName:   ct.DisplayName,
 		Unit:          ct.Unit,
-		DecimalPlaces: int32(min(ct.DecimalPlaces, math.MaxInt32)),
+		DecimalPlaces: decimalPlaces32,
 		IsActive:      ct.IsActive,
 	})
 	if err != nil {

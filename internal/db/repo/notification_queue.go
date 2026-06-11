@@ -3,9 +3,9 @@ package repo
 import (
 	"context"
 	"errors"
-	"math"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -141,11 +141,12 @@ func (r *NotificationQueueRepo) GetPendingDigestForUser(ctx context.Context, use
 	if err != nil {
 		return nil, err
 	}
+	limit32, _ := safecast.Convert[int32](limit)
 	rows, err := r.db.Gen(ctx).ListPendingDigestForTenantSubject(ctx, gen.ListPendingDigestForTenantSubjectParams{
 		TenantSubjectID: tsid,
 		EventType:       string(models.NotificationTranslationCompletedPendingDigest),
 		CreatedAt:       since,
-		PageLimit:       int32(min(limit, math.MaxInt32)),
+		PageLimit:       limit32,
 	})
 	if err != nil {
 		return nil, err
@@ -220,12 +221,14 @@ func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query
 	if err != nil {
 		return nil, 0, err
 	}
+	limit32, _ := safecast.Convert[int32](opts.GetLimit())
+	offset32, _ := safecast.Convert[int32](opts.GetOffset())
 	rows, err := q.ListNotificationsFiltered(ctx, gen.ListNotificationsFilteredParams{
 		TenantSubjectID: tsid,
 		EventType:       eventType,
 		Seen:            opts.Filters.Seen,
-		PageLimit:       int32(min(opts.GetLimit(), math.MaxInt32)),
-		PageOffset:      int32(min(opts.GetOffset(), math.MaxInt32)),
+		PageLimit:       limit32,
+		PageOffset:      offset32,
 	})
 	if err != nil {
 		return nil, 0, err
