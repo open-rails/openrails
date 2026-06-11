@@ -74,12 +74,10 @@ type runtimeOverrides struct {
 	Clock clockwork.Clock
 }
 
-func effectiveSolanaNetwork(cfg *config.Config, proc *config.ProcessorConfig) string {
-	if proc != nil {
-		if network := strings.ToLower(strings.TrimSpace(proc.Network)); network != "" {
-			return network
-		}
-	}
+// effectiveSolanaNetwork derives the Solana network purely from the operating
+// mode — devnet under test mode, mainnet otherwise. There is deliberately no
+// override knob (#349): the mode already answers the question.
+func effectiveSolanaNetwork(cfg *config.Config) string {
 	if cfg != nil && cfg.IsTestMode() {
 		return "devnet"
 	}
@@ -94,7 +92,7 @@ func configureSolanaProcessor(cfg *config.Config) error {
 	if proc == nil {
 		return nil
 	}
-	proc.Network = effectiveSolanaNetwork(cfg, proc)
+	proc.Network = effectiveSolanaNetwork(cfg)
 	if len(proc.Tokens) == 0 {
 		proc.Tokens = config.TokensForNetwork(proc.Network)
 	}
@@ -649,7 +647,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
 	var solanaRPC *solana.RPCClient
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
-		solanaNetwork := effectiveSolanaNetwork(cfg, solanaProc)
+		solanaNetwork := effectiveSolanaNetwork(cfg)
 		solanaRPC = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
 			Endpoint:     solanaProc.RPCEndpoint,
 			HeliusAPIKey: solanaProc.HeliusAPIKey,

@@ -461,9 +461,13 @@ type ProcessorConfig struct {
 	WebhookSecretThin string `koanf:"webhook_secret_thin"`
 
 	// --- Solana fields (type: solana) ---
-	RPCEndpoint     string                 `koanf:"rpc_endpoint"`
-	HeliusAPIKey    string                 `koanf:"helius_api_key"`
-	Network         string                 `koanf:"network"`
+	RPCEndpoint  string `koanf:"rpc_endpoint"`
+	HeliusAPIKey string `koanf:"helius_api_key"`
+	// Network is DERIVED from the operating mode at startup (devnet under test
+	// mode, mainnet otherwise) — it is deliberately NOT configurable (#349):
+	// the mode already answers the question, and a second selector could only
+	// contradict it.
+	Network         string                 `koanf:"-"`
 	RecipientWallet string                 `koanf:"recipient_wallet"`
 	Tokens          map[string]TokenConfig `koanf:"tokens"`
 	// SolanaPayRecurringSubscriptions advertises recurring Solana Pay v2
@@ -785,7 +789,7 @@ type SolanaConfig struct {
 	// If not set, falls back to Solana public endpoints.
 	HeliusAPIKey string `koanf:"helius_api_key"`
 
-	Network         string `koanf:"network"` // mainnet, devnet, testnet
+	Network         string `koanf:"-"` // derived from the operating mode: devnet (test) or mainnet
 	RecipientWallet string `koanf:"recipient_wallet"`
 
 	Tokens map[string]TokenConfig `koanf:"tokens,omitempty"`
@@ -1395,12 +1399,6 @@ func validateStripeProcessor(name string, proc *ProcessorConfig, isDev bool) err
 func validateSolanaProcessor(cfg *Config, name string, proc *ProcessorConfig, isDev bool) error {
 	if strings.TrimSpace(proc.RecipientWallet) == "" {
 		log.Warnf("processor '%s' (solana): recipient_wallet not configured; Solana payments disabled", name)
-	}
-	// #348 test-mode guarantee: the network normally derives from the mode
-	// (devnet under sandbox money), but an explicit override exists — refuse a
-	// mainnet override while the mode promises no real money can move.
-	if cfg != nil && cfg.IsTestMode() && strings.ToLower(strings.TrimSpace(proc.Network)) == "mainnet" {
-		return fmt.Errorf("processor '%s' (solana): network=mainnet is not allowed in test mode — real funds could move; remove the override or switch to a live mode", name)
 	}
 	if cfg == nil || cfg.Pyth == nil {
 		return fmt.Errorf("processor '%s' (solana): pyth configuration is required", name)
