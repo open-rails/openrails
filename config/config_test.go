@@ -707,3 +707,13 @@ func TestFeatureFlagsProcessorSubscriptionDeletionKillSwitch(t *testing.T) {
 	cfg := &Config{FeatureFlags: &FeatureFlags{DisableProcessorSubscriptionDeletions: true}}
 	require.True(t, cfg.IsProcessorSubscriptionDeletionDisabled())
 }
+
+func TestFeatureFlagsLimitedMode(t *testing.T) {
+	var nilFlags *FeatureFlags
+	require.False(t, nilFlags.IsLimitedMode())
+	require.False(t, (&FeatureFlags{}).IsLimitedMode())
+	require.True(t, (&FeatureFlags{LimitedMode: true}).IsLimitedMode())
+
+	require.False(t, (&Config{}).IsLimitedMode())
+	require.True(t, (&Config{FeatureFlags: &FeatureFlags{LimitedMode: true}}).IsLimitedMode())
+}

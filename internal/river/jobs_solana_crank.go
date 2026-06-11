@@ -101,6 +101,10 @@ func (w *SolanaCrankWorker) now() time.Time {
 }
 
 func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankArgs]) error {
+	if w.Config != nil && w.Config.IsLimitedMode() {
+		log.WithContext(ctx).Warn("limited mode: skipping Solana recurring pulls (#345)")
+		return nil
+	}
 	if w.Cranker == nil || w.Lifecycle == nil {
 		log.WithContext(ctx).Warn("Solana cranker not fully wired (no cranker/lifecycle); skipping run")
 		return nil

@@ -448,6 +448,7 @@ captcha:
 #   FEATURE_FLAGS_DUNNING_WINDOW_DAYS=15
 #   FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true|false
 #   FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true|false
+#   FEATURE_FLAGS_LIMITED_MODE=true|false
 
 feature_flags:
   # -------------------------------------------------------------------------
@@ -470,6 +471,25 @@ feature_flags:
   #   4. All accumulated past_due subscriptions will be retried
   #
   dunning_mode: "on"
+
+  # -------------------------------------------------------------------------
+  # Limited Mode - No proactive operations against payment providers
+  # -------------------------------------------------------------------------
+  # When true, OpenRails takes NO system-initiated action against any payment
+  # provider:
+  #   - Dunning attempts no charges and no window-expiry cancellations
+  #     (behaves as dunning_mode=dry_run_only; dunning_mode=off stays off)
+  #   - Auto-top-up and arrears-collection charges are skipped
+  #   - Solana recurring pulls (cranker) are skipped
+  #
+  # Everything user/admin-initiated still works: checkout charges, card/vault
+  # saves, tier changes, user/admin cancellations (INCLUDING their processor-
+  # side deletes), resumes, refunds, webhook processing, alerts.
+  #
+  # Note: disable_processor_subscription_deletions is STRICTER (blocks even
+  # user-asked deletes); set both for migration cutovers.
+  #
+  limited_mode: false
 
   # -------------------------------------------------------------------------
   # Dunning Window - How long past a missed rebill charges may be attempted

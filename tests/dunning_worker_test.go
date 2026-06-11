@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -441,4 +442,51 @@ func TestDunningWorkerWithinWindowIsNotExpired(t *testing.T) {
 	// NOT window-cancelled — it stays past_due awaiting a real rebill attempt.
 	updated := suite.GetSubscription(sub.ID)
 	assert.Equal(t, models.StatusPastDue, updated.Status)
+}
+
+// TestDunningWorkerLimitedModeTakesNoAction verifies limited mode (#345):
+// dunning is demoted to dry-run, so even a window-stale past_due subscription
+// is neither charged nor window-expiry cancelled — it is left untouched.
+func TestDunningWorkerLimitedModeTakesNoAction(t *testing.T) {
+	suite := setupTestSuite(t)
+
+	products := suite.SeedProducts()
+	priceID := products[0].Prices[0].ID
+
+	userID := uuid.New().String()
+	pm := suite.CreateTestPaymentMethod(userID)
+
+	pastRetry := time.Now().Add(-1 * time.Hour)
+	stalePeriodEnd := time.Now().Add(-60 * 24 * time.Hour)
+	retryAttempts := 1
+
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              userID,
+		PriceID:             priceID,
+		Status:              models.StatusPastDue,
+		Processor:           models.ProcessorMobius,
+		PaymentMethodID:     &pm.ID,
+		RetryAttempts:       &retryAttempts,
+		NextRetryAt:         &pastRetry,
+		PeriodStart:         stalePeriodEnd.Add(-30 * 24 * time.Hour),
+		CurrentPeriodEndsAt: &stalePeriodEnd,
+	})
+
+	limitedCfg := *suite.App.Runtime.Config
+	limitedCfg.FeatureFlags = &config.FeatureFlags{LimitedMode: true}
+
+	worker := &riverjobs.DunningWorker{
+		DB:         suite.App.Runtime.DB,
+		Config:     &limitedCfg,
+		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+	}
+
+	err := worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}})
+	require.NoError(t, err)
+
+	updated := suite.GetSubscription(sub.ID)
+	assert.Equal(t, models.StatusPastDue, updated.Status)
+	require.NotNil(t, updated.RetryAttempts)
+	assert.Equal(t, 1, *updated.RetryAttempts)
+	assert.Nil(t, updated.CancelledAt)
 }

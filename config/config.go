@@ -854,8 +854,22 @@ type FeatureFlags struct {
 	// while local cancellation and entitlement changes proceed normally. The
 	// remote subscription is left alive for later reconciliation. Safety switch
 	// for migration cutovers — prevents bulk remote deletions while local state
-	// is still being converged.
+	// is still being converged. STRICTER than LimitedMode: blocks even the
+	// deletes that finalize user-asked cancellations.
 	DisableProcessorSubscriptionDeletions bool `koanf:"disable_processor_subscription_deletions"`
+
+	// LimitedMode disables every PROACTIVE operation against the payment
+	// providers while leaving user/admin-initiated (reactive) operations fully
+	// functional. When true:
+	//   - Dunning attempts no charges and no window-expiry cancellations
+	//     (behaves as dunning_mode=dry_run_only; dunning_mode=off stays off)
+	//   - Auto-top-up and arrears-collection charges are skipped
+	//   - Solana recurring pulls (cranker) are skipped
+	// Reactive paths are unaffected: checkout charges, vault saves, user/admin
+	// cancellations (including their processor-side deletes), resumes, refunds,
+	// webhook processing, alerts and local bookkeeping. Boot posture for
+	// migration cutovers, reconciliation runs and incident response.
+	LimitedMode bool `koanf:"limited_mode"`
 
 	// DisableEntitlementExpiration stops all entitlement/credit expiration when true.
 	// Affects: CreditExpiryWorker, HoldExpiryWorker, entitlement revocation in FailMembership.
@@ -911,6 +925,13 @@ func (f *FeatureFlags) GetDunningWindow() time.Duration {
 // processor-side subscription deletions are blocked.
 func (f *FeatureFlags) IsProcessorSubscriptionDeletionDisabled() bool {
 	return f != nil && f.DisableProcessorSubscriptionDeletions
+}
+
+// IsLimitedMode returns true if proactive payment-provider operations
+// (dunning charges/cancellations, auto-top-ups, arrears collection, Solana
+// pulls) are disabled, leaving only reactive, user-initiated operations.
+func (f *FeatureFlags) IsLimitedMode() bool {
+	return f != nil && f.LimitedMode
 }
 
 // SendGridConfig holds SendGrid email configuration.
@@ -1503,6 +1524,12 @@ func (cfg *Config) GetDunningWindow() time.Duration {
 	return cfg.GetFeatureFlags().GetDunningWindow()
 }
 
+// IsLimitedMode returns true if proactive payment-provider operations are
+// disabled by feature flag.
+func (cfg *Config) IsLimitedMode() bool {
+	return cfg.GetFeatureFlags().IsLimitedMode()
+}
+
 // IsProcessorSubscriptionDeletionDisabled returns true if outbound
 // processor-side subscription deletions are blocked by feature flag.
 func (cfg *Config) IsProcessorSubscriptionDeletionDisabled() bool {
@@ -1967,6 +1994,14 @@ func logFeatureFlagsStatus(cfg *Config) {
 		log.Warn("⚠️  DUNNING DISABLED - Failed rebills will result in immediate cancellation")
 		log.Info("   No grace period, no retry attempts, no recovery workflow")
 		log.Info("   Set feature_flags.dunning_mode=on to enable normal dunning")
+	}
+
+	// Log limited mode if enabled
+	if flags.IsLimitedMode() {
+		log.Warn("⚠️  LIMITED MODE - No proactive payment-provider operations will be performed")
+		log.Info("   Dunning charges/cancellations, auto-top-ups, arrears collection and Solana pulls are paused")
+		log.Info("   Reactive operations (checkout, vault saves, user/admin cancels, webhooks) work normally")
+		log.Info("   Set feature_flags.limited_mode=false to resume proactive operations")
 	}
 
 	// Log processor subscription deletions if disabled

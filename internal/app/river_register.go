@@ -115,11 +115,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.AutoTopupWorker{
 		Credits: r.CreditsService,
+		Config:  r.Config,
 	}); err != nil {
 		return fmt.Errorf("add auto-topup worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.ArrearsChargeWorker{
 		Credits: r.CreditsService,
+		Config:  r.Config,
 	}); err != nil {
 		return fmt.Errorf("add arrears charge worker: %w", err)
 	}

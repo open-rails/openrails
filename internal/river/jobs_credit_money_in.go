@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -66,6 +67,7 @@ type AutoTopupWorker struct {
 	river.WorkerDefaults[AutoTopupArgs]
 	Credits  *credits.CreditsService
 	Charger  credits.Charger
+	Config   *config.Config
 	Cooldown time.Duration
 }
 
@@ -73,6 +75,10 @@ func (AutoTopupWorker) Kind() string { return KindAutoTopup }
 
 func (w AutoTopupWorker) Work(ctx context.Context, _ *river.Job[AutoTopupArgs]) error {
 	logger := log.WithContext(ctx).WithField("worker", KindAutoTopup)
+	if w.Config != nil && w.Config.IsLimitedMode() {
+		logger.Warn("limited mode: skipping auto-top-up charges (#345)")
+		return nil
+	}
 	if w.Credits == nil || w.Charger == nil {
 		logger.Debug("auto-top-up charger not configured; skipping")
 		return nil
@@ -119,12 +125,17 @@ type ArrearsChargeWorker struct {
 	river.WorkerDefaults[ArrearsChargeArgs]
 	Credits *credits.CreditsService
 	Charger credits.Charger
+	Config  *config.Config
 }
 
 func (ArrearsChargeWorker) Kind() string { return KindArrearsCharge }
 
 func (w ArrearsChargeWorker) Work(ctx context.Context, job *river.Job[ArrearsChargeArgs]) error {
 	logger := log.WithContext(ctx).WithField("worker", KindArrearsCharge)
+	if w.Config != nil && w.Config.IsLimitedMode() {
+		logger.Warn("limited mode: skipping arrears collection charges (#345)")
+		return nil
+	}
 	if w.Credits == nil || w.Charger == nil {
 		logger.Debug("arrears charger not configured; skipping")
 		return nil

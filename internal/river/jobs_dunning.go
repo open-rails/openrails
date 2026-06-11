@@ -87,6 +87,15 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		dunningMode = w.Config.GetDunningMode()
 	}
 
+	// Limited mode (#345): dunning is a PROACTIVE operation, so demote to
+	// dry-run — due subscriptions are listed with state preserved, but nothing
+	// is charged and nothing is window-expiry cancelled. "off" stays off (it is
+	// about failure semantics, not proactivity).
+	if w.Config != nil && w.Config.IsLimitedMode() && dunningMode == config.DunningModeOn {
+		log.WithContext(ctx).Warn("Limited mode: dunning demoted to dry_run_only (no charges, no window-expiry cancellations)")
+		dunningMode = config.DunningModeDryRunOnly
+	}
+
 	// If dunning is completely off, skip - FailMembership handles immediate cancellation
 	if dunningMode == config.DunningModeOff {
 		log.WithContext(ctx).Info("Dunning mode is 'off'; skipping dunning run (FailMembership handles immediate cancellation)")
