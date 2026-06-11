@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
 // defaultStripeBalanceCheck verifies a Stripe secret key works WITHOUT charging,
@@ -23,7 +25,10 @@ func defaultStripeBalanceCheck(ctx context.Context, secretKey string) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	// Pure read path with no config at hand: the unconditionally write-blocked
+	// choke client keeps the GET working in every mode while making any future
+	// mutation here fail loudly.
+	resp, err := stripeapi.ReadOnlyClient(15 * time.Second).Do(req)
 	if err != nil {
 		return err
 	}

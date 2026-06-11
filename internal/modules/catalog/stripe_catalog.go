@@ -11,10 +11,23 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
 type StripeCatalogService struct {
 	Config *config.Config
+}
+
+// httpClient returns the choke-point Stripe client (internal/integrations/
+// stripeapi): when mode=readonly every mutating request is rejected at the
+// transport with stripeapi.ErrProviderReadOnly before reaching the network.
+// ALL Stripe HTTP in this package must flow through it.
+func (s *StripeCatalogService) httpClient() *http.Client {
+	var cfg *config.Config
+	if s != nil {
+		cfg = s.Config
+	}
+	return stripeapi.Client(cfg, 0)
 }
 
 type stripeObject struct {
@@ -78,7 +91,7 @@ func (s *StripeCatalogService) CreateProduct(ctx context.Context, params CreateP
 		form.Set("metadata["+k+"]", v)
 	}
 
-	obj, err := stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products", form, params.IdempotencyKey)
+	obj, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products", form, params.IdempotencyKey)
 	if err != nil {
 		return "", err
 	}
@@ -144,7 +157,7 @@ func (s *StripeCatalogService) CreatePrice(ctx context.Context, params CreatePri
 		}
 	}
 
-	obj, err := stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices", form, params.IdempotencyKey)
+	obj, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices", form, params.IdempotencyKey)
 	if err != nil {
 		return "", err
 	}
@@ -190,7 +203,7 @@ func (s *StripeCatalogService) UpdateProduct(ctx context.Context, stripeProductI
 	if len(form) == 0 {
 		return nil
 	}
-	_, err := stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products/"+url.PathEscape(id), form, "")
+	_, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products/"+url.PathEscape(id), form, "")
 	return err
 }
 
@@ -234,7 +247,7 @@ func (s *StripeCatalogService) UpdatePrice(ctx context.Context, stripePriceID st
 	if len(form) == 0 {
 		return nil
 	}
-	_, err := stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices/"+url.PathEscape(id), form, "")
+	_, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices/"+url.PathEscape(id), form, "")
 	return err
 }
 
@@ -259,7 +272,7 @@ func (s *StripeCatalogService) RetrieveProduct(ctx context.Context, stripeProduc
 	if id == "" {
 		return nil, fmt.Errorf("stripe_product_id required")
 	}
-	body, status, err := stripeGet(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products/"+url.PathEscape(id))
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products/"+url.PathEscape(id))
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +326,7 @@ func (s *StripeCatalogService) SearchProductsByMetadata(ctx context.Context, key
 	// Stripe search query syntax: metadata['key']:'value'
 	query := fmt.Sprintf("metadata['%s']:'%s'", escapeStripeQueryValue(key), escapeStripeQueryValue(value))
 	endpoint := "https://api.stripe.com/v1/products/search?limit=10&query=" + url.QueryEscape(query)
-	body, status, err := stripeGet(ctx, stripeProc.SecretKey, endpoint)
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +357,7 @@ func (s *StripeCatalogService) ListPricesByLookupKey(ctx context.Context, lookup
 		return nil, fmt.Errorf("lookup_key required")
 	}
 	endpoint := "https://api.stripe.com/v1/prices?limit=10&lookup_keys[]=" + url.QueryEscape(lookupKey)
-	body, status, err := stripeGet(ctx, stripeProc.SecretKey, endpoint)
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +397,7 @@ func (s *StripeCatalogService) ListProducts(ctx context.Context, startingAfter s
 	if sa := strings.TrimSpace(startingAfter); sa != "" {
 		endpoint += "&starting_after=" + url.QueryEscape(sa)
 	}
-	body, status, err := stripeGet(ctx, stripeProc.SecretKey, endpoint)
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, endpoint)
 	if err != nil {
 		return nil, "", err
 	}
@@ -416,7 +429,7 @@ func (s *StripeCatalogService) ListPrices(ctx context.Context, startingAfter str
 	if sa := strings.TrimSpace(startingAfter); sa != "" {
 		endpoint += "&starting_after=" + url.QueryEscape(sa)
 	}
-	body, status, err := stripeGet(ctx, stripeProc.SecretKey, endpoint)
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, endpoint)
 	if err != nil {
 		return nil, "", err
 	}
@@ -446,7 +459,7 @@ func (s *StripeCatalogService) RetrievePrice(ctx context.Context, stripePriceID 
 	if id == "" {
 		return nil, fmt.Errorf("stripe_price_id required")
 	}
-	body, status, err := stripeGet(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices/"+url.PathEscape(id))
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices/"+url.PathEscape(id))
 	if err != nil {
 		return nil, err
 	}
@@ -479,7 +492,7 @@ func (s *StripeCatalogService) VerifyPriceExists(ctx context.Context, priceID st
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+stripeProc.SecretKey)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient().Do(req)
 	if err != nil {
 		return err
 	}
@@ -521,13 +534,13 @@ func stripeIntervalForDays(days int) (interval string, intervalCount int) {
 
 // stripeGet executes a GET against the Stripe API and returns the body, status, and any transport error.
 // Status >= 400 is not an error; callers inspect status for 404 vs other failures.
-func stripeGet(ctx context.Context, secretKey, endpoint string) ([]byte, int, error) {
+func (s *StripeCatalogService) stripeGet(ctx context.Context, secretKey, endpoint string) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient().Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -539,7 +552,7 @@ func stripeGet(ctx context.Context, secretKey, endpoint string) ([]byte, int, er
 	return body, resp.StatusCode, nil
 }
 
-func stripePostForm(ctx context.Context, secretKey string, endpoint string, form url.Values, idempotencyKey string) (*stripeObject, error) {
+func (s *StripeCatalogService) stripePostForm(ctx context.Context, secretKey string, endpoint string, form url.Values, idempotencyKey string) (*stripeObject, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
@@ -550,7 +563,7 @@ func stripePostForm(ctx context.Context, secretKey string, endpoint string, form
 		req.Header.Set("Idempotency-Key", strings.TrimSpace(idempotencyKey))
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient().Do(req)
 	if err != nil {
 		return nil, err
 	}

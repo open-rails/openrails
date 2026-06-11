@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -1505,7 +1506,7 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(stripeProc.SecretKey))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe checkout failed: %w", err)

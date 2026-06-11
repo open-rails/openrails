@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
@@ -123,7 +124,9 @@ func (l *HTTPStripeSubscriptionLister) ListSubscriptions(ctx context.Context, pa
 
 	client := l.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		// Read-only by design: the listers only GET; the write-blocked client
+		// keeps any future mutation on this path failing loudly at the choke.
+		client = stripeapi.ReadOnlyClient(30 * time.Second)
 	}
 
 	var (
@@ -306,7 +309,9 @@ func (l *HTTPStripeChargeLister) ListCharges(ctx context.Context, pageSize, maxP
 
 	client := l.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		// Read-only by design: the listers only GET; the write-blocked client
+		// keeps any future mutation on this path failing loudly at the choke.
+		client = stripeapi.ReadOnlyClient(30 * time.Second)
 	}
 
 	var (

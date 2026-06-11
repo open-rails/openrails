@@ -1030,7 +1030,7 @@ Catalog is the one domain where OPENRAILS is the source of truth, so sync direct
 - Catalog: dispatcher + adapter gate above (limited + readonly).
 - Workers: existing #345 gates now keyed off the mode-aware IsLimitedMode().
 - Solana: cranker covered by limited; user-side flows are user-signed (we read/verify/record).
-- Stripe reactive writes (checkout-session creation etc.) have NO single choke point yet — readonly blocks NMI hard but Stripe reactive writes only via the catalog/worker gates; central Stripe gate is a follow-up task.
+- Stripe: internal/integrations/stripeapi guardTransport — every Stripe HTTP call obtains its *http.Client from stripeapi.Client(cfg)/ReadOnlyClient; non-GET/HEAD fails locally with stripeapi.ErrProviderReadOnly when mode=readonly (done 2026-06-11, see follow-up task below).
 
 **Tasks:**
 - [x] config: top-level Mode (test|production|limited|readonly, default test), validation, mode-aware accessors, remove feature_flags.limited_mode + verify_processor_mappings, TEST_MODE explicit-set detection, startup mode banner
@@ -1038,7 +1038,7 @@ Catalog is the one domain where OPENRAILS is the source of truth, so sync direct
 - [x] Catalog write gate: autoCreateContext.RemoteWritesDisabled, adapter write-point checks (mobius Attach createPlan, stripe Attach lookup-key path + AutoCreate, Update dispatch), dispatcher converts Attach sentinel to pending_manual_link
 - [x] README + config.example.yaml: rewrite around the mode dial; remove verify_processor_mappings row
 - [x] Tests: mode accessor matrix; NMI readonly gate; resolveProviders limited-mode -> pending (no remote calls); migrate #345 tests off feature_flags.limited_mode
-- [ ] Follow-up: central Stripe write choke point for readonly
+- [x] Follow-up: central Stripe write choke point for readonly — DONE 2026-06-11: new internal/integrations/stripeapi package is the wire-level choke (guardTransport RoundTripper returns package-level ErrProviderReadOnly for every non-GET/HEAD before any network I/O when cfg.IsProviderReadOnly(); GETs pass); ALL raw api.stripe.com call sites converted to stripeapi.Client(cfg)/ReadOnlyClient (subscriptions stripe_service/portal/refunds/reconcile-listers, checkout session create, catalog stripeGet/stripePostForm/VerifyPriceExists, webhook thin-event hydration, tenancy balance check — the last three are pure-read paths on the unconditionally write-blocked ReadOnlyClient); unit tests (httptest: readonly POST/DELETE blocked locally with the sentinel and zero server hits, GET passes, non-readonly POST passes) + live-validated with the Stripe test key (readonly GET /v1/balance -> 200; POST through the choke blocked in 19µs, canary listener saw 0 requests).
 
 ---
 
