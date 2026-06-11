@@ -1183,3 +1183,16 @@ Hard cut, no aliases: ModeTest constant deleted, IsTestMode() renamed/reimplemen
 - [ ] migrate every test fixture; full unit + smoke integration green
 
 ---
+
+# #356: release v0.17.0 (batch-only entitlements) + adapt all four consumers
+
+**Status:** IN PROGRESS 2026-06-11 (owner request: "push as v0.17.0... adapt tensorhub + cozy-art + doujins + hentai0"). Executes the consumer half of #354.
+
+Merge `batch-354` into master, tag v0.17.0, then move every consumer onto the batch-only `ListActiveEntitlements(issuer, subjects []string, at) map[subject][]EntitlementRecord`. Deploy coupling: v0.16.0 consumers' GET 404s against a v0.17.0 server (enrichment degrades to no claims), so consumer bumps land together with this release.
+
+**Tasks:**
+- [ ] Merge batch-354 -> master (resolve drift), verify build/vet/unit/conformance, push, tag v0.17.0
+- [ ] doujins: provider mint call = batch of one; implement authkit v0.21.0 BatchEntitlementsProvider (admin list = one call); bump openrails v0.17.0 + authkit v0.21.0; auth integration suite green vs real openrails
+- [ ] hentai0: same provider adaptation + bumps (mirrors doujins)
+- [ ] cozy-art: delete the BROKEN direct-SQL provider (queries removed billing.entitlements.user_id); port the openrails-client provider + service-JWT source; bump openrails v0.14.0 -> v0.17.0, authkit v0.19.0 -> v0.21.0
+- [ ] tensorhub: bump openrails v0.13.x pseudo-version -> v0.17.0; fix Client-interface fallout (it gained entitlements + windows methods); build/tests
