@@ -232,6 +232,9 @@ func (c *RPCClient) GetEndpoint() string {
 type SignatureInfo struct {
 	Signature string
 	HasError  bool
+	// BlockTime is the cluster-reported block time, nil when the node did not
+	// return one (older ledger ranges).
+	BlockTime *time.Time
 }
 
 // GetSignaturesForAddress finds transactions that reference a specific address.
@@ -256,10 +259,15 @@ func (c *RPCClient) GetSignaturesForAddress(ctx context.Context, address string,
 
 	results := make([]SignatureInfo, 0, len(resp))
 	for _, sig := range resp {
-		results = append(results, SignatureInfo{
+		info := SignatureInfo{
 			Signature: sig.Signature.String(),
 			HasError:  sig.Err != nil,
-		})
+		}
+		if sig.BlockTime != nil {
+			t := sig.BlockTime.Time().UTC()
+			info.BlockTime = &t
+		}
+		results = append(results, info)
 	}
 
 	return results, nil

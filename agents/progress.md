@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 355
+next_id: 356
 
 ---
 
@@ -135,7 +135,7 @@ Plan and implement OpenRails-owned USDC funding sessions for host apps that need
 # #107: processor-reconcile (was: processor-sync)
 
 **Completed:** no
-**Status:** redesigned 2026-06-10 per Paul: all configured providers (stripe, nmi/mobius, ccbill, solana) where possible; advisory + enforce modes; remote system is source of truth and is NEVER mutated (admin action queue for cancels/refunds); doubles as empty-instance bootstrap/restore. Implementation not started.
+**Status:** redesigned 2026-06-10 per Paul: all configured providers (stripe, nmi/mobius, ccbill, solana) where possible; advisory + enforce modes; remote system is source of truth and is NEVER mutated (admin action queue for cancels/refunds); doubles as empty-instance bootstrap/restore. PHASE 1 (provider fetchers + normalized snapshot model, internal/reconcile) implemented 2026-06-11; diff engine / findings persistence / enforce appliers / admin API+CLI are phase 2, untouched pending design review.
 
 Reconcile local OpenRails billing state against the payment processors as the source of truth, for ALL configured providers where the provider exposes the data: Stripe, NMI/Mobius, CCBill, Solana. Two modes: advisory (report only) and enforce (converge local state to the processor's declared state). The tool NEVER mutates the remote processor — remote actions (cancel, refund) are queued for an admin.
 
@@ -210,11 +210,11 @@ Cross-referencing the two distinguishes 'dunning tried and failed' (local retry 
 
 **Tasks:**
 - DESIGN: refreshed 2026-06-10 (all providers, advisory+enforce, remote read-only, persisted findings + admin queue)
-- [ ] internal/reconcile: ProcessorFetcher interface + normalized RemoteSnapshot with capability flags
-- [ ] NMI fetcher: typed Query API calls (report_type=recurring, transaction search by date range, customer_vault)
-- [ ] CCBill fetcher: extend DataLink beyond ACTIVEMEMBERS (expired/cancellation/transaction/chargeback exports)
-- [ ] Stripe fetcher: subscriptions, charges/invoices, refunds, disputes
-- [ ] Solana fetcher: on-chain subscription accounts + payment signature scan (respect *AtSlot/ReadUntilConsistent read-lag rules)
+- [x] internal/reconcile: ProcessorFetcher interface + normalized RemoteSnapshot with capability flags — phase 1 landed 2026-06-11 (reconcile.go: RemoteSnapshot/RemoteSubscription/RemoteTransaction/RemoteVaultEntry + Capabilities + FetchParams; amounts in amount_cents, raw payloads preserved per record)
+- [x] NMI fetcher: typed Query API calls (report_type=recurring, transaction search by date range, customer_vault) — reconcile/nmi.go over the existing query.php client (read-only by construction); XML shapes + status inference verified live against the Mobius sandbox (58 subs, 47 txns, 94 vault entries); NMI exposes no chargebacks (capability false) and no subscription_id on transactions (order_id kept in raw)
+- [x] CCBill fetcher: extend DataLink beyond ACTIVEMEMBERS (expired/cancellation/transaction/chargeback exports) — ccbill.FetchTransactionExport (REBILL/CANCELLATION/EXPIRE/REFUND/CHARGEBACK over MST-clock date ranges) + reconcile/ccbill.go normalization; NOT live-validated (no DataLink credentials available), per-type CSV columns follow the long-standing legacy integrations and raw rows are preserved verbatim
+- [x] Stripe fetcher: subscriptions, charges/invoices, refunds, disputes — reconcile/stripe.go, raw GETs through stripeapi.ReadOnlyClient with cursor pagination; vault from expanded default_payment_method; verified live against the cozy-art test account (13 subs, 19 charges, 12 vault entries)
+- [x] Solana fetcher: on-chain subscription accounts + payment signature scan (respect *AtSlot/ReadUntilConsistent read-lag rules) — reconcile/solana.go, minimal by design: caller-supplied local sub refs -> subscription PDA existence + DecodePlanAccount + signature listing (SignatureInfo gained BlockTime); bulk point-in-time reads use plain GetAccountData (read-lag gating only applies to post-tx reads)
 - [ ] Identity + plan matching: processor_subscription_id first, email/username/merchant-defined fallback, provider_links (#329) plan mapping
 - [ ] Diff engine producing PS-1..PS-9 findings; migrations for reconciliation_runs + reconciliation_findings (lifecycle: open -> auto_fixed | admin_pending -> resolved/dismissed)
 - [ ] Advisory mode: run + persisted, queryable report (counts by type/severity, per-user detail)
@@ -1157,5 +1157,29 @@ The driving case: admin dashboards listing N users fan out N HTTP calls today. d
 - [ ] hentai0 (#168 follow-up): same provider upgrade as doujins (mirrors exactly)
 - [ ] cozy-art: adopt the openrails client AT ALL — AUDIT FINDING 2026-06-11: cozy-art still runs its own direct-SQL entitlements provider (internal/billing/entitlements_provider.go) querying `billing.entitlements.user_id`, a column REMOVED in the tenant_subject hard cut → its mint-time entitlements are silently broken at runtime. Port the doujins #390 pattern wholesale: openrails.Client remote provider (single now, batch with the authkit seam), bump openrails v0.14.0 → v0.16.0+ and authkit v0.19.0 → v0.20.0 (names-only provider contract), delete the SQL provider
 - [ ] tensorhub: no entitlements surface; evaluate `Balance`/`GetCreditAccount`/`BudgetStatus` batch for payer/actor dashboards (it already consumes the batch hot path via AdmitBatch + windows, openrails pinned at a v0.13.x pseudo-version — bump opportunistically when adopting)
+
+---
+# #355: split the mode dial: test_env boolean (credential sandbox enforcement) orthogonal to mode=full|limited|readonly
+
+**Completed:** no
+**Status:** open (Paul 2026-06-11): "get rid of test-mode, and make it test-env=true with test-env=false by default. --mode will be full, limited, and read-only, while test-env enforces that we are using test creds, not prod creds. These are orthogonal. The name test-env is better so it doesn't get confused with the mode."
+
+## Design
+
+Two orthogonal axes replace the current 4-value mode:
+
+- **`test_env: true|false`** (yaml) / `TEST_ENV` (env) / `--test-env` (CLI). Default **false**. When true: every processor routes to sandbox (NMI test semantics, CCBill sandbox URL, Solana devnet) AND the credential guarantees attach — Stripe live key (sk_live_/rk_live_) refuses to boot, NMI accounts are probed at boot (non-issued test card; decline = production credentials = refuse), Solana derives devnet. test_env=true is rejected outside env=development (carries over the old sandbox-not-in-prod rule).
+- **`mode: full|limited|readonly`** (mode=test DELETED; "production" RENAMED to "full"). Pure behavior dial, applies identically in test and live env: full = everything; limited = reactive-only (#345/#346 gates); readonly = zero provider writes (wire-enforced all three rails). Required outside development; dev default = full.
+
+Mapping from the old world: mode=test ≡ test_env=true + mode=full. The old dev default (sandbox money) becomes: dev default is mode=full + test_env=false — NOTE THE BEHAVIOR CHANGE, flagged for Paul: a dev boot with real creds in .env and no flags is now live, where the old default was sandbox. (Mitigation kept: the compose dev stack has no real creds; mode is still required outside dev.)
+
+Hard cut, no aliases: ModeTest constant deleted, IsTestMode() renamed/reimplemented as IsTestEnv() (= cfg.TestEnv), all gates (probe, stripe key validation, solana network derivation, CCBill sandbox URL, processor test semantics) keyed off IsTestEnv(); mode banner + README mode table + matrix + config.example.yaml + .env.example + --mode flag help all updated; --test-env CLI flag added beside --mode.
+
+**Tasks:**
+- [ ] config: TestEnv bool + IsTestEnv(); mode enum full|limited|readonly (test deleted, production->full); validation (test_env only in dev; mode required outside dev; dev default mode=full)
+- [ ] re-key all sandbox gates off IsTestEnv (probe in build_runtime, stripe key check, solana network, ccbill URL, NMI test semantics)
+- [ ] CLI: --test-env flag; --mode help text update
+- [ ] docs: README modes section + matrix + example yaml + .env.example
+- [ ] migrate every test fixture; full unit + smoke integration green
 
 ---
