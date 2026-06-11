@@ -545,3 +545,17 @@ Evaluate and potentially adopt embedded durable workflow execution for critical 
 - [ ] Decide: Adopt go-workflows based on PoC results
 
 ---
+# #351: optional managed cloudflared: expose a local OpenRails instance externally
+
+**Completed:** no
+
+Optionally RUN cloudflared (not just document it): a local/dev OpenRails instance gets a stable public hostname so external systems can reach it — primarily processor webhooks (NMI/Mobius, Stripe, CCBill) hitting a laptop or CI box, and host apps integrating against a dev instance. Context: the doc-only `cloudflared` config block (tunnel_token/tunnel_name/public_hostname) was removed in the #350 knob diet because OpenRails never ran it; if we ever DO run it, the config earns its way back. Filed per Paul 2026-06-11: "we presumably want cloudflared to run, so that a local instance can be made available externally by another system. Kind of optional."
+
+Sketch: a `cloudflared` sidecar in the dev compose stack (image exists upstream; needs tunnel token) OR an opt-in supervisor goroutine that execs a bundled/system cloudflared with the configured token and logs the public hostname at boot. Compose-sidecar is likely the right shape — keeps the binary out of OpenRails and the knob count at zero (token lives in .env for compose only). docs/cloudflared-webhooks.md already documents the manual flow.
+
+**Tasks:**
+- [ ] Decide shape: compose sidecar (preferred) vs supervised child process
+- [ ] Wire dev compose service + .env token passthrough; print the public webhook URL on boot
+- [ ] Update docs/cloudflared-webhooks.md from manual steps to the supported flow
+
+---
