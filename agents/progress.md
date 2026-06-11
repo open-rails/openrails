@@ -1125,7 +1125,7 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 
 # #354: batch-first service reads — ListActiveEntitlementsBatch + batch convention for list-shaped consumers
 
-**Status:** PLANNED 2026-06-11 (owner decision, Paul: "make everything batch by default... where it makes sense. Then it's just a difference of the consumer supplying a [] array of user-ids, rather than a single one"). Self-scoped surfaces (/v1/self/* — the token IS the user) stay single; machine surfaces (/v1/service/*) and admin/dashboard reads are batch-shaped wherever the consumer naturally holds a LIST.
+**Status:** PLANNED 2026-06-11 (owner decision, Paul: "make everything batch by default... where it makes sense. Then it's just a difference of the consumer supplying a [] array of user-ids, rather than a single one"). Self-scoped surfaces (/v1/self/* — the token IS the user) stay single; machine surfaces (/v1/service/*) and admin/dashboard reads are batch-shaped wherever the consumer naturally holds a LIST. || OPENRAILS + AUTHKIT SIDES DONE 2026-06-11: branch `batch-354` (pushed, unmerged — master in use by a concurrent session) + authkit v0.21.0. Consumer integrations blocked on the branch merging + a release tag.
 
 ## Why
 
@@ -1148,8 +1148,8 @@ The driving case: admin dashboards listing N users fan out N HTTP calls today. d
 
 ## Integration (consumers)
 
-- [ ] openrails: batch route + handler (one ANY() query, cap 500, dedupe) + SDK method on both transports + conformance test
-- [ ] authkit: OPTIONAL batch seam — `BatchEntitlementsProvider { ListEntitlementsBatch(ctx, userIDs []string) (map[string][]string, error) }` interface-upgrade detected via type assertion; `AdminListUsers` (and any other per-row enrichment loop) uses it when the host's provider implements it, falling back to per-user otherwise. Token minting stays single-user. (File as its own authkit issue when picked up.)
+- [x] openrails: batch route + handler (one ANY() query, cap 500, dedupe) + SDK method on both transports + conformance test — IMPLEMENTED 2026-06-11 on branch `batch-354` (pushed; NOT merged — master is in use by a concurrent session; merge + tag when free). Conformance run also surfaced that the #347 conformance section was committed unrun (scriptEnv never got issuer/subject, no entitlement seeding — failed on both transports); fixed on the branch, suite green
+- [x] authkit: BatchEntitlementsProvider seam + AdminListUsers one-call enrichment (per-user fallback, batch-failure degrades to none) — authkit v0.21.0 (a708e2b), tagged + pushed
 - [ ] doujins (#390 follow-up): openrailsEntitlementsProvider implements ListEntitlementsBatch via the SDK batch call → admin user list premium badges in ONE call; bump openrails + authkit pins
 - [ ] hentai0 (#168 follow-up): same provider upgrade as doujins (mirrors exactly)
 - [ ] cozy-art: adopt the openrails client AT ALL — AUDIT FINDING 2026-06-11: cozy-art still runs its own direct-SQL entitlements provider (internal/billing/entitlements_provider.go) querying `billing.entitlements.user_id`, a column REMOVED in the tenant_subject hard cut → its mint-time entitlements are silently broken at runtime. Port the doujins #390 pattern wholesale: openrails.Client remote provider (single now, batch with the authkit seam), bump openrails v0.14.0 → v0.16.0+ and authkit v0.19.0 → v0.20.0 (names-only provider contract), delete the SQL provider
