@@ -251,8 +251,13 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 	if orig.Amount <= 0 || orig.RefundedPaymentID != nil {
 		return errors.New("only successful charge payments can be refunded")
 	}
-	if strings.HasPrefix(strings.TrimSpace(orig.TransactionID), "sub:") {
-		return errors.New("synthetic subscription references are not refundable")
+	// Synthetic transaction references are placeholders, not gateway charges:
+	// "sub:" rows reference a subscription, and "*_attempt:" rows are NMI
+	// checkout attempt anchors (the real charge is a separate payment row).
+	for _, prefix := range []string{"sub:", "nmi_sub_attempt:", "nmi_sale_attempt:"} {
+		if strings.HasPrefix(strings.TrimSpace(orig.TransactionID), prefix) {
+			return errors.New("synthetic transaction references are not refundable")
+		}
 	}
 
 	refundedTotal, err := s.repo.GetRefundTotalByPaymentID(ctx, orig.ID)

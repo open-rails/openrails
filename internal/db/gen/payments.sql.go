@@ -36,7 +36,7 @@ func (q *Queries) CompleteProviderAttempt(ctx context.Context, arg CompleteProvi
 
 const completeProviderAttemptInPlace = `-- name: CompleteProviderAttemptInPlace :execrows
 UPDATE billing.payments
-SET metadata = $2
+SET metadata = $2, status = 'completed'
 WHERE id = $1
   AND amount > 0
   AND status = 'pending'
@@ -47,6 +47,11 @@ type CompleteProviderAttemptInPlaceParams struct {
 	Metadata []byte
 }
 
+// Resolves a provider attempt row whose real payment is recorded separately
+// (NMI subscription checkout): the row keeps its synthetic transaction_id and
+// is excluded from listings via the nmi_subscription_order_id metadata key,
+// but its status must still reach a terminal state — leaving it 'pending'
+// forever reads as a stuck payment.
 func (q *Queries) CompleteProviderAttemptInPlace(ctx context.Context, arg CompleteProviderAttemptInPlaceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeProviderAttemptInPlace, arg.ID, arg.Metadata)
 	if err != nil {

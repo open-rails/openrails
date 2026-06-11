@@ -122,9 +122,14 @@ WHERE id = $1
   AND amount > 0
   AND status = 'pending';
 
+-- Resolves a provider attempt row whose real payment is recorded separately
+-- (NMI subscription checkout): the row keeps its synthetic transaction_id and
+-- is excluded from listings via the nmi_subscription_order_id metadata key,
+-- but its status must still reach a terminal state — leaving it 'pending'
+-- forever reads as a stuck payment.
 -- name: CompleteProviderAttemptInPlace :execrows
 UPDATE billing.payments
-SET metadata = $2
+SET metadata = $2, status = 'completed'
 WHERE id = $1
   AND amount > 0
   AND status = 'pending';
