@@ -21,8 +21,9 @@ import (
 )
 
 type bootstrapApplyOptions struct {
-	file   string
-	dryRun bool
+	file       string
+	dryRun     bool
+	exhaustive bool
 }
 
 func newBootstrapCmd() *cobra.Command {
@@ -40,6 +41,7 @@ func newBootstrapCmd() *cobra.Command {
 	}
 	apply.Flags().StringVarP(&opts.file, "file", "f", bootstrap.DefaultBootstrapManifestPath, "bootstrap manifest YAML file")
 	apply.Flags().BoolVar(&opts.dryRun, "dry-run", false, "validate and print plans without mutating state")
+	apply.Flags().BoolVar(&opts.exhaustive, "exhaustive", false, "treat the local catalog as exhaustive: ARCHIVE (never delete) provider-side catalog objects bearing OpenRails ownership markers that are not in the local catalog (#357); foreign provider objects are never touched")
 	cmd.AddCommand(apply)
 	return cmd
 }
@@ -62,6 +64,15 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 		return fmt.Errorf("config not loaded; bootstrap apply requires --config")
 	}
 
+	// --exhaustive archives provider-side catalog objects — a provider WRITE.
+	// Catalog provider writes are gated by the operating mode (#346), so refuse
+	// UP FRONT under limited/readonly rather than half-running (the readonly
+	// wire chokes would reject the POSTs anyway, but loudly and mid-apply).
+	// Default extras detection/logging is read-only and runs in every mode.
+	if opts.exhaustive && !opts.dryRun && cfg.IsLimitedMode() {
+		return fmt.Errorf("bootstrap apply --exhaustive refused: mode=%s disables catalog provider writes, so provider-side extras cannot be archived; re-run under mode=full (without --exhaustive, extras are still detected and logged read-only)", cfg.GetMode())
+	}
+
 	embeddedApp, err := embedded.New(embedded.Options{Config: cfg})
 	if err != nil {
 		return fmt.Errorf("bootstrap application: %w", err)
@@ -76,7 +87,7 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	return applyBootstrapManifest(ctx, cfg, embeddedApp.App(), manifest, out, opts.dryRun)
+	return applyBootstrapManifest(ctx, cfg, embeddedApp.App(), manifest, out, opts.dryRun, opts.exhaustive)
 }
 
 // startupBootstrapLockKey is the pg_advisory_lock key serializing concurrent
@@ -127,7 +138,9 @@ func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) 
 	}()
 
 	log.WithField("file", path).Info("startup bootstrap: applying unified manifest (idempotent)")
-	return applyBootstrapManifest(ctx, cfg, a, manifest, log.StandardLogger().Out, false)
+	// exhaustive=false: the startup re-apply is additive-only; archiving extras
+	// is reserved for the explicit `bootstrap apply --exhaustive` CLI (#357).
+	return applyBootstrapManifest(ctx, cfg, a, manifest, log.StandardLogger().Out, false, false)
 }
 
 // resolveBootstrapManifestPath returns the conventional bootstrap manifest
@@ -146,7 +159,14 @@ func resolveBootstrapManifestPath(_ *config.Config) string {
 // and catalog declared by a unified bootstrap manifest. It is the single apply
 // path shared by the `bootstrap apply` CLI and the server's first-run startup
 // bootstrap (#327), so both consume the same one manifest schema.
-func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BootstrapManifest, out io.Writer, dryRun bool) error {
+//
+// After the catalogs converge it additionally detects provider-side catalog
+// EXTRAS — products/prices/plans on the provider account that are NOT in the
+// local catalog (#357). By default extras are only logged (read-only; they are
+// ignorable and never touched). Under exhaustive=true the OpenRails-marked
+// extras are ARCHIVED (never deleted): Stripe active=false; NMI/CCBill surface
+// pending manual actions. Foreign provider objects are never touched.
+func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BootstrapManifest, out io.Writer, dryRun bool, exhaustive bool) error {
 	if len(manifest.Tenants) > 0 {
 		if dryRun {
 			fmt.Fprintf(out, "tenants: %d declared (dry-run: no tenant mutations)\n", len(manifest.Tenants))
@@ -205,7 +225,80 @@ func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App,
 		fmt.Fprintln(out)
 		result.Print(out)
 	}
-	return nil
+
+	// #357: extras pass. Gated on the manifest actually declaring catalogs —
+	// an empty/tenants-only manifest makes no exhaustiveness claim about the
+	// provider accounts, so nothing is scanned (and nothing could ever be
+	// archived) for it.
+	return reportCatalogExtras(ctx, svc, out, dryRun, exhaustive)
+}
+
+// reportCatalogExtras runs the #357 extras pass after a catalog apply: detect
+// + log provider-side objects not in the local catalog (always; read-only),
+// and archive the OpenRails-marked ones when exhaustive is set. Under dry-run
+// the archive half only prints what it WOULD archive.
+//
+// Detection failure is non-fatal on a default apply (the apply itself
+// succeeded; extras logging is advisory) but fatal under --exhaustive, where
+// the operator explicitly asked for the provider accounts to be converged.
+func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out io.Writer, dryRun bool, exhaustive bool) error {
+	report, err := svc.DetectCatalogExtras(ctx)
+	if err != nil {
+		if exhaustive {
+			return fmt.Errorf("catalog extras detection: %w", err)
+		}
+		log.WithError(err).Warn("catalog extras detection failed (apply succeeded; provider extras were not checked)")
+		fmt.Fprintf(out, "\ncatalog extras: detection failed (apply unaffected): %v\n", err)
+		return nil
+	}
+
+	fmt.Fprintf(out, "\ncatalog extras: %d provider-side object(s) not in the local catalog (scanned %d stripe products, %d stripe prices, %d nmi plans)\n",
+		len(report.Extras), report.ScannedStripeProducts, report.ScannedStripePrices, report.ScannedNMIPlans)
+	for _, e := range report.Extras {
+		marker := "foreign — never touched"
+		if e.Owned {
+			marker = "openrails-marked"
+		}
+		state := ""
+		if !e.Active {
+			state = ", inactive"
+		}
+		fmt.Fprintf(out, "  - %s %s %s (%s) [%s%s]\n", e.Provider, e.ObjectType, e.ExternalID, e.Label, marker, state)
+		log.WithFields(log.Fields{
+			"event":       "catalog_extra",
+			"provider":    e.Provider,
+			"object_type": e.ObjectType,
+			"external_id": e.ExternalID,
+			"label":       e.Label,
+			"owned":       e.Owned,
+			"active":      e.Active,
+		}).Info("bootstrap apply: provider-side catalog extra (ignorable; not in local catalog)")
+	}
+	for _, n := range report.Notes {
+		fmt.Fprintf(out, "  note (%s): %s\n", n.Provider, n.Note)
+	}
+
+	if !exhaustive || len(report.Extras) == 0 {
+		return nil
+	}
+	if dryRun {
+		fmt.Fprintf(out, "\nexhaustive (dry-run): would archive the openrails-marked extras above; foreign objects would not be touched\n")
+		return nil
+	}
+	outcomes, archiveErr := svc.ArchiveCatalogExtras(ctx, report.Extras)
+	fmt.Fprintf(out, "\nexhaustive archive outcomes:\n")
+	for _, o := range outcomes {
+		fmt.Fprintf(out, "  - %s %s %s: %s (%s)\n", o.Extra.Provider, o.Extra.ObjectType, o.Extra.ExternalID, o.Action, o.Detail)
+		log.WithFields(log.Fields{
+			"event":       "catalog_extra_archive",
+			"provider":    o.Extra.Provider,
+			"object_type": o.Extra.ObjectType,
+			"external_id": o.Extra.ExternalID,
+			"action":      string(o.Action),
+			"detail":      o.Detail,
+		}).Info("bootstrap apply --exhaustive: catalog extra archive outcome")
+	}
+	return archiveErr
 }
 
 func contextForBootstrapCatalog(ctx context.Context, a *app.App, catalogName string) (context.Context, error) {

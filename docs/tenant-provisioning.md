@@ -172,6 +172,27 @@ catalogs:
 - `catalogs[]` uses the existing catalog-as-code schema. Bootstrap applies it
   additively: missing products/prices are not removed by omission.
 
+### Provider extras (#357)
+
+After the catalogs converge, `bootstrap apply` additionally **lists
+provider-side catalog objects that are NOT in the local catalog** (Stripe
+products/prices, NMI recurring plans) and logs them, classified as
+`openrails-marked` (bearing our ownership markers: `openrails.*` lookup keys /
+`openrails_product_key`/`openrails_price_key` metadata / content-addressed NMI
+plan ids) or `foreign`. This detection is read-only, runs in every mode, and
+extras are ignorable — the default apply never touches them.
+
+Pass `--exhaustive` to declare the local catalog authoritative-and-exhaustive:
+the **openrails-marked** extras are then **archived, never deleted** — Stripe
+objects get `active=false` (existing subscriptions keep billing; new purchases
+become impossible); NMI plans surface a pending manual action (NMI has no plan
+archive, and plan deletion is irreversible and unsafe while subscribers exist —
+verify zero subscribers in the control center, then delete manually); CCBill
+(no API) and Solana (no plan enumeration) are note-only. Foreign provider
+objects are **never** touched, even under `--exhaustive`. Because archiving is
+a provider write, `--exhaustive` refuses up front under `mode=limited` or
+`mode=readonly`.
+
 ### Provider identity & idempotency
 
 Applying a catalog (via bootstrap first-run, the `billing catalog apply` CLI, or
