@@ -139,7 +139,6 @@ type Config struct {
 	ClickHouse  *ClickHouseConfig `koanf:"clickhouse,omitempty"`
 	Logger      *LoggerConfig     `koanf:"logger,omitempty"`
 	SendGrid    *SendGridConfig   `koanf:"sendgrid,omitempty"`
-	Pyth        *PythConfig       `koanf:"pyth,omitempty"`
 	CorsOrigins []string          `koanf:"cors_origins,omitempty"`
 	// TenantCORS configures per-tenant browser-direct allowed origins (issue #222
 	// browser tier). It is keyed by tenant slug; each entry lists the exact
@@ -451,7 +450,9 @@ type ProcessorConfig struct {
 	WebhookSecretThin string `koanf:"webhook_secret_thin"`
 
 	// --- Solana fields (type: solana) ---
-	RPCEndpoint  string `koanf:"rpc_endpoint"`
+	// There is no rpc_endpoint knob (#352): with a Helius key, Helius is the
+	// primary RPC and the public endpoints are the fallback chain; without one,
+	// the public chain alone serves. One key, zero endpoint plumbing.
 	HeliusAPIKey string `koanf:"helius_api_key"`
 	// Network is DERIVED from the operating mode at startup (devnet under test
 	// mode, mainnet otherwise) — it is deliberately NOT configurable (#349):
@@ -548,7 +549,6 @@ func (p *ProcessorConfig) ToStripeConfig() *StripeConfig {
 // Only valid for Solana-type processors.
 func (p *ProcessorConfig) ToSolanaConfig() *SolanaConfig {
 	return &SolanaConfig{
-		RPCEndpoint:                     p.RPCEndpoint,
 		HeliusAPIKey:                    p.HeliusAPIKey,
 		Network:                         p.Network,
 		RecipientWallet:                 p.RecipientWallet,
@@ -770,9 +770,7 @@ func (cp *ControlPlaneConfig) SelfHostedPosture() bool {
 }
 
 type SolanaConfig struct {
-	// RPCEndpoint is a custom RPC endpoint override. If set, it bypasses the fallback chain entirely.
 	// Leave empty to use the automatic fallback chain: Helius (if configured) → Solana public.
-	RPCEndpoint string `koanf:"rpc_endpoint"`
 
 	// HeliusAPIKey enables Helius as the primary RPC provider (recommended for production).
 	// Get a free API key at https://helius.dev (100k requests/day on free tier).
@@ -788,12 +786,6 @@ type SolanaConfig struct {
 	SolanaPayRecurringSubscriptions bool `koanf:"solana_pay_recurring_subscriptions"`
 }
 
-type PythConfig struct {
-	HermesURL        string            `koanf:"hermes_url"`
-	MaxPriceAge      string            `koanf:"max_price_age"`
-	MaxConfidenceBPS int               `koanf:"max_confidence_bps"`
-	PriceFeeds       map[string]string `koanf:"price_feeds"`
-}
 
 // TokenConfig defines configuration for a specific Solana token
 type TokenConfig struct {
@@ -1388,22 +1380,17 @@ func validateSolanaProcessor(cfg *Config, name string, proc *ProcessorConfig, is
 	if strings.TrimSpace(proc.RecipientWallet) == "" {
 		log.Warnf("processor '%s' (solana): recipient_wallet not configured; Solana payments disabled", name)
 	}
-	if cfg == nil || cfg.Pyth == nil {
-		return fmt.Errorf("processor '%s' (solana): pyth configuration is required", name)
-	}
-	if strings.TrimSpace(cfg.Pyth.HermesURL) == "" {
-		return fmt.Errorf("processor '%s' (solana): pyth.hermes_url is required", name)
-	}
-	if _, err := time.ParseDuration(strings.TrimSpace(cfg.Pyth.MaxPriceAge)); err != nil {
-		return fmt.Errorf("processor '%s' (solana): invalid pyth.max_price_age: %w", name, err)
-	}
+	// Pyth is NOT configurable (#352): Hermes URL, freshness bounds and the
+	// price-feed map are protocol constants (DefaultPyth*). Tokens are limited
+	// to symbols those hardcoded feeds cover.
+	feeds := DefaultPythPriceFeeds()
 	for symbol := range proc.Tokens {
 		normalized := strings.ToUpper(strings.TrimSpace(symbol))
 		if normalized == "" {
 			return fmt.Errorf("processor '%s' (solana): token symbol cannot be empty", name)
 		}
-		if strings.TrimSpace(cfg.Pyth.PriceFeeds[normalized]) == "" {
-			return fmt.Errorf("processor '%s' (solana): missing pyth.price_feeds.%s", name, normalized)
+		if strings.TrimSpace(feeds[normalized]) == "" {
+			return fmt.Errorf("processor '%s' (solana): token %s has no built-in pyth price feed", name, normalized)
 		}
 	}
 
@@ -1678,12 +1665,6 @@ func GetDefaultBillingConfig() *Config {
 		Logger: &LoggerConfig{
 			Level: "info", // Default to info level (options: debug, info, warn, error, fatal, panic)
 		},
-		Pyth: &PythConfig{
-			HermesURL:        DefaultPythHermesURL,
-			MaxPriceAge:      DefaultPythMaxPriceAge,
-			MaxConfidenceBPS: DefaultPythMaxConfidenceBPS,
-			PriceFeeds:       DefaultPythPriceFeeds(),
-		},
 		RateLimits: &RateLimitsConfig{
 			"subscribe": &RateLimit{
 				RequestsPerMinute: 10, // Very restrictive for payment endpoints
@@ -1745,43 +1726,6 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 	return nil
 }
 
-func applyPythDefaults(cfg *Config) {
-	if cfg.Pyth == nil {
-		cfg.Pyth = &PythConfig{}
-	}
-	if strings.TrimSpace(cfg.Pyth.HermesURL) == "" {
-		cfg.Pyth.HermesURL = DefaultPythHermesURL
-	}
-	if strings.TrimSpace(cfg.Pyth.MaxPriceAge) == "" {
-		cfg.Pyth.MaxPriceAge = DefaultPythMaxPriceAge
-	}
-	if cfg.Pyth.MaxConfidenceBPS <= 0 {
-		cfg.Pyth.MaxConfidenceBPS = DefaultPythMaxConfidenceBPS
-	}
-
-	defaults := DefaultPythPriceFeeds()
-	if cfg.Pyth.PriceFeeds == nil {
-		cfg.Pyth.PriceFeeds = defaults
-		return
-	}
-	for symbol, feedID := range cfg.Pyth.PriceFeeds {
-		normalized := strings.ToUpper(strings.TrimSpace(symbol))
-		if normalized == "" {
-			delete(cfg.Pyth.PriceFeeds, symbol)
-			continue
-		}
-		trimmedFeedID := strings.TrimSpace(feedID)
-		if normalized != symbol {
-			delete(cfg.Pyth.PriceFeeds, symbol)
-		}
-		cfg.Pyth.PriceFeeds[normalized] = trimmedFeedID
-	}
-	for symbol, feedID := range defaults {
-		if strings.TrimSpace(cfg.Pyth.PriceFeeds[symbol]) == "" {
-			cfg.Pyth.PriceFeeds[symbol] = feedID
-		}
-	}
-}
 
 func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
@@ -1944,7 +1888,6 @@ func Load(configPath string) (*Config, error) {
 	if cfg.Store.LogoURL == "" {
 		cfg.Store.LogoURL = DefaultLogoURL
 	}
-	applyPythDefaults(cfg)
 
 	// Initialize and normalize Processors map
 	if cfg.Processors == nil {

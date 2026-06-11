@@ -99,7 +99,6 @@ func NewSolanaPayPoller(
 			}
 		}
 		rpc = solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
-			Endpoint:     solanaProc.RPCEndpoint,
 			HeliusAPIKey: solanaProc.HeliusAPIKey,
 			Network:      solanaNetwork,
 		})

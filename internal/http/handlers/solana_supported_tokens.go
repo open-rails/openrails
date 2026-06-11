@@ -233,7 +233,10 @@ func GetSolanaConfig(r *httprequest.Request) {
 	resp := SolanaRuntimeConfigResponse{
 		Network:         network,
 		Chain:           "solana:" + network,
-		RPCURL:          strings.TrimSpace(solanaProc.RPCEndpoint),
+		// RPCURL is intentionally empty (#352): there is no rpc_endpoint knob
+		// anymore, and the server-side Helius key must never reach a browser.
+		// Wallets/frontends bring their own RPC.
+		RPCURL:          "",
 		ExplorerCluster: explorerCluster(network),
 		PreferredToken:  config.PreferredStablecoin,
 		Tokens:          tokens,

@@ -98,11 +98,6 @@ func configureSolanaProcessor(cfg *config.Config) error {
 	}
 
 	priceFeeds := config.DefaultPythPriceFeeds()
-	if cfg.Pyth != nil {
-		for symbol, feedID := range cfg.Pyth.PriceFeeds {
-			priceFeeds[strings.ToUpper(strings.TrimSpace(symbol))] = strings.TrimSpace(feedID)
-		}
-	}
 
 	normalized := make(map[string]config.TokenConfig, len(proc.Tokens))
 	for symbol, token := range proc.Tokens {
@@ -132,24 +127,12 @@ func createPythPriceProvider(cfg *config.Config) (solanamodule.TokenPriceProvide
 	if cfg == nil || cfg.GetSolanaProcessor() == nil {
 		return nil, nil
 	}
+	// Pyth is not configurable (#352): Hermes URL, freshness bounds and the
+	// price-feed map are protocol constants.
 	hermesURL := config.DefaultPythHermesURL
 	maxPriceAgeText := config.DefaultPythMaxPriceAge
 	maxConfidenceBPS := config.DefaultPythMaxConfidenceBPS
 	priceFeeds := config.DefaultPythPriceFeeds()
-	if cfg.Pyth != nil {
-		if strings.TrimSpace(cfg.Pyth.HermesURL) != "" {
-			hermesURL = cfg.Pyth.HermesURL
-		}
-		if strings.TrimSpace(cfg.Pyth.MaxPriceAge) != "" {
-			maxPriceAgeText = cfg.Pyth.MaxPriceAge
-		}
-		if cfg.Pyth.MaxConfidenceBPS > 0 {
-			maxConfidenceBPS = cfg.Pyth.MaxConfidenceBPS
-		}
-		for symbol, feedID := range cfg.Pyth.PriceFeeds {
-			priceFeeds[strings.ToUpper(strings.TrimSpace(symbol))] = strings.TrimSpace(feedID)
-		}
-	}
 	maxPriceAge, err := time.ParseDuration(strings.TrimSpace(maxPriceAgeText))
 	if err != nil {
 		return nil, fmt.Errorf("parse pyth max price age: %w", err)
@@ -649,7 +632,6 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	if solanaProc := cfg.GetSolanaProcessor(); solanaProc != nil {
 		solanaNetwork := effectiveSolanaNetwork(cfg)
 		solanaRPC = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
-			Endpoint:     solanaProc.RPCEndpoint,
 			HeliusAPIKey: solanaProc.HeliusAPIKey,
 			Network:      solanaNetwork,
 		})

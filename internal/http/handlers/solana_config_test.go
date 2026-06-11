@@ -19,8 +19,7 @@ func TestGetSolanaConfig(t *testing.T) {
 			Config: &config.Config{
 				Processors: map[string]*config.ProcessorConfig{
 					"solana": {
-						Network:     "devnet",
-						RPCEndpoint: "https://api.devnet.solana.com",
+						Network: "devnet",
 						Tokens: map[string]config.TokenConfig{
 							"USDC": {
 								Name:     "Dev USDC",
@@ -48,7 +47,6 @@ func TestGetSolanaConfig(t *testing.T) {
 			Processors: map[string]*config.ProcessorConfig{
 				"solana": {
 					Network:                         "devnet",
-					RPCEndpoint:                     "https://api.devnet.solana.com",
 					SolanaPayRecurringSubscriptions: true,
 					Tokens: map[string]config.TokenConfig{
 						"USDC": {
@@ -71,7 +69,8 @@ func TestGetSolanaConfig(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	require.Equal(t, "devnet", response.Network)
 	require.Equal(t, "solana:devnet", response.Chain)
-	require.Equal(t, "https://api.devnet.solana.com", response.RPCURL)
+	// RPCURL is always empty (#352): no rpc_endpoint knob, and the Helius key must never reach a browser.
+	require.Equal(t, "", response.RPCURL)
 	require.Equal(t, "devnet", response.ExplorerCluster)
 	require.Equal(t, config.PreferredStablecoin, response.PreferredToken)
 	require.True(t, response.Features.SolanaPay)

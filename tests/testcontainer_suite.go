@@ -271,15 +271,6 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 				WebhookSecret:   envOrDefault("PROCESSORS_MOBIUS_WEBHOOK_SECRET", ""),
 			},
 		},
-		// Pyth price-feed config is required whenever a Solana processor is
-		// configured (config.validateSolanaProcessor). Use the package defaults
-		// so the integration suite can bootstrap.
-		Pyth: &config.PythConfig{
-			HermesURL:        config.DefaultPythHermesURL,
-			MaxPriceAge:      config.DefaultPythMaxPriceAge,
-			MaxConfidenceBPS: config.DefaultPythMaxConfidenceBPS,
-			PriceFeeds:       config.DefaultPythPriceFeeds(),
-		},
 	}
 	if suite.port != 0 {
 		suite.Config.Port = config.FlexiblePort(suite.port)

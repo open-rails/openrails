@@ -234,19 +234,6 @@ encryption:
   # master_key: set via ENCRYPTION_MASTER_KEY env var (base64 of 32 bytes)
 
 # =============================================================================
-# PYTH PRICE FEEDS
-# =============================================================================
-
-pyth:
-  hermes_url: "https://hermes.pyth.network"
-  max_price_age: "2m"
-  max_confidence_bps: 100
-  price_feeds:
-    SOL: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d"
-    USDC: "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a"
-    PYUSD: "c1da1b73d7f01e7ddd54b3766cf7fcd644395ad14f70aa706ec5384c59e76692"
-
-# =============================================================================
 # PAYMENT PROCESSORS
 # =============================================================================
 # All processors are configured under a single "processors" map.
@@ -318,13 +305,11 @@ processors:
     # -------------------------------------------------------------------------
     #
     # OPTION 1: Automatic RPC fallback chain (RECOMMENDED)
-    # Leave rpc_endpoint empty. Uses: Helius → Ankr → Solana public
     # Add helius_api_key for Helius as primary (100k req/day free tier)
     #
     # helius_api_key: ""  # Get free API key at https://helius.dev
     #
     # OPTION 2: Custom RPC endpoint (bypasses fallback chain)
-    # rpc_endpoint: "https://your-rpc-provider.com"
 
     # -------------------------------------------------------------------------
     # Token Configuration

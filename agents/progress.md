@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 352
+next_id: 353
 
 ---
 
@@ -1098,5 +1098,16 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 - [x] Audit every koanf field for DEAD/REDUNDANT/DOC-ONLY; remove confirmed ones (cloudflared)
 - [x] Sweep config.example.yaml + .env.example to match
 - [x] Follow-up: hard-cut tenant_bootstrap.file (#342 advisory-lock fix landed as 0d65111; legacy knob + TENANTS_FILE env mapping + bootstrap_apply fallback removed)
+
+---
+# #352: config knob diet round 2: pyth.* hardcoded, solana rpc_endpoint removed
+
+**Completed:** yes
+**Status:** DONE 2026-06-11 (Paul: "max price age, max confidence bps, price feeds, etc. could all be hardcoded"; "if we have a helius api key we don't really need rpc_endpoint"). Removed: the ENTIRE `pyth.*` block (hermes_url/max_price_age/max_confidence_bps/price_feeds — now protocol constants via DefaultPyth*; validation previously FORCED operators to write a block that equaled the defaults) and `processors.solana.rpc_endpoint` (helius_api_key is the one RPC knob: key set -> Helius primary + public fallback chain; no key -> public chain). Token symbols now validate against the hardcoded feed map ("token X has no built-in pyth price feed"). The /solana runtime-config endpoint's RPCURL is now always empty — no knob to serve, and the server-side Helius key must never reach a browser; wallets bring their own RPC. Suite no longer needs a Pyth block to boot (verified: build/vet clean, unit suites green incl. handlers/solana/pyth, integration boot smoke green). Solana processor surface is now: helius_api_key, recipient_wallet, tokens (defaults per network), solana_pay_recurring_subscriptions, private_key.
+
+**Tasks:**
+- [x] Hardcode pyth.* as constants; drop PythConfig/applyPythDefaults/validation requirement
+- [x] Remove rpc_endpoint (config field, SolanaConfig, all client construction sites, RPCURL response)
+- [x] Sweep config.example.yaml + .env.example + test fixtures
 
 ---
