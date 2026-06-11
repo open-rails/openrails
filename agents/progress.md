@@ -1079,12 +1079,12 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 
 # #349: config.FlexiblePort is int16 — ports above 32767 overflow negative and run-server refuses to listen
 
-**Status:** open (found 2026-06-11 by the doujins testcontainers harness booting a real openrails on a kernel-ephemeral port).
+**Status:** FIXED 2026-06-11 (Claude, committed): FlexiblePort is now a plain int; UnmarshalText parses 32-bit and enforces 1-65535; Validate range-checks integer-typed yaml values that bypass UnmarshalText (0 = unset/default). Unit tests cover 44553/65535/trim/empty plus 65536/0/-1/non-numeric and the Validate path (44553 ok, 70000 and -20983 refused). Doujins can drop freeLocalPortBelow32768 once it consumes a build with this fix.
 
 `config/config.go:25` declares `type FlexiblePort int16`. Any configured port above 32767 — the kernel's default ephemeral range STARTS at 32768 — wraps negative (44553 → -20983) and run-server dies with `listen tcp: address -20983: invalid port`. TCP ports go to 65535; the type should be a plain int with 1-65535 range validation. Doujins' integration harness works around it by allocating only sub-32768 ports (tests/openrails_harness.go freeLocalPortBelow32768).
 
 **Tasks:**
-- [ ] Widen FlexiblePort to int with 1-65535 range validation in UnmarshalText (keep the string/int flexible parse)
+- [x] Widen FlexiblePort to int with 1-65535 range validation in UnmarshalText (keep the string/int flexible parse)
 - [ ] Doujins follow-up: drop the freeLocalPortBelow32768 workaround once a release carries the fix
 
 ---

@@ -750,3 +750,31 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	require.NoError(t, Validate(cfg2))
 	require.Equal(t, "", cfg2.Processors["stripe"].SecretKey)
 }
+
+func TestFlexiblePortRange(t *testing.T) {
+	// #349: int16 wrapped every kernel-ephemeral port (>=32768) negative.
+	var p FlexiblePort
+	require.NoError(t, p.UnmarshalText([]byte("44553")))
+	require.Equal(t, FlexiblePort(44553), p)
+	require.NoError(t, p.UnmarshalText([]byte("65535")))
+	require.Equal(t, FlexiblePort(65535), p)
+	require.NoError(t, p.UnmarshalText([]byte(" 2053 ")))
+	require.Equal(t, FlexiblePort(2053), p)
+	require.NoError(t, p.UnmarshalText([]byte("")))
+	require.Equal(t, FlexiblePort(0), p)
+
+	require.Error(t, p.UnmarshalText([]byte("65536")))
+	require.Error(t, p.UnmarshalText([]byte("0")))
+	require.Error(t, p.UnmarshalText([]byte("-1")))
+	require.Error(t, p.UnmarshalText([]byte("not-a-port")))
+
+	// integer-typed values bypass UnmarshalText; Validate catches them
+	cfg := GetDefaultBillingConfig()
+	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
+	cfg.Port = 44553
+	require.NoError(t, Validate(cfg))
+	cfg.Port = 70000
+	require.ErrorContains(t, Validate(cfg), "invalid port")
+	cfg.Port = -20983
+	require.ErrorContains(t, Validate(cfg), "invalid port")
+}

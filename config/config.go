@@ -21,8 +21,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// FlexiblePort is a custom type that can unmarshal both strings and integers
-type FlexiblePort int16
+// FlexiblePort is a custom type that can unmarshal both strings and integers.
+// Plain int, NOT int16 (#349): TCP ports run to 65535 and the kernel's default
+// ephemeral range STARTS at 32768, so an int16 wrapped every ephemeral port
+// negative (44553 → -20983) and the listener died.
+type FlexiblePort int
 
 // UnmarshalText implements the encoding.TextUnmarshaler interface
 func (p *FlexiblePort) UnmarshalText(text []byte) error {
@@ -32,9 +35,12 @@ func (p *FlexiblePort) UnmarshalText(text []byte) error {
 		return nil
 	}
 
-	val, err := strconv.ParseInt(s, 10, 16)
+	val, err := strconv.ParseInt(s, 10, 32)
 	if err != nil {
 		return fmt.Errorf("invalid port value: %w", err)
+	}
+	if val < 1 || val > 65535 {
+		return fmt.Errorf("invalid port value %d: must be 1-65535", val)
 	}
 
 	*p = FlexiblePort(val)
@@ -1104,6 +1110,13 @@ func Validate(cfg *Config) error {
 	// must never silently boot with full behavior (#346).
 	if !ValidModes[strings.ToLower(strings.TrimSpace(cfg.Mode))] {
 		return fmt.Errorf("invalid mode %q: must be one of test, production, limited, readonly", cfg.Mode)
+	}
+
+	// Port range (#349): UnmarshalText validates string-typed values, but an
+	// integer yaml value decodes straight into the field and must be checked
+	// here. 0 = unset (the default port applies).
+	if cfg.Port != 0 && (cfg.Port < 1 || cfg.Port > 65535) {
+		return fmt.Errorf("invalid port %d: must be 1-65535", cfg.Port)
 	}
 
 	isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""
