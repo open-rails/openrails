@@ -215,6 +215,8 @@ Beyond discrepancies, the advisory run must answer: did manual dunning ever run,
 1. **Processor charge-attempt timeline** — NMI transaction search including DECLINED transactions per subscription (NMI's own monthly rebill attempts show up here even if our system did nothing); Stripe invoice payment attempts; CCBill rebill/expire transactions.
 2. **Local dunning state** — last_retry_at / retry_attempts / next_retry_at on the subscription row (imported from legacy by #343).
 
+DECISION (Paul 2026-06-11): forensics are GENERIC openrails functionality, never tenant-specific. THIRD evidence source added: openrails' own ClickHouse payment/subscription events — which, for migrated tenants, include the imported legacy rebill-attempt history (doujins #387 handlers normalize users_logs/vault_logs into these events). This covers deep history the provider APIs cannot return (NMI's query window won't serve years-old declines; the migrated events will). The doujins-side legacy report is demoted to optional one-time MIGRATION VALIDATION (crosscheck source DB vs migrated events), not forensics.
+
 Cross-referencing the two distinguishes 'dunning tried and failed' (local retry fields advancing, processor declines recorded) from 'dunning never ran' (processor shows months of declines, local retry fields frozen/null). Aggregate output: when the dunning worker last took any action, count of subscriptions with zero attempts vs attempted-but-exhausted, decline reasons histogram. This evidence is attached to the corresponding PS-2/PS-3 findings.
 
 **Tasks:**
