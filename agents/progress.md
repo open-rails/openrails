@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 354
+next_id: 355
 
 ---
 
@@ -1044,13 +1044,13 @@ Catalog is the one domain where OPENRAILS is the source of truth, so sync direct
 
 # #347: SDK: fold entitlements read into openrails.Client (ListActiveEntitlements) — token-issuance enrichment for sibling hosts
 
-**Status:** IN FLIGHT 2026-06-11 — implementation already in the working tree (client.go + remote.go + embed/client.go + pkg/service ListActiveEntitlementRecordsForTenantSubject + conformance test additions, ~172 insertions, uncommitted; a concurrent agent owns the code). This section files the issue so the work and its consumers are tracked.
+**Status:** DONE 2026-06-11 — landed as 8d9d747 and tagged v0.16.0 (committed by the consumer-side session with the owner's go-ahead to unblock dropping the consumers' replace directives; build/vet/unit green, and the method was end-to-end-proven beforehand by doujins' real-OpenRails integration harness). doujins (a0a6ea02) and hentai0 (8ede7df1) pin v0.16.0 with NO replace directives.
 
 #338 follow-up: add `ListActiveEntitlements(ctx, issuer, subject string, at time.Time) ([]EntitlementRecord, error)` to the unified `openrails.Client` — the payer addressed by its EXTERNAL (issuer, subject) identity, zero `at` = now, unknown subject = empty slice not error — implemented by BOTH transports (remote = the existing `/v1/service` by-external-subject entitlements route; embedded = handler-transcribed service call) and covered by the dual-transport conformance script. Purpose: sibling hosts (doujins, hentai0) enrich their access tokens with entitlement claims at mint time through the SDK instead of hand-rolled HTTP clients or direct SQL into the billing schema.
 
 **Tasks:**
-- [ ] Land the working-tree implementation (interface method + EntitlementRecord wire type + both transports + conformance coverage)
-- [ ] Push/tag a version containing it so consumers can pin (doujins #390, hentai0 #168 hold local `replace` directives until then)
+- [x] Land the working-tree implementation (interface method + EntitlementRecord wire type + both transports + conformance coverage) — 8d9d747
+- [x] Push/tag a version containing it so consumers can pin — v0.16.0; doujins #390 + hentai0 #168 pinned and their replaces dropped
 
 ---
 # #348: MODE=test credential guarantees: NMI test-mode probe + Stripe live-key hard-fail
@@ -1085,7 +1085,7 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 
 **Tasks:**
 - [x] Widen FlexiblePort to int with 1-65535 range validation in UnmarshalText (keep the string/int flexible parse)
-- [ ] Doujins follow-up: drop the freeLocalPortBelow32768 workaround once a release carries the fix
+- [x] Doujins follow-up: drop the freeLocalPortBelow32768 workaround once a release carries the fix — done in doujins a0a6ea02 (harness builds the openrails binary from the sibling checkout, which carries the fix; v0.16.0 tag includes it)
 
 ---
 # #350: config knob diet: remove useless/redundant configuration
@@ -1120,5 +1120,39 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 - [x] Trim CaptchaConfig to enabled/provider/site_key/secret_key; constants behind Effective*
 - [x] Verifier test seam; migrate captcha/ratelimit/http tests off removed fields
 - [x] Pin rate-limit partial-override merge with a test; sweep config.example.yaml
+
+---
+
+# #354: batch-first service reads — ListActiveEntitlementsBatch + batch convention for list-shaped consumers
+
+**Status:** PLANNED 2026-06-11 (owner decision, Paul: "make everything batch by default... where it makes sense. Then it's just a difference of the consumer supplying a [] array of user-ids, rather than a single one"). Self-scoped surfaces (/v1/self/* — the token IS the user) stay single; machine surfaces (/v1/service/*) and admin/dashboard reads are batch-shaped wherever the consumer naturally holds a LIST.
+
+## Why
+
+The driving case: admin dashboards listing N users fan out N HTTP calls today. doujins/hentai0 admin user lists enrich per row (authkit `AdminListUsers` calls `Service.ListEntitlements` per user → the host's EntitlementsProvider → one `/v1/service` round-trip EACH). A 100-user admin page = 100 sequential HTTP calls where the engine could answer with ONE query (`subject = ANY($1)`). The same economics apply to any list-shaped read (payer balance dashboards, subscription-status columns). Precedent already in the SDK: `AdmitBatch` (#335) and `SettleWindowItems` are batch; reads should follow.
+
+## Design — entitlements batch (the flagship)
+
+- Route: `POST /v1/service/tenant-subjects/by-external-subject/entitlements/batch`, body `{"issuer": "...", "subjects": ["...", ...], "at": <RFC3339, optional>}` (POST because hundreds of ids don't fit query strings; mirrors /v1/service/admit/batch).
+- Response: object keyed by subject — `{"<subject>": [EntitlementRecord, ...], ...}` with an entry for EVERY requested subject; unknown subject = `[]`, matching the single route's empty-not-error semantics. Read batches are ONE SQL query (`ts.subject = ANY($1)` under the issuer's tenant), so no per-item error isolation is needed (unlike write batches): the call errors atomically or answers completely.
+- Cap: max 500 subjects per call; over-cap = 400 with an explicit message (no silent truncation). Dedupe repeated subjects server-side.
+- SDK: `Client.ListActiveEntitlementsBatch(ctx, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error)` on BOTH transports + dual-transport conformance coverage. `ListActiveEntitlements` (single) STAYS — it is the token-mint hot path and the degenerate case; internally the remote single route is kept (stable, cacheable GET) and the embedded single call shares the same service function as batch.
+- Convention going forward: NEW list-consumable service reads are designed batch-first with the single call as sugar.
+
+## Survey — other batch candidates (build when a consumer materializes, not speculatively)
+
+- `Balance`/`GetCreditAccount` batch by payer tenant-subject ids — payer-balance dashboards (tensorhub-shaped hosts listing payers). Same one-query economics.
+- `BudgetStatus` batch by actor — actor-budget dashboards.
+- Subscriptions-by-external-subject batch — admin user lists with a subscription-status column (doujins/hentai0 admin pages); today only per-user tenant-admin reads exist.
+- Tenant-admin BROWSER surface batch reads (/v1/tenant-admin/*) — NOT needed now: doujins/hentai0 admin list pages render from their own backends (authkit), which is where the batch belongs; revisit only if a browser-direct list view appears.
+
+## Integration (consumers)
+
+- [ ] openrails: batch route + handler (one ANY() query, cap 500, dedupe) + SDK method on both transports + conformance test
+- [ ] authkit: OPTIONAL batch seam — `BatchEntitlementsProvider { ListEntitlementsBatch(ctx, userIDs []string) (map[string][]string, error) }` interface-upgrade detected via type assertion; `AdminListUsers` (and any other per-row enrichment loop) uses it when the host's provider implements it, falling back to per-user otherwise. Token minting stays single-user. (File as its own authkit issue when picked up.)
+- [ ] doujins (#390 follow-up): openrailsEntitlementsProvider implements ListEntitlementsBatch via the SDK batch call → admin user list premium badges in ONE call; bump openrails + authkit pins
+- [ ] hentai0 (#168 follow-up): same provider upgrade as doujins (mirrors exactly)
+- [ ] cozy-art: adopt the openrails client AT ALL — AUDIT FINDING 2026-06-11: cozy-art still runs its own direct-SQL entitlements provider (internal/billing/entitlements_provider.go) querying `billing.entitlements.user_id`, a column REMOVED in the tenant_subject hard cut → its mint-time entitlements are silently broken at runtime. Port the doujins #390 pattern wholesale: openrails.Client remote provider (single now, batch with the authkit seam), bump openrails v0.14.0 → v0.16.0+ and authkit v0.19.0 → v0.20.0 (names-only provider contract), delete the SQL provider
+- [ ] tensorhub: no entitlements surface; evaluate `Balance`/`GetCreditAccount`/`BudgetStatus` batch for payer/actor dashboards (it already consumes the batch hot path via AdmitBatch + windows, openrails pinned at a v0.13.x pseudo-version — bump opportunistically when adopting)
 
 ---
