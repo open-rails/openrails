@@ -33,7 +33,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if clock == nil {
 		clock = clockwork.NewRealClock()
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService}); err != nil {
+	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{Config: r.Config}); err != nil {
