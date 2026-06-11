@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 350
+next_id: 351
 
 ---
 
@@ -1086,5 +1086,16 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 **Tasks:**
 - [ ] Widen FlexiblePort to int with 1-65535 range validation in UnmarshalText (keep the string/int flexible parse)
 - [ ] Doujins follow-up: drop the freeLocalPortBelow32768 workaround once a release carries the fix
+
+---
+# #350: config knob diet: remove useless/redundant configuration
+
+**Completed:** no
+**Status:** in_progress 2026-06-11 (Paul: "the fewer knobs we have the easier openrails will be to use operationally"). DONE: PROCESSORS_SOLANA_NETWORK override removed (commit 9b1edec) — Network is now derived purely from the operating mode (devnet under test, mainnet otherwise), koanf tag dropped (field kept as internal derived plumbing), the #348 mainnet-under-test guard deleted as unrepresentable. IN FLIGHT: full audit of config/config.go for fields that are dead (no readers outside config), redundant (superseded by another knob), or doc-only (comments admit the server never uses them); known leads: cloudflared block, ProcessorConfig.TokenizationURL.
+
+**Tasks:**
+- [x] Remove solana network override; derive from mode
+- [ ] Audit every koanf field for DEAD/REDUNDANT/DOC-ONLY; remove confirmed ones
+- [ ] Sweep config.example.yaml + .env.example to match
 
 ---
