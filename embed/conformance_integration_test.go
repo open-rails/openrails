@@ -254,6 +254,31 @@ type scriptResult struct {
 	ErrCloseUnknown           obsErr
 	ErrSettleEmpty            obsErr
 	ErrBatchEmpty             obsErr
+
+	// Entitlements by external (issuer, subject) identity.
+	Entitlements            []obsEntitlement
+	EntitlementsUnknown     int
+	ErrEntitlementsNoIssuer obsErr
+}
+
+type obsEntitlement struct {
+	Entitlement  string
+	SourceType   string
+	HasEnd       bool
+	PayerMatches bool
+}
+
+func observeEntitlements(ents []openrails.EntitlementRecord, payer uuid.UUID) []obsEntitlement {
+	out := make([]obsEntitlement, 0, len(ents))
+	for _, e := range ents {
+		out = append(out, obsEntitlement{
+			Entitlement:  e.Entitlement,
+			SourceType:   e.SourceType,
+			HasEnd:       e.EndAt != nil,
+			PayerMatches: e.TenantSubjectID == payer.String(),
+		})
+	}
+	return out
 }
 
 type obsWindowState struct {
@@ -325,6 +350,10 @@ type scriptEnv struct {
 	resource   string // per-side: ResourceRevenueDaily is cross-payer within the tenant
 	side       string
 	from, to   time.Time
+	// issuer/subject are the payer's EXTERNAL identity (its
+	// billing.tenant_subjects row) for the entitlements steps.
+	issuer  string
+	subject string
 }
 
 // runScript executes the identical operation sequence through one client and
@@ -685,6 +714,18 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	r.ErrSettleEmpty = observeErr(t, env.side+" settle empty batch", err)
 	_, err = c.AdmitBatch(ctx, nil)
 	r.ErrBatchEmpty = observeErr(t, env.side+" admit-batch empty", err)
+
+	// 20) Entitlements by external (issuer, subject): the seeded active row, an
+	// unknown subject (the wire's 200 [] — empty, never an error), and the
+	// missing-issuer validation error.
+	ents, err := c.ListActiveEntitlements(ctx, env.issuer, env.subject, time.Time{})
+	require.NoError(t, err, "%s entitlements", env.side)
+	r.Entitlements = observeEntitlements(ents, env.payer)
+	ghost, err := c.ListActiveEntitlements(ctx, env.issuer, "ghost-"+env.subject, time.Time{})
+	require.NoError(t, err, "%s entitlements unknown subject", env.side)
+	r.EntitlementsUnknown = len(ghost)
+	_, err = c.ListActiveEntitlements(ctx, "", env.subject, time.Time{})
+	r.ErrEntitlementsNoIssuer = observeErr(t, env.side+" entitlements without issuer", err)
 
 	return r
 }

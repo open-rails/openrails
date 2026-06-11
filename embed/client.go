@@ -686,6 +686,55 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 	return nil
 }
 
+// ListActiveEntitlements transcribes
+// handlers.ServiceGetExternalSubjectEntitlements (entitlements.go):
+// issuer/subject required (in that order), an unresolved (issuer, subject) is
+// the empty result (the wire's 200 []), a resolve fault is 500 "failed to
+// resolve tenant subject" and a list fault 500 "failed to fetch entitlements".
+// A zero `at` defaults to the engine clock, like the handler's absent `at`
+// query param. The service-token tenant-subject scope gate is not transcribed
+// — in embedded mode the host IS the principal (see the type comment).
+func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer, subject string, at time.Time) ([]openrails.EntitlementRecord, error) {
+	if strings.TrimSpace(issuer) == "" {
+		return nil, invalidErr("issuer required")
+	}
+	if strings.TrimSpace(subject) == "" {
+		return nil, invalidErr("subject required")
+	}
+	tsid, found, err := c.svc.ResolveTenantSubjectByExternalSubject(ctx, issuer, subject)
+	if err != nil {
+		return nil, internalErr("failed to resolve tenant subject")
+	}
+	if !found {
+		return []openrails.EntitlementRecord{}, nil
+	}
+	recs, err := c.svc.ListActiveEntitlementRecordsForTenantSubject(ctx, tsid, at)
+	if err != nil {
+		return nil, internalErr("failed to fetch entitlements")
+	}
+	out := make([]openrails.EntitlementRecord, 0, len(recs))
+	for _, e := range recs {
+		rec := openrails.EntitlementRecord{
+			ID:              e.ID.String(),
+			TenantSubjectID: e.TenantSubjectID.String(),
+			Entitlement:     e.Entitlement,
+			StartAt:         e.StartAt,
+			EndAt:           e.EndAt,
+			SourceType:      e.SourceType,
+			RevokedAt:       e.RevokedAt,
+			RevokeReason:    e.RevokeReason,
+			CreatedAt:       e.CreatedAt,
+			UpdatedAt:       e.UpdatedAt,
+		}
+		if e.SourceID != nil {
+			sourceStr := e.SourceID.String()
+			rec.SourceID = &sourceStr
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
 // ResourceRevenueDaily transcribes handlers.ServiceResourceRevenue
 // (service_credits.go), including the handler-side total summation.
 func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*openrails.ResourceRevenueResponse, error) {

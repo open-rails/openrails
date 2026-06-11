@@ -82,6 +82,15 @@ type Client interface {
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
 	// payers in the tenant (#410).
 	ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
+	// ListActiveEntitlements returns the entitlement records active at `at` for
+	// the payer addressed by its EXTERNAL identity — the (issuer, subject) pair
+	// the host's auth system already holds (the same key a delegated token pins
+	// via `iss`/`delegated_sub`). A zero `at` means "now". An unknown
+	// (issuer, subject) — a user who has never touched billing — is an empty
+	// slice, not an error. Intended for token-issuance enrichment: bake the
+	// names into your access token's claims and gate per-request from the
+	// token, not from this call.
+	ListActiveEntitlements(ctx context.Context, issuer, subject string, at time.Time) ([]EntitlementRecord, error)
 	// OpenWindow opens a prepaid credit window (#335): a REAL hold — the funds
 	// leave the payer's available balance now. ErrInsufficientCredits on a payer
 	// who can't cover it.
@@ -395,6 +404,22 @@ type ResourceRevenueDailyRow struct {
 type ResourceRevenueResponse struct {
 	RevenueMicros int64                     `json:"revenue_micros"`
 	Daily         []ResourceRevenueDailyRow `json:"daily"`
+}
+
+// EntitlementRecord is one active entitlement row — the handler's
+// ServiceEntitlementRecord wire shape (entitlements.go) verbatim.
+type EntitlementRecord struct {
+	ID              string     `json:"id"`
+	TenantSubjectID string     `json:"tenant_subject_id,omitempty"`
+	Entitlement     string     `json:"entitlement"`
+	StartAt         time.Time  `json:"start_at"`
+	EndAt           *time.Time `json:"end_at,omitempty"`
+	SourceID        *string    `json:"source_id,omitempty"`
+	SourceType      string     `json:"source_type"`
+	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
+	RevokeReason    *string    `json:"revoke_reason,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // OpenWindowRequest is the body for POST /v1/service/credits/windows (#335).

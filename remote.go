@@ -438,6 +438,27 @@ func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitB
 	return out.Items, nil
 }
 
+// ListActiveEntitlements implements Client (handler
+// ServiceGetExternalSubjectEntitlements, entitlements.go). An unknown
+// (issuer, subject) answers 200 [] on the wire — an empty slice, never an
+// error.
+func (c *remote) ListActiveEntitlements(ctx context.Context, issuer, subject string, at time.Time) ([]EntitlementRecord, error) {
+	q := url.Values{}
+	q.Set("issuer", strings.TrimSpace(issuer))
+	q.Set("subject", strings.TrimSpace(subject))
+	if !at.IsZero() {
+		q.Set("at", at.UTC().Format(time.RFC3339))
+	}
+	var out []EntitlementRecord
+	if err := c.do(ctx, http.MethodGet, "/v1/service/tenant-subjects/by-external-subject/entitlements?"+q.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []EntitlementRecord{}
+	}
+	return out, nil
+}
+
 // ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).
 func (c *remote) ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error) {
 	body := map[string]any{
