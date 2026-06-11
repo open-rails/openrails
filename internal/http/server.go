@@ -42,6 +42,14 @@ type Dependencies struct {
 	// nil in verifier-only mode. When present, the server selectively mounts the
 	// intentional AuthKit route groups (never DefaultAPI in locked-down mode).
 	ControlPlane *controlplane.ControlPlane
+	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
+	// the browser-direct self-service surface (issue #339). When set, the host
+	// verifies the incoming credential itself and supplies the explicitly
+	// mapped principal; /v1/self/* + /v1/tenant-admin/* are then mounted even
+	// without a control plane, authenticated by this seam. When both this and
+	// the control plane are configured, the host-supplied authenticator wins
+	// (an explicit override of the default control-plane verifier).
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 }
 
 type Server struct {
@@ -56,8 +64,11 @@ type Server struct {
 	// may also set it explicitly. nil when neither is available — embedded
 	// auth-gated routes then fail closed with 500 (see Options.requiredMW).
 	authenticator billingauth.Authenticator
-	controlPlane  *controlplane.ControlPlane
-	captchaStore  *captcha.ChallengeStore
+	// delegatedAuthenticator is the optional host-supplied identity seam for
+	// the self-service surface (#339); see Dependencies.DelegatedAuthenticator.
+	delegatedAuthenticator billingauth.DelegatedAuthenticator
+	controlPlane           *controlplane.ControlPlane
+	captchaStore           *captcha.ChallengeStore
 
 	// tenancy is the tenant provisioning + lifecycle + per-tenant secret service
 	// (issue #225). Built only when the control plane is present (it owns the
@@ -144,10 +155,11 @@ func New(deps Dependencies) (*Server, error) {
 		// The gin standalone surface needs Optional()/Required() middleware: build
 		// the gin provider from the framework-neutral authenticator (#285). The
 		// embedded net/http surface uses the authenticator directly.
-		authProvider:  ginauth.ProviderFromAuthenticator(deps.Authenticator),
-		authenticator: deps.Authenticator,
-		controlPlane:  deps.ControlPlane,
-		captchaStore:  captcha.NewChallengeStore(deps.Redis),
+		authProvider:           ginauth.ProviderFromAuthenticator(deps.Authenticator),
+		authenticator:          deps.Authenticator,
+		delegatedAuthenticator: deps.DelegatedAuthenticator,
+		controlPlane:           deps.ControlPlane,
+		captchaStore:           captcha.NewChallengeStore(deps.Redis),
 	}
 
 	// Wire the live admin-permission checker onto the runtime so mixed
@@ -403,8 +415,9 @@ func New(deps Dependencies) (*Server, error) {
 	s.registerServiceRoutes(s.publicHandler)
 
 	// Browser-direct self-service API: delegated-access-token-authenticated, on
-	// the SAME public engine (issue #222 browser tier). No-op without a control
-	// plane (verifier-only mode has no delegated-token issuer).
+	// the SAME public engine (issue #222 browser tier). Mounted when the control
+	// plane OR a host-supplied DelegatedAuthenticator is configured (#339);
+	// no-op otherwise.
 	s.registerSelfServiceRoutes(s.publicHandler)
 
 	// Tenant-scoped webhook routing (issue #225): /v1/t/:tenant/webhooks/:provider

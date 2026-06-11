@@ -20,18 +20,24 @@ type Options struct {
 	// Authenticator is the framework-neutral auth boundary (gin-free). When nil,
 	// the default AuthKit-backed authenticator is built from config.
 	Authenticator billingauth.Authenticator
-	Cache         cache.Cache
-	Clock         clockwork.Clock
+	// DelegatedAuthenticator is the optional host-pluggable identity seam for
+	// the delegated self-service surface (#339). When nil, that surface
+	// authenticates via the control plane's delegated-token verifier (and is
+	// not mounted in verifier-only mode).
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+	Cache                  cache.Cache
+	Clock                  clockwork.Clock
 }
 
 // NewApp constructs the long-lived application runtime.
 func NewApp(cfg *config.Config, opts *Options) (*app.App, error) {
 	application, err := app.BootstrapWithOptions(cfg, &app.BootstrapOptions{
-		PGXPool:       optsValue(opts, func(o *Options) *pgxpool.Pool { return o.PGXPool }),
-		Redis:         optsValue(opts, func(o *Options) *redis.Client { return o.Redis }),
-		Authenticator: optsValue(opts, func(o *Options) billingauth.Authenticator { return o.Authenticator }),
-		Cache:         optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),
-		Clock:         optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
+		PGXPool:                optsValue(opts, func(o *Options) *pgxpool.Pool { return o.PGXPool }),
+		Redis:                  optsValue(opts, func(o *Options) *redis.Client { return o.Redis }),
+		Authenticator:          optsValue(opts, func(o *Options) billingauth.Authenticator { return o.Authenticator }),
+		DelegatedAuthenticator: optsValue(opts, func(o *Options) billingauth.DelegatedAuthenticator { return o.DelegatedAuthenticator }),
+		Cache:                  optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),
+		Clock:                  optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

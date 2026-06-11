@@ -140,11 +140,12 @@ func newServer(e *embedded.Embedded) (*server.Server, error) {
 		}
 	}
 	return server.New(server.Dependencies{
-		Config:        a.Config,
-		Cache:         a.Cache,
-		Runtime:       a.Runtime,
-		Redis:         a.RedisClient,
-		Authenticator: a.Authenticator,
-		ControlPlane:  embcp.Get(a),
+		Config:                 a.Config,
+		Cache:                  a.Cache,
+		Runtime:                a.Runtime,
+		Redis:                  a.RedisClient,
+		Authenticator:          a.Authenticator,
+		DelegatedAuthenticator: a.DelegatedAuthenticator,
+		ControlPlane:           embcp.Get(a),
 	})
 }

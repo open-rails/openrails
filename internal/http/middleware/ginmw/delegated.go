@@ -12,6 +12,8 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/authprovider"
+	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -114,6 +116,107 @@ func DelegatedSelfRequired(resolver DelegatedResolver) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// DelegatedPrincipalRequired authenticates a tenant-scoped self-service route
+// with a HOST-SUPPLIED billingauth.DelegatedAuthenticator (issue #339): when
+// OpenRails runs as a SUBSYSTEM of a host application, the host verifies its
+// own credential and returns the explicitly mapped principal — one system,
+// one credential. It is the host-pluggable counterpart of
+// DelegatedSelfRequired and produces the EXACT SAME context payload (pinned
+// tenant, acting user, resolved-delegated record), so every downstream
+// handler and RequireDelegatedPermission gate works unchanged.
+//
+// EXPLICIT MAPPING — NO FALLBACKS: the principal must carry the resolved
+// tenant id and subject. A principal with an empty/unparseable tenant, an
+// empty subject, no permissions, or any permission outside the delegated
+// catalog (`openrails:self:*` / `openrails:tenant:*`) is rejected (401, fail
+// closed) — mirroring the verify-time catalog gate on real delegated tokens,
+// so a host can never smuggle a service/operator grant onto the browser
+// surface.
+func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if authn == nil {
+			response.InternalError(c, "delegated authentication not configured")
+			c.Abort()
+			return
+		}
+
+		principal, err := authn.AuthenticateDelegated(c.Request.Context(), c.Request)
+		if err != nil {
+			response.UnauthorizedWithMessage(c, billingauth.UnauthenticatedMessage(err))
+			c.Abort()
+			return
+		}
+		resolved, verr := resolvedFromHostPrincipal(principal)
+		if verr != nil {
+			response.UnauthorizedWithMessage(c, "delegated_principal_invalid")
+			c.Abort()
+			return
+		}
+
+		// Identical context payload to DelegatedSelfRequired: pin the resolved
+		// tenant (#223), bind the acting user, and record the delegated state for
+		// the per-route permission gates.
+		ctx := tenant.WithID(c.Request.Context(), resolved.TenantID)
+		uc := authprovider.UserContext{
+			UserID:        resolved.DelegatedSubject,
+			Email:         resolved.Email,
+			EmailVerified: resolved.EmailVerified,
+			Username:      resolved.Username,
+			Tenant:        resolved.Tenant,
+		}
+		ctx = authprovider.SetUserContext(ctx, uc)
+		c.Request = c.Request.WithContext(ctx)
+		c.Set("billing.user_context", uc)
+		c.Set("billing.tenant_id", resolved.TenantID)
+		c.Set(DelegatedContextKey, resolved)
+
+		c.Next()
+	}
+}
+
+// resolvedFromHostPrincipal validates a host-supplied principal and converts
+// it to the *controlplane.ResolvedDelegated shape the delegated context
+// carries. Validation is strict and fail-closed: explicit tenant + subject,
+// at least one permission, and every permission inside the delegated catalog.
+func resolvedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*controlplane.ResolvedDelegated, error) {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	tenantID, err := tenant.ParseID(strings.TrimSpace(p.TenantID))
+	if err != nil || tenantID.IsZero() {
+		return nil, billingauth.ErrDelegatedPrincipalInvalid
+	}
+	subject := strings.TrimSpace(p.SubjectID)
+	if len(p.Permissions) == 0 {
+		return nil, billingauth.ErrDelegatedPrincipalInvalid
+	}
+	perms := make([]string, 0, len(p.Permissions))
+	for _, perm := range p.Permissions {
+		perm = strings.TrimSpace(perm)
+		if !controlplane.IsDelegatedPermission(perm) {
+			return nil, billingauth.ErrDelegatedPrincipalInvalid
+		}
+		perms = append(perms, perm)
+	}
+
+	return &controlplane.ResolvedDelegated{
+		Tenant:     strings.TrimSpace(p.TenantSlug),
+		TenantID:   tenantID,
+		TenantSlug: strings.TrimSpace(p.TenantSlug),
+		// The self handlers key billing rows by the subject's own UUID
+		// (identity.TenantSubjectIDFromString), so mirror that derivation here.
+		// Zero when the subject is not a UUID — exactly like the handlers, which
+		// reject a zero payer.
+		TenantSubjectID:  identity.TenantSubjectIDFromString(subject).UUID(),
+		DelegatedSubject: subject,
+		Issuer:           strings.TrimSpace(p.Actor),
+		Permissions:      perms,
+		Email:            p.Email,
+		EmailVerified:    p.EmailVerified,
+		Username:         p.Username,
+	}, nil
 }
 
 // RequireDelegatedPermission gates a self-service route on a specific

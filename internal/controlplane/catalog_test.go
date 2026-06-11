@@ -22,6 +22,8 @@ func TestCatalog_ContainsRequiredPermissions(t *testing.T) {
 		"openrails:subscriptions:cancel",
 		// Self-service (browser-direct) permissions (#222 browser tier).
 		"openrails:self:billing:read",
+		// Self account-settings write (#339 gap-fill).
+		"openrails:self:billing:write",
 		"openrails:self:checkout:create",
 		"openrails:self:subscriptions:cancel",
 		"openrails:self:payment-methods:manage",

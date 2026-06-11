@@ -28,6 +28,14 @@ type App struct {
 	// (#285).
 	Authenticator billingauth.Authenticator
 
+	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
+	// the browser-direct self-service surface (issue #339): the host verifies
+	// the incoming credential itself and supplies the explicitly mapped
+	// {tenant, subject, permissions} principal. When set, the standalone/gin
+	// server mounts /v1/self/* + /v1/tenant-admin/* authenticated by this seam
+	// even without a control plane.
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+
 	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224),
 	// held as `any` so the embedded CORE (internal/app, pkg/embedded, embedhttp)
 	// imports neither internal/controlplane nor — through it — AuthKit (#284). It
@@ -68,8 +76,11 @@ type BootstrapOptions struct {
 	// authenticator and auth-gated routes fail closed. Hosts opt into the AuthKit
 	// verifier via pkg/embedded/authkit.NewVerifierAuthenticator and pass it here.
 	Authenticator billingauth.Authenticator
-	Cache         cache.Cache
-	Clock         clockwork.Clock
+	// DelegatedAuthenticator is the optional host-pluggable identity seam for
+	// the delegated self-service surface (#339); see App.DelegatedAuthenticator.
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+	Cache                  cache.Cache
+	Clock                  clockwork.Clock
 }
 
 // Bootstrap initialises core services, caches, and auth verifier.
@@ -101,8 +112,10 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 	// (#284). It no longer builds an AuthKit verifier here; hosts/standalone opt in
 	// via pkg/embedded/authkit.NewVerifierAuthenticator and pass the result here.
 	var authenticator billingauth.Authenticator
+	var delegatedAuthenticator billingauth.DelegatedAuthenticator
 	if opts != nil {
 		authenticator = opts.Authenticator
+		delegatedAuthenticator = opts.DelegatedAuthenticator
 	}
 
 	var dbOverride *db.DB
@@ -149,12 +162,13 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 	}
 
 	app := &App{
-		Config:           cfg,
-		Runtime:          runtime,
-		Cache:            appCache,
-		RedisClient:      runtime.RedisClient,
-		Authenticator:    authenticator,
-		stopRedisMonitor: stop,
+		Config:                 cfg,
+		Runtime:                runtime,
+		Cache:                  appCache,
+		RedisClient:            runtime.RedisClient,
+		Authenticator:          authenticator,
+		DelegatedAuthenticator: delegatedAuthenticator,
+		stopRedisMonitor:       stop,
 	}
 
 	// The OpenRails-owned AuthKit control plane (#224) is no longer built here

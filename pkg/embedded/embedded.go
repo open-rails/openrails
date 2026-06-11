@@ -28,7 +28,18 @@ type Options struct {
 	// default AuthKit-backed authenticator is built from Config. Hosts that have a
 	// gin Provider can adapt it with ginauth.AsAuthenticator (#285).
 	Authenticator billingauth.Authenticator
-	Cache         cache.Cache
+	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
+	// the browser-direct self-service surface (/v1/self/* + /v1/tenant-admin/*,
+	// issue #339). A host that verifies platform credentials itself implements
+	// billingauth.DelegatedAuthenticator and returns the EXPLICITLY mapped
+	// {tenant, subject, permissions} principal; the standalone/gin handler then
+	// mounts the self surface authenticated by it, even without a control
+	// plane. When nil, the surface authenticates via the control plane's
+	// delegated-token verifier (the default), and is not mounted in
+	// verifier-only mode. See billingauth.DelegatedAuthenticatorFunc for a
+	// closure example.
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+	Cache                  cache.Cache
 }
 
 type Embedded struct {
@@ -45,10 +56,11 @@ func New(opts Options) (*Embedded, error) {
 	// constructs the gin server from this App on demand (#285). Keeping the gin
 	// server out of this core type is what makes pkg/embedded gin-free.
 	application, err := bootstrap.NewApp(opts.Config, &bootstrap.Options{
-		PGXPool:       opts.PGXPool,
-		Redis:         opts.Redis,
-		Authenticator: opts.Authenticator,
-		Cache:         opts.Cache,
+		PGXPool:                opts.PGXPool,
+		Redis:                  opts.Redis,
+		Authenticator:          opts.Authenticator,
+		DelegatedAuthenticator: opts.DelegatedAuthenticator,
+		Cache:                  opts.Cache,
 	})
 	if err != nil {
 		return nil, err

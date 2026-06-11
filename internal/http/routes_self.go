@@ -18,28 +18,48 @@ import (
 // logged-in end-user; the browser calls OpenRails directly with it. Every
 // operation is scoped to the token's delegated_sub + resolved tenant.
 //
-// Mounted only when the OpenRails-owned AuthKit control plane is configured (it
-// owns the delegated-token verifier). In verifier-only mode there is no delegated
-// issuer and the self-service surface is not mounted.
+// IDENTITY IS HOST-PLUGGABLE (issue #339): the surface is mounted when EITHER
+// the OpenRails-owned AuthKit control plane (the default delegated-token
+// verifier) OR a host-supplied billingauth.DelegatedAuthenticator is
+// configured. A host running OpenRails as a subsystem verifies its own
+// credential and supplies the explicitly mapped principal — one system, one
+// credential; the host-supplied seam takes precedence when both are present.
+// With neither configured there is no delegated identity source and the
+// surface is not mounted.
 func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
-	if s.controlPlane == nil {
-		log.Info("control plane disabled; delegated self-service API routes will not be mounted")
+	delegatedMW := s.delegatedMiddleware()
+	if delegatedMW == nil {
+		log.Info("no delegated identity source (control plane or host delegated authenticator); self-service API routes will not be mounted")
 		return
 	}
 
 	group := e.Group(StandaloneV1Prefix + httproutes.SelfRoutePrefix)
-	httproutes.RegisterSelfServiceRoutes(group, s.runtime, ginmw.DelegatedSelfRequired(s.controlPlane))
+	httproutes.RegisterSelfServiceRoutes(group, s.runtime, delegatedMW)
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")
 
-	// Browser-direct TENANT-ADMIN surface (issue #259): the SAME delegated-token
+	// Browser-direct TENANT-ADMIN surface (issue #259): the SAME delegated
 	// middleware authenticates; per-route gates require `openrails:tenant:*`
 	// permissions and the handlers act on a `:user_id` WITHIN the token's pinned
 	// tenant. Mounted on the same public engine alongside /v1/self/*.
 	adminGroup := e.Group(StandaloneV1Prefix + httproutes.TenantAdminRoutePrefix)
-	httproutes.RegisterTenantAdminRoutes(adminGroup, s.runtime, ginmw.DelegatedSelfRequired(s.controlPlane))
+	httproutes.RegisterTenantAdminRoutes(adminGroup, s.runtime, delegatedMW)
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.TenantAdminRoutePrefix).
 		Info("delegated tenant-admin API routes registered on public handler")
+}
+
+// delegatedMiddleware picks the delegated-identity middleware for the
+// self-service + tenant-admin surfaces (#339): the host-supplied
+// DelegatedAuthenticator when present (an explicit override), else the
+// control plane's delegated-token verifier, else nil (surface not mounted).
+func (s *Server) delegatedMiddleware() gin.HandlerFunc {
+	if s.delegatedAuthenticator != nil {
+		return ginmw.DelegatedPrincipalRequired(s.delegatedAuthenticator)
+	}
+	if s.controlPlane != nil {
+		return ginmw.DelegatedSelfRequired(s.controlPlane)
+	}
+	return nil
 }

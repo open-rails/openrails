@@ -191,6 +191,17 @@ func RegisterSelfServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 
 	read := ginmw.RequireDelegatedPermission(controlplane.PermSelfBillingRead)
 
+	// Credit ACCOUNT surface (issue #339 gap-fill): the caller's OWN account
+	// settings + balance/outstanding, settings writes, and transaction history.
+	// The subject is ALWAYS the delegated principal's subject — no
+	// tenant_subject_id parameter exists on this surface. Settings writes are
+	// gated by the dedicated self billing:write permission so a read-only token
+	// can inspect but never reconfigure.
+	billingWrite := ginmw.RequireDelegatedPermission(controlplane.PermSelfBillingWrite)
+	group.GET("/account", read, wrap(httphandlers.GetMyCreditAccount))
+	group.PUT("/account/settings", billingWrite, wrap(httphandlers.SetMyCreditAccountSettings))
+	group.GET("/account/transactions", read, wrap(httphandlers.GetMyAccountTransactions))
+
 	// Account + balance/credits read.
 	group.GET("/status", read, wrap(httphandlers.GetMyBillingStatus))
 	group.GET("/credits", read, wrap(httphandlers.GetMyCredits))

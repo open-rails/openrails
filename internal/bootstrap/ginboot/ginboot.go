@@ -65,12 +65,13 @@ func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
 	}
 
 	billingServer, err := server.New(server.Dependencies{
-		Config:        application.Config,
-		Cache:         application.Cache,
-		Runtime:       application.Runtime,
-		Redis:         application.RedisClient,
-		Authenticator: application.Authenticator,
-		ControlPlane:  embcp.Get(application),
+		Config:                 application.Config,
+		Cache:                  application.Cache,
+		Runtime:                application.Runtime,
+		Redis:                  application.RedisClient,
+		Authenticator:          application.Authenticator,
+		DelegatedAuthenticator: application.DelegatedAuthenticator,
+		ControlPlane:           embcp.Get(application),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create billing server: %w", err)

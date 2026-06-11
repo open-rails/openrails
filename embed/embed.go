@@ -21,7 +21,29 @@ import (
 )
 
 // Options configures the embedded runtime. It wraps pkg/embedded.Options
-// (Config, PGXPool, Redis, Authenticator, Cache) and adds lifecycle switches.
+// (Config, PGXPool, Redis, Authenticator, DelegatedAuthenticator, Cache) and
+// adds lifecycle switches.
+//
+// DelegatedAuthenticator (issue #339) is the host-pluggable identity seam for
+// the browser-direct self-service surface: a host that verifies its own
+// credentials supplies a billingauth.DelegatedAuthenticator returning the
+// explicitly mapped {tenant, subject, permissions} principal, and the
+// standalone gin handler (pkg/embedded/gin.Handler over Runtime.Embedded())
+// mounts /v1/self/* + /v1/tenant-admin/* authenticated by it — no control
+// plane required. For example:
+//
+//	opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
+//		func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+//			user, err := hostAuth.Verify(r) // the host's own credential check
+//			if err != nil {
+//				return nil, billingauth.ErrUnauthenticated
+//			}
+//			return &billingauth.DelegatedPrincipal{
+//				TenantID:    tenant.DefaultID.String(), // explicit per-deployment mapping
+//				SubjectID:   user.CanonicalID,
+//				Permissions: []string{"openrails:self:billing:read"},
+//			}, nil
+//		})
 type Options struct {
 	embedded.Options
 

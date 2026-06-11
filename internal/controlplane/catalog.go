@@ -80,7 +80,13 @@ const (
 	// server-to-server service token permissions above, `openrails:self:*` authorizes a
 	// human end-user (the token's `delegated_sub`) to manage ONLY their own
 	// billing — never another user's and never operator/admin surfaces.
-	PermSelfBillingRead        = "openrails:self:billing:read"
+	PermSelfBillingRead = "openrails:self:billing:read"
+	// PermSelfBillingWrite gates self-service WRITES to the caller's OWN
+	// billing-account settings (billing mode, spend caps, auto-top-up — issue
+	// #339 account-settings gap-fill). Deliberately distinct from
+	// PermSelfBillingRead so a read-only token can inspect but never
+	// reconfigure its account.
+	PermSelfBillingWrite       = "openrails:self:billing:write"
 	PermSelfCheckoutCreate     = "openrails:self:checkout:create"
 	PermSelfSubscriptionCancel = "openrails:self:subscriptions:cancel"
 	PermSelfPaymentMethods     = "openrails:self:payment-methods:manage"
@@ -143,6 +149,7 @@ var catalogEntries = []Permission{
 	{Name: PermPaymentsRefund, Description: "Refund payments."},
 	{Name: PermSubscriptionsCancel, Description: "Cancel subscriptions on behalf of the operator."},
 	{Name: PermSelfBillingRead, Description: "Self-service: read your own balance, credits, transactions, subscriptions, and payment history."},
+	{Name: PermSelfBillingWrite, Description: "Self-service: configure your own billing-account settings (billing mode, spend caps, auto-top-up)."},
 	{Name: PermSelfCheckoutCreate, Description: "Self-service: create your own checkout sessions."},
 	{Name: PermSelfSubscriptionCancel, Description: "Self-service: cancel your own subscriptions."},
 	{Name: PermSelfPaymentMethods, Description: "Self-service: manage your own payment methods."},
@@ -160,6 +167,7 @@ var catalogEntries = []Permission{
 // not carry operator/server-to-server grants.
 var selfCatalog = map[string]struct{}{
 	PermSelfBillingRead:        {},
+	PermSelfBillingWrite:       {},
 	PermSelfCheckoutCreate:     {},
 	PermSelfSubscriptionCancel: {},
 	PermSelfPaymentMethods:     {},
@@ -170,6 +178,7 @@ var selfCatalog = map[string]struct{}{
 func SelfCatalogNames() []string {
 	return []string{
 		PermSelfBillingRead,
+		PermSelfBillingWrite,
 		PermSelfCheckoutCreate,
 		PermSelfSubscriptionCancel,
 		PermSelfPaymentMethods,
