@@ -102,11 +102,29 @@ type LocalPaymentMethod struct {
 	ExpiryDate      string
 }
 
+// LocalPrice is the slice of billing.prices the PS-1 materializer consumes:
+// the catalog provider_links (processors jsonb) map remote plan ids onto
+// local prices.
+type LocalPrice struct {
+	ID               uuid.UUID
+	ProductID        uuid.UUID
+	Amount           int64
+	Currency         string
+	BillingCycleDays *int
+	Status           string
+	// Processors is the provider-links blob: processor name -> config map
+	// (plan_id / price_id / ...), as written by catalog bootstrap.
+	Processors map[string]map[string]string
+}
+
 // LocalState is one provider's local billing state, loaded tenant-scoped.
 type LocalState struct {
 	Subscriptions  []LocalSubscription
 	Entitlements   []LocalEntitlement
 	PaymentMethods []LocalPaymentMethod
+	// Prices are the billable prices carrying provider links (all providers;
+	// the diff filters by the provider's local processor names).
+	Prices []LocalPrice
 }
 
 // LocalStateLoader loads the local rows the diff engine compares against a
@@ -191,6 +209,30 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider) (*Loca
 			StartAt:         row.StartAt,
 			EndAt:           row.EndAt,
 		})
+	}
+
+	prices, err := q.ReconcileListPricesWithProcessors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range prices {
+		p := LocalPrice{
+			ID:        row.ID,
+			ProductID: row.ProductID,
+			Amount:    row.Amount,
+			Currency:  row.Currency,
+			Status:    row.Status,
+		}
+		if row.BillingCycleDays != nil {
+			days := int(*row.BillingCycleDays)
+			p.BillingCycleDays = &days
+		}
+		if len(row.Processors) > 0 {
+			// Tolerate malformed blobs: a price whose links can't decode simply
+			// never matches a remote plan (PS-1 stays admin_pending).
+			_ = json.Unmarshal(row.Processors, &p.Processors)
+		}
+		state.Prices = append(state.Prices, p)
 	}
 
 	pms, err := q.ReconcileListPaymentMethodsByProcessors(ctx, names)

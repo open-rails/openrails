@@ -22,6 +22,10 @@ type adminReconcileRunRequest struct {
 	Providers []string `json:"providers"` // empty = all configured
 	Since     string   `json:"since"`     // RFC3339 or YYYY-MM-DD
 	Until     string   `json:"until"`
+	// Materialize (enforce-only, explicit opt-in — bootstrap mode v1.1):
+	// auto-create local subscriptions for PS-1 findings whose identity AND
+	// plan resolve unambiguously; everything else stays admin_pending.
+	Materialize bool `json:"materialize"`
 }
 
 type adminReconcileFindingPath struct {
@@ -75,6 +79,10 @@ func AdminReconcileRun(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "mode must be advisory or enforce")
 		return
 	}
+	if req.Materialize && mode != reconcile.ModeEnforce {
+		r.ErrorJSON(http.StatusBadRequest, "materialize requires mode=enforce (advisory never writes)")
+		return
+	}
 	since, err := parseReconcileTime(req.Since)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid since: "+err.Error())
@@ -95,10 +103,11 @@ func AdminReconcileRun(r *httprequest.Request) {
 		return
 	}
 	res, err := eng.Run(r.Request.Context(), reconcile.RunParams{
-		Mode:      mode,
-		Providers: providers,
-		Since:     since,
-		Until:     until,
+		Mode:        mode,
+		Providers:   providers,
+		Since:       since,
+		Until:       until,
+		Materialize: req.Materialize,
 	})
 	if err != nil {
 		if res != nil {

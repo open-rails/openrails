@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 361
+next_id: 362
 
 ---
 
@@ -135,7 +135,7 @@ Plan and implement OpenRails-owned USDC funding sessions for host apps that need
 # #107: processor-reconcile (was: processor-sync)
 
 **Completed:** no
-**Status:** redesigned 2026-06-10 per Paul: all configured providers (stripe, nmi/mobius, ccbill, solana) where possible; advisory + enforce modes; remote system is source of truth and is NEVER mutated (admin action queue for cancels/refunds); doubles as empty-instance bootstrap/restore. PHASE 1 (provider fetchers + normalized snapshot model, internal/reconcile) implemented 2026-06-11. PHASE 2 implemented 2026-06-11 per the phase-2 design decisions: migration 008 (reconciliation_runs + reconciliation_findings with stable identity + RLS), diff engine PS-1..PS-9 (engine.go/diff.go/findings.go), enforce appliers (local writes only, idempotent), dunning forensics in the run summary, CLI (`billing reconcile check|fix|report`) + admin API (POST/GET /v1/admin/reconcile/runs, findings list + ack/dismiss); unit + integration suites green; live read-only advisory smoke verified against the NMI sandbox (58 subs -> 58 PS-1, 4 PS-8, 46 PS-4) and the Stripe test account (13 subs -> 11 PS-1; 2 terminal subs correctly skipped). Remaining tails: doujins-cutover runbook doc; ClickHouse third evidence source for forensics (decision added 2026-06-11, not yet wired); provider_links plan mapping (not needed while PS-1 is admin-pending).
+**Status:** redesigned 2026-06-10 per Paul: all configured providers (stripe, nmi/mobius, ccbill, solana) where possible; advisory + enforce modes; remote system is source of truth and is NEVER mutated (admin action queue for cancels/refunds); doubles as empty-instance bootstrap/restore. PHASE 1 (provider fetchers + normalized snapshot model, internal/reconcile) implemented 2026-06-11. PHASE 2 implemented 2026-06-11 per the phase-2 design decisions: migration 008 (reconciliation_runs + reconciliation_findings with stable identity + RLS), diff engine PS-1..PS-9 (engine.go/diff.go/findings.go), enforce appliers (local writes only, idempotent), dunning forensics in the run summary, CLI (`billing reconcile check|fix|report`) + admin API (POST/GET /v1/admin/reconcile/runs, findings list + ack/dismiss); unit + integration suites green; live read-only advisory smoke verified against the NMI sandbox (58 subs -> 58 PS-1, 4 PS-8, 46 PS-4) and the Stripe test account (13 subs -> 11 PS-1; 2 terminal subs correctly skipped). TAILS CLOSED 2026-06-11: (1) ClickHouse third evidence source wired into the forensics (reconcile/history.go + analytics.DunningHistoryService; per-sub timelines tagged provider|local|history, "last dunning action per ANY source" aggregate, graceful degradation note when CH absent/unreachable — query + scan contract live-validated read-only against the dev ClickHouse); (2) PS-1 materialization (bootstrap mode v1.1): `billing reconcile fix --materialize` / admin POST `materialize:true` (enforce-only, explicit opt-in) auto-creates local subs when identity (single vault/email match) AND plan (catalog provider_links) both resolve unambiguously — which also closes the provider_links plan-mapping tail; (3) docs/operations.md verified+refreshed against the implementation; README Documentation section links it. Remaining tail: doujins-cutover runbook doc (operations.md's cutover-posture section covers the levers; a step-by-step cutover sequence is still open). CCBill remains NOT live-validated (DataLink creds still absent).
 
 Reconcile local OpenRails billing state against the payment processors as the source of truth, for ALL configured providers where the provider exposes the data: Stripe, NMI/Mobius, CCBill, Solana. Two modes: advisory (report only) and enforce (converge local state to the processor's declared state). The tool NEVER mutates the remote processor — remote actions (cancel, refund) are queued for an admin.
 
@@ -226,13 +226,13 @@ Cross-referencing the two distinguishes 'dunning tried and failed' (local retry 
 - [x] CCBill fetcher: extend DataLink beyond ACTIVEMEMBERS (expired/cancellation/transaction/chargeback exports) — ccbill.FetchTransactionExport (REBILL/CANCELLATION/EXPIRE/REFUND/CHARGEBACK over MST-clock date ranges) + reconcile/ccbill.go normalization; NOT live-validated (no DataLink credentials available), per-type CSV columns follow the long-standing legacy integrations and raw rows are preserved verbatim
 - [x] Stripe fetcher: subscriptions, charges/invoices, refunds, disputes — reconcile/stripe.go, raw GETs through stripeapi.ReadOnlyClient with cursor pagination; vault from expanded default_payment_method; verified live against the cozy-art test account (13 subs, 19 charges, 12 vault entries)
 - [x] Solana fetcher: on-chain subscription accounts + payment signature scan (respect *AtSlot/ReadUntilConsistent read-lag rules) — reconcile/solana.go, minimal by design: caller-supplied local sub refs -> subscription PDA existence + DecodePlanAccount + signature listing (SignatureInfo gained BlockTime); bulk point-in-time reads use plain GetAccountData (read-lag gating only applies to post-tx reads)
-- [x] Identity + plan matching: processor_subscription_id first, email/username/merchant-defined fallback — phase 2 (diff.go correlator: psid -> NMI order_id breadcrumb `rebill-<subID>-<unix>`/bare-uuid -> vault/customer id -> email; ZERO or MULTIPLE candidates = admin_pending, never guess); provider_links plan mapping deferred (PS-1 is admin-pending in v1, nothing materializes)
+- [x] Identity + plan matching: processor_subscription_id first, email/username/merchant-defined fallback — phase 2 (diff.go correlator: psid -> NMI order_id breadcrumb `rebill-<subID>-<unix>`/bare-uuid -> vault/customer id -> email; ZERO or MULTIPLE candidates = admin_pending, never guess); provider_links plan mapping landed 2026-06-11 with --materialize (buildPlanIndex over prices.processors jsonb: plan_id/price_id keys under the provider's local processor names; exactly one matching billable price resolves, zero/multiple blocks)
 - [x] Diff engine producing PS-1..PS-9 findings; migrations for reconciliation_runs + reconciliation_findings (lifecycle: open -> auto_fixed | admin_pending -> resolved/dismissed) — phase 2: migration 008 (stable identity UNIQUE(tenant,provider,finding_type,subject_key), RLS like neighbors), upsert-by-identity (re-runs update; dismissed stays dismissed), auto_vanished on disappearance (txn-window types PS-4/5/6 only when the run's window re-covered the transaction); capability-gated checks; NMI absence circuit breaker (remote live < 10% of local live when local >= 10 -> abort provider run, decision 6); DeletionScheduledAt intent annotation keeps recorded-delete drift out of the admin queue (decision 5)
 - [x] Advisory mode: run + persisted, queryable report (counts by type/severity, per-user detail) — phase 2: zero local writes (proven by test), summary jsonb per provider, `billing reconcile check` + report rendering (table/json)
-- [x] Dunning forensics: per-subscription processor charge-attempt timeline (incl. declines) cross-referenced with local retry fields; aggregate report (when dunning last ran, never-attempted vs attempted-and-failed, decline reasons) — phase 2: forensics.go, persisted in the run summary + rendered in report output; ClickHouse third evidence source (2026-06-11 decision) not yet wired
+- [x] Dunning forensics: per-subscription processor charge-attempt timeline (incl. declines) cross-referenced with local retry fields; aggregate report (when dunning last ran, never-attempted vs attempted-and-failed, decline reasons) — phase 2: forensics.go, persisted in the run summary + rendered in report output; ClickHouse third evidence source WIRED 2026-06-11: HistoryEventSource (reconcile/history.go) over analytics.DunningHistoryService (payment_events + subscription_events, tenant-scoped, correlated by local subscription uuid then processor_subscription_id), merged per-sub timeline entries tagged provider|local|history, history failures count as decline evidence for never_attempted classification, aggregates gain last provider/history attempt + "last dunning action per ANY source"; CH unconfigured/unreachable -> history_source note in the report, NEVER a run error (unit-tested incl. the degradation path; SQL + scan types live-validated read-only against dev ClickHouse)
 - [x] Enforce mode: local-only convergence appliers (subscription status/periods, entitlement grant/revoke, payment backfill) — phase 2: appliers.go, idempotent (rerun proven a write no-op), local writes only so it works under mode=readonly; PS-2 cancel(cancel_type=expired)+revoke, PS-3 adopt status/periods (never resurrects locally-cancelled subs), PS-4 backfill ON CONFLICT(tenant,processor,transaction_id)+current-period grant, PS-5 refund record/mark, PS-7 vault adopt, PS-9 grant/revoke SUBSCRIPTION-sourced only (admin grants + grace untouched; IsEntitlementExpirationDisabled -> logged skip); PS-1/PS-6/PS-8 never auto-applied
 - [x] Admin action queue: requires_admin findings with recommended remote action (e.g. cancel duplicate + refund); ack/dismiss endpoints — phase 2: findings with requires_admin=true + status=admin_pending, recommended_action text, POST /v1/admin/reconcile/findings/:id/{ack,dismiss} {notes}
-- [ ] Bootstrap mode: materialize local records from a RemoteSnapshot into an empty instance (disaster recovery) — deferred by design (decision 4: PS-1 ships admin-pending in v1; catalog-direction bootstrap is #356)
+- [x] Bootstrap mode: materialize local records from a RemoteSnapshot into an empty instance (disaster recovery) — v1.1 shipped 2026-06-11 as an EXPLICIT OPT-IN: `billing reconcile fix --materialize` + `materialize:true` on the admin POST (enforce-only; advisory+materialize is rejected). PS-1 auto-creates ONLY when identity resolves to a single subject (vault id -> payment method, or unique email match; zero/multiple = admin_pending with the blocker documented in remote_evidence.materialize_blocked) AND the plan maps to exactly one billable price via provider_links; created sub adopts remote status/periods (past_due without a period end stays blocked: chk constraint), snapshots the product entitlements/credits specs (ReconcileMaterializeSubscription, idempotent via NOT EXISTS on processor_subscription_id), backfills the snapshot's latest successful charge, grants entitlements via the normal subscription-sourced path; finding resolves enforced with materialization evidence. Without the flag PS-1 behavior is byte-for-byte unchanged. Unit suite (6 cases) + integration test (resolvable + unresolvable PS-1 under RLS, no-flag run unchanged, idempotent re-run) green
 - [x] Admin API endpoints (POST /admin/v1/reconcile/runs, GET runs/{id}, findings list/ack) + thin CLI wrapper — phase 2: synchronous POST /v1/admin/reconcile/runs {mode, providers, since, until} -> run+summary+findings, GET runs / runs/:id / findings?status=&provider=&type=&admin_queue=, ack/dismiss; CLI `billing reconcile check|fix|report [--provider --since --until --tenant --format table|json]` over the same engine (cmd/billing/reconcile.go)
 - [ ] Optional: River-scheduled advisory run + alerting on new findings — REJECTED per decision 3 (manual-only; no recurring runs)
 - [x] Tests with mocked fetchers per provider — phase 2: table-driven unit suite across the whole taxonomy (fake fetchers/store/writer: identity stability, auto-resolve, breaker abort, intent annotation, capability gating, ambiguous identity, enforce idempotency, advisory-never-writes, dismissed-stays-dismissed) + integration suite (-tags=integration: seeded PG, advisory persists, enforce converges + admin queue holds PS-1/PS-8, rerun stable, ack lifecycle); also fixed internal/dbtest createExternalTestDatabase silently aliasing the admin/dev DB (pgx ConnString() returns the ORIGINAL dsn), which had bricked the external-DB integration path
@@ -1075,7 +1075,7 @@ Catalog is the one domain where OPENRAILS is the source of truth, so sync direct
 ## Per-provider guarantee under MODE=test
 
 - **Stripe**: keys are self-identifying (sk_/rk_ test/live prefixes). A live key under sandbox-money mode is now a HARD Validate error (was: warn + disable). Test key under live mode stays warn+disable (already harmless).
-- **NMI**: undetectable by configuration — sandbox accounts hit the SAME production gateway URL and keys carry no marker (confirmed against docs.nmi.com). Detection instead fingerprints the gateway's documented Test Mode simulation behavior (docs.nmi.com/reference/testing-methods: test card + amount>=1.00 -> simulated APPROVE, amount<1.00 -> simulated DECLINE, nothing reaches a processor): boot probe runs ONE auth $1.00 on the documented test card (4111.../10-29). SIMPLIFIED per Paul 2026-06-11: 4111 is a non-issued PAN no production processor can EVER approve, so approval alone is conclusive proof of simulation — the earlier second $0.50 sub-dollar-decline check was dropped (it encoded NMI's specific simulator rules and could false-positive a white-label NMI-compatible gateway whose test mode simulates differently). Approved = simulating -> safe (auth voided); DECLINED = live account -> REFUSE TO BOOT (harmless on live: one declined-attempt gateway fee, cents; no money moves — but beware supervisor crash-loops re-probing each restart: decline fees accumulate + card-testing fraud-flag risk; verdict cooldown cache offered, not yet built); response=3 (bad creds) or transport error = indeterminate -> loud warning, boot continues (keeps offline dev + CI alive). Implementation: internal/integrations/nmi/probe.go (ProbeTestMode), wired in createNMIClients.
+- **NMI**: undetectable by configuration — sandbox accounts hit the SAME production gateway URL and keys carry no marker (confirmed against docs.nmi.com). Detection instead fingerprints the gateway's documented Test Mode simulation behavior (docs.nmi.com/reference/testing-methods: test card + amount>=1.00 -> simulated APPROVE, amount<1.00 -> simulated DECLINE, nothing reaches a processor): boot probe runs ONE auth $1.00 on the documented test card (4111.../10-29). SIMPLIFIED per Paul 2026-06-11: 4111 is a non-issued PAN no production processor can EVER approve, so approval alone is conclusive proof of simulation — the earlier second $0.50 sub-dollar-decline check was dropped (it encoded NMI's specific simulator rules and could false-positive a white-label NMI-compatible gateway whose test mode simulates differently). Approved = simulating -> safe (auth voided); DECLINED = live account -> REFUSE TO BOOT (harmless on live: one declined-attempt gateway fee, cents; no money moves — but beware supervisor crash-loops re-probing each restart: decline fees accumulate + card-testing fraud-flag risk; verdict cooldown cache BUILT 2026-06-11, see task below); response=3 (bad creds) or transport error = indeterminate -> loud warning, boot continues (keeps offline dev + CI alive). Implementation: internal/integrations/nmi/probe.go (ProbeTestMode), wired in createNMIClients.
 - **Solana**: network is DERIVED from the mode (devnet iff sandbox money) with no override field — structurally guaranteed already.
 - **CCBill**: sandbox uses a separate URL derived from the mode; per Paul, does not apply.
 
@@ -1088,6 +1088,7 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 - [x] NMI: ProbeTestMode fingerprint probe + createNMIClients boot wiring (refuse on ProbeLive, warn on indeterminate); 5 probe unit tests
 - [x] account_type declaration reverted (rejected design)
 - [x] README: document the guarantees on the mode table
+- [x] Probe-cooldown cache 2026-06-11: migration 009 billing.probe_verdicts (provider, sha256(key), verdict, checked_at; RLS-exempt by design — instance-level credential state, written before any tenant context) + sqlc probe_verdicts.sql; createNMIClients consults it under test_env: fresh (<12h) 'live' verdict refuses boot FROM CACHE without re-probing (crash-looping supervisor pays ONE declined auth total, no card-testing-flag accumulation), fresh 'simulated' skips the probe, rotated key (hash mismatch) or stale verdict re-probes, indeterminate never cached, any cache read/write failure degrades to probing (internal/app/probe_cache.go). Unit tests (probeCacheDecision policy table, key hashing) + integration roundtrip (TestProbeVerdictCacheRoundtrip: app-role, non-tenant-pinned conn, upsert flip, key-rotation miss, nil-DB degrade) green
 
 ---
 
@@ -1433,3 +1434,94 @@ publish age 6s). EURC registry mint verified via Jupiter token API:
 - [ ] Follow-up: degrade NMI/CCBill missing-credential fatals (audit table) — separate issue if accepted
 
 ---
+
+---
+
+# #361: delegated-tokens-slug-only-tenant-identity
+
+**Completed:** no
+**Status:** PLANNED 2026-06-11
+
+Host apps (doujins, hentai0) must never need to know their OpenRails tenant uuid. A
+tenant knows its chosen name (slug) the way a user knows their username; the uuid is
+OpenRails-internal database identity. The desired mint shape for a host talking to
+OpenRails is exactly:
+
+```
+iss:    https://doujins.com   (or the hentai0 issuer — distinct issuers, ONE tenant)
+aud:    openrails
+tenant: doujins               (the slug; same value from BOTH issuers)
+signed by the host's tenant key (registered JWKS)
+```
+
+No `tenant_id` claim. If the tenant is renamed doujins -> doujins2 inside OpenRails,
+outstanding tokens carrying `tenant: doujins` stop validating (slug-claim cross-check)
+and hosts simply mint new ones with `tenant: doujins2` — short TTLs (5m) make this a
+non-event, and it is the CORRECT behavior: the slug is the host-facing identity.
+
+## Metadata
+
+- Category: design-debt / cross-repo coordination
+- Status: planned
+- Passes: false
+
+## Current state (verified 2026-06-11)
+
+- OpenRails ALREADY resolves delegated tokens the right way: `ResolveDelegated`
+  (internal/controlplane/delegated.go) pins the tenant from the VALIDATED `iss` via the
+  issuer registry (`billing.tenant_delegated_issuers` -> tenant; issuer is globally
+  unique so a signing key can only ever reach its own tenant), then cross-checks the
+  `tenant` SLUG claim if present. The `tenant_id` claim is NEVER read on this path.
+- The ONLY thing forcing hosts to know the uuid is authkit's v0.19 delegated-access
+  token profile: `MintDelegatedAccessToken` errors `tenant_id required`
+  (authkit/http/delegation.go) and the verifier rejects `missing_tenant_id`
+  (authkit/http/verifier.go ~660). Authkit's resource-account binding check already
+  accepts a match on EITHER the slug or the uuid.
+- Consequence: doujins/hentai0 carry `BILLING_TENANT_ID` env plumbing
+  (DOUJINS_BILLING_TENANT_ID / HENTAI0_BILLING_TENANT_ID -> openrailsmint minter), a
+  random uuidv7 that goes stale on every dev-stack reset, with "SELECT id FROM
+  billing.tenants WHERE slug='doujins'" lookup instructions sprinkled in comments.
+- Security note: an issuer-asserted `tenant_id` is only trustworthy when bound to the
+  issuer registration server-side, which OpenRails already does via the registry — so
+  the claim is at best a cache of the binding, never a substitute for it.
+- One receiver DOES key on the claim: tensorhub
+  (internal/api/platform_delegated_principal.go) makes the token's `tenant_id` the
+  principal's EffectiveTenant and persists user files under `{tenant_id}/...` paths,
+  and its middleware independently 401s when the claim is empty. Tensorhub keeps its
+  guarantee with zero changes once authkit relaxes; moving tensorhub to issuer-pinned
+  resolution is tensorhub's debt, out of scope here.
+
+**Tasks:**
+- [ ] authkit: make `tenant_id` OPTIONAL on the delegated-access profile — drop the
+      mint-time `tenant_id required` error in `MintDelegatedAccessToken` and the
+      verify-time `missing_tenant_id` rejection; keep the claim pass-through when
+      present and keep `validateDelegatedIssuerResourceAccount` slug-or-uuid binding
+      unchanged. Document that receivers which key on `tenant_id` (tensorhub) must
+      enforce presence themselves. Version bump + release.
+- [ ] openrails: bump the pinned authkit; add/adjust a controlplane test proving a
+      delegated token WITHOUT `tenant_id` resolves end-to-end (issuer-pinned tenant,
+      slug cross-check, TouchTenantSubject) — codifying that openrails never needs
+      the claim.
+- [ ] openrails: add a slug-rename semantics test: after renaming a tenant's slug, a
+      token carrying the OLD slug claim is rejected (tenant-claim mismatch) and a
+      token with the NEW slug validates — documenting rename behavior instead of
+      discovering it in prod.
+- [ ] doujins: drop the tenant-uuid mint requirement (internal/billing/openrailsmint/
+      minter.go) and ALL `BILLING_TENANT_ID` plumbing: docker-compose env for both the
+      doujins and hentai0 services, DOUJINS_BILLING_TENANT_ID / HENTAI0_BILLING_TENANT_ID
+      in .env, scripts/e2e/lib.sh E2E_BILLING_TENANT_ID wiring, and the "look it up
+      after openrails migrates" comments. Token mints carry slug only.
+- [ ] hentai0: same cleanup in its own repo (its embedded minter + config).
+- [ ] e2e: doujins tests/openrails_harness.go + e2e flows pass with no tenant uuid
+      configured anywhere (fresh stack, bootstrap manifest, register, delegated
+      self-token, checkout).
+- [ ] Note in the authkit release notes: hosts minting for TENSORHUB audiences still
+      need the uuid until tensorhub moves to issuer-pinned resolution (tensorhub debt,
+      tracked in tensorhub's own tracker).
+
+## Rollout order
+
+authkit release (profile relaxation, backward compatible — tokens WITH the claim stay
+valid) -> openrails pin bump + tests (no behavior change) -> doujins/hentai0 cleanup
+(env vars deleted; mints go slug-only). No migration, no data movement; outstanding
+tokens are unaffected either way.

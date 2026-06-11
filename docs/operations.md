@@ -71,15 +71,63 @@ provider:
   subscription-sourced entitlements granted/revoked — admin-grant comps are
   untouchable). Anything requiring a *remote* action lands in the admin queue
   for a human.
+- `billing reconcile report [--run=ID]`: render the latest (or given) run's
+  summary, dunning forensics, and standing open findings.
+
+`check` and `fix` take `--provider nmi|ccbill|stripe|solana` (repeatable;
+default = every configured provider), `--since` / `--until` (RFC3339 or
+`YYYY-MM-DD`, bounding the transaction window), `--tenant` (slug or id;
+default tenant otherwise) and `--format table|json`. The same engine sits
+behind the admin API: `POST /v1/admin/reconcile/runs` `{mode, providers,
+since, until, materialize}` runs synchronously; `GET .../runs`,
+`GET .../runs/:id`, `GET .../findings?status=&provider=&type=&admin_queue=`,
+and `POST .../findings/:id/{ack,dismiss}` work the queue.
+
+**Materialize (bootstrap mode, v1.1)** — `billing reconcile fix
+--materialize` (or `"materialize": true` on the admin POST; enforce-only,
+explicit opt-in). PS-1 findings (the processor bills a subscription OpenRails
+does not know) are auto-created locally **only when both halves resolve
+unambiguously**: identity through the engine's existing matcher (a single
+vault/email match — zero or multiple candidates never guess) and plan through
+catalog provider_links (the billable price whose `processors[provider]` entry
+carries the remote plan id). A materialized subscription adopts the remote
+status and period timestamps, snapshots the product's entitlement spec like a
+normal signup, gets the snapshot's latest successful charge backfilled as a
+payment, and grants entitlements through the ordinary subscription-sourced
+path; the finding resolves as `enforced` with the materialization evidence.
+Anything unresolvable behaves exactly as without the flag (admin_pending),
+with the blocker documented on the finding.
 
 Findings have stable identity across runs (re-runs update, vanished findings
 auto-resolve), carry intent evidence ("our recorded delete never executed —
 the executor replays it") so the admin queue holds only genuine unknowns, and
-include the dunning-forensics report (remote decline timeline vs local retry
-state). NMI safety note: cancelled subscriptions *vanish* from NMI's recurring
-report rather than changing status, so the engine refuses to act when the
-remote active set is implausibly small versus local (circuit breaker against
-mass-cancellation from a bad fetch).
+include the dunning-forensics report. NMI safety note: cancelled
+subscriptions *vanish* from NMI's recurring report rather than changing
+status, so the engine refuses to act when the remote active set is
+implausibly small versus local (circuit breaker against mass-cancellation
+from a bad fetch).
+
+**Dunning forensics — three evidence sources.** For every examined
+subscription (locally past_due, or cancelled-as-expired) the report
+cross-references, with each timeline entry tagged by source:
+
+1. **provider** — the processor's own charge-attempt timeline, declines
+   included (NMI transaction search, Stripe charges, CCBill exports);
+2. **local** — the retry fields on the subscription row (`last_retry_at` /
+   `retry_attempts` / `next_retry_at`), preserved verbatim by the legacy
+   import;
+3. **history** — OpenRails' own ClickHouse analytics events
+   (`payment_events` / `subscription_events`), which for migrated tenants
+   include the imported legacy history (users_logs rebill attempts,
+   mobius_schedulers scheduler events, payment_settings gateway state). This
+   is the deep-history source: the provider query APIs will not serve
+   years-old declines, the migrated events will — it is what answers "did
+   legacy dunning run and when did it die" end to end.
+
+Aggregates report per-source and combined "last dunning action per ANY
+source", never-attempted vs attempted-and-exhausted counts, and a
+decline-reason histogram. ClickHouse unconfigured or unreachable degrades to
+a `history source: …` note in the report — never an error.
 
 ## Dunning (#359)
 
@@ -113,7 +161,12 @@ dunning; this section governs NMI-backed manual dunning.)
 - `test_env = true|false` — credential sandbox enforcement, orthogonal to
   mode: sandbox routing + Stripe live-key refusal + the NMI boot probe (one
   auth on the non-issued test card; a decline proves production credentials
-  and refuses the boot) + Solana devnet. Dev-only.
+  and refuses the boot) + Solana devnet. Probe verdicts cache for 12h in
+  `billing.probe_verdicts` (#348), keyed by sha256 of the key: a fresh `live`
+  verdict refuses the boot from cache without re-probing (a crash loop costs
+  one declined auth total), a fresh `simulated` verdict skips the probe, a
+  rotated key or stale verdict re-probes, and cache failures degrade to
+  probing. Dev-only.
 - `feature_flags.disable_processor_subscription_deletions` — kill switch on
   NMI deletes, stricter than `limited` (blocks even user-asked deletes);
   skipped deletes leave durable markers, replayed by the boot rescan (and,

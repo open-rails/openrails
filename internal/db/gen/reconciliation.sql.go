@@ -752,6 +752,55 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 	return items, nil
 }
 
+const reconcileListPricesWithProcessors = `-- name: ReconcileListPricesWithProcessors :many
+SELECT id, product_id, amount, currency, billing_cycle_days, status, processors
+FROM billing.prices
+WHERE processors IS NOT NULL
+  AND status <> 'draft'
+`
+
+type ReconcileListPricesWithProcessorsRow struct {
+	ID               uuid.UUID
+	ProductID        uuid.UUID
+	Amount           int64
+	Currency         string
+	BillingCycleDays *int32
+	Status           string
+	Processors       []byte
+}
+
+// Billable prices with their processor link blobs (provider_links): the PS-1
+// materializer maps a remote plan id onto the local price whose processors
+// jsonb carries that id under the provider's key. Draft prices are excluded
+// (not billable); archived prices stay (grandfathered subscriptions bill them).
+func (q *Queries) ReconcileListPricesWithProcessors(ctx context.Context) ([]ReconcileListPricesWithProcessorsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListPricesWithProcessors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReconcileListPricesWithProcessorsRow
+	for rows.Next() {
+		var i ReconcileListPricesWithProcessorsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.Amount,
+			&i.Currency,
+			&i.BillingCycleDays,
+			&i.Status,
+			&i.Processors,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reconcileListSolanaSubscriptionRefs = `-- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
 FROM billing.solana_subscriptions
@@ -926,6 +975,86 @@ func (q *Queries) ReconcileMarkPaymentRefunded(ctx context.Context, id uuid.UUID
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscription :many
+INSERT INTO billing.subscriptions (
+    price_id, product_id, status, processor, processor_subscription_id,
+    user_email, current_period_starts_at, current_period_ends_at, started_at,
+    entitlements_spec_snapshot, credits_spec_snapshot, tenant_subject_id
+)
+SELECT pr.id, pr.product_id, $1::billing.subscription_status,
+       $2, $3,
+       $4,
+       $5::timestamptz,
+       $6::timestamptz,
+       COALESCE($7::timestamptz, now()),
+       p.entitlements_spec, p.credits_spec, $8
+FROM billing.prices pr
+JOIN billing.products p ON p.id = pr.product_id
+WHERE pr.id = $9
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.subscriptions s
+      WHERE s.processor_subscription_id = $3
+        AND s.processor = ANY ($10::text[])
+  )
+RETURNING id, entitlements_spec_snapshot
+`
+
+type ReconcileMaterializeSubscriptionParams struct {
+	Status                  BillingSubscriptionStatus
+	Processor               string
+	ProcessorSubscriptionID string
+	UserEmail               *string
+	PeriodStartsAt          *time.Time
+	PeriodEndsAt            *time.Time
+	StartedAt               *time.Time
+	TenantSubjectID         uuid.UUID
+	PriceID                 uuid.UUID
+	Processors              []string
+}
+
+type ReconcileMaterializeSubscriptionRow struct {
+	ID                       uuid.UUID
+	EntitlementsSpecSnapshot []byte
+}
+
+// PS-1 materialization (bootstrap mode, --materialize): create the local
+// subscription for a processor subscription that resolved unambiguously to an
+// identity and a price. The entitlements/credits specs snapshot from the
+// product exactly like a normal signup, so the subscription-sourced
+// entitlement path works unchanged. Idempotent: a second run inserts nothing
+// when any subscription already carries the processor subscription id (zero
+// rows returned = already materialized).
+func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg ReconcileMaterializeSubscriptionParams) ([]ReconcileMaterializeSubscriptionRow, error) {
+	rows, err := q.db.Query(ctx, reconcileMaterializeSubscription,
+		arg.Status,
+		arg.Processor,
+		arg.ProcessorSubscriptionID,
+		arg.UserEmail,
+		arg.PeriodStartsAt,
+		arg.PeriodEndsAt,
+		arg.StartedAt,
+		arg.TenantSubjectID,
+		arg.PriceID,
+		arg.Processors,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReconcileMaterializeSubscriptionRow
+	for rows.Next() {
+		var i ReconcileMaterializeSubscriptionRow
+		if err := rows.Scan(&i.ID, &i.EntitlementsSpecSnapshot); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows

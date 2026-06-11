@@ -579,6 +579,15 @@ type BillingPrice struct {
 	TenantID uuid.UUID
 }
 
+// Cached NMI test-mode probe verdicts (#348): one row per (provider, sha256(security_key)). Fresh 'live' refuses boot from cache, fresh 'simulated' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.
+type BillingProbeVerdict struct {
+	Provider string
+	// sha256 hex of the provider security key. A rotated key hashes differently, so the cache never answers for a credential it has not seen.
+	KeyHash   string
+	Verdict   string
+	CheckedAt time.Time
+}
+
 type BillingProcessorCustomer struct {
 	ID         uuid.UUID
 	Processor  string

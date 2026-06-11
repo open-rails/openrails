@@ -1,18 +1,28 @@
 package reconcile
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
 // DunningForensics answers, per provider: did dunning ever run, when did it
 // stop, and did attempts fail? For every locally past_due or
-// cancelled-as-expired subscription it lines up the processor's
-// charge-attempt timeline (declines included) against the local retry fields
-// (last_retry_at / retry_attempts / next_retry_at).
+// cancelled-as-expired subscription it lines up THREE evidence sources
+// (decision 2026-06-11 — forensics are generic OpenRails functionality):
+//
+//  1. "provider" — the processor's own charge-attempt timeline (declines
+//     included), from the fetcher's transaction snapshot;
+//  2. "local"    — the local retry fields (last_retry_at / retry_attempts /
+//     next_retry_at), imported from legacy by the migration;
+//  3. "history"  — OpenRails' ClickHouse analytics events
+//     (payment_events/subscription_events), which for migrated tenants
+//     include the imported legacy rebill/scheduler history — deep history the
+//     provider APIs cannot return.
 type DunningForensics struct {
-	Provider              Provider   `json:"provider"`
-	SubscriptionsExamined int        `json:"subscriptions_examined"`
+	Provider              Provider `json:"provider"`
+	SubscriptionsExamined int      `json:"subscriptions_examined"`
 	// NeverAttempted: the processor recorded declines but local dunning never
 	// acted (retry fields frozen/null) — "dunning never ran".
 	NeverAttempted int `json:"never_attempted"`
@@ -26,11 +36,33 @@ type DunningForensics struct {
 	NoRemoteDeclines int `json:"no_remote_declines"`
 	// LastLocalDunningAction is the newest last_retry_at across the examined
 	// set — when local dunning last did anything at all.
-	LastLocalDunningAction *time.Time     `json:"last_local_dunning_action,omitempty"`
-	DeclineReasons         map[string]int `json:"decline_reason_histogram,omitempty"`
+	LastLocalDunningAction *time.Time `json:"last_local_dunning_action,omitempty"`
+	// LastProviderAttempt is the newest provider-side charge attempt
+	// (success or decline) across the examined set.
+	LastProviderAttempt *time.Time `json:"last_provider_attempt,omitempty"`
+	// LastHistoryAttempt is the newest charge-type analytics event across the
+	// examined set (incl. imported legacy rebill attempts).
+	LastHistoryAttempt *time.Time `json:"last_history_attempt,omitempty"`
+	// LastDunningActionAnySource is the max of the three, with the source
+	// that supplied it — "when did dunning last act, per ANY evidence".
+	LastDunningActionAnySource *time.Time     `json:"last_dunning_action_any_source,omitempty"`
+	LastDunningActionVia       string         `json:"last_dunning_action_via,omitempty"` // provider | local | history
+	DeclineReasons             map[string]int `json:"decline_reason_histogram,omitempty"`
+	// HistorySource documents the third evidence source's availability:
+	// "ok: N events (M correlated)", "not configured", or "unavailable: ...".
+	// Unreachable ClickHouse degrades to this note, never an error.
+	HistorySource string `json:"history_source,omitempty"`
 	// Details are per-subscription lines, capped at forensicsDetailCap.
 	Details        []DunningSubscriptionReport `json:"details,omitempty"`
 	DetailsCovered int                         `json:"details_covered"`
+}
+
+// TimelineEvent is one merged-timeline entry, tagged by evidence source.
+type TimelineEvent struct {
+	At     time.Time `json:"at"`
+	Source string    `json:"source"` // provider | local | history
+	Kind   string    `json:"kind"`
+	Detail string    `json:"detail,omitempty"`
 }
 
 // DunningSubscriptionReport is one subscription's cross-referenced timeline.
@@ -47,25 +79,68 @@ type DunningSubscriptionReport struct {
 	FirstDeclineAt          *time.Time `json:"first_decline_at,omitempty"`
 	LastDeclineAt           *time.Time `json:"last_decline_at,omitempty"`
 	DeclineReasons          []string   `json:"decline_reasons,omitempty"`
-	Classification          string     `json:"classification"`
+	// History (ClickHouse analytics events incl. imported legacy):
+	HistoryEvents    int        `json:"history_events,omitempty"`
+	HistoryFailures  int        `json:"history_failures,omitempty"`
+	HistorySuccesses int        `json:"history_successes,omitempty"`
+	FirstHistoryAt   *time.Time `json:"first_history_at,omitempty"`
+	LastHistoryAt    *time.Time `json:"last_history_at,omitempty"`
+	Classification   string     `json:"classification"`
+	// Timeline merges the three sources chronologically (most recent
+	// timelineCap events kept), each entry tagged provider|local|history.
+	Timeline []TimelineEvent `json:"timeline,omitempty"`
 }
 
-const forensicsDetailCap = 200
+const (
+	forensicsDetailCap = 200
+	timelineCap        = 30
+)
+
+// historyEventClass classifies an analytics event for forensics counting:
+// charge attempt (success/failure) vs other lifecycle noise.
+func historyEventClass(eventType, status string) (isAttempt, isFailure, isSuccess bool) {
+	et := strings.ToLower(eventType)
+	st := strings.ToLower(status)
+	switch {
+	case strings.Contains(et, "charge") || strings.Contains(et, "rebill") || et == "renewed":
+		fail := strings.Contains(et, "fail") || strings.Contains(et, "declin") ||
+			strings.Contains(st, "fail") || strings.Contains(st, "declin")
+		return true, fail, !fail
+	default:
+		return false, false, false
+	}
+}
 
 // computeDunningForensics builds the per-provider dunning report from the
-// snapshot's transaction timeline and the local retry fields.
-func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *LocalState, now time.Time) *DunningForensics {
+// snapshot's transaction timeline, the local retry fields, and the analytics
+// history events. historyNote documents the history source's availability.
+func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *LocalState, history []HistoryEvent, historyNote string, now time.Time) *DunningForensics {
 	idx := buildLocalIndex(local)
 	ridx := buildRemoteIndex(snap)
 	corr := &correlator{local: idx, remote: ridx}
 
 	// Correlate the remote charge timeline to local subscriptions once.
 	type timeline struct {
-		declines, successes            int
-		firstDeclineAt, lastDeclineAt  *time.Time
-		reasons                        map[string]int
+		declines, successes           int
+		firstDeclineAt, lastDeclineAt *time.Time
+		lastAttemptAt                 *time.Time
+		reasons                       map[string]int
+		// history (ClickHouse) evidence:
+		histEvents, histFailures, histSuccesses int
+		firstHistAt, lastHistAt                 *time.Time
+		lastHistAttemptAt                       *time.Time
+		events                                  []TimelineEvent
 	}
 	timelines := map[string]*timeline{} // keyed by local subscription id
+	tlFor := func(subID string) *timeline {
+		tl := timelines[subID]
+		if tl == nil {
+			tl = &timeline{reasons: map[string]int{}}
+			timelines[subID] = tl
+		}
+		return tl
+	}
+
 	for i := range snap.Transactions {
 		t := &snap.Transactions[i]
 		if t.Type != TransactionTypeSale && t.Type != TransactionTypeDecline {
@@ -75,24 +150,34 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 		if sub == nil {
 			continue
 		}
-		tl := timelines[sub.ID.String()]
-		if tl == nil {
-			tl = &timeline{reasons: map[string]int{}}
-			timelines[sub.ID.String()] = tl
+		tl := tlFor(sub.ID.String())
+		at := t.OccurredAt.UTC()
+		if !t.OccurredAt.IsZero() {
+			if tl.lastAttemptAt == nil || at.After(*tl.lastAttemptAt) {
+				tl.lastAttemptAt = &at
+			}
 		}
 		if t.Success {
 			tl.successes++
+			if !t.OccurredAt.IsZero() {
+				tl.events = append(tl.events, TimelineEvent{
+					At: at, Source: "provider", Kind: "charge_success",
+					Detail: fmt.Sprintf("%s %d %s", t.TransactionID, t.AmountCents, t.Currency),
+				})
+			}
 			continue
 		}
 		tl.declines++
 		if !t.OccurredAt.IsZero() {
-			at := t.OccurredAt.UTC()
 			if tl.firstDeclineAt == nil || at.Before(*tl.firstDeclineAt) {
 				tl.firstDeclineAt = &at
 			}
 			if tl.lastDeclineAt == nil || at.After(*tl.lastDeclineAt) {
 				tl.lastDeclineAt = &at
 			}
+			tl.events = append(tl.events, TimelineEvent{
+				At: at, Source: "provider", Kind: "charge_declined", Detail: t.DeclineReason,
+			})
 		}
 		reason := t.DeclineReason
 		if reason == "" {
@@ -101,9 +186,62 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 		tl.reasons[reason]++
 	}
 
+	// Third source: analytics history events, correlated by local
+	// subscription id first, processor subscription id second.
+	historyCorrelated := 0
+	for i := range history {
+		ev := &history[i]
+		var sub *LocalSubscription
+		if ev.SubscriptionID != nil {
+			sub = idx.byID[*ev.SubscriptionID]
+		}
+		if sub == nil && ev.ProcessorSubscriptionID != "" {
+			sub = idx.byPSID[ev.ProcessorSubscriptionID]
+		}
+		if sub == nil {
+			continue
+		}
+		historyCorrelated++
+		tl := tlFor(sub.ID.String())
+		at := ev.OccurredAt.UTC()
+		tl.histEvents++
+		if tl.firstHistAt == nil || at.Before(*tl.firstHistAt) {
+			tl.firstHistAt = &at
+		}
+		if tl.lastHistAt == nil || at.After(*tl.lastHistAt) {
+			tl.lastHistAt = &at
+		}
+		isAttempt, isFailure, isSuccess := historyEventClass(ev.EventType, ev.Status)
+		if isFailure {
+			tl.histFailures++
+		}
+		if isAttempt && isSuccess {
+			tl.histSuccesses++
+		}
+		if isAttempt && (tl.lastHistAttemptAt == nil || at.After(*tl.lastHistAttemptAt)) {
+			tl.lastHistAttemptAt = &at
+		}
+		detail := ev.Status
+		if ev.ProcessorTransactionID != "" {
+			if detail != "" {
+				detail += " "
+			}
+			detail += ev.ProcessorTransactionID
+		}
+		tl.events = append(tl.events, TimelineEvent{
+			At: at, Source: "history", Kind: ev.EventType, Detail: strings.TrimSpace(detail),
+		})
+	}
+
 	report := &DunningForensics{
 		Provider:       provider,
 		DeclineReasons: map[string]int{},
+		HistorySource:  historyNote,
+	}
+	if historyNote == "" && len(history) > 0 {
+		report.HistorySource = fmt.Sprintf("ok: %d events (%d correlated)", len(history), historyCorrelated)
+	} else if strings.HasPrefix(historyNote, "ok") {
+		report.HistorySource = fmt.Sprintf("%s (%d correlated)", historyNote, historyCorrelated)
 	}
 
 	for i := range local.Subscriptions {
@@ -124,21 +262,51 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 			LastRetryAt:             s.LastRetryAt,
 			NextRetryAt:             s.NextRetryAt,
 		}
+		var events []TimelineEvent
 		if tl != nil {
 			line.RemoteDeclines = tl.declines
 			line.RemoteSuccesses = tl.successes
 			line.FirstDeclineAt = tl.firstDeclineAt
 			line.LastDeclineAt = tl.lastDeclineAt
+			line.HistoryEvents = tl.histEvents
+			line.HistoryFailures = tl.histFailures
+			line.HistorySuccesses = tl.histSuccesses
+			line.FirstHistoryAt = tl.firstHistAt
+			line.LastHistoryAt = tl.lastHistAt
 			for reason, n := range tl.reasons {
 				report.DeclineReasons[reason] += n
 				line.DeclineReasons = append(line.DeclineReasons, reason)
 			}
 			sort.Strings(line.DeclineReasons)
-		}
+			events = append(events, tl.events...)
 
+			if tl.lastAttemptAt != nil && (report.LastProviderAttempt == nil || tl.lastAttemptAt.After(*report.LastProviderAttempt)) {
+				report.LastProviderAttempt = tl.lastAttemptAt
+			}
+			if tl.lastHistAttemptAt != nil && (report.LastHistoryAttempt == nil || tl.lastHistAttemptAt.After(*report.LastHistoryAttempt)) {
+				report.LastHistoryAttempt = tl.lastHistAttemptAt
+			}
+		}
+		if s.LastRetryAt != nil {
+			events = append(events, TimelineEvent{
+				At: s.LastRetryAt.UTC(), Source: "local", Kind: "dunning_retry",
+				Detail: fmt.Sprintf("retry_attempts=%d", s.RetryAttempts),
+			})
+		}
+		sort.SliceStable(events, func(i, j int) bool { return events[i].At.Before(events[j].At) })
+		if len(events) > timelineCap {
+			events = events[len(events)-timelineCap:] // keep the most recent
+		}
+		line.Timeline = events
+
+		// History evidence of charge attempts counts as remote declines for
+		// classification when the provider window saw nothing (the migrated
+		// legacy events ARE the decline record for years the provider API
+		// cannot serve).
+		remoteDeclineEvidence := line.RemoteDeclines > 0 || line.HistoryFailures > 0
 		attempted := s.RetryAttempts > 0 || s.LastRetryAt != nil
 		switch {
-		case !attempted && line.RemoteDeclines > 0:
+		case !attempted && remoteDeclineEvidence:
 			line.Classification = "never_attempted"
 			report.NeverAttempted++
 		case attempted && (s.NextRetryAt == nil || s.Status == "cancelled"):
@@ -163,6 +331,25 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 	report.DetailsCovered = len(report.Details)
 	if len(report.DeclineReasons) == 0 {
 		report.DeclineReasons = nil
+	}
+
+	// "Last dunning action per ANY source."
+	type sourced struct {
+		at  *time.Time
+		via string
+	}
+	for _, c := range []sourced{
+		{report.LastProviderAttempt, "provider"},
+		{report.LastLocalDunningAction, "local"},
+		{report.LastHistoryAttempt, "history"},
+	} {
+		if c.at == nil {
+			continue
+		}
+		if report.LastDunningActionAnySource == nil || c.at.After(*report.LastDunningActionAnySource) {
+			report.LastDunningActionAnySource = c.at
+			report.LastDunningActionVia = c.via
+		}
 	}
 	return report
 }

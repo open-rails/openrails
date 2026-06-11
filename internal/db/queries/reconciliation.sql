@@ -196,6 +196,16 @@ WHERE processor = ANY (sqlc.arg(processors)::text[]);
 SELECT subscription_pda, plan_pda, subscriber_wallet
 FROM billing.solana_subscriptions;
 
+-- Billable prices with their processor link blobs (provider_links): the PS-1
+-- materializer maps a remote plan id onto the local price whose processors
+-- jsonb carries that id under the provider's key. Draft prices are excluded
+-- (not billable); archived prices stay (grandfathered subscriptions bill them).
+-- name: ReconcileListPricesWithProcessors :many
+SELECT id, product_id, amount, currency, billing_cycle_days, status, processors
+FROM billing.prices
+WHERE processors IS NOT NULL
+  AND status <> 'draft';
+
 -- ============================================================================
 -- Enforce appliers: idempotent LOCAL writes only (never a provider call)
 -- ============================================================================
@@ -306,6 +316,36 @@ ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING;
 UPDATE billing.payments
 SET status = 'refunded'
 WHERE id = sqlc.arg(id) AND status <> 'refunded';
+
+-- PS-1 materialization (bootstrap mode, --materialize): create the local
+-- subscription for a processor subscription that resolved unambiguously to an
+-- identity and a price. The entitlements/credits specs snapshot from the
+-- product exactly like a normal signup, so the subscription-sourced
+-- entitlement path works unchanged. Idempotent: a second run inserts nothing
+-- when any subscription already carries the processor subscription id (zero
+-- rows returned = already materialized).
+-- name: ReconcileMaterializeSubscription :many
+INSERT INTO billing.subscriptions (
+    price_id, product_id, status, processor, processor_subscription_id,
+    user_email, current_period_starts_at, current_period_ends_at, started_at,
+    entitlements_spec_snapshot, credits_spec_snapshot, tenant_subject_id
+)
+SELECT pr.id, pr.product_id, sqlc.arg(status)::billing.subscription_status,
+       sqlc.arg(processor), sqlc.arg(processor_subscription_id),
+       sqlc.narg(user_email),
+       sqlc.narg(period_starts_at)::timestamptz,
+       sqlc.narg(period_ends_at)::timestamptz,
+       COALESCE(sqlc.narg(started_at)::timestamptz, now()),
+       p.entitlements_spec, p.credits_spec, sqlc.arg(tenant_subject_id)
+FROM billing.prices pr
+JOIN billing.products p ON p.id = pr.product_id
+WHERE pr.id = sqlc.arg(price_id)
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.subscriptions s
+      WHERE s.processor_subscription_id = sqlc.arg(processor_subscription_id)
+        AND s.processor = ANY (sqlc.arg(processors)::text[])
+  )
+RETURNING id, entitlements_spec_snapshot;
 
 -- PS-7: adopt the processor's vault metadata for a stored payment method.
 -- name: ReconcileAdoptPaymentMethod :execrows

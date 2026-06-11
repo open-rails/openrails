@@ -112,6 +112,48 @@ type ApplyAction struct {
 	AdoptVault         *AdoptVaultAction
 	GrantEntitlements  *GrantEntitlementsAction
 	RevokeEntitlements *RevokeEntitlementsAction
+	Materialize        *MaterializeSubscriptionAction
+}
+
+// MaterializeSubscriptionAction creates the local subscription for a PS-1
+// finding whose identity AND plan both resolved unambiguously (bootstrap mode
+// v1.1, the explicit --materialize opt-in). Identity comes from the engine's
+// existing matcher (a single vault/email match — zero or multiple candidates
+// keep the finding admin_pending), the plan from catalog provider_links (the
+// billable price whose processors[provider] ids carry the remote plan id).
+// The created subscription snapshots the product's entitlements/credits specs
+// like a normal signup, so entitlements flow through the ordinary
+// subscription-sourced path.
+type MaterializeSubscriptionAction struct {
+	Provider Provider
+	// Processor is the LOCAL processor name to stamp on the subscription —
+	// the key under which the price's provider link matched (e.g. "mobius",
+	// "stripe"), so the new row joins the same roster future reconciles load.
+	Processor               string
+	ProcessorSubscriptionID string
+	TenantSubjectID         uuid.UUID
+	PriceID                 uuid.UUID
+	ProductID               uuid.UUID
+	Status                  string // active | past_due (PS-1 only fires for live remote subs)
+	PeriodStartsAt          *time.Time
+	PeriodEndsAt            *time.Time
+	StartedAt               *time.Time
+	UserEmail               string
+	// IdentityVia documents how identity resolved (vault_id | email) for the
+	// resolution evidence.
+	IdentityVia string
+	// Backfill, when non-nil, records the snapshot's most recent successful
+	// charge for this remote subscription after creation. The writer fills in
+	// SubscriptionID with the freshly created id.
+	Backfill *BackfillPaymentAction
+}
+
+// MaterializeResult reports what one materialization actually did.
+type MaterializeResult struct {
+	SubscriptionID      uuid.UUID
+	Created             bool
+	EntitlementsGranted int
+	PaymentBackfilled   bool
 }
 
 // CancelLocalAction cancels a local subscription (PS-2) and revokes its

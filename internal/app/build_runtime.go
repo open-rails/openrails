@@ -242,7 +242,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	ccbillClient := createCCBillClient(cfg)
 	ccbillRESTClient := createCCBillRESTClient(cfg)
 	ccbillDataLinkClient := createCCBillDataLinkClient(cfg)
-	nmiClients, err := createNMIClients(cfg)
+	nmiClients, err := createNMIClients(cfg, database)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create nmi clients: %w", err)
 	}
@@ -500,7 +500,7 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	return nil
 }
 
-func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
+func createNMIClients(cfg *config.Config, database *db.DB) (map[string]*nmi.NMIClient, error) {
 	clients := make(map[string]*nmi.NMIClient)
 
 	nmiProcessors := cfg.GetNMIProcessors()
@@ -545,18 +545,39 @@ func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
 	// the non-issued test card, so a decline proves PRODUCTION credentials —
 	// refuse to start. Probe errors (offline dev, bad credentials) are
 	// inconclusive and only warn.
+	//
+	// Probe-cooldown cache (#348 tail): conclusive verdicts persist in
+	// billing.probe_verdicts keyed by sha256(security key). A fresh 'live'
+	// verdict refuses the boot from cache (a crash-looping supervisor stops
+	// paying one declined auth per restart); a fresh 'simulated' verdict skips
+	// the probe. A rotated key or a stale verdict always re-probes, and cache
+	// failures degrade to probing.
 	if cfg.IsTestEnv() {
 		for providerKey, client := range clients {
 			if client.SecurityKey == "" {
 				continue // unconfigured dev client, nothing to verify
 			}
+			keyHash := probeKeyHash(client.SecurityKey)
+			if verdict, checkedAt, ok := lookupProbeVerdict(database, providerKey, keyHash); ok {
+				switch probeCacheDecision(verdict, checkedAt, time.Now()) {
+				case probeCacheRefuseBoot:
+					return nil, fmt.Errorf("processor %q: PRODUCTION NMI credentials detected while test_env is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); refusing to start (use the sandbox account credentials, rotate the key, or unset test_env)", providerKey, checkedAt.UTC().Format(time.RFC3339), probeVerdictCooldown)
+				case probeCacheSkipProbe:
+					log.Infof("processor %q: NMI account verified as simulating (cached probe verdict from %s; #348 probe cooldown, no probe sent)", providerKey, checkedAt.UTC().Format(time.RFC3339))
+					continue
+				}
+			}
 			result, probeErr := client.ProbeTestMode()
 			switch result {
 			case nmi.ProbeLive:
+				storeProbeVerdict(database, providerKey, keyHash, probeVerdictLive)
 				return nil, fmt.Errorf("processor %q: PRODUCTION NMI credentials detected while test_env is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to start (use the sandbox account credentials, or unset test_env)", providerKey)
 			case nmi.ProbeSimulated:
+				storeProbeVerdict(database, providerKey, keyHash, probeVerdictSimulated)
 				log.Infof("processor %q: NMI account verified as simulating (test env)", providerKey)
 			default:
+				// Indeterminate verdicts are never cached: the next boot
+				// re-probes once the transport/credential issue clears.
 				log.WithError(probeErr).Warnf("⚠️  processor %q: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_env", providerKey)
 			}
 		}

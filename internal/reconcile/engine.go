@@ -29,6 +29,11 @@ type Engine struct {
 	// Writer applies enforce-mode local writes. May be nil for advisory-only
 	// engines.
 	Writer LocalWriter
+	// History is the THIRD dunning-forensics evidence source (OpenRails'
+	// own ClickHouse analytics events, incl. imported legacy history). May be
+	// nil / unconfigured: the forensics report then carries a note instead —
+	// a missing or unreachable ClickHouse is NEVER a run error.
+	History HistoryEventSource
 
 	// DisableEntitlementRevocation mirrors config.IsEntitlementExpirationDisabled:
 	// when true, every entitlement-revoking applier is skipped with a logged
@@ -54,6 +59,11 @@ type RunParams struct {
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
 	Until time.Time
+	// Materialize (enforce-only, explicit opt-in — bootstrap mode v1.1):
+	// PS-1 findings whose identity AND plan resolve unambiguously are
+	// materialized as local subscriptions instead of going admin_pending.
+	// Ambiguous/unresolvable PS-1 behavior is unchanged.
+	Materialize bool
 }
 
 // ProviderReport is one provider's section of the run summary.
@@ -155,6 +165,9 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	}
 	if params.Mode == ModeEnforce && e.Writer == nil {
 		return nil, fmt.Errorf("reconcile: enforce mode requires a LocalWriter")
+	}
+	if params.Materialize && params.Mode != ModeEnforce {
+		return nil, fmt.Errorf("reconcile: materialize is an enforce-mode option (advisory never writes)")
 	}
 
 	providers := params.Providers
@@ -282,10 +295,11 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	now := e.now()
-	findings := diffProvider(provider, snap, local, localPayments, now)
+	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{Materialize: params.Materialize})
 
 	if snap.Capabilities.Transactions {
-		rep.Dunning = computeDunningForensics(provider, snap, local, now)
+		history, historyNote := e.fetchHistory(ctx, provider, params)
+		rep.Dunning = computeDunningForensics(provider, snap, local, history, historyNote, now)
 	}
 
 	// Persist findings (stable identity: upsert by (tenant, provider, type,
@@ -380,6 +394,22 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	return rep, records, nil
+}
+
+// fetchHistory pulls the third dunning evidence source (ClickHouse analytics
+// events). It NEVER fails the run: unconfigured or unreachable degrades to a
+// note carried into the forensics report.
+func (e *Engine) fetchHistory(ctx context.Context, provider Provider, params RunParams) ([]HistoryEvent, string) {
+	if e.History == nil || !e.History.Configured() {
+		return nil, "not configured (no ClickHouse analytics source; provider + local evidence only)"
+	}
+	events, err := e.History.ListEvents(ctx, localProcessorNames(provider), params.Since, params.Until)
+	if err != nil {
+		log.WithError(err).WithField("provider", provider).
+			Warn("reconcile: analytics history source unavailable; forensics degrade to provider + local evidence")
+		return nil, "unavailable: " + err.Error()
+	}
+	return events, fmt.Sprintf("ok: %d events", len(events))
 }
 
 // coveredWindow is the transaction timeline this run actually examined for
@@ -485,6 +515,25 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 		}
 		evidence["entitlements_granted"] = granted
 		return evidence, granted > 0, nil
+
+	case a.Materialize != nil:
+		res, err := e.Writer.MaterializeSubscription(ctx, *a.Materialize)
+		if err != nil {
+			return nil, false, err
+		}
+		if !res.Created {
+			return nil, false, nil // already materialized: skipped, re-diffed next run
+		}
+		evidence["materialized_subscription_id"] = res.SubscriptionID.String()
+		evidence["identity_via"] = a.Materialize.IdentityVia
+		evidence["price_id"] = a.Materialize.PriceID.String()
+		evidence["status"] = a.Materialize.Status
+		evidence["entitlements_granted"] = res.EntitlementsGranted
+		evidence["payment_backfilled"] = res.PaymentBackfilled
+		if a.Materialize.Backfill != nil {
+			evidence["backfill_transaction_id"] = a.Materialize.Backfill.TransactionID
+		}
+		return evidence, true, nil
 
 	case a.RevokeEntitlements != nil:
 		if e.DisableEntitlementRevocation {

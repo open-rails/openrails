@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/modules/analytics"
 )
 
 // FetcherClients are the already-built runtime clients the fetchers wrap.
@@ -75,6 +76,12 @@ func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]ProcessorFetc
 	}
 	if cfg != nil {
 		e.DisableEntitlementRevocation = cfg.IsEntitlementExpirationDisabled()
+		// Third dunning-forensics evidence source: OpenRails' own ClickHouse
+		// analytics events (incl. imported legacy history). Optional — when
+		// ClickHouse is absent the report carries a note instead.
+		if cfg.ClickHouse != nil {
+			e.History = NewAnalyticsHistorySource(analytics.NewDunningHistoryService(cfg.ClickHouse))
+		}
 	}
 	return e
 }

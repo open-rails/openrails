@@ -51,6 +51,7 @@ func (l *fakeLocal) Load(ctx context.Context, provider Provider) (*LocalState, e
 		Subscriptions:  append([]LocalSubscription(nil), l.state.Subscriptions...),
 		Entitlements:   append([]LocalEntitlement(nil), l.state.Entitlements...),
 		PaymentMethods: append([]LocalPaymentMethod(nil), l.state.PaymentMethods...),
+		Prices:         append([]LocalPrice(nil), l.state.Prices...),
 	}
 	return &cp, nil
 }
@@ -394,6 +395,68 @@ func (w *fakeWriter) GrantEntitlements(ctx context.Context, a GrantEntitlementsA
 		granted++
 	}
 	return granted, nil
+}
+
+// fakeMaterializeEntitlements is what the fakeWriter "snapshots" onto every
+// materialized subscription (the PG writer reads the product's spec).
+var fakeMaterializeEntitlements = []string{"premium"}
+
+func (w *fakeWriter) MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error) {
+	w.calls["materialize"]++
+	w.local.mu.Lock()
+	for i := range w.local.state.Subscriptions {
+		if w.local.state.Subscriptions[i].ProcessorSubscriptionID == a.ProcessorSubscriptionID {
+			w.local.mu.Unlock()
+			return MaterializeResult{}, nil // already materialized
+		}
+	}
+	priceID := a.PriceID
+	sub := LocalSubscription{
+		ID:                      uuid.New(),
+		TenantSubjectID:         a.TenantSubjectID,
+		PriceID:                 &priceID,
+		ProductID:               a.ProductID,
+		Status:                  a.Status,
+		Processor:               a.Processor,
+		ProcessorSubscriptionID: a.ProcessorSubscriptionID,
+		UserEmail:               a.UserEmail,
+		CurrentPeriodStartsAt:   a.PeriodStartsAt,
+		CurrentPeriodEndsAt:     a.PeriodEndsAt,
+		StartedAt:               time.Now(),
+		EntitlementNames:        fakeMaterializeEntitlements,
+	}
+	w.local.state.Subscriptions = append(w.local.state.Subscriptions, sub)
+	w.local.mu.Unlock()
+
+	res := MaterializeResult{SubscriptionID: sub.ID, Created: true}
+	if a.PeriodEndsAt == nil || a.PeriodEndsAt.After(time.Now()) {
+		start := time.Now()
+		if a.PeriodStartsAt != nil {
+			start = *a.PeriodStartsAt
+		}
+		granted, err := w.GrantEntitlements(ctx, GrantEntitlementsAction{
+			SubscriptionID:  sub.ID,
+			TenantSubjectID: a.TenantSubjectID,
+			Entitlements:    fakeMaterializeEntitlements,
+			StartAt:         start,
+			EndAt:           a.PeriodEndsAt,
+		})
+		if err != nil {
+			return res, err
+		}
+		res.EntitlementsGranted = granted
+	}
+	if a.Backfill != nil {
+		b := *a.Backfill
+		subID := sub.ID
+		b.SubscriptionID = &subID
+		backfilled, err := w.BackfillPayment(ctx, b)
+		if err != nil {
+			return res, err
+		}
+		res.PaymentBackfilled = backfilled
+	}
+	return res, nil
 }
 
 func (w *fakeWriter) RevokeSubscriptionEntitlements(ctx context.Context, a RevokeEntitlementsAction) (int, error) {
@@ -1226,7 +1289,7 @@ func TestDunningForensics(t *testing.T) {
 			nmiSaleTxn("d3", fmt.Sprintf("rebill-%s-%d", exhausted.ID, testNow.Unix()), false),
 		},
 	}
-	report := computeDunningForensics(ProviderNMI, snap, &local.state, testNow)
+	report := computeDunningForensics(ProviderNMI, snap, &local.state, nil, "not configured", testNow)
 	require.NotNil(t, report)
 	assert.Equal(t, 2, report.SubscriptionsExamined)
 	assert.Equal(t, 1, report.NeverAttempted)
@@ -1235,6 +1298,277 @@ func TestDunningForensics(t *testing.T) {
 	require.NotNil(t, report.LastLocalDunningAction)
 	assert.True(t, report.LastLocalDunningAction.Equal(*exhausted.LastRetryAt))
 	require.Len(t, report.Details, 2)
+}
+
+// --- PS-1 materialization (bootstrap mode v1.1) -------------------------------
+
+// materializeFixture: a remote NMI subscription unknown locally whose identity
+// (vault id -> local payment method) and plan (provider link on one price)
+// both resolve, plus a successful remote charge attributable to it.
+func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
+	local := &fakeLocal{}
+	subjectID := uuid.New()
+	price := LocalPrice{
+		ID:        uuid.New(),
+		ProductID: uuid.New(),
+		Amount:    999,
+		Currency:  "usd",
+		Status:    "active",
+		Processors: map[string]map[string]string{
+			"mobius": {"plan_id": "plan-gold"},
+		},
+	}
+	local.state.Prices = []LocalPrice{price}
+	local.state.PaymentMethods = []LocalPaymentMethod{{
+		ID: uuid.New(), TenantSubjectID: subjectID, Processor: "mobius",
+		VaultID: "vault-77", LastFour: "1111", ExpiryDate: "1029",
+	}}
+	end := testNow.Add(20 * 24 * time.Hour)
+	lastBilled := testNow.Add(-10 * 24 * time.Hour)
+	snap := &RemoteSnapshot{
+		Provider:     ProviderNMI,
+		Capabilities: Capabilities{Subscriptions: true, Transactions: true, Vault: true},
+		Subscriptions: []RemoteSubscription{
+			{
+				ProcessorSubscriptionID: "remote-77",
+				Status:                  SubscriptionStatusActive,
+				CustomerID:              "vault-77",
+				Email:                   "owner@example.com",
+				PlanID:                  "plan-gold",
+				NextBillingAt:           &end,
+				LastBilledAt:            &lastBilled,
+				AmountCents:             999,
+				Currency:                "usd",
+			},
+		},
+		Transactions: []RemoteTransaction{
+			{
+				TransactionID: "txn-mat-1", Type: TransactionTypeSale, Success: true,
+				AmountCents: 999, Currency: "USD", OccurredAt: lastBilled,
+				Raw: rawJSON(map[string]any{"customer_vault_id": "vault-77"}),
+			},
+		},
+		VaultEntries: []RemoteVaultEntry{
+			{CustomerVaultID: "vault-77", CardLast4: "1111", CardExpiry: "1029"},
+		},
+	}
+	return local, snap, price
+}
+
+func TestMaterializePS1(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("without the flag PS-1 stays admin_pending (unchanged)", func(t *testing.T) {
+		local, snap, _ := materializeFixture()
+		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		require.NoError(t, err)
+		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
+		require.Len(t, ps1, 1)
+		assert.Equal(t, FindingStatusAdminPending, ps1[0].Status)
+		assert.True(t, ps1[0].RequiresAdmin)
+		assert.Zero(t, writer.calls["materialize"])
+		assert.Equal(t, FindingStatusAdminPending, store.record(ProviderNMI, FindingRemoteSubMissingLocal, "remote-77").Status)
+	})
+
+	t.Run("materialize requires enforce mode", func(t *testing.T) {
+		local, snap, _ := materializeFixture()
+		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
+		_, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, Materialize: true})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "enforce")
+	})
+
+	t.Run("resolvable PS-1 materializes with payment + entitlements and resolves enforced", func(t *testing.T) {
+		local, snap, price := materializeFixture()
+		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		require.NoError(t, err)
+
+		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
+		require.Len(t, ps1, 1)
+		assert.Equal(t, 1, writer.calls["materialize"])
+
+		rec := store.record(ProviderNMI, FindingRemoteSubMissingLocal, "remote-77")
+		require.NotNil(t, rec)
+		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
+		assert.Equal(t, "enforced", rec.Resolution)
+		require.NotNil(t, rec.ResolutionEvid)
+		assert.Equal(t, "vault_id", rec.ResolutionEvid["identity_via"])
+		assert.Equal(t, price.ID.String(), rec.ResolutionEvid["price_id"])
+		assert.Equal(t, true, rec.ResolutionEvid["payment_backfilled"])
+
+		// The local subscription exists with remote status/periods…
+		st, _ := local.Load(ctx, ProviderNMI)
+		var created *LocalSubscription
+		for i := range st.Subscriptions {
+			if st.Subscriptions[i].ProcessorSubscriptionID == "remote-77" {
+				created = &st.Subscriptions[i]
+			}
+		}
+		require.NotNil(t, created)
+		assert.Equal(t, "active", created.Status)
+		assert.Equal(t, "mobius", created.Processor)
+		require.NotNil(t, created.CurrentPeriodEndsAt)
+		assert.True(t, created.CurrentPeriodEndsAt.Equal(*snap.Subscriptions[0].NextBillingAt))
+
+		// …the snapshot charge is backfilled and entitlements granted.
+		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, []string{"txn-mat-1"})
+		require.Len(t, payments, 1)
+		require.Len(t, st.Entitlements, 1)
+		assert.Equal(t, created.ID, st.Entitlements[0].SourceID)
+
+		// Re-run: converged, no duplicate, no second materialize write.
+		res2, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		require.NoError(t, err)
+		assert.Empty(t, findByType(res2.Findings, FindingRemoteSubMissingLocal))
+		assert.Equal(t, 1, writer.calls["materialize"])
+	})
+
+	t.Run("ambiguous identity stays admin_pending with the blocker documented", func(t *testing.T) {
+		local, snap, _ := materializeFixture()
+		// Second subject shares the remote email -> two distinct candidates.
+		other := liveLocalSub(ProviderNMI, "other-1")
+		other.UserEmail = "owner@example.com"
+		local.state.Subscriptions = append(local.state.Subscriptions, other)
+		snap.Subscriptions = append(snap.Subscriptions, RemoteSubscription{
+			ProcessorSubscriptionID: "other-1", Status: SubscriptionStatusActive,
+		})
+		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		require.NoError(t, err)
+		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
+		require.Len(t, ps1, 1)
+		assert.Equal(t, FindingStatusAdminPending, ps1[0].Status)
+		assert.Contains(t, ps1[0].RemoteEvidence["materialize_blocked"], "ambiguous")
+		assert.Zero(t, writer.calls["materialize"])
+	})
+
+	t.Run("unresolvable plan stays admin_pending", func(t *testing.T) {
+		local, snap, _ := materializeFixture()
+		local.state.Prices = nil // no provider link anywhere
+		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		require.NoError(t, err)
+		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
+		require.Len(t, ps1, 1)
+		assert.Equal(t, FindingStatusAdminPending, ps1[0].Status)
+		assert.Contains(t, ps1[0].RemoteEvidence["materialize_blocked"], "plan unresolved")
+		assert.Zero(t, writer.calls["materialize"])
+	})
+
+	t.Run("remote past_due without a period end stays admin_pending", func(t *testing.T) {
+		local, snap, _ := materializeFixture()
+		snap.Subscriptions[0].Status = SubscriptionStatusPastDue
+		snap.Subscriptions[0].NextBillingAt = nil
+		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		require.NoError(t, err)
+		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
+		require.Len(t, ps1, 1)
+		assert.Equal(t, FindingStatusAdminPending, ps1[0].Status)
+		assert.Contains(t, ps1[0].RemoteEvidence["materialize_blocked"], "past_due")
+		assert.Zero(t, writer.calls["materialize"])
+	})
+}
+
+// --- forensics: ClickHouse third evidence source -------------------------------
+
+type fakeHistorySource struct {
+	configured bool
+	events     []HistoryEvent
+	err        error
+}
+
+func (f *fakeHistorySource) Configured() bool { return f.configured }
+func (f *fakeHistorySource) ListEvents(ctx context.Context, processors []string, since, until time.Time) ([]HistoryEvent, error) {
+	return f.events, f.err
+}
+
+func TestDunningForensicsHistorySource(t *testing.T) {
+	ctx := context.Background()
+
+	newFixture := func() (*fakeLocal, *RemoteSnapshot, LocalSubscription) {
+		local := &fakeLocal{}
+		sub := liveLocalSub(ProviderNMI, "nmi-hist")
+		sub.Status = "past_due"
+		local.state.Subscriptions = []LocalSubscription{sub}
+		snap := &RemoteSnapshot{
+			Provider:     ProviderNMI,
+			Capabilities: Capabilities{Subscriptions: true, Transactions: true},
+			Subscriptions: []RemoteSubscription{
+				{ProcessorSubscriptionID: "nmi-hist", Status: SubscriptionStatusPastDue, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
+			},
+		}
+		return local, snap, sub
+	}
+
+	t.Run("history events merge into the per-subscription timeline and aggregates", func(t *testing.T) {
+		local, snap, sub := newFixture()
+		subID := sub.ID
+		histAt := testNow.Add(-200 * 24 * time.Hour) // deep history the provider window can't see
+		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
+		eng.History = &fakeHistorySource{configured: true, events: []HistoryEvent{
+			{Table: "payment_events", EventType: "charge_failed", Processor: "nmi", SubscriptionID: &subID, OccurredAt: histAt},
+			{Table: "payment_events", EventType: "charge_success", Processor: "nmi", SubscriptionID: &subID, OccurredAt: histAt.Add(-30 * 24 * time.Hour)},
+			{Table: "subscription_events", EventType: "subscription_cancelled", Processor: "nmi", ProcessorSubscriptionID: "nmi-hist", OccurredAt: histAt.Add(24 * time.Hour)},
+			{Table: "payment_events", EventType: "charge_failed", Processor: "nmi", OccurredAt: histAt}, // uncorrelated: no ids
+		}}
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		require.NoError(t, err)
+
+		d := res.Summary.Providers["nmi"].Dunning
+		require.NotNil(t, d)
+		assert.Equal(t, "ok: 4 events (3 correlated)", d.HistorySource)
+		require.Len(t, d.Details, 1)
+		line := d.Details[0]
+		assert.Equal(t, 3, line.HistoryEvents)
+		assert.Equal(t, 1, line.HistoryFailures)
+		assert.Equal(t, 1, line.HistorySuccesses)
+
+		// Timeline carries source-tagged entries from history.
+		var sources, kinds []string
+		for _, ev := range line.Timeline {
+			sources = append(sources, ev.Source)
+			kinds = append(kinds, ev.Kind)
+		}
+		assert.Contains(t, sources, "history")
+		assert.Contains(t, kinds, "charge_failed")
+		assert.Contains(t, kinds, "subscription_cancelled")
+
+		// "Last dunning action per ANY source": only history acted here.
+		require.NotNil(t, d.LastDunningActionAnySource)
+		assert.Equal(t, "history", d.LastDunningActionVia)
+		assert.True(t, d.LastDunningActionAnySource.Equal(histAt))
+
+		// History failures classify a frozen-retry sub as never_attempted even
+		// with zero provider declines in the window.
+		assert.Equal(t, "never_attempted", line.Classification)
+		assert.Equal(t, 1, d.NeverAttempted)
+	})
+
+	t.Run("unreachable ClickHouse degrades to a note, never an error", func(t *testing.T) {
+		local, snap, _ := newFixture()
+		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
+		eng.History = &fakeHistorySource{configured: true, err: fmt.Errorf("dial tcp: connection refused")}
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		require.NoError(t, err, "history source failure must not fail the run")
+		d := res.Summary.Providers["nmi"].Dunning
+		require.NotNil(t, d)
+		assert.Contains(t, d.HistorySource, "unavailable: dial tcp")
+		assert.Equal(t, "completed", res.Status)
+	})
+
+	t.Run("unconfigured source is noted", func(t *testing.T) {
+		local, snap, _ := newFixture()
+		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
+		eng.History = &fakeHistorySource{configured: false}
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
+		require.NoError(t, err)
+		d := res.Summary.Providers["nmi"].Dunning
+		require.NotNil(t, d)
+		assert.Contains(t, d.HistorySource, "not configured")
+	})
 }
 
 func TestParseRebillOrderID(t *testing.T) {

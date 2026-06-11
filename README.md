@@ -435,7 +435,12 @@ don't see its warning in the boot log, it isn't on. Full docs in `config.example
 guarantees** attach — a live Stripe key (`sk_live_`/`rk_live_`) refuses to boot; each
 configured NMI account is probed at boot with one auth on the non-issued test card —
 only a simulator can approve it, so a decline proves a live account and refuses the boot
-(NMI sandbox accounts are otherwise undetectable — same URL, unmarked keys); CCBill uses
+(NMI sandbox accounts are otherwise undetectable — same URL, unmarked keys). Probe
+verdicts are cached for 12h in `billing.probe_verdicts` keyed by sha256 of the key
+(#348): a fresh `live` verdict refuses the boot from cache without re-probing — a
+crash-looping supervisor pays one declined auth total, not one per restart — a fresh
+`simulated` verdict skips the probe, and a rotated key or stale verdict always
+re-probes (cache failures degrade to probing); CCBill uses
 `sandbox-api.ccbill.com`; Solana derives devnet structurally. `test_env=true` is
 **rejected outside `env=development`** — sandbox money is dev-only. The old `mode=test`
 is exactly `TEST_ENV=true` + `MODE=full`.
@@ -522,6 +527,7 @@ period), and dunning past the window cancels instead of charging.
 ## Documentation
 
 - **HTTP API reference:** [docs/api/endpoints.md](docs/api/endpoints.md)
+- **Operations manual:** [docs/operations.md](docs/operations.md) — provider consistency, the durability model, dunning, safety levers, and `billing reconcile check|fix|report`: the manual batch truth-pull that diffs and (on `fix`) converges local state to the payment processors (#107; never writes to a provider).
 - **Entitlements model:** [docs/entitlements_timeline.md](docs/entitlements_timeline.md)
 - **Tenant provisioning & service tokens:** [docs/tenant-provisioning.md](docs/tenant-provisioning.md)
 - **Testing with business time:** [docs/business-time.md](docs/business-time.md)

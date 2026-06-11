@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -22,6 +23,7 @@ type LocalWriter interface {
 	AdoptPaymentMethod(ctx context.Context, a AdoptVaultAction) (bool, error)
 	GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error)
 	RevokeSubscriptionEntitlements(ctx context.Context, a RevokeEntitlementsAction) (int, error)
+	MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error)
 }
 
 // PGLocalWriter applies enforce writes via the sqlc layer on a tenant-pinned
@@ -165,6 +167,82 @@ func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlemen
 		granted += int(n)
 	}
 	return granted, nil
+}
+
+// MaterializeSubscription creates the local subscription for a resolved PS-1
+// (bootstrap mode v1.1). Idempotent: when any local subscription already
+// carries the processor subscription id, the insert returns zero rows and
+// nothing else runs. The created row snapshots the product's entitlements
+// spec, and entitlements are granted through the normal subscription-sourced
+// path when the remote period is still running.
+func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error) {
+	var emailPtr *string
+	if email := a.UserEmail; email != "" {
+		emailPtr = &email
+	}
+	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
+		Status:                  gen.BillingSubscriptionStatus(a.Status),
+		Processor:               a.Processor,
+		ProcessorSubscriptionID: a.ProcessorSubscriptionID,
+		UserEmail:               emailPtr,
+		PeriodStartsAt:          a.PeriodStartsAt,
+		PeriodEndsAt:            a.PeriodEndsAt,
+		StartedAt:               a.StartedAt,
+		TenantSubjectID:         a.TenantSubjectID,
+		PriceID:                 a.PriceID,
+		Processors:              localProcessorNames(a.Provider),
+	})
+	if err != nil {
+		return MaterializeResult{}, err
+	}
+	if len(rows) == 0 {
+		return MaterializeResult{}, nil // already materialized (or price vanished): no-op
+	}
+	res := MaterializeResult{SubscriptionID: rows[0].ID, Created: true}
+
+	// Entitlements via the normal subscription-sourced path, for the remote
+	// period when it is still running (mirrors the PS-4 current-period grant).
+	now := w.now()
+	if a.PeriodEndsAt == nil || a.PeriodEndsAt.After(now) {
+		var spec map[string]json.RawMessage
+		if len(rows[0].EntitlementsSpecSnapshot) > 0 {
+			_ = json.Unmarshal(rows[0].EntitlementsSpecSnapshot, &spec)
+		}
+		if len(spec) > 0 {
+			names := make([]string, 0, len(spec))
+			for name := range spec {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			start := now
+			if a.PeriodStartsAt != nil {
+				start = *a.PeriodStartsAt
+			}
+			granted, err := w.GrantEntitlements(ctx, GrantEntitlementsAction{
+				SubscriptionID:  res.SubscriptionID,
+				TenantSubjectID: a.TenantSubjectID,
+				Entitlements:    names,
+				StartAt:         start,
+				EndAt:           a.PeriodEndsAt,
+			})
+			if err != nil {
+				return res, err
+			}
+			res.EntitlementsGranted = granted
+		}
+	}
+
+	if a.Backfill != nil {
+		b := *a.Backfill
+		subID := res.SubscriptionID
+		b.SubscriptionID = &subID
+		backfilled, err := w.BackfillPayment(ctx, b)
+		if err != nil {
+			return res, err
+		}
+		res.PaymentBackfilled = backfilled
+	}
+	return res, nil
 }
 
 func (w *PGLocalWriter) RevokeSubscriptionEntitlements(ctx context.Context, a RevokeEntitlementsAction) (int, error) {

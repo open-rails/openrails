@@ -37,12 +37,12 @@ func startReconcilePostgres(t *testing.T) *db.DB {
 }
 
 type seededState struct {
-	subjectID  uuid.UUID
-	productID  uuid.UUID
-	priceID    uuid.UUID
-	subAlive   uuid.UUID // active locally, active remotely
-	subDead    uuid.UUID // active locally, ABSENT from the remote roster (PS-2)
-	entDeadID  uuid.UUID // live entitlement sourced by subDead
+	subjectID uuid.UUID
+	productID uuid.UUID
+	priceID   uuid.UUID
+	subAlive  uuid.UUID // active locally, active remotely
+	subDead   uuid.UUID // active locally, ABSENT from the remote roster (PS-2)
+	entDeadID uuid.UUID // live entitlement sourced by subDead
 }
 
 // seedReconcileFixtures inserts a product, price, tenant subject, and two NMI
@@ -318,6 +318,199 @@ func TestReconcileEngineIntegration(t *testing.T) {
 		require.Len(t, dups, 1)
 		assert.Equal(t, FindingStatusResolved, dups[0].Status)
 		assert.Equal(t, "auto_vanished", dups[0].Resolution)
+		return nil
+	}))
+}
+
+// TestReconcileMaterializeIntegration proves the PS-1 materialization
+// (bootstrap mode v1.1) end to end against real Postgres under RLS: a fake
+// snapshot carries one RESOLVABLE PS-1 (vault identity + provider_links plan)
+// and one UNRESOLVABLE PS-1. `fix --materialize` creates the local
+// subscription with remote status/periods, backfills the snapshot's charge,
+// grants entitlements via the subscription-sourced path, and resolves the
+// finding as enforced — while the unresolvable one stays admin_pending.
+func TestReconcileMaterializeIntegration(t *testing.T) {
+	appDB := startReconcilePostgres(t)
+	baseCtx := tenant.WithID(context.Background(), tenant.DefaultID)
+	store := &PGStore{DB: appDB}
+
+	suffix := uuid.NewString()[:8]
+	subjectIDHolder := uuid.Nil
+	productID := uuid.New()
+	priceID := uuid.New()
+	pmID := uuid.New()
+	vaultID := "mat-vault-" + suffix
+	planID := "mat-plan-" + suffix
+	entName := "premium-mat-" + suffix
+
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		subjectIDHolder = dbtest.EnsureTenantSubjectIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		exec := func(sql string, args ...any) {
+			t.Helper()
+			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
+			require.NoError(t, err)
+		}
+		// Catalog: product with an entitlements spec + a price whose
+		// provider_links blob carries the NMI plan id.
+		exec(`INSERT INTO billing.products (id, slug, display_name, tier_group, entitlements_spec)
+		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null))`,
+			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, billing_cycle_days, processors)
+		      VALUES ($1, $2, 1499, 'usd', 30, jsonb_build_object('nmi', jsonb_build_object('plan_id', $3::text)))`,
+			priceID, productID, planID)
+		// Identity anchor: a stored payment method holding the remote vault id.
+		exec(`INSERT INTO billing.payment_methods (id, tenant_subject_id, processor, vault_id, initial_transaction_id, last_four, expiry_date)
+		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029')`, pmID, subjectIDHolder, vaultID, suffix)
+		return nil
+	}))
+	subjectID := subjectIDHolder
+
+	now := time.Now().UTC()
+	periodEnd := now.Add(20 * 24 * time.Hour)
+	lastBilled := now.Add(-10 * 24 * time.Hour)
+	resolvablePSID := "mat-resolvable-" + suffix
+	unresolvablePSID := "mat-unresolvable-" + suffix
+	txnID := "mat-txn-" + suffix
+	snap := &RemoteSnapshot{
+		Provider:     ProviderNMI,
+		FetchedAt:    now,
+		Capabilities: Capabilities{Subscriptions: true, Transactions: true, Vault: true},
+		Subscriptions: []RemoteSubscription{
+			{
+				ProcessorSubscriptionID: resolvablePSID,
+				Status:                  SubscriptionStatusActive,
+				CustomerID:              vaultID,
+				Email:                   "mat-" + suffix + "@example.com",
+				PlanID:                  planID,
+				NextBillingAt:           &periodEnd,
+				LastBilledAt:            &lastBilled,
+				AmountCents:             1499,
+				Currency:                "usd",
+			},
+			{
+				// No vault/email match locally, no plan link: unresolvable.
+				ProcessorSubscriptionID: unresolvablePSID,
+				Status:                  SubscriptionStatusActive,
+				Email:                   "stranger-" + suffix + "@example.com",
+				PlanID:                  "unknown-plan-" + suffix,
+			},
+		},
+		Transactions: []RemoteTransaction{
+			{
+				TransactionID: txnID, Type: TransactionTypeSale, Success: true,
+				AmountCents: 1499, Currency: "USD", OccurredAt: lastBilled,
+				Raw: rawJSON(map[string]any{"customer_vault_id": vaultID}),
+			},
+		},
+	}
+
+	newEngine := func() *Engine {
+		return &Engine{
+			Fetchers: map[Provider]ProcessorFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}},
+			Store:    store,
+			Local:    &PGLocalStateLoader{DB: appDB},
+			Writer:   &PGLocalWriter{DB: appDB},
+		}
+	}
+
+	// ---- enforce WITHOUT --materialize: both PS-1 stay admin_pending --------
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		require.NoError(t, err)
+		for _, f := range res.Findings {
+			if f.Type == FindingRemoteSubMissingLocal {
+				assert.Equal(t, FindingStatusAdminPending, f.Status, "PS-1 without --materialize is unchanged")
+			}
+		}
+		var n int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM billing.subscriptions WHERE processor_subscription_id = $1`, resolvablePSID).Scan(&n))
+		assert.Zero(t, n, "no subscription created without the flag")
+		return nil
+	}))
+
+	// ---- enforce WITH --materialize ------------------------------------------
+	var matRun *RunResult
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		matRun = res
+		return err
+	}))
+	require.NotNil(t, matRun)
+	assert.Equal(t, "completed", matRun.Status)
+
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		// Resolvable: subscription created with remote status/periods.
+		var subID uuid.UUID
+		var status, processor string
+		var gotSubject uuid.UUID
+		var gotPeriodEnd time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT id, status::text, processor, tenant_subject_id, current_period_ends_at
+			 FROM billing.subscriptions WHERE processor_subscription_id = $1`, resolvablePSID).
+			Scan(&subID, &status, &processor, &gotSubject, &gotPeriodEnd))
+		assert.Equal(t, "active", status)
+		assert.Equal(t, "nmi", processor)
+		assert.Equal(t, subjectID, gotSubject)
+		assert.WithinDuration(t, periodEnd, gotPeriodEnd, time.Second)
+
+		// Snapshot charge backfilled against the new subscription.
+		var amount int64
+		var paySub uuid.UUID
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT amount, subscription_id FROM billing.payments WHERE transaction_id = $1`, txnID).
+			Scan(&amount, &paySub))
+		assert.Equal(t, int64(1499), amount)
+		assert.Equal(t, subID, paySub)
+
+		// Entitlements granted through the normal subscription-sourced path.
+		var entCount int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM billing.entitlements
+			 WHERE source_type = 'subscription' AND source_id = $1
+			   AND entitlement = $2 AND revoked_at IS NULL`, subID, entName).Scan(&entCount))
+		assert.Equal(t, 1, entCount)
+
+		// Finding resolved as enforced with the resolution evidence.
+		findings, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingRemoteSubMissingLocal), Limit: 50})
+		require.NoError(t, err)
+		var resolved, pending *FindingRecord
+		for i := range findings {
+			switch findings[i].SubjectKey {
+			case resolvablePSID:
+				resolved = &findings[i]
+			case unresolvablePSID:
+				pending = &findings[i]
+			}
+		}
+		require.NotNil(t, resolved)
+		assert.Equal(t, FindingStatusAutoFixed, resolved.Status)
+		assert.Equal(t, "enforced", resolved.Resolution)
+		require.NotNil(t, resolved.ResolutionEvid)
+		assert.Equal(t, subID.String(), resolved.ResolutionEvid["materialized_subscription_id"])
+		assert.Equal(t, "vault_id", resolved.ResolutionEvid["identity_via"])
+
+		// Unresolvable: still admin_pending, blocker documented.
+		require.NotNil(t, pending)
+		assert.Equal(t, FindingStatusAdminPending, pending.Status)
+		assert.True(t, pending.RequiresAdmin)
+		blocked, _ := pending.RemoteEvidence["materialize_blocked"].(string)
+		assert.Contains(t, blocked, "identity unresolved")
+		assert.Contains(t, blocked, "plan unresolved")
+		return nil
+	}))
+
+	// ---- re-run: idempotent, no duplicate subscription ------------------------
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		require.NoError(t, err)
+		for _, f := range res.Findings {
+			assert.NotEqual(t, resolvablePSID, f.SubjectKey, "materialized PS-1 must not re-diff")
+		}
+		var n int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM billing.subscriptions WHERE processor_subscription_id = $1`, resolvablePSID).Scan(&n))
+		assert.Equal(t, 1, n, "exactly one materialized subscription after a re-run")
 		return nil
 	}))
 }

@@ -19,6 +19,7 @@ type localIndex struct {
 	entsBySource map[uuid.UUID][]*LocalEntitlement
 	pmByVault    map[string]*LocalPaymentMethod
 	pmByID       map[uuid.UUID]*LocalPaymentMethod
+	prices       []LocalPrice
 }
 
 func buildLocalIndex(local *LocalState) *localIndex {
@@ -54,6 +55,42 @@ func buildLocalIndex(local *LocalState) *localIndex {
 		pm := &local.PaymentMethods[i]
 		idx.pmByVault[pm.VaultID] = pm
 		idx.pmByID[pm.ID] = pm
+	}
+	idx.prices = local.Prices
+	return idx
+}
+
+// planLink is one (price, local processor name) pair whose provider link
+// carries a given remote plan id.
+type planLink struct {
+	price         *LocalPrice
+	processorName string
+}
+
+// planLinkIDKeys are the provider-link config keys that hold a processor-side
+// plan/price identifier (models.ProcessorKeyPlanID / ProcessorKeyStripePriceID).
+var planLinkIDKeys = []string{"plan_id", "price_id"}
+
+// buildPlanIndex maps remote plan ids onto local prices via the catalog
+// provider_links blobs, restricted to the provider's local processor names.
+func buildPlanIndex(provider Provider, prices []LocalPrice) map[string][]planLink {
+	idx := map[string][]planLink{}
+	names := localProcessorNames(provider)
+	for i := range prices {
+		p := &prices[i]
+		for _, name := range names {
+			cfg := p.Processors[name]
+			if cfg == nil {
+				continue
+			}
+			for _, key := range planLinkIDKeys {
+				id := strings.TrimSpace(cfg[key])
+				if id == "" {
+					continue
+				}
+				idx[id] = append(idx[id], planLink{price: p, processorName: name})
+			}
+		}
 	}
 	return idx
 }
@@ -329,10 +366,18 @@ func deletionIntent(s *LocalSubscription) map[string]any {
 
 const deletionIntentAction = "no admin action needed: boot rescan replays the recorded delete (deletion_scheduled_at marker present)"
 
+// diffOptions carries per-run diff behavior switches.
+type diffOptions struct {
+	// Materialize (enforce-only, explicit opt-in): PS-1 findings whose
+	// identity and plan both resolve unambiguously carry a materialize apply
+	// action instead of going admin_pending.
+	Materialize bool
+}
+
 // diffProvider runs every capability-gated check of the PS-1..PS-9 taxonomy
 // for one provider snapshot vs local state and returns the findings, each
 // carrying its enforce instruction where one is safe.
-func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, localPayments []LocalPayment, now time.Time) []Finding {
+func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, localPayments []LocalPayment, now time.Time, opts diffOptions) []Finding {
 	idx := buildLocalIndex(local)
 	ridx := buildRemoteIndex(snap)
 	corr := &correlator{local: idx, remote: ridx}
@@ -348,7 +393,7 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 	var findings []Finding
 
 	if caps.Subscriptions {
-		findings = append(findings, diffSubscriptions(provider, snap, idx, ridx, traits, now)...)
+		findings = append(findings, diffSubscriptions(provider, snap, idx, ridx, traits, now, opts)...)
 		findings = append(findings, diffDuplicates(provider, idx, ridx)...)
 	}
 	if caps.Transactions {
@@ -371,8 +416,9 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 }
 
 // diffSubscriptions covers PS-1, PS-2 and PS-3.
-func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex, ridx *remoteIndex, traits providerTraits, now time.Time) []Finding {
+func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex, ridx *remoteIndex, traits providerTraits, now time.Time, opts diffOptions) []Finding {
 	var findings []Finding
+	planIdx := buildPlanIndex(provider, idx.prices)
 
 	// Remote -> local: PS-1 and presence-based PS-2/PS-3.
 	for psid, r := range ridx.subByPSID {
@@ -383,7 +429,7 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 				// noise, not actionable drift.
 				continue
 			}
-			findings = append(findings, makePS1(provider, r, idx))
+			findings = append(findings, makePS1(provider, r, idx, planIdx, snap, opts))
 			continue
 		}
 
@@ -431,7 +477,7 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 	return findings
 }
 
-func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex) Finding {
+func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx map[string][]planLink, snap *RemoteSnapshot, opts diffOptions) Finding {
 	remoteEv := remoteSubEvidence(r)
 	if len(r.Raw) > 0 {
 		var raw any
@@ -440,14 +486,14 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex) Finding 
 		}
 	}
 	f := Finding{
-		Provider:       provider,
-		Type:           FindingRemoteSubMissingLocal,
-		SubjectKey:     r.ProcessorSubscriptionID,
-		Severity:       SeverityCritical,
-		Status:         FindingStatusAdminPending,
-		RequiresAdmin:  true,
-		RemoteEvidence: remoteEv,
-		RecommendedAction: "the processor is billing a subscription OpenRails does not know; investigate and either import it locally or cancel it at the processor (remote action, admin-only). No auto-create in v1",
+		Provider:          provider,
+		Type:              FindingRemoteSubMissingLocal,
+		SubjectKey:        r.ProcessorSubscriptionID,
+		Severity:          SeverityCritical,
+		Status:            FindingStatusAdminPending,
+		RequiresAdmin:     true,
+		RemoteEvidence:    remoteEv,
+		RecommendedAction: "the processor is billing a subscription OpenRails does not know; investigate and either import it locally or cancel it at the processor (remote action, admin-only). Default (no --materialize): no auto-create",
 	}
 	// Email fallback: surface candidates so the admin sees the likely owner,
 	// but never auto-link (zero or multiple matches = human decision).
@@ -464,11 +510,158 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex) Finding 
 			}
 			f.LocalEvidence = map[string]any{"email_candidates": matches}
 			if len(candidates) == 1 {
-				f.RecommendedAction = "the processor bills a subscription unknown locally, but exactly one local subscription shares its email (see local_evidence); verify and link/import manually. No auto-create in v1"
+				f.RecommendedAction = "the processor bills a subscription unknown locally, but exactly one local subscription shares its email (see local_evidence); verify and link/import manually, or re-run enforce with --materialize"
 			}
 		}
 	}
+	if !opts.Materialize {
+		return f
+	}
+
+	// Materialization (bootstrap mode v1.1): auto-create ONLY when both
+	// identity and plan resolve unambiguously; anything else stays
+	// admin_pending exactly as without the flag, with the blocker documented.
+	subjectID, identityVia, identityNote := resolvePS1Identity(r, idx)
+	link, planNote := resolvePS1Plan(r, planIdx)
+	var blockers []string
+	if identityNote != "" {
+		blockers = append(blockers, identityNote)
+	}
+	if planNote != "" {
+		blockers = append(blockers, planNote)
+	}
+	if r.Status == SubscriptionStatusPastDue && r.NextBillingAt == nil {
+		// Local past_due requires a period end (chk_past_due_has_period_end).
+		blockers = append(blockers, "remote is past_due without a next billing date; local past_due requires a period end")
+	}
+	if len(blockers) > 0 {
+		remoteEv["materialize_blocked"] = strings.Join(blockers, "; ")
+		return f
+	}
+
+	action := &MaterializeSubscriptionAction{
+		Provider:                provider,
+		Processor:               link.processorName,
+		ProcessorSubscriptionID: r.ProcessorSubscriptionID,
+		TenantSubjectID:         subjectID,
+		PriceID:                 link.price.ID,
+		ProductID:               link.price.ProductID,
+		Status:                  string(r.Status),
+		PeriodEndsAt:            r.NextBillingAt,
+		UserEmail:               strings.TrimSpace(r.Email),
+		IdentityVia:             identityVia,
+	}
+	if r.LastBilledAt != nil {
+		action.StartedAt = r.LastBilledAt
+		// chk_valid_period: only carry the period start when it precedes the end.
+		if r.NextBillingAt == nil || r.LastBilledAt.Before(*r.NextBillingAt) {
+			action.PeriodStartsAt = r.LastBilledAt
+		}
+	}
+	if t := latestChargeForRemoteSub(snap, r); t != nil {
+		action.Backfill = &BackfillPaymentAction{
+			Processor:       link.processorName,
+			TransactionID:   t.TransactionID,
+			AmountCents:     t.AmountCents,
+			Currency:        strings.ToLower(t.Currency),
+			PurchasedAt:     t.OccurredAt,
+			PriceID:         link.price.ID,
+			TenantSubjectID: subjectID,
+			Metadata: map[string]any{
+				"reconcile_backfill":    true,
+				"reconcile_materialize": true,
+				"provider":              string(provider),
+			},
+		}
+	}
+
+	f.Status = FindingStatusOpen
+	f.RequiresAdmin = false
+	f.Apply = &ApplyAction{Materialize: action}
+	f.RecommendedAction = fmt.Sprintf(
+		"materialize: identity resolved via %s and plan %q maps to exactly one local price; enforce creates the local subscription (status %s) with the remote periods%s",
+		identityVia, r.PlanID, r.Status,
+		map[bool]string{true: " and backfills the snapshot's latest charge", false: ""}[action.Backfill != nil])
+	if f.LocalEvidence == nil {
+		f.LocalEvidence = map[string]any{}
+	}
+	f.LocalEvidence["materialize_identity_via"] = identityVia
+	f.LocalEvidence["materialize_tenant_subject_id"] = subjectID.String()
+	f.LocalEvidence["materialize_price_id"] = link.price.ID.String()
+	f.LocalEvidence["materialize_processor"] = link.processorName
 	return f
+}
+
+// resolvePS1Identity resolves the remote subscription's owner through the
+// engine's existing matcher surfaces: the vault/customer id against local
+// payment methods, then the email against local subscriptions. Exactly one
+// DISTINCT subject across both is a resolution; zero or multiple is not
+// (never guess).
+func resolvePS1Identity(r *RemoteSubscription, idx *localIndex) (uuid.UUID, string, string) {
+	subjects := map[uuid.UUID]string{} // subject -> how it matched (vault wins)
+	if r.CustomerID != "" {
+		if pm, ok := idx.pmByVault[r.CustomerID]; ok {
+			subjects[pm.TenantSubjectID] = "vault_id"
+		}
+	}
+	if email := strings.ToLower(strings.TrimSpace(r.Email)); email != "" {
+		for _, s := range idx.byEmail[email] {
+			if _, ok := subjects[s.TenantSubjectID]; !ok {
+				subjects[s.TenantSubjectID] = "email"
+			}
+		}
+	}
+	switch len(subjects) {
+	case 0:
+		return uuid.Nil, "", "identity unresolved: no local vault/email match"
+	case 1:
+		for id, via := range subjects {
+			return id, via, ""
+		}
+	}
+	return uuid.Nil, "", fmt.Sprintf("identity ambiguous: %d candidate subjects", len(subjects))
+}
+
+// resolvePS1Plan maps the remote plan id onto exactly one local price via the
+// catalog provider_links.
+func resolvePS1Plan(r *RemoteSubscription, planIdx map[string][]planLink) (planLink, string) {
+	planID := strings.TrimSpace(r.PlanID)
+	if planID == "" {
+		return planLink{}, "plan unresolved: remote record carries no plan id"
+	}
+	links := planIdx[planID]
+	switch len(links) {
+	case 0:
+		return planLink{}, fmt.Sprintf("plan unresolved: no local price carries a provider link for plan %q", planID)
+	case 1:
+		return links[0], ""
+	}
+	return planLink{}, fmt.Sprintf("plan ambiguous: %d local prices carry provider links for plan %q", len(links), planID)
+}
+
+// latestChargeForRemoteSub finds the snapshot's most recent successful sale
+// attributable to the remote subscription (direct subscription linkage, or a
+// matching vault/customer breadcrumb).
+func latestChargeForRemoteSub(snap *RemoteSnapshot, r *RemoteSubscription) *RemoteTransaction {
+	var best *RemoteTransaction
+	for i := range snap.Transactions {
+		t := &snap.Transactions[i]
+		if t.Type != TransactionTypeSale || !t.Success || t.TransactionID == "" || t.AmountCents <= 0 {
+			continue
+		}
+		matched := t.SubscriptionID != "" && t.SubscriptionID == r.ProcessorSubscriptionID
+		if !matched && r.CustomerID != "" {
+			bc := decodeBreadcrumbs(t.Raw)
+			matched = bc.CustomerVaultID == r.CustomerID || bc.Customer == r.CustomerID
+		}
+		if !matched {
+			continue
+		}
+		if best == nil || t.OccurredAt.After(best.OccurredAt) {
+			best = t
+		}
+	}
+	return best
 }
 
 // compareStatuses diffs one matched (local, remote) subscription pair into
@@ -486,13 +679,13 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 		// PS-2: processor terminated it, local still bills/grants.
 		cancelType := "expired"
 		f := Finding{
-			Provider:       provider,
-			Type:           FindingLocalActiveRemoteDead,
-			SubjectKey:     s.ID.String(),
-			Severity:       SeverityHigh,
-			Status:         FindingStatusOpen,
-			LocalEvidence:  localSubEvidence(s),
-			RemoteEvidence: remoteSubEvidence(r),
+			Provider:          provider,
+			Type:              FindingLocalActiveRemoteDead,
+			SubjectKey:        s.ID.String(),
+			Severity:          SeverityHigh,
+			Status:            FindingStatusOpen,
+			LocalEvidence:     localSubEvidence(s),
+			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: "processor reports this subscription " + string(r.Status) + "; enforce cancels it locally and revokes its subscription-sourced entitlements",
 			Apply: &ApplyAction{CancelLocal: &CancelLocalAction{
 				SubscriptionID: s.ID,
@@ -511,14 +704,14 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 		// either a recorded-but-unexecuted delete (intent annotation) or an
 		// orphan the admin must cancel AT the processor.
 		f := Finding{
-			Provider:       provider,
-			Type:           FindingStatusMismatch,
-			SubjectKey:     s.ID.String(),
-			Severity:       SeverityMedium,
-			Status:         FindingStatusAdminPending,
-			RequiresAdmin:  true,
-			LocalEvidence:  localSubEvidence(s),
-			RemoteEvidence: remoteSubEvidence(r),
+			Provider:          provider,
+			Type:              FindingStatusMismatch,
+			SubjectKey:        s.ID.String(),
+			Severity:          SeverityMedium,
+			Status:            FindingStatusAdminPending,
+			RequiresAdmin:     true,
+			LocalEvidence:     localSubEvidence(s),
+			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: "subscription is terminated locally but the processor still bills it; cancel it AT the processor (remote action, admin-only)",
 		}
 		if intent := deletionIntent(s); intent != nil {
@@ -546,15 +739,15 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 			apply = &ApplyAction{AdoptStatus: adopt}
 		}
 		f := Finding{
-			Provider:       provider,
-			Type:           FindingStatusMismatch,
-			SubjectKey:     s.ID.String(),
-			Severity:       SeverityMedium,
-			Status:         FindingStatusOpen,
-			LocalEvidence:  localSubEvidence(s),
-			RemoteEvidence: remoteSubEvidence(r),
+			Provider:          provider,
+			Type:              FindingStatusMismatch,
+			SubjectKey:        s.ID.String(),
+			Severity:          SeverityMedium,
+			Status:            FindingStatusOpen,
+			LocalEvidence:     localSubEvidence(s),
+			RemoteEvidence:    remoteSubEvidence(r),
 			RecommendedAction: fmt.Sprintf("adopt processor status %q (local %q) and its period timestamps", r.Status, s.Status),
-			Apply:          apply,
+			Apply:             apply,
 		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
@@ -570,13 +763,13 @@ func compareStatuses(provider Provider, s *LocalSubscription, r *RemoteSubscript
 			}
 			if drift > 48*time.Hour {
 				return []Finding{{
-					Provider:       provider,
-					Type:           FindingStatusMismatch,
-					SubjectKey:     s.ID.String(),
-					Severity:       SeverityMedium,
-					Status:         FindingStatusOpen,
-					LocalEvidence:  localSubEvidence(s),
-					RemoteEvidence: remoteSubEvidence(r),
+					Provider:          provider,
+					Type:              FindingStatusMismatch,
+					SubjectKey:        s.ID.String(),
+					Severity:          SeverityMedium,
+					Status:            FindingStatusOpen,
+					LocalEvidence:     localSubEvidence(s),
+					RemoteEvidence:    remoteSubEvidence(r),
 					RecommendedAction: fmt.Sprintf("period end drifts %.0fh from the processor's next billing date; adopt the processor's period timestamps", drift.Hours()),
 					Apply: &ApplyAction{AdoptStatus: &AdoptStatusAction{
 						SubscriptionID: s.ID,
@@ -654,14 +847,14 @@ func diffDuplicates(provider Provider, idx *localIndex, ridx *remoteIndex) []Fin
 			localEv = map[string]any{"matched_subscriptions": l}
 		}
 		findings = append(findings, Finding{
-			Provider:       provider,
-			Type:           FindingDuplicateSubscriptions,
-			SubjectKey:     g.key,
-			Severity:       SeverityHigh,
-			Status:         FindingStatusAdminPending,
-			RequiresAdmin:  true,
-			LocalEvidence:  localEv,
-			RemoteEvidence: remoteEv,
+			Provider:          provider,
+			Type:              FindingDuplicateSubscriptions,
+			SubjectKey:        g.key,
+			Severity:          SeverityHigh,
+			Status:            FindingStatusAdminPending,
+			RequiresAdmin:     true,
+			LocalEvidence:     localEv,
+			RemoteEvidence:    remoteEv,
 			RecommendedAction: "one subject is billed by multiple live processor subscriptions; pick the keeper, cancel the duplicate AT the processor and refund the double charge (remote action, admin-only)",
 		})
 	}
@@ -882,14 +1075,14 @@ func makePS6(provider Provider, t *RemoteTransaction, corr *correlator, payments
 	localEv := localSubEvidence(sub)
 	localEv["correlated_via"] = how
 	return Finding{
-		Provider:       provider,
-		Type:           FindingChargebackActiveSub,
-		SubjectKey:     t.TransactionID,
-		Severity:       SeverityCritical,
-		Status:         FindingStatusAdminPending,
-		RequiresAdmin:  true,
-		LocalEvidence:  localEv,
-		RemoteEvidence: remoteTxnEvidence(t),
+		Provider:          provider,
+		Type:              FindingChargebackActiveSub,
+		SubjectKey:        t.TransactionID,
+		Severity:          SeverityCritical,
+		Status:            FindingStatusAdminPending,
+		RequiresAdmin:     true,
+		LocalEvidence:     localEv,
+		RemoteEvidence:    remoteTxnEvidence(t),
 		RecommendedAction: "chargeback received while the subscription is still active; review, then terminate + revoke and/or fight the dispute (remote action, admin-only)",
 	}, true
 }
