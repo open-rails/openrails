@@ -788,10 +788,36 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 		return fmt.Errorf("failed to load subscription for transaction event: %w", err)
 	}
 	prevStatus := subscription.Status
+	txnID := body.TransactionID.Trimmed()
+	if txnID == "" && body.TransactionDetail != nil {
+		txnID = body.TransactionDetail.TransactionID.Trimmed()
+	}
+	if txnID == "" {
+		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Missing transaction ID", map[string]interface{}{
+			"subscription_reference": nmiSubID,
+		}, nil))
+	}
 	if explicitSubID == "" && subscription.Status != models.StatusPending {
+		// The initial saved-card charge activates its subscription synchronously
+		// (#330), so the sale.success webhook for that very charge arrives with
+		// the subscription already active and no explicit subscription id. If
+		// the transaction is already recorded, this is a duplicate notification
+		// — acknowledge it instead of surfacing a webhook error.
+		if s.PaymentService != nil {
+			if existing, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Processor(provider), txnID); lookupErr == nil && existing != nil {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_reference": nmiSubID,
+					"subscription_status":    string(subscription.Status),
+					"transaction_id":         txnID,
+					"payment_id":             existing.ID,
+				}).Info("NMI transaction success already recorded; acknowledging duplicate notification")
+				return nil
+			}
+		}
 		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Non-recurring transaction cannot mutate active subscription", map[string]interface{}{
 			"subscription_reference": nmiSubID,
 			"subscription_status":    string(subscription.Status),
+			"transaction_id":         txnID,
 		}, nil))
 	}
 
@@ -804,15 +830,6 @@ func (s *NMIWebhookService) handleTransactionSaleSuccess(ctx context.Context) er
 	currency := transactionCurrency(body)
 	if strings.TrimSpace(currency) == "" {
 		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Missing transaction currency", map[string]interface{}{
-			"subscription_reference": nmiSubID,
-		}, nil))
-	}
-	txnID := body.TransactionID.Trimmed()
-	if txnID == "" && body.TransactionDetail != nil {
-		txnID = body.TransactionDetail.TransactionID.Trimmed()
-	}
-	if txnID == "" {
-		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Missing transaction ID", map[string]interface{}{
 			"subscription_reference": nmiSubID,
 		}, nil))
 	}

@@ -70,6 +70,52 @@ func TestHandleAddSubscription_ActivatesPendingWithSettledTransactionMetadata(t 
 	require.Equal(t, 1, count)
 }
 
+func TestHandleTransactionSaleSuccess_AcksDuplicateInitialChargeOnActiveSubscription(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+
+	svc, dbi, ids := setupNMIAddSubscriptionTest(t, dsn, true)
+	ctx := context.Background()
+	pool := dbi.Pool()
+
+	// Activate the subscription and record the initial charge (the analogue of
+	// the synchronous saved-card checkout activation, #330).
+	require.NoError(t, svc.handleAddSubscription(ctx))
+
+	// Live NMI sale.success notifications for the initial charge carry no
+	// explicit subscription reference — only the order id — and arrive after
+	// the subscription is already active. The already-recorded transaction
+	// must be acknowledged as a duplicate, not surfaced as a webhook error.
+	implicitBody, err := json.Marshal(NMITransactionEventBody{
+		TransactionID: Stringish(ids.transactionID),
+		Amount:        Stringish("23.99"),
+		Currency:      Stringish("USD"),
+		OrderID:       Stringish(ids.providerSubID),
+	})
+	require.NoError(t, err)
+	svc.Data = NMIWebhookEvent{EventID: uuid.New().String(), EventType: string(EventTypeNMITransactionSuccess), EventBody: implicitBody}
+	require.NoError(t, svc.handleTransactionSaleSuccess(ctx))
+
+	var count int
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT count(*) FROM billing.payments WHERE transaction_id = $1", ids.transactionID).Scan(&count))
+	require.Equal(t, 1, count)
+	gotSub, err := gen.New(pool).GetSubscriptionByID(ctx, ids.subscriptionID)
+	require.NoError(t, err)
+	require.Equal(t, string(models.StatusActive), string(gotSub.Status))
+
+	// A non-recurring transaction that is NOT already recorded must still be
+	// rejected rather than mutate the active subscription.
+	unknownBody, err := json.Marshal(NMITransactionEventBody{
+		TransactionID: Stringish("txn_unknown_" + uuid.New().String()),
+		Amount:        Stringish("23.99"),
+		Currency:      Stringish("USD"),
+		OrderID:       Stringish(ids.providerSubID),
+	})
+	require.NoError(t, err)
+	svc.Data = NMIWebhookEvent{EventID: uuid.New().String(), EventType: string(EventTypeNMITransactionSuccess), EventBody: unknownBody}
+	require.Error(t, svc.handleTransactionSaleSuccess(ctx))
+}
+
 func TestHandleAddSubscription_WithoutSettledTransactionMetadataStaysPending(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
@@ -93,6 +139,7 @@ type nmiAddSubscriptionTestIDs struct {
 	userID          string
 	tenantSubjectID uuid.UUID
 	subscriptionID  uuid.UUID
+	providerSubID   string
 	transactionID   string
 	transactionBody []byte
 }
@@ -235,6 +282,7 @@ func setupNMIAddSubscriptionTest(t *testing.T, dsn string, includeTransactionMet
 			userID:          userID,
 			tenantSubjectID: tenantSubjectID,
 			subscriptionID:  subscriptionID,
+			providerSubID:   providerSubID,
 			transactionID:   transactionID,
 			transactionBody: transactionBody,
 		}
