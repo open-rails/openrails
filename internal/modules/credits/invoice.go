@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -208,9 +209,11 @@ func (s *CreditsService) ListInvoices(ctx context.Context, payer identity.Tenant
 			return e
 		}
 		total = int(n)
+		limit32, _ := safecast.Convert[int32](limit)
+		offset32, _ := safecast.Convert[int32](offset)
 		rows, e := q.ListInvoicesByPayer(ctx, gen.ListInvoicesByPayerParams{
 			TenantID: tenantID, TenantSubjectID: payer.UUID(),
-			Column3: int32(limit), Column4: int32(offset),
+			Column3: limit32, Column4: offset32,
 		})
 		if e != nil {
 			return e

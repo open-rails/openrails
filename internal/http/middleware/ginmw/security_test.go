@@ -11,24 +11,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBodyLimitSkipsWebhookRoutes(t *testing.T) {
+func TestBodyLimitAppliesToWebhookRoutes(t *testing.T) {
 	t.Parallel()
 
+	// Webhook routes are no longer exempt from the global body limit; it acts as
+	// a backstop in addition to the tighter per-processor caps in the handlers.
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(BodyLimit(8))
 	r.POST("/v1/webhooks/:provider", func(c *gin.Context) {
-		body, err := io.ReadAll(c.Request.Body)
-		require.NoError(t, err)
-		c.String(http.StatusOK, string(body))
+		_, err := io.ReadAll(c.Request.Body)
+		require.Error(t, err)
+		c.Status(http.StatusRequestEntityTooLarge)
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/stripe", strings.NewReader("larger-than-eight"))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, "larger-than-eight", w.Body.String())
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 }
 
 func TestBodyLimitAppliesToNonWebhookRoutes(t *testing.T) {
@@ -48,14 +49,6 @@ func TestBodyLimitAppliesToNonWebhookRoutes(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
-}
-
-func TestIsWebhookPathSupportsEmbeddedPrefix(t *testing.T) {
-	t.Parallel()
-
-	require.True(t, isWebhookPath("/v1/webhooks/stripe"))
-	require.True(t, isWebhookPath("/billing/v1/webhooks/mobius"))
-	require.False(t, isWebhookPath("/v1/checkout"))
 }
 
 func TestSecurityHeadersSkipsCSPForNMITokenizationDebugPage(t *testing.T) {

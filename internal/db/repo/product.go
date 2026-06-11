@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -41,6 +42,7 @@ func (r *ProductRepo) Create(ctx context.Context, product *models.Product) error
 	if product.Description != "" {
 		desc = &product.Description
 	}
+	tierRank32, _ := safecast.Convert[int32](product.TierRank)
 	rows, err := r.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
 		ID:               product.ID,
 		TenantID:         product.TenantID,
@@ -50,7 +52,7 @@ func (r *ProductRepo) Create(ctx context.Context, product *models.Product) error
 		EntitlementsSpec: entSpec,
 		CreditsSpec:      credSpec,
 		TierGroup:        product.TierGroup,
-		TierRank:         int32(product.TierRank),
+		TierRank:         tierRank32,
 		Status:           string(product.Status),
 		CreatedAt:        product.CreatedAt,
 		UpdatedAt:        product.UpdatedAt,
@@ -95,9 +97,11 @@ func (r *ProductRepo) GetActivePaginated(ctx context.Context, limit, offset int)
 	if err != nil {
 		return nil, 0, err
 	}
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListActiveProductsPaged(ctx, gen.ListActiveProductsPagedParams{
-		PageLimit:  int32(limit),
-		PageOffset: int32(offset),
+		PageLimit:  limit32,
+		PageOffset: offset32,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -116,9 +120,11 @@ func (r *ProductRepo) GetAllPaginated(ctx context.Context, limit, offset int) ([
 	if err != nil {
 		return nil, 0, err
 	}
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListAllProductsPaged(ctx, gen.ListAllProductsPagedParams{
-		PageLimit:  int32(limit),
-		PageOffset: int32(offset),
+		PageLimit:  limit32,
+		PageOffset: offset32,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -143,6 +149,7 @@ func (r *ProductRepo) Update(ctx context.Context, product *models.Product) error
 	if product.Description != "" {
 		desc = &product.Description
 	}
+	tierRank32, _ := safecast.Convert[int32](product.TierRank)
 	rows, err := r.db.Gen(ctx).UpdateProduct(ctx, gen.UpdateProductParams{
 		ID:               product.ID,
 		Slug:             product.Slug,
@@ -151,7 +158,7 @@ func (r *ProductRepo) Update(ctx context.Context, product *models.Product) error
 		EntitlementsSpec: entSpec,
 		CreditsSpec:      credSpec,
 		TierGroup:        product.TierGroup,
-		TierRank:         int32(product.TierRank),
+		TierRank:         tierRank32,
 		Status:           string(product.Status),
 		UpdatedAt:        updateTimestamp(product.UpdatedAt),
 	})

@@ -61,6 +61,10 @@ type ManualRebillResponse struct {
 	Success       bool
 	TransactionID string
 	ErrorMessage  string
+	// ResponseCode is the NMI/processor response_code for a declined rebill
+	// (0 when approved or unavailable). Used by dunning to distinguish hard
+	// declines (stop retries) from soft declines (keep retrying).
+	ResponseCode int
 }
 
 type RecurringQueryParams struct {
@@ -296,7 +300,11 @@ func (c *NMIClient) AttemptManualRebill(params ManualRebillParams) (*ManualRebil
 	}
 
 	errorMessage := responseText(output, "Unknown error")
-	return &ManualRebillResponse{Success: false, ErrorMessage: errorMessage}, nil
+	return &ManualRebillResponse{
+		Success:      false,
+		ErrorMessage: errorMessage,
+		ResponseCode: parseMobiusResponseCode(output),
+	}, nil
 }
 
 func (c *NMIClient) GetTransactionDetails(transactionID string) (string, error) {

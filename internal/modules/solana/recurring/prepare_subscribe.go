@@ -1,6 +1,7 @@
 package recurring
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -397,7 +398,11 @@ func readInitID(data []byte) (int64, error) {
 	if len(data) < end {
 		return 0, fmt.Errorf("recurring: subscription authority data too short (%d bytes, need %d)", len(data), end)
 	}
-	return int64(binary.LittleEndian.Uint64(data[subscriptionAuthorityInitIDOffset:end])), nil
+	var v int64
+	if err := binary.Read(bytes.NewReader(data[subscriptionAuthorityInitIDOffset:end]), binary.LittleEndian, &v); err != nil {
+		return 0, fmt.Errorf("recurring: read initId: %w", err)
+	}
+	return v, nil
 }
 
 // readAuthorityInitID reads the SubscriptionAuthority initId with a bounded,

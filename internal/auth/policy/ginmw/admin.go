@@ -7,11 +7,11 @@ package ginmw
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/open-rails/openrails/internal/http/response"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/internal/http/response"
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
+	log "github.com/sirupsen/logrus"
 )
 
 // PlatformSuperadminRequired gates a cross-tenant /v1/platform/* route on the

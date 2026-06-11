@@ -18,6 +18,7 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -446,6 +447,11 @@ type ProcessorConfig struct {
 	SubscriptionTypeId string `koanf:"subscription_type_id"`
 	DataLinkUsername   string `koanf:"datalink_username"`
 	DataLinkPassword   string `koanf:"datalink_password"`
+	// AllowedCIDRs is the CCBill webhook source allowlist (CIDR notation). When
+	// empty, the documented default ranges are used. Supplying it via config/env
+	// lets the ranges be rotated without a code deploy. Parsed at boot (fail-fast
+	// on invalid entries) — see iputil.Configure.
+	AllowedCIDRs []string `koanf:"allowed_cidrs"`
 
 	// --- Stripe fields (type: stripe) ---
 	SecretKey  string `koanf:"secret_key"`
@@ -540,7 +546,8 @@ func (p *ProcessorConfig) ToCCBillConfig() *CCBillConfig {
 		SubscriptionTypeId: p.SubscriptionTypeId,
 		DataLinkUsername:   p.DataLinkUsername,
 		DataLinkPassword:   p.DataLinkPassword,
-		TestMode:           false, // Will be set by caller based on test_env
+		AllowedCIDRs:       p.AllowedCIDRs,
+		TestMode:           false, // Will be set by caller based on global test_mode
 	}
 }
 
@@ -584,6 +591,10 @@ type CCBillConfig struct {
 
 	DataLinkUsername string `koanf:"datalink_username"`
 	DataLinkPassword string `koanf:"datalink_password"`
+
+	// AllowedCIDRs is the CCBill webhook source allowlist (CIDR notation).
+	// Empty means use iputil.DefaultCCBillIPRanges.
+	AllowedCIDRs []string `koanf:"allowed_cidrs"`
 }
 
 type RedisConfig struct {
@@ -1621,19 +1632,24 @@ func GetDefaultBillingConfig() *Config {
 		},
 		RateLimits: &RateLimitsConfig{
 			"subscribe": &RateLimit{
-				RequestsPerMinute: 10, // Very restrictive for payment endpoints
+				RequestsPerMinute: 20, // Mutation endpoint; per-user limit is the real fraud control
 			},
 			"checkout": &RateLimit{
-				RequestsPerMinute: 5, // Heavy rate limiting for checkout - prevents abuse
+				RequestsPerMinute: 10, // Kept tight to deter card-testing/abuse
 			},
 			"webhook": &RateLimit{
-				RequestsPerMinute: 100, // Higher for webhooks
+				// Per source IP. All webhooks from a processor share one bucket
+				// (fixed processor IPs), so this must absorb rebill runs / event
+				// bursts without 429-ing legit payment events. Webhooks are already
+				// authenticated (signature + IP allowlist + body caps); this is a
+				// DoS floor, not the primary control.
+				RequestsPerMinute: 1200,
 			},
 			"payment": &RateLimit{
-				RequestsPerMinute: 20,
+				RequestsPerMinute: 40,
 			},
 			"default": &RateLimit{
-				RequestsPerMinute: 60,
+				RequestsPerMinute: 300, // SPA/NAT friendly (multiple users behind one IP)
 			},
 		},
 		Captcha: &CaptchaConfig{
@@ -1664,9 +1680,13 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 			continue
 		}
 		visited[candidate] = struct{}{}
-		if _, err := os.Stat(candidate); err == nil {
-			if err := k.Load(file.Provider(candidate), yaml.Parser()); err != nil {
-				return fmt.Errorf("loading config file %s: %w", candidate, err)
+		// Normalize the path before touching the filesystem. The path is
+		// operator-supplied (CLI flag / env var / built-in default), but cleaning
+		// it removes any "../" traversal segments defensively.
+		cleaned := filepath.Clean(candidate)
+		if _, err := os.Stat(cleaned); err == nil {
+			if err := k.Load(file.Provider(cleaned), yaml.Parser()); err != nil {
+				return fmt.Errorf("loading config file %s: %w", cleaned, err)
 			}
 			return nil
 		}
@@ -1900,6 +1920,16 @@ func Load(configPath string) (*Config, error) {
 	// Validate the loaded configuration
 	if err := Validate(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	// Configure the CCBill webhook IP allowlist from config (fail-fast on invalid
+	// CIDRs). Empty list falls back to the documented default ranges.
+	var ccbillCIDRs []string
+	if ccbillProc := cfg.GetCCBillProcessor(); ccbillProc != nil {
+		ccbillCIDRs = ccbillProc.AllowedCIDRs
+	}
+	if err := iputil.Configure(ccbillCIDRs); err != nil {
+		return nil, fmt.Errorf("config validation failed: ccbill allowed_cidrs: %w", err)
 	}
 
 	return cfg, nil

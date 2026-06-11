@@ -3,6 +3,7 @@ package riverjobs
 import (
 	"context"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -58,8 +59,9 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 		// Privileged (no-GUC) cross-tenant sweep with explicit tenant predicates.
 		err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			q := gen.New(tx)
+			batchSize32, _ := safecast.Convert[int32](batchSize)
 			blocks, err := q.ListExpiredCreditBlocksForUpdate(ctx, gen.ListExpiredCreditBlocksForUpdateParams{
-				Now: now, BatchSize: int32(batchSize),
+				Now: now, BatchSize: batchSize32,
 			})
 			if err != nil {
 				return err

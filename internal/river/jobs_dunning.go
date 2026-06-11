@@ -286,14 +286,40 @@ func (w *DunningWorker) processSubscription(
 
 	if rebillResp == nil || !rebillResp.Success {
 		reason := "rebill declined"
-		if rebillResp != nil && rebillResp.ErrorMessage != "" {
-			reason = rebillResp.ErrorMessage
+		responseCode := 0
+		if rebillResp != nil {
+			if rebillResp.ErrorMessage != "" {
+				reason = rebillResp.ErrorMessage
+			}
+			responseCode = rebillResp.ResponseCode
 		}
+		hardDecline := subscriptions.ClassifyNMIDecline(responseCode) == subscriptions.DeclineHard
+		var failureCode *string
+		if responseCode != 0 {
+			code := fmt.Sprintf("%d", responseCode)
+			failureCode = &code
+		}
+
+		declineLog := logEntry.WithFields(log.Fields{
+			"response_code": responseCode,
+			"reason":        reason,
+			"hard_decline":  hardDecline,
+		})
+		if hardDecline {
+			// Emit a high-visibility signal: a hard decline permanently terminates
+			// the subscription rather than retrying.
+			declineLog.Error("Dunning: hard decline; terminating subscription without further retries")
+		} else {
+			declineLog.Warn("Dunning: soft decline; will retry on schedule")
+		}
+
 		_ = w.markManualRebillFailed(ctx, attempt.ID, reason)
 		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      processor,
 			SubscriptionID: &sub.ID,
 			FailureReason:  &reason,
+			FailureCode:    failureCode,
+			HardDecline:    hardDecline,
 		}); err != nil {
 			logEntry.WithError(err).Warn("apply failure policy after declined rebill")
 		}

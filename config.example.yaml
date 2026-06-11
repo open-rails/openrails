@@ -292,6 +292,16 @@ processors:
     # datalink_username: set via PROCESSORS_CCBILL_DATALINK_USERNAME env var
     # datalink_password: set via PROCESSORS_CCBILL_DATALINK_PASSWORD env var
 
+    # Webhook source IP allowlist (CIDR notation). Overrides the documented
+    # built-in default ranges so they can be rotated without a code deploy when
+    # CCBill adds/changes IPs. Parsed at boot; invalid entries fail startup.
+    # Changes require a service restart to take effect.
+    # allowed_cidrs:
+    #   - "64.38.212.0/24"
+    #   - "64.38.215.0/24"
+    #   - "64.38.240.0/24"
+    #   - "64.38.241.0/24"
+
   # ---------------------------------------------------------------------------
   # Stripe (reserved name - type implied)
   # ---------------------------------------------------------------------------
@@ -404,19 +414,23 @@ sendgrid:
 
 rate_limits:
   subscribe:
-    requests_per_minute: 10  # Very restrictive for payment endpoints
+    requests_per_minute: 20   # Mutations; per-user limit is the real fraud control
 
   checkout:
-    requests_per_minute: 5   # Heavy rate limiting for checkout
+    requests_per_minute: 10   # Kept tight to deter card-testing/abuse
 
   webhook:
-    requests_per_minute: 100 # Higher for processor webhooks
+    # Per source IP. All webhooks from a processor share one bucket (fixed
+    # processor IPs), so this absorbs rebill runs / event bursts without 429-ing
+    # legit payment events. Webhooks are already authenticated (signature + IP
+    # allowlist + body caps); this is a DoS floor, not the primary control.
+    requests_per_minute: 1200
 
   payment:
-    requests_per_minute: 20  # Payment method operations
+    requests_per_minute: 40   # Payment method operations
 
   default:
-    requests_per_minute: 60  # Default for other endpoints
+    requests_per_minute: 300  # Other endpoints; SPA/NAT friendly
 
 # Captcha is enabled after an IP exceeds an extreme rate-limit threshold.
 # The frontend should retry the same request with X-Captcha-Token.

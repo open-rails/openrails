@@ -77,9 +77,10 @@ func RegisterAdminRoutes(e *embedded.Embedded, group *gin.RouterGroup, opts Rout
 	if a == nil {
 		panic("embedded billing: not initialized")
 	}
-	httproutes.RegisterAdminRoutes(ginrouter.New(group, a.Runtime), a.Runtime, httproutes.Options{
+	adminOpts := httproutes.Options{
 		Authenticator: routeAuthenticator(e, opts),
-	})
+	}
+	httproutes.RegisterAdminRoutes(ginrouter.New(group, a.Runtime), a.Runtime, adminOpts)
 }
 
 // RegisterWebhookRoutes registers webhook routes on the provided gin router

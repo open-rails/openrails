@@ -1386,12 +1386,23 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 		now := s.now()
 
-		// If dunning is off, immediately cancel - no grace period, no retries
-		if dunningMode == config.DunningModeOff {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-				"user_id":         subscription.TenantSubjectID.String(),
-			}).Warn("Dunning mode is 'off'; immediately cancelling subscription (no recovery)")
+		// Hard declines (stolen card, do-not-honor, account closed, expired card,
+		// pickup card) or dunning-off both terminate immediately: cancel now with
+		// no grace period and no further retry scheduling. Retrying a hard decline
+		// cannot succeed and risks flagging the merchant with the card networks.
+		if params.HardDecline || dunningMode == config.DunningModeOff {
+			if params.HardDecline {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+					"user_id":         subscription.TenantSubjectID,
+					"failure_code":    normalize.FromPtr(params.FailureCode),
+				}).Warn("Hard decline received; immediately cancelling subscription (no retry)")
+			} else {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+					"user_id":         subscription.TenantSubjectID,
+				}).Warn("Dunning mode is 'off'; immediately cancelling subscription (no recovery)")
+			}
 
 			expired := models.CancelTypeExpired
 			reason := normalize.FromPtr(params.FailureReason)

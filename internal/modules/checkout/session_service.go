@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
@@ -2460,6 +2461,10 @@ func (s *CheckoutSessionService) tierChangePrepareInput(ctx context.Context, ses
 	if err != nil || oldRow == nil {
 		return in, fmt.Errorf("%w: no on-chain record for this subscription", ErrCheckoutSessionValidation)
 	}
+	newPlanCreatedAt, safeErr := safecast.Convert[int64](getUint64Field(session.ProcessorState, "tier_new_plan_created_at"))
+	if safeErr != nil {
+		return in, fmt.Errorf("%w: tier_new_plan_created_at overflows int64", ErrCheckoutSessionValidation)
+	}
 	in = recurring.PrepareTierChangeInput{
 		TenantID:             tenant.FromContextOrDefault(ctx),
 		SubscriberWallet:     oldRow.SubscriberWallet,
@@ -2469,7 +2474,7 @@ func (s *CheckoutSessionService) tierChangePrepareInput(ctx context.Context, ses
 		NewPlanID:            getUint64Field(session.ProcessorState, "tier_new_plan_id"),
 		NewAmountBaseUnits:   getUint64Field(session.ProcessorState, "tier_new_amount_base_units"),
 		NewPeriodHours:       getUint64Field(session.ProcessorState, "tier_new_period_hours"),
-		NewPlanCreatedAt:     int64(getUint64Field(session.ProcessorState, "tier_new_plan_created_at")),
+		NewPlanCreatedAt:     newPlanCreatedAt,
 		IsUpgrade:            getBoolField(session.ProcessorState, "tier_is_upgrade"),
 		FirstChargeBaseUnits: getUint64Field(session.ProcessorState, "tier_first_charge_base_units"),
 	}

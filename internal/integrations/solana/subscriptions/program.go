@@ -10,6 +10,7 @@
 package subscriptions
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -105,7 +106,9 @@ func u64le(v uint64) []byte {
 }
 
 func i64le(v int64) []byte {
-	return u64le(uint64(v))
+	var buf bytes.Buffer
+	_ = binary.Write(&buf, binary.LittleEndian, v)
+	return buf.Bytes()
 }
 
 // writeFixedString writes s into a fixed-size n-byte buffer (utf8, zero-padded,

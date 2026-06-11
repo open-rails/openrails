@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -166,6 +167,8 @@ func (r *PriceRepo) ListPaginated(ctx context.Context, filter PriceFilter, limit
 	if err != nil {
 		return nil, 0, err
 	}
+	limit32, _ := safecast.Convert[int32](limit)
+	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListPricesFiltered(ctx, gen.ListPricesFilteredParams{
 		OnlyActive:    onlyActive,
 		OnlyInactive:  onlyInactive,
@@ -174,8 +177,8 @@ func (r *PriceRepo) ListPaginated(ctx context.Context, filter PriceFilter, limit
 		ProductID:     filter.ProductID,
 		OnlyRecurring: onlyRecurring,
 		OnlyOneTime:   onlyOneTime,
-		PageLimit:     int32(limit),
-		PageOffset:    int32(offset),
+		PageLimit:     limit32,
+		PageOffset:    offset32,
 	})
 	if err != nil {
 		return nil, 0, err

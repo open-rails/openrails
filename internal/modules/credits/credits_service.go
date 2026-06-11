@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -392,6 +393,12 @@ func (s *CreditsService) depositTx(ctx context.Context, q *gen.Queries, ct *mode
 		}
 	}
 
+	// Guard against int64 overflow: a sufficiently large deposit on a user with
+	// a positive balance would wrap the balance negative, permanently bricking
+	// the credit account. Reject the deposit rather than silently corrupting it.
+	if bal.Balance > math.MaxInt64-params.Amount {
+		return nil, fmt.Errorf("deposit would overflow balance")
+	}
 	newBal := bal.Balance + params.Amount
 
 	if err := q.SetCreditBalance(ctx, gen.SetCreditBalanceParams{

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -102,9 +103,10 @@ func (r *SolanaSubscriptionRepo) GetBySubscriptionID(ctx context.Context, subscr
 // ordered by tenant so the worker can load each tenant's signer once. `limit`
 // caps the batch (0 = no limit).
 func (r *SolanaSubscriptionRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]*models.SolanaSubscription, error) {
+	limit32, _ := safecast.Convert[int32](limit)
 	rows, err := r.db.Gen(ctx).ListDueSolanaSubscriptions(ctx, gen.ListDueSolanaSubscriptionsParams{
 		Now:       now.UTC(),
-		PageLimit: int32(limit),
+		PageLimit: limit32,
 	})
 	if err != nil {
 		return nil, err
@@ -168,7 +170,8 @@ func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) 
 // worker cross-checks against billing.payments (#258). `limit` caps the batch
 // (0 = no limit).
 func (r *SolanaSubscriptionRepo) ListActiveWithSignature(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
-	rows, err := r.db.Gen(ctx).ListActiveSolanaSubscriptionsWithSignature(ctx, int32(limit))
+	limit32, _ := safecast.Convert[int32](limit)
+	rows, err := r.db.Gen(ctx).ListActiveSolanaSubscriptionsWithSignature(ctx, limit32)
 	if err != nil {
 		return nil, err
 	}

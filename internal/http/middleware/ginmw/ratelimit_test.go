@@ -3,8 +3,10 @@ package ginmw
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -407,6 +409,50 @@ func performCaptchaTestRequest(r http.Handler, token string, paths ...string) *h
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	return w
+}
+
+func TestRateLimitRejectsOversizedContentLength(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := NewRateLimitStore()
+	cfg := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 10}}
+
+	r := gin.New()
+	r.Use(rateLimitWithDependencies(&cfg, nil, nil, store, captcha.NewChallengeStore(nil), nil))
+	r.POST("/v1/checkout", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/checkout", nil)
+	req.RemoteAddr = "203.0.113.60:1234"
+	req.ContentLength = bucketMaxContentLength["checkout"] + 1
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	// Rejected before any rate-limit counting.
+	require.Empty(t, store.counters)
+}
+
+func TestRateLimitRejectsOversizedChunkedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := NewRateLimitStore()
+	cfg := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 10}}
+
+	r := gin.New()
+	r.Use(rateLimitWithDependencies(&cfg, nil, nil, store, captcha.NewChallengeStore(nil), nil))
+	r.POST("/v1/checkout", func(c *gin.Context) {
+		_, err := io.ReadAll(c.Request.Body)
+		require.Error(t, err)
+		c.String(http.StatusRequestEntityTooLarge, "too large")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/checkout", strings.NewReader(strings.Repeat("a", int(bucketMaxContentLength["checkout"]+1))))
+	req.RemoteAddr = "203.0.113.61:1234"
+	req.ContentLength = -1
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	// Chunked requests are capped by MaxBytesReader even without Content-Length.
+	require.Len(t, store.counters, 1)
 }
 
 func performRateLimitTestRequest(r http.Handler, path, ip, userID string) *httptest.ResponseRecorder {

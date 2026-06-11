@@ -27,6 +27,19 @@ const (
 	rateLimitScopeUser = "user"
 )
 
+// bucketMaxContentLength is the per-bucket Content-Length ceiling used for
+// early payload-size throttling. A request whose declared Content-Length exceeds
+// the ceiling is rejected with 413 before any rate-limit counting or body read,
+// cheaply shedding oversized-payload load. Buckets absent from the map (e.g.
+// "webhook", which enforces tighter per-processor caps in the handler) are not
+// checked here.
+var bucketMaxContentLength = map[string]int64{
+	"checkout":        64 << 10, // 64 KiB
+	"subscriptions":   64 << 10, // 64 KiB
+	"payment-methods": 64 << 10, // 64 KiB
+	"default":         1 << 20,  // 1 MiB (matches the global body limit)
+}
+
 // RateLimitStore holds in-memory counters as a fallback when Redis is unavailable.
 type RateLimitStore struct {
 	mu       sync.Mutex
@@ -85,6 +98,24 @@ func rateLimitWithDependencies(rateLimiterConfig *config.RateLimitsConfig, captc
 		if limit == nil {
 			c.Next()
 			return
+		}
+
+		// Payload-size throttling: enforce per-bucket caps for both declared and
+		// streaming/chunked payloads.
+		if max, ok := bucketMaxContentLength[bucket]; ok && c.Request != nil {
+			if c.Request.Body != nil {
+				c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, max)
+			}
+			if c.Request.ContentLength > max {
+				log.WithFields(log.Fields{
+					"bucket":         bucket,
+					"content_length": c.Request.ContentLength,
+					"max":            max,
+				}).Warn("Request rejected: Content-Length exceeds route threshold")
+				c.Header("Retry-After", "60")
+				c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request payload too large"})
+				return
+			}
 		}
 
 		subjects := rateLimitSubjects(c)

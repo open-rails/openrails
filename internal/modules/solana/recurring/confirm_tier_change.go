@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
@@ -215,7 +216,11 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if in.IsUpgrade {
 		// Period 1 was pulled atomically in the tx, so the membership's current
 		// period is [now, now+new_period] and the cranker's first pull is period 2.
-		newPeriodEnd = now.Add(time.Duration(in.NewPeriodHours) * time.Hour)
+		newPeriodHoursI64, safeErr := safecast.Convert[int64](in.NewPeriodHours)
+		if safeErr != nil {
+			return nil, fmt.Errorf("recurring: confirm tier-change: new period hours overflow: %w", safeErr)
+		}
+		newPeriodEnd = now.Add(time.Duration(newPeriodHoursI64) * time.Hour)
 	} else {
 		// Downgrade: no immediate charge. The user keeps the (higher-tier) access
 		// they already paid for until the OLD period end; the lower tier rebills

@@ -9,6 +9,8 @@ services:
     ports:
       - "127.0.0.1:25432:5432"
     volumes:
+      # PG18+ requires the mount at /var/lib/postgresql (not .../data) so it can
+      # manage the version-specific data subdirectory (e.g. 18/main) itself.
       - postgres_data:/var/lib/postgresql
       # Bootstrap SQL runs automatically during first initialization
       - ./migrations/bootstrap/001_postgres_init.sql:/docker-entrypoint-initdb.d/001_postgres_init.sql:ro
@@ -125,8 +127,10 @@ services:
         # Wait a bit extra for cluster coordination to be fully ready
         sleep 5
 
-        # Run bootstrap SQL as default admin user (has all privileges)
-        cat <<'SQL_EOF' | sed "s/{CLICKHOUSE_USER}/$${BOOTSTRAP_CLICKHOUSE_USER}/g" | sed "s/{CLICKHOUSE_PASSWORD}/$${BOOTSTRAP_CLICKHOUSE_PASSWORD}/g" | clickhouse-client --host clickhouse --user default --multiquery
+        # Run bootstrap SQL as the built-in 'default' admin user (has all privileges).
+        # Must pass --user default explicitly: clickhouse-client auto-reads CLICKHOUSE_USER
+        # from env, which is set to analytics_user — the user we're about to create.
+        cat <<'SQL_EOF' | sed "s/{CLICKHOUSE_USER}/$${BOOTSTRAP_CLICKHOUSE_USER}/g" | sed "s/{CLICKHOUSE_PASSWORD}/$${BOOTSTRAP_CLICKHOUSE_PASSWORD}/g" | clickhouse-client --host clickhouse --user default --password "" --multiquery
         -- Create database across cluster
         CREATE DATABASE IF NOT EXISTS analytics ON CLUSTER openrails;
 
@@ -283,6 +287,7 @@ services:
     ports:
       - "127.0.0.1:28080:8080"
     volumes:
+      - issuer_postgres_data:/var/lib/postgresql
       - issuer_runtime_keys:/.runtime/authkit
     networks:
       - local-openrails
