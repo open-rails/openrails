@@ -21,16 +21,17 @@ import (
 // requirement, and the openrails:self:* permission-catalog gate. They build the
 // exact verifier configuration newDelegatedVerifier uses, so they pin the real
 // behavior without needing a database (the AuthKit-tenant -> OpenRails-tenant mapping in
-// ResolveDelegated reuses tenantForAuthKitTenantSlug, covered by the service token path + the
+// ResolveDelegated keys on the registered issuer, covered by the service token path + the
 // middleware tests).
 
 const (
-	testDelegatedIssuer  = "https://billing.test.example"
-	testDelegatedKID     = "test-kid-1"
-	canonicalAudience    = "openrails"
-	testDelegatedSubject = "end-user-42"
-	testDelegatedTenant  = "operator"
-	wrongAudience        = "tensorhub"
+	testDelegatedIssuer   = "https://billing.test.example"
+	testDelegatedKID      = "test-kid-1"
+	canonicalAudience     = "openrails"
+	testDelegatedSubject  = "end-user-42"
+	testDelegatedTenant   = "operator"
+	testDelegatedTenantID = "11111111-1111-1111-1111-111111111111"
+	wrongAudience         = "tensorhub"
 )
 
 // newTestDelegatedVerifier builds a Verifier identical to newDelegatedVerifier's
@@ -75,6 +76,9 @@ func mintDelegated(t *testing.T, signer jwtkit.Signer, p authhttp.DelegatedAcces
 	}
 	if p.Tenant == "" {
 		p.Tenant = testDelegatedTenant
+	}
+	if p.TenantID == "" {
+		p.TenantID = testDelegatedTenantID
 	}
 	tok, err := authhttp.MintDelegatedAccessToken(context.Background(), signer, p)
 	require.NoError(t, err)
@@ -135,6 +139,7 @@ func TestDelegatedVerify_RejectsExpired(t *testing.T) {
 			"iss":           testDelegatedIssuer,
 			"aud":           []string{canonicalAudience},
 			"tenant":        testDelegatedTenant,
+			"tenant_id":     testDelegatedTenantID,
 			"delegated_sub": testDelegatedSubject,
 			"permissions":   []string{PermSelfBillingRead},
 			"iat":           past.Unix(),

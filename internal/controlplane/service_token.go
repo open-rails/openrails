@@ -28,8 +28,8 @@ const (
 type ResolvedServiceToken struct {
 	// AuthKitTenantID is the immutable AuthKit tenant uuid that owns the
 	// service token (claim/source `tenant_id`). It is the canonical
-	// cross-service identifier; empty for legacy credentials minted before
-	// AuthKit emitted it, and on the issuer-pinned service-JWT path.
+	// cross-service identifier; always populated on the service-token path
+	// (empty only on the issuer-pinned service-JWT path).
 	AuthKitTenantID string
 	// AuthKitTenantSlug is the AuthKit tenant slug that owns the service
 	// token. Slugs are MUTABLE — presentation/audit only.
@@ -144,9 +144,9 @@ func (c *ControlPlane) LooksLikeServiceToken(token string) bool {
 //     expiry, revocation, tenant-deleted) — returns authcore.ErrAccessTokenExpired /
 //     ErrAccessTokenRevoked / ErrInvalidAccessToken on those conditions,
 //   - maps the owning AuthKit tenant -> OpenRails tenant (#223) via the
-//     billing.tenants directory, preferring the IMMUTABLE AuthKit tenant uuid
-//     (authkit_tenant_id) and falling back to the mutable slug
-//     (authkit_tenant_slug) only for legacy state (see tenantForAuthKitTenant).
+//     billing.tenants directory, keyed exclusively on the IMMUTABLE AuthKit
+//     tenant uuid (authkit_tenant_id); a credential or directory row without
+//     the uuid fails verification (see tenantForAuthKitTenant).
 //
 // A cross-tenant or unknown service-token tenant (no tenant directory row) yields
 // ErrServiceTokenTenantUnresolved so the caller can reject the request.
@@ -164,7 +164,7 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 		return nil, err
 	}
 
-	tid, tslug, err := c.tenantForAuthKitTenant(ctx, resolved.TenantID, resolved.TenantSlug)
+	tid, tslug, err := c.tenantForAuthKitTenant(ctx, resolved.TenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -232,49 +232,20 @@ func hasAnyResourceKind(resources []authcore.ServiceTokenResource, kind string) 
 // administers the default tenant; future AuthKit tenants map to their own
 // tenant rows. Suspended/deleted tenants are rejected.
 //
-// Resolution prefers the IMMUTABLE AuthKit tenant uuid (authkit_tenant_id);
-// the MUTABLE slug (authkit_tenant_slug) is consulted only when:
-//
-//   - the credential carries no uuid (minted by a pre-`tenant_id` AuthKit —
-//     such tokens circulate for months), or
-//   - the uuid matched no directory row AND the slug row is itself unlinked
-//     (authkit_tenant_id IS NULL, i.e. written before the uuid dual-write /
-//     backfill). A row already linked to a DIFFERENT AuthKit tenant must
-//     never be reachable through its mutable slug — that is exactly the
-//     slug-reassignment confusion this resolution order exists to prevent.
-func (c *ControlPlane) tenantForAuthKitTenant(ctx context.Context, authKitTenantID, authKitTenantSlug string) (tenant.ID, string, error) {
+// Resolution keys EXCLUSIVELY on the IMMUTABLE AuthKit tenant uuid
+// (authkit_tenant_id, from the `tenant_id` claim/source). A credential
+// without a uuid, or a uuid that matches no linked directory row, is a
+// verification failure — the MUTABLE slug (authkit_tenant_slug) is never
+// consulted for identity (it is presentation/audit only).
+func (c *ControlPlane) tenantForAuthKitTenant(ctx context.Context, authKitTenantID string) (tenant.ID, string, error) {
 	authKitTenantID = strings.TrimSpace(authKitTenantID)
-	authKitTenantSlug = strings.ToLower(strings.TrimSpace(authKitTenantSlug))
 	if c.pool == nil {
 		return tenant.ID{}, "", errors.New("controlplane: pgx pool unavailable for tenant resolution")
 	}
-
-	if authKitTenantID != "" {
-		tid, slug, err := c.tenantDirectoryRow(ctx, `authkit_tenant_id = $1`, authKitTenantID)
-		if err == nil {
-			return tid, slug, nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return tenant.ID{}, "", err
-		}
-		if authKitTenantSlug == "" {
-			return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
-		}
-		// Legacy directory row not yet linked by uuid: accept the slug match
-		// only when the row carries NO AuthKit tenant uuid at all.
-		tid, slug, err = c.tenantDirectoryRow(ctx,
-			`lower(authkit_tenant_slug) = $1 AND authkit_tenant_id IS NULL`, authKitTenantSlug)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
-		}
-		return tid, slug, err
-	}
-
-	if authKitTenantSlug == "" {
+	if authKitTenantID == "" {
 		return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
 	}
-	// Legacy credential without a `tenant_id` claim: mutable-slug lookup.
-	tid, slug, err := c.tenantDirectoryRow(ctx, `lower(authkit_tenant_slug) = $1`, authKitTenantSlug)
+	tid, slug, err := c.tenantDirectoryRow(ctx, `authkit_tenant_id = $1`, authKitTenantID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
 	}

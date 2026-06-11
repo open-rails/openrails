@@ -294,9 +294,9 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 
 // TestDelegatedTenantResolution exercises the AuthKit-tenant -> OpenRails-tenant
 // mapping ResolveServiceToken relies on (tenantForAuthKitTenant): resolution
-// prefers the IMMUTABLE AuthKit tenant uuid (authkit_tenant_id), falls back to
-// the MUTABLE slug only for legacy credentials or un-linked directory rows, and
-// rejects unknown or suspended AuthKit tenants as cross-tenant/unmapped.
+// keys EXCLUSIVELY on the IMMUTABLE AuthKit tenant uuid (authkit_tenant_id) —
+// there is no slug fallback — and rejects credentials without a uuid, unlinked
+// directory rows, and unknown or suspended AuthKit tenants.
 func TestDelegatedTenantResolution(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
@@ -322,40 +322,31 @@ func TestDelegatedTenantResolution(t *testing.T) {
 		 WHERE id = $1::uuid`, tenant.DefaultID.String())
 	require.NoError(t, err)
 
-	// Immutable uuid -> its OpenRails tenant, even when the presented slug is
-	// stale (the AuthKit tenant was renamed): the uuid wins.
-	tid, slug, err := cp.tenantForAuthKitTenant(ctx, "ak-default-id", "renamed-org")
+	// Immutable uuid -> its OpenRails tenant. The slug is irrelevant to
+	// resolution (presentation/audit only).
+	tid, slug, err := cp.tenantForAuthKitTenant(ctx, "ak-default-id")
 	require.NoError(t, err)
 	require.Equal(t, tenant.DefaultID, tid)
 	require.Equal(t, "default", slug)
 
-	// Legacy credential (no tenant_id claim): the slug lookup still resolves.
-	tid, slug, err = cp.tenantForAuthKitTenant(ctx, "", "default-org")
-	require.NoError(t, err)
-	require.Equal(t, tenant.DefaultID, tid)
-	require.Equal(t, "default", slug)
-
-	// uuid-carrying credential + un-linked directory row: slug fallback applies.
-	tid, slug, err = cp.tenantForAuthKitTenant(ctx, "ak-beta-id", "beta-org")
-	require.NoError(t, err)
-	require.Equal(t, "beta", slug)
-	require.Equal(t, "00000000-0000-0000-0000-000000000003", tid.String())
-
-	// An unmapped uuid must NOT reach a row already linked to a DIFFERENT
-	// AuthKit tenant through its mutable slug (slug-reassignment confusion).
-	_, _, err = cp.tenantForAuthKitTenant(ctx, "ak-other-id", "default-org")
+	// Hard cut: a credential without a tenant uuid is rejected — there is no
+	// slug fallback, even when a slug-matching directory row exists.
+	_, _, err = cp.tenantForAuthKitTenant(ctx, "")
 	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
 
-	// Suspended tenant -> cross-tenant/unmapped rejection, by uuid and by slug.
-	_, _, err = cp.tenantForAuthKitTenant(ctx, "ak-acme-id", "")
-	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
-	_, _, err = cp.tenantForAuthKitTenant(ctx, "", "acme-org")
+	// Hard cut: a uuid that matches no LINKED directory row is rejected — an
+	// unlinked row (authkit_tenant_id IS NULL) is unreachable regardless of its
+	// slug.
+	_, _, err = cp.tenantForAuthKitTenant(ctx, "ak-beta-id")
 	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
 
-	// Unknown AuthKit tenant -> rejection.
-	_, _, err = cp.tenantForAuthKitTenant(ctx, "", "nobody")
+	// An unmapped uuid never reaches a row linked to a DIFFERENT AuthKit
+	// tenant (slug-reassignment confusion is structurally impossible).
+	_, _, err = cp.tenantForAuthKitTenant(ctx, "ak-other-id")
 	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
-	_, _, err = cp.tenantForAuthKitTenant(ctx, "", "")
+
+	// Suspended tenant -> cross-tenant/unmapped rejection.
+	_, _, err = cp.tenantForAuthKitTenant(ctx, "ak-acme-id")
 	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
 
 	// The control plane built a delegated verifier (browser-tier prerequisite).

@@ -182,12 +182,23 @@ func mintFed(t *testing.T, signer *jwtkit.RSASigner, issuer, sub string, perms [
 
 func mintFedWithAudience(t *testing.T, signer *jwtkit.RSASigner, issuer, sub string, perms []string, tenantClaim string, audiences []string) string {
 	t.Helper()
+	// authkit v0.19.0 requires the `tenant_id` (uuid) claim at mint. OpenRails'
+	// federated resolution is issuer-pinned, so the value only needs to be a
+	// stable uuid for the tenant the issuer is registered to.
+	tenantID := map[string]string{
+		"tenant-a": fedTenantA.String(),
+		"tenant-b": fedTenantB.String(),
+	}[tenantClaim]
+	if tenantID == "" {
+		tenantID = fedTenantA.String()
+	}
 	tok, err := authhttp.MintDelegatedAccessToken(context.Background(), signer, authhttp.DelegatedAccessParams{
 		Issuer:           issuer,
 		Audiences:        audiences,
 		DelegatedSubject: sub,
 		Permissions:      perms,
 		Tenant:           tenantClaim,
+		TenantID:         tenantID,
 		TTL:              5 * time.Minute,
 	})
 	require.NoError(t, err)
