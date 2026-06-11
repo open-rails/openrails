@@ -421,6 +421,26 @@ don't see its warning in the boot log, it isn't on. Full docs in `config.example
 | `limited` | live | **Reactive-only.** Nothing system-initiated touches a provider: no dunning charges or window-expiry cancellations (dunning runs dry), no auto-top-ups, no arrears collection, no Solana pulls, no catalog provider-object writes (provider slots defer to `pending_manual_link` and converge on a later apply). Everything user/admin-initiated works — checkout charges, card/vault saves, tier changes, cancels (including their processor-side delete), resumes, refunds, webhooks. |
 | `readonly` | live creds | **Zero provider writes, even reactive ones** — a checkout/charge attempt fails loudly (`ErrProviderReadOnly`). Provider *reads* (query APIs, catalog verification) and local serving still work. Implies `limited` + the deletion kill switch. For reconciliation/forensics boots. |
 
+At a glance — what each mode permits:
+
+| Operation | `test` | `production` | `limited` | `readonly` |
+|---|---|---|---|---|
+| Real money can move | ❌ (sandbox) | ✅ | ✅ | ❌ (writes blocked) |
+| User checkout / charge | ✅ sandbox | ✅ | ✅ | ❌ fails loudly |
+| Card/vault save, tier change, resume, refund | ✅ sandbox | ✅ | ✅ | ❌ |
+| User/admin cancel → processor-side delete | ✅ sandbox | ✅ | ✅ | ❌ marker left for replay |
+| Dunning charges + window-expiry cancellations | ✅ sandbox | ✅ | ❌ runs dry | ❌ |
+| Auto-top-ups, arrears collection, Solana pulls | ✅ sandbox | ✅ | ❌ | ❌ |
+| Catalog provider-object writes (bootstrap apply) | ✅ sandbox | ✅ | ❌ deferred | ❌ deferred |
+| Provider reads (query APIs, catalog verification) | ✅ | ✅ | ✅ | ✅ |
+| Webhook ingestion + local serving | ✅ | ✅ | ✅ | ✅ |
+
+Each mode is strictly more restrictive than the one before it (`readonly` ⊃ `limited`):
+`limited` draws the line at *who initiates* (the system initiates nothing; humans get
+everything), `readonly` draws it at *the wire* (nothing writes to a provider, not even a
+customer clicking buy). Typical uses: `limited` = migration cutover with the site fully
+usable; `readonly` = reconciliation/forensics boots that must only observe.
+
 `mode` is **required outside development** (the server refuses to boot without one);
 unset in dev defaults to `test`. The old `test_mode` boolean no longer exists.
 
