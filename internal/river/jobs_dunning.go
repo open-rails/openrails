@@ -70,7 +70,7 @@ type DunningWorker struct {
 	IdempotencyService *idempotency.IdempotencyService
 	// DeferDelete schedules the processor-side delete for terminal
 	// cancellations (#344). Threaded into the per-run lifecycle so window
-	// expiry and 5th-failure exhaustion stop the remote NMI subscription via
+	// expiry and retry exhaustion stop the remote NMI subscription via
 	// the ONE scheduled mechanism (kill-switch governed at execution). nil in
 	// producer-less wirings/tests: cancellation still happens, the remote sub
 	// is left for reconciliation.
@@ -148,7 +148,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService, w.Clock)
 	lifecycle.SetConfig(w.Config) // For feature flag access
 	if w.DeferDelete != nil {
-		// Terminal cancellations (window expiry, 5th declined rebill) schedule
+		// Terminal cancellations (window expiry, retry exhaustion) schedule
 		// the remote NMI delete through the shared mechanism (#344).
 		lifecycle.SetDeferredDeleteScheduler(w.DeferDelete)
 	}
@@ -200,15 +200,25 @@ func (w *DunningWorker) processSubscription(
 	periodEnd := sub.CurrentPeriodEndsAt.UTC()
 	processor := models.Processor(provider)
 
-	// Dunning window: charges are only attempted within GetDunningWindow() of
-	// the missed rebill. Anything older (e.g. months-stale subscriptions imported
-	// from a legacy system) must never be surprise-charged — cancel + downgrade
-	// instead, and the processor-side subscription is stopped via the scheduled
-	// deferred-delete mechanism so NMI quits retrying it.
-	window := config.DefaultDunningWindowDays * 24 * time.Hour
-	if w.Config != nil {
-		window = w.Config.GetDunningWindow()
+	// Dunning staleness window (#344, #359): charges are only attempted within
+	// the window DERIVED from the price's billing cycle (last retry offset +
+	// one day of slack — see subscriptions.DunningWindow). Anything
+	// older (e.g. months-stale subscriptions imported from a legacy system)
+	// must never be surprise-charged — cancel + downgrade instead, and the
+	// processor-side subscription is stopped via the scheduled deferred-delete
+	// mechanism so NMI quits retrying it. A sub-4-day cycle derives a ZERO
+	// window: any past_due daily sub is immediately terminal here.
+	cycleDays := subscriptions.BillingCycleDaysOf(sub.Price)
+	if cycleDays <= 0 && priceSvc != nil {
+		if p, err := priceSvc.GetByID(ctx, sub.PriceID); err == nil {
+			cycleDays = subscriptions.BillingCycleDaysOf(p)
+		}
 	}
+	if cycleDays <= 0 {
+		logEntry.WithField("price_id", sub.PriceID).
+			Warn("Dunning: subscription has no billing cycle (one-time price?); using monthly dunning window")
+	}
+	window := subscriptions.DunningWindow(cycleDays)
 	if w.now().UTC().After(periodEnd.Add(window)) {
 		return w.expireWindowedSubscription(ctx, logEntry, sub, lifecycle, processor, periodEnd, window)
 	}

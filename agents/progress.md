@@ -1271,8 +1271,8 @@ NON-GOAL — no inbound/webhook durable queue: we are one system; if the DB is d
 ---
 # #359: cadence-relative dunning: schedule derived from billing cycle; dunning_window_days knob deleted
 
-**Completed:** no
-**Status:** open (Paul 2026-06-11): "I don't want a configuration for dunning-days. Dunning should be done in a way that makes sense relative to the duration of the payment." Another knob-diet entry: the schedule is HARDCODED as a function of the price's billing_cycle_days.
+**Completed:** yes (2026-06-11)
+**Status:** done, including the 2026-06-11 progressive-monthly revision. API (internal/modules/subscriptions/dunning.go): DunningRetryOffsets(cycleDays) []offset + DunningMaxFailures + DunningNextRetryIn(cycleDays, failures) + DunningWindow(cycleDays) — replacing DunningInterval/MaxDunningFailures; feature_flags.dunning_window_days + DefaultDunningWindowDays + both GetDunningWindow accessors DELETED. Schedules: <4d -> none (first failure terminal, window 0); 4-27d -> +1d,+2d (3 failures total, window 3d); >=28d -> +2d,+5d,+9d,+13d (5 failures total, window 14d, capped; unknown cycle -> monthly + warn). Slack = 1 day past the last offset. Boundary justification vs the principle: the weekly tier's 3d window forces the 0-retry cutoff up to <4d (a 2-3d sub retried daily would still be dunning when the next period is due), and the monthly tier's 14d window forces its start up to 28d (covers 4-weekly billing; span 13d ~ 46% of cycle) — the sketched 2d/10d boundaries would have the window outlast the cycle. FailMembership schedules each retry at the schedule's gap relative to now (late worker never schedules into the past); solana crank next_pull aligns via the same gaps; CCBill's 72h grace cap kept as a local webhooks const (processor-driven dunning, outside this spec). Verified: unit tier-table + gap + window<cycle sweep; integration TestDunningWorker* fully green incl. new 7d derived-window, 1d immediate-terminal (worker + FailMembership-first-failure) and weekly 3-failure FailMembership cases; NMI state-machine/deferred-delete/time-dependent regressions green.
 
 ## The policy (Paul's anchors, verbatim)
 
@@ -1293,7 +1293,7 @@ Consequences:
 - README + config.example.yaml: dunning_window_days rows removed; document the cadence table.
 
 **Tasks:**
-- [ ] dunningSchedule(cycleDays) + delete the constants and the dunning_window_days knob (config, accessors, validation, docs, env example)
-- [ ] FailMembership + DunningWorker consume the schedule (retry scheduling, terminal check, derived staleness window)
-- [ ] Tests: tier table (1d/7d/30d/365d + boundary cases), window derivation, integration regression (existing window tests adapted to derived windows)
+- [x] dunningSchedule(cycleDays) + delete the constants and the dunning_window_days knob (config, accessors, validation, docs, env example)
+- [x] FailMembership + DunningWorker consume the schedule (retry scheduling, terminal check, derived staleness window)
+- [x] Tests: tier table (1d/7d/30d/365d + boundary cases), window derivation, integration regression (existing window tests adapted to derived windows)
 ---

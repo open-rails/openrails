@@ -474,9 +474,23 @@ Feature-flag dials on top:
 | Flag | Default | What it does |
 |---|---|---|
 | `disable_processor_subscription_deletions` | `false` | Kill switch for outbound NMI `delete_subscription` — **stricter than `limited`**: blocks even the deletes that finalize user-asked cancels. Local cancellation proceeds; each skipped delete leaves a durable `deletion_scheduled_at` marker, and a boot-time rescan re-enqueues all of them once the flag is lifted. Implied by `mode=readonly`. |
-| `dunning_mode` | `on` | `on` = retry failed rebills (every 72h, max 5 attempts); `dry_run_only` = workflow runs and logs due subscriptions but never charges (retry state preserved — this is "pause"); `off` = no dunning at all AND rebill failures cancel immediately with no recovery (changes failure semantics — not a pause). |
-| `dunning_window_days` | `15` | Dunning may only charge within N days of the missed rebill (`current_period_ends_at`). Anything older is cancelled + downgraded **without** a charge — a card that failed months ago is never surprise-charged by a catch-up run. |
+| `dunning_mode` | `on` | `on` = retry failed rebills on the cadence-relative schedule below; `dry_run_only` = workflow runs and logs due subscriptions but never charges (retry state preserved — this is "pause"); `off` = no dunning at all AND rebill failures cancel immediately with no recovery (changes failure semantics — not a pause). |
 | `disable_entitlement_expiration` | `false` | Freezes local access lifecycle: credit/hold expiry and entitlement revocation pause; users keep premium even after their subscription ends. Orthogonal to the provider-facing settings. |
+
+The dunning **schedule** is not a knob — it is a hardcoded function of the price's
+billing cycle (#359):
+
+| Billing cycle | Retry schedule (offsets from the failed rebill) |
+|---|---|
+| < 4 days (daily) | none — the first failed rebill is terminal |
+| 4–27 days (weekly-ish) | +1d, +2d (3 attempts total) |
+| ≥ 28 days (monthly, yearly) | +2d, +5d, +9d, +13d — progressive, 5 attempts over ~2 weeks (capped: yearly is never more generous than monthly) |
+
+The staleness window ("never charge a months-old failure") is **derived** from the same
+schedule: dunning may only charge within `period_end` + the last retry offset + one day
+of slack (14 days for monthly subs, 3 days for weekly, zero for daily). Anything older
+is cancelled + downgraded **without** a charge — a card that failed months ago is never
+surprise-charged by a catch-up run.
 
 ### Safe boot with production credentials
 
@@ -495,7 +509,7 @@ FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true
 
 Exit path, in order: (1) unset `DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS` and restart —
 the boot rescan replays every delete skipped while the switch was on; (2) once converged,
-set `MODE=full` — dunning resumes, and the dunning window guarantees the stale
+set `MODE=full` — dunning resumes, and the derived staleness window guarantees the stale
 backlog is cancelled + downgraded rather than charged.
 
 All paused work is **delayed, not lost** — the workers are state-scan loops, so the first

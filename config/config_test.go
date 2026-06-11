@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -653,20 +652,6 @@ func TestLoad_DBSchemaEnv(t *testing.T) {
 		_, err := Load("nonexistent-config.yaml")
 		assert.Error(t, err)
 	})
-}
-
-func TestFeatureFlagsDunningWindow(t *testing.T) {
-	// nil flags and zero value fall back to the default window
-	var nilFlags *FeatureFlags
-	require.Equal(t, DefaultDunningWindowDays*24*time.Hour, nilFlags.GetDunningWindow())
-	require.Equal(t, DefaultDunningWindowDays*24*time.Hour, (&FeatureFlags{}).GetDunningWindow())
-	require.Equal(t, DefaultDunningWindowDays*24*time.Hour, (&FeatureFlags{DunningWindowDays: -3}).GetDunningWindow())
-
-	require.Equal(t, 30*24*time.Hour, (&FeatureFlags{DunningWindowDays: 30}).GetDunningWindow())
-
-	// Config wrapper is nil-safe via GetFeatureFlags
-	cfg := &Config{}
-	require.Equal(t, DefaultDunningWindowDays*24*time.Hour, cfg.GetDunningWindow())
 }
 
 func TestFeatureFlagsProcessorSubscriptionDeletionKillSwitch(t *testing.T) {

@@ -24,10 +24,10 @@ import (
 // the network pull (the fakeCranker returns a chosen outcome — success, a real
 // on-chain error string, or an RPC error). The classifier
 // (recurring.ClassifyCrankError) and the scheduling/dunning logic
-// (subscriptions.DunningInterval, MaxDunningFailures) under test are the REAL
-// production code paths. The fakeLifecycle models exactly what the real
+// (subscriptions.DunningRetryOffsets, #359 cadence-relative) under test are the
+// REAL production code paths. The fakeLifecycle models exactly what the real
 // SubscriptionLifecycleService does on FailMembership: escalate RetryAttempts
-// and cancel at MaxDunningFailures.
+// and cancel at the schedule's max failures.
 
 // ---- fakes -----------------------------------------------------------------
 
@@ -85,8 +85,9 @@ func (c *fakeCranker) Crank(_ context.Context, _ tenant.ID, _ *models.SolanaSubs
 
 // fakeLifecycle captures the lifecycle calls crankOne makes AND models the real
 // dunning escalation: FailMembership increments RetryAttempts and, on reaching
-// MaxDunningFailures, cancels (exactly as SubscriptionLifecycleService.FailMembership
-// does — see lifecycle_service.go RetryAttempts >= MaxDunningFailures).
+// the schedule's max failures, cancels (exactly as
+// SubscriptionLifecycleService.FailMembership does — see lifecycle_service.go
+// RetryAttempts >= DunningMaxFailures).
 type fakeLifecycle struct {
 	renewals  int
 	failures  int
@@ -108,7 +109,7 @@ func (l *fakeLifecycle) FailMembership(_ context.Context, p *subscriptions.FailM
 	l.failures++
 	l.lastFail = p
 	// Mirror the production lifecycle: cancel once RetryAttempts reaches the cap.
-	if l.failures >= subscriptions.MaxDunningFailures {
+	if l.failures >= subscriptions.DunningMaxFailures(smCycleDays) {
 		l.cancelled = true
 	}
 	return nil
@@ -125,6 +126,11 @@ func (l *fakeLifecycle) CancelMembership(_ context.Context, p *subscriptions.Can
 
 const (
 	smPeriodHours  = uint64(1)
+	// smCycleDays pins the harness to the MONTHLY dunning tier (#359) so the
+	// recoverable-decline path exercises the progressive 5-failure schedule
+	// (+2d/+5d/+9d/+13d); the 1h on-chain period alone would otherwise
+	// resolve to the 0-retry tier.
+	smCycleDays = 30
 	smAmountBase   = uint64(1_000_000) // 1 USDC (6 decimals)
 	smFiatAmount   = int64(100)        // $1.00
 	smFiatCurrency = "usd"
@@ -173,6 +179,10 @@ func newCrankHarness(t *testing.T) *crankHarness {
 				fingerprint:     smFingerprint,
 				fiatAmount:      smFiatAmount,
 				currency:        smFiatCurrency,
+				cycleDays:       smCycleDays,
+				// mirror production resolvePlan: the failure count BEFORE this
+				// crank, as the real subscription row would carry it.
+				retryAttempts: life.failures,
 			}, nil
 		},
 	}
@@ -222,14 +232,16 @@ func TestCrankStateMachine_SuccessMultiRebill(t *testing.T) {
 }
 
 // recoverable decline (insufficient USDC, SPL token Custom:1): route to dunning
-// and reschedule next_pull_at by DunningInterval (NOT one period). Escalating
-// the same decline across retries reaches MaxDunningFailures -> cancel.
+// and reschedule next_pull_at by the cadence-relative dunning interval (NOT
+// one period). Escalating the same decline across retries reaches the
+// schedule's max failures -> cancel.
 func TestCrankStateMachine_RecoverableDunningEscalatesToCancel(t *testing.T) {
 	h := newCrankHarness(t)
 	// SPL token InsufficientFunds -> recoverable per the real classifier.
 	insufficient := errors.New(`Transaction failed: custom program error: 0x1 {"InstructionError":[0,{"Custom":1}]}`)
 
-	for attempt := 1; attempt <= subscriptions.MaxDunningFailures; attempt++ {
+	maxFailures := subscriptions.DunningMaxFailures(smCycleDays)
+	for attempt := 1; attempt <= maxFailures; attempt++ {
 		now := h.w.now()
 		h.crank.err = insufficient
 		require.NoError(t, h.run(t))
@@ -237,21 +249,27 @@ func TestCrankStateMachine_RecoverableDunningEscalatesToCancel(t *testing.T) {
 		require.Equal(t, attempt, h.life.failures, "FailMembership called once per attempt")
 		require.Equal(t, 0, h.life.renewals, "no renewal while dunning")
 
-		// rescheduled by the dunning interval, not by one period.
-		wantNext := now.Add(subscriptions.DunningInterval)
+		// rescheduled by the schedule's gap for this failure count, not by one
+		// period. The terminal failure has no gap: the crank then advances one
+		// period so the cancelled record doesn't hot-loop.
+		gap := subscriptions.DunningNextRetryIn(smCycleDays, attempt)
+		if gap == 0 {
+			gap = time.Duration(smPeriodHours) * time.Hour
+		}
+		wantNext := now.Add(gap)
 		require.Equal(t, wantNext, h.store.nextPullAt[h.row.ID], "attempt %d reschedule", attempt)
 
 		// the recorded decline code is the shared InsufficientFunds vocabulary.
 		require.NotNil(t, h.life.lastFail)
 		require.Equal(t, models.ProcessorSolana, h.life.lastFail.Processor)
 
-		h.clock.Advance(subscriptions.DunningInterval)
+		h.clock.Advance(gap)
 	}
 
-	// after MaxDunningFailures the lifecycle escalates to cancel (modelled here
-	// exactly as the real FailMembership does).
-	require.True(t, h.life.cancelled, "escalated to cancel at MaxDunningFailures")
-	require.Equal(t, subscriptions.MaxDunningFailures, h.life.failures)
+	// after the schedule's max failures the lifecycle escalates to cancel
+	// (modelled here exactly as the real FailMembership does).
+	require.True(t, h.life.cancelled, "escalated to cancel at the schedule's max failures")
+	require.Equal(t, maxFailures, h.life.failures)
 }
 
 // terminal decline (subscriber revoked the SPL delegate, token Custom:4

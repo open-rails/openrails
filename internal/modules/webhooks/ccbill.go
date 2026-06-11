@@ -90,13 +90,20 @@ func parseCCBillDateUsingTimestamp(dateStr string) (*time.Time, error) {
 	return &combined, nil
 }
 
+// ccbillGraceCap bounds how far past the paid term end a CCBill-announced
+// retry date may extend grace. CCBill runs its own dunning cadence; this is
+// purely OpenRails' cap on the grace access granted meanwhile. (Historically
+// this was subscriptions.DunningInterval, before #359 replaced the fixed
+// dunning interval with the cadence-relative offset schedule.)
+const ccbillGraceCap = 72 * time.Hour
+
 func capCCBillRetryAt(nextRetryAt, paidTermEnd *time.Time) *time.Time {
 	if nextRetryAt == nil {
 		return nil
 	}
 	candidate := nextRetryAt.UTC()
 	if paidTermEnd != nil {
-		maxGraceEnd := paidTermEnd.UTC().Add(subscriptions.DunningInterval)
+		maxGraceEnd := paidTermEnd.UTC().Add(ccbillGraceCap)
 		if candidate.After(maxGraceEnd) {
 			candidate = maxGraceEnd
 		}

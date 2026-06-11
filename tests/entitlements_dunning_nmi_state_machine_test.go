@@ -115,9 +115,11 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		FailureReason:  &failReason,
 	}))
 
+	// Monthly billing cycle -> progressive retry gaps (#359): +2d after the
+	// initial failure, then +3d after the second.
 	// First retry attempt: fail via mock, should append grace up to next_retry_at.
 	mock.ShouldFail = true
-	clock.Advance(subscriptions.DunningInterval)
+	clock.Advance(subscriptions.DunningNextRetryIn(30, 1))
 
 	worker := &riverjobs.DunningWorker{
 		DB:                 rt.DB,
@@ -131,7 +133,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 
 	// Second retry attempt: succeed via mock, should clear grace and push the next paid window.
 	mock.ShouldFail = false
-	clock.Advance(subscriptions.DunningInterval)
+	clock.Advance(subscriptions.DunningNextRetryIn(30, 2))
 	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
 
 	for _, entName := range []string{"premium", "extra"} {
@@ -207,9 +209,12 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailureRevokesGrace(t *test
 		EventLogService:    rt.EventLogService,
 	}
 
-	// Drive retries until the subscription is cancelled.
-	for i := 0; i < subscriptions.MaxDunningFailures+1; i++ {
-		clock.Advance(subscriptions.DunningInterval)
+	// Drive retries until the subscription is cancelled (monthly schedule,
+	// #359: 5 failures total, progressive gaps of at most 4d). Advancing by
+	// the largest gap each pass guarantees the next retry is due.
+	maxDunningFailures := subscriptions.DunningMaxFailures(30)
+	for i := 0; i < maxDunningFailures+1; i++ {
+		clock.Advance(4 * 24 * time.Hour)
 		require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{}))
 		refreshed := suite.GetSubscription(sub.ID)
 		if refreshed.Status == models.StatusCancelled {

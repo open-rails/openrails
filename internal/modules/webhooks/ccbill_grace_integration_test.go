@@ -153,10 +153,10 @@ func TestCCBillRenewalFailure_AppendsGraceEntitlements(t *testing.T) {
 	require.Equal(t, paidEnd.UTC(), graceStartAt.UTC())
 	require.NotNil(t, graceEndAt)
 	// Grace end mirrors capCCBillRetryAt: the parsed end-of-day retry date,
-	// clamped to paidTermEnd + DunningInterval (the 72h grace cap). For these
-	// fixture dates the 72h cap wins.
+	// clamped to paidTermEnd + ccbillGraceCap (72h). For these fixture dates
+	// the cap wins.
 	expectedGraceEnd := time.Date(nextRetryAt.Year(), nextRetryAt.Month(), nextRetryAt.Day(), 23, 59, 59, 0, time.UTC)
-	if maxGraceEnd := paidEnd.UTC().Add(subscriptions.DunningInterval); expectedGraceEnd.After(maxGraceEnd) {
+	if maxGraceEnd := paidEnd.UTC().Add(ccbillGraceCap); expectedGraceEnd.After(maxGraceEnd) {
 		expectedGraceEnd = maxGraceEnd
 	}
 	require.Equal(t, expectedGraceEnd.UTC(), graceEndAt.UTC())

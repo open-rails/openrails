@@ -1420,10 +1420,28 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			// Update subscription status - failed payment = past_due (still trying to recover)
 			subscription.Status = models.StatusPastDue
 
+			// #359: the dunning cadence is a hardcoded function of the price's
+			// billing cycle (monthly: 5 failures total, progressive retries at
+			// +2d/+5d/+9d/+13d; weekly-ish: retries at +1d/+2d; daily-ish: the
+			// first failure is terminal). See DunningRetryOffsets.
+			cycleDays := BillingCycleDaysOf(subscription.Price)
+			if cycleDays <= 0 {
+				if price, perr := priceService.GetByID(ctx, subscription.PriceID); perr == nil {
+					cycleDays = BillingCycleDaysOf(price)
+				}
+			}
+			if cycleDays <= 0 {
+				// A past_due subscription on a one-time price shouldn't exist;
+				// defensively dun it on the monthly schedule.
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+					"price_id":        subscription.PriceID,
+				}).Warn("FailMembership: subscription has no billing cycle (one-time price?); using monthly dunning schedule")
+			}
+			maxFailures := DunningMaxFailures(cycleDays)
+
 			terminal := params.Terminal
 			if !terminal {
-				// Dunning policy for NMI-backed subscriptions: try every 3 days, up to 5 failures total
-				// Example timeline (D = day of initial failure): D+3, D+6, D+9, D+12, D+15
 				subscription.LastRetryAt = &now
 				if subscription.RetryAttempts == nil {
 					attempts := 1
@@ -1431,10 +1449,15 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				} else {
 					*subscription.RetryAttempts++
 				}
-				terminal = *subscription.RetryAttempts >= MaxDunningFailures
+				// maxFailures == 1 (sub-4-day cycles) makes the FIRST failure
+				// terminal: straight to cancel + revoke + scheduled NMI delete.
+				terminal = *subscription.RetryAttempts >= maxFailures
 			}
 
-			// Terminal (window expired, or MaxDunningFailures reached): cancel; otherwise schedule next attempt in DunningInterval
+			// Terminal (window expired, or the schedule's max failures reached):
+			// cancel; otherwise schedule the next retry at the schedule's gap
+			// for this failure count (relative to now, so a late worker run
+			// never schedules into the past)
 			if terminal {
 				expired := models.CancelTypeExpired
 				reason := normalize.FromPtr(params.FailureReason)
@@ -1448,7 +1471,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				subscription.EndedAt = &now
 				subscription.ClearRetrySchedule()
 			} else {
-				nextRetry := now.Add(DunningInterval)
+				nextRetry := now.Add(DunningNextRetryIn(cycleDays, *subscription.RetryAttempts))
 				subscription.NextRetryAt = &nextRetry
 			}
 		}

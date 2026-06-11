@@ -524,8 +524,9 @@ func TestDunningMaxRetriesFailsSubscription(t *testing.T) {
 	userID := uuid.New().String()
 	processorSubID := "test-dunning-max-" + uuid.New().String()[:8]
 
-	// Create a subscription at max retries (one more failure = cancelled)
-	retryAttempts := subscriptions.MaxDunningFailures - 1 // One retry left
+	// Create a subscription at max retries (one more failure = cancelled).
+	// Monthly billing cycle -> 5 failures total (#359).
+	retryAttempts := subscriptions.DunningMaxFailures(30) - 1 // One retry left
 	nextRetry := startTime
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:         userID,

@@ -4,6 +4,7 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -354,9 +356,9 @@ func TestDunningWorkerMultipleDueSubscriptions(t *testing.T) {
 }
 
 // TestDunningWorkerWindowExpiredCancelsWithoutCharge verifies the dunning
-// staleness window (#344): a past_due subscription whose missed rebill is older
-// than the window is cancelled + downgraded WITHOUT any charge attempt, instead
-// of being retried.
+// staleness window (#344, derived from the billing cycle since #359): a
+// past_due subscription whose missed rebill is older than the window is
+// cancelled + downgraded WITHOUT any charge attempt, instead of being retried.
 func TestDunningWorkerWindowExpiredCancelsWithoutCharge(t *testing.T) {
 	suite := setupTestSuite(t)
 
@@ -367,7 +369,7 @@ func TestDunningWorkerWindowExpiredCancelsWithoutCharge(t *testing.T) {
 	pm := suite.CreateTestPaymentMethod(userID)
 
 	pastRetry := time.Now().Add(-1 * time.Hour)
-	stalePeriodEnd := time.Now().Add(-60 * 24 * time.Hour) // far beyond the 15-day default window
+	stalePeriodEnd := time.Now().Add(-60 * 24 * time.Hour) // far beyond the derived 14-day monthly window
 	retryAttempts := 1
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
@@ -414,7 +416,7 @@ func TestDunningWorkerWithinWindowIsNotExpired(t *testing.T) {
 	pm := suite.CreateTestPaymentMethod(userID)
 
 	pastRetry := time.Now().Add(-1 * time.Hour)
-	recentPeriodEnd := time.Now().Add(-3 * 24 * time.Hour) // inside the 15-day window
+	recentPeriodEnd := time.Now().Add(-3 * 24 * time.Hour) // inside the derived 14-day monthly window
 	retryAttempts := 1
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
@@ -489,4 +491,248 @@ func TestDunningWorkerLimitedModeTakesNoAction(t *testing.T) {
 	require.NotNil(t, updated.RetryAttempts)
 	assert.Equal(t, 1, *updated.RetryAttempts)
 	assert.Nil(t, updated.CancelledAt)
+}
+
+// createDunningCycleProductPrice seeds an active Mobius product+price with the
+// given billing cycle, for exercising the cadence-relative dunning tiers (#359).
+func createDunningCycleProductPrice(t *testing.T, suite *TestContainerSuite, cycleDays int) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	now := suite.GetClock().Now().UTC()
+	productID := uuid.New()
+	priceID := uuid.New()
+
+	suite.InsertProduct(ctx, &models.Product{
+		ID:               productID,
+		Slug:             fmt.Sprintf("dunning-cycle-%dd-%s", cycleDays, uuid.New().String()[:8]),
+		DisplayName:      fmt.Sprintf("Dunning %dd cycle", cycleDays),
+		Description:      "cadence-relative dunning fixture",
+		EntitlementsSpec: map[string]*int{"premium": nil},
+		Status:           models.CatalogStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	suite.InsertPrice(ctx, &models.Price{
+		ID:               priceID,
+		ProductID:        productID,
+		Status:           models.CatalogStatusActive,
+		Amount:           999,
+		Currency:         "usd",
+		BillingCycleDays: &cycleDays,
+		Processors: map[string]map[string]string{
+			string(models.ProcessorMobius): {
+				models.ProcessorKeyPlanID: "plan_dunning_cycle",
+			},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	return priceID
+}
+
+// TestDunningWorkerWeeklyCycleDerivedWindow pins the weekly tier (#359): a 7d
+// billing cycle derives a 3-day staleness window (last retry offset +2d, plus
+// one day of slack). A missed rebill older than 3 days is terminal-cancelled
+// without a charge; a fresher one proceeds into the normal rebill path.
+func TestDunningWorkerWeeklyCycleDerivedWindow(t *testing.T) {
+	suite := setupTestSuite(t)
+
+	priceID := createDunningCycleProductPrice(t, suite, 7)
+	pastRetry := time.Now().Add(-1 * time.Hour)
+	retryAttempts := 1
+
+	// Beyond the derived 3d window -> terminal cancel without charge.
+	staleUser := uuid.New().String()
+	stalePM := suite.CreateTestPaymentMethod(staleUser)
+	stalePeriodEnd := time.Now().Add(-4 * 24 * time.Hour)
+	staleSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              staleUser,
+		PriceID:             priceID,
+		Status:              models.StatusPastDue,
+		Processor:           models.ProcessorMobius,
+		PaymentMethodID:     &stalePM.ID,
+		RetryAttempts:       &retryAttempts,
+		NextRetryAt:         &pastRetry,
+		PeriodStart:         stalePeriodEnd.Add(-7 * 24 * time.Hour),
+		CurrentPeriodEndsAt: &stalePeriodEnd,
+	})
+
+	// Inside the derived 3d window -> stays past_due (normal rebill path).
+	freshUser := uuid.New().String()
+	freshPM := suite.CreateTestPaymentMethod(freshUser)
+	freshPeriodEnd := time.Now().Add(-2 * 24 * time.Hour)
+	freshSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              freshUser,
+		PriceID:             priceID,
+		Status:              models.StatusPastDue,
+		Processor:           models.ProcessorMobius,
+		PaymentMethodID:     &freshPM.ID,
+		RetryAttempts:       &retryAttempts,
+		NextRetryAt:         &pastRetry,
+		PeriodStart:         freshPeriodEnd.Add(-7 * 24 * time.Hour),
+		CurrentPeriodEndsAt: &freshPeriodEnd,
+	})
+
+	// Zero-value NMI client: present (so the run proceeds) but unconfigured —
+	// any attempted charge would error, proving the window path never charges.
+	worker := &riverjobs.DunningWorker{
+		DB:         suite.App.Runtime.DB,
+		Config:     suite.App.Runtime.Config,
+		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+	}
+	require.NoError(t, worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}}))
+
+	stale := suite.GetSubscription(staleSub.ID)
+	require.Equal(t, models.StatusCancelled, stale.Status, "4d-old missed rebill on a 7d cycle is beyond the derived 3d window")
+	require.NotNil(t, stale.CancelType)
+	assert.Equal(t, models.CancelTypeExpired, *stale.CancelType)
+	assert.Nil(t, stale.NextRetryAt)
+
+	fresh := suite.GetSubscription(freshSub.ID)
+	assert.Equal(t, models.StatusPastDue, fresh.Status, "2d-old missed rebill on a 7d cycle is inside the derived 3d window")
+}
+
+// TestDunningWorkerDailyCycleImmediatelyTerminal pins the 0-retry tier (#359):
+// a sub-4-day billing cycle derives a ZERO staleness window, so ANY past_due
+// daily subscription is terminal-cancelled by the worker without a charge.
+func TestDunningWorkerDailyCycleImmediatelyTerminal(t *testing.T) {
+	suite := setupTestSuite(t)
+
+	priceID := createDunningCycleProductPrice(t, suite, 1)
+
+	userID := uuid.New().String()
+	pm := suite.CreateTestPaymentMethod(userID)
+
+	pastRetry := time.Now().Add(-1 * time.Hour)
+	periodEnd := time.Now().Add(-1 * time.Hour) // barely missed — still terminal
+	retryAttempts := 1
+
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              userID,
+		PriceID:             priceID,
+		Status:              models.StatusPastDue,
+		Processor:           models.ProcessorMobius,
+		PaymentMethodID:     &pm.ID,
+		RetryAttempts:       &retryAttempts,
+		NextRetryAt:         &pastRetry,
+		PeriodStart:         periodEnd.Add(-24 * time.Hour),
+		CurrentPeriodEndsAt: &periodEnd,
+	})
+
+	worker := &riverjobs.DunningWorker{
+		DB:         suite.App.Runtime.DB,
+		Config:     suite.App.Runtime.Config,
+		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+	}
+	require.NoError(t, worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}}))
+
+	updated := suite.GetSubscription(sub.ID)
+	require.Equal(t, models.StatusCancelled, updated.Status, "1d-cycle past_due sub must be immediately terminal (zero derived window)")
+	require.NotNil(t, updated.CancelType)
+	assert.Equal(t, models.CancelTypeExpired, *updated.CancelType)
+	assert.Nil(t, updated.NextRetryAt)
+	assert.Nil(t, updated.RetryAttempts)
+}
+
+// TestDunningWorkerFailMembershipDailyCycleFirstFailureTerminal pins the
+// FailMembership side of the 0-retry tier (#359): the FIRST rebill failure of
+// a 1d-cycle subscription goes straight to the terminal branch — cancelled,
+// no past_due retry state.
+func TestDunningWorkerFailMembershipDailyCycleFirstFailureTerminal(t *testing.T) {
+	suite := setupTestSuite(t)
+	rt := suite.App.Runtime
+
+	priceID := createDunningCycleProductPrice(t, suite, 1)
+
+	userID := uuid.New().String()
+	pm := suite.CreateTestPaymentMethod(userID)
+	periodEnd := time.Now().UTC()
+
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              userID,
+		PriceID:             priceID,
+		Status:              models.StatusActive,
+		Processor:           models.ProcessorMobius,
+		PaymentMethodID:     &pm.ID,
+		PeriodStart:         periodEnd.Add(-24 * time.Hour),
+		CurrentPeriodEndsAt: &periodEnd,
+	})
+
+	reason := "rebill declined"
+	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(context.Background(), &subscriptions.FailMembershipParams{
+		Processor:      models.ProcessorMobius,
+		SubscriptionID: &sub.ID,
+		FailureReason:  &reason,
+	}))
+
+	updated := suite.GetSubscription(sub.ID)
+	require.Equal(t, models.StatusCancelled, updated.Status, "first failure on a 1d cycle is terminal (0-retry tier)")
+	require.NotNil(t, updated.CancelType)
+	assert.Equal(t, models.CancelTypeExpired, *updated.CancelType)
+	assert.Nil(t, updated.NextRetryAt, "no retry is ever scheduled on the 0-retry tier")
+}
+
+// TestDunningWorkerFailMembershipWeeklyCycleSchedule pins the weekly tier's
+// retry scheduling in FailMembership (#359): a 7d cycle retries at +1d and
+// +2d after the initial failure and is terminal on the 3rd failure.
+func TestDunningWorkerFailMembershipWeeklyCycleSchedule(t *testing.T) {
+	suite := setupTestSuite(t)
+	rt := suite.App.Runtime
+	ctx := context.Background()
+
+	priceID := createDunningCycleProductPrice(t, suite, 7)
+
+	userID := uuid.New().String()
+	pm := suite.CreateTestPaymentMethod(userID)
+	periodEnd := time.Now().UTC()
+
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              userID,
+		PriceID:             priceID,
+		Status:              models.StatusActive,
+		Processor:           models.ProcessorMobius,
+		PaymentMethodID:     &pm.ID,
+		PeriodStart:         periodEnd.Add(-7 * 24 * time.Hour),
+		CurrentPeriodEndsAt: &periodEnd,
+	})
+
+	reason := "rebill declined"
+
+	// First failure: past_due, next retry ~24h out (weekly offsets +1d/+2d).
+	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
+		Processor:      models.ProcessorMobius,
+		SubscriptionID: &sub.ID,
+		FailureReason:  &reason,
+	}))
+	updated := suite.GetSubscription(sub.ID)
+	require.Equal(t, models.StatusPastDue, updated.Status)
+	require.NotNil(t, updated.RetryAttempts)
+	assert.Equal(t, 1, *updated.RetryAttempts)
+	require.NotNil(t, updated.NextRetryAt)
+	assert.WithinDuration(t, time.Now().UTC().Add(subscriptions.DunningNextRetryIn(7, 1)), updated.NextRetryAt.UTC(), time.Minute,
+		"weekly tier schedules the first retry 24h out")
+
+	// Second failure: still past_due, next retry another 24h out.
+	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
+		Processor:      models.ProcessorMobius,
+		SubscriptionID: &sub.ID,
+		FailureReason:  &reason,
+	}))
+	updated = suite.GetSubscription(sub.ID)
+	require.Equal(t, models.StatusPastDue, updated.Status, "2nd failure on a 7d cycle still retries")
+	require.NotNil(t, updated.RetryAttempts)
+	assert.Equal(t, 2, *updated.RetryAttempts)
+	require.NotNil(t, updated.NextRetryAt)
+	assert.WithinDuration(t, time.Now().UTC().Add(subscriptions.DunningNextRetryIn(7, 2)), updated.NextRetryAt.UTC(), time.Minute,
+		"weekly tier schedules the second retry another 24h out")
+
+	// Third failure: terminal (weekly tier allows 3 failures total).
+	require.NoError(t, rt.SubscriptionLifecycleService.FailMembership(ctx, &subscriptions.FailMembershipParams{
+		Processor:      models.ProcessorMobius,
+		SubscriptionID: &sub.ID,
+		FailureReason:  &reason,
+	}))
+	updated = suite.GetSubscription(sub.ID)
+	require.Equal(t, models.StatusCancelled, updated.Status, "3rd failure on a 7d cycle is terminal")
+	assert.Nil(t, updated.NextRetryAt)
 }

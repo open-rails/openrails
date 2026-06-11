@@ -482,21 +482,20 @@ feature_flags:
   #
   dunning_mode: "on"
 
+  # NOTE: the dunning SCHEDULE is not configurable (#359). It is a hardcoded
+  # function of the price's billing cycle (retry offsets from the failed rebill):
+  #   cycle < 4 days -> no retries (the first failure is terminal)
+  #   4..27 days     -> +1d, +2d (3 attempts total)
+  #   >= 28 days     -> +2d, +5d, +9d, +13d (5 attempts over ~2 weeks, capped;
+  #                     yearly == monthly)
+  # The staleness window ("never charge a months-old failure") is DERIVED from
+  # the same schedule: period_end + last retry offset + one day of slack
+  # (14 days for monthly subs). A past_due subscription whose missed rebill is
+  # OLDER than that window is cancelled and the user downgraded WITHOUT a
+  # charge attempt.
+
   # (Limited mode moved: it is now the top-level `mode: limited` operating
   # mode - see CORE SETTINGS. feature_flags.limited_mode no longer exists.)
-
-  # -------------------------------------------------------------------------
-  # Dunning Window - How long past a missed rebill charges may be attempted
-  # -------------------------------------------------------------------------
-  # Dunning only retries within [period_end, period_end + window]. A past_due
-  # subscription whose missed rebill is OLDER than the window is cancelled and
-  # the user downgraded WITHOUT a charge attempt - a card that failed months
-  # ago must never be surprise-charged by a catch-up dunning run (e.g. after
-  # importing stale subscriptions from a legacy system).
-  #
-  # 0 or unset = default 15 days.
-  #
-  dunning_window_days: 15
 
   # -------------------------------------------------------------------------
   # Disable Processor Subscription Deletions - Blocks remote delete_subscription

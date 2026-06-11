@@ -147,8 +147,8 @@ func TestFailMembershipDunningExhaustionSchedulesNMIDelete(t *testing.T) {
 	pm := suite.CreateTestPaymentMethod(userID)
 
 	pastRetry := time.Now().Add(-1 * time.Hour)
-	recentPeriodEnd := time.Now().Add(-2 * 24 * time.Hour) // within the 15-day dunning window
-	retryAttempts := subscriptions.MaxDunningFailures - 1  // the next failure is the 5th = terminal
+	recentPeriodEnd := time.Now().Add(-2 * 24 * time.Hour) // within the derived monthly dunning window (#359)
+	retryAttempts := subscriptions.DunningMaxFailures(30) - 1 // the next failure is the 5th = terminal
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:              userID,
@@ -204,7 +204,7 @@ func TestFailMembershipExhaustionSetsDurableMarkerViaScheduler(t *testing.T) {
 
 	userID := uuid.New().String()
 	pastRetry := time.Now().Add(-1 * time.Hour)
-	retryAttempts := subscriptions.MaxDunningFailures - 1
+	retryAttempts := subscriptions.DunningMaxFailures(30) - 1
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:        userID,
@@ -253,7 +253,7 @@ func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
 
 	userID := uuid.New().String()
 	pastRetry := time.Now().Add(-1 * time.Hour)
-	retryAttempts := subscriptions.MaxDunningFailures - 1
+	retryAttempts := subscriptions.DunningMaxFailures(30) - 1
 
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
 		UserID:        userID,

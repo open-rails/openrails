@@ -827,10 +827,6 @@ const (
 	DunningModeOff = "off"
 )
 
-// DefaultDunningWindowDays bounds how long past a missed rebill dunning may
-// still attempt charges (see FeatureFlags.DunningWindowDays).
-const DefaultDunningWindowDays = 15
-
 // Operating modes (#346, #355) — see Config.Mode. The former mode=test is
 // gone (sandbox is the orthogonal test_env axis) and "production" is renamed
 // "full".
@@ -866,13 +862,9 @@ type FeatureFlags struct {
 	//   - "off": No dunning - immediate cancellation on rebill failure, no recovery
 	DunningMode string `koanf:"dunning_mode"`
 
-	// DunningWindowDays bounds how long past a missed rebill (the subscription's
-	// current period end) dunning may still attempt charges. Once the window has
-	// elapsed the subscription is cancelled and entitlements revoked WITHOUT
-	// charging — a card that failed months ago must never be surprise-charged by
-	// a catch-up dunning run (e.g. after importing stale legacy subscriptions).
-	// 0 or negative = DefaultDunningWindowDays.
-	DunningWindowDays int `koanf:"dunning_window_days"`
+	// NOTE (#359): there is no dunning schedule/window knob. The dunning
+	// cadence AND the staleness window are hardcoded functions of the price's
+	// billing cycle — see internal/modules/subscriptions.DunningRetryOffsets.
 
 	// DisableProcessorSubscriptionDeletions, when true, blocks every outbound
 	// processor-side delete_subscription call (NMI/Mobius recurring deletes)
@@ -916,16 +908,6 @@ func (f *FeatureFlags) IsDunningDryRun() bool {
 // IsDunningOff returns true if dunning is completely disabled (immediate cancel on failure).
 func (f *FeatureFlags) IsDunningOff() bool {
 	return f.GetDunningMode() == DunningModeOff
-}
-
-// GetDunningWindow returns how long past the missed rebill (current period end)
-// dunning may still attempt charges, defaulting to DefaultDunningWindowDays.
-func (f *FeatureFlags) GetDunningWindow() time.Duration {
-	days := DefaultDunningWindowDays
-	if f != nil && f.DunningWindowDays > 0 {
-		days = f.DunningWindowDays
-	}
-	return time.Duration(days) * 24 * time.Hour
 }
 
 // IsProcessorSubscriptionDeletionDisabled returns true if outbound
@@ -1513,12 +1495,6 @@ func (cfg *Config) IsDunningDryRun() bool {
 // IsDunningOff returns true if dunning is completely disabled.
 func (cfg *Config) IsDunningOff() bool {
 	return cfg.GetFeatureFlags().IsDunningOff()
-}
-
-// GetDunningWindow returns how long past the missed rebill dunning may still
-// attempt charges.
-func (cfg *Config) GetDunningWindow() time.Duration {
-	return cfg.GetFeatureFlags().GetDunningWindow()
 }
 
 // IsProcessorSubscriptionDeletionDisabled returns true if outbound

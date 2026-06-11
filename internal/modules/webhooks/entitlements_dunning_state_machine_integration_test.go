@@ -151,7 +151,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 		require.NoError(t, svc.handleRenewalFailure(ctx))
 	}
 
-	// Grace windows are capped at paidTermEnd + DunningInterval (72h) =
+	// Grace windows are capped at paidTermEnd + ccbillGraceCap (72h) =
 	// 2026-02-03 00:00Z (see capCCBillRetryAt). Retry dates must stay distinct
 	// *within* that cap so each failure appends a new window rather than being
 	// collapsed to the same capped instant and deduplicated.

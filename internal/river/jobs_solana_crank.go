@@ -71,6 +71,11 @@ type resolvedPlan struct {
 	fingerprint     int64
 	fiatAmount      int64
 	currency        string
+	// cycleDays is the price's billing cycle in days (0 = unknown) and
+	// retryAttempts the subscription's consecutive-failure count so far —
+	// together they feed the cadence-relative dunning schedule (#359).
+	cycleDays     int
+	retryAttempts int
 }
 
 // SolanaCrankWorker queries due Solana subscriptions and cranks each: pull the
@@ -238,8 +243,9 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			return nil
 		default:
 			// Recoverable subscriber decline (insufficient USDC, etc.) -> dunning.
-			// Advance next_pull_at by the dunning interval so we align with the
-			// dunning cadence instead of re-failing every hourly run.
+			// Advance next_pull_at by the cadence-relative dunning interval
+			// (#359, derived from the price's billing cycle) so we align with
+			// the dunning cadence instead of re-failing every hourly run.
 			llog.Warn("Solana cranker: recoverable pull failure; routing to dunning")
 			reason := crankErr.Error()
 			code := string(cf.Code)
@@ -252,7 +258,16 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			}); err != nil {
 				return fmt.Errorf("solana crank: fail membership: %w", err)
 			}
-			nextRetry := w.now().Add(subscriptions.DunningInterval)
+			// plan.retryAttempts was loaded BEFORE the FailMembership above
+			// recorded this failure, so the schedule gap is looked up at +1.
+			gap := subscriptions.DunningNextRetryIn(plan.cycleDays, plan.retryAttempts+1)
+			if gap <= 0 {
+				// That failure was terminal under the schedule (FailMembership
+				// cancelled the membership); advance one period so this record
+				// doesn't hot-loop while the cancellation settles.
+				gap = time.Duration(periodHours) * time.Hour
+			}
+			nextRetry := w.now().Add(gap)
 			return repo.SetNextPullAt(ctx, row.ID, nextRetry)
 		}
 	}
@@ -290,6 +305,10 @@ func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaS
 	if err != nil {
 		return resolvedPlan{}, fmt.Errorf("solana crank: load price: %w", err)
 	}
+	retryAttempts := 0
+	if sub.RetryAttempts != nil {
+		retryAttempts = *sub.RetryAttempts
+	}
 	cfg := price.GetProcessorConfig(models.ProcessorSolana)
 	if cfg == nil {
 		return resolvedPlan{}, fmt.Errorf("solana crank: price %s has no solana processor config", price.ID)
@@ -309,5 +328,7 @@ func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaS
 		fingerprint:     fingerprint,
 		fiatAmount:      price.Amount,
 		currency:        price.Currency,
+		cycleDays:       subscriptions.BillingCycleDaysOf(price),
+		retryAttempts:   retryAttempts,
 	}, nil
 }
