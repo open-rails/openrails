@@ -22,7 +22,6 @@ type Options struct {
 	// CALLER'S OWN tenant. nil in verifier-only mode, in which case admin routes
 	// fail closed (there is no operator-tenant or role-claim fallback).
 	AdminPermissionChecker authpolicy.AdminPermissionChecker
-
 }
 
 // requiredMW builds the neutral "authentication required" middleware for the
