@@ -412,52 +412,50 @@ func stripeModeTestConfig(secretKey string, testMode bool) *Config {
 
 func TestValidateStripeKeyForTestMode(t *testing.T) {
 	// Standard secret keys (sk_*)
-	t.Run("sk_live_ + test_mode=true disables Stripe", func(t *testing.T) {
+	t.Run("sk_live_ + test_mode=true is a hard error (#347)", func(t *testing.T) {
 		cfg := stripeModeTestConfig("sk_live_abc123", true)
-		validateStripeKeyForTestMode(cfg)
-		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "live key in test mode should be disabled")
+		assert.Error(t, validateStripeKeyForTestMode(cfg), "live key in test mode must refuse to boot")
 	})
 
 	t.Run("sk_test_ + test_mode=true allowed", func(t *testing.T) {
 		cfg := stripeModeTestConfig("sk_test_abc123", true)
-		validateStripeKeyForTestMode(cfg)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg))
 		assert.Equal(t, "sk_test_abc123", cfg.Processors["stripe"].SecretKey, "test key in test mode should be kept")
 	})
 
 	t.Run("sk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
 		cfg := stripeModeTestConfig("sk_test_abc123", false)
-		validateStripeKeyForTestMode(cfg)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg))
 		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "test key in live mode should be disabled")
 	})
 
 	t.Run("sk_live_ + test_mode=false allowed", func(t *testing.T) {
 		cfg := stripeModeTestConfig("sk_live_abc123", false)
-		validateStripeKeyForTestMode(cfg)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg))
 		assert.Equal(t, "sk_live_abc123", cfg.Processors["stripe"].SecretKey, "live key in live mode should be kept")
 	})
 
 	// Restricted keys (rk_*) — these must be classified the same as sk_* keys.
-	t.Run("rk_live_ + test_mode=true disables Stripe", func(t *testing.T) {
+	t.Run("rk_live_ + test_mode=true is a hard error (#347)", func(t *testing.T) {
 		cfg := stripeModeTestConfig("rk_live_abc123", true)
-		validateStripeKeyForTestMode(cfg)
-		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "restricted live key in test mode should be disabled")
+		assert.Error(t, validateStripeKeyForTestMode(cfg), "restricted live key in test mode must refuse to boot")
 	})
 
 	t.Run("rk_test_ + test_mode=true allowed", func(t *testing.T) {
 		cfg := stripeModeTestConfig("rk_test_abc123", true)
-		validateStripeKeyForTestMode(cfg)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg))
 		assert.Equal(t, "rk_test_abc123", cfg.Processors["stripe"].SecretKey, "restricted test key in test mode should be kept")
 	})
 
 	t.Run("rk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
 		cfg := stripeModeTestConfig("rk_test_abc123", false)
-		validateStripeKeyForTestMode(cfg)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg))
 		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "restricted test key in live mode should be disabled")
 	})
 
 	t.Run("rk_live_ + test_mode=false allowed", func(t *testing.T) {
 		cfg := stripeModeTestConfig("rk_live_abc123", false)
-		validateStripeKeyForTestMode(cfg)
+		assert.NoError(t, validateStripeKeyForTestMode(cfg))
 		assert.Equal(t, "rk_live_abc123", cfg.Processors["stripe"].SecretKey, "restricted live key in live mode should be kept")
 	})
 }
@@ -738,4 +736,29 @@ func TestOperatingModes(t *testing.T) {
 	require.True(t, (&Config{Mode: " Limited "}).IsLimitedMode())
 	require.False(t, (&Config{Mode: "redaonly"}).IsLimitedMode())
 	require.Error(t, Validate(&Config{Mode: "redaonly"}))
+}
+
+
+func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
+	cfg := GetDefaultBillingConfig()
+	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
+	cfg.Mode = ModeTest
+	cfg.Processors = map[string]*ProcessorConfig{
+		"stripe": {Type: "stripe", SecretKey: "sk_live_abc123"},
+	}
+	require.Error(t, Validate(cfg))
+
+	// test key in test mode is fine
+	cfg.Processors["stripe"].SecretKey = "sk_test_abc123"
+	require.NoError(t, Validate(cfg))
+
+	// test key in a live mode: disabled with a warning, not fatal
+	cfg2 := GetDefaultBillingConfig()
+	cfg2.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
+	cfg2.Mode = ModeLimited
+	cfg2.Processors = map[string]*ProcessorConfig{
+		"stripe": {Type: "stripe", SecretKey: "sk_test_abc123"},
+	}
+	require.NoError(t, Validate(cfg2))
+	require.Equal(t, "", cfg2.Processors["stripe"].SecretKey)
 }

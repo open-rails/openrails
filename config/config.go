@@ -1171,7 +1171,9 @@ func Validate(cfg *Config) error {
 
 	// Validate Stripe key prefix matches test_mode
 	// This runs after processor validation to check the key we'll actually use
-	validateStripeKeyForTestMode(cfg)
+	if err := validateStripeKeyForTestMode(cfg); err != nil {
+		return err
+	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		return fmt.Errorf("captcha config validation failed: %w", err)
 	}
@@ -1280,15 +1282,15 @@ func validateOptionalDuration(name, raw string) error {
 // validateStripeKeyForTestMode checks if the Stripe API key prefix matches the test_mode setting.
 // If there's a mismatch, it logs a warning and clears the key to disable Stripe.
 // This prevents accidentally processing real charges in test mode or test charges in production.
-func validateStripeKeyForTestMode(cfg *Config) {
+func validateStripeKeyForTestMode(cfg *Config) error {
 	stripeProc, ok := cfg.Processors["stripe"]
 	if !ok || stripeProc == nil {
-		return // No Stripe configured
+		return nil // No Stripe configured
 	}
 
 	secretKey := strings.TrimSpace(stripeProc.SecretKey)
 	if secretKey == "" {
-		return // No key configured, nothing to validate
+		return nil // No key configured, nothing to validate
 	}
 
 	// Both standard secret keys (sk_*) and restricted keys (rk_*) carry the
@@ -1297,15 +1299,19 @@ func validateStripeKeyForTestMode(cfg *Config) {
 	isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
 
 	if cfg.IsTestMode() && isLiveKey {
-		log.Warn("⚠️  Stripe live key provided but test_mode is enabled - disabling Stripe")
-		log.Warn("   Use a test-mode key (sk_test_/rk_test_) when test_mode=true, or set test_mode=false for production")
-		stripeProc.SecretKey = ""
-	} else if !cfg.IsTestMode() && isTestKey {
+		// Hard guarantee (#347): sandbox-money mode must never hold a live key —
+		// a mistakenly-test-moded production system would otherwise carry a
+		// credential that can move real money.
+		return fmt.Errorf("stripe live key (sk_live_/rk_live_) is not allowed in test/sandbox mode; use a test key or switch to a live mode")
+	}
+	if !cfg.IsTestMode() && isTestKey {
 		log.Warn("⚠️  Stripe test key provided but test_mode is disabled (production) - disabling Stripe")
 		log.Warn("   Use a live-mode key (sk_live_/rk_live_) when test_mode=false, or set test_mode=true for testing")
 		stripeProc.SecretKey = ""
 	}
+	return nil
 }
+
 
 // validateProcessors validates all processors in the new Processors map
 func validateProcessors(cfg *Config, isDev bool) error {

@@ -115,3 +115,76 @@ func TestReadOnlyBlocksAllDirectPostMutations(t *testing.T) {
 	err = client.DeleteRecurringSubscription("12345")
 	require.ErrorIs(t, err, ErrProviderReadOnly)
 }
+
+// probeServer simulates an NMI gateway for the test-mode probe. verdicts maps
+// the auth amount to the response code returned ("1" approved, "2" declined,
+// "3" error).
+func probeServer(t *testing.T, verdicts map[string]string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		switch r.Form.Get("type") {
+		case "auth":
+			code, ok := verdicts[r.Form.Get("amount")]
+			if !ok {
+				t.Errorf("unexpected probe amount %q", r.Form.Get("amount"))
+				code = "3"
+			}
+			w.Write([]byte("response=" + code + "&responsetext=PROBE&transactionid=99001&response_code=100"))
+		case "void":
+			w.Write([]byte("response=1&responsetext=SUCCESS&transactionid=99001"))
+		default:
+			t.Errorf("unexpected probe request type %q", r.Form.Get("type"))
+		}
+	}))
+}
+
+func probeClient(t *testing.T, serverURL string) *NMIClient {
+	t.Helper()
+	client, err := NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
+	require.NoError(t, err)
+	client.DirectPostURL = serverURL
+	return client
+}
+
+func TestProbeTestMode(t *testing.T) {
+	t.Run("simulation signature: $1 approved + $0.50 declined -> simulated", func(t *testing.T) {
+		server := probeServer(t, map[string]string{"1.00": "1", "0.50": "2"})
+		defer server.Close()
+		result, err := probeClient(t, server.URL).ProbeTestMode()
+		require.NoError(t, err)
+		require.Equal(t, ProbeSimulated, result)
+	})
+
+	t.Run("$1 declined -> live account", func(t *testing.T) {
+		server := probeServer(t, map[string]string{"1.00": "2"})
+		defer server.Close()
+		result, err := probeClient(t, server.URL).ProbeTestMode()
+		require.NoError(t, err)
+		require.Equal(t, ProbeLive, result)
+	})
+
+	t.Run("approves everything -> not the simulator signature -> live", func(t *testing.T) {
+		server := probeServer(t, map[string]string{"1.00": "1", "0.50": "1"})
+		defer server.Close()
+		result, err := probeClient(t, server.URL).ProbeTestMode()
+		require.NoError(t, err)
+		require.Equal(t, ProbeLive, result)
+	})
+
+	t.Run("gateway error (bad credentials) -> indeterminate", func(t *testing.T) {
+		server := probeServer(t, map[string]string{"1.00": "3"})
+		defer server.Close()
+		result, err := probeClient(t, server.URL).ProbeTestMode()
+		require.Error(t, err)
+		require.Equal(t, ProbeIndeterminate, result)
+	})
+
+	t.Run("transport failure -> indeterminate", func(t *testing.T) {
+		server := probeServer(t, nil)
+		server.Close() // refuse connections
+		result, err := probeClient(t, server.URL).ProbeTestMode()
+		require.Error(t, err)
+		require.Equal(t, ProbeIndeterminate, result)
+	})
+}

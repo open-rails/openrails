@@ -501,6 +501,30 @@ func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
 		clients[providerKey] = client
 	}
 
+	// #347: MODE=test guarantees sandbox money, but NMI accounts are
+	// undetectable by configuration (sandbox hits the same gateway URL, the key
+	// carries no marker). Fingerprint the gateway's documented Test Mode
+	// simulation behavior instead: an account that does NOT simulate is live,
+	// and a live NMI account must never boot under MODE=test — refuse. Probe
+	// errors (offline dev, bad credentials) are inconclusive and only warn.
+	// Legacy test_mode=true (mode unset) deliberately does not probe.
+	if cfg.GetMode() == config.ModeTest {
+		for providerKey, client := range clients {
+			if client.SecurityKey == "" {
+				continue // unconfigured dev client, nothing to verify
+			}
+			result, probeErr := client.ProbeTestMode()
+			switch result {
+			case nmi.ProbeLive:
+				return nil, fmt.Errorf("processor %q: NMI account is NOT simulating (live account) — a live NMI account must never run under MODE=test", providerKey)
+			case nmi.ProbeSimulated:
+				log.Infof("processor %q: NMI account verified as simulating (test mode)", providerKey)
+			default:
+				log.WithError(probeErr).Warnf("⚠️  processor %q: could not verify the NMI account is in test mode; proceeding, but confirm the credentials are a sandbox account", providerKey)
+			}
+		}
+	}
+
 	return clients, nil
 }
 

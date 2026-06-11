@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 348
+next_id: 349
 
 ---
 
@@ -1051,5 +1051,28 @@ Catalog is the one domain where OPENRAILS is the source of truth, so sync direct
 **Tasks:**
 - [ ] Land the working-tree implementation (interface method + EntitlementRecord wire type + both transports + conformance coverage)
 - [ ] Push/tag a version containing it so consumers can pin (doujins #390, hentai0 #168 hold local `replace` directives until then)
+
+---
+# #348: MODE=test credential guarantees: NMI test-mode probe + Stripe live-key hard-fail
+
+**Completed:** no
+**Status:** IMPLEMENTED 2026-06-11 (Claude): the failure protected against is "operator wires PRODUCTION credentials but believes test mode makes them safe". A self-declared account_type label was implemented and then REJECTED by Paul (rightly: the person making the mistake mislabels too) and reverted in favor of real detection.
+
+## Per-provider guarantee under MODE=test
+
+- **Stripe**: keys are self-identifying (sk_/rk_ test/live prefixes). A live key under sandbox-money mode is now a HARD Validate error (was: warn + disable). Test key under live mode stays warn+disable (already harmless).
+- **NMI**: undetectable by configuration — sandbox accounts hit the SAME production gateway URL and keys carry no marker (confirmed against docs.nmi.com). Detection instead fingerprints the gateway's documented Test Mode simulation behavior (docs.nmi.com/reference/testing-methods: test card + amount>=1.00 -> simulated APPROVE, amount<1.00 -> simulated DECLINE, nothing reaches a processor): boot probe runs auth $1.00 + auth $0.50 on the documented test card (4111.../10-29). $1 approved + $0.50 declined = simulating -> safe; $1 DECLINED = live account -> REFUSE TO BOOT (the probe is harmless on live: non-issued PAN declines, no money moves); approves-both = not the simulator signature -> treated live -> refuse; response=3 (bad creds) or transport error = indeterminate -> loud warning, boot continues (keeps offline dev + CI alive). Approved probe auths are best-effort voided. Implementation: internal/integrations/nmi/probe.go (ProbeTestMode), wired in createNMIClients.
+- **Solana**: network is DERIVED from the mode (devnet iff sandbox money) with no override field — structurally guaranteed already.
+- **CCBill**: sandbox uses a separate URL derived from the mode; per Paul, does not apply.
+
+## Scope decision
+
+The probe runs ONLY under the explicit `MODE=test`, not legacy `test_mode: true` — adopting the mode dial opts into the guarantee; legacy boots (every CI suite, offline dev) gain no real-NMI network dependency at startup. Unconfigured clients (empty key) are skipped.
+
+**Tasks:**
+- [x] Stripe: live key + sandbox money -> hard Validate error; tests updated to new semantics
+- [x] NMI: ProbeTestMode fingerprint probe + createNMIClients boot wiring (refuse on ProbeLive, warn on indeterminate); 5 probe unit tests
+- [x] account_type declaration reverted (rejected design)
+- [x] README: document the guarantees on the mode table
 
 ---
