@@ -395,8 +395,9 @@ or your own tooling instead — admin routes without a permission checker fail c
   non-authoritative metadata for things like checkout prefill.
 - **Admin authority:** the live `openrails:admin` permission evaluated at request time in
   the caller's own tenant (see embedded guide §5). Never derived from role names.
-- **Sandbox vs live:** `test_mode` (default `true`) routes every processor to its
-  test/sandbox environment so you can't accidentally charge a real card.
+- **Sandbox vs live:** `MODE=test` (the dev default) routes every processor to its
+  test/sandbox environment so you can't accidentally charge a real card; outside
+  development an explicit mode is required (see Operating modes below).
 
 ## Configuration
 
@@ -420,9 +421,8 @@ don't see its warning in the boot log, it isn't on. Full docs in `config.example
 | `limited` | live | **Reactive-only.** Nothing system-initiated touches a provider: no dunning charges or window-expiry cancellations (dunning runs dry), no auto-top-ups, no arrears collection, no Solana pulls, no catalog provider-object writes (provider slots defer to `pending_manual_link` and converge on a later apply). Everything user/admin-initiated works — checkout charges, card/vault saves, tier changes, cancels (including their processor-side delete), resumes, refunds, webhooks. |
 | `readonly` | live creds | **Zero provider writes, even reactive ones** — a checkout/charge attempt fails loudly (`ErrProviderReadOnly`). Provider *reads* (query APIs, catalog verification) and local serving still work. Implies `limited` + the deletion kill switch. For reconciliation/forensics boots. |
 
-Unset `mode` = legacy behavior: `test_mode` decides sandbox/live (defaulting to sandbox in
-dev), all behavior on. An explicit `TEST_MODE` always beats `mode` for the sandbox/live
-choice.
+`mode` is **required outside development** (the server refuses to boot without one);
+unset in dev defaults to `test`. The old `test_mode` boolean no longer exists.
 
 Feature-flag dials on top:
 

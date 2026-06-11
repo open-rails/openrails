@@ -234,21 +234,18 @@ func TestLoad_EnvTrimming(t *testing.T) {
 }
 
 func TestIsTestMode(t *testing.T) {
-	t.Run("defaults to true when nil", func(t *testing.T) {
-		cfg := &Config{TestMode: nil}
-		assert.True(t, cfg.IsTestMode(), "should default to test mode when not explicitly set")
+	t.Run("defaults to sandbox when mode unset (dev)", func(t *testing.T) {
+		assert.True(t, (&Config{}).IsTestMode())
 	})
 
-	t.Run("returns true when explicitly true", func(t *testing.T) {
-		trueBool := true
-		cfg := &Config{TestMode: &trueBool}
-		assert.True(t, cfg.IsTestMode())
+	t.Run("mode=test is sandbox", func(t *testing.T) {
+		assert.True(t, (&Config{Mode: ModeTest}).IsTestMode())
 	})
 
-	t.Run("returns false when explicitly false", func(t *testing.T) {
-		falseBool := false
-		cfg := &Config{TestMode: &falseBool}
-		assert.False(t, cfg.IsTestMode())
+	t.Run("live modes are not sandbox", func(t *testing.T) {
+		assert.False(t, (&Config{Mode: ModeProduction}).IsTestMode())
+		assert.False(t, (&Config{Mode: ModeLimited}).IsTestMode())
+		assert.False(t, (&Config{Mode: ModeReadOnly}).IsTestMode())
 	})
 }
 
@@ -286,20 +283,18 @@ func TestIsDev(t *testing.T) {
 }
 
 func TestProductionTestModeValidation(t *testing.T) {
-	t.Run("prod env rejects test_mode true", func(t *testing.T) {
-		trueBool := true
+	t.Run("prod env rejects mode=test", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.TestMode = &trueBool
+		cfg.Mode = ModeTest
 		assembleDBURL(cfg)
 		assert.False(t, cfg.IsDev(), "env=prod should not be dev")
-		assert.ErrorContains(t, Validate(cfg), "test_mode=true is not allowed outside development")
+		assert.ErrorContains(t, Validate(cfg), "mode=test is not allowed outside development")
 	})
 
-	t.Run("prod env treats unset test_mode as live", func(t *testing.T) {
+	t.Run("prod env requires an explicit mode", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.TestMode = nil
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -307,35 +302,31 @@ func TestProductionTestModeValidation(t *testing.T) {
 		cfg.ClickHouse.Username = "prod_analytics"
 		cfg.ClickHouse.Password = "production-clickhouse-password"
 		assembleDBURL(cfg)
-		assert.False(t, cfg.IsTestMode(), "unset test_mode in prod should be live")
-		assert.NoError(t, Validate(cfg))
+		assert.ErrorContains(t, Validate(cfg), "mode is required outside development")
 	})
 
-	t.Run("dev env treats unset test_mode as sandbox", func(t *testing.T) {
+	t.Run("dev env treats unset mode as sandbox", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "dev"
-		cfg.TestMode = nil
 		assembleDBURL(cfg)
-		assert.True(t, cfg.IsTestMode(), "unset test_mode in dev should be sandbox")
+		assert.True(t, cfg.IsTestMode(), "unset mode in dev should be sandbox")
 		assert.NoError(t, Validate(cfg))
 	})
 
-	t.Run("dev env can have test_mode false", func(t *testing.T) {
-		falseBool := false
+	t.Run("dev env can run live via mode=production", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "dev"
-		cfg.TestMode = &falseBool
+		cfg.Mode = ModeProduction
 		assembleDBURL(cfg)
 		assert.True(t, cfg.IsDev(), "env=dev should be dev")
-		assert.False(t, cfg.IsTestMode(), "test_mode=false should not be in test mode")
+		assert.False(t, cfg.IsTestMode(), "mode=production should not be sandbox")
 		assert.NoError(t, Validate(cfg))
 	})
 
-	t.Run("prod env accepts explicit test_mode false", func(t *testing.T) {
-		falseBool := false
+	t.Run("prod env accepts mode=production", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.TestMode = &falseBool
+		cfg.Mode = ModeProduction
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -347,10 +338,9 @@ func TestProductionTestModeValidation(t *testing.T) {
 	})
 
 	t.Run("prod env rejects missing auth audience", func(t *testing.T) {
-		falseBool := false
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.TestMode = &falseBool
+		cfg.Mode = ModeProduction
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -363,10 +353,9 @@ func TestProductionTestModeValidation(t *testing.T) {
 	})
 
 	t.Run("prod env rejects missing cors origins", func(t *testing.T) {
-		falseBool := false
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.TestMode = &falseBool
+		cfg.Mode = ModeProduction
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -396,11 +385,14 @@ func TestStripeKeyModeCompatibility(t *testing.T) {
 }
 
 // stripeModeTestConfig builds a minimal Config with a single Stripe processor
-// carrying the given secret key and the given test_mode setting.
+// carrying the given secret key and a test/production operating mode.
 func stripeModeTestConfig(secretKey string, testMode bool) *Config {
-	tm := testMode
+	mode := ModeProduction
+	if testMode {
+		mode = ModeTest
+	}
 	return &Config{
-		TestMode: &tm,
+		Mode: mode,
 		Processors: map[string]*ProcessorConfig{
 			"stripe": {
 				Type:      string(ProcessorTypeStripe),
@@ -727,10 +719,6 @@ func TestOperatingModes(t *testing.T) {
 	require.True(t, ro.IsProviderReadOnly())
 	require.False(t, ro.IsTestMode())
 	require.True(t, ro.IsProcessorSubscriptionDeletionDisabled()) // readonly implies the kill switch
-
-	// explicit TEST_MODE beats mode
-	tm := true
-	require.True(t, (&Config{Mode: ModeProduction, TestMode: &tm}).IsTestMode())
 
 	// case/space tolerant; unknown normalizes to "" pre-validation
 	require.True(t, (&Config{Mode: " Limited "}).IsLimitedMode())

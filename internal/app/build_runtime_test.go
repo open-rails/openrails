@@ -10,9 +10,8 @@ import (
 func TestCreateCCBillDataLinkClientPropagatesTestMode(t *testing.T) {
 	t.Parallel()
 
-	testMode := true
 	cfg := config.GetDefaultBillingConfig()
-	cfg.TestMode = &testMode
+	cfg.Mode = config.ModeTest
 	cfg.Processors = map[string]*config.ProcessorConfig{
 		"ccbill": {
 			ClientAccNum:     "945280",

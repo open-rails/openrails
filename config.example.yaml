@@ -10,17 +10,6 @@
 # Controls logging verbosity and debug features (NOT payment mode)
 env: "development"
 
-# Test Mode: Controls whether payment processors use sandbox/test behavior
-# - true (default): NMI uses test credentials, CCBill uses sandbox-api, Solana uses devnet
-# - false: All processors use production endpoints
-#
-# This is separate from 'env' - you can run env=prod with test_mode=true for
-# staging environments, or env=dev with test_mode=false for local prod testing.
-#
-# Stripe note: Stripe uses API key prefix (sk_test_* vs sk_live_*) to determine mode.
-# If your key doesn't match test_mode, Stripe will be disabled with a warning.
-test_mode: true
-
 # Operating Mode (#346): ONE dial for how much OpenRails may do against the
 # payment providers. Feature flags below remain fine-grained overrides on top;
 # the strictest setting always wins. Env var: MODE=
@@ -41,8 +30,8 @@ test_mode: true
 #                   Implies limited + the processor-deletion kill switch.
 #                   Reconciliation/forensics posture.
 #
-# Unset = legacy behavior (test_mode/env decide; everything on). An explicit
-# test_mode always beats mode for the sandbox/live choice.
+# Unset defaults to "test" in development. Outside development an explicit
+# mode is REQUIRED — the server refuses to boot without one.
 # mode: "production"
 
 # =============================================================================

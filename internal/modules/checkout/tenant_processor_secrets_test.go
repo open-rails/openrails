@@ -161,8 +161,12 @@ func TestCheckoutCCBillSubscriptionUsesTenantSecret(t *testing.T) {
 }
 
 func checkoutProcessorConfig(testMode bool, mobiusKey string) *config.Config {
+	mode := config.ModeProduction
+	if testMode {
+		mode = config.ModeTest
+	}
 	return &config.Config{
-		TestMode: &testMode,
+		Mode: mode,
 		Processors: map[string]*config.ProcessorConfig{
 			"mobius": {
 				Type:        config.ProcessorTypeNMI,

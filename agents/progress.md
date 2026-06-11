@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 349
+next_id: 350
 
 ---
 
@@ -1067,12 +1067,24 @@ Catalog is the one domain where OPENRAILS is the source of truth, so sync direct
 
 ## Scope decision
 
-The probe runs ONLY under the explicit `MODE=test`, not legacy `test_mode: true` — adopting the mode dial opts into the guarantee; legacy boots (every CI suite, offline dev) gain no real-NMI network dependency at startup. Unconfigured clients (empty key) are skipped.
+HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only dial. Unset mode = test in development; outside development an explicit mode is REQUIRED (Validate refuses to boot). The probe now runs whenever IsTestMode() (incl. dev default) for every configured NMI client; refusal message names the failure explicitly ("PRODUCTION NMI credentials detected while test mode is on ... refusing to start"). Also closed: explicit PROCESSORS_SOLANA_NETWORK=mainnet override is refused under test mode (the derived devnet can be overridden, so the guarantee needed the check). TEST_MODE env mapping deleted; .env.example/config.example.yaml/README updated; all test fixtures migrated to Mode. Unconfigured clients (empty key) still skipped; probe errors still warn-and-continue.
 
 **Tasks:**
 - [x] Stripe: live key + sandbox money -> hard Validate error; tests updated to new semantics
 - [x] NMI: ProbeTestMode fingerprint probe + createNMIClients boot wiring (refuse on ProbeLive, warn on indeterminate); 5 probe unit tests
 - [x] account_type declaration reverted (rejected design)
 - [x] README: document the guarantees on the mode table
+
+---
+
+# #349: config.FlexiblePort is int16 — ports above 32767 overflow negative and run-server refuses to listen
+
+**Status:** open (found 2026-06-11 by the doujins testcontainers harness booting a real openrails on a kernel-ephemeral port).
+
+`config/config.go:25` declares `type FlexiblePort int16`. Any configured port above 32767 — the kernel's default ephemeral range STARTS at 32768 — wraps negative (44553 → -20983) and run-server dies with `listen tcp: address -20983: invalid port`. TCP ports go to 65535; the type should be a plain int with 1-65535 range validation. Doujins' integration harness works around it by allocating only sub-32768 ports (tests/openrails_harness.go freeLocalPortBelow32768).
+
+**Tasks:**
+- [ ] Widen FlexiblePort to int with 1-65535 range validation in UnmarshalText (keep the string/int flexible parse)
+- [ ] Doujins follow-up: drop the freeLocalPortBelow32768 workaround once a release carries the fix
 
 ---
