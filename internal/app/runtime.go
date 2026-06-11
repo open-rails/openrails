@@ -130,6 +130,13 @@ type Runtime struct {
 
 	riverStarted        bool
 	externalRiverClient bool // true if River client was provided externally
+	// DeferredDeletes is the shared deferred NMI-delete scheduler (issue 216 /
+	// #344). Set once the River producer exists (build_runtime); nil until then
+	// and in producer-less wirings. The dunning worker threads it into its
+	// per-run lifecycle so terminal cancellations schedule the processor-side
+	// delete through the ONE mechanism (no inline deletes).
+	DeferredDeletes subscriptions.DeferredDeleteScheduler
+
 }
 
 // Close gracefully shuts down runtime resources.

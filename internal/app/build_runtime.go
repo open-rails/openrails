@@ -289,6 +289,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		// Wire the deferred NMI delete scheduler now that the producer exists
 		// (issue 216). Without it, NMI cancellations fall back to deleting inline.
 		deferredDeletes := newRiverDeferredDeleteScheduler(producer)
+		runtime.DeferredDeletes = deferredDeletes
 		if runtime.UserSubscriptionService != nil {
 			runtime.UserSubscriptionService.SetDeferredDeleteScheduler(deferredDeletes)
 		}
@@ -296,11 +297,11 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		// dunning exhaustion (FailMembership -> cancelled) stops the remote NMI
 		// recurring subscription instead of stranding it. This is the shared
 		// instance used by the webhook handlers (and the Solana crank worker,
-		// where the NMI-backed gate makes it a no-op). The dunning worker builds
-		// its own lifecycle in jobs_dunning.go and is deliberately NOT wired: its
-		// window-expiry path deletes the remote subscription inline, and a
-		// scheduled job on top would re-attempt the delete (the marker stays set
-		// after an inline delete) — needless NMI errors/retries.
+		// where the NMI-backed gate makes it a no-op). The dunning worker's
+		// per-run lifecycle is wired with the SAME scheduler via
+		// Runtime.DeferredDeletes (river_register), and its window-expiry path
+		// no longer deletes inline — every terminal cancellation funnels through
+		// the one scheduled-delete mechanism, so no double-delete is possible.
 		if runtime.SubscriptionLifecycleService != nil {
 			runtime.SubscriptionLifecycleService.SetDeferredDeleteScheduler(deferredDeletes)
 		}
@@ -634,6 +635,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		solanaRPC = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
 			HeliusAPIKey: solanaProc.HeliusAPIKey,
 			Network:      solanaNetwork,
+			ReadOnly:     cfg.IsProviderReadOnly(),
 		})
 	}
 	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, solanaRPC, cfg, priceService, fxProvider, clock)

@@ -59,12 +59,35 @@ func NewDataLinkClient(cfg *config.CCBillConfig) *DataLinkClient {
 }
 
 func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord, error) {
-	// Build base URL
-	apiURL := fmt.Sprintf("%s/data/main.cgi", c.BaseURL)
-
-	// Create form data for POST request
 	formData := url.Values{}
 	formData.Set("transactionTypes", "ACTIVEMEMBERS")
+
+	content, err := c.fetchDataLink(ctx, formData)
+	if err != nil {
+		return nil, err
+	}
+
+	if !strings.HasPrefix(content, `"ACTIVEMEMBERS"`) {
+		log.WithContext(ctx).WithField("response_length", len(content)).Error("Invalid response format from CCBill")
+		return nil, fmt.Errorf("invalid response format from CCBill: expected ACTIVEMEMBERS data")
+	}
+
+	return c.ProcessCSVData(ctx, content)
+}
+
+// fetchDataLink POSTs a DataLink request to /data/main.cgi with the shared
+// auth/test-mode form fields merged in, retries transient failures, and
+// returns the raw response body after rejecting error payloads. extra carries
+// the report-specific fields (transactionTypes, startTime, endTime, ...).
+func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (string, error) {
+	apiURL := fmt.Sprintf("%s/data/main.cgi", c.BaseURL)
+
+	formData := url.Values{}
+	for k, vs := range extra {
+		for _, v := range vs {
+			formData.Add(k, v)
+		}
+	}
 	formData.Set("clientAccnum", c.ClientAccNum)
 	formData.Set("username", c.Username)
 	formData.Set("password", c.Password)
@@ -90,7 +113,7 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 		var req *http.Request
 		req, err = http.NewRequestWithContext(ctx, "POST", apiURL, strings.NewReader(formData.Encode()))
 		if err != nil {
-			return nil, fmt.Errorf("creating request: %w", err)
+			return "", fmt.Errorf("creating request: %w", err)
 		}
 
 		// Set proper headers
@@ -105,10 +128,10 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 			}).Warn("Request failed")
 
 			if tries == maxRetries {
-				return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, err)
+				return "", fmt.Errorf("failed after %d retries: %w", maxRetries, err)
 			}
 			if err := sleepWithContext(ctx, time.Duration(tries)*time.Second); err != nil {
-				return nil, err
+				return "", err
 			}
 			continue
 		}
@@ -120,11 +143,11 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 		// Handle authentication errors specifically
 		if resp.StatusCode == http.StatusUnauthorized {
 			resp.Body.Close()
-			return nil, fmt.Errorf("authentication failed: invalid credentials")
+			return "", fmt.Errorf("authentication failed: invalid credentials")
 		}
 		if resp.StatusCode == http.StatusForbidden {
 			resp.Body.Close()
-			return nil, fmt.Errorf("access forbidden: check client account permissions")
+			return "", fmt.Errorf("access forbidden: check client account permissions")
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -134,42 +157,37 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 
 		if tries == maxRetries {
 			resp.Body.Close()
-			return nil, fmt.Errorf("failed after %d retries, last status: %d", maxRetries, resp.StatusCode)
+			return "", fmt.Errorf("failed after %d retries, last status: %d", maxRetries, resp.StatusCode)
 		}
 		resp.Body.Close()
 		if err := sleepWithContext(ctx, time.Duration(tries)*time.Second); err != nil {
-			return nil, err
+			return "", err
 		}
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDataLinkResponseBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
+		return "", fmt.Errorf("reading response body: %w", err)
 	}
 	if len(body) > maxDataLinkResponseBytes {
-		return nil, fmt.Errorf("ccbill datalink response exceeded %d bytes", maxDataLinkResponseBytes)
+		return "", fmt.Errorf("ccbill datalink response exceeded %d bytes", maxDataLinkResponseBytes)
 	}
 
 	content := string(body)
 
 	// Check for actual CCBill error responses (more specific error detection)
 	// CCBill errors typically start with specific error messages, not CSV data
-	if !strings.HasPrefix(content, `"ACTIVEMEMBERS"`) &&
+	if !strings.HasPrefix(content, `"`) &&
 		(strings.HasPrefix(strings.ToLower(content), "error") ||
 			strings.HasPrefix(strings.ToLower(content), "invalid") ||
 			strings.Contains(strings.ToLower(content), "authentication failed") ||
 			strings.Contains(strings.ToLower(content), "access denied")) {
 		log.WithContext(ctx).WithField("response_length", len(content)).Error("Error response from CCBill")
-		return nil, fmt.Errorf("ccbill api returned an error payload")
+		return "", fmt.Errorf("ccbill api returned an error payload")
 	}
 
-	if !strings.HasPrefix(content, `"ACTIVEMEMBERS"`) {
-		log.WithContext(ctx).WithField("response_length", len(content)).Error("Invalid response format from CCBill")
-		return nil, fmt.Errorf("invalid response format from CCBill: expected ACTIVEMEMBERS data")
-	}
-
-	return c.ProcessCSVData(ctx, content)
+	return content, nil
 }
 
 func (c *DataLinkClient) ProcessCSVData(ctx context.Context, csvData string) ([]CCBillRecord, error) {

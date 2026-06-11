@@ -30,6 +30,10 @@ type RPCFallbackClient struct {
 
 	// Track endpoint health for smart failover
 	failures map[int]time.Time // endpoint index -> next retry time
+	// readOnly blocks SendTransaction/SendTransactionSkipPreflight (the only
+	// chain mutations) with ErrProviderReadOnly when mode=readonly (#346).
+	// Reads (account data, balances, signatures) always pass.
+	readOnly bool
 }
 
 // RPCFallbackConfig holds configuration for building the fallback chain.
@@ -42,6 +46,8 @@ type RPCFallbackConfig struct {
 
 	// Network determines which endpoints to use (mainnet, devnet).
 	Network string
+	// ReadOnly blocks transaction submission at the wire (mode=readonly).
+	ReadOnly bool
 }
 
 // DefaultMainnetEndpoints returns the default RPC endpoints for mainnet.
@@ -148,6 +154,7 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 	}
 
 	return &RPCFallbackClient{
+		readOnly:  cfg.ReadOnly,
 		endpoints: endpoints,
 		clients:   clients,
 		network:   network,
@@ -283,6 +290,9 @@ func (c *RPCFallbackClient) GetBalance(ctx context.Context, address solanago.Pub
 // even though the transaction executes fine. Callers MUST confirm the signature
 // afterward (WatchTransaction) since a skipped-preflight failure still lands.
 func (c *RPCFallbackClient) SendTransactionSkipPreflight(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {
+	if c.readOnly {
+		return solanago.Signature{}, ErrProviderReadOnly
+	}
 	var sig solanago.Signature
 	err := c.withFallback(ctx, "SendTransactionSkipPreflight", func(client *rpc.Client) error {
 		resp, err := client.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{
@@ -480,8 +490,17 @@ func (c *RPCFallbackClient) GetMinimumBalanceForRentExemption(ctx context.Contex
 	return balance, err
 }
 
+// ErrProviderReadOnly is returned by every transaction-submission method when
+// the provider is read-only (mode=readonly, #346). It is a hard failure of the
+// requested operation, never a skip signal — mirrors nmi.ErrProviderReadOnly
+// and stripeapi.ErrProviderReadOnly.
+var ErrProviderReadOnly = errors.New("solana: transaction submission is blocked (mode=readonly)")
+
 // SendTransaction submits a transaction with automatic failover.
 func (c *RPCFallbackClient) SendTransaction(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {
+	if c.readOnly {
+		return solanago.Signature{}, ErrProviderReadOnly
+	}
 	var sig solanago.Signature
 	err := c.withFallback(ctx, "SendTransaction", func(client *rpc.Client) error {
 		resp, err := client.SendTransaction(ctx, tx)

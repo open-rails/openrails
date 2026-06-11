@@ -68,6 +68,13 @@ type DunningWorker struct {
 	NMIClients         map[string]*nmi.NMIClient
 	EventLogService    *analytics.EventLogService
 	IdempotencyService *idempotency.IdempotencyService
+	// DeferDelete schedules the processor-side delete for terminal
+	// cancellations (#344). Threaded into the per-run lifecycle so window
+	// expiry and 5th-failure exhaustion stop the remote NMI subscription via
+	// the ONE scheduled mechanism (kill-switch governed at execution). nil in
+	// producer-less wirings/tests: cancellation still happens, the remote sub
+	// is left for reconciliation.
+	DeferDelete subscriptions.DeferredDeleteScheduler
 }
 
 func (DunningWorker) Kind() string { return KindDunning }
@@ -140,6 +147,11 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	paymentSvc := payments.NewPaymentService(w.DB, w.Clock)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.EventLogService, w.Clock)
 	lifecycle.SetConfig(w.Config) // For feature flag access
+	if w.DeferDelete != nil {
+		// Terminal cancellations (window expiry, 5th declined rebill) schedule
+		// the remote NMI delete through the shared mechanism (#344).
+		lifecycle.SetDeferredDeleteScheduler(w.DeferDelete)
+	}
 	creditsSvc := credits.NewCreditsService(w.DB, w.Clock)
 
 	successCount := 0
@@ -191,13 +203,14 @@ func (w *DunningWorker) processSubscription(
 	// Dunning window: charges are only attempted within GetDunningWindow() of
 	// the missed rebill. Anything older (e.g. months-stale subscriptions imported
 	// from a legacy system) must never be surprise-charged — cancel + downgrade
-	// instead, and stop the processor-side subscription so NMI quits retrying it.
+	// instead, and the processor-side subscription is stopped via the scheduled
+	// deferred-delete mechanism so NMI quits retrying it.
 	window := config.DefaultDunningWindowDays * 24 * time.Hour
 	if w.Config != nil {
 		window = w.Config.GetDunningWindow()
 	}
 	if w.now().UTC().After(periodEnd.Add(window)) {
-		return w.expireWindowedSubscription(ctx, logEntry, sub, lifecycle, client, processor, periodEnd, window)
+		return w.expireWindowedSubscription(ctx, logEntry, sub, lifecycle, processor, periodEnd, window)
 	}
 
 	if client == nil {
@@ -296,14 +309,15 @@ func (w *DunningWorker) processSubscription(
 
 // expireWindowedSubscription handles a past_due subscription whose missed rebill
 // is older than the dunning window: terminal cancellation + entitlement
-// revocation WITHOUT a charge, then a best-effort processor-side delete so NMI
-// stops retrying the dead subscription (gated by the deletion kill switch).
+// revocation WITHOUT a charge. The processor-side delete is NOT performed
+// inline — FailMembership(Terminal) persists the deletion marker and schedules
+// the deferred NMI delete through the one shared mechanism (#344), which the
+// deletion kill switch governs at execution time.
 func (w *DunningWorker) expireWindowedSubscription(
 	ctx context.Context,
 	logEntry *log.Entry,
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
-	client *nmi.NMIClient,
 	processor models.Processor,
 	periodEnd time.Time,
 	window time.Duration,
@@ -317,16 +331,6 @@ func (w *DunningWorker) expireWindowedSubscription(
 	}); err != nil {
 		logEntry.WithError(err).Error("Dunning: failed to cancel window-expired subscription")
 		return dunningOutcomeFailed
-	}
-
-	if client != nil && sub.ProcessorSubscriptionID != "" {
-		if err := client.DeleteRecurringSubscription(sub.ProcessorSubscriptionID); err != nil {
-			if errors.Is(err, nmi.ErrSubscriptionDeletesDisabled) {
-				logEntry.Warn("Dunning: processor subscription deletes disabled; remote subscription left alive for reconciliation")
-			} else {
-				logEntry.WithError(err).Error("Dunning: failed to delete processor subscription after window expiry; remote may keep retrying")
-			}
-		}
 	}
 
 	logEntry.WithFields(log.Fields{

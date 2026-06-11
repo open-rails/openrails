@@ -16,6 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/repo"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/funding"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -411,7 +412,10 @@ func hydrateThinStripeEvent(ctx context.Context, stripeSecretKey string, body []
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+stripeSecretKey)
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	// Thin-event hydration is a pure read (GET of the related object); the
+	// unconditionally write-blocked choke client works in every mode and makes
+	// any future mutation on this path fail loudly.
+	resp, err := stripeapi.ReadOnlyClient(15 * time.Second).Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -13,8 +13,11 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
-	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/riverqueue/river"
+
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 // queryNMIDeleteJobs returns (count, state, scheduledAt) for deferred NMI
@@ -284,4 +287,52 @@ func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
 
 	count, _, _ := queryNMIDeleteJobs(t, suite, sub.ID)
 	assert.Zero(t, count, "no delete job may exist for the limited-mode cancellation")
+}
+
+// TestDunningWorkerWindowExpirySchedulesDeferredDelete closes the #344 tail:
+// the dunning worker's terminal cancellations now route the processor-side
+// delete through the shared deferred scheduler (no inline delete), so window
+// expiry persists the durable marker and schedules exactly one delete job.
+func TestDunningWorkerWindowExpirySchedulesDeferredDelete(t *testing.T) {
+	suite := setupTestSuite(t)
+
+	products := suite.SeedProducts()
+	priceID := products[0].Prices[0].ID
+
+	userID := uuid.New().String()
+	pm := suite.CreateTestPaymentMethod(userID)
+
+	pastRetry := time.Now().Add(-1 * time.Hour)
+	stalePeriodEnd := time.Now().Add(-60 * 24 * time.Hour)
+	retryAttempts := 1
+
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              userID,
+		PriceID:             priceID,
+		Status:              models.StatusPastDue,
+		Processor:           models.ProcessorMobius,
+		PaymentMethodID:     &pm.ID,
+		RetryAttempts:       &retryAttempts,
+		NextRetryAt:         &pastRetry,
+		PeriodStart:         stalePeriodEnd.Add(-30 * 24 * time.Hour),
+		CurrentPeriodEndsAt: &stalePeriodEnd,
+	})
+
+	recorder := &recordingDeferredDeleteScheduler{}
+	worker := &riverjobs.DunningWorker{
+		DB:          suite.App.Runtime.DB,
+		Config:      suite.App.Runtime.Config,
+		NMIClients:  map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+		DeferDelete: recorder,
+	}
+
+	err := worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}})
+	require.NoError(t, err)
+
+	updated := suite.GetSubscription(sub.ID)
+	require.Equal(t, models.StatusCancelled, updated.Status)
+	require.NotNil(t, updated.DeletionScheduledAt, "terminal window-expiry cancel must persist the deferred-delete marker")
+
+	require.Len(t, recorder.scheduled, 1, "exactly one deferred delete scheduled (no inline delete)")
+	require.Equal(t, sub.ID, recorder.scheduled[0].SubscriptionID)
 }

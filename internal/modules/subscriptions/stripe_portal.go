@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
 type StripePortalService struct {
@@ -40,7 +40,7 @@ func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerI
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe portal failed: %w", err)

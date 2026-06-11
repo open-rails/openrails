@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
 
@@ -96,7 +97,7 @@ func (s *StripeService) CreateCustomer(ctx context.Context, email, appUserID str
 	// and concurrent checkouts.
 	req.Header.Set("Idempotency-Key", "customer_create_"+appUserID)
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe customer create failed: %w", err)
@@ -147,7 +148,7 @@ func (s *StripeService) FindCustomerIDByAppUserID(ctx context.Context, appUserID
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe customer search failed: %w", err)
@@ -200,7 +201,7 @@ func (s *StripeService) ListActiveSubscriptionsForCustomer(ctx context.Context, 
 		return nil, errors.New("customer_id is required")
 	}
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	var summaries []StripeSubscriptionSummary
 	for _, status := range []string{"active", "trialing"} {
 		query := url.Values{}
@@ -281,7 +282,7 @@ func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionI
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe subscription fetch failed: %w", err)
@@ -358,7 +359,7 @@ func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptio
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("stripe subscription update failed: %w", err)
@@ -414,7 +415,7 @@ func (s *StripeService) ScheduleSubscriptionPriceChange(ctx context.Context, sub
 	createReq.Header.Set("Authorization", "Bearer "+secretKey)
 	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	createResp, err := client.Do(createReq)
 	if err != nil {
 		return "", fmt.Errorf("stripe subscription schedule create failed: %w", err)
@@ -527,7 +528,7 @@ func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID s
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("stripe subscription cancel failed: %w", err)
@@ -566,7 +567,7 @@ func (s *StripeService) ResumeSubscription(ctx context.Context, subscriptionID s
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("stripe subscription resume failed: %w", err)

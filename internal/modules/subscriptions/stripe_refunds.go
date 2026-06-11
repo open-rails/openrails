@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
 var ErrStripeRefundTargetMissing = errors.New("stripe refundable transaction id is missing")
@@ -85,7 +86,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	}
 	req.Header.Set("Idempotency-Key", idempotencyKey)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := stripeapi.Client(s.Config, 30*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("stripe refund request failed: %w", err)
@@ -168,7 +169,7 @@ func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := stripeapi.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("stripe refund fetch failed: %w", err)

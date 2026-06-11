@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 355
+next_id: 357
 
 ---
 
@@ -135,7 +135,7 @@ Plan and implement OpenRails-owned USDC funding sessions for host apps that need
 # #107: processor-reconcile (was: processor-sync)
 
 **Completed:** no
-**Status:** redesigned 2026-06-10 per Paul: all configured providers (stripe, nmi/mobius, ccbill, solana) where possible; advisory + enforce modes; remote system is source of truth and is NEVER mutated (admin action queue for cancels/refunds); doubles as empty-instance bootstrap/restore. Implementation not started.
+**Status:** redesigned 2026-06-10 per Paul: all configured providers (stripe, nmi/mobius, ccbill, solana) where possible; advisory + enforce modes; remote system is source of truth and is NEVER mutated (admin action queue for cancels/refunds); doubles as empty-instance bootstrap/restore. PHASE 1 (provider fetchers + normalized snapshot model, internal/reconcile) implemented 2026-06-11; diff engine / findings persistence / enforce appliers / admin API+CLI are phase 2, untouched pending design review.
 
 Reconcile local OpenRails billing state against the payment processors as the source of truth, for ALL configured providers where the provider exposes the data: Stripe, NMI/Mobius, CCBill, Solana. Two modes: advisory (report only) and enforce (converge local state to the processor's declared state). The tool NEVER mutates the remote processor — remote actions (cancel, refund) are queued for an admin.
 
@@ -210,11 +210,11 @@ Cross-referencing the two distinguishes 'dunning tried and failed' (local retry 
 
 **Tasks:**
 - DESIGN: refreshed 2026-06-10 (all providers, advisory+enforce, remote read-only, persisted findings + admin queue)
-- [ ] internal/reconcile: ProcessorFetcher interface + normalized RemoteSnapshot with capability flags
-- [ ] NMI fetcher: typed Query API calls (report_type=recurring, transaction search by date range, customer_vault)
-- [ ] CCBill fetcher: extend DataLink beyond ACTIVEMEMBERS (expired/cancellation/transaction/chargeback exports)
-- [ ] Stripe fetcher: subscriptions, charges/invoices, refunds, disputes
-- [ ] Solana fetcher: on-chain subscription accounts + payment signature scan (respect *AtSlot/ReadUntilConsistent read-lag rules)
+- [x] internal/reconcile: ProcessorFetcher interface + normalized RemoteSnapshot with capability flags — phase 1 landed 2026-06-11 (reconcile.go: RemoteSnapshot/RemoteSubscription/RemoteTransaction/RemoteVaultEntry + Capabilities + FetchParams; amounts in amount_cents, raw payloads preserved per record)
+- [x] NMI fetcher: typed Query API calls (report_type=recurring, transaction search by date range, customer_vault) — reconcile/nmi.go over the existing query.php client (read-only by construction); XML shapes + status inference verified live against the Mobius sandbox (58 subs, 47 txns, 94 vault entries); NMI exposes no chargebacks (capability false) and no subscription_id on transactions (order_id kept in raw)
+- [x] CCBill fetcher: extend DataLink beyond ACTIVEMEMBERS (expired/cancellation/transaction/chargeback exports) — ccbill.FetchTransactionExport (REBILL/CANCELLATION/EXPIRE/REFUND/CHARGEBACK over MST-clock date ranges) + reconcile/ccbill.go normalization; NOT live-validated (no DataLink credentials available), per-type CSV columns follow the long-standing legacy integrations and raw rows are preserved verbatim
+- [x] Stripe fetcher: subscriptions, charges/invoices, refunds, disputes — reconcile/stripe.go, raw GETs through stripeapi.ReadOnlyClient with cursor pagination; vault from expanded default_payment_method; verified live against the cozy-art test account (13 subs, 19 charges, 12 vault entries)
+- [x] Solana fetcher: on-chain subscription accounts + payment signature scan (respect *AtSlot/ReadUntilConsistent read-lag rules) — reconcile/solana.go, minimal by design: caller-supplied local sub refs -> subscription PDA existence + DecodePlanAccount + signature listing (SignatureInfo gained BlockTime); bulk point-in-time reads use plain GetAccountData (read-lag gating only applies to post-tx reads)
 - [ ] Identity + plan matching: processor_subscription_id first, email/username/merchant-defined fallback, provider_links (#329) plan mapping
 - [ ] Diff engine producing PS-1..PS-9 findings; migrations for reconciliation_runs + reconciliation_findings (lifecycle: open -> auto_fixed | admin_pending -> resolved/dismissed)
 - [ ] Advisory mode: run + persisted, queryable report (counts by type/severity, per-user detail)
@@ -936,6 +936,7 @@ Webhook-driven dunning exhaustion (FailMembership reaching MaxDunningFailures fr
 - [x] Tests: window-expiry decision, sentinel gate, terminal FailMembership; build/vet + unit suites green
 - [x] Follow-up: boot rescan re-enqueues pending DeletionScheduledAt after flag lift (optional; #107 reconcile is the catch-all)
 - [x] Follow-up (pre-existing gap): webhook-driven dunning exhaustion never deletes the remote NMI sub — needs NMI client access or a scheduled delete job from lifecycle
+- [x] TAIL CLOSED 2026-06-11: dunning worker's per-run lifecycle wired with Runtime.DeferredDeletes; inline window-expiry delete removed — ALL terminal cancellations (window expiry, 5th declined rebill, webhook exhaustion) funnel through the one scheduled deferred-delete mechanism (marker in-tx, job post-commit, kill-switch governed; no double-delete possible). Verified: TestDunningWorkerWindowExpirySchedulesDeferredDelete + full dunning/rescan/FailMembership regression green; #348 probe live-validated against the real doujins NMI sandbox key (ProbeSimulated)
 
 ---
 
@@ -1030,7 +1031,7 @@ Catalog is the one domain where OPENRAILS is the source of truth, so sync direct
 - Catalog: dispatcher + adapter gate above (limited + readonly).
 - Workers: existing #345 gates now keyed off the mode-aware IsLimitedMode().
 - Solana: cranker covered by limited; user-side flows are user-signed (we read/verify/record).
-- Stripe reactive writes (checkout-session creation etc.) have NO single choke point yet — readonly blocks NMI hard but Stripe reactive writes only via the catalog/worker gates; central Stripe gate is a follow-up task.
+- Stripe: internal/integrations/stripeapi guardTransport — every Stripe HTTP call obtains its *http.Client from stripeapi.Client(cfg)/ReadOnlyClient; non-GET/HEAD fails locally with stripeapi.ErrProviderReadOnly when mode=readonly (done 2026-06-11, see follow-up task below).
 
 **Tasks:**
 - [x] config: top-level Mode (test|production|limited|readonly, default test), validation, mode-aware accessors, remove feature_flags.limited_mode + verify_processor_mappings, TEST_MODE explicit-set detection, startup mode banner
@@ -1038,7 +1039,8 @@ Catalog is the one domain where OPENRAILS is the source of truth, so sync direct
 - [x] Catalog write gate: autoCreateContext.RemoteWritesDisabled, adapter write-point checks (mobius Attach createPlan, stripe Attach lookup-key path + AutoCreate, Update dispatch), dispatcher converts Attach sentinel to pending_manual_link
 - [x] README + config.example.yaml: rewrite around the mode dial; remove verify_processor_mappings row
 - [x] Tests: mode accessor matrix; NMI readonly gate; resolveProviders limited-mode -> pending (no remote calls); migrate #345 tests off feature_flags.limited_mode
-- [ ] Follow-up: central Stripe write choke point for readonly
+- [x] Follow-up: central Stripe write choke point for readonly
+- [x] Solana wire choke too (2026-06-11): RPCFallbackClient gates SendTransaction + SendTransactionSkipPreflight (the chain's only mutation points) with solana.ErrProviderReadOnly when mode=readonly; wired from cfg at both construction sites (build_runtime, poller); reads unaffected. readonly is now wire-enforced on all three rails — DONE 2026-06-11: new internal/integrations/stripeapi package is the wire-level choke (guardTransport RoundTripper returns package-level ErrProviderReadOnly for every non-GET/HEAD before any network I/O when cfg.IsProviderReadOnly(); GETs pass); ALL raw api.stripe.com call sites converted to stripeapi.Client(cfg)/ReadOnlyClient (subscriptions stripe_service/portal/refunds/reconcile-listers, checkout session create, catalog stripeGet/stripePostForm/VerifyPriceExists, webhook thin-event hydration, tenancy balance check — the last three are pure-read paths on the unconditionally write-blocked ReadOnlyClient); unit tests (httptest: readonly POST/DELETE blocked locally with the sentinel and zero server hits, GET passes, non-readonly POST passes) + live-validated with the Stripe test key (readonly GET /v1/balance -> 200; POST through the choke blocked in 19µs, canary listener saw 0 requests).
 
 ---
 
@@ -1125,7 +1127,7 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 
 # #354: batch-first service reads — ListActiveEntitlementsBatch + batch convention for list-shaped consumers
 
-**Status:** PLANNED 2026-06-11 (owner decision, Paul: "make everything batch by default... where it makes sense. Then it's just a difference of the consumer supplying a [] array of user-ids, rather than a single one"). Self-scoped surfaces (/v1/self/* — the token IS the user) stay single; machine surfaces (/v1/service/*) and admin/dashboard reads are batch-shaped wherever the consumer naturally holds a LIST.
+**Status:** PLANNED 2026-06-11 (owner decision, Paul: "make everything batch by default... where it makes sense. Then it's just a difference of the consumer supplying a [] array of user-ids, rather than a single one"). Self-scoped surfaces (/v1/self/* — the token IS the user) stay single; machine surfaces (/v1/service/*) and admin/dashboard reads are batch-shaped wherever the consumer naturally holds a LIST. || OPENRAILS + AUTHKIT SIDES DONE 2026-06-11: branch `batch-354` (pushed, unmerged — master in use by a concurrent session) + authkit v0.21.0. Consumer integrations blocked on the branch merging + a release tag.
 
 ## Why
 
@@ -1148,11 +1150,49 @@ The driving case: admin dashboards listing N users fan out N HTTP calls today. d
 
 ## Integration (consumers)
 
-- [ ] openrails: batch route + handler (one ANY() query, cap 500, dedupe) + SDK method on both transports + conformance test
-- [ ] authkit: OPTIONAL batch seam — `BatchEntitlementsProvider { ListEntitlementsBatch(ctx, userIDs []string) (map[string][]string, error) }` interface-upgrade detected via type assertion; `AdminListUsers` (and any other per-row enrichment loop) uses it when the host's provider implements it, falling back to per-user otherwise. Token minting stays single-user. (File as its own authkit issue when picked up.)
+- [x] openrails: batch route + handler (one ANY() query, cap 500, dedupe) + SDK method on both transports + conformance test — IMPLEMENTED 2026-06-11 on branch `batch-354` (pushed; NOT merged — master is in use by a concurrent session; merge + tag when free). Conformance run also surfaced that the #347 conformance section was committed unrun (scriptEnv never got issuer/subject, no entitlement seeding — failed on both transports); fixed on the branch, suite green
+- [x] COLLAPSE (owner decision 2026-06-11, same day: "I don't want separate 'batch' and 'single' functions... it's always batch"): NO single variant anywhere — `Client.ListActiveEntitlements(ctx, issuer, subjects []string, at) (map[subject][]EntitlementRecord, error)` is THE method and `POST .../by-external-subject/entitlements` is THE route (GET single deleted; orphaned single-path code removed). BREAKING + deploy-coupled: v0.16.0 consumers' GET 404s against a server running this (enrichment degrades to no claims, not an outage) — bump doujins/hentai0 providers with the merge/tag
+- [x] authkit: BatchEntitlementsProvider seam + AdminListUsers one-call enrichment (per-user fallback, batch-failure degrades to none) — authkit v0.21.0 (a708e2b), tagged + pushed
 - [ ] doujins (#390 follow-up): openrailsEntitlementsProvider implements ListEntitlementsBatch via the SDK batch call → admin user list premium badges in ONE call; bump openrails + authkit pins
 - [ ] hentai0 (#168 follow-up): same provider upgrade as doujins (mirrors exactly)
 - [ ] cozy-art: adopt the openrails client AT ALL — AUDIT FINDING 2026-06-11: cozy-art still runs its own direct-SQL entitlements provider (internal/billing/entitlements_provider.go) querying `billing.entitlements.user_id`, a column REMOVED in the tenant_subject hard cut → its mint-time entitlements are silently broken at runtime. Port the doujins #390 pattern wholesale: openrails.Client remote provider (single now, batch with the authkit seam), bump openrails v0.14.0 → v0.16.0+ and authkit v0.19.0 → v0.20.0 (names-only provider contract), delete the SQL provider
 - [ ] tensorhub: no entitlements surface; evaluate `Balance`/`GetCreditAccount`/`BudgetStatus` batch for payer/actor dashboards (it already consumes the batch hot path via AdmitBatch + windows, openrails pinned at a v0.13.x pseudo-version — bump opportunistically when adopting)
 
 ---
+# #355: split the mode dial: test_env boolean (credential sandbox enforcement) orthogonal to mode=full|limited|readonly
+
+**Completed:** no
+**Status:** open (Paul 2026-06-11): "get rid of test-mode, and make it test-env=true with test-env=false by default. --mode will be full, limited, and read-only, while test-env enforces that we are using test creds, not prod creds. These are orthogonal. The name test-env is better so it doesn't get confused with the mode."
+
+## Design
+
+Two orthogonal axes replace the current 4-value mode:
+
+- **`test_env: true|false`** (yaml) / `TEST_ENV` (env) / `--test-env` (CLI). Default **false**. When true: every processor routes to sandbox (NMI test semantics, CCBill sandbox URL, Solana devnet) AND the credential guarantees attach — Stripe live key (sk_live_/rk_live_) refuses to boot, NMI accounts are probed at boot (non-issued test card; decline = production credentials = refuse), Solana derives devnet. test_env=true is rejected outside env=development (carries over the old sandbox-not-in-prod rule).
+- **`mode: full|limited|readonly`** (mode=test DELETED; "production" RENAMED to "full"). Pure behavior dial, applies identically in test and live env: full = everything; limited = reactive-only (#345/#346 gates); readonly = zero provider writes (wire-enforced all three rails). Required outside development; dev default = full.
+
+Mapping from the old world: mode=test ≡ test_env=true + mode=full. The old dev default (sandbox money) becomes: dev default is mode=full + test_env=false — NOTE THE BEHAVIOR CHANGE, flagged for Paul: a dev boot with real creds in .env and no flags is now live, where the old default was sandbox. (Mitigation kept: the compose dev stack has no real creds; mode is still required outside dev.)
+
+Hard cut, no aliases: ModeTest constant deleted, IsTestMode() renamed/reimplemented as IsTestEnv() (= cfg.TestEnv), all gates (probe, stripe key validation, solana network derivation, CCBill sandbox URL, processor test semantics) keyed off IsTestEnv(); mode banner + README mode table + matrix + config.example.yaml + .env.example + --mode flag help all updated; --test-env CLI flag added beside --mode.
+
+**Tasks:**
+- [ ] config: TestEnv bool + IsTestEnv(); mode enum full|limited|readonly (test deleted, production->full); validation (test_env only in dev; mode required outside dev; dev default mode=full)
+- [ ] re-key all sandbox gates off IsTestEnv (probe in build_runtime, stripe key check, solana network, ccbill URL, NMI test semantics)
+- [ ] CLI: --test-env flag; --mode help text update
+- [ ] docs: README modes section + matrix + example yaml + .env.example
+- [ ] migrate every test fixture; full unit + smoke integration green
+
+---
+
+# #356: release v0.17.0 (batch-only entitlements) + adapt all four consumers
+
+**Status:** IN PROGRESS 2026-06-11 (owner request: "push as v0.17.0... adapt tensorhub + cozy-art + doujins + hentai0"). Executes the consumer half of #354.
+
+Merge `batch-354` into master, tag v0.17.0, then move every consumer onto the batch-only `ListActiveEntitlements(issuer, subjects []string, at) map[subject][]EntitlementRecord`. Deploy coupling: v0.16.0 consumers' GET 404s against a v0.17.0 server (enrichment degrades to no claims), so consumer bumps land together with this release.
+
+**Tasks:**
+- [ ] Merge batch-354 -> master (resolve drift), verify build/vet/unit/conformance, push, tag v0.17.0
+- [ ] doujins: provider mint call = batch of one; implement authkit v0.21.0 BatchEntitlementsProvider (admin list = one call); bump openrails v0.17.0 + authkit v0.21.0; auth integration suite green vs real openrails
+- [ ] hentai0: same provider adaptation + bumps (mirrors doujins)
+- [ ] cozy-art: delete the BROKEN direct-SQL provider (queries removed billing.entitlements.user_id); port the openrails-client provider + service-JWT source; bump openrails v0.14.0 -> v0.17.0, authkit v0.19.0 -> v0.21.0
+- [ ] tensorhub: bump openrails v0.13.x pseudo-version -> v0.17.0; fix Client-interface fallout (it gained entitlements + windows methods); build/tests

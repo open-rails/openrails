@@ -228,6 +228,27 @@ func TestTenantAdmin_OperationalListsMountedAndGated(t *testing.T) {
 	}
 }
 
+func TestTenantAdmin_PaymentWriteRoutesMountedAndGated(t *testing.T) {
+	readOnly := []string{controlplane.PermTenantBillingRead}
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"off-channel-payment", http.MethodPost, "/v1/tenant-admin/users/user_123/payments/off-channel"},
+		{"payment-refund", http.MethodPost, "/v1/tenant-admin/payments/pay_123/refund"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTenantAdminRouter(t, readOnly)
+			w := doSelfBearerBody(e, tc.method, tc.path, "delegated.jwt.token", `{}`)
+			require.Equal(t, http.StatusForbidden, w.Code,
+				"%s must be mounted and gated (403, not 404): %s", tc.name, w.Body.String())
+		})
+	}
+}
+
 func TestTenantAdmin_SecretRoutesMountedAndGated(t *testing.T) {
 	readless := []string{controlplane.PermTenantBillingRead}
 
