@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -174,8 +175,8 @@ func (r *PriceRepo) ListPaginated(ctx context.Context, filter PriceFilter, limit
 		ProductID:     filter.ProductID,
 		OnlyRecurring: onlyRecurring,
 		OnlyOneTime:   onlyOneTime,
-		PageLimit:     int32(limit),
-		PageOffset:    int32(offset),
+		PageLimit:     int32(min(limit, math.MaxInt32)),
+		PageOffset:    int32(min(offset, math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, 0, err

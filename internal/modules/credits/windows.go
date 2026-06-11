@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -563,7 +564,7 @@ func (s *CreditsService) ExpireWindows(ctx context.Context, batchSize int) (int,
 		err := s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			q := gen.New(tx)
 			windows, err := q.ListExpiredOpenCreditWindowsForUpdate(ctx, gen.ListExpiredOpenCreditWindowsForUpdateParams{
-				Now: now, BatchSize: int32(batchSize),
+				Now: now, BatchSize: int32(min(batchSize, math.MaxInt32)),
 			})
 			if err != nil {
 				return err

@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
@@ -50,7 +51,7 @@ func (r *ProductRepo) Create(ctx context.Context, product *models.Product) error
 		EntitlementsSpec: entSpec,
 		CreditsSpec:      credSpec,
 		TierGroup:        product.TierGroup,
-		TierRank:         int32(product.TierRank),
+		TierRank:         int32(min(product.TierRank, math.MaxInt32)),
 		Status:           string(product.Status),
 		CreatedAt:        product.CreatedAt,
 		UpdatedAt:        product.UpdatedAt,
@@ -96,8 +97,8 @@ func (r *ProductRepo) GetActivePaginated(ctx context.Context, limit, offset int)
 		return nil, 0, err
 	}
 	rows, err := q.ListActiveProductsPaged(ctx, gen.ListActiveProductsPagedParams{
-		PageLimit:  int32(limit),
-		PageOffset: int32(offset),
+		PageLimit:  int32(min(limit, math.MaxInt32)),
+		PageOffset: int32(min(offset, math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, 0, err
@@ -117,8 +118,8 @@ func (r *ProductRepo) GetAllPaginated(ctx context.Context, limit, offset int) ([
 		return nil, 0, err
 	}
 	rows, err := q.ListAllProductsPaged(ctx, gen.ListAllProductsPagedParams{
-		PageLimit:  int32(limit),
-		PageOffset: int32(offset),
+		PageLimit:  int32(min(limit, math.MaxInt32)),
+		PageOffset: int32(min(offset, math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, 0, err
@@ -151,7 +152,7 @@ func (r *ProductRepo) Update(ctx context.Context, product *models.Product) error
 		EntitlementsSpec: entSpec,
 		CreditsSpec:      credSpec,
 		TierGroup:        product.TierGroup,
-		TierRank:         int32(product.TierRank),
+		TierRank:         int32(min(product.TierRank, math.MaxInt32)),
 		Status:           string(product.Status),
 		UpdatedAt:        updateTimestamp(product.UpdatedAt),
 	})

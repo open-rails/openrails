@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -104,7 +105,7 @@ func (r *SolanaSubscriptionRepo) GetBySubscriptionID(ctx context.Context, subscr
 func (r *SolanaSubscriptionRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]*models.SolanaSubscription, error) {
 	rows, err := r.db.Gen(ctx).ListDueSolanaSubscriptions(ctx, gen.ListDueSolanaSubscriptionsParams{
 		Now:       now.UTC(),
-		PageLimit: int32(limit),
+		PageLimit: int32(min(limit, math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, err
@@ -168,7 +169,7 @@ func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) 
 // worker cross-checks against billing.payments (#258). `limit` caps the batch
 // (0 = no limit).
 func (r *SolanaSubscriptionRepo) ListActiveWithSignature(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
-	rows, err := r.db.Gen(ctx).ListActiveSolanaSubscriptionsWithSignature(ctx, int32(limit))
+	rows, err := r.db.Gen(ctx).ListActiveSolanaSubscriptionsWithSignature(ctx, int32(min(limit, math.MaxInt32)))
 	if err != nil {
 		return nil, err
 	}

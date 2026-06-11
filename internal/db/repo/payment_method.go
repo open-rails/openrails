@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -165,8 +166,8 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 	}
 	rows, err := q.ListPaymentMethodsByTenantSubjectPaged(ctx, gen.ListPaymentMethodsByTenantSubjectPagedParams{
 		TenantSubjectID: tsid,
-		PageLimit:       int32(limit),
-		PageOffset:      int32(offset),
+		PageLimit:       int32(min(limit, math.MaxInt32)),
+		PageOffset:      int32(min(offset, math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, 0, err

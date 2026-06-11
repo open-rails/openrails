@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -366,8 +367,8 @@ func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, p
 	}
 	rows, err := q.ListPaymentsByTenantSubjectPaged(ctx, gen.ListPaymentsByTenantSubjectPagedParams{
 		TenantSubjectID: tsid,
-		PageLimit:       int32(pageSize),
-		PageOffset:      int32((page - 1) * pageSize),
+		PageLimit:       int32(min(pageSize, math.MaxInt32)),
+		PageOffset:      int32(min((page-1)*pageSize, math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, 0, err
@@ -444,8 +445,8 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 		RefundsOnly:     f.RefundsOnly,
 		SortBy:          sortBy,
 		SortDesc:        f.SortOrder != "asc",
-		PageLimit:       int32(opts.GetLimit()),
-		PageOffset:      int32(opts.GetOffset()),
+		PageLimit:       int32(min(opts.GetLimit(), math.MaxInt32)),
+		PageOffset:      int32(min(opts.GetOffset(), math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, 0, err

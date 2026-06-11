@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
@@ -155,8 +156,8 @@ func (r *AdminGrantRepo) ListByGrantedBy(ctx context.Context, grantedBy string, 
 	}
 	rows, err := q.ListAdminGrantsByGrantedBy(ctx, gen.ListAdminGrantsByGrantedByParams{
 		GrantedBy:  grantedBy,
-		PageLimit:  int32(limit),
-		PageOffset: int32(offset),
+		PageLimit:  int32(min(limit, math.MaxInt32)),
+		PageOffset: int32(min(offset, math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, 0, err

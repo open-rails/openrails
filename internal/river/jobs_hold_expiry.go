@@ -3,6 +3,7 @@ package riverjobs
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -69,7 +70,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 
 			// Find expired active holds (stored as credit_transactions rows with transaction_type='hold')
 			holds, err := q.ListExpiredActiveHoldsForUpdate(ctx, gen.ListExpiredActiveHoldsForUpdateParams{
-				Now: now, BatchSize: int32(batchSize),
+				Now: now, BatchSize: int32(min(batchSize, math.MaxInt32)),
 			})
 			if err != nil {
 				return err

@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -59,7 +60,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 		err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			q := gen.New(tx)
 			blocks, err := q.ListExpiredCreditBlocksForUpdate(ctx, gen.ListExpiredCreditBlocksForUpdateParams{
-				Now: now, BatchSize: int32(batchSize),
+				Now: now, BatchSize: int32(min(batchSize, math.MaxInt32)),
 			})
 			if err != nil {
 				return err

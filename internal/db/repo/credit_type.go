@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
@@ -34,7 +35,7 @@ func (r *CreditTypeRepo) Create(ctx context.Context, ct *models.CreditType) erro
 		Name:          ct.Name,
 		DisplayName:   ct.DisplayName,
 		Unit:          ct.Unit,
-		DecimalPlaces: int32(ct.DecimalPlaces),
+		DecimalPlaces: int32(min(ct.DecimalPlaces, math.MaxInt32)),
 		IsActive:      ct.IsActive,
 		CreatedAt:     ct.CreatedAt,
 	})
@@ -81,7 +82,7 @@ func (r *CreditTypeRepo) Update(ctx context.Context, ct *models.CreditType) erro
 		Name:          ct.Name,
 		DisplayName:   ct.DisplayName,
 		Unit:          ct.Unit,
-		DecimalPlaces: int32(ct.DecimalPlaces),
+		DecimalPlaces: int32(min(ct.DecimalPlaces, math.MaxInt32)),
 		IsActive:      ct.IsActive,
 	})
 	if err != nil {

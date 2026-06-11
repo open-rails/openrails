@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -144,7 +145,7 @@ func (r *NotificationQueueRepo) GetPendingDigestForUser(ctx context.Context, use
 		TenantSubjectID: tsid,
 		EventType:       string(models.NotificationTranslationCompletedPendingDigest),
 		CreatedAt:       since,
-		PageLimit:       int32(limit),
+		PageLimit:       int32(min(limit, math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, err
@@ -223,8 +224,8 @@ func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query
 		TenantSubjectID: tsid,
 		EventType:       eventType,
 		Seen:            opts.Filters.Seen,
-		PageLimit:       int32(opts.GetLimit()),
-		PageOffset:      int32(opts.GetOffset()),
+		PageLimit:       int32(min(opts.GetLimit(), math.MaxInt32)),
+		PageOffset:      int32(min(opts.GetOffset(), math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, 0, err

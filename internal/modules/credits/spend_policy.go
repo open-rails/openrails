@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -273,7 +274,7 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 
 	var expiry *int32
 	if cur.DefaultCreditExpiryDays != nil {
-		v := int32(*cur.DefaultCreditExpiryDays)
+		v := int32(min(*cur.DefaultCreditExpiryDays, math.MaxInt32))
 		expiry = &v
 	}
 	if err := s.db.Gen(ctx).UpsertCreditAccountSettings(ctx, gen.UpsertCreditAccountSettingsParams{
@@ -291,7 +292,7 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 		AutoTopupPaymentMethodID:  cur.AutoTopupPaymentMethod,
 		DefaultCreditExpiryDays:   expiry,
 		HardStopOnBreach:          cur.HardStopOnBreach,
-		AlertThresholdPct:         int32(cur.AlertThresholdPct),
+		AlertThresholdPct:         int32(min(cur.AlertThresholdPct, math.MaxInt32)),
 		CreatedAt:                 cur.CreatedAt,
 		UpdatedAt:                 cur.UpdatedAt,
 	}); err != nil {

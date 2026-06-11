@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -435,8 +436,8 @@ func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Contex
 	}
 	rows, err := q.ListSubscriptionsByTenantSubjectPaged(ctx, gen.ListSubscriptionsByTenantSubjectPagedParams{
 		TenantSubjectID: tsid,
-		PageLimit:       int32(pageSize),
-		PageOffset:      int32((page - 1) * pageSize),
+		PageLimit:       int32(min(pageSize, math.MaxInt32)),
+		PageOffset:      int32(min((page-1)*pageSize, math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, 0, err
@@ -504,8 +505,8 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 		ExpiresBefore:   f.ExpiresBefore,
 		SortBy:          sortBy,
 		SortDesc:        f.SortOrder != "asc",
-		PageLimit:       int32(params.Limit),
-		PageOffset:      int32(params.Offset),
+		PageLimit:       int32(min(params.Limit, math.MaxInt32)),
+		PageOffset:      int32(min(params.Offset, math.MaxInt32)),
 	})
 	if err != nil {
 		return nil, 0, err
@@ -547,7 +548,7 @@ func intPtrTo32(v *int) *int32 {
 	if v == nil {
 		return nil
 	}
-	i := int32(*v)
+	i := int32(min(*v, math.MaxInt32))
 	return &i
 }
 

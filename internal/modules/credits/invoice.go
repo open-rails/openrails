@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -210,7 +211,7 @@ func (s *CreditsService) ListInvoices(ctx context.Context, payer identity.Tenant
 		total = int(n)
 		rows, e := q.ListInvoicesByPayer(ctx, gen.ListInvoicesByPayerParams{
 			TenantID: tenantID, TenantSubjectID: payer.UUID(),
-			Column3: int32(limit), Column4: int32(offset),
+			Column3: int32(min(limit, math.MaxInt32)), Column4: int32(min(offset, math.MaxInt32)),
 		})
 		if e != nil {
 			return e

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -52,7 +53,7 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 	}
 	rows, err := q.ListRepairAlerts(ctx, gen.ListRepairAlertsParams{
 		TenantSubjectID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
-		Column3: int32(limit), Column4: int32(offset),
+		Column3: int32(min(limit, math.MaxInt32)), Column4: int32(min(offset, math.MaxInt32)),
 	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve repair alerts")
@@ -104,7 +105,7 @@ func GetAdminManualRebillAttempts(r *httprequest.Request) {
 	}
 	rows, err := q.ListManualRebillAttempts(ctx, gen.ListManualRebillAttemptsParams{
 		Status: statusFilter, Processor: processorFilter,
-		Column1: int32(limit), Column2: int32(offset),
+		Column1: int32(min(limit, math.MaxInt32)), Column2: int32(min(offset, math.MaxInt32)),
 	})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve manual rebill attempts")
