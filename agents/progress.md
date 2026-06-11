@@ -1249,6 +1249,12 @@ Each type defines validity: delete valid while the sub exists and is cancelled (
 
 Findings carry intent_evidence referencing the ledger; PS-2/PS-3 with a live pending intent recommend "executor replays" not admin action; NEW finding type for stuck intents (pending/unknown beyond threshold).
 
+## Confirmed + inbound non-goal (Paul 2026-06-11)
+
+Plan CONFIRMED: "a table recording all outbound intents, a scheduled worker attempts them when possible, with an expiration period after which re-attempt is no longer possible or no longer makes sense. No outbound operations are lost." (The no-recurring-jobs ruling on #107 applies to reconcile RUNS; the intent executor is the action pipeline and is explicitly endorsed as a scheduled worker.)
+
+NON-GOAL — no inbound/webhook durable queue: we are one system; if the DB is down we could not enqueue either (shared fate). Inbound durability = the PROVIDER's at-least-once webhook retries (handlers stay idempotent) + #107 reconcile as the batch backstop for outages long enough to exhaust provider retries. Build nothing inbound.
+
 ## Phasing (after in-flight #107 phase 2 + #355 land)
 
 - A: table + sqlc + executor worker (lease/SKIP LOCKED, backoff, mode/origin gating) + verifier loop for unknown_needs_verify; migrate NMI delete_subscription onto it (DeletionScheduledAt becomes a view onto the intent; boot rescan retired).
