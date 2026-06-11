@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 357
+next_id: 359
 
 ---
 
@@ -198,6 +198,15 @@ Each fetcher declares capabilities (subscriptions / transactions / refunds / cha
 - Mutating any processor (by design, forever — admins do that by hand).
 - The legacy doujins data import itself — issue #343; this tool then corrects whatever the import got wrong.
 - Dunning: OpenRails' River dunning worker already exists (ListDueDunningSubscriptions); once legacy subscriptions are imported and converged, dunning resumes naturally. The legacy machine's dead dunning is evidence to find, not a thing to build here.
+
+## Phase-2 design decisions (Paul, 2026-06-11)
+
+1. FINDING IDENTITY: Option B — stable identity keyed (tenant, provider, finding_type, subject_key); re-runs update the open finding (last_seen_at, occurrence_count); findings that stop appearing auto-resolve ("vanished on its own" is signal).
+2. ENFORCE: one-shot — fetch+diff+apply in a single run; idempotent appliers; the admin queue IS the review step for risky items. No apply-a-reviewed-plan mechanism.
+3. SCHEDULING: NO recurring reconcile runs — manual actions only (CLI/admin API). The always-on nightly advisory idea is REJECTED.
+4. BOOTSTRAP: the word means the CATALOG direction (existing bootstrap apply: local catalog -> ensure provider entries, idempotent). NEW: extras in the provider are ignorable-but-logged by default; an explicit --exhaustive flag archives provider-side products+prices NOT in the local catalog (archive, never delete: existing subscriptions continue billing; new purchases blocked). Filed as its own issue (#356, class-1 machinery). #107's provider->local subscription materialization ships as PS-1 admin-pending in v1.
+5. CLASS-3 INTENT ANNOTATION (accepted): findings carry local intent evidence (e.g. DeletionScheduledAt marker present -> "recorded delete never executed; boot rescan replays it") so the admin queue holds only genuine unknowns.
+6. NMI ABSENCE CIRCUIT BREAKER: on NMI, PS-2 is detected by absence from the recurring report (it has no status field); the engine must refuse to treat absence as truth when the remote active set is implausibly small vs local (abort run + alert), mirroring CCBillReconcileWorker's guard.
 
 ## Dunning forensics (advisory report section)
 
@@ -1196,3 +1205,58 @@ Merge `batch-354` into master, tag v0.17.0, then move every consumer onto the ba
 - [ ] hentai0: same provider adaptation + bumps (mirrors doujins)
 - [ ] cozy-art: delete the BROKEN direct-SQL provider (queries removed billing.entitlements.user_id); port the openrails-client provider + service-JWT source; bump openrails v0.14.0 -> v0.17.0, authkit v0.19.0 -> v0.21.0
 - [ ] tensorhub: bump openrails v0.13.x pseudo-version -> v0.17.0; fix Client-interface fallout (it gained entitlements + windows methods); build/tests
+# #357: bootstrap apply: log provider-side catalog extras; --exhaustive archives them
+
+**Completed:** no
+**Status:** open (Paul 2026-06-11). The catalog bootstrap (local products+prices -> ensure provider entries exist, idempotent) already exists as `bootstrap apply`. Two additions: (1) DEFAULT: provider-side products/prices NOT in the local catalog are ignorable — log/report them, never touch them. (2) `--exhaustive` flag: the local catalog is authoritative-and-exhaustive — archive (NEVER delete) provider objects not in it: Stripe products/prices -> active=false; NMI plans -> per-provider archive semantics (plan removal does not affect existing subscriptions — verify before implementing); CCBill -> log + pending manual action (no API); Solana -> investigate plan-deactivation instruction, else log. Existing subscriptions continue billing; new purchases to archived objects become impossible. Archive is a provider WRITE: blocked by readonly wire chokes, deferred under limited (the command should say so loudly rather than half-run). Only archive objects bearing OUR ownership markers (openrails.* lookup_keys / content-addressed NMI plan ids / openrails_product_key metadata) unless an additional override is given — never archive a tenant's unrelated provider objects.
+
+**Tasks:**
+- [ ] Extras detection + logging in the default apply path (all providers with read APIs)
+- [ ] --exhaustive: archive semantics per provider (stripe active=false; NMI verified-archive; ccbill pending action; solana investigated)
+- [ ] Ownership-marker guard; mode interplay (refuse/defer under limited/readonly with clear message)
+- [ ] Tests + docs
+---
+# #358: provider intent ledger: durable, effectively-once outbox for ALL outbound provider mutations
+
+**Completed:** no
+**Status:** open (designed with Paul 2026-06-11): "Every action we want to happen on an external payment provider is durably logged + execution attempted. If execution fails (remote down, readonly mode, limited mode, insufficient credentials) we queue and re-attempt for as long as it is still relevant. These intents are applied exactly once."
+
+## The unifying insight
+
+Class-3 divergence (missed outbound actions) is prevented structurally when every provider mutation flows through ONE durable intent pipeline. This week's piecemeal builds are all instances of it: DeletionScheduledAt markers + boot rescan (#344), the manual_rebill_attempts claim table, pending_manual_link catalog states + re-apply-every-boot. Generalize them.
+
+## Schema sketch
+
+`billing.provider_intents`: id, tenant_id, provider, intent_type (delete_subscription | manual_rebill | refund | plan_create | plan_archive | vault_update | ...), subject ids (subscription/payment/price...), payload jsonb, idempotency_key (unique), status (pending | in_flight | succeeded | unknown_needs_verify | failed_retryable | failed_terminal | superseded | expired), attempts, next_attempt_at, claimed_until (single-executor lease, SKIP LOCKED), origin (user | admin | system) + reason, relevance/expiry condition, result_evidence jsonb, executed_at. RLS + tenant stamping per schema conventions.
+
+## Effectively-once semantics (NOT literal exactly-once — impossible over a network; per-class strategy)
+
+- MONEY-MOVING (rebill, refund, arrears, top-up): lease -> attempt -> on ambiguous outcome park as unknown_needs_verify; a verifier resolves via the provider READ API before any retry; never blind-retry. (= the existing manual_rebill_attempts pattern, generalized.) Stripe ops additionally send Idempotency-Key.
+- DELETE/CANCEL: verify-then-execute; absent = success; blind retry harmless.
+- CREATE (plans/prices): content-addressed find-or-create (already idempotent).
+
+## Mode interplay (the payoff Paul named)
+
+readonly/limited/kill-switch/provider-down/bad-creds stop being ERRORS and become reasons an intent stays pending (status note says why). Origin gates execution: user/admin-origin intents (their cancel's delete, an admin refund) execute under limited (reactive completion — matches today's deferred-delete behavior); system-origin intents (dunning charge) wait for full mode. Nothing attempts a provider write under readonly (wire chokes are the backstop; the executor checks first and parks politely). When the mode lifts, the executor drains the queue — replacing the boot-rescan special case with the general mechanism.
+
+## Relevance windows
+
+Each type defines validity: delete valid while the sub exists and is cancelled (superseded if resumed); rebill valid inside the dunning window (#344) — expiry -> expired with a finding; refund valid until executed or admin-cancelled. Expired/terminal intents surface in reconcile (#107) as findings.
+
+## #107 tie-in (already wired in phase 2)
+
+Findings carry intent_evidence referencing the ledger; PS-2/PS-3 with a live pending intent recommend "executor replays" not admin action; NEW finding type for stuck intents (pending/unknown beyond threshold).
+
+## Phasing (after in-flight #107 phase 2 + #355 land)
+
+- A: table + sqlc + executor worker (lease/SKIP LOCKED, backoff, mode/origin gating) + verifier loop for unknown_needs_verify; migrate NMI delete_subscription onto it (DeletionScheduledAt becomes a view onto the intent; boot rescan retired).
+- B: refunds + Stripe cancel/portal ops (Idempotency-Key support in stripeapi).
+- C: fold manual_rebill_attempts in as intent_type=manual_rebill (preserve its exact verify semantics).
+- D: catalog archive ops (#357 --exhaustive executes through the ledger).
+
+**Tasks:**
+- [ ] Phase A: schema + executor + verifier + NMI deletes migrated + rescan retired
+- [ ] Phase B: refunds/Stripe ops + Idempotency-Key
+- [ ] Phase C: manual rebills folded in
+- [ ] Phase D: #357 archive ops through the ledger
+---
