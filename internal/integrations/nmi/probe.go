@@ -8,31 +8,25 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Test-mode account detection (#347).
+// Test-mode account detection (#348).
 //
 // NMI sandbox/test accounts are indistinguishable by configuration: they hit
 // the SAME production gateway URL and the security key carries no marker
-// (unlike Stripe's sk_test_/sk_live_ prefixes). What IS distinguishable is the
-// gateway's documented simulation behavior when an account is in Test Mode
-// (docs.nmi.com/reference/testing-methods):
+// (unlike Stripe's sk_test_/sk_live_ prefixes). What IS distinguishable is
+// behavior: the canonical test card (4111...) is a non-issued PAN that no
+// production processor can ever approve, while a test-mode account simulates
+// approval for it without touching a processor
+// (docs.nmi.com/reference/testing-methods). One authorization-only probe is
+// therefore conclusive:
 //
-//   - any valid test card with amount >= 1.00 is APPROVED without touching a
-//     processor;
-//   - any amount < 1.00 is deterministically DECLINED by the simulator.
-//
-// A LIVE account cannot reproduce that signature: the canonical test PAN
-// (4111...) is not an issued card, so a real processor DECLINES the $1.00
-// auth. The probe therefore runs two authorization-only requests:
-//
-//	auth $1.00 approved + auth $0.50 declined  -> account is simulating (safe)
-//	auth $1.00 DECLINED                        -> account is LIVE
-//	auth approves both amounts                 -> not the simulator signature;
-//	                                              treated as live (unsafe)
-//	transport/credential errors (response=3)   -> indeterminate
+//	auth $1.00 on the test card APPROVED -> the account is simulating (safe)
+//	auth $1.00 on the test card DECLINED -> the account is LIVE
+//	transport/credential errors (response=3) -> indeterminate
 //
 // The probe is harmless on a live account — an auth on a non-issued PAN is
-// declined and no money can move. An approved simulated auth is voided
-// (best-effort) for tidiness.
+// declined and no money can move (it does cost one declined-attempt gateway
+// fee, typically cents). An approved simulated auth is voided (best-effort)
+// for tidiness.
 
 const (
 	probeTestCard   = "4111111111111111"
@@ -46,25 +40,22 @@ const (
 	// ProbeIndeterminate: transport failure or a gateway-level error
 	// (e.g. invalid credentials) — nothing can be concluded.
 	ProbeIndeterminate TestModeProbeResult = iota
-	// ProbeSimulated: the account exhibits the documented Test Mode
-	// simulation signature — transactions cannot move real money.
+	// ProbeSimulated: the account approved the non-issued test card —
+	// only a simulator can do that; transactions cannot move real money.
 	ProbeSimulated
-	// ProbeLive: the account did NOT simulate — it forwarded to a real
-	// processor (or otherwise broke the simulation signature).
+	// ProbeLive: the account declined the test card — it forwarded to a real
+	// processor, so it is a live account.
 	ProbeLive
 )
 
 // ProbeTestMode determines whether this account is currently simulating
-// transactions (NMI Test Mode / sandbox) by fingerprinting the documented
-// simulation behavior. Call only when the operating mode expects sandbox
-// money; on a live account the probe costs one declined auth.
+// transactions (NMI Test Mode / sandbox). Call only when the operating mode
+// expects sandbox money; on a live account the probe costs one declined auth.
 func (c *NMIClient) ProbeTestMode() (TestModeProbeResult, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return ProbeIndeterminate, err
 	}
 
-	// Probe 1: auth $1.00 on the documented test card. Simulator: approved.
-	// Live processor: declined (non-issued PAN).
 	approved, txnID, gatewayErr, err := c.probeAuth("1.00")
 	if err != nil {
 		return ProbeIndeterminate, err
@@ -78,21 +69,6 @@ func (c *NMIClient) ProbeTestMode() (TestModeProbeResult, error) {
 		return ProbeLive, nil
 	}
 	c.voidProbe(txnID)
-
-	// Probe 2: auth $0.50. The simulator deterministically DECLINES amounts
-	// below 1.00; an account that approves both amounts is not exhibiting the
-	// simulation signature and must be treated as live.
-	approved, txnID, gatewayErr, err = c.probeAuth("0.50")
-	if err != nil || gatewayErr != "" {
-		if err == nil {
-			err = fmt.Errorf("nmi test-mode probe inconclusive on sub-dollar check: %s", gatewayErr)
-		}
-		return ProbeIndeterminate, err
-	}
-	if approved {
-		c.voidProbe(txnID)
-		return ProbeLive, nil
-	}
 	return ProbeSimulated, nil
 }
 

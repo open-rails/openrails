@@ -148,24 +148,16 @@ func probeClient(t *testing.T, serverURL string) *NMIClient {
 }
 
 func TestProbeTestMode(t *testing.T) {
-	t.Run("simulation signature: $1 approved + $0.50 declined -> simulated", func(t *testing.T) {
-		server := probeServer(t, map[string]string{"1.00": "1", "0.50": "2"})
+	t.Run("test card approved -> simulating (only a simulator approves a non-issued PAN)", func(t *testing.T) {
+		server := probeServer(t, map[string]string{"1.00": "1"})
 		defer server.Close()
 		result, err := probeClient(t, server.URL).ProbeTestMode()
 		require.NoError(t, err)
 		require.Equal(t, ProbeSimulated, result)
 	})
 
-	t.Run("$1 declined -> live account", func(t *testing.T) {
+	t.Run("test card declined -> live account", func(t *testing.T) {
 		server := probeServer(t, map[string]string{"1.00": "2"})
-		defer server.Close()
-		result, err := probeClient(t, server.URL).ProbeTestMode()
-		require.NoError(t, err)
-		require.Equal(t, ProbeLive, result)
-	})
-
-	t.Run("approves everything -> not the simulator signature -> live", func(t *testing.T) {
-		server := probeServer(t, map[string]string{"1.00": "1", "0.50": "1"})
 		defer server.Close()
 		result, err := probeClient(t, server.URL).ProbeTestMode()
 		require.NoError(t, err)
