@@ -371,6 +371,7 @@ func RegisterTenantAdminRoutes(group *gin.RouterGroup, rt *app.Runtime, delegate
 
 	// Off-channel payment recording — payments:write.
 	users.POST("/payments/off-channel", payWrite, wrap(httphandlers.AdminCreateOffChannelPayment))
+	group.POST("/payments/:id/refund", payWrite, wrap(httphandlers.AdminRefundPayment))
 
 	// Subscriptions: a tenant admin may cancel a subscription owned by a user in
 	// its tenant. Subscriptions are addressed by id; the handler operates within
