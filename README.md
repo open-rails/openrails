@@ -409,7 +409,7 @@ Zero-config against the bundled compose stack. Override with a `config.yaml` (re
 ## Operating modes & feature flags
 
 One dial picks how much OpenRails may do against the payment providers: `mode` (yaml) /
-`MODE` (env). Fine-grained feature flags under `feature_flags.*` (env: `FEATURE_FLAGS_<NAME>`)
+`MODE` (env) / `--mode` (CLI flag; flag beats env beats yaml). Fine-grained feature flags under `feature_flags.*` (env: `FEATURE_FLAGS_<NAME>`)
 remain as overrides on top — **the strictest setting always wins**. Every restrictive
 setting is announced with a `⚠️` warning at startup; if you expected a safety posture and
 don't see its warning in the boot log, it isn't on. Full docs in `config.example.yaml`.

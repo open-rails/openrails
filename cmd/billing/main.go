@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -34,6 +35,15 @@ func main() {
 				return fmt.Errorf("failed to get config flag: %w", err)
 			}
 
+			// --mode rides the same koanf pipeline as everything else by
+			// overwriting the MODE env var before Load: flag beats env beats
+			// yaml. Validation in Load rejects unknown values.
+			if mode, err := cmd.Flags().GetString("mode"); err == nil && strings.TrimSpace(mode) != "" {
+				if err := os.Setenv("MODE", strings.TrimSpace(mode)); err != nil {
+					return fmt.Errorf("failed to apply --mode: %w", err)
+				}
+			}
+
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
@@ -47,6 +57,8 @@ func main() {
 
 	rootCmd.PersistentFlags().
 		StringP("config", "c", "config.yaml", "Path to config file")
+	rootCmd.PersistentFlags().
+		String("mode", "", "Operating mode: test | production | limited | readonly (overrides MODE env and config.yaml; required outside development)")
 
 	serverCmd := &cobra.Command{
 		Use:     "run-server",
