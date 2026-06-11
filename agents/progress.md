@@ -1273,7 +1273,7 @@ NON-GOAL — no inbound/webhook durable queue: we are one system; if the DB is d
 
 ## The policy (Paul's anchors, verbatim)
 
-- 1-MONTH cadence (the common case): 5 retries, once every 3 days (~15 days of attempts), then terminal failure. [= today's DunningInterval/MaxDunningFailures constants]
+- 1-MONTH cadence (the common case) — REVISED by Paul 2026-06-11 to a 14-day PROGRESSIVE schedule: 5 total attempts = the initial failure + 4 retries at +2d, +5d, +9d, +13d (June 1 fail -> June 3, 6, 10, 14), then terminal. Progressive spacing (2,3,4,4-day gaps) front-loads retries where transient declines clear; span matches Stripe's recommended 2-week window. NOTE: the schedule function therefore returns a list of retry OFFSETS, not (count, fixed-interval); the derived staleness window = initial failure + last offset + slack (~14d).
 - 1-WEEK cadence: 2 retries, one day apart, then downgrade + delete.
 - 1-YEAR cadence: same as monthly — 5 retries / 3 days is "as generous as we want to get" (cap).
 - 1-DAY cadence: NO dunning — first failure is terminal.
