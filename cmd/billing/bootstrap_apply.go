@@ -79,6 +79,14 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 	return applyBootstrapManifest(ctx, cfg, embeddedApp.App(), manifest, out, opts.dryRun)
 }
 
+// startupBootstrapLockKey is the pg_advisory_lock key serializing concurrent
+// startup bootstraps (#342). The apply is plan-then-execute with no internal
+// transaction, so simultaneous replica cold starts against an empty control
+// plane would each plan the same creates and race the inserts (23505 on
+// unique_prices_product_amount_cycle). Holding this lock across plan+apply
+// makes the second replica plan against the converged state instead.
+const startupBootstrapLockKey = int64(0x6f72_626f_6f74) // "orboot"
+
 // applyStartupBootstrap applies the unified bootstrap manifest on EVERY server
 // start (#327). The apply is idempotent + additive — tenant data is reconciled
 // (upsert; issuers/principals are registered if missing) and catalogs plan with
@@ -86,7 +94,8 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 // every boot is safe and lets a mounted bootstrap file converge an existing
 // control plane (e.g. register a delegated issuer that was added after the DB
 // was first provisioned). No-op when no manifest is configured/present or the
-// control plane is disabled.
+// control plane is disabled. Concurrent replicas serialize on a session-level
+// advisory lock (#342); the lock auto-releases if the holder dies.
 func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) error {
 	path := resolveBootstrapManifestPath(cfg)
 	if path == "" {
@@ -100,6 +109,23 @@ func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) 
 	if err != nil {
 		return err
 	}
+
+	// Dedicated connection: pg_advisory_lock is session-scoped, so the lock
+	// must be taken and released on the same conn, held for the whole apply.
+	conn, err := cp.Pool().Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire bootstrap lock connection: %w", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, startupBootstrapLockKey); err != nil {
+		return fmt.Errorf("acquire bootstrap advisory lock: %w", err)
+	}
+	defer func() {
+		if _, err := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, startupBootstrapLockKey); err != nil {
+			log.WithError(err).Warn("release bootstrap advisory lock")
+		}
+	}()
+
 	log.WithField("file", path).Info("startup bootstrap: applying unified manifest (idempotent)")
 	return applyBootstrapManifest(ctx, cfg, a, manifest, log.StandardLogger().Out, false)
 }
