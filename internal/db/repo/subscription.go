@@ -151,6 +151,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		CancelFeedback:           s.CancelFeedback,
 		CancelType:               cancelType,
 		CancelledAt:              s.CancelledAt,
+		DeletionScheduledAt:      s.DeletionScheduledAt,
 		GatewayResponse:          s.Metadata,
 		ScheduledPriceID:         s.ScheduledPriceID,
 		UpdatedAt:                s.UpdatedAt,
@@ -570,6 +571,17 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, proc
 		out = append(out, *s)
 	}
 	return out, nil
+}
+
+// ListPendingDeletionScheduled returns cancelled subscriptions that still
+// carry a deletion_scheduled_at marker — their deferred processor-side delete
+// never finalized (#344 follow-up boot rescan). No relations attached.
+func (r *SubscriptionRepo) ListPendingDeletionScheduled(ctx context.Context) ([]*models.Subscription, error) {
+	rows, err := r.db.Gen(ctx).ListPendingDeletionScheduledSubscriptions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return subscriptionsFromGen(rows)
 }
 
 // GetLatestResumableCancelled returns the payer's most recent cancelled

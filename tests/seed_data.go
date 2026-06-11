@@ -582,6 +582,7 @@ type SubscriptionOptions struct {
 	ProcessorSubID      string
 	RetryAttempts       *int
 	NextRetryAt         *time.Time
+	DeletionScheduledAt *time.Time
 }
 
 func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts SubscriptionOptions) *models.Subscription {
@@ -627,6 +628,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 		CancelFeedback:          opts.CancelFeedback,
 		RetryAttempts:           opts.RetryAttempts,
 		NextRetryAt:             opts.NextRetryAt,
+		DeletionScheduledAt:     opts.DeletionScheduledAt,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}

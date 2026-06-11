@@ -893,7 +893,7 @@ Also boot the cutover with `FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIO
 # #344: dunning-staleness-window + processor-subscription-deletion kill switch
 
 **Completed:** no
-**Status:** IMPLEMENTED 2026-06-10 (Claude, uncommitted): config flags + FailMembership.Terminal + dunning window (check precedes client-nil check so stale subs expire even unconfigured) + NMIClient.SubscriptionDeletesDisabled/ErrSubscriptionDeletesDisabled + all 5 call sites degrade per design. Verified: build/vet clean; unit suites green (config, nmi, river, subscriptions, checkout, app); FULL dunning integration file green incl. 2 new window tests (expired->cancelled+downgraded without charge, recent->stays past_due). Remaining: the 2 follow-up tasks.
+**Status:** IMPLEMENTED 2026-06-10 (Claude, uncommitted): config flags + FailMembership.Terminal + dunning window (check precedes client-nil check so stale subs expire even unconfigured) + NMIClient.SubscriptionDeletesDisabled/ErrSubscriptionDeletesDisabled + all 5 call sites degrade per design. Verified: build/vet clean; unit suites green (config, nmi, river, subscriptions, checkout, app); FULL dunning integration file green incl. 2 new window tests (expired->cancelled+downgraded without charge, recent->stays past_due). FOLLOW-UPS DONE 2026-06-10 (Claude, uncommitted): boot rescan (Runtime.RescanPendingDeferredDeletes on worker start re-enqueues cancelled+marker subs at max(now, marker); skipped on external-River path) + lifecycle deferred delete (SubscriptionLifecycleService.SetDeferredDeleteScheduler, wired in build_runtime for the webhook path; terminal NMI-backed FailMembership persists DeletionScheduledAt in-tx and enqueues the delete job post-commit at now; gated off in limited mode per #345; dunning worker's own lifecycle instance deliberately left unwired — its window-expiry path deletes inline) + restored deletion_scheduled_at to UpdateSubscriptionAt (silently dropped in the #334 sqlc migration, so the marker never persisted on update); 4 new integration tests + full TestDunningWorker regression green (15/15).
 
 Two safety mechanisms for the billing lifecycle, motivated by the doujins legacy cutover (#343) but permanent product behavior: (1) a dunning staleness window — dunning may only attempt charges within N days of the missed rebill; anything older is cancelled + downgraded WITHOUT charging; (2) a kill switch that blocks all outbound processor-side subscription deletions (NMI delete_subscription) so cutover/reconciliation can run without bulk-deleting remote subscriptions.
 
@@ -934,8 +934,8 @@ Webhook-driven dunning exhaustion (FailMembership reaching MaxDunningFailures fr
 - [x] DunningWorker: window check before claim/charge -> terminal cancel + gated remote delete; outcome counters (succeeded/failed/window_expired) in run summary
 - [x] Call-site sentinel handling: deferred-delete worker (keep marker), user immediate cancel (DeletionScheduledAt=now marker), admin cancel, checkout supersede
 - [x] Tests: window-expiry decision, sentinel gate, terminal FailMembership; build/vet + unit suites green
-- [ ] Follow-up: boot rescan re-enqueues pending DeletionScheduledAt after flag lift (optional; #107 reconcile is the catch-all)
-- [ ] Follow-up (pre-existing gap): webhook-driven dunning exhaustion never deletes the remote NMI sub — needs NMI client access or a scheduled delete job from lifecycle
+- [x] Follow-up: boot rescan re-enqueues pending DeletionScheduledAt after flag lift (optional; #107 reconcile is the catch-all)
+- [x] Follow-up (pre-existing gap): webhook-driven dunning exhaustion never deletes the remote NMI sub — needs NMI client access or a scheduled delete job from lifecycle
 
 ---
 

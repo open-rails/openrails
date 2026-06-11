@@ -49,6 +49,7 @@ UPDATE billing.subscriptions SET
     cancel_feedback = sqlc.narg(cancel_feedback),
     cancel_type = sqlc.narg(cancel_type),
     cancelled_at = sqlc.narg(cancelled_at),
+    deletion_scheduled_at = sqlc.narg(deletion_scheduled_at),
     gateway_response = sqlc.narg(gateway_response),
     scheduled_price_id = sqlc.narg(scheduled_price_id),
     updated_at = sqlc.arg(updated_at)
@@ -202,6 +203,15 @@ SET next_retry_at = sqlc.arg(lease_until)::timestamptz,
 WHERE id = $1
   AND status = 'past_due'
   AND next_retry_at IS NOT NULL AND next_retry_at <= sqlc.arg(claimed_at)::timestamptz;
+
+-- name: ListPendingDeletionScheduledSubscriptions :many
+-- Boot rescan (#344 follow-up): cancelled subscriptions still carrying the
+-- deletion_scheduled_at marker — their deferred processor-side delete never
+-- finalized (the deletion kill switch skipped it, or the job was lost). The
+-- worker-startup rescan re-enqueues these via the deferred-delete scheduler.
+SELECT * FROM billing.subscriptions sub
+WHERE sub.status = 'cancelled'
+  AND sub.deletion_scheduled_at IS NOT NULL;
 
 -- name: GetLatestResumableCancelledSubscription :one
 SELECT * FROM billing.subscriptions sub

@@ -264,6 +264,13 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 		return err
 	}
 
+	// Boot rescan (#344 follow-up): re-enqueue deferred NMI deletes whose
+	// markers survived a kill-switch skip or a lost job. Best-effort — the
+	// markers stay discoverable for #107 reconciliation on failure.
+	if _, err := r.RescanPendingDeferredDeletes(ctx); err != nil {
+		log.WithError(err).Warn("Boot rescan of pending deferred NMI deletes failed; markers remain for reconciliation")
+	}
+
 	<-ctx.Done()
 	return ctx.Err()
 }

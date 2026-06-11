@@ -37,6 +37,13 @@ type SubscriptionLifecycleService struct {
 	NotificationService NotificationEmailSender
 	PaymentService      *payments.PaymentService // For creating Payment records on renewal
 	EventLogService     LifecycleEventLogger     // For logging events to ClickHouse
+
+	// deferDelete enqueues the deferred NMI delete_subscription job (#344
+	// follow-up). Optional: injected via SetDeferredDeleteScheduler in the
+	// composition root (same pattern as UserSubscriptionService.deferDelete).
+	// When nil, terminal dunning cancellations leave the remote NMI
+	// subscription alive (caller-side paths or #107 reconciliation handle it).
+	deferDelete DeferredDeleteScheduler
 }
 
 func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context.Context, subscription *models.Subscription, trigger string, allowOverride bool) error {
@@ -93,6 +100,13 @@ func (s *SubscriptionLifecycleService) Clock() clockwork.Clock {
 // SetConfig sets the config for feature flag access
 func (s *SubscriptionLifecycleService) SetConfig(cfg *config.Config) {
 	s.Config = cfg
+}
+
+// SetDeferredDeleteScheduler injects the deferred NMI delete scheduler (#344
+// follow-up). Wired post-construction in the composition root once the River
+// producer exists, mirroring UserSubscriptionService.SetDeferredDeleteScheduler.
+func (s *SubscriptionLifecycleService) SetDeferredDeleteScheduler(d DeferredDeleteScheduler) {
+	s.deferDelete = d
 }
 
 // now returns the current time from the service's clock
@@ -1332,6 +1346,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	var subscriptionID uuid.UUID
 	var userID string
 	var finalStatus models.SubscriptionStatus
+	// Set inside the tx when a terminal cancellation must also stop the
+	// remote NMI recurring subscription; the job is enqueued after commit.
+	var scheduleDeferredDelete bool
 
 	// Check dunning mode from feature flags
 	dunningMode := config.DunningModeOn
@@ -1365,6 +1382,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// Capture values for event logging
 		subscriptionID = subscription.ID
 		userID = subscription.TenantSubjectID.String()
+		scheduleDeferredDelete = false // reset in case the tx is retried
 
 		now := s.now()
 
@@ -1458,6 +1476,33 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 						}
 					}
 				}
+			}
+		}
+
+		// #344 follow-up (pre-existing gap): a terminal payment-failure
+		// cancellation of an NMI-backed subscription must also stop the
+		// processor-side recurring subscription, or NMI keeps retrying it
+		// monthly forever. This was previously only handled by the dunning
+		// worker's window-expiry path; webhook-driven dunning exhaustion
+		// stranded the remote sub. Persist the durable DeletionScheduledAt
+		// marker inside the tx (so a lost job is recoverable via the boot
+		// rescan / #107 reconciliation) and enqueue the deferred delete after
+		// commit. The NMI delete worker plus the #344 client-level kill switch
+		// then govern actual execution.
+		if subscription.Status == models.StatusCancelled &&
+			processors.IsNMIBackedProcessor(subscription.Processor) &&
+			subscription.ProcessorSubscriptionID != "" {
+			if s.Config != nil && s.Config.IsLimitedMode() {
+				// Limited mode (#345): no proactive provider action — leave the
+				// remote subscription for reconciliation.
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id":           subscription.ID,
+					"processor":                 subscription.Processor,
+					"processor_subscription_id": subscription.ProcessorSubscriptionID,
+				}).Warn("Limited mode: remote processor subscription left alive for reconciliation (no proactive provider action)")
+			} else if s.deferDelete != nil {
+				subscription.DeletionScheduledAt = &now
+				scheduleDeferredDelete = true
 			}
 		}
 
@@ -1563,6 +1608,25 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 	if err != nil {
 		return err
+	}
+
+	// Schedule the deferred NMI delete AFTER the cancellation committed. Runs
+	// at "now": the undo-window semantics of user cancellations do not apply to
+	// dunning exhaustion. Idempotent via river.UniqueOpts ByArgs. On failure the
+	// persisted DeletionScheduledAt marker keeps the pending delete discoverable
+	// (boot rescan / #107 reconciliation), so we log instead of failing the flow.
+	if scheduleDeferredDelete {
+		if err := s.deferDelete.ScheduleNMIDelete(ctx, userID, subscriptionID, s.now()); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"subscription_id": subscriptionID,
+				"user_id":         userID,
+			}).Error("failed to schedule deferred NMI delete after terminal payment failure; marker persisted for rescan/reconciliation")
+		} else {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscriptionID,
+				"user_id":         userID,
+			}).Info("scheduled deferred NMI delete after terminal payment failure")
+		}
 	}
 
 	s.dispatchNotifications(ctx, notifications)

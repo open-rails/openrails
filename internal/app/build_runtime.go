@@ -307,8 +307,21 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		runtime.riverProducerPool = pool
 		// Wire the deferred NMI delete scheduler now that the producer exists
 		// (issue 216). Without it, NMI cancellations fall back to deleting inline.
+		deferredDeletes := newRiverDeferredDeleteScheduler(producer)
 		if runtime.UserSubscriptionService != nil {
-			runtime.UserSubscriptionService.SetDeferredDeleteScheduler(newRiverDeferredDeleteScheduler(producer))
+			runtime.UserSubscriptionService.SetDeferredDeleteScheduler(deferredDeletes)
+		}
+		// #344 follow-up: the lifecycle service needs it too so webhook-driven
+		// dunning exhaustion (FailMembership -> cancelled) stops the remote NMI
+		// recurring subscription instead of stranding it. This is the shared
+		// instance used by the webhook handlers (and the Solana crank worker,
+		// where the NMI-backed gate makes it a no-op). The dunning worker builds
+		// its own lifecycle in jobs_dunning.go and is deliberately NOT wired: its
+		// window-expiry path deletes the remote subscription inline, and a
+		// scheduled job on top would re-attempt the delete (the marker stays set
+		// after an inline delete) — needless NMI errors/retries.
+		if runtime.SubscriptionLifecycleService != nil {
+			runtime.SubscriptionLifecycleService.SetDeferredDeleteScheduler(deferredDeletes)
 		}
 	}
 
