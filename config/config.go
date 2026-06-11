@@ -155,20 +155,9 @@ type Config struct {
 	FeatureFlags *FeatureFlags                `koanf:"feature_flags,omitempty"`
 	Encryption   *EncryptionConfig            `koanf:"encryption,omitempty"`
 	Vault        *VaultConfig                 `koanf:"vault,omitempty"`
-	// TenantBootstrap is the legacy tenant-only manifest input used by the
-	// bootstrap-tenants command. New deployments should run
-	// `bootstrap apply -f /etc/openrails/bootstrap.yaml` with the unified tenant
-	// + catalog manifest instead of auto-applying tenant provisioning at startup.
-	TenantBootstrap *TenantBootstrapConfig `koanf:"tenant_bootstrap,omitempty"`
 	// BillingHotPath configures the degraded-mode behavior of the per-invocation
 	// billing authorize call (issue #248). EXPLICIT, never a silent default.
 	BillingHotPath *BillingHotPathConfig `koanf:"billing_hot_path,omitempty"`
-}
-
-// TenantBootstrapConfig configures the optional declarative tenant bootstrap
-// manifest. Empty File disables the feature.
-type TenantBootstrapConfig struct {
-	File string `koanf:"file,omitempty"`
 }
 
 // Billing hot-path fail policies (issue #248). The per-invocation authorize/hold
@@ -1852,9 +1841,6 @@ func Load(configPath string) (*Config, error) {
 		}
 		if s == "auth_expected_audience" {
 			return "auth.expected_audience"
-		}
-		if s == "openrails_tenants_file" || s == "tenant_bootstrap_file" {
-			return "tenant_bootstrap.file"
 		}
 		if s == "openrails_billing_hot_path_fail_policy" || s == "billing_hot_path_fail_policy" {
 			return "billing_hot_path.fail_policy"

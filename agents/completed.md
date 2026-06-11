@@ -8373,3 +8373,10 @@ OUTCOME (2026-06-08): tasks 1-7 done. Validated end-to-end: with hentai0 DOWN, `
 - [x] Follow-up (doujins compose): remove the one-shot openrails-bootstrap container, point openrails at the unified manifest, revert the doujins-only split, use the combined manifest; verify first-run auto-bootstrap works with hentai0 down.
 
 ---
+
+# #342: startup bootstrap: concurrent replicas race the catalog apply (23505 crash on fresh DB)
+
+**Completed:** yes
+**Status:** DONE 2026-06-11, commit 0d65111 (entry restored 2026-06-11 — it was lost in tracker churn during the json->markdown conversion window). The startup bootstrap is plan-then-execute with no internal transaction, so simultaneous replica cold starts against an empty control plane each planned the same creates and raced the inserts (23505 on unique_prices_product_amount_cycle), crash-looping the loser. Fix: session-level pg_advisory_lock (key 0x6f72_626f_6f74 "orboot") taken on a DEDICATED pool conn and held across plan+apply, released via context.WithoutCancel; auto-releases if the holder dies, so the second replica plans against the converged state. Follow-on hard cut (#350, same day): the legacy `tenant_bootstrap.file` config knob + TENANTS_FILE env mapping were removed — the manifest lives at the conventional path or is passed explicitly to `bootstrap apply`.
+
+---

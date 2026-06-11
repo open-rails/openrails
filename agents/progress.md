@@ -1097,6 +1097,6 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 - [x] Remove solana network override; derive from mode
 - [x] Audit every koanf field for DEAD/REDUNDANT/DOC-ONLY; remove confirmed ones (cloudflared)
 - [x] Sweep config.example.yaml + .env.example to match
-- [ ] Follow-up (other session's call): hard-cut tenant_bootstrap.file once #342 bootstrap work settles
+- [x] Follow-up: hard-cut tenant_bootstrap.file (#342 advisory-lock fix landed as 0d65111; legacy knob + TENANTS_FILE env mapping + bootstrap_apply fallback removed)
 
 ---

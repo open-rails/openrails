@@ -130,14 +130,12 @@ func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) 
 	return applyBootstrapManifest(ctx, cfg, a, manifest, log.StandardLogger().Out, false)
 }
 
-// resolveBootstrapManifestPath returns the configured bootstrap manifest path,
-// or the conventional default location if that file exists, else "".
-func resolveBootstrapManifestPath(cfg *config.Config) string {
-	if cfg != nil && cfg.TenantBootstrap != nil {
-		if p := strings.TrimSpace(cfg.TenantBootstrap.File); p != "" {
-			return p
-		}
-	}
+// resolveBootstrapManifestPath returns the conventional bootstrap manifest
+// location when that file exists, else "". There is deliberately no config
+// knob for this path (#350 hard cut of the legacy tenant_bootstrap.file): the
+// manifest lives at the one conventional path, or is passed explicitly to the
+// `bootstrap apply` CLI.
+func resolveBootstrapManifestPath(_ *config.Config) string {
 	if _, err := os.Stat(bootstrap.DefaultBootstrapManifestPath); err == nil {
 		return bootstrap.DefaultBootstrapManifestPath
 	}
