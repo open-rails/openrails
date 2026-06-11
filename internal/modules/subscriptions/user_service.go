@@ -501,14 +501,25 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		subscription.DeletionScheduledAt = &deleteAt
 	} else {
 		// Immediate delete with NMI (no scheduled job).
+		subscription.DeletionScheduledAt = nil
 		if s.NMIClients != nil {
 			if client, ok := s.NMIClients[provider]; ok && subscription.ProcessorSubscriptionID != "" {
 				if err := client.DeleteRecurringSubscription(subscription.ProcessorSubscriptionID); err != nil {
-					return fmt.Errorf("failed to cancel subscription with processor '%s': %w", provider, err)
+					if errors.Is(err, nmi.ErrSubscriptionDeletesDisabled) {
+						// Kill switch: cancel locally but keep a deferred-delete marker so
+						// the pending remote delete stays discoverable for replay or
+						// reconciliation once deletions are re-enabled.
+						log.WithFields(log.Fields{
+							"subscription_id": subscription.ID,
+							"processor":       provider,
+						}).Warn("processor subscription deletes disabled; cancelling locally, remote subscription left for reconciliation")
+						subscription.DeletionScheduledAt = &now
+					} else {
+						return fmt.Errorf("failed to cancel subscription with processor '%s': %w", provider, err)
+					}
 				}
 			}
 		}
-		subscription.DeletionScheduledAt = nil
 	}
 
 	// Update subscription status in database

@@ -445,7 +445,9 @@ captcha:
 #
 # Environment variables:
 #   FEATURE_FLAGS_DUNNING_MODE=on|dry_run_only|off
+#   FEATURE_FLAGS_DUNNING_WINDOW_DAYS=15
 #   FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true|false
+#   FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true|false
 
 feature_flags:
   # -------------------------------------------------------------------------
@@ -468,6 +470,37 @@ feature_flags:
   #   4. All accumulated past_due subscriptions will be retried
   #
   dunning_mode: "on"
+
+  # -------------------------------------------------------------------------
+  # Dunning Window - How long past a missed rebill charges may be attempted
+  # -------------------------------------------------------------------------
+  # Dunning only retries within [period_end, period_end + window]. A past_due
+  # subscription whose missed rebill is OLDER than the window is cancelled and
+  # the user downgraded WITHOUT a charge attempt - a card that failed months
+  # ago must never be surprise-charged by a catch-up dunning run (e.g. after
+  # importing stale subscriptions from a legacy system).
+  #
+  # 0 or unset = default 15 days.
+  #
+  dunning_window_days: 15
+
+  # -------------------------------------------------------------------------
+  # Disable Processor Subscription Deletions - Blocks remote delete_subscription
+  # -------------------------------------------------------------------------
+  # When true:
+  #   - Every outbound NMI delete_subscription call is skipped (user cancels,
+  #     admin cancels, tier-change supersedes, deferred deletes, dunning expiry)
+  #   - Local cancellation/downgrade proceeds normally
+  #   - The remote subscription stays alive and is flagged for reconciliation
+  #     (deferred-delete markers are kept for replay)
+  #
+  # When false (default):
+  #   - Normal behavior: OpenRails deletes the NMI subscription, then downgrades
+  #
+  # Use case: migration cutovers / reconciliation runs where bulk remote
+  # deletions on possibly-wrong local state would be unrecoverable.
+  #
+  disable_processor_subscription_deletions: false
 
   # -------------------------------------------------------------------------
   # Disable Entitlement Expiration - Stops credits/entitlements from expiring

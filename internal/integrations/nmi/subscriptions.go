@@ -207,9 +207,18 @@ func (c *NMIClient) UpdateSubscriptionPaymentSource(subscriptionID, customerVaul
 	return nil
 }
 
+// ErrSubscriptionDeletesDisabled is returned by DeleteRecurringSubscription when
+// processor-side subscription deletions are blocked by feature flag. Callers
+// must treat it as "deliberately skipped": proceed with local lifecycle changes
+// and leave the remote subscription for reconciliation — never as success.
+var ErrSubscriptionDeletesDisabled = errors.New("nmi: processor subscription deletes are disabled (feature_flags.disable_processor_subscription_deletions)")
+
 func (c *NMIClient) DeleteRecurringSubscription(subscriptionID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
+	}
+	if c.SubscriptionDeletesDisabled {
+		return ErrSubscriptionDeletesDisabled
 	}
 	if strings.TrimSpace(subscriptionID) == "" {
 		return errors.New("subscriptionID is required")

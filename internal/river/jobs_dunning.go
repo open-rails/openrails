@@ -36,6 +36,17 @@ const (
 	dunningAttemptLease = 15 * time.Minute
 )
 
+// dunningOutcome classifies what a dunning pass did with one subscription.
+type dunningOutcome int
+
+const (
+	dunningOutcomeFailed dunningOutcome = iota
+	dunningOutcomeSucceeded
+	// dunningOutcomeWindowExpired: the missed rebill is older than the dunning
+	// window — the subscription was cancelled + downgraded without a charge.
+	dunningOutcomeWindowExpired
+)
+
 // DunningArgs triggers a dunning run that processes all due past_due subscriptions.
 type DunningArgs struct{}
 
@@ -124,70 +135,87 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 
 	successCount := 0
 	failCount := 0
+	windowExpiredCount := 0
 
 	for _, sub := range dueSubscriptions {
-		result := w.processSubscription(ctx, &sub, lifecycle, priceSvc, creditsSvc)
-		if result {
+		switch w.processSubscription(ctx, &sub, lifecycle, priceSvc, creditsSvc) {
+		case dunningOutcomeSucceeded:
 			successCount++
-		} else {
+		case dunningOutcomeWindowExpired:
+			windowExpiredCount++
+		default:
 			failCount++
 		}
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"total":   len(dueSubscriptions),
-		"success": successCount,
-		"failed":  failCount,
+		"total":          len(dueSubscriptions),
+		"success":        successCount,
+		"failed":         failCount,
+		"window_expired": windowExpiredCount,
 	}).Info("Dunning: run completed")
 
 	return nil
 }
 
 // processSubscription attempts a dunning rebill for a single subscription.
-// Returns true if the rebill was successful, false otherwise.
 func (w *DunningWorker) processSubscription(
 	ctx context.Context,
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	priceSvc *catalog.PriceService,
 	creditsSvc *credits.CreditsService,
-) bool {
+) dunningOutcome {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
 	provider := resolveSubscriptionProcessor(sub)
-	client := w.NMIClients[provider]
-	if client == nil {
-		logEntry.WithField("processor", provider).Warn("NMI client not configured for provider; skipping")
-		return false
-	}
+	client := w.NMIClients[provider] // may be nil; only required for charging
 
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		logEntry.Warn("Dunning: past_due subscription has no current period end; skipping rebill")
-		return false
+		return dunningOutcomeFailed
 	}
 
 	periodEnd := sub.CurrentPeriodEndsAt.UTC()
+	processor := models.Processor(provider)
+
+	// Dunning window: charges are only attempted within GetDunningWindow() of
+	// the missed rebill. Anything older (e.g. months-stale subscriptions imported
+	// from a legacy system) must never be surprise-charged — cancel + downgrade
+	// instead, and stop the processor-side subscription so NMI quits retrying it.
+	window := config.DefaultDunningWindowDays * 24 * time.Hour
+	if w.Config != nil {
+		window = w.Config.GetDunningWindow()
+	}
+	if w.now().UTC().After(periodEnd.Add(window)) {
+		return w.expireWindowedSubscription(ctx, logEntry, sub, lifecycle, client, processor, periodEnd, window)
+	}
+
+	if client == nil {
+		logEntry.WithField("processor", provider).Warn("NMI client not configured for provider; skipping")
+		return dunningOutcomeFailed
+	}
+
 	orderReference := rebillOrderReference(sub)
 	if orderReference == "" {
 		logEntry.Warn("Dunning: unable to build rebill order reference; skipping rebill")
-		return false
+		return dunningOutcomeFailed
 	}
-	processor := models.Processor(resolveSubscriptionProcessor(sub))
 
 	claimed, err := w.claimDunningAttempt(ctx, sub, w.now())
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: failed to claim subscription for rebill")
-		return false
+		return dunningOutcomeFailed
 	}
 	if !claimed {
 		logEntry.Info("Dunning: subscription was already claimed or no longer due")
-		return false
+		return dunningOutcomeFailed
 	}
 
 	attempt, attemptClaimed, err := w.claimManualRebillAttempt(ctx, sub.ID, periodEnd, processor, orderReference, w.now())
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: failed to claim durable manual rebill attempt")
-		return false
+		return dunningOutcomeFailed
 	}
 	if !attemptClaimed {
 		if attempt.Status == models.ManualRebillAttemptSucceeded && attempt.TransactionID != nil && sub.Status == models.StatusPastDue {
@@ -196,10 +224,10 @@ func (w *DunningWorker) processSubscription(
 		}
 		if attempt.Status == models.ManualRebillAttemptSucceeded {
 			logEntry.WithField("manual_rebill_attempt_id", attempt.ID).Info("Dunning: rebill already completed for this period")
-			return true
+			return dunningOutcomeSucceeded
 		}
 		logEntry.WithField("manual_rebill_attempt_id", attempt.ID).Info("Dunning: durable manual rebill attempt is already resolved or needs reconciliation")
-		return false
+		return dunningOutcomeFailed
 	}
 
 	// Validate payment method
@@ -214,7 +242,7 @@ func (w *DunningWorker) processSubscription(
 		}); err != nil {
 			logEntry.WithError(err).Warn("fail-membership after missing payment method")
 		}
-		return false
+		return dunningOutcomeFailed
 	}
 
 	// Attempt manual rebill via configured NMI provider
@@ -231,7 +259,7 @@ func (w *DunningWorker) processSubscription(
 			logEntry.WithError(err2).Warn("Dunning: failed to mark manual rebill attempt unknown")
 		}
 		logEntry.WithError(err).Warn("Dunning: manual rebill request status unknown; not scheduling another automatic charge")
-		return false
+		return dunningOutcomeFailed
 	}
 
 	if rebillResp == nil || !rebillResp.Success {
@@ -247,14 +275,56 @@ func (w *DunningWorker) processSubscription(
 		}); err != nil {
 			logEntry.WithError(err).Warn("apply failure policy after declined rebill")
 		}
-		return false
+		return dunningOutcomeFailed
 	}
 
 	if err := w.markManualRebillSucceeded(ctx, attempt.ID, rebillResp.TransactionID); err != nil {
 		logEntry.WithError(err).Error("Dunning: failed to mark manual rebill attempt succeeded after processor approval")
-		return false
+		return dunningOutcomeFailed
 	}
 	return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, creditsSvc, processor, rebillResp.TransactionID)
+}
+
+// expireWindowedSubscription handles a past_due subscription whose missed rebill
+// is older than the dunning window: terminal cancellation + entitlement
+// revocation WITHOUT a charge, then a best-effort processor-side delete so NMI
+// stops retrying the dead subscription (gated by the deletion kill switch).
+func (w *DunningWorker) expireWindowedSubscription(
+	ctx context.Context,
+	logEntry *log.Entry,
+	sub *models.Subscription,
+	lifecycle *subscriptions.SubscriptionLifecycleService,
+	client *nmi.NMIClient,
+	processor models.Processor,
+	periodEnd time.Time,
+	window time.Duration,
+) dunningOutcome {
+	reason := fmt.Sprintf("dunning window expired: rebill was due %s, window is %s", periodEnd.Format(time.RFC3339), window)
+	if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
+		Processor:      processor,
+		SubscriptionID: &sub.ID,
+		FailureReason:  &reason,
+		Terminal:       true,
+	}); err != nil {
+		logEntry.WithError(err).Error("Dunning: failed to cancel window-expired subscription")
+		return dunningOutcomeFailed
+	}
+
+	if client != nil && sub.ProcessorSubscriptionID != "" {
+		if err := client.DeleteRecurringSubscription(sub.ProcessorSubscriptionID); err != nil {
+			if errors.Is(err, nmi.ErrSubscriptionDeletesDisabled) {
+				logEntry.Warn("Dunning: processor subscription deletes disabled; remote subscription left alive for reconciliation")
+			} else {
+				logEntry.WithError(err).Error("Dunning: failed to delete processor subscription after window expiry; remote may keep retrying")
+			}
+		}
+	}
+
+	logEntry.WithFields(log.Fields{
+		"period_end": periodEnd,
+		"window":     window.String(),
+	}).Warn("Dunning: window expired; subscription cancelled and downgraded without charge")
+	return dunningOutcomeWindowExpired
 }
 
 func (w *DunningWorker) applySuccessfulRebill(
@@ -266,7 +336,7 @@ func (w *DunningWorker) applySuccessfulRebill(
 	creditsSvc *credits.CreditsService,
 	processor models.Processor,
 	transactionID string,
-) bool {
+) dunningOutcome {
 	var amount int64
 	currency := subscriptions.CurrencyUSD
 	if sub.Price != nil {
@@ -286,7 +356,7 @@ func (w *DunningWorker) applySuccessfulRebill(
 		Currency:                currency,
 	}); err != nil {
 		logEntry.WithError(err).Error("renew membership after successful rebill")
-		return false
+		return dunningOutcomeFailed
 	}
 
 	if creditsSvc != nil {
@@ -305,7 +375,7 @@ func (w *DunningWorker) applySuccessfulRebill(
 	}
 
 	logEntry.Info("Dunning: rebill successful")
-	return true
+	return dunningOutcomeSucceeded
 }
 
 func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscriptionID uuid.UUID, periodEnd time.Time, processor models.Processor, orderReference string, now time.Time) (*models.ManualRebillAttempt, bool, error) {

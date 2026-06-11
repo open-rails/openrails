@@ -101,6 +101,11 @@ type FailMembershipParams struct {
 	SubscriptionID *uuid.UUID
 	FailureReason  *string
 	FailureCode    *string
+	// Terminal forces immediate cancellation (entitlements revoked, no further
+	// retries) regardless of the retry count, without incrementing it — no charge
+	// was attempted. Used when the dunning window has expired: a months-stale
+	// rebill must be downgraded, never retried.
+	Terminal bool
 }
 
 func NormalizeCancelType(cancelType *models.CancelType) string {

@@ -28,6 +28,11 @@ type NMIClient struct {
 	DirectPostURL string
 	QueryURL      string
 	TestMode      bool
+	// SubscriptionDeletesDisabled blocks DeleteRecurringSubscription (returns
+	// ErrSubscriptionDeletesDisabled) so a cutover/reconciliation can run without
+	// bulk-deleting remote subscriptions. Set from
+	// feature_flags.disable_processor_subscription_deletions at client build.
+	SubscriptionDeletesDisabled bool
 	// httpClient bounds every gateway call with a timeout so a slow/hung NMI
 	// endpoint fails fast instead of blocking the request forever (#363/#367).
 	// The default http.DefaultClient used by http.PostForm has NO timeout.

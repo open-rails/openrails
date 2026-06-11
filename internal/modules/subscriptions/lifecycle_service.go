@@ -1391,18 +1391,22 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			// Update subscription status - failed payment = past_due (still trying to recover)
 			subscription.Status = models.StatusPastDue
 
-			// Dunning policy for NMI-backed subscriptions: try every 3 days, up to 5 failures total
-			// Example timeline (D = day of initial failure): D+3, D+6, D+9, D+12, D+15
-			subscription.LastRetryAt = &now
-			if subscription.RetryAttempts == nil {
-				attempts := 1
-				subscription.RetryAttempts = &attempts
-			} else {
-				*subscription.RetryAttempts++
+			terminal := params.Terminal
+			if !terminal {
+				// Dunning policy for NMI-backed subscriptions: try every 3 days, up to 5 failures total
+				// Example timeline (D = day of initial failure): D+3, D+6, D+9, D+12, D+15
+				subscription.LastRetryAt = &now
+				if subscription.RetryAttempts == nil {
+					attempts := 1
+					subscription.RetryAttempts = &attempts
+				} else {
+					*subscription.RetryAttempts++
+				}
+				terminal = *subscription.RetryAttempts >= MaxDunningFailures
 			}
 
-			// If we've reached MaxDunningFailures, cancel; otherwise schedule next attempt in DunningInterval
-			if *subscription.RetryAttempts >= MaxDunningFailures {
+			// Terminal (window expired, or MaxDunningFailures reached): cancel; otherwise schedule next attempt in DunningInterval
+			if terminal {
 				expired := models.CancelTypeExpired
 				reason := normalize.FromPtr(params.FailureReason)
 				if reason == "" {

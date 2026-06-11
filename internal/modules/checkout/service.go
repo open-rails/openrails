@@ -2102,7 +2102,20 @@ func (s *CheckoutService) cancelNMISubscription(ctx context.Context, sub *models
 		return fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
 	}
 
-	return client.DeleteRecurringSubscription(sub.ProcessorSubscriptionID)
+	if err := client.DeleteRecurringSubscription(sub.ProcessorSubscriptionID); err != nil {
+		if errors.Is(err, nmi.ErrSubscriptionDeletesDisabled) {
+			// Kill switch: the superseded subscription stays alive at NMI (a remote
+			// duplicate) until reconciliation disposes of it; the tier change must
+			// still proceed locally.
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": sub.ID,
+				"processor":       provider,
+			}).Warn("processor subscription deletes disabled; superseded subscription left alive at NMI for reconciliation")
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // TierChange processes a subscription tier change (upgrade or downgrade).

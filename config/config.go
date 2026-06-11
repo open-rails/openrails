@@ -819,6 +819,10 @@ const (
 	DunningModeOff = "off"
 )
 
+// DefaultDunningWindowDays bounds how long past a missed rebill dunning may
+// still attempt charges (see FeatureFlags.DunningWindowDays).
+const DefaultDunningWindowDays = 15
+
 // ValidDunningModes contains all valid dunning mode values
 var ValidDunningModes = map[string]bool{
 	DunningModeOn:         true,
@@ -836,6 +840,22 @@ type FeatureFlags struct {
 	//   - "dry_run_only": Workflow runs but no charges attempted - for debugging
 	//   - "off": No dunning - immediate cancellation on rebill failure, no recovery
 	DunningMode string `koanf:"dunning_mode"`
+
+	// DunningWindowDays bounds how long past a missed rebill (the subscription's
+	// current period end) dunning may still attempt charges. Once the window has
+	// elapsed the subscription is cancelled and entitlements revoked WITHOUT
+	// charging — a card that failed months ago must never be surprise-charged by
+	// a catch-up dunning run (e.g. after importing stale legacy subscriptions).
+	// 0 or negative = DefaultDunningWindowDays.
+	DunningWindowDays int `koanf:"dunning_window_days"`
+
+	// DisableProcessorSubscriptionDeletions, when true, blocks every outbound
+	// processor-side delete_subscription call (NMI/Mobius recurring deletes)
+	// while local cancellation and entitlement changes proceed normally. The
+	// remote subscription is left alive for later reconciliation. Safety switch
+	// for migration cutovers — prevents bulk remote deletions while local state
+	// is still being converged.
+	DisableProcessorSubscriptionDeletions bool `koanf:"disable_processor_subscription_deletions"`
 
 	// DisableEntitlementExpiration stops all entitlement/credit expiration when true.
 	// Affects: CreditExpiryWorker, HoldExpiryWorker, entitlement revocation in FailMembership.
@@ -875,6 +895,22 @@ func (f *FeatureFlags) IsDunningDryRun() bool {
 // IsDunningOff returns true if dunning is completely disabled (immediate cancel on failure).
 func (f *FeatureFlags) IsDunningOff() bool {
 	return f.GetDunningMode() == DunningModeOff
+}
+
+// GetDunningWindow returns how long past the missed rebill (current period end)
+// dunning may still attempt charges, defaulting to DefaultDunningWindowDays.
+func (f *FeatureFlags) GetDunningWindow() time.Duration {
+	days := DefaultDunningWindowDays
+	if f != nil && f.DunningWindowDays > 0 {
+		days = f.DunningWindowDays
+	}
+	return time.Duration(days) * 24 * time.Hour
+}
+
+// IsProcessorSubscriptionDeletionDisabled returns true if outbound
+// processor-side subscription deletions are blocked.
+func (f *FeatureFlags) IsProcessorSubscriptionDeletionDisabled() bool {
+	return f != nil && f.DisableProcessorSubscriptionDeletions
 }
 
 // SendGridConfig holds SendGrid email configuration.
@@ -1461,6 +1497,18 @@ func (cfg *Config) IsDunningOff() bool {
 	return cfg.GetFeatureFlags().IsDunningOff()
 }
 
+// GetDunningWindow returns how long past the missed rebill dunning may still
+// attempt charges.
+func (cfg *Config) GetDunningWindow() time.Duration {
+	return cfg.GetFeatureFlags().GetDunningWindow()
+}
+
+// IsProcessorSubscriptionDeletionDisabled returns true if outbound
+// processor-side subscription deletions are blocked by feature flag.
+func (cfg *Config) IsProcessorSubscriptionDeletionDisabled() bool {
+	return cfg.GetFeatureFlags().IsProcessorSubscriptionDeletionDisabled()
+}
+
 // IsEntitlementExpirationDisabled returns true if entitlement/credit expiration is disabled.
 func (cfg *Config) IsEntitlementExpirationDisabled() bool {
 	return cfg.GetFeatureFlags().DisableEntitlementExpiration
@@ -1919,6 +1967,13 @@ func logFeatureFlagsStatus(cfg *Config) {
 		log.Warn("⚠️  DUNNING DISABLED - Failed rebills will result in immediate cancellation")
 		log.Info("   No grace period, no retry attempts, no recovery workflow")
 		log.Info("   Set feature_flags.dunning_mode=on to enable normal dunning")
+	}
+
+	// Log processor subscription deletions if disabled
+	if flags.IsProcessorSubscriptionDeletionDisabled() {
+		log.Warn("⚠️  PROCESSOR SUBSCRIPTION DELETIONS DISABLED - delete_subscription calls to NMI will be skipped")
+		log.Info("   Local cancellations and downgrades proceed; remote subscriptions stay alive for reconciliation")
+		log.Info("   Set feature_flags.disable_processor_subscription_deletions=false to resume deletions")
 	}
 
 	// Log entitlement expiration if disabled

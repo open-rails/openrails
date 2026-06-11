@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -349,4 +350,95 @@ func TestDunningWorkerMultipleDueSubscriptions(t *testing.T) {
 		updatedSub := suite.GetSubscription(sub.ID)
 		assert.Equal(t, models.StatusPastDue, updatedSub.Status)
 	}
+}
+
+// TestDunningWorkerWindowExpiredCancelsWithoutCharge verifies the dunning
+// staleness window (#344): a past_due subscription whose missed rebill is older
+// than the window is cancelled + downgraded WITHOUT any charge attempt, instead
+// of being retried.
+func TestDunningWorkerWindowExpiredCancelsWithoutCharge(t *testing.T) {
+	suite := setupTestSuite(t)
+
+	products := suite.SeedProducts()
+	priceID := products[0].Prices[0].ID
+
+	userID := uuid.New().String()
+	pm := suite.CreateTestPaymentMethod(userID)
+
+	pastRetry := time.Now().Add(-1 * time.Hour)
+	stalePeriodEnd := time.Now().Add(-60 * 24 * time.Hour) // far beyond the 15-day default window
+	retryAttempts := 1
+
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              userID,
+		PriceID:             priceID,
+		Status:              models.StatusPastDue,
+		Processor:           models.ProcessorMobius,
+		PaymentMethodID:     &pm.ID,
+		RetryAttempts:       &retryAttempts,
+		NextRetryAt:         &pastRetry,
+		PeriodStart:         stalePeriodEnd.Add(-30 * 24 * time.Hour),
+		CurrentPeriodEndsAt: &stalePeriodEnd,
+	})
+
+	// A zero-value NMI client: present (so the run proceeds) but unconfigured —
+	// any attempted charge would error, proving the window path never charges.
+	worker := &riverjobs.DunningWorker{
+		DB:         suite.App.Runtime.DB,
+		Config:     suite.App.Runtime.Config,
+		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+	}
+
+	err := worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}})
+	require.NoError(t, err)
+
+	updated := suite.GetSubscription(sub.ID)
+	require.Equal(t, models.StatusCancelled, updated.Status)
+	require.NotNil(t, updated.CancelType)
+	assert.Equal(t, models.CancelTypeExpired, *updated.CancelType)
+	assert.Nil(t, updated.NextRetryAt)
+	assert.Nil(t, updated.RetryAttempts)
+	assert.NotNil(t, updated.CancelledAt)
+}
+
+// TestDunningWorkerWithinWindowIsNotExpired verifies a recent missed rebill is
+// NOT window-cancelled (it proceeds into the normal rebill path).
+func TestDunningWorkerWithinWindowIsNotExpired(t *testing.T) {
+	suite := setupTestSuite(t)
+
+	products := suite.SeedProducts()
+	priceID := products[0].Prices[0].ID
+
+	userID := uuid.New().String()
+	pm := suite.CreateTestPaymentMethod(userID)
+
+	pastRetry := time.Now().Add(-1 * time.Hour)
+	recentPeriodEnd := time.Now().Add(-3 * 24 * time.Hour) // inside the 15-day window
+	retryAttempts := 1
+
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              userID,
+		PriceID:             priceID,
+		Status:              models.StatusPastDue,
+		Processor:           models.ProcessorMobius,
+		PaymentMethodID:     &pm.ID,
+		RetryAttempts:       &retryAttempts,
+		NextRetryAt:         &pastRetry,
+		PeriodStart:         recentPeriodEnd.Add(-30 * 24 * time.Hour),
+		CurrentPeriodEndsAt: &recentPeriodEnd,
+	})
+
+	worker := &riverjobs.DunningWorker{
+		DB:         suite.App.Runtime.DB,
+		Config:     suite.App.Runtime.Config,
+		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
+	}
+
+	err := worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}})
+	require.NoError(t, err)
+
+	// The unconfigured client cannot charge; the point is the subscription was
+	// NOT window-cancelled — it stays past_due awaiting a real rebill attempt.
+	updated := suite.GetSubscription(sub.ID)
+	assert.Equal(t, models.StatusPastDue, updated.Status)
 }

@@ -3,6 +3,7 @@ package riverjobs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -356,6 +357,16 @@ func (w NMIDeleteSubscriptionWorker) Work(ctx context.Context, job *river.Job[NM
 	if w.NMIClients != nil {
 		if client, ok := w.NMIClients[provider]; ok && sub.ProcessorSubscriptionID != "" {
 			if err := client.DeleteRecurringSubscription(sub.ProcessorSubscriptionID); err != nil {
+				if errors.Is(err, nmi.ErrSubscriptionDeletesDisabled) {
+					// Kill switch: do NOT finalize — keep DeletionScheduledAt set so the
+					// pending delete stays discoverable/replayable once re-enabled, and
+					// complete the job rather than retry-spinning against the flag.
+					log.WithContext(ctx).WithFields(log.Fields{
+						"subscription_id": sub.ID,
+						"processor":       sub.Processor,
+					}).Warn("deferred NMI delete skipped: processor subscription deletes disabled; marker kept for replay")
+					return nil
+				}
 				// Return the error so River retries; the NMI subscription must be
 				// deleted before its rebill, so retries matter.
 				return fmt.Errorf("deferred delete: failed to delete NMI subscription '%s': %w", provider, err)

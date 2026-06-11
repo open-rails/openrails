@@ -198,6 +198,15 @@ func (s *AdminSubscriptionService) cancelWithNMI(subscription *models.Subscripti
 	}
 
 	if err := client.DeleteRecurringSubscription(subscription.ProcessorSubscriptionID); err != nil {
+		if errors.Is(err, nmi.ErrSubscriptionDeletesDisabled) {
+			// Kill switch: proceed with the local admin cancellation; the remote
+			// subscription stays alive and is picked up by reconciliation.
+			log.WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"processor":       provider,
+			}).Warn("processor subscription deletes disabled; admin cancel proceeds locally, remote subscription left for reconciliation")
+			return nil
+		}
 		return fmt.Errorf("failed to cancel subscription with NMI provider '%s': %w", provider, err)
 	}
 
