@@ -237,6 +237,85 @@ type scriptResult struct {
 	ErrBalanceBadID     obsErr
 	ErrRollupBadGroup   obsErr
 	ErrAdmitNegative    obsErr
+
+	// Prepaid credit windows + batch admission (#335).
+	WindowOpen   obsWindowState
+	WindowSettle []obsSettle
+	WindowRefill obsWindowState
+	WindowClose  obsWindowState
+	SettleClosed []obsSettle
+
+	BatchVerdicts []obsBatchVerdict
+
+	ErrWindowOpenInsufficient obsErr
+	ErrWindowOpenNoAmount     obsErr
+	ErrRefillNoArgs           obsErr
+	ErrRefillUnknown          obsErr
+	ErrCloseUnknown           obsErr
+	ErrSettleEmpty            obsErr
+	ErrBatchEmpty             obsErr
+}
+
+type obsWindowState struct {
+	Held         int64
+	Settled      int64
+	Status       string
+	PayerMatches bool
+	HasExpiry    bool
+}
+
+func observeWindow(t *testing.T, label string, w *openrails.CreditWindow, payer uuid.UUID) obsWindowState {
+	t.Helper()
+	require.NotNil(t, w, label)
+	require.NotEqual(t, uuid.Nil, w.WindowID, "%s: window id", label)
+	return obsWindowState{
+		Held:         w.HeldMicros,
+		Settled:      w.SettledMicros,
+		Status:       w.Status,
+		PayerMatches: w.PayerTenantID == payer,
+		HasExpiry:    !w.ExpiresAt.IsZero(),
+	}
+}
+
+type obsSettle struct {
+	OK            bool
+	Replayed      bool
+	Error         string
+	HasTxn        bool
+	WindowMatches bool
+}
+
+func observeSettles(results []openrails.WindowSettleResult, windowID uuid.UUID) []obsSettle {
+	out := make([]obsSettle, 0, len(results))
+	for _, r := range results {
+		out = append(out, obsSettle{
+			OK:            r.OK,
+			Replayed:      r.Replayed,
+			Error:         r.Error,
+			HasTxn:        r.TransactionID != nil,
+			WindowMatches: r.WindowID == windowID,
+		})
+	}
+	return out
+}
+
+type obsBatchVerdict struct {
+	Status    int
+	Error     string
+	HasResult bool
+	Result    obsAdmit
+}
+
+func observeBatchVerdicts(verdicts []openrails.AdmitBatchVerdict) []obsBatchVerdict {
+	out := make([]obsBatchVerdict, 0, len(verdicts))
+	for _, v := range verdicts {
+		o := obsBatchVerdict{Status: v.Status, Error: v.Error, HasResult: v.Result != nil}
+		if v.Result != nil {
+			o.Result = observeAdmit(v.Result)
+		}
+		out = append(out, o)
+	}
+	return out
 }
 
 type scriptEnv struct {
@@ -527,6 +606,85 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		RequestID:      env.side + "-admit-neg",
 	})
 	r.ErrAdmitNegative = observeErr(t, env.side+" admit negative estimate", err)
+
+	// 17) Prepaid credit windows (#335): open -> settle (ok + idempotent replay
+	// + over-settle + nil window + unknown window) -> refill -> close ->
+	// settle-after-close.
+	win, err := c.OpenWindow(ctx, openrails.OpenWindowRequest{
+		PayerTenantID: payerID,
+		Actor:         env.actor,
+		CreditType:    env.creditType,
+		AmountMicros:  50_000,
+		TTLSeconds:    600,
+	})
+	require.NoError(t, err, "%s open-window", env.side)
+	r.WindowOpen = observeWindow(t, env.side+" open-window", win, env.payer)
+	require.Equal(t, "open", win.Status, "%s opened window status", env.side)
+
+	unknownWindow := uuid.New()
+	settled, err := c.SettleWindowItems(ctx, []openrails.WindowSettleItem{
+		{WindowID: win.WindowID, RequestID: env.side + "-settle-1", AmountMicros: 20_000, Actor: env.actor,
+			Usage: &openrails.WindowSettleUsage{EventType: "invoke", Resource: env.resource}},
+		{WindowID: win.WindowID, RequestID: env.side + "-settle-1", AmountMicros: 20_000},      // replay
+		{WindowID: win.WindowID, RequestID: env.side + "-settle-2", AmountMicros: 999_999_999}, // over-settle
+		{RequestID: env.side + "-settle-3", AmountMicros: 5},                                   // nil window -> invalid_item
+		{WindowID: unknownWindow, RequestID: env.side + "-settle-4", AmountMicros: 5},          // unknown window
+	})
+	require.NoError(t, err, "%s settle (per-item failures must not fail the flush)", env.side)
+	require.Len(t, settled, 5, "%s settle results are positional", env.side)
+	r.WindowSettle = observeSettles(settled, win.WindowID)
+	require.True(t, settled[0].OK && !settled[0].Replayed, "%s settle item 0", env.side)
+	require.True(t, settled[1].OK && settled[1].Replayed, "%s settle item 1 must be an idempotent replay", env.side)
+
+	rw, err := c.RefillWindow(ctx, win.WindowID, 10_000, 600)
+	require.NoError(t, err, "%s refill-window", env.side)
+	r.WindowRefill = observeWindow(t, env.side+" refill-window", rw, env.payer)
+
+	cw, err := c.CloseWindow(ctx, win.WindowID)
+	require.NoError(t, err, "%s close-window", env.side)
+	r.WindowClose = observeWindow(t, env.side+" close-window", cw, env.payer)
+	require.Equal(t, "closed", cw.Status, "%s closed window status", env.side)
+
+	afterClose, err := c.SettleWindowItems(ctx, []openrails.WindowSettleItem{
+		{WindowID: win.WindowID, RequestID: env.side + "-settle-5", AmountMicros: 1},
+	})
+	require.NoError(t, err, "%s settle after close", env.side)
+	r.SettleClosed = observeSettles(afterClose, win.WindowID)
+
+	// 18) Cross-payer batch admission (#335): allowed (client-side credit-type
+	// default) + money-denied + bad payer + negative estimate — per-item
+	// isolation, the batch call itself succeeds.
+	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{
+		{PayerTenantID: payerID, Actor: env.actor, EstimateMicros: 1_000, RequestID: env.side + "-batch-1", Source: "admit"},
+		{PayerTenantID: payerID, Actor: env.actor, CreditType: env.creditType, EstimateMicros: 10_000_000_000, RequestID: env.side + "-batch-2"},
+		{PayerTenantID: "not-a-uuid", Actor: env.actor, CreditType: env.creditType, EstimateMicros: 1, RequestID: env.side + "-batch-3"},
+		{PayerTenantID: payerID, Actor: env.actor, CreditType: env.creditType, EstimateMicros: -1, RequestID: env.side + "-batch-4"},
+	})
+	require.NoError(t, err, "%s admit-batch", env.side)
+	require.Len(t, verdicts, 4, "%s admit-batch verdicts are positional", env.side)
+	r.BatchVerdicts = observeBatchVerdicts(verdicts)
+	require.True(t, verdicts[0].Allowed(), "%s admit-batch item 0 must be admitted", env.side)
+	require.NoError(t, c.Release(ctx, verdicts[0].Result.ReservationID), "%s release batch hold", env.side)
+
+	// 19) Window/batch error parity.
+	_, err = c.OpenWindow(ctx, openrails.OpenWindowRequest{
+		PayerTenantID: payerID, Actor: env.actor, CreditType: env.creditType, AmountMicros: 10_000_000_000,
+	})
+	r.ErrWindowOpenInsufficient = observeErr(t, env.side+" open-window insufficient", err)
+	_, err = c.OpenWindow(ctx, openrails.OpenWindowRequest{
+		PayerTenantID: payerID, Actor: env.actor, CreditType: env.creditType,
+	})
+	r.ErrWindowOpenNoAmount = observeErr(t, env.side+" open-window without amount", err)
+	_, err = c.RefillWindow(ctx, unknownWindow, 0, 0)
+	r.ErrRefillNoArgs = observeErr(t, env.side+" refill without amount or ttl", err)
+	_, err = c.RefillWindow(ctx, unknownWindow, 1_000, 60)
+	r.ErrRefillUnknown = observeErr(t, env.side+" refill unknown window", err)
+	_, err = c.CloseWindow(ctx, unknownWindow)
+	r.ErrCloseUnknown = observeErr(t, env.side+" close unknown window", err)
+	_, err = c.SettleWindowItems(ctx, nil)
+	r.ErrSettleEmpty = observeErr(t, env.side+" settle empty batch", err)
+	_, err = c.AdmitBatch(ctx, nil)
+	r.ErrBatchEmpty = observeErr(t, env.side+" admit-batch empty", err)
 
 	return r
 }

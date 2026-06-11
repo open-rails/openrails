@@ -82,6 +82,26 @@ type Client interface {
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
 	// payers in the tenant (#410).
 	ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
+	// OpenWindow opens a prepaid credit window (#335): a REAL hold — the funds
+	// leave the payer's available balance now. ErrInsufficientCredits on a payer
+	// who can't cover it.
+	OpenWindow(ctx context.Context, req OpenWindowRequest) (*CreditWindow, error)
+	// SettleWindowItems flushes a cross-payer batch of settled actuals. The call
+	// succeeds with per-item results — one item's failure never fails the flush —
+	// and is safe to re-send wholesale (per-item idempotency on RequestID).
+	SettleWindowItems(ctx context.Context, items []WindowSettleItem) ([]WindowSettleResult, error)
+	// RefillWindow extends an open window: amountMicros > 0 reserves more funds
+	// (ErrInsufficientCredits applies exactly like open), ttlSeconds > 0 pushes
+	// expires_at out. At least one must be positive.
+	RefillWindow(ctx context.Context, windowID uuid.UUID, amountMicros, ttlSeconds int64) (*CreditWindow, error)
+	// CloseWindow releases the window's unsettled remainder back to the payer's
+	// available balance. Idempotent: re-closing returns the closed window.
+	CloseWindow(ctx context.Context, windowID uuid.UUID) (*CreditWindow, error)
+	// AdmitBatch performs one cross-payer batch admission (#335): N admit items
+	// (mixed payers) in ONE call with per-item verdicts. Per-item isolation: one
+	// item's deny or error never fails the batch; the returned slice is
+	// positionally aligned with items. Idempotent per item on RequestID like Admit.
+	AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error)
 }
 
 // PayerTenantID is the OpenRails tenant-subject UUID a charge is billed to.
@@ -375,4 +395,71 @@ type ResourceRevenueDailyRow struct {
 type ResourceRevenueResponse struct {
 	RevenueMicros int64                     `json:"revenue_micros"`
 	Daily         []ResourceRevenueDailyRow `json:"daily"`
+}
+
+// OpenWindowRequest is the body for POST /v1/service/credits/windows (#335).
+type OpenWindowRequest struct {
+	PayerTenantID string `json:"tenant_subject_id"`
+	Actor         string `json:"actor"`
+	CreditType    string `json:"credit_type,omitempty"`
+	AmountMicros  int64  `json:"amount"`
+	TTLSeconds    int64  `json:"ttl_seconds,omitempty"`
+}
+
+// CreditWindow is the window snapshot returned by open/refill/close
+// (pkg/service.CreditWindowDTO on the wire).
+type CreditWindow struct {
+	WindowID      uuid.UUID `json:"window_id"`
+	PayerTenantID uuid.UUID `json:"tenant_subject_id"`
+	HeldMicros    int64     `json:"held_amount"`
+	SettledMicros int64     `json:"settled_amount"`
+	Status        string    `json:"status"` // open | closed | expired
+	ExpiresAt     time.Time `json:"expires_at"`
+}
+
+// WindowSettleUsage carries the analytics attribution recorded with a settled
+// item (no second debit) — the window analogue of CaptureUsage.
+type WindowSettleUsage struct {
+	EventType string         `json:"event_type"`
+	Resource  string         `json:"resource,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+// WindowSettleItem is one settled actual. Items in one SettleWindowItems call
+// may span windows AND payers (the cross-payer flush). RequestID is the
+// per-item idempotency key.
+type WindowSettleItem struct {
+	WindowID     uuid.UUID          `json:"window_id"`
+	RequestID    string             `json:"request_id"`
+	AmountMicros int64              `json:"amount"`
+	Actor        string             `json:"actor,omitempty"`
+	Usage        *WindowSettleUsage `json:"usage,omitempty"`
+}
+
+// WindowSettleResult is one per-item settle outcome. OK with Replayed=true is
+// an idempotent replay (already settled, not charged again). Error is one of
+// window_not_found | window_not_open | window_exceeded | invalid_item |
+// internal_error.
+type WindowSettleResult struct {
+	WindowID      uuid.UUID  `json:"window_id"`
+	RequestID     string     `json:"request_id"`
+	OK            bool       `json:"ok"`
+	Replayed      bool       `json:"replayed,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	TransactionID *uuid.UUID `json:"transaction_id,omitempty"`
+}
+
+// AdmitBatchVerdict is one per-item verdict from POST /v1/service/admit/batch.
+// Status is the HTTP-equivalent status the single Admit route would have
+// returned for this item (200/402/403/429/4xx/5xx); Result is the full
+// admission decision when one was reached.
+type AdmitBatchVerdict struct {
+	Status int            `json:"status"`
+	Error  string         `json:"error,omitempty"`
+	Result *AdmitResponse `json:"result,omitempty"`
+}
+
+// Allowed reports whether this item was admitted.
+func (v AdmitBatchVerdict) Allowed() bool {
+	return v.Status == 200 && v.Result != nil && v.Result.Allowed
 }

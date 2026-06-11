@@ -374,6 +374,70 @@ func (c *remote) SetTierPolicy(ctx context.Context, tenantSubjectID string, in T
 	return c.do(ctx, http.MethodPut, "/v1/service/tier-policies", body, nil)
 }
 
+// OpenWindow implements Client (handler ServiceOpenCreditWindow, #335).
+func (c *remote) OpenWindow(ctx context.Context, req OpenWindowRequest) (*CreditWindow, error) {
+	if req.CreditType == "" {
+		req.CreditType = c.creditType
+	}
+	var out CreditWindow
+	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/windows", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SettleWindowItems implements Client (handler ServiceSettleCreditWindows).
+func (c *remote) SettleWindowItems(ctx context.Context, items []WindowSettleItem) ([]WindowSettleResult, error) {
+	var out struct {
+		Items []WindowSettleResult `json:"items"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/settle", map[string]any{"items": items}, &out); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
+// RefillWindow implements Client (handler ServiceRefillCreditWindow).
+func (c *remote) RefillWindow(ctx context.Context, windowID uuid.UUID, amountMicros, ttlSeconds int64) (*CreditWindow, error) {
+	body := map[string]any{"amount": amountMicros, "ttl_seconds": ttlSeconds}
+	var out CreditWindow
+	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/windows/"+windowID.String()+"/refill", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CloseWindow implements Client (handler ServiceCloseCreditWindow).
+func (c *remote) CloseWindow(ctx context.Context, windowID uuid.UUID) (*CreditWindow, error) {
+	var out CreditWindow
+	if err := c.do(ctx, http.MethodPost, "/v1/service/credits/windows/"+windowID.String()+"/close", map[string]any{}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// AdmitBatch implements Client (handler ServiceAdmitBatch, #335). The batch
+// itself answers 200 with positional per-item verdicts; batch-level validation
+// (empty / oversized) is the server's, so both transports reject identically.
+func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error) {
+	// Default credit types on a copy — the caller's slice is never mutated
+	// (matching the embedded transport).
+	send := make([]AdmitRequest, len(items))
+	copy(send, items)
+	for i := range send {
+		if send[i].CreditType == "" {
+			send[i].CreditType = c.creditType
+		}
+	}
+	var out struct {
+		Items []AdmitBatchVerdict `json:"items"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/v1/service/admit/batch", map[string]any{"items": send}, &out); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
 // ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).
 func (c *remote) ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error) {
 	body := map[string]any{
