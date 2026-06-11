@@ -32,7 +32,7 @@ func (s *Server) captchaStatusHandler(c *gin.Context) {
 		cfg = s.cfg.Captcha
 	}
 	resp := gin.H{
-		"enabled":           cfg != nil && cfg.Enabled,
+		"enabled":           cfg.IsEnabled(),
 		"required":          false,
 		"token_header":      captcha.TokenHeader,
 		"client_script_url": captchaClientScriptURL(c),
@@ -40,7 +40,7 @@ func (s *Server) captchaStatusHandler(c *gin.Context) {
 	if cfg != nil {
 		resp["provider"] = cfg.EffectiveProvider()
 	}
-	if cfg == nil || !cfg.Enabled || s.captchaStore == nil {
+	if !cfg.IsEnabled() || s.captchaStore == nil {
 		c.JSON(http.StatusOK, resp)
 		return
 	}
@@ -83,7 +83,7 @@ func captchaClientScriptURL(c *gin.Context) string {
 }
 
 func buildCaptchaClientScript(cfg *config.CaptchaConfig) string {
-	enabled := cfg != nil && cfg.Enabled
+	enabled := cfg.IsEnabled()
 	provider := ""
 	siteKey := ""
 	scriptURL := ""

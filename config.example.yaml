@@ -410,8 +410,9 @@ rate_limits:
 # script URLs, the 15m challenge TTL, the 3x extreme-threshold escalation, the
 # 0.5 recaptcha-v3 min score, and the challenged buckets (checkout,
 # payment-methods, subscriptions).
+# There is no enabled knob: setting BOTH keys enables captcha; leaving them
+# empty disables it (half a pair refuses to boot).
 captcha:
-  enabled: false
   provider: turnstile # turnstile | recaptcha-v3 | hcaptcha
   site_key: ""
   secret_key: ""

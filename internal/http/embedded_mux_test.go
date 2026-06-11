@@ -31,7 +31,7 @@ func (stubAuthenticator) Authenticate(_ context.Context, r *http.Request) (billi
 // required auth (401), and a path param.
 func TestEmbeddedMuxAssembles(t *testing.T) {
 	s := &Server{
-		cfg:           &config.Config{Captcha: &config.CaptchaConfig{Enabled: false}},
+		cfg:           &config.Config{Captcha: &config.CaptchaConfig{}},
 		runtime:       &app.Runtime{},
 		authenticator: stubAuthenticator{},
 	}

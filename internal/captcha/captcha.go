@@ -70,7 +70,7 @@ type ChallengeStore struct {
 
 // NewVerifier returns a provider-neutral captcha verifier when captcha is enabled.
 func NewVerifier(cfg *config.CaptchaConfig, client *http.Client) Verifier {
-	if cfg == nil || !cfg.Enabled {
+	if !cfg.IsEnabled() {
 		return nil
 	}
 
@@ -271,7 +271,7 @@ func (s *ChallengeStore) pruneLocked(memory map[string]time.Time, now time.Time)
 // ShouldApply reports whether captcha escalation is enabled for a rate-limit bucket.
 func ShouldApply(cfg *config.CaptchaConfig, bucket string) bool {
 	bucket = strings.ToLower(strings.TrimSpace(bucket))
-	if cfg == nil || !cfg.Enabled || bucket == "" || bucket == "webhook" {
+	if !cfg.IsEnabled() || bucket == "" || bucket == "webhook" {
 		return false
 	}
 

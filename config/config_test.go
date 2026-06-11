@@ -122,21 +122,27 @@ func TestLoad_MobiusProcessorRequiresExplicitType(t *testing.T) {
 	assert.ErrorContains(t, err, "processor 'mobius' must declare a type")
 }
 
-func TestValidateCaptchaRequiresKeysWhenEnabled(t *testing.T) {
+func TestValidateCaptchaRejectsHalfConfiguredCredentials(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
-	cfg.Captcha.Enabled = true
 	cfg.Captcha.Provider = CaptchaProviderTurnstile
 	cfg.Captcha.SiteKey = ""
 	cfg.Captcha.SecretKey = "secret-key"
 
+	// There is no enabled knob (#353): credentials ARE the signal, so the only
+	// invalid state is half a pair.
 	err := Validate(cfg)
 	assert.Error(t, err)
-	assert.ErrorContains(t, err, "site_key is required")
+	assert.ErrorContains(t, err, "BOTH site_key and secret_key")
 
 	cfg.Captcha.SiteKey = "site-key"
-	err = Validate(cfg)
-	assert.NoError(t, err)
+	assert.NoError(t, Validate(cfg))
+	assert.True(t, cfg.Captcha.IsEnabled())
+
+	cfg.Captcha.SiteKey = ""
+	cfg.Captcha.SecretKey = ""
+	assert.NoError(t, Validate(cfg))
+	assert.False(t, cfg.Captcha.IsEnabled())
 }
 
 func TestValidateCaptchaRejectsInvalidSettings(t *testing.T) {
@@ -156,7 +162,6 @@ func TestValidateCaptchaRejectsInvalidSettings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := GetDefaultBillingConfig()
 			cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
-			cfg.Captcha.Enabled = true
 			cfg.Captcha.Provider = CaptchaProviderTurnstile
 			cfg.Captcha.SiteKey = "site-key"
 			cfg.Captcha.SecretKey = "secret-key"

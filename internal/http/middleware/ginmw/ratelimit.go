@@ -488,7 +488,7 @@ func classifyBucket(path, method string) string {
 }
 
 func captchaShouldEnforce(cfg *config.CaptchaConfig, req *http.Request, bucket string) bool {
-	if cfg == nil || !cfg.Enabled || req == nil || bucket == "" || bucket == "webhook" || bucket == "captcha" {
+	if !cfg.IsEnabled() || req == nil || bucket == "" || bucket == "webhook" || bucket == "captcha" {
 		return false
 	}
 	path := strings.ToLower(req.URL.Path)

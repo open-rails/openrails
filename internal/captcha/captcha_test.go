@@ -41,8 +41,8 @@ func TestVerifierPostsSiteVerifyForm(t *testing.T) {
 	defer server.Close()
 
 	verifier := NewVerifier(&config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderTurnstile,
+		SiteKey:   "site-key",
 		SecretKey: "secret-key",
 	}, server.Client())
 	verifier.(*siteVerifyVerifier).verifyURLOverride = server.URL
@@ -80,8 +80,8 @@ func TestVerifierRejectsLowScore(t *testing.T) {
 	defer server.Close()
 
 	verifier := NewVerifier(&config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderRecaptchaV3,
+		SiteKey:   "site-key",
 		SecretKey: "secret-key",
 	}, server.Client())
 	verifier.(*siteVerifyVerifier).verifyURLOverride = server.URL
@@ -127,8 +127,8 @@ func TestVerifierValidatesRecaptchaV3Action(t *testing.T) {
 			defer server.Close()
 
 			verifier := NewVerifier(&config.CaptchaConfig{
-				Enabled:   true,
 				Provider:  config.CaptchaProviderRecaptchaV3,
+				SiteKey:   "site-key",
 				SecretKey: "secret-key",
 			}, server.Client())
 			verifier.(*siteVerifyVerifier).verifyURLOverride = server.URL

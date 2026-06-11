@@ -979,10 +979,17 @@ const (
 // challenge TTL, escalation multiplier, challenged buckets) is hardcoded —
 // they are protocol/policy constants, not deployment choices.
 type CaptchaConfig struct {
-	Enabled   bool   `koanf:"enabled"`
 	Provider  string `koanf:"provider"`
 	SiteKey   string `koanf:"site_key"`
 	SecretKey string `koanf:"secret_key"`
+}
+
+// IsEnabled reports whether captcha challenges are active. There is no
+// enabled knob (#353): configuring the credentials IS the enablement signal —
+// the system already applies captcha selectively (only after extreme
+// rate-limit escalation, only on the challenged buckets).
+func (c *CaptchaConfig) IsEnabled() bool {
+	return c != nil && strings.TrimSpace(c.SiteKey) != "" && strings.TrimSpace(c.SecretKey) != ""
 }
 
 func (c *CaptchaConfig) EffectiveProvider() string {
@@ -1145,7 +1152,7 @@ func validateBillingHotPath(cfg *BillingHotPathConfig) error {
 }
 
 func validateCaptcha(cfg *CaptchaConfig) error {
-	if cfg == nil || !cfg.Enabled {
+	if cfg == nil {
 		return nil
 	}
 
@@ -1155,11 +1162,12 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 		return fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
 
-	if strings.TrimSpace(cfg.SiteKey) == "" {
-		return fmt.Errorf("site_key is required when captcha is enabled")
-	}
-	if strings.TrimSpace(cfg.SecretKey) == "" {
-		return fmt.Errorf("secret_key is required when captcha is enabled")
+	// Credentials ARE the enablement signal — a half-configured pair is the
+	// one state that can only be a mistake.
+	siteKey := strings.TrimSpace(cfg.SiteKey) != ""
+	secretKey := strings.TrimSpace(cfg.SecretKey) != ""
+	if siteKey != secretKey {
+		return fmt.Errorf("captcha requires BOTH site_key and secret_key (set both to enable, neither to disable)")
 	}
 	return nil
 }
@@ -1619,7 +1627,6 @@ func GetDefaultBillingConfig() *Config {
 			},
 		},
 		Captcha: &CaptchaConfig{
-			Enabled:  false,
 			Provider: CaptchaProviderTurnstile,
 		},
 		FeatureFlags: &FeatureFlags{

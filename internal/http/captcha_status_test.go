@@ -22,7 +22,6 @@ func TestCaptchaStatusReportsGlobalChallenge(t *testing.T) {
 
 	s := &Server{
 		cfg: &config.Config{Captcha: &config.CaptchaConfig{
-			Enabled:   true,
 			Provider:  config.CaptchaProviderTurnstile,
 			SiteKey:   "site-key",
 			SecretKey: "secret-key",
@@ -56,7 +55,6 @@ func TestCaptchaStatusReportsUserChallenge(t *testing.T) {
 
 	s := &Server{
 		cfg: &config.Config{Captcha: &config.CaptchaConfig{
-			Enabled:   true,
 			Provider:  config.CaptchaProviderTurnstile,
 			SiteKey:   "site-key",
 			SecretKey: "secret-key",
@@ -83,7 +81,7 @@ func TestCaptchaStatusReportsUserChallenge(t *testing.T) {
 
 func TestCaptchaStatusDisabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	s := &Server{cfg: &config.Config{Captcha: &config.CaptchaConfig{Enabled: false}}, captchaStore: captcha.NewChallengeStore(nil)}
+	s := &Server{cfg: &config.Config{Captcha: &config.CaptchaConfig{}}, captchaStore: captcha.NewChallengeStore(nil)}
 
 	r := gin.New()
 	r.GET("/v1/captcha/status", s.captchaStatusHandler)
@@ -99,7 +97,6 @@ func TestCaptchaStatusEmbeddedRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	s := &Server{
 		cfg: &config.Config{Captcha: &config.CaptchaConfig{
-			Enabled:   true,
 			Provider:  config.CaptchaProviderTurnstile,
 			SiteKey:   "site-key",
 			SecretKey: "secret-key",
@@ -123,7 +120,6 @@ func TestCaptchaStatusEmbeddedRoute(t *testing.T) {
 func TestCaptchaClientScriptIncludesProviderLoader(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	s := &Server{cfg: &config.Config{Captcha: &config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderHCaptcha,
 		SiteKey:   "site-key",
 		SecretKey: "secret-key",
@@ -147,7 +143,6 @@ func TestCaptchaClientScriptIncludesProviderLoader(t *testing.T) {
 func TestCaptchaClientScriptIncludesRecaptchaV3Execute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	s := &Server{cfg: &config.Config{Captcha: &config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderRecaptchaV3,
 		SiteKey:   "site-key",
 		SecretKey: "secret-key",
@@ -169,7 +164,7 @@ func TestCaptchaClientScriptIncludesRecaptchaV3Execute(t *testing.T) {
 
 func TestCaptchaClientScriptDisabledNoop(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	s := &Server{cfg: &config.Config{Captcha: &config.CaptchaConfig{Enabled: false}}}
+	s := &Server{cfg: &config.Config{Captcha: &config.CaptchaConfig{}}}
 
 	r := gin.New()
 	r.GET("/v1/captcha/client.js", s.captchaClientScriptHandler)

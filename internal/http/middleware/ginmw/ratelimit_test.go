@@ -50,7 +50,6 @@ func TestRateLimitEscalatesToCaptchaAfterExtremeHits(t *testing.T) {
 	verifier := &stubCaptchaVerifier{validToken: "valid-token"}
 	cfg := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
 	captchaCfg := &config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderTurnstile,
 		SiteKey:   "site-key",
 		SecretKey: "secret-key",
@@ -83,7 +82,6 @@ func TestRateLimitDoesNotCaptchaWebhookBucket(t *testing.T) {
 	challengeStore := captcha.NewChallengeStore(nil)
 	require.NoError(t, challengeStore.MarkChallenged(context.Background(), "ip:203.0.113.20", time.Minute))
 	captchaCfg := &config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderTurnstile,
 		SiteKey:   "site-key",
 		SecretKey: "secret-key",
@@ -110,7 +108,6 @@ func TestRateLimitCaptchaChallengeIsGlobalAcrossProtectedBuckets(t *testing.T) {
 		"default":  {RequestsPerMinute: 60},
 	}
 	captchaCfg := &config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderTurnstile,
 		SiteKey:   "site-key",
 		SecretKey: "secret-key",
@@ -141,7 +138,6 @@ func TestRateLimitCaptchaChallengeAppliesToDefaultAPIBucket(t *testing.T) {
 	require.NoError(t, challengeStore.MarkChallenged(context.Background(), "ip:203.0.113.10", time.Minute))
 	cfg := config.RateLimitsConfig{"default": {RequestsPerMinute: 60}}
 	captchaCfg := &config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderTurnstile,
 		SiteKey:   "site-key",
 		SecretKey: "secret-key",
@@ -159,7 +155,7 @@ func TestRateLimitCaptchaChallengeAppliesToDefaultAPIBucket(t *testing.T) {
 func TestRateLimitDoesNotLimitCaptchaStatusOrClientScript(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := config.RateLimitsConfig{"default": {RequestsPerMinute: 1}}
-	captchaCfg := &config.CaptchaConfig{Enabled: true, Provider: config.CaptchaProviderTurnstile, SiteKey: "site-key", SecretKey: "secret-key"}
+	captchaCfg := &config.CaptchaConfig{Provider: config.CaptchaProviderTurnstile, SiteKey: "site-key", SecretKey: "secret-key"}
 
 	r := gin.New()
 	r.Use(rateLimitWithDependencies(&cfg, captchaCfg, nil, NewRateLimitStore(), captcha.NewChallengeStore(nil), &stubCaptchaVerifier{validToken: "valid-token"}))
@@ -260,7 +256,6 @@ func TestRateLimitUserCaptchaChallengeFollowsUserAcrossIPs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
 	captchaCfg := &config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderTurnstile,
 		SiteKey:   "site-key",
 		SecretKey: "secret-key",
@@ -289,7 +284,6 @@ func TestRateLimitIPCaptchaChallengeFollowsIPAcrossUsers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
 	captchaCfg := &config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderTurnstile,
 		SiteKey:   "site-key",
 		SecretKey: "secret-key",
@@ -318,7 +312,6 @@ func TestRateLimitCaptchaSolveClearsIPAndUserSubjects(t *testing.T) {
 	verifier := &stubCaptchaVerifier{validToken: "valid-token"}
 	cfg := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 10}}
 	captchaCfg := &config.CaptchaConfig{
-		Enabled:   true,
 		Provider:  config.CaptchaProviderTurnstile,
 		SiteKey:   "site-key",
 		SecretKey: "secret-key",

@@ -143,7 +143,7 @@ func (s *Assembler) captchaStatusHandler(w http.ResponseWriter, r *http.Request)
 		cfg = s.Cfg.Captcha
 	}
 	resp := map[string]any{
-		"enabled":           cfg != nil && cfg.Enabled,
+		"enabled":           cfg.IsEnabled(),
 		"required":          false,
 		"token_header":      captcha.TokenHeader,
 		"client_script_url": captchaClientScriptURL(r),
@@ -151,7 +151,7 @@ func (s *Assembler) captchaStatusHandler(w http.ResponseWriter, r *http.Request)
 	if cfg != nil {
 		resp["provider"] = cfg.EffectiveProvider()
 	}
-	if cfg != nil && cfg.Enabled && s.CaptchaStore != nil {
+	if cfg.IsEnabled() && s.CaptchaStore != nil {
 		for _, subjectKey := range middleware.RateLimitSubjectKeysHTTP(r) {
 			challenged, err := s.CaptchaStore.IsChallenged(r.Context(), subjectKey)
 			if err != nil {
@@ -197,7 +197,7 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 }
 
 func buildCaptchaClientScript(cfg *config.CaptchaConfig) string {
-	enabled := cfg != nil && cfg.Enabled
+	enabled := cfg.IsEnabled()
 	provider := ""
 	siteKey := ""
 	scriptURL := ""
