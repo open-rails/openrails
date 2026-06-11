@@ -394,7 +394,7 @@ func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollup
 
 // ResourceRevenueDailyRow is one day's revenue (micros) for an endpoint.
 type ResourceRevenueDailyRow struct {
-	Date             string `json:"date"`
+	Date         string `json:"date"`
 	AmountMicros int64  `json:"amount_micros"`
 }
 
@@ -572,6 +572,58 @@ func (s *Service) ListActiveEntitlementRecordsForTenantSubject(ctx context.Conte
 			CreatedAt:       e.CreatedAt,
 			UpdatedAt:       e.UpdatedAt,
 		})
+	}
+	return out, nil
+}
+
+// EntitlementsBatchMaxSubjects bounds one batch read (#354); over-cap is an
+// explicit error at the edge, never a silent truncation. Shared by the
+// standalone handler and the embedded transport.
+const EntitlementsBatchMaxSubjects = 500
+
+// ListActiveEntitlementRecordsByExternalSubjects (#354): active rows for many
+// external subjects of one (ambient-tenant, issuer) in one query, grouped by
+// subject; subjects with no rows are absent. Callers trim/dedupe/cap.
+func (s *Service) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
+	issuer = strings.TrimSpace(issuer)
+	if issuer == "" {
+		return nil, fmt.Errorf("issuer required")
+	}
+	if len(subjects) == 0 {
+		return map[string][]EntitlementRecord{}, nil
+	}
+	if at.IsZero() {
+		at = s.now().UTC()
+	}
+	grouped, err := s.entitlementService().ListActiveRecordsByExternalSubjects(ctx, issuer, subjects, at.UTC())
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]EntitlementRecord, len(grouped))
+	for subject, records := range grouped {
+		rs := make([]EntitlementRecord, 0, len(records))
+		for _, e := range records {
+			reason := (*string)(nil)
+			if e.RevokeReason != nil {
+				v := string(*e.RevokeReason)
+				reason = &v
+			}
+			rs = append(rs, EntitlementRecord{
+				ID:              e.ID,
+				TenantSubjectID: e.TenantSubjectID,
+				UserID:          e.TenantSubjectID.String(),
+				Entitlement:     e.Entitlement,
+				StartAt:         e.StartAt,
+				EndAt:           e.EndAt,
+				SourceID:        e.SourceID,
+				SourceType:      string(e.SourceType),
+				RevokedAt:       e.RevokedAt,
+				RevokeReason:    reason,
+				CreatedAt:       e.CreatedAt,
+				UpdatedAt:       e.UpdatedAt,
+			})
+		}
+		out[subject] = rs
 	}
 	return out, nil
 }

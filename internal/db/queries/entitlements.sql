@@ -392,3 +392,20 @@ WHERE ent.tenant_subject_id = $1
   AND ent.start_at > sqlc.arg(now)::timestamptz
   AND (sqlc.narg(source_type)::text IS NULL OR ent.source_type = sqlc.narg(source_type)::text)
   AND (sqlc.narg(source_id)::uuid IS NULL OR ent.source_id = sqlc.narg(source_id)::uuid);
+
+-- name: ListActiveEntitlementRecordsByExternalSubjects :many
+-- Batch read (#354): active entitlement rows for MANY external subjects of one
+-- (tenant, issuer) in ONE query — the list-shaped consumers' answer to N
+-- per-subject round trips. Subjects with no active rows simply do not appear;
+-- the handler/SDK reconstruct empty entries per requested subject.
+SELECT ts.subject AS external_subject, ent.* FROM billing.entitlements ent
+JOIN billing.tenant_subjects ts ON ts.id = ent.tenant_subject_id
+WHERE ts.tenant_id = sqlc.arg(tenant_id)
+  AND ts.issuer = sqlc.arg(issuer)
+  AND ts.subject = ANY(sqlc.arg(subjects)::text[])
+  AND ent.tenant_id = sqlc.arg(tenant_id)
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at <= sqlc.arg(at)::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
+ORDER BY ts.subject, ent.start_at ASC;

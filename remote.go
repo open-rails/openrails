@@ -459,6 +459,26 @@ func (c *remote) ListActiveEntitlements(ctx context.Context, issuer, subject str
 	return out, nil
 }
 
+// ListActiveEntitlementsBatch implements Client (handler
+// ServiceGetExternalSubjectEntitlementsBatch, entitlements.go).
+func (c *remote) ListActiveEntitlementsBatch(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
+	body := map[string]any{
+		"issuer":   strings.TrimSpace(issuer),
+		"subjects": subjects,
+	}
+	if !at.IsZero() {
+		body["at"] = at.UTC().Format(time.RFC3339)
+	}
+	var out map[string][]EntitlementRecord
+	if err := c.do(ctx, http.MethodPost, "/v1/service/tenant-subjects/by-external-subject/entitlements/batch", body, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = map[string][]EntitlementRecord{}
+	}
+	return out, nil
+}
+
 // ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).
 func (c *remote) ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error) {
 	body := map[string]any{

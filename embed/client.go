@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -712,6 +713,10 @@ func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer, subjec
 	if err != nil {
 		return nil, internalErr("failed to fetch entitlements")
 	}
+	return wireEntitlementRecords(recs), nil
+}
+
+func wireEntitlementRecords(recs []billingservice.EntitlementRecord) []openrails.EntitlementRecord {
 	out := make([]openrails.EntitlementRecord, 0, len(recs))
 	for _, e := range recs {
 		rec := openrails.EntitlementRecord{
@@ -731,6 +736,48 @@ func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer, subjec
 			rec.SourceID = &sourceStr
 		}
 		out = append(out, rec)
+	}
+	return out
+}
+
+// ListActiveEntitlementsBatch transcribes
+// handlers.ServiceGetExternalSubjectEntitlementsBatch (entitlements.go):
+// trim + dedupe, cap, one query, an entry per requested subject. The
+// service-token scope gate is not transcribed — embedded hosts are the
+// principal.
+func (c *localClient) ListActiveEntitlementsBatch(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]openrails.EntitlementRecord, error) {
+	if strings.TrimSpace(issuer) == "" {
+		return nil, invalidErr("issuer required")
+	}
+	deduped := make([]string, 0, len(subjects))
+	seen := make(map[string]struct{}, len(subjects))
+	for _, s := range subjects {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		deduped = append(deduped, s)
+	}
+	if len(deduped) == 0 {
+		return nil, invalidErr("subjects required")
+	}
+	if len(deduped) > billingservice.EntitlementsBatchMaxSubjects {
+		return nil, invalidErr(fmt.Sprintf("too many subjects: %d > %d per call", len(deduped), billingservice.EntitlementsBatchMaxSubjects))
+	}
+	grouped, err := c.svc.ListActiveEntitlementRecordsByExternalSubjects(ctx, strings.TrimSpace(issuer), deduped, at)
+	if err != nil {
+		return nil, internalErr("failed to fetch entitlements")
+	}
+	out := make(map[string][]openrails.EntitlementRecord, len(deduped))
+	for _, s := range deduped {
+		out[s] = []openrails.EntitlementRecord{}
+	}
+	for subject, recs := range grouped {
+		out[subject] = wireEntitlementRecords(recs)
 	}
 	return out, nil
 }

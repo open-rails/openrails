@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"sort"
 	"testing"
@@ -259,6 +260,14 @@ type scriptResult struct {
 	Entitlements            []obsEntitlement
 	EntitlementsUnknown     int
 	ErrEntitlementsNoIssuer obsErr
+
+	// Batch entitlements (#354).
+	BatchEntitlements            []obsEntitlement
+	BatchUnknownEmpty            bool
+	BatchKeyCount                int
+	ErrBatchEntitlementsNoIssuer obsErr
+	ErrBatchEntitlementsEmpty    obsErr
+	ErrBatchEntitlementsOverCap  obsErr
 }
 
 type obsEntitlement struct {
@@ -727,6 +736,27 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.ListActiveEntitlements(ctx, "", env.subject, time.Time{})
 	r.ErrEntitlementsNoIssuer = observeErr(t, env.side+" entitlements without issuer", err)
 
+	// 21) Batch entitlements (#354): seeded subject + an unknown one in one
+	// call (dupes deduped), an entry per requested subject, plus the
+	// no-issuer / empty-subjects / over-cap validation errors.
+	batch, err := c.ListActiveEntitlementsBatch(ctx, env.issuer,
+		[]string{env.subject, " " + env.subject, "ghost-" + env.subject}, time.Time{})
+	require.NoError(t, err, "%s entitlements batch", env.side)
+	r.BatchEntitlements = observeEntitlements(batch[env.subject], env.payer)
+	ghostRecs, ghostPresent := batch["ghost-"+env.subject]
+	r.BatchUnknownEmpty = ghostPresent && len(ghostRecs) == 0
+	r.BatchKeyCount = len(batch)
+	_, err = c.ListActiveEntitlementsBatch(ctx, "", []string{env.subject}, time.Time{})
+	r.ErrBatchEntitlementsNoIssuer = observeErr(t, env.side+" entitlements batch without issuer", err)
+	_, err = c.ListActiveEntitlementsBatch(ctx, env.issuer, []string{" ", ""}, time.Time{})
+	r.ErrBatchEntitlementsEmpty = observeErr(t, env.side+" entitlements batch empty subjects", err)
+	overCap := make([]string, 501)
+	for i := range overCap {
+		overCap[i] = fmt.Sprintf("s-%d", i)
+	}
+	_, err = c.ListActiveEntitlementsBatch(ctx, env.issuer, overCap, time.Time{})
+	r.ErrBatchEntitlementsOverCap = observeErr(t, env.side+" entitlements batch over cap", err)
+
 	return r
 }
 
@@ -797,17 +827,25 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 		openrails.WithTimeout(30*time.Second),
 	)
 
-	newPayer := func(side string) uuid.UUID {
+	const issuer = "conformance"
+	newPayer := func(side string) (uuid.UUID, string) {
 		id := uuid.New()
+		subject := side + "-" + id.String()
 		_, err := pool.Exec(ctx, `
 			INSERT INTO billing.tenant_subjects (id, tenant_id, issuer, subject, created_at, last_seen_at)
 			VALUES ($1, $2, $3, $4, now(), now())`,
-			id, tenant.DefaultID.UUID(), "conformance", side+"-"+id.String())
+			id, tenant.DefaultID.UUID(), issuer, subject)
 		require.NoError(t, err)
-		return id
+		// One active entitlement row for the entitlements steps.
+		_, err = pool.Exec(ctx, `
+			INSERT INTO billing.entitlements (id, tenant_id, tenant_subject_id, entitlement, start_at, source_id, source_type)
+			VALUES ($1, $2, $3, 'premium', now() - interval '1 hour', $4, 'admin')`,
+			uuid.New(), tenant.DefaultID.UUID(), id, uuid.New())
+		require.NoError(t, err)
+		return id, subject
 	}
-	payerLocal := newPayer("local")
-	payerRemote := newPayer("remote")
+	payerLocal, subjectLocal := newPayer("local")
+	payerRemote, subjectRemote := newPayer("remote")
 
 	from := time.Now().Add(-time.Hour).UTC()
 	to := time.Now().Add(time.Hour).UTC()
@@ -815,10 +853,12 @@ func TestConformance_EmbeddedAndRemoteAreObservablyIdentical(t *testing.T) {
 	resLocal := runScript(t, ctx, local, scriptEnv{
 		payer: payerLocal, actor: "user:conf", creditType: creditType,
 		resource: "ep-local", side: "local", from: from, to: to,
+		issuer: issuer, subject: subjectLocal,
 	})
 	resRemote := runScript(t, ctx, remote, scriptEnv{
 		payer: payerRemote, actor: "user:conf", creditType: creditType,
 		resource: "ep-remote", side: "remote", from: from, to: to,
+		issuer: issuer, subject: subjectRemote,
 	})
 
 	// THE assertion: identical observable behavior across transports.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const acquireEntitlementTimelineLock = `-- name: AcquireEntitlementTimelineLock :exec
@@ -554,6 +555,90 @@ func (q *Queries) ListActiveEntitlementRecords(ctx context.Context, arg ListActi
 	for rows.Next() {
 		var i BillingEntitlement
 		if err := rows.Scan(
+			&i.ID,
+			&i.Entitlement,
+			&i.StartAt,
+			&i.EndAt,
+			&i.SourceID,
+			&i.SourceType,
+			&i.RevokedAt,
+			&i.RevokeReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.Period,
+			&i.TenantID,
+			&i.TenantSubjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveEntitlementRecordsByExternalSubjects = `-- name: ListActiveEntitlementRecordsByExternalSubjects :many
+SELECT ts.subject AS external_subject, ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.tenant_id, ent.tenant_subject_id FROM billing.entitlements ent
+JOIN billing.tenant_subjects ts ON ts.id = ent.tenant_subject_id
+WHERE ts.tenant_id = $1
+  AND ts.issuer = $2
+  AND ts.subject = ANY($3::text[])
+  AND ent.tenant_id = $1
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at <= $4::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at > $4::timestamptz)
+ORDER BY ts.subject, ent.start_at ASC
+`
+
+type ListActiveEntitlementRecordsByExternalSubjectsParams struct {
+	TenantID uuid.UUID
+	Issuer   string
+	Subjects []string
+	At       time.Time
+}
+
+type ListActiveEntitlementRecordsByExternalSubjectsRow struct {
+	ExternalSubject string
+	ID              uuid.UUID
+	Entitlement     string
+	StartAt         time.Time
+	EndAt           *time.Time
+	SourceID        uuid.UUID
+	SourceType      string
+	RevokedAt       *time.Time
+	RevokeReason    *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
+	Period          pgtype.Range[pgtype.Timestamptz]
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+}
+
+// Batch read (#354): active entitlement rows for MANY external subjects of one
+// (tenant, issuer) in ONE query — the list-shaped consumers' answer to N
+// per-subject round trips. Subjects with no active rows simply do not appear;
+// the handler/SDK reconstruct empty entries per requested subject.
+func (q *Queries) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Context, arg ListActiveEntitlementRecordsByExternalSubjectsParams) ([]ListActiveEntitlementRecordsByExternalSubjectsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveEntitlementRecordsByExternalSubjects,
+		arg.TenantID,
+		arg.Issuer,
+		arg.Subjects,
+		arg.At,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveEntitlementRecordsByExternalSubjectsRow
+	for rows.Next() {
+		var i ListActiveEntitlementRecordsByExternalSubjectsRow
+		if err := rows.Scan(
+			&i.ExternalSubject,
 			&i.ID,
 			&i.Entitlement,
 			&i.StartAt,

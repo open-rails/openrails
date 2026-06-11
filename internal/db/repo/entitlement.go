@@ -181,6 +181,44 @@ func (r *EntitlementRepo) ListActiveRecordsByTenantSubject(ctx context.Context, 
 	return entitlementsFromGen(rows), nil
 }
 
+// ListActiveRecordsByExternalSubjects (#354): one query, grouped by subject;
+// subjects with no active rows are absent from the map.
+func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
+	rows, err := r.db.Gen(ctx).ListActiveEntitlementRecordsByExternalSubjects(ctx, gen.ListActiveEntitlementRecordsByExternalSubjectsParams{
+		TenantID: tenant.FromContextOrDefault(ctx).UUID(),
+		Issuer:   issuer,
+		Subjects: subjects,
+		At:       at,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]models.Entitlement, len(rows))
+	for _, row := range rows {
+		sourceID := row.SourceID
+		m := models.Entitlement{
+			ID:              row.ID,
+			TenantID:        row.TenantID,
+			TenantSubjectID: row.TenantSubjectID,
+			Entitlement:     row.Entitlement,
+			StartAt:         row.StartAt,
+			EndAt:           row.EndAt,
+			SourceID:        &sourceID,
+			SourceType:      models.EntitlementSourceType(row.SourceType),
+			RevokedAt:       row.RevokedAt,
+			CreatedAt:       row.CreatedAt,
+			UpdatedAt:       row.UpdatedAt,
+			DeletedAt:       row.DeletedAt,
+		}
+		if row.RevokeReason != nil {
+			rr := models.EntitlementRevokeReason(*row.RevokeReason)
+			m.RevokeReason = &rr
+		}
+		out[row.ExternalSubject] = append(out[row.ExternalSubject], m)
+	}
+	return out, nil
+}
+
 func (r *EntitlementRepo) ListDistinctEntitlementNamesBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID) ([]string, error) {
 	return r.db.Gen(ctx).ListDistinctEntitlementNamesBySource(ctx, gen.ListDistinctEntitlementNamesBySourceParams{
 		SourceType: string(sourceType),

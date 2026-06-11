@@ -80,6 +80,11 @@ func RegisterServiceRoutes(group *gin.RouterGroup, rt *app.Runtime, oatMW gin.Ha
 		ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead),
 		wrap(httphandlers.ServiceGetExternalSubjectEntitlements),
 	)
+	// Batch variant (#354): one issuer, many subjects, one query.
+	group.POST("/tenant-subjects/by-external-subject/entitlements/batch",
+		ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead),
+		wrap(httphandlers.ServiceGetExternalSubjectEntitlementsBatch),
+	)
 
 	tenantSubjects := group.Group("/tenant-subjects/:tenant_subject_id")
 	tenantSubjects.GET("/entitlements", ginmw.RequireServiceTokenPermission(controlplane.PermEntitlementsRead), wrap(httphandlers.ServiceGetTenantSubjectEntitlements))

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -130,6 +131,86 @@ func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
 		return
 	}
 	r.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements))
+}
+
+type serviceExternalSubjectEntitlementsBatchRequest struct {
+	Issuer   string   `json:"issuer"`
+	Subjects []string `json:"subjects"`
+	At       string   `json:"at,omitempty"` // RFC3339; empty = now
+}
+
+// ServiceGetExternalSubjectEntitlementsBatch (#354): one query answers many
+// subjects. Response is keyed by subject with an entry per requested subject
+// (unknown = [], never an error) after trim + dedupe; over-cap is a 400.
+func ServiceGetExternalSubjectEntitlementsBatch(r *httprequest.Request) {
+	var req serviceExternalSubjectEntitlementsBatchRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	issuer := strings.TrimSpace(req.Issuer)
+	if issuer == "" {
+		r.ErrorJSON(http.StatusBadRequest, "issuer required")
+		return
+	}
+	subjects := make([]string, 0, len(req.Subjects))
+	seen := make(map[string]struct{}, len(req.Subjects))
+	for _, s := range req.Subjects {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		subjects = append(subjects, s)
+	}
+	if len(subjects) == 0 {
+		r.ErrorJSON(http.StatusBadRequest, "subjects required")
+		return
+	}
+	if len(subjects) > billingservice.EntitlementsBatchMaxSubjects {
+		r.ErrorJSON(http.StatusBadRequest, fmt.Sprintf("too many subjects: %d > %d per call", len(subjects), billingservice.EntitlementsBatchMaxSubjects))
+		return
+	}
+	at := r.Clock.Now()
+	if raw := strings.TrimSpace(req.At); raw != "" {
+		parsed, err := timeutil.ParseRFC3339UTC(raw)
+		if err != nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
+			return
+		}
+		at = parsed
+	}
+
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	grouped, err := svc.ListActiveEntitlementRecordsByExternalSubjects(r.Request.Context(), issuer, subjects, at)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
+		return
+	}
+	// Same gate as the single route: a subject-scoped token reads only its own
+	// subject. All records of one subject share a tenant_subject id.
+	for _, records := range grouped {
+		if len(records) == 0 {
+			continue
+		}
+		if !requireServiceTenantSubjectScope(r, identity.TenantSubjectID(records[0].TenantSubjectID)) {
+			return
+		}
+	}
+	out := make(map[string][]ServiceEntitlementRecord, len(subjects))
+	for _, s := range subjects {
+		out[s] = []ServiceEntitlementRecord{}
+	}
+	for subject, records := range grouped {
+		out[subject] = serviceEntitlementRecordsFromService(records)
+	}
+	r.JSON(http.StatusOK, out)
 }
 
 func serviceEntitlementQueryTime(r *httprequest.Request) (time.Time, bool) {

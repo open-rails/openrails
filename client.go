@@ -91,6 +91,11 @@ type Client interface {
 	// names into your access token's claims and gate per-request from the
 	// token, not from this call.
 	ListActiveEntitlements(ctx context.Context, issuer, subject string, at time.Time) ([]EntitlementRecord, error)
+	// ListActiveEntitlementsBatch (#354): many subjects of one issuer in one
+	// call, for list renders. Subjects are trimmed + deduped; the result has an
+	// entry per requested subject (unknown = empty slice, never an error).
+	// Max 500 subjects per call — over-cap errors, never silently truncates.
+	ListActiveEntitlementsBatch(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error)
 	// OpenWindow opens a prepaid credit window (#335): a REAL hold — the funds
 	// leave the payer's available balance now. ErrInsufficientCredits on a payer
 	// who can't cover it.
