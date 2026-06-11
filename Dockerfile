@@ -27,15 +27,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Copy source code
 COPY . .
 
-# go.mod replaces authkit with a local checkout while an unpublished version is
-# co-developed. Builds therefore need the `authkit` additional build context —
-# docker compose passes ../authkit (additional_contexts); for plain docker use:
-#   docker build --build-context authkit=../authkit .
-# The checkout is materialized at a stable in-image path and the replace is
-# repointed there, so the host path in go.mod doesn't have to exist in-container.
-COPY --from=authkit . /authkit
-RUN go mod edit -replace github.com/open-rails/authkit=/authkit
-
 # Build the application with cache mount
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \

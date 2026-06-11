@@ -18,7 +18,7 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/lib/pq v1.10.9
-	github.com/open-rails/authkit v0.17.0
+	github.com/open-rails/authkit v0.18.2
 	github.com/open-rails/migratekit v1.1.0
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/riverqueue/river v0.26.0
@@ -186,5 +186,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/open-rails/authkit => /home/fidika/authkit
