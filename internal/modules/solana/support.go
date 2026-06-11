@@ -138,12 +138,14 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol string, tokenCfg confi
 	if strings.TrimSpace(tokenCfg.Mint) == "" {
 		return nil, fmt.Errorf("token %s missing mint configuration", tokenSymbol)
 	}
-	// Stablecoins are treated as $1.00 (no sub-penny price noise). A divergence
-	// failsafe (rarely triggered) consults the price feed when one exists: if the
-	// stablecoin has depegged beyond the tolerance, the live price is used so the
-	// charge compensates. Non-stablecoins (SOL, ...) always require a live price.
+	// USD-pegged stablecoins are treated as $1.00 (no sub-penny price noise). A
+	// divergence failsafe (rarely triggered) consults the price feed when one
+	// exists: if the stablecoin has depegged beyond the tolerance, the live price
+	// is used so the charge compensates. The check is mint-aware (#360) so a
+	// custom-symbol token pointing at a known USD-pegged mint still gets parity
+	// pricing. Everything else (SOL, EURC, ...) always requires a live price.
 	var tokenPriceUSD float64
-	if config.IsStablecoin(tokenSymbol) {
+	if config.IsUSDPeggedToken(tokenSymbol, tokenCfg.Mint) {
 		tokenPriceUSD = stablecoinPriceUSD(ctx, tokenSymbol, priceProvider)
 	} else {
 		if priceProvider == nil {

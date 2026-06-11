@@ -84,6 +84,21 @@ func effectiveSolanaNetwork(cfg *config.Config) string {
 	return "mainnet"
 }
 
+// configureSolanaProcessor normalizes the Solana token set and applies the
+// pricing policy (#360). It NEVER fails the boot over token configuration —
+// tokens that cannot function are dropped with a loud warning, mirroring the
+// "recipient_wallet not configured; Solana payments disabled" pattern:
+//
+//   - devnet (test_env): NO pricing requirements at all — devnet money is fake.
+//   - mainnet, Pyth feed exists for the symbol: feed pricing (for stablecoins
+//     the feed is the depeg failsafe).
+//   - mainnet, known USD-pegged stablecoin mint without a feed: kept, priced
+//     at $1.00 parity, LOUD warning (no depeg protection).
+//   - mainnet, non-USD-pegged stablecoin (e.g. EURC) or unknown token without
+//     a feed: that TOKEN is disabled with a loud warning; everything else
+//     keeps working.
+//
+// The error return is retained for signature stability; it is always nil.
 func configureSolanaProcessor(cfg *config.Config) error {
 	if cfg == nil {
 		return nil
@@ -97,30 +112,68 @@ func configureSolanaProcessor(cfg *config.Config) error {
 		proc.Tokens = config.TokensForNetwork(proc.Network)
 	}
 
-	priceFeeds := config.DefaultPythPriceFeeds()
-
 	normalized := make(map[string]config.TokenConfig, len(proc.Tokens))
 	for symbol, token := range proc.Tokens {
 		normalizedSymbol := strings.ToUpper(strings.TrimSpace(symbol))
 		if normalizedSymbol == "" {
-			return fmt.Errorf("solana token symbol cannot be empty")
+			log.Warn("⚠️  solana token with empty symbol in configuration; entry dropped")
+			continue
 		}
 		if strings.TrimSpace(token.Mint) == "" {
-			return fmt.Errorf("solana token %s missing mint", normalizedSymbol)
+			log.Warnf("⚠️  solana token %s has no mint configured; payments in %s unavailable", normalizedSymbol, normalizedSymbol)
+			continue
 		}
 		if token.Decimals < 0 {
-			return fmt.Errorf("solana token %s has invalid decimals", normalizedSymbol)
+			log.Warnf("⚠️  solana token %s has invalid decimals (%d); payments in %s unavailable", normalizedSymbol, token.Decimals, normalizedSymbol)
+			continue
 		}
 		if strings.TrimSpace(token.Name) == "" {
 			token.Name = normalizedSymbol
 		}
-		if strings.TrimSpace(priceFeeds[normalizedSymbol]) == "" {
-			return fmt.Errorf("solana token %s missing pyth price feed", normalizedSymbol)
+
+		// Pricing policy applies to MAINNET only: devnet money is fake, so a
+		// devnet deployment never needs price feeds (or Hermes) at all.
+		if proc.Network != "devnet" {
+			switch decision, sc := config.ClassifySolanaTokenPricing(normalizedSymbol, token.Mint); decision {
+			case config.TokenPricingFeed:
+				// Live Pyth pricing; for stablecoins the feed doubles as the
+				// depeg failsafe.
+			case config.TokenPricingUSDParity:
+				log.Warnf("⚠️  solana token %s has no pyth price feed; degrading to $1.00 USD parity (known USD-pegged stablecoin, NO depeg protection)", normalizedSymbol)
+			case config.TokenPricingDisabled:
+				if sc.Symbol != "" {
+					log.Warnf("⚠️  solana token %s is pegged to %s and has no price feed; payments in %s unavailable (cannot default a non-USD peg to USD parity)", normalizedSymbol, strings.ToUpper(sc.Peg), normalizedSymbol)
+				} else {
+					log.Warnf("⚠️  solana token %s has no pyth price feed and is not a known stablecoin; payments in %s unavailable", normalizedSymbol, normalizedSymbol)
+				}
+				continue
+			}
 		}
 		normalized[normalizedSymbol] = token
 	}
 	proc.Tokens = normalized
 	return nil
+}
+
+// devnetParityPriceProvider wraps the Pyth client under test_env (#360).
+// Devnet money is fake and a devnet deployment must never require Hermes:
+// feed-backed symbols are still priced via Hermes when it is reachable
+// (realistic SOL quotes), but ANY failure — missing feed, network error,
+// staleness — degrades to $1.00 parity instead of erroring.
+type devnetParityPriceProvider struct {
+	inner solanamodule.TokenPriceProvider
+}
+
+func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) (float64, error) {
+	if p.inner != nil {
+		if price, err := p.inner.PriceUSD(ctx, symbol); err == nil && price > 0 {
+			return price, nil
+		} else if err != nil {
+			log.WithError(err).WithField("token", symbol).
+				Debug("devnet: pyth price unavailable; using $1.00 parity (fake money)")
+		}
+	}
+	return 1.0, nil
 }
 
 func createPythPriceProvider(cfg *config.Config) (solanamodule.TokenPriceProvider, error) {
@@ -145,6 +198,9 @@ func createPythPriceProvider(cfg *config.Config) (solanamodule.TokenPriceProvide
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create pyth client: %w", err)
+	}
+	if effectiveSolanaNetwork(cfg) == "devnet" {
+		return devnetParityPriceProvider{inner: client}, nil
 	}
 	return client, nil
 }

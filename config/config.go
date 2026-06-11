@@ -1048,13 +1048,6 @@ func (c *CaptchaConfig) EffectiveChallengeBuckets() []string {
 	return []string{"checkout", "payment-methods", "subscriptions"}
 }
 
-func parseDurationDefault(raw string, fallback time.Duration) time.Duration {
-	d, err := time.ParseDuration(strings.TrimSpace(raw))
-	if err != nil || d <= 0 {
-		return fallback
-	}
-	return d
-}
 
 // Validate validates the billing configuration
 func Validate(cfg *Config) error {
@@ -1177,33 +1170,7 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 	return nil
 }
 
-func validateHTTPSURL(name, rawURL string) error {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("invalid %s: %w", name, err)
-	}
-	if parsed.Scheme != "https" {
-		return fmt.Errorf("%s must use https", name)
-	}
-	if parsed.Host == "" {
-		return fmt.Errorf("%s must include a host", name)
-	}
-	return nil
-}
 
-func validateOptionalDuration(name, raw string) error {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	d, err := time.ParseDuration(strings.TrimSpace(raw))
-	if err != nil {
-		return fmt.Errorf("invalid %s: %w", name, err)
-	}
-	if d <= 0 {
-		return fmt.Errorf("%s must be positive", name)
-	}
-	return nil
-}
 
 // validateStripeKeyForTestEnv checks if the Stripe API key prefix matches the
 // test_env axis. If there's a mismatch, it logs a warning and clears the key to
@@ -1325,22 +1292,43 @@ func validateStripeProcessor(name string, proc *ProcessorConfig, isDev bool) err
 	return nil
 }
 
-// validateSolanaProcessor validates a Solana-type processor
+// validateSolanaProcessor validates a Solana-type processor. Solana token
+// misconfiguration NEVER fails the boot (#360): tokens that cannot be priced
+// degrade per the policy in ClassifySolanaTokenPricing (USD-pegged stablecoins
+// fall back to $1.00 parity; everything else is disabled per-token), mirroring
+// the recipient_wallet pattern below. The authoritative pass — including the
+// actual dropping of unpriceable tokens — happens at runtime in
+// configureSolanaProcessor, because an EMPTY token map is only defaulted there
+// (after Validate), so Validate never sees defaulted tokens; this sibling check
+// merely surfaces the same warnings early for explicitly-configured tokens.
 func validateSolanaProcessor(cfg *Config, name string, proc *ProcessorConfig, isDev bool) error {
+	_ = isDev
 	if strings.TrimSpace(proc.RecipientWallet) == "" {
 		log.Warnf("processor '%s' (solana): recipient_wallet not configured; Solana payments disabled", name)
 	}
+	// Pricing applies to MAINNET only. Under test_env (=> devnet) money is
+	// fake and there is no feed requirement at all.
+	if cfg.IsTestEnv() {
+		return nil
+	}
 	// Pyth is NOT configurable (#352): Hermes URL, freshness bounds and the
-	// price-feed map are protocol constants (DefaultPyth*). Tokens are limited
-	// to symbols those hardcoded feeds cover.
-	feeds := DefaultPythPriceFeeds()
-	for symbol := range proc.Tokens {
+	// price-feed map are protocol constants (DefaultPyth*).
+	for symbol, token := range proc.Tokens {
 		normalized := strings.ToUpper(strings.TrimSpace(symbol))
 		if normalized == "" {
-			return fmt.Errorf("processor '%s' (solana): token symbol cannot be empty", name)
+			log.Warnf("processor '%s' (solana): token with empty symbol will be dropped at startup", name)
+			continue
 		}
-		if strings.TrimSpace(feeds[normalized]) == "" {
-			return fmt.Errorf("processor '%s' (solana): token %s has no built-in pyth price feed", name, normalized)
+		switch decision, sc := ClassifySolanaTokenPricing(normalized, token.Mint); decision {
+		case TokenPricingFeed:
+		case TokenPricingUSDParity:
+			log.Warnf("⚠️  processor '%s' (solana): token %s has no pyth price feed; will degrade to $1.00 USD parity (known USD-pegged stablecoin, NO depeg protection)", name, normalized)
+		case TokenPricingDisabled:
+			if sc.Symbol != "" {
+				log.Warnf("⚠️  processor '%s' (solana): token %s is pegged to %s and has no price feed; payments in %s will be unavailable", name, normalized, strings.ToUpper(sc.Peg), normalized)
+			} else {
+				log.Warnf("⚠️  processor '%s' (solana): token %s has no pyth price feed and is not a known stablecoin; payments in %s will be unavailable", name, normalized, normalized)
+			}
 		}
 	}
 

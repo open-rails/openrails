@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 360
+next_id: 361
 
 ---
 
@@ -1296,4 +1296,140 @@ Consequences:
 - [x] dunningSchedule(cycleDays) + delete the constants and the dunning_window_days knob (config, accessors, validation, docs, env example)
 - [x] FailMembership + DunningWorker consume the schedule (retry scheduling, terminal check, derived staleness window)
 - [x] Tests: tier table (1d/7d/30d/365d + boundary cases), window derivation, integration regression (existing window tests adapted to derived windows)
+---
+
+# #360: solana-token-pricing-degrade-not-die
+
+**Completed:** code done 2026-06-11 (unit-tested; live doujins redeploy pending)
+**Status:** IMPLEMENTED 2026-06-11: boot never fails over Solana token pricing; USD1/USDG Pyth feeds added (verified); stablecoin registry + mainnet pricing policy landed; doujins crash-loop fix is a rebuild of the openrails image.
+
+## Metadata
+
+- Category: incident / bug
+- Status: implemented
+- Passes: true (unit suites; live verification on doujins pending redeploy)
+
+## Incident
+
+doujins compose stack: all openrails replicas crash-looped at boot with
+`bootstrap application: initialise runtime: solana token USD1 missing pyth price feed`
+(another replica said USDG — Go map iteration order is randomized, so each replica
+died on whichever unpriceable token it iterated first).
+
+## Root cause
+
+1. doujins configures NO Solana tokens — only `PROCESSORS_SOLANA_HELIUS_API_KEY`,
+   which creates the `processors.solana` entry with an EMPTY token map.
+2. `config.Validate` → `validateSolanaProcessor` loops over `proc.Tokens`; with an
+   empty map the feed check is vacuous → Validate passes. **This is the
+   Validate-ordering answer**: token DEFAULTING happens later, in
+   `configureSolanaProcessor` (buildRuntimeWithOverrides), AFTER Validate — so the
+   sibling check in config.go never sees the defaulted token set.
+3. At runtime `configureSolanaProcessor` filled the empty map with
+   `TokensForNetwork("mainnet")` (doujins is mainnet: its `test_mode: true` /
+   `TEST_MODE=true` knobs map to nothing — the #355 axis is `test_env`), which
+   includes USD1 + USDG (added pre-#352 as deliberately FEEDLESS $1-peg
+   stablecoins, see feedlessStablecoins in the old solana_tokens.go).
+4. #352 (0b503815) hardcoded `DefaultPythPriceFeeds` to SOL/USDC/PYUSD only and
+   made any token outside that map a FATAL boot error — contradicting the
+   feedless-stablecoin design in the same file. Result: every default mainnet
+   boot was a guaranteed crash-loop.
+5. Irony: doujins has no `recipient_wallet`, so Solana payments were already
+   disabled-with-warning — the container died pricing tokens for a feature that
+   was not even enabled.
+
+## Fix (three-policy, all-cases-boot)
+
+1. **Mainnet-only pricing.** Under test_env (network=devnet) there is NO feed
+   requirement: `configureSolanaProcessor` skips classification, and
+   `createPythPriceProvider` wraps the Pyth client in `devnetParityPriceProvider`
+   (any pricing failure → $1.00 parity; devnet never needs Hermes).
+2. **Stablecoins ≈ peg unless depegged.** New hardcoded registry
+   `config.knownStablecoins` (mint → peg; mint is the trust anchor so a token
+   merely NAMED "USDC" can't buy parity): USDC/USDT/PYUSD/USD1/USDG → usd,
+   EURC → eur. Mainnet policy via `config.ClassifySolanaTokenPricing`:
+   feed present → feed used (depeg failsafe); USD-pegged registry mint w/o feed
+   → kept at $1.00 parity with LOUD warning; quote path is now mint-aware
+   (`config.IsUSDPeggedToken` in CalculateTokenQuote).
+3. **Cross-currency pegs need pricing.** Non-USD-pegged stablecoin (EURC) w/o
+   feed → that TOKEN disabled with loud warning; unknown token w/o feed →
+   disabled too. Malformed entries (empty symbol/mint, bad decimals) → dropped
+   with warning. `validateSolanaProcessor` mirrors all of this WARN-ONLY.
+   In ALL cases the container boots (recipient_wallet pattern).
+
+`IsFeedlessStablecoin` is now DERIVED (registry ∧ no feed), so adding a feed
+auto-upgrades a coin to depeg-protected pricing.
+
+## USD1/USDG feed verdicts (verified 2026-06-11)
+
+Both have real, live Pyth mainnet feeds — added to `DefaultPythPriceFeeds`
+(this alone fixes doujins):
+
+- USD1 (Crypto.USD1/USD): `0a2425d43486780990d8b63543029e20556be51fd756cca584212f4d539611d4`
+- USDG (Crypto.USDG/USD): `daa58c6a3ce7d4b9c46c32a6e646012c17c4a2b24c08dd8c5e476118b855a7da`
+
+Source: Pyth's own Hermes registry (the API production consumes):
+`https://hermes.pyth.network/v2/price_feeds?query=USD1` (resp. `USDG`); live
+prices confirmed via `/v2/updates/price/latest` (USD1 ≈ $0.9988, USDG ≈ $1.0000,
+publish age 6s). EURC registry mint verified via Jupiter token API:
+`HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr` ($121M mcap, SPL Token program).
+
+## Boot-path fatal-vs-degrade audit (principle: feature-disabling config degrades; dangerous config stays fatal)
+
+| Check | Today | Verdict |
+|---|---|---|
+| Invalid/typo'd `mode` (Validate) | fatal | KEEP — typo must not silently run full behavior (#346) |
+| Invalid port | fatal | KEEP — nothing to degrade to |
+| `test_env` outside development | fatal | KEEP — sandbox creds in prod posture |
+| `mode` unset outside dev | fatal | KEEP — explicit posture required |
+| Default DB/ClickHouse creds outside dev | fatal | KEEP — dangerous |
+| Auth issuers/audience/CORS missing outside dev | fatal | KEEP — degrading = unauthenticated billing API |
+| Stripe live key under test_env | fatal | KEEP — real-money credential in sandbox (#347) |
+| Stripe test key under live | warn+disable | OK (already degrades) |
+| Stripe key missing | warn | OK (already degrades) |
+| NMI `security_key` missing (non-dev Validate) | fatal | SHOULD DEGRADE (disable that processor + loud warn) — inconsistent with Stripe sibling; follow-up, not changed here |
+| createNMIClients: empty security key (runtime, ANY env) | fatal | SHOULD DEGRADE — latent #352-style crash-loop: a half-configured NMI processor kills the container even in dev (Validate skips dev, runtime doesn't). Follow-up |
+| NMI probe = PRODUCTION creds under test_env | fatal | KEEP — real charges possible (#348) |
+| NMI probe inconclusive | warn | OK |
+| CCBill acc_num/sub_acc missing (non-dev) | fatal | SHOULD DEGRADE (feature-disabling) — follow-up |
+| CCBill DataLink half-pair | fatal | KEEP — half-configured pair is always a mistake (captcha precedent) |
+| CCBill config missing entirely | info+nil | OK (already degrades) |
+| Captcha half-pair / unknown provider | fatal | KEEP — ambiguous intent |
+| billing_hot_path unknown fail_policy | fatal | KEEP — fail-open/closed is a money/safety dial (#248) |
+| Unknown processor type / missing type | fatal | KEEP — typo'd config |
+| DB unreachable / URL undetermined / migrations unapplied | fatal | KEEP — core dependency. Wart: validateDatabase uses `log.Fatal` (os.Exit) instead of returning the error |
+| RLS posture violation with RequireRLS | fatal | KEEP — tenant isolation (#227) |
+| River producer pool failure | fatal | KEEP — DB again |
+| Redis ping failure / unconfigured | warn+permissive | OK (already degrades) |
+| ClickHouse init/migrations failure | warn, analytics off | OK |
+| EmailService init failure | warn, email off | OK |
+| Solana recipient_wallet missing | warn, payments off | OK (the pattern this fix mirrors) |
+| Solana token pricing (was: missing feed) | WAS fatal | FIXED → degrade per policy above |
+
+## Doujins-side recommendation (NOT applied — their repo untouched)
+
+- USD1/USDG come from OpenRails' own `DefaultSupportedTokens()` (mints
+  `USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB`,
+  `2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH`) — doujins configures no
+  tokens. **No doujins config change is required**: rebuild the openrails image
+  (compose builds from `../openrails`) and the stack boots.
+- Stale knob: `e2e/openrails.yaml` `test_mode: true` (top-level) and compose
+  `TEST_MODE=true` map to NOTHING since #355 — openrails there runs with live
+  credential posture + mainnet Solana. If sandbox semantics are intended (their
+  Mobius account IS sandbox), set `test_env: true` / `TEST_ENV=true` instead;
+  note that also derives devnet Solana (#349 — the axes are coupled by design).
+- `PROCESSORS_SOLANA_RECIPIENT_WALLET` is unset, so Solana payments are disabled
+  regardless; either configure the wallet or drop the Helius key if unused.
+
+**Tasks:**
+- [x] Root-cause the crash-loop incl. why Validate never fired (defaults injected post-Validate)
+- [x] Add verified USD1/USDG Pyth feed ids to DefaultPythPriceFeeds (Hermes-verified, live)
+- [x] Stablecoin registry (mint → peg) + ClassifySolanaTokenPricing policy
+- [x] configureSolanaProcessor: degrade-not-die (devnet exempt; parity; per-token disable)
+- [x] validateSolanaProcessor: warn-only mirror; createPythPriceProvider: devnet parity wrapper
+- [x] CalculateTokenQuote mint-aware USD-peg check
+- [x] Policy-matrix unit tests (config + app + solana module + pyth suites green)
+- [ ] Rebuild/redeploy doujins openrails image and confirm boot + supported-tokens endpoint
+- [ ] Follow-up: degrade NMI/CCBill missing-credential fatals (audit table) — separate issue if accepted
+
 ---
