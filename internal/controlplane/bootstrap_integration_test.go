@@ -292,40 +292,70 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestDelegatedTenantResolution exercises the AuthKit-tenant -> OpenRails-tenant mapping that
-// ResolveDelegated relies on for browser-direct delegated access tokens (issue
-// #222 browser tier): an active AuthKit tenant maps to its OpenRails tenant, while an unknown or
-// suspended AuthKit tenant is rejected as cross-tenant/unmapped. ResolveDelegated and
-// ResolveServiceToken share this exact mapping (tenantForAuthKitTenantSlug).
+// TestDelegatedTenantResolution exercises the AuthKit-tenant -> OpenRails-tenant
+// mapping ResolveServiceToken relies on (tenantForAuthKitTenant): resolution
+// prefers the IMMUTABLE AuthKit tenant uuid (authkit_tenant_id), falls back to
+// the MUTABLE slug only for legacy credentials or un-linked directory rows, and
+// rejects unknown or suspended AuthKit tenants as cross-tenant/unmapped.
 func TestDelegatedTenantResolution(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
 	cp := newEnabledControlPlane(t, pool)
 
-	// A second, suspended tenant owned by a distinct AuthKit tenant.
+	// A second, suspended tenant owned by a distinct AuthKit tenant (uuid+slug linked).
 	_, err := pool.Exec(ctx, `
-		INSERT INTO billing.tenants (id, slug, name, status, authkit_tenant_slug)
-		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'Acme', 'suspended', 'acme-org')
+		INSERT INTO billing.tenants (id, slug, name, status, authkit_tenant_id, authkit_tenant_slug)
+		VALUES ('00000000-0000-0000-0000-000000000002', 'acme', 'Acme', 'suspended', 'ak-acme-id', 'acme-org')
 		ON CONFLICT (id) DO NOTHING`)
 	require.NoError(t, err)
-	// Map the default tenant to an active AuthKit tenant so the happy path resolves.
+	// A third, active tenant written BEFORE the uuid dual-write: slug only, NULL uuid.
 	_, err = pool.Exec(ctx, `
-		UPDATE billing.tenants SET authkit_tenant_slug = 'default-org', status = 'active'
-		WHERE id = $1::uuid`, tenant.DefaultID.String())
+		INSERT INTO billing.tenants (id, slug, name, status, authkit_tenant_slug)
+		VALUES ('00000000-0000-0000-0000-000000000003', 'beta', 'Beta', 'active', 'beta-org')
+		ON CONFLICT (id) DO NOTHING`)
+	require.NoError(t, err)
+	// Map the default tenant to an active AuthKit tenant (uuid + slug) so the
+	// happy path resolves.
+	_, err = pool.Exec(ctx, `
+		UPDATE billing.tenants
+		   SET authkit_tenant_id = 'ak-default-id', authkit_tenant_slug = 'default-org', status = 'active'
+		 WHERE id = $1::uuid`, tenant.DefaultID.String())
 	require.NoError(t, err)
 
-	// Active AuthKit tenant -> its OpenRails tenant.
-	tid, slug, err := cp.tenantForAuthKitTenantSlug(ctx, "default-org")
+	// Immutable uuid -> its OpenRails tenant, even when the presented slug is
+	// stale (the AuthKit tenant was renamed): the uuid wins.
+	tid, slug, err := cp.tenantForAuthKitTenant(ctx, "ak-default-id", "renamed-org")
 	require.NoError(t, err)
 	require.Equal(t, tenant.DefaultID, tid)
 	require.Equal(t, "default", slug)
 
-	// Suspended tenant's AuthKit tenant -> cross-tenant/unmapped rejection.
-	_, _, err = cp.tenantForAuthKitTenantSlug(ctx, "acme-org")
+	// Legacy credential (no tenant_id claim): the slug lookup still resolves.
+	tid, slug, err = cp.tenantForAuthKitTenant(ctx, "", "default-org")
+	require.NoError(t, err)
+	require.Equal(t, tenant.DefaultID, tid)
+	require.Equal(t, "default", slug)
+
+	// uuid-carrying credential + un-linked directory row: slug fallback applies.
+	tid, slug, err = cp.tenantForAuthKitTenant(ctx, "ak-beta-id", "beta-org")
+	require.NoError(t, err)
+	require.Equal(t, "beta", slug)
+	require.Equal(t, "00000000-0000-0000-0000-000000000003", tid.String())
+
+	// An unmapped uuid must NOT reach a row already linked to a DIFFERENT
+	// AuthKit tenant through its mutable slug (slug-reassignment confusion).
+	_, _, err = cp.tenantForAuthKitTenant(ctx, "ak-other-id", "default-org")
+	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
+
+	// Suspended tenant -> cross-tenant/unmapped rejection, by uuid and by slug.
+	_, _, err = cp.tenantForAuthKitTenant(ctx, "ak-acme-id", "")
+	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
+	_, _, err = cp.tenantForAuthKitTenant(ctx, "", "acme-org")
 	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
 
 	// Unknown AuthKit tenant -> rejection.
-	_, _, err = cp.tenantForAuthKitTenantSlug(ctx, "nobody")
+	_, _, err = cp.tenantForAuthKitTenant(ctx, "", "nobody")
+	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
+	_, _, err = cp.tenantForAuthKitTenant(ctx, "", "")
 	require.ErrorIs(t, err, ErrServiceTokenTenantUnresolved)
 
 	// The control plane built a delegated verifier (browser-tier prerequisite).

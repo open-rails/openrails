@@ -26,7 +26,13 @@ const (
 // authorization needs: the owning AuthKit tenant, the resolved OpenRails tenant, and
 // the service token's granted OpenRails permission strings.
 type ResolvedServiceToken struct {
-	// AuthKitTenantSlug is the AuthKit tenant that owns the service token.
+	// AuthKitTenantID is the immutable AuthKit tenant uuid that owns the
+	// service token (claim/source `tenant_id`). It is the canonical
+	// cross-service identifier; empty for legacy credentials minted before
+	// AuthKit emitted it, and on the issuer-pinned service-JWT path.
+	AuthKitTenantID string
+	// AuthKitTenantSlug is the AuthKit tenant slug that owns the service
+	// token. Slugs are MUTABLE — presentation/audit only.
 	AuthKitTenantSlug string
 	// TenantID is the OpenRails tenant (#223) the service token administers.
 	TenantID tenant.ID
@@ -137,8 +143,10 @@ func (c *ControlPlane) LooksLikeServiceToken(token string) bool {
 //   - resolves key id + secret hash via AuthKit core (owning tenant, permissions,
 //     expiry, revocation, tenant-deleted) — returns authcore.ErrAccessTokenExpired /
 //     ErrAccessTokenRevoked / ErrInvalidAccessToken on those conditions,
-//   - maps the owning AuthKit tenant slug -> OpenRails tenant (#223) via the
-//     billing.tenants directory (authkit_tenant_slug).
+//   - maps the owning AuthKit tenant -> OpenRails tenant (#223) via the
+//     billing.tenants directory, preferring the IMMUTABLE AuthKit tenant uuid
+//     (authkit_tenant_id) and falling back to the mutable slug
+//     (authkit_tenant_slug) only for legacy state (see tenantForAuthKitTenant).
 //
 // A cross-tenant or unknown service-token tenant (no tenant directory row) yields
 // ErrServiceTokenTenantUnresolved so the caller can reject the request.
@@ -156,7 +164,7 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 		return nil, err
 	}
 
-	tid, tslug, err := c.tenantForAuthKitTenantSlug(ctx, resolved.TenantSlug)
+	tid, tslug, err := c.tenantForAuthKitTenant(ctx, resolved.TenantID, resolved.TenantSlug)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +173,7 @@ func (c *ControlPlane) ResolveServiceToken(ctx context.Context, token string) (*
 	}
 
 	return &ResolvedServiceToken{
+		AuthKitTenantID:   resolved.TenantID,
 		AuthKitTenantSlug: resolved.TenantSlug,
 		TenantID:          tid,
 		TenantSlug:        tslug,
@@ -218,19 +227,66 @@ func hasAnyResourceKind(resources []authcore.ServiceTokenResource, kind string) 
 	return false
 }
 
-// tenantForAuthKitTenantSlug maps an AuthKit tenant slug to its OpenRails tenant via the
-// billing.tenants directory. The operator tenant administers the default tenant;
-// future AuthKit tenants map to their own tenant rows. Suspended/deleted tenants
-// are rejected.
-func (c *ControlPlane) tenantForAuthKitTenantSlug(ctx context.Context, authKitTenantSlug string) (tenant.ID, string, error) {
+// tenantForAuthKitTenant maps a credential's owning AuthKit tenant to its
+// OpenRails tenant via the billing.tenants directory. The operator tenant
+// administers the default tenant; future AuthKit tenants map to their own
+// tenant rows. Suspended/deleted tenants are rejected.
+//
+// Resolution prefers the IMMUTABLE AuthKit tenant uuid (authkit_tenant_id);
+// the MUTABLE slug (authkit_tenant_slug) is consulted only when:
+//
+//   - the credential carries no uuid (minted by a pre-`tenant_id` AuthKit —
+//     such tokens circulate for months), or
+//   - the uuid matched no directory row AND the slug row is itself unlinked
+//     (authkit_tenant_id IS NULL, i.e. written before the uuid dual-write /
+//     backfill). A row already linked to a DIFFERENT AuthKit tenant must
+//     never be reachable through its mutable slug — that is exactly the
+//     slug-reassignment confusion this resolution order exists to prevent.
+func (c *ControlPlane) tenantForAuthKitTenant(ctx context.Context, authKitTenantID, authKitTenantSlug string) (tenant.ID, string, error) {
+	authKitTenantID = strings.TrimSpace(authKitTenantID)
 	authKitTenantSlug = strings.ToLower(strings.TrimSpace(authKitTenantSlug))
-	if authKitTenantSlug == "" {
-		return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
-	}
 	if c.pool == nil {
 		return tenant.ID{}, "", errors.New("controlplane: pgx pool unavailable for tenant resolution")
 	}
 
+	if authKitTenantID != "" {
+		tid, slug, err := c.tenantDirectoryRow(ctx, `authkit_tenant_id = $1`, authKitTenantID)
+		if err == nil {
+			return tid, slug, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return tenant.ID{}, "", err
+		}
+		if authKitTenantSlug == "" {
+			return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
+		}
+		// Legacy directory row not yet linked by uuid: accept the slug match
+		// only when the row carries NO AuthKit tenant uuid at all.
+		tid, slug, err = c.tenantDirectoryRow(ctx,
+			`lower(authkit_tenant_slug) = $1 AND authkit_tenant_id IS NULL`, authKitTenantSlug)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
+		}
+		return tid, slug, err
+	}
+
+	if authKitTenantSlug == "" {
+		return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
+	}
+	// Legacy credential without a `tenant_id` claim: mutable-slug lookup.
+	tid, slug, err := c.tenantDirectoryRow(ctx, `lower(authkit_tenant_slug) = $1`, authKitTenantSlug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
+	}
+	return tid, slug, err
+}
+
+// tenantDirectoryRow runs one billing.tenants directory lookup with the given
+// WHERE predicate (which must reference exactly one $1 argument). It returns
+// pgx.ErrNoRows untouched so callers can decide whether a fallback applies;
+// an inactive (suspended) tenant is rejected with ErrServiceTokenTenantUnresolved
+// and never falls through to another key.
+func (c *ControlPlane) tenantDirectoryRow(ctx context.Context, where, arg string) (tenant.ID, string, error) {
 	var (
 		idStr  string
 		slug   string
@@ -239,14 +295,11 @@ func (c *ControlPlane) tenantForAuthKitTenantSlug(ctx context.Context, authKitTe
 	err := c.pool.QueryRow(ctx, `
 		SELECT id::text, slug, status
 		  FROM billing.tenants
-		 WHERE lower(authkit_tenant_slug) = $1
+		 WHERE `+where+`
 		   AND deleted_at IS NULL
 		 LIMIT 1
-	`, authKitTenantSlug).Scan(&idStr, &slug, &status)
+	`, arg).Scan(&idStr, &slug, &status)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return tenant.ID{}, "", ErrServiceTokenTenantUnresolved
-		}
 		return tenant.ID{}, "", err
 	}
 	if status != "active" {
