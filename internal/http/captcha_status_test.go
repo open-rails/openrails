@@ -151,7 +151,6 @@ func TestCaptchaClientScriptIncludesRecaptchaV3Execute(t *testing.T) {
 		Provider:  config.CaptchaProviderRecaptchaV3,
 		SiteKey:   "site-key",
 		SecretKey: "secret-key",
-		Action:    "billing_challenge",
 	}}}
 
 	r := gin.New()

@@ -244,9 +244,9 @@ func ServiceGetBudget(r *httprequest.Request) {
 }
 
 type serviceBudgetCheckRequest struct {
-	TenantSubjectID     string                                  `json:"tenant_subject_id"`
-	Actor               string                                  `json:"actor"`
-	Windows             []billingservice.BudgetCheckWindowInput `json:"windows"`
+	TenantSubjectID string                                  `json:"tenant_subject_id"`
+	Actor           string                                  `json:"actor"`
+	Windows         []billingservice.BudgetCheckWindowInput `json:"windows"`
 	RequestedMicros int64                                   `json:"requested_micros"`
 }
 

@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 353
+next_id: 354
 
 ---
 
@@ -1109,5 +1109,16 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 - [x] Hardcode pyth.* as constants; drop PythConfig/applyPythDefaults/validation requirement
 - [x] Remove rpc_endpoint (config field, SolanaConfig, all client construction sites, RPCURL response)
 - [x] Sweep config.example.yaml + .env.example + test fixtures
+
+---
+# #353: config knob diet round 3: captcha hardcoded to credentials-only; rate-limit merge contract pinned
+
+**Completed:** yes
+**Status:** DONE 2026-06-11 (Paul: "we can just hardcode all of the captcha configuration; rate-limit should be configurable with reasonable defaults that config can override"). CaptchaConfig is now {enabled, provider, site_key, secret_key} — action ("billing_challenge"), provider verify/script URLs (recaptcha keeps ?render=<site_key>), 15m challenge TTL, 3x extreme multiplier, 0.5 min score, and the challenged buckets {checkout, payment-methods, subscriptions} are constants behind the existing Effective* helpers (call sites unchanged). The captcha verifier gained an in-package verifyURLOverride test seam (the config override used to double as the test hook). validateCaptcha shrank to provider/site_key/secret_key. rate_limits.* KEPT as-is by design: per-endpoint buckets (subscribe 10/min, checkout 5, webhook 100, payment 20, default 60) overridable per-key; the partial-override-keeps-other-defaults merge behavior is now pinned by TestRateLimitsPartialOverrideKeepsDefaults.
+
+**Tasks:**
+- [x] Trim CaptchaConfig to enabled/provider/site_key/secret_key; constants behind Effective*
+- [x] Verifier test seam; migrate captcha/ratelimit/http tests off removed fields
+- [x] Pin rate-limit partial-override merge with a test; sweep config.example.yaml
 
 ---

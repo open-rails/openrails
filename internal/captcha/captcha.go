@@ -55,6 +55,9 @@ type VerifyResult struct {
 type siteVerifyVerifier struct {
 	cfg    *config.CaptchaConfig
 	client *http.Client
+	// verifyURLOverride lets in-package tests point verification at an
+	// httptest server; the URL is otherwise hardcoded per provider (#353).
+	verifyURLOverride string
 }
 
 // ChallengeStore tracks challenged subjects with Redis and in-memory fallback.
@@ -78,6 +81,13 @@ func NewVerifier(cfg *config.CaptchaConfig, client *http.Client) Verifier {
 	return &siteVerifyVerifier{cfg: cfg, client: client}
 }
 
+func (v *siteVerifyVerifier) verifyURL() string {
+	if v.verifyURLOverride != "" {
+		return v.verifyURLOverride
+	}
+	return v.cfg.EffectiveVerifyURL()
+}
+
 func (v *siteVerifyVerifier) Verify(ctx context.Context, req VerifyRequest) (*VerifyResult, error) {
 	if v == nil || v.cfg == nil {
 		return nil, fmt.Errorf("captcha verifier is not configured")
@@ -95,7 +105,7 @@ func (v *siteVerifyVerifier) Verify(ctx context.Context, req VerifyRequest) (*Ve
 		form.Set("remoteip", remoteIP)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, v.cfg.EffectiveVerifyURL(), strings.NewReader(form.Encode()))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, v.verifyURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("create captcha verify request: %w", err)
 	}

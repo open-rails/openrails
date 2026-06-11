@@ -150,41 +150,6 @@ func TestValidateCaptchaRejectsInvalidSettings(t *testing.T) {
 			mutate:    func(c *CaptchaConfig) { c.Provider = "recaptcha" },
 			wantError: "unsupported provider",
 		},
-		{
-			name:      "invalid verify url",
-			mutate:    func(c *CaptchaConfig) { c.VerifyURL = "://bad" },
-			wantError: "invalid verify_url",
-		},
-		{
-			name:      "unsupported verify url scheme",
-			mutate:    func(c *CaptchaConfig) { c.VerifyURL = "ftp://captcha.example/siteverify" },
-			wantError: "verify_url must use https",
-		},
-		{
-			name:      "insecure verify url",
-			mutate:    func(c *CaptchaConfig) { c.VerifyURL = "http://captcha.example/siteverify" },
-			wantError: "verify_url must use https",
-		},
-		{
-			name:      "invalid challenge ttl",
-			mutate:    func(c *CaptchaConfig) { c.ChallengeTTL = "soon" },
-			wantError: "invalid challenge_ttl",
-		},
-		{
-			name:      "insecure script url",
-			mutate:    func(c *CaptchaConfig) { c.ScriptURL = "http://captcha.example/api.js" },
-			wantError: "script_url must use https",
-		},
-		{
-			name:      "invalid score",
-			mutate:    func(c *CaptchaConfig) { c.MinScore = 1.5 },
-			wantError: "min_score must be between 0 and 1",
-		},
-		{
-			name:      "empty buckets",
-			mutate:    func(c *CaptchaConfig) { c.ChallengeBuckets = []string{" ", ""} },
-			wantError: "challenge_buckets must include at least one non-empty bucket",
-		},
 	}
 
 	for _, tt := range tests {
@@ -726,7 +691,6 @@ func TestOperatingModes(t *testing.T) {
 	require.Error(t, Validate(&Config{Mode: "redaonly"}))
 }
 
-
 func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
@@ -777,4 +741,22 @@ func TestFlexiblePortRange(t *testing.T) {
 	require.ErrorContains(t, Validate(cfg), "invalid port")
 	cfg.Port = -20983
 	require.ErrorContains(t, Validate(cfg), "invalid port")
+}
+
+// TestRateLimitsPartialOverrideKeepsDefaults pins the #353 contract: rate
+// limits are configurable, but overriding ONE endpoint must not wipe the
+// built-in defaults for the others.
+func TestRateLimitsPartialOverrideKeepsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("rate_limits:\n  checkout:\n    requests_per_minute: 99\n"), 0o644))
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.RateLimits)
+	rl := *cfg.RateLimits
+	require.Equal(t, 99, rl["checkout"].RequestsPerMinute, "explicit override applies")
+	require.NotNil(t, rl["subscribe"], "untouched endpoints keep their defaults")
+	require.Equal(t, 10, rl["subscribe"].RequestsPerMinute)
+	require.NotNil(t, rl["default"])
 }

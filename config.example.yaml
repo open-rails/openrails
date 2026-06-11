@@ -406,20 +406,15 @@ rate_limits:
 
 # Captcha is enabled after an IP exceeds an extreme rate-limit threshold.
 # The frontend should retry the same request with X-Captcha-Token.
+# Everything else about captcha behavior is hardcoded (#353): provider verify/
+# script URLs, the 15m challenge TTL, the 3x extreme-threshold escalation, the
+# 0.5 recaptcha-v3 min score, and the challenged buckets (checkout,
+# payment-methods, subscriptions).
 captcha:
   enabled: false
-  provider: turnstile # turnstile | recaptcha | hcaptcha
+  provider: turnstile # turnstile | recaptcha-v3 | hcaptcha
   site_key: ""
   secret_key: ""
-  verify_url: "" # optional override
-  script_url: "" # optional override
-  challenge_ttl: 15m
-  extreme_multiplier: 3
-  min_score: 0.5 # used only when provider returns a score
-  challenge_buckets:
-    - checkout
-    - payment-methods
-    - subscriptions
 
 # =============================================================================
 # FEATURE FLAGS (Safety Controls)

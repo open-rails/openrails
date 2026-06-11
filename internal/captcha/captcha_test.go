@@ -44,8 +44,8 @@ func TestVerifierPostsSiteVerifyForm(t *testing.T) {
 		Enabled:   true,
 		Provider:  config.CaptchaProviderTurnstile,
 		SecretKey: "secret-key",
-		VerifyURL: server.URL,
 	}, server.Client())
+	verifier.(*siteVerifyVerifier).verifyURLOverride = server.URL
 
 	result, err := verifier.Verify(context.Background(), VerifyRequest{Token: "response-token", RemoteIP: "203.0.113.5", Bucket: "checkout"})
 	require.NoError(t, err)
@@ -83,9 +83,8 @@ func TestVerifierRejectsLowScore(t *testing.T) {
 		Enabled:   true,
 		Provider:  config.CaptchaProviderRecaptchaV3,
 		SecretKey: "secret-key",
-		VerifyURL: server.URL,
-		MinScore:  0.5,
 	}, server.Client())
+	verifier.(*siteVerifyVerifier).verifyURLOverride = server.URL
 
 	result, err := verifier.Verify(context.Background(), VerifyRequest{Token: "response-token"})
 	require.NoError(t, err)
@@ -131,10 +130,8 @@ func TestVerifierValidatesRecaptchaV3Action(t *testing.T) {
 				Enabled:   true,
 				Provider:  config.CaptchaProviderRecaptchaV3,
 				SecretKey: "secret-key",
-				VerifyURL: server.URL,
-				Action:    "billing_challenge",
-				MinScore:  0.5,
 			}, server.Client())
+			verifier.(*siteVerifyVerifier).verifyURLOverride = server.URL
 
 			result, err := verifier.Verify(context.Background(), VerifyRequest{Token: "response-token"})
 			require.NoError(t, err)

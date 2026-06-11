@@ -786,7 +786,6 @@ type SolanaConfig struct {
 	SolanaPayRecurringSubscriptions bool `koanf:"solana_pay_recurring_subscriptions"`
 }
 
-
 // TokenConfig defines configuration for a specific Solana token
 type TokenConfig struct {
 	Mint     string `json:"mint" koanf:"mint"`         // Token mint address accepted on the configured Solana network.
@@ -863,13 +862,11 @@ type FeatureFlags struct {
 	// deletes that finalize user-asked cancellations.
 	DisableProcessorSubscriptionDeletions bool `koanf:"disable_processor_subscription_deletions"`
 
-
 	// DisableEntitlementExpiration stops all entitlement/credit expiration when true.
 	// Affects: CreditExpiryWorker, HoldExpiryWorker, entitlement revocation in FailMembership.
 	// Users keep premium access even after subscription ends.
 	// Default: false (normal expiration behavior)
 	DisableEntitlementExpiration bool `koanf:"disable_entitlement_expiration"`
-
 }
 
 // GetDunningMode returns the effective dunning mode, defaulting to "on" if not set or invalid.
@@ -977,18 +974,15 @@ const (
 )
 
 // CaptchaConfig controls captcha challenges enabled after extreme rate-limit hits.
+// CaptchaConfig is deliberately minimal (#353): provider choice + the account
+// credentials. Everything else (verify/script URLs, action, score threshold,
+// challenge TTL, escalation multiplier, challenged buckets) is hardcoded —
+// they are protocol/policy constants, not deployment choices.
 type CaptchaConfig struct {
-	Enabled           bool     `koanf:"enabled"`
-	Provider          string   `koanf:"provider"`
-	SiteKey           string   `koanf:"site_key"`
-	SecretKey         string   `koanf:"secret_key"`
-	Action            string   `koanf:"action"`
-	VerifyURL         string   `koanf:"verify_url"`
-	ScriptURL         string   `koanf:"script_url"`
-	MinScore          float64  `koanf:"min_score"`
-	ChallengeTTL      string   `koanf:"challenge_ttl"`
-	ExtremeMultiplier int      `koanf:"extreme_multiplier"`
-	ChallengeBuckets  []string `koanf:"challenge_buckets"`
+	Enabled   bool   `koanf:"enabled"`
+	Provider  string `koanf:"provider"`
+	SiteKey   string `koanf:"site_key"`
+	SecretKey string `koanf:"secret_key"`
 }
 
 func (c *CaptchaConfig) EffectiveProvider() string {
@@ -999,81 +993,49 @@ func (c *CaptchaConfig) EffectiveProvider() string {
 }
 
 func (c *CaptchaConfig) EffectiveVerifyURL() string {
-	if c == nil || strings.TrimSpace(c.VerifyURL) == "" {
-		switch c.EffectiveProvider() {
-		case CaptchaProviderRecaptchaV3:
-			return "https://www.google.com/recaptcha/api/siteverify"
-		case CaptchaProviderHCaptcha:
-			return "https://hcaptcha.com/siteverify"
-		default:
-			return "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-		}
+	switch c.EffectiveProvider() {
+	case CaptchaProviderRecaptchaV3:
+		return "https://www.google.com/recaptcha/api/siteverify"
+	case CaptchaProviderHCaptcha:
+		return "https://hcaptcha.com/siteverify"
+	default:
+		return "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 	}
-	return strings.TrimSpace(c.VerifyURL)
 }
 
 func (c *CaptchaConfig) EffectiveScriptURL() string {
-	if c == nil || strings.TrimSpace(c.ScriptURL) == "" {
-		switch c.EffectiveProvider() {
-		case CaptchaProviderRecaptchaV3:
-			siteKey := strings.TrimSpace(c.SiteKey)
-			if siteKey == "" {
-				return "https://www.google.com/recaptcha/api.js?render="
-			}
-			return "https://www.google.com/recaptcha/api.js?render=" + url.QueryEscape(siteKey)
-		case CaptchaProviderHCaptcha:
-			return "https://js.hcaptcha.com/1/api.js?render=explicit"
-		default:
-			return "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+	switch c.EffectiveProvider() {
+	case CaptchaProviderRecaptchaV3:
+		siteKey := ""
+		if c != nil {
+			siteKey = strings.TrimSpace(c.SiteKey)
 		}
+		return "https://www.google.com/recaptcha/api.js?render=" + url.QueryEscape(siteKey)
+	case CaptchaProviderHCaptcha:
+		return "https://js.hcaptcha.com/1/api.js?render=explicit"
+	default:
+		return "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
 	}
-	return strings.TrimSpace(c.ScriptURL)
 }
 
 func (c *CaptchaConfig) EffectiveChallengeTTL() time.Duration {
-	return parseDurationDefault(c.durationValue(func(c *CaptchaConfig) string { return c.ChallengeTTL }), 15*time.Minute)
+	return 15 * time.Minute
 }
 
 func (c *CaptchaConfig) EffectiveExtremeMultiplier() int {
-	if c == nil || c.ExtremeMultiplier <= 0 {
-		return 3
-	}
-	return c.ExtremeMultiplier
+	return 3
 }
 
 func (c *CaptchaConfig) EffectiveMinScore() float64 {
-	if c == nil || c.MinScore <= 0 {
-		return 0.5
-	}
-	return c.MinScore
+	return 0.5
 }
 
 func (c *CaptchaConfig) EffectiveAction() string {
-	if c == nil || strings.TrimSpace(c.Action) == "" {
-		return "billing_challenge"
-	}
-	return strings.TrimSpace(c.Action)
+	return "billing_challenge"
 }
 
 func (c *CaptchaConfig) EffectiveChallengeBuckets() []string {
-	if c == nil || len(c.ChallengeBuckets) == 0 {
-		return []string{"checkout", "payment-methods", "subscriptions"}
-	}
-	out := make([]string, 0, len(c.ChallengeBuckets))
-	for _, bucket := range c.ChallengeBuckets {
-		bucket = strings.ToLower(strings.TrimSpace(bucket))
-		if bucket != "" {
-			out = append(out, bucket)
-		}
-	}
-	return out
-}
-
-func (c *CaptchaConfig) durationValue(get func(*CaptchaConfig) string) string {
-	if c == nil {
-		return ""
-	}
-	return get(c)
+	return []string{"checkout", "payment-methods", "subscriptions"}
 }
 
 func parseDurationDefault(raw string, fallback time.Duration) time.Duration {
@@ -1199,31 +1161,6 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 	if strings.TrimSpace(cfg.SecretKey) == "" {
 		return fmt.Errorf("secret_key is required when captcha is enabled")
 	}
-	if cfg.EffectiveProvider() == CaptchaProviderRecaptchaV3 && strings.TrimSpace(cfg.EffectiveAction()) == "" {
-		return fmt.Errorf("action is required when recaptcha-v3 is enabled")
-	}
-	if rawURL := strings.TrimSpace(cfg.VerifyURL); rawURL != "" {
-		if err := validateHTTPSURL("verify_url", rawURL); err != nil {
-			return err
-		}
-	}
-	if rawURL := strings.TrimSpace(cfg.ScriptURL); rawURL != "" {
-		if err := validateHTTPSURL("script_url", rawURL); err != nil {
-			return err
-		}
-	}
-	if err := validateOptionalDuration("challenge_ttl", cfg.ChallengeTTL); err != nil {
-		return err
-	}
-	if cfg.MinScore < 0 || cfg.MinScore > 1 {
-		return fmt.Errorf("min_score must be between 0 and 1")
-	}
-	if cfg.ExtremeMultiplier < 0 {
-		return fmt.Errorf("extreme_multiplier cannot be negative")
-	}
-	if len(cfg.ChallengeBuckets) > 0 && len(cfg.EffectiveChallengeBuckets()) == 0 {
-		return fmt.Errorf("challenge_buckets must include at least one non-empty bucket")
-	}
 	return nil
 }
 
@@ -1287,7 +1224,6 @@ func validateStripeKeyForTestMode(cfg *Config) error {
 	}
 	return nil
 }
-
 
 // validateProcessors validates all processors in the new Processors map
 func validateProcessors(cfg *Config, isDev bool) error {
@@ -1683,13 +1619,8 @@ func GetDefaultBillingConfig() *Config {
 			},
 		},
 		Captcha: &CaptchaConfig{
-			Enabled:           false,
-			Provider:          CaptchaProviderTurnstile,
-			Action:            "billing_challenge",
-			ChallengeTTL:      "15m",
-			ExtremeMultiplier: 3,
-			MinScore:          0.5,
-			ChallengeBuckets:  []string{"checkout", "payment-methods", "subscriptions"},
+			Enabled:  false,
+			Provider: CaptchaProviderTurnstile,
 		},
 		FeatureFlags: &FeatureFlags{
 			DunningMode:                  DunningModeOn,
@@ -1725,7 +1656,6 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 	}
 	return nil
 }
-
 
 func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
