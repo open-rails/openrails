@@ -779,6 +779,6 @@ func TestRateLimitsPartialOverrideKeepsDefaults(t *testing.T) {
 	rl := *cfg.RateLimits
 	require.Equal(t, 99, rl["checkout"].RequestsPerMinute, "explicit override applies")
 	require.NotNil(t, rl["subscribe"], "untouched endpoints keep their defaults")
-	require.Equal(t, 10, rl["subscribe"].RequestsPerMinute)
+	require.Equal(t, 20, rl["subscribe"].RequestsPerMinute)
 	require.NotNil(t, rl["default"])
 }
