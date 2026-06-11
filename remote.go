@@ -439,29 +439,8 @@ func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitB
 }
 
 // ListActiveEntitlements implements Client (handler
-// ServiceGetExternalSubjectEntitlements, entitlements.go). An unknown
-// (issuer, subject) answers 200 [] on the wire — an empty slice, never an
-// error.
-func (c *remote) ListActiveEntitlements(ctx context.Context, issuer, subject string, at time.Time) ([]EntitlementRecord, error) {
-	q := url.Values{}
-	q.Set("issuer", strings.TrimSpace(issuer))
-	q.Set("subject", strings.TrimSpace(subject))
-	if !at.IsZero() {
-		q.Set("at", at.UTC().Format(time.RFC3339))
-	}
-	var out []EntitlementRecord
-	if err := c.do(ctx, http.MethodGet, "/v1/service/tenant-subjects/by-external-subject/entitlements?"+q.Encode(), nil, &out); err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = []EntitlementRecord{}
-	}
-	return out, nil
-}
-
-// ListActiveEntitlementsBatch implements Client (handler
-// ServiceGetExternalSubjectEntitlementsBatch, entitlements.go).
-func (c *remote) ListActiveEntitlementsBatch(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
+// ServiceGetExternalSubjectEntitlements, entitlements.go).
+func (c *remote) ListActiveEntitlements(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
 	body := map[string]any{
 		"issuer":   strings.TrimSpace(issuer),
 		"subjects": subjects,
@@ -470,7 +449,7 @@ func (c *remote) ListActiveEntitlementsBatch(ctx context.Context, issuer string,
 		body["at"] = at.UTC().Format(time.RFC3339)
 	}
 	var out map[string][]EntitlementRecord
-	if err := c.do(ctx, http.MethodPost, "/v1/service/tenant-subjects/by-external-subject/entitlements/batch", body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/service/tenant-subjects/by-external-subject/entitlements", body, &out); err != nil {
 		return nil, err
 	}
 	if out == nil {

@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type ServiceEntitlementRecord struct {
@@ -87,63 +86,18 @@ func ServiceGetTenantSubjectEntitlements(r *httprequest.Request) {
 	r.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements))
 }
 
-func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
-	issuer := strings.TrimSpace(r.Query("issuer"))
-	subject := strings.TrimSpace(r.Query("subject"))
-	if issuer == "" {
-		r.ErrorJSON(http.StatusBadRequest, "issuer required")
-		return
-	}
-	if subject == "" {
-		r.ErrorJSON(http.StatusBadRequest, "subject required")
-		return
-	}
-	at, ok := serviceEntitlementQueryTime(r)
-	if !ok {
-		return
-	}
-
-	tenantSubjectID, err := r.State.DB.Gen(r.Request.Context()).GetTenantSubjectIDByIssuerSubject(r.Request.Context(), gen.GetTenantSubjectIDByIssuerSubjectParams{
-		TenantID: tenant.FromContextOrDefault(r.Request.Context()).UUID(),
-		Issuer:   issuer,
-		Subject:  subject,
-	})
-	if err != nil {
-		if repo.IsNotFound(err) {
-			r.JSON(http.StatusOK, []ServiceEntitlementRecord{})
-			return
-		}
-		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve tenant subject")
-		return
-	}
-	if !requireServiceTenantSubjectScope(r, identity.TenantSubjectID(tenantSubjectID)) {
-		return
-	}
-
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-	entitlements, err := svc.ListActiveEntitlementRecordsForTenantSubject(r.Request.Context(), identity.TenantSubjectID(tenantSubjectID), at)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
-		return
-	}
-	r.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements))
-}
-
-type serviceExternalSubjectEntitlementsBatchRequest struct {
+type serviceExternalSubjectEntitlementsRequest struct {
 	Issuer   string   `json:"issuer"`
 	Subjects []string `json:"subjects"`
 	At       string   `json:"at,omitempty"` // RFC3339; empty = now
 }
 
-// ServiceGetExternalSubjectEntitlementsBatch (#354): one query answers many
-// subjects. Response is keyed by subject with an entry per requested subject
-// (unknown = [], never an error) after trim + dedupe; over-cap is a 400.
-func ServiceGetExternalSubjectEntitlementsBatch(r *httprequest.Request) {
-	var req serviceExternalSubjectEntitlementsBatchRequest
+// ServiceGetExternalSubjectEntitlements is always batch (#354): one query
+// answers many subjects; a single lookup is an array of one. Response is
+// keyed by subject with an entry per requested subject (unknown = [], never
+// an error) after trim + dedupe; over-cap is a 400.
+func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
+	var req serviceExternalSubjectEntitlementsRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -193,8 +147,8 @@ func ServiceGetExternalSubjectEntitlementsBatch(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
 		return
 	}
-	// Same gate as the single route: a subject-scoped token reads only its own
-	// subject. All records of one subject share a tenant_subject id.
+	// A subject-scoped token reads only its own subject. All records of one
+	// subject share a tenant_subject id.
 	for _, records := range grouped {
 		if len(records) == 0 {
 			continue
@@ -211,19 +165,6 @@ func ServiceGetExternalSubjectEntitlementsBatch(r *httprequest.Request) {
 		out[subject] = serviceEntitlementRecordsFromService(records)
 	}
 	r.JSON(http.StatusOK, out)
-}
-
-func serviceEntitlementQueryTime(r *httprequest.Request) (time.Time, bool) {
-	atStr := strings.TrimSpace(r.Query("at"))
-	if atStr != "" {
-		parsed, err := timeutil.ParseRFC3339UTC(atStr)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
-			return time.Time{}, false
-		}
-		return parsed, true
-	}
-	return r.Clock.Now(), true
 }
 
 func GetAdminUserEntitlements(r *httprequest.Request) {

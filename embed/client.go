@@ -687,35 +687,6 @@ func (c *localClient) SetTierPolicy(ctx context.Context, tenantSubjectID string,
 	return nil
 }
 
-// ListActiveEntitlements transcribes
-// handlers.ServiceGetExternalSubjectEntitlements (entitlements.go):
-// issuer/subject required (in that order), an unresolved (issuer, subject) is
-// the empty result (the wire's 200 []), a resolve fault is 500 "failed to
-// resolve tenant subject" and a list fault 500 "failed to fetch entitlements".
-// A zero `at` defaults to the engine clock, like the handler's absent `at`
-// query param. The service-token tenant-subject scope gate is not transcribed
-// — in embedded mode the host IS the principal (see the type comment).
-func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer, subject string, at time.Time) ([]openrails.EntitlementRecord, error) {
-	if strings.TrimSpace(issuer) == "" {
-		return nil, invalidErr("issuer required")
-	}
-	if strings.TrimSpace(subject) == "" {
-		return nil, invalidErr("subject required")
-	}
-	tsid, found, err := c.svc.ResolveTenantSubjectByExternalSubject(ctx, issuer, subject)
-	if err != nil {
-		return nil, internalErr("failed to resolve tenant subject")
-	}
-	if !found {
-		return []openrails.EntitlementRecord{}, nil
-	}
-	recs, err := c.svc.ListActiveEntitlementRecordsForTenantSubject(ctx, tsid, at)
-	if err != nil {
-		return nil, internalErr("failed to fetch entitlements")
-	}
-	return wireEntitlementRecords(recs), nil
-}
-
 func wireEntitlementRecords(recs []billingservice.EntitlementRecord) []openrails.EntitlementRecord {
 	out := make([]openrails.EntitlementRecord, 0, len(recs))
 	for _, e := range recs {
@@ -740,12 +711,11 @@ func wireEntitlementRecords(recs []billingservice.EntitlementRecord) []openrails
 	return out
 }
 
-// ListActiveEntitlementsBatch transcribes
-// handlers.ServiceGetExternalSubjectEntitlementsBatch (entitlements.go):
-// trim + dedupe, cap, one query, an entry per requested subject. The
-// service-token scope gate is not transcribed — embedded hosts are the
-// principal.
-func (c *localClient) ListActiveEntitlementsBatch(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]openrails.EntitlementRecord, error) {
+// ListActiveEntitlements transcribes
+// handlers.ServiceGetExternalSubjectEntitlements (entitlements.go): trim +
+// dedupe, cap, one query, an entry per requested subject. The service-token
+// scope gate is not transcribed — embedded hosts are the principal.
+func (c *localClient) ListActiveEntitlements(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]openrails.EntitlementRecord, error) {
 	if strings.TrimSpace(issuer) == "" {
 		return nil, invalidErr("issuer required")
 	}

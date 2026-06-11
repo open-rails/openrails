@@ -10,11 +10,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // Service is the exported, in-process billing API.
@@ -626,37 +623,4 @@ func (s *Service) ListActiveEntitlementRecordsByExternalSubjects(ctx context.Con
 		out[subject] = rs
 	}
 	return out, nil
-}
-
-// ResolveTenantSubjectByExternalSubject resolves the OpenRails tenant subject
-// for an external (issuer, subject) identity within the ambient tenant — the
-// in-process counterpart of the resolution the by-external-subject service
-// route performs (handlers.ServiceGetExternalSubjectEntitlements).
-// found=false with a nil error means the identity has never touched billing in
-// this tenant; the wire answers that case with 200 [].
-func (s *Service) ResolveTenantSubjectByExternalSubject(ctx context.Context, issuer, subject string) (identity.TenantSubjectID, bool, error) {
-	issuer = strings.TrimSpace(issuer)
-	subject = strings.TrimSpace(subject)
-	if issuer == "" {
-		return identity.TenantSubjectID{}, false, fmt.Errorf("issuer required")
-	}
-	if subject == "" {
-		return identity.TenantSubjectID{}, false, fmt.Errorf("subject required")
-	}
-	database, err := s.requireDB()
-	if err != nil {
-		return identity.TenantSubjectID{}, false, err
-	}
-	id, err := database.Gen(ctx).GetTenantSubjectIDByIssuerSubject(ctx, gen.GetTenantSubjectIDByIssuerSubjectParams{
-		TenantID: tenant.FromContextOrDefault(ctx).UUID(),
-		Issuer:   issuer,
-		Subject:  subject,
-	})
-	if err != nil {
-		if repo.IsNotFound(err) {
-			return identity.TenantSubjectID{}, false, nil
-		}
-		return identity.TenantSubjectID{}, false, err
-	}
-	return identity.TenantSubjectID(id), true, nil
 }

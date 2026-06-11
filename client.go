@@ -82,20 +82,18 @@ type Client interface {
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
 	// payers in the tenant (#410).
 	ResourceRevenueDaily(ctx context.Context, resource string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
-	// ListActiveEntitlements returns the entitlement records active at `at` for
-	// the payer addressed by its EXTERNAL identity — the (issuer, subject) pair
-	// the host's auth system already holds (the same key a delegated token pins
-	// via `iss`/`delegated_sub`). A zero `at` means "now". An unknown
-	// (issuer, subject) — a user who has never touched billing — is an empty
-	// slice, not an error. Intended for token-issuance enrichment: bake the
-	// names into your access token's claims and gate per-request from the
-	// token, not from this call.
-	ListActiveEntitlements(ctx context.Context, issuer, subject string, at time.Time) ([]EntitlementRecord, error)
-	// ListActiveEntitlementsBatch (#354): many subjects of one issuer in one
-	// call, for list renders. Subjects are trimmed + deduped; the result has an
-	// entry per requested subject (unknown = empty slice, never an error).
-	// Max 500 subjects per call — over-cap errors, never silently truncates.
-	ListActiveEntitlementsBatch(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error)
+	// ListActiveEntitlements returns the entitlement records active at `at`
+	// for subjects addressed by their EXTERNAL identity — the issuer +
+	// subject ids the host's auth system already holds (the same key a
+	// delegated token pins via `iss`/`delegated_sub`). Always batch (#354):
+	// one engine query answers the whole list, keyed by subject with an entry
+	// per requested subject after trim + dedupe; an unknown subject — a user
+	// who has never touched billing — is an empty slice, never an error.
+	// Single lookup = an array of one. Max 500 subjects per call; over-cap
+	// errors, never silently truncates. A zero `at` means "now". For
+	// token-issuance enrichment and list renders: bake names into token
+	// claims and gate per-request from the token, not from this call.
+	ListActiveEntitlements(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]EntitlementRecord, error)
 	// OpenWindow opens a prepaid credit window (#335): a REAL hold — the funds
 	// leave the payer's available balance now. ErrInsufficientCredits on a payer
 	// who can't cover it.

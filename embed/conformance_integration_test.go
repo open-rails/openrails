@@ -256,18 +256,13 @@ type scriptResult struct {
 	ErrSettleEmpty            obsErr
 	ErrBatchEmpty             obsErr
 
-	// Entitlements by external (issuer, subject) identity.
-	Entitlements            []obsEntitlement
-	EntitlementsUnknown     int
-	ErrEntitlementsNoIssuer obsErr
-
-	// Batch entitlements (#354).
-	BatchEntitlements            []obsEntitlement
-	BatchUnknownEmpty            bool
-	BatchKeyCount                int
-	ErrBatchEntitlementsNoIssuer obsErr
-	ErrBatchEntitlementsEmpty    obsErr
-	ErrBatchEntitlementsOverCap  obsErr
+	// Entitlements by external (issuer, subjects) identity — always batch (#354).
+	Entitlements              []obsEntitlement
+	EntitlementsUnknownEmpty  bool
+	EntitlementsKeyCount      int
+	ErrEntitlementsNoIssuer   obsErr
+	ErrEntitlementsNoSubjects obsErr
+	ErrEntitlementsOverCap    obsErr
 }
 
 type obsEntitlement struct {
@@ -724,38 +719,26 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	_, err = c.AdmitBatch(ctx, nil)
 	r.ErrBatchEmpty = observeErr(t, env.side+" admit-batch empty", err)
 
-	// 20) Entitlements by external (issuer, subject): the seeded active row, an
-	// unknown subject (the wire's 200 [] — empty, never an error), and the
-	// missing-issuer validation error.
-	ents, err := c.ListActiveEntitlements(ctx, env.issuer, env.subject, time.Time{})
-	require.NoError(t, err, "%s entitlements", env.side)
-	r.Entitlements = observeEntitlements(ents, env.payer)
-	ghost, err := c.ListActiveEntitlements(ctx, env.issuer, "ghost-"+env.subject, time.Time{})
-	require.NoError(t, err, "%s entitlements unknown subject", env.side)
-	r.EntitlementsUnknown = len(ghost)
-	_, err = c.ListActiveEntitlements(ctx, "", env.subject, time.Time{})
-	r.ErrEntitlementsNoIssuer = observeErr(t, env.side+" entitlements without issuer", err)
-
-	// 21) Batch entitlements (#354): seeded subject + an unknown one in one
-	// call (dupes deduped), an entry per requested subject, plus the
+	// 20) Entitlements (#354, always batch): seeded subject + an unknown one
+	// in one call (dupes deduped), an entry per requested subject, plus the
 	// no-issuer / empty-subjects / over-cap validation errors.
-	batch, err := c.ListActiveEntitlementsBatch(ctx, env.issuer,
+	ents, err := c.ListActiveEntitlements(ctx, env.issuer,
 		[]string{env.subject, " " + env.subject, "ghost-" + env.subject}, time.Time{})
-	require.NoError(t, err, "%s entitlements batch", env.side)
-	r.BatchEntitlements = observeEntitlements(batch[env.subject], env.payer)
-	ghostRecs, ghostPresent := batch["ghost-"+env.subject]
-	r.BatchUnknownEmpty = ghostPresent && len(ghostRecs) == 0
-	r.BatchKeyCount = len(batch)
-	_, err = c.ListActiveEntitlementsBatch(ctx, "", []string{env.subject}, time.Time{})
-	r.ErrBatchEntitlementsNoIssuer = observeErr(t, env.side+" entitlements batch without issuer", err)
-	_, err = c.ListActiveEntitlementsBatch(ctx, env.issuer, []string{" ", ""}, time.Time{})
-	r.ErrBatchEntitlementsEmpty = observeErr(t, env.side+" entitlements batch empty subjects", err)
+	require.NoError(t, err, "%s entitlements", env.side)
+	r.Entitlements = observeEntitlements(ents[env.subject], env.payer)
+	ghostRecs, ghostPresent := ents["ghost-"+env.subject]
+	r.EntitlementsUnknownEmpty = ghostPresent && len(ghostRecs) == 0
+	r.EntitlementsKeyCount = len(ents)
+	_, err = c.ListActiveEntitlements(ctx, "", []string{env.subject}, time.Time{})
+	r.ErrEntitlementsNoIssuer = observeErr(t, env.side+" entitlements without issuer", err)
+	_, err = c.ListActiveEntitlements(ctx, env.issuer, []string{" ", ""}, time.Time{})
+	r.ErrEntitlementsNoSubjects = observeErr(t, env.side+" entitlements empty subjects", err)
 	overCap := make([]string, 501)
 	for i := range overCap {
 		overCap[i] = fmt.Sprintf("s-%d", i)
 	}
-	_, err = c.ListActiveEntitlementsBatch(ctx, env.issuer, overCap, time.Time{})
-	r.ErrBatchEntitlementsOverCap = observeErr(t, env.side+" entitlements batch over cap", err)
+	_, err = c.ListActiveEntitlements(ctx, env.issuer, overCap, time.Time{})
+	r.ErrEntitlementsOverCap = observeErr(t, env.side+" entitlements over cap", err)
 
 	return r
 }
