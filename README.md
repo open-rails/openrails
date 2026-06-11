@@ -179,6 +179,43 @@ Zero-config against the bundled compose stack. Override with a `config.yaml` (re
 `AUTH_EXPECTED_AUDIENCE` → `auth.expected_audience`). See `config.example.yaml` and
 `.env.example`.
 
+## Safety modes & feature flags
+
+Runtime safety controls under `feature_flags.*` (env: `FEATURE_FLAGS_<NAME>`). Every
+non-default flag is announced with a `⚠️` warning at startup — if you expected a safety
+mode and don't see its warning in the boot log, it isn't on. Full per-flag docs live in
+`config.example.yaml`.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `test_mode` (top-level) | `true` | Routes every processor to its sandbox; you can't charge a real card. Production = `false`. |
+| `limited_mode` | `false` | **No proactive action against any payment provider**: dunning attempts no charges and no window-expiry cancellations (demoted to dry-run), auto-top-ups, arrears collection, and Solana recurring pulls are skipped. Everything user/admin-initiated still works — checkout charges, card/vault saves, tier changes, cancels (including their processor-side delete), resumes, refunds, webhooks. |
+| `disable_processor_subscription_deletions` | `false` | Kill switch for outbound NMI `delete_subscription` — **stricter than `limited_mode`**: blocks even the deletes that finalize user-asked cancels. Local cancellation proceeds; each skipped delete leaves a durable `deletion_scheduled_at` marker, and a boot-time rescan re-enqueues all of them once the flag is lifted. |
+| `dunning_mode` | `on` | `on` = retry failed rebills (every 72h, max 5 attempts); `dry_run_only` = workflow runs and logs due subscriptions but never charges (retry state preserved — this is "pause"); `off` = no dunning at all AND rebill failures cancel immediately with no recovery (changes failure semantics — not a pause). |
+| `dunning_window_days` | `15` | Dunning may only charge within N days of the missed rebill (`current_period_ends_at`). Anything older is cancelled + downgraded **without** a charge — a card that failed months ago is never surprise-charged by a catch-up run. |
+| `disable_entitlement_expiration` | `false` | Freezes local access lifecycle: credit/hold expiry and entitlement revocation pause; users keep premium even after their subscription ends. Orthogonal to the provider-facing flags. |
+| `verify_processor_mappings` | `false` | Catalog applies remotely verify provider-link ids (e.g. that a Stripe `price_id` exists) instead of shape-checking only. |
+
+### Safe mode with production credentials
+
+Booting against real processor accounts (e.g. a migration cutover or reconciliation run),
+set **before first start** — imported stale `past_due` subscriptions are immediately "due"
+and default flags would start charging them within hours:
+
+```bash
+FEATURE_FLAGS_LIMITED_MODE=true
+FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true
+# optional: also freeze local downgrades while reconciling
+FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true
+```
+
+`limited_mode` subsumes `dunning_mode=dry_run_only`, so you don't need that separately.
+
+Exit path, in order: (1) unset `DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS` and restart —
+the boot rescan replays every delete skipped while the switch was on; (2) once converged,
+unset `LIMITED_MODE` — dunning resumes, and the dunning window guarantees the stale
+backlog is cancelled + downgraded rather than charged.
+
 ## Documentation
 
 - **HTTP API reference:** [docs/api/endpoints.md](docs/api/endpoints.md)
