@@ -273,6 +273,9 @@ func TestRateLimitUserCaptchaChallengeFollowsUserAcrossIPs(t *testing.T) {
 	r.POST("/v1/checkout", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
 
 	require.Equal(t, http.StatusOK, performRateLimitTestRequest(r, "/v1/checkout", "203.0.113.44", "user_1").Code)
+	// The hardcoded extreme multiplier is 3 (#353): count 2 is a plain 429, the
+	// user subject escalates to a captcha challenge at count 3.
+	require.Equal(t, http.StatusTooManyRequests, performRateLimitTestRequest(r, "/v1/checkout", "203.0.113.44", "user_1").Code)
 	challenged := performRateLimitTestRequest(r, "/v1/checkout", "203.0.113.45", "user_1")
 	require.Equal(t, http.StatusForbidden, challenged.Code)
 	require.Contains(t, challenged.Body.String(), "captcha_required")
@@ -299,6 +302,8 @@ func TestRateLimitIPCaptchaChallengeFollowsIPAcrossUsers(t *testing.T) {
 	r.POST("/v1/checkout", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
 
 	require.Equal(t, http.StatusOK, performRateLimitTestRequest(r, "/v1/checkout", "203.0.113.52", "user_1").Code)
+	// Hardcoded extreme multiplier 3 (#353): the IP subject escalates at count 3.
+	require.Equal(t, http.StatusTooManyRequests, performRateLimitTestRequest(r, "/v1/checkout", "203.0.113.52", "user_1").Code)
 	challenged := performRateLimitTestRequest(r, "/v1/checkout", "203.0.113.52", "user_2")
 	require.Equal(t, http.StatusForbidden, challenged.Code)
 	require.Contains(t, challenged.Body.String(), "captcha_required")
