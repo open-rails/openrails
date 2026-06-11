@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 359
+next_id: 360
 
 ---
 
@@ -1185,11 +1185,13 @@ Mapping from the old world: mode=test ≡ test_env=true + mode=full. The old dev
 Hard cut, no aliases: ModeTest constant deleted, IsTestMode() renamed/reimplemented as IsTestEnv() (= cfg.TestEnv), all gates (probe, stripe key validation, solana network derivation, CCBill sandbox URL, processor test semantics) keyed off IsTestEnv(); mode banner + README mode table + matrix + config.example.yaml + .env.example + --mode flag help all updated; --test-env CLI flag added beside --mode.
 
 **Tasks:**
-- [ ] config: TestEnv bool + IsTestEnv(); mode enum full|limited|readonly (test deleted, production->full); validation (test_env only in dev; mode required outside dev; dev default mode=full)
-- [ ] re-key all sandbox gates off IsTestEnv (probe in build_runtime, stripe key check, solana network, ccbill URL, NMI test semantics)
-- [ ] CLI: --test-env flag; --mode help text update
-- [ ] docs: README modes section + matrix + example yaml + .env.example
-- [ ] migrate every test fixture; full unit + smoke integration green
+- [x] config: TestEnv bool + IsTestEnv(); mode enum full|limited|readonly (test deleted, production->full); validation (test_env only in dev; mode required outside dev; dev default mode=full)
+- [x] re-key all sandbox gates off IsTestEnv (probe in build_runtime, stripe key check, solana network, ccbill URL, NMI test semantics)
+- [x] CLI: --test-env flag; --mode help text update
+- [x] docs: README modes section + matrix + example yaml + .env.example
+- [x] migrate every test fixture; full unit + smoke integration green
+
+**Status (agent, 2026-06-11):** implemented and verified. Hard cut landed: ModeTest deleted, ModeProduction renamed ModeFull ("full"), IsTestMode() reimplemented as IsTestEnv() (= cfg.TestEnv); TEST_ENV env mapping (top-level special case) + --test-env CLI flag added; testcontainer suite sets test_env=true explicitly so the NMI demo-key probe and CCBill IP bypass keep working. Concurrent-agent packages (internal/integrations/nmi, ccbill, stripeapi, solana, internal/reconcile) untouched except the compile-required fixture swap in stripeapi_test.go. Verified: go build ./... clean; go vet (incl. -tags=integration ./tests) clean; unit tests green on config/app/cmd/checkout/vault/stripeapi/river/subscriptions/http/service; integration smoke TestDunningWorkerNoDueSubscriptions ok (20s); CLI: `--mode test` errors "must be one of full, limited, readonly", `--mode full --test-env run-server` boots with the TEST ENV + Mode: full banners. README carries the flagged behavior change (dev default = live creds + mode=full unless TEST_ENV=true).
 
 ---
 
@@ -1259,4 +1261,32 @@ Findings carry intent_evidence referencing the ledger; PS-2/PS-3 with a live pen
 - [ ] Phase B: refunds/Stripe ops + Idempotency-Key
 - [ ] Phase C: manual rebills folded in
 - [ ] Phase D: #357 archive ops through the ledger
+---
+# #359: cadence-relative dunning: schedule derived from billing cycle; dunning_window_days knob deleted
+
+**Completed:** no
+**Status:** open (Paul 2026-06-11): "I don't want a configuration for dunning-days. Dunning should be done in a way that makes sense relative to the duration of the payment." Another knob-diet entry: the schedule is HARDCODED as a function of the price's billing_cycle_days.
+
+## The policy (Paul's anchors, verbatim)
+
+- 1-MONTH cadence (the common case): 5 retries, once every 3 days (~15 days of attempts), then terminal failure. [= today's DunningInterval/MaxDunningFailures constants]
+- 1-WEEK cadence: 2 retries, one day apart, then downgrade + delete.
+- 1-YEAR cadence: same as monthly — 5 retries / 3 days is "as generous as we want to get" (cap).
+- 1-DAY cadence: NO dunning — first failure is terminal.
+
+## Design
+
+`dunningSchedule(billingCycleDays) -> (maxRetries int, interval time.Duration)` in internal/modules/subscriptions (replacing the package-level DunningInterval/MaxDunningFailures constants). Guiding principle for boundaries between the anchors: the total retry span must stay WELL within one billing cycle (a week sub must not still be dunning when the next week is due). Suggested tiers (implementer documents the final boundaries against the principle): cycle < 2d -> 0 retries; 2d..~9d -> 2 retries @ 1d; >= ~10d -> 5 retries @ 3d (capped — never more generous than monthly).
+
+Consequences:
+- `feature_flags.dunning_window_days` + DefaultDunningWindowDays DELETED (knob diet). The staleness window (#344, "never charge a months-old failure") is now DERIVED: window = period_end + (maxRetries x interval) + small slack; older -> terminal cancel without charge, exactly as today but cadence-aware. A 1-day sub's window is zero (any missed rebill is immediately terminal).
+- FailMembership's retry scheduling consults the subscription's price cycle (price loadable via PriceID inside the existing tx) for next_retry_at and the max-retries terminal check.
+- DunningWorker's window check derives from the same function.
+- dunning_mode (on/dry_run_only/off) is UNCHANGED — it dials whether dunning runs, not its shape.
+- README + config.example.yaml: dunning_window_days rows removed; document the cadence table.
+
+**Tasks:**
+- [ ] dunningSchedule(cycleDays) + delete the constants and the dunning_window_days knob (config, accessors, validation, docs, env example)
+- [ ] FailMembership + DunningWorker consume the schedule (retry scheduling, terminal check, derived staleness window)
+- [ ] Tests: tier table (1d/7d/30d/365d + boundary cases), window derivation, integration regression (existing window tests adapted to derived windows)
 ---

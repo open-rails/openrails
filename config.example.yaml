@@ -10,29 +10,43 @@
 # Controls logging verbosity and debug features (NOT payment mode)
 env: "development"
 
-# Operating Mode (#346): ONE dial for how much OpenRails may do against the
-# payment providers. Feature flags below remain fine-grained overrides on top;
-# the strictest setting always wins. Env var: MODE=
+# Operating Mode (#346, #355): the pure-BEHAVIOR dial — how much OpenRails may
+# do against the payment providers. It applies identically with sandbox or
+# live credentials (that is the orthogonal test_env axis below). Feature flags
+# below remain fine-grained overrides on top; the strictest setting always
+# wins. Env var: MODE=, CLI flag: --mode
 #
-#   - "test":       sandbox processors, FULL behavior (charges, dunning,
-#                   deletes all run - no real money). Dev only.
-#   - "production": live processors, full behavior.
-#   - "limited":    live processors, REACTIVE-ONLY - no system-initiated
-#                   provider actions: no dunning charges or window-expiry
-#                   cancellations (dunning runs dry), no auto-top-ups, no
-#                   arrears collection, no Solana pulls, and no catalog
-#                   provider-object writes (slots defer to pending_manual_link
-#                   and converge on a later apply). User/admin-initiated
-#                   operations work normally, including their processor-side
-#                   deletes. Cutover/incident posture.
-#   - "readonly":   live credentials, ZERO provider writes - even reactive
-#                   charges fail loudly. Provider reads + local serving only.
-#                   Implies limited + the processor-deletion kill switch.
-#                   Reconciliation/forensics posture.
+#   - "full":     everything runs - charges, dunning, deletes.
+#   - "limited":  REACTIVE-ONLY - no system-initiated provider actions: no
+#                 dunning charges or window-expiry cancellations (dunning runs
+#                 dry), no auto-top-ups, no arrears collection, no Solana
+#                 pulls, and no catalog provider-object writes (slots defer to
+#                 pending_manual_link and converge on a later apply).
+#                 User/admin-initiated operations work normally, including
+#                 their processor-side deletes. Cutover/incident posture.
+#   - "readonly": ZERO provider writes - even reactive charges fail loudly.
+#                 Provider reads + local serving only. Implies limited + the
+#                 processor-deletion kill switch. Reconciliation/forensics
+#                 posture.
 #
-# Unset defaults to "test" in development. Outside development an explicit
+# Unset defaults to "full" in development. Outside development an explicit
 # mode is REQUIRED — the server refuses to boot without one.
-# mode: "production"
+# mode: "full"
+
+# Test Environment (#355): the sandbox-CREDENTIAL axis, orthogonal to mode.
+# Env var: TEST_ENV=, CLI flag: --test-env. Default false (live credentials).
+# When true, every processor routes to its sandbox AND the credential
+# guarantees attach:
+#   - Stripe: a live key (sk_live_/rk_live_) refuses to boot
+#   - NMI: each account is probed at boot with the non-issued test card —
+#     a decline proves production credentials and refuses the boot
+#   - CCBill: sandbox-api.ccbill.com
+#   - Solana: devnet (derived; not separately configurable)
+# test_env=true is rejected outside env=development — sandbox money is
+# dev-only. NOTE: the dev default is test_env=false, so a dev boot with real
+# credentials in .env and no flags moves real money; set test_env=true for
+# sandbox.
+# test_env: false
 
 # =============================================================================
 # STANDALONE MODE ONLY
@@ -292,8 +306,8 @@ processors:
   # ---------------------------------------------------------------------------
   solana:
     recipient_wallet: "your-solana-wallet-address"
-    # network is auto-derived from test_mode: devnet if test_mode=true, mainnet otherwise
-    # Explicit network setting overrides auto-derivation (rarely needed)
+    # network is auto-derived from test_env: devnet if test_env=true, mainnet
+    # otherwise. It is deliberately not configurable.
 
     # Advertise recurring Solana Pay v2 transaction-request support to clients.
     # Keep false until the deployment has validated target wallets with merchant
@@ -429,7 +443,8 @@ captcha:
 #   FEATURE_FLAGS_DUNNING_WINDOW_DAYS=15
 #   FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true|false
 #   FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true|false
-#   MODE=test|production|limited|readonly  (top-level operating mode, see CORE SETTINGS)
+#   MODE=full|limited|readonly  (top-level operating mode, see CORE SETTINGS)
+#   TEST_ENV=true|false         (sandbox-credential axis, see CORE SETTINGS)
 
 feature_flags:
   # -------------------------------------------------------------------------

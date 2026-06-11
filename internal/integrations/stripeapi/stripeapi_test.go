@@ -67,8 +67,8 @@ func TestNonReadOnlyAllowsWrites(t *testing.T) {
 	for _, cfg := range []*config.Config{
 		nil,
 		{},
-		{Mode: config.ModeTest},
-		{Mode: config.ModeProduction},
+		{Mode: config.ModeFull, TestEnv: true}, // sandbox creds, full behavior (old mode=test)
+		{Mode: config.ModeFull},
 		{Mode: config.ModeLimited}, // limited gates live at the dispatcher/worker layer, not the wire
 	} {
 		client := Client(cfg, 0)

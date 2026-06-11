@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -44,6 +45,19 @@ func main() {
 				}
 			}
 
+			// --test-env mirrors --mode: overwrite the TEST_ENV env var before
+			// Load so flag beats env beats yaml. Only applied when the flag was
+			// passed explicitly, so an unset flag never clobbers TEST_ENV.
+			if cmd.Flags().Changed("test-env") {
+				testEnv, err := cmd.Flags().GetBool("test-env")
+				if err != nil {
+					return fmt.Errorf("failed to get test-env flag: %w", err)
+				}
+				if err := os.Setenv("TEST_ENV", strconv.FormatBool(testEnv)); err != nil {
+					return fmt.Errorf("failed to apply --test-env: %w", err)
+				}
+			}
+
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
@@ -58,7 +72,9 @@ func main() {
 	rootCmd.PersistentFlags().
 		StringP("config", "c", "config.yaml", "Path to config file")
 	rootCmd.PersistentFlags().
-		String("mode", "", "Operating mode: test | production | limited | readonly (overrides MODE env and config.yaml; required outside development)")
+		String("mode", "", "Operating mode (behavior): full | limited | readonly (overrides MODE env and config.yaml; required outside development)")
+	rootCmd.PersistentFlags().
+		Bool("test-env", false, "Use sandbox processor credentials (Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_ENV env and config.yaml; development only")
 
 	serverCmd := &cobra.Command{
 		Use:     "run-server",

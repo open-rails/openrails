@@ -37,7 +37,7 @@ func Webhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Webhook processing is not configured")
 		return
 	}
-	isTestMode := r.State.Config.IsTestMode()
+	isTestEnv := r.State.Config.IsTestEnv()
 	if processors.IsNMIBacked(provider) {
 		if enqueueNMIWebhook(r, provider, clientIP) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})
@@ -46,7 +46,7 @@ func Webhook(r *httprequest.Request) {
 	}
 	switch provider {
 	case subscriptions.ProcessorCCBill:
-		if !isTestMode {
+		if !isTestEnv {
 			if !iputil.IsValidCCBillIP(clientIP) {
 				log.WithFields(log.Fields{"client_ip": clientIP, "processor": "ccbill", "event_type": r.Query("eventType")}).Warn("CCBill webhook rejected - unauthorized IP address")
 				r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
@@ -54,7 +54,7 @@ func Webhook(r *httprequest.Request) {
 			}
 			log.WithField("client_ip", clientIP).Debug("CCBill webhook authenticated - valid IP range")
 		} else {
-			log.WithField("client_ip", clientIP).Debug("CCBill webhook authentication bypassed - test mode enabled")
+			log.WithField("client_ip", clientIP).Debug("CCBill webhook authentication bypassed - test env enabled")
 		}
 		if enqueueCCBillWebhook(r, clientIP) {
 			r.SuccessJSON(map[string]string{"status": "accepted"})

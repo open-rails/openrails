@@ -47,6 +47,15 @@ func TestLoad_EnvMapping(t *testing.T) {
 		}
 	})
 
+	t.Run("maps TEST_ENV to the top-level test_env bool (#355)", func(t *testing.T) {
+		t.Setenv("TEST_ENV", "true")
+
+		cfg, err := Load("nonexistent-config.yaml")
+		assert.NoError(t, err)
+		assert.True(t, cfg.TestEnv)
+		assert.True(t, cfg.IsTestEnv())
+	})
+
 	t.Run("maps canonical OpenRails hot-path env vars", func(t *testing.T) {
 		t.Setenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY", "fail_open")
 
@@ -203,19 +212,21 @@ func TestLoad_EnvTrimming(t *testing.T) {
 	assert.Equal(t, "pass", cfg.DB.Password)
 }
 
-func TestIsTestMode(t *testing.T) {
-	t.Run("defaults to sandbox when mode unset (dev)", func(t *testing.T) {
-		assert.True(t, (&Config{}).IsTestMode())
+func TestIsTestEnv(t *testing.T) {
+	t.Run("defaults to live credentials when unset", func(t *testing.T) {
+		assert.False(t, (&Config{}).IsTestEnv())
 	})
 
-	t.Run("mode=test is sandbox", func(t *testing.T) {
-		assert.True(t, (&Config{Mode: ModeTest}).IsTestMode())
+	t.Run("test_env=true is sandbox", func(t *testing.T) {
+		assert.True(t, (&Config{TestEnv: true}).IsTestEnv())
 	})
 
-	t.Run("live modes are not sandbox", func(t *testing.T) {
-		assert.False(t, (&Config{Mode: ModeProduction}).IsTestMode())
-		assert.False(t, (&Config{Mode: ModeLimited}).IsTestMode())
-		assert.False(t, (&Config{Mode: ModeReadOnly}).IsTestMode())
+	t.Run("orthogonal to mode", func(t *testing.T) {
+		assert.False(t, (&Config{Mode: ModeFull}).IsTestEnv())
+		assert.False(t, (&Config{Mode: ModeLimited}).IsTestEnv())
+		assert.False(t, (&Config{Mode: ModeReadOnly}).IsTestEnv())
+		assert.True(t, (&Config{Mode: ModeFull, TestEnv: true}).IsTestEnv())
+		assert.True(t, (&Config{Mode: ModeReadOnly, TestEnv: true}).IsTestEnv())
 	})
 }
 
@@ -252,14 +263,15 @@ func TestIsDev(t *testing.T) {
 	})
 }
 
-func TestProductionTestModeValidation(t *testing.T) {
-	t.Run("prod env rejects mode=test", func(t *testing.T) {
+func TestProductionTestEnvValidation(t *testing.T) {
+	t.Run("prod env rejects test_env=true", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.Mode = ModeTest
+		cfg.Mode = ModeFull
+		cfg.TestEnv = true
 		assembleDBURL(cfg)
 		assert.False(t, cfg.IsDev(), "env=prod should not be dev")
-		assert.ErrorContains(t, Validate(cfg), "mode=test is not allowed outside development")
+		assert.ErrorContains(t, Validate(cfg), "test_env=true is not allowed outside development")
 	})
 
 	t.Run("prod env requires an explicit mode", func(t *testing.T) {
@@ -275,28 +287,29 @@ func TestProductionTestModeValidation(t *testing.T) {
 		assert.ErrorContains(t, Validate(cfg), "mode is required outside development")
 	})
 
-	t.Run("dev env treats unset mode as sandbox", func(t *testing.T) {
+	t.Run("dev env defaults to live credentials and full behavior", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "dev"
 		assembleDBURL(cfg)
-		assert.True(t, cfg.IsTestMode(), "unset mode in dev should be sandbox")
+		assert.False(t, cfg.IsTestEnv(), "unset test_env in dev defaults to live credentials")
+		assert.False(t, cfg.IsLimitedMode(), "unset mode in dev defaults to full behavior")
 		assert.NoError(t, Validate(cfg))
 	})
 
-	t.Run("dev env can run live via mode=production", func(t *testing.T) {
+	t.Run("dev env accepts test_env=true (sandbox)", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "dev"
-		cfg.Mode = ModeProduction
+		cfg.TestEnv = true
 		assembleDBURL(cfg)
 		assert.True(t, cfg.IsDev(), "env=dev should be dev")
-		assert.False(t, cfg.IsTestMode(), "mode=production should not be sandbox")
+		assert.True(t, cfg.IsTestEnv())
 		assert.NoError(t, Validate(cfg))
 	})
 
-	t.Run("prod env accepts mode=production", func(t *testing.T) {
+	t.Run("prod env accepts mode=full", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.Mode = ModeProduction
+		cfg.Mode = ModeFull
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -310,7 +323,7 @@ func TestProductionTestModeValidation(t *testing.T) {
 	t.Run("prod env rejects missing auth audience", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.Mode = ModeProduction
+		cfg.Mode = ModeFull
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -325,7 +338,7 @@ func TestProductionTestModeValidation(t *testing.T) {
 	t.Run("prod env rejects missing cors origins", func(t *testing.T) {
 		cfg := GetDefaultBillingConfig()
 		cfg.Env = "prod"
-		cfg.Mode = ModeProduction
+		cfg.Mode = ModeFull
 		cfg.DB.Username = "billing_app"
 		cfg.DB.Password = "production-db-password"
 		cfg.Auth.Issuers = []string{"https://issuer.example.com"}
@@ -354,15 +367,13 @@ func TestStripeKeyModeCompatibility(t *testing.T) {
 	})
 }
 
-// stripeModeTestConfig builds a minimal Config with a single Stripe processor
-// carrying the given secret key and a test/production operating mode.
-func stripeModeTestConfig(secretKey string, testMode bool) *Config {
-	mode := ModeProduction
-	if testMode {
-		mode = ModeTest
-	}
+// stripeTestEnvConfig builds a minimal Config with a single Stripe processor
+// carrying the given secret key and the given test_env setting (mode stays
+// full — the behavior dial is orthogonal to the credential axis).
+func stripeTestEnvConfig(secretKey string, testEnv bool) *Config {
 	return &Config{
-		Mode: mode,
+		Mode:    ModeFull,
+		TestEnv: testEnv,
 		Processors: map[string]*ProcessorConfig{
 			"stripe": {
 				Type:      string(ProcessorTypeStripe),
@@ -372,53 +383,53 @@ func stripeModeTestConfig(secretKey string, testMode bool) *Config {
 	}
 }
 
-func TestValidateStripeKeyForTestMode(t *testing.T) {
+func TestValidateStripeKeyForTestEnv(t *testing.T) {
 	// Standard secret keys (sk_*)
-	t.Run("sk_live_ + test_mode=true is a hard error (#347)", func(t *testing.T) {
-		cfg := stripeModeTestConfig("sk_live_abc123", true)
-		assert.Error(t, validateStripeKeyForTestMode(cfg), "live key in test mode must refuse to boot")
+	t.Run("sk_live_ + test_env=true is a hard error (#347)", func(t *testing.T) {
+		cfg := stripeTestEnvConfig("sk_live_abc123", true)
+		assert.Error(t, validateStripeKeyForTestEnv(cfg), "live key in test env must refuse to boot")
 	})
 
-	t.Run("sk_test_ + test_mode=true allowed", func(t *testing.T) {
-		cfg := stripeModeTestConfig("sk_test_abc123", true)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg))
-		assert.Equal(t, "sk_test_abc123", cfg.Processors["stripe"].SecretKey, "test key in test mode should be kept")
+	t.Run("sk_test_ + test_env=true allowed", func(t *testing.T) {
+		cfg := stripeTestEnvConfig("sk_test_abc123", true)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
+		assert.Equal(t, "sk_test_abc123", cfg.Processors["stripe"].SecretKey, "test key in test env should be kept")
 	})
 
-	t.Run("sk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
-		cfg := stripeModeTestConfig("sk_test_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg))
-		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "test key in live mode should be disabled")
+	t.Run("sk_test_ + test_env=false disables Stripe", func(t *testing.T) {
+		cfg := stripeTestEnvConfig("sk_test_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
+		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "test key in live env should be disabled")
 	})
 
-	t.Run("sk_live_ + test_mode=false allowed", func(t *testing.T) {
-		cfg := stripeModeTestConfig("sk_live_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg))
-		assert.Equal(t, "sk_live_abc123", cfg.Processors["stripe"].SecretKey, "live key in live mode should be kept")
+	t.Run("sk_live_ + test_env=false allowed", func(t *testing.T) {
+		cfg := stripeTestEnvConfig("sk_live_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
+		assert.Equal(t, "sk_live_abc123", cfg.Processors["stripe"].SecretKey, "live key in live env should be kept")
 	})
 
 	// Restricted keys (rk_*) — these must be classified the same as sk_* keys.
-	t.Run("rk_live_ + test_mode=true is a hard error (#347)", func(t *testing.T) {
-		cfg := stripeModeTestConfig("rk_live_abc123", true)
-		assert.Error(t, validateStripeKeyForTestMode(cfg), "restricted live key in test mode must refuse to boot")
+	t.Run("rk_live_ + test_env=true is a hard error (#347)", func(t *testing.T) {
+		cfg := stripeTestEnvConfig("rk_live_abc123", true)
+		assert.Error(t, validateStripeKeyForTestEnv(cfg), "restricted live key in test env must refuse to boot")
 	})
 
-	t.Run("rk_test_ + test_mode=true allowed", func(t *testing.T) {
-		cfg := stripeModeTestConfig("rk_test_abc123", true)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg))
-		assert.Equal(t, "rk_test_abc123", cfg.Processors["stripe"].SecretKey, "restricted test key in test mode should be kept")
+	t.Run("rk_test_ + test_env=true allowed", func(t *testing.T) {
+		cfg := stripeTestEnvConfig("rk_test_abc123", true)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
+		assert.Equal(t, "rk_test_abc123", cfg.Processors["stripe"].SecretKey, "restricted test key in test env should be kept")
 	})
 
-	t.Run("rk_test_ + test_mode=false disables Stripe", func(t *testing.T) {
-		cfg := stripeModeTestConfig("rk_test_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg))
-		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "restricted test key in live mode should be disabled")
+	t.Run("rk_test_ + test_env=false disables Stripe", func(t *testing.T) {
+		cfg := stripeTestEnvConfig("rk_test_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
+		assert.Empty(t, cfg.Processors["stripe"].SecretKey, "restricted test key in live env should be disabled")
 	})
 
-	t.Run("rk_live_ + test_mode=false allowed", func(t *testing.T) {
-		cfg := stripeModeTestConfig("rk_live_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg))
-		assert.Equal(t, "rk_live_abc123", cfg.Processors["stripe"].SecretKey, "restricted live key in live mode should be kept")
+	t.Run("rk_live_ + test_env=false allowed", func(t *testing.T) {
+		cfg := stripeTestEnvConfig("rk_live_abc123", false)
+		assert.NoError(t, validateStripeKeyForTestEnv(cfg))
+		assert.Equal(t, "rk_live_abc123", cfg.Processors["stripe"].SecretKey, "restricted live key in live env should be kept")
 	})
 }
 
@@ -669,47 +680,53 @@ func TestFeatureFlagsProcessorSubscriptionDeletionKillSwitch(t *testing.T) {
 }
 
 func TestOperatingModes(t *testing.T) {
-	// legacy/unset: nothing limited, dev default decides test mode
+	// unset: nothing limited (dev default = full); test_env defaults off
 	require.False(t, (&Config{}).IsLimitedMode())
 	require.False(t, (&Config{}).IsProviderReadOnly())
-	require.True(t, (&Config{}).IsTestMode()) // dev env default
+	require.False(t, (&Config{}).IsTestEnv())
 
-	require.True(t, (&Config{Mode: ModeTest}).IsTestMode())
-	require.False(t, (&Config{Mode: ModeProduction}).IsTestMode())
-	require.False(t, (&Config{Mode: ModeProduction}).IsLimitedMode())
+	require.False(t, (&Config{Mode: ModeFull}).IsLimitedMode())
+	require.False(t, (&Config{Mode: ModeFull}).IsProviderReadOnly())
 
 	limited := &Config{Mode: ModeLimited}
 	require.True(t, limited.IsLimitedMode())
 	require.False(t, limited.IsProviderReadOnly())
-	require.False(t, limited.IsTestMode()) // limited = live processors
 	require.False(t, limited.IsProcessorSubscriptionDeletionDisabled())
 
 	ro := &Config{Mode: ModeReadOnly}
 	require.True(t, ro.IsLimitedMode())
 	require.True(t, ro.IsProviderReadOnly())
-	require.False(t, ro.IsTestMode())
 	require.True(t, ro.IsProcessorSubscriptionDeletionDisabled()) // readonly implies the kill switch
+
+	// mode is pure behavior: test_env does not change the behavior gates
+	roSandbox := &Config{Mode: ModeReadOnly, TestEnv: true}
+	require.True(t, roSandbox.IsLimitedMode())
+	require.True(t, roSandbox.IsProviderReadOnly())
 
 	// case/space tolerant; unknown normalizes to "" pre-validation
 	require.True(t, (&Config{Mode: " Limited "}).IsLimitedMode())
 	require.False(t, (&Config{Mode: "redaonly"}).IsLimitedMode())
 	require.Error(t, Validate(&Config{Mode: "redaonly"}))
+
+	// hard cut (#355): the old mode values are gone, not aliased
+	require.ErrorContains(t, Validate(&Config{Mode: "test"}), "must be one of full, limited, readonly")
+	require.ErrorContains(t, Validate(&Config{Mode: "production"}), "must be one of full, limited, readonly")
 }
 
-func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
+func TestStripeLiveKeyRejectedInTestEnv(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
-	cfg.Mode = ModeTest
+	cfg.TestEnv = true
 	cfg.Processors = map[string]*ProcessorConfig{
 		"stripe": {Type: "stripe", SecretKey: "sk_live_abc123"},
 	}
 	require.Error(t, Validate(cfg))
 
-	// test key in test mode is fine
+	// test key in the test env is fine
 	cfg.Processors["stripe"].SecretKey = "sk_test_abc123"
 	require.NoError(t, Validate(cfg))
 
-	// test key in a live mode: disabled with a warning, not fatal
+	// test key with live credentials expected: disabled with a warning, not fatal
 	cfg2 := GetDefaultBillingConfig()
 	cfg2.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
 	cfg2.Mode = ModeLimited

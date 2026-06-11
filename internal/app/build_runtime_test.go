@@ -7,11 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreateCCBillDataLinkClientPropagatesTestMode(t *testing.T) {
+func TestCreateCCBillDataLinkClientPropagatesTestEnv(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.GetDefaultBillingConfig()
-	cfg.Mode = config.ModeTest
+	cfg.Mode = config.ModeFull
+	cfg.TestEnv = true
 	cfg.Processors = map[string]*config.ProcessorConfig{
 		"ccbill": {
 			ClientAccNum:     "945280",

@@ -160,13 +160,10 @@ func TestCheckoutCCBillSubscriptionUsesTenantSecret(t *testing.T) {
 	require.Equal(t, "tenant-sub", parsed.Query().Get("clientSubacc"))
 }
 
-func checkoutProcessorConfig(testMode bool, mobiusKey string) *config.Config {
-	mode := config.ModeProduction
-	if testMode {
-		mode = config.ModeTest
-	}
+func checkoutProcessorConfig(testEnv bool, mobiusKey string) *config.Config {
 	return &config.Config{
-		Mode: mode,
+		Mode:    config.ModeFull,
+		TestEnv: testEnv,
 		Processors: map[string]*config.ProcessorConfig{
 			"mobius": {
 				Type:        config.ProcessorTypeNMI,

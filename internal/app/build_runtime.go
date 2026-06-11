@@ -74,11 +74,11 @@ type runtimeOverrides struct {
 	Clock clockwork.Clock
 }
 
-// effectiveSolanaNetwork derives the Solana network purely from the operating
-// mode — devnet under test mode, mainnet otherwise. There is deliberately no
-// override knob (#349): the mode already answers the question.
+// effectiveSolanaNetwork derives the Solana network purely from the test_env
+// axis — devnet under test_env, mainnet otherwise. There is deliberately no
+// override knob (#349): test_env already answers the question.
 func effectiveSolanaNetwork(cfg *config.Config) string {
-	if cfg != nil && cfg.IsTestMode() {
+	if cfg != nil && cfg.IsTestEnv() {
 		return "devnet"
 	}
 	return "mainnet"
@@ -473,7 +473,7 @@ func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
 			log.Warnf("nmi provider '%s' webhook secret is not configured; signature validation will be disabled", providerKey)
 		}
 
-		client, err := nmi.NewClient(providerKey, settings, cfg.IsTestMode())
+		client, err := nmi.NewClient(providerKey, settings, cfg.IsTestEnv())
 		if err != nil {
 			return nil, err
 		}
@@ -483,13 +483,13 @@ func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
 		clients[providerKey] = client
 	}
 
-	// #348: test mode guarantees sandbox money, but NMI accounts are
+	// #348: test_env guarantees sandbox money, but NMI accounts are
 	// undetectable by configuration (sandbox hits the same gateway URL, the key
 	// carries no marker). Probe instead: only a simulating account can approve
 	// the non-issued test card, so a decline proves PRODUCTION credentials —
 	// refuse to start. Probe errors (offline dev, bad credentials) are
 	// inconclusive and only warn.
-	if cfg.IsTestMode() {
+	if cfg.IsTestEnv() {
 		for providerKey, client := range clients {
 			if client.SecurityKey == "" {
 				continue // unconfigured dev client, nothing to verify
@@ -497,11 +497,11 @@ func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
 			result, probeErr := client.ProbeTestMode()
 			switch result {
 			case nmi.ProbeLive:
-				return nil, fmt.Errorf("processor %q: PRODUCTION NMI credentials detected while test mode is on — the account did not simulate the test-card probe, so real charges could occur; refusing to start (use the sandbox account credentials, or switch to a live mode)", providerKey)
+				return nil, fmt.Errorf("processor %q: PRODUCTION NMI credentials detected while test_env is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to start (use the sandbox account credentials, or unset test_env)", providerKey)
 			case nmi.ProbeSimulated:
-				log.Infof("processor %q: NMI account verified as simulating (test mode)", providerKey)
+				log.Infof("processor %q: NMI account verified as simulating (test env)", providerKey)
 			default:
-				log.WithError(probeErr).Warnf("⚠️  processor %q: could not verify the NMI account is in test mode; proceeding, but confirm the credentials are a sandbox account", providerKey)
+				log.WithError(probeErr).Warnf("⚠️  processor %q: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_env", providerKey)
 			}
 		}
 	}
@@ -541,7 +541,7 @@ func createCCBillClient(cfg *config.Config) *ccbill.CCBillClient {
 		return nil
 	}
 
-	return ccbill.NewClient(ccbillProc.ToCCBillConfig(), cfg.IsTestMode())
+	return ccbill.NewClient(ccbillProc.ToCCBillConfig(), cfg.IsTestEnv())
 }
 
 func createCCBillRESTClient(cfg *config.Config) *ccbill.RESTClient {
@@ -563,7 +563,7 @@ func createCCBillDataLinkClient(cfg *config.Config) *ccbill.DataLinkClient {
 	}
 
 	ccbillConfig := ccbillProc.ToCCBillConfig()
-	ccbillConfig.TestMode = cfg.IsTestMode()
+	ccbillConfig.TestMode = cfg.IsTestEnv()
 	client := ccbill.NewDataLinkClient(ccbillConfig)
 	if err := client.ValidateConfig(); err != nil {
 		log.WithError(err).Warn("Invalid CCBill DataLink configuration; worker disabled")

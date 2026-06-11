@@ -217,9 +217,14 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 	// Use the JWKS server URL as the issuer so auth verification works
 	jwksIssuer := GetTestIssuerURL()
 	suite.Config = &config.Config{
-		Env:  "dev",
-		Host: "localhost",
-		Port: 8080, // Fixed port for shared test suite
+		Env: "dev",
+		// Sandbox semantics MUST be explicit (#355): the dev default is now
+		// live credentials + mode=full, so the suite sets test_env=true to keep
+		// processors on their sandbox environments (and the NMI demo-key boot
+		// probe working).
+		TestEnv: true,
+		Host:    "localhost",
+		Port:    8080, // Fixed port for shared test suite
 		DB: &config.DBConfig{
 			URL: postgresConnStr,
 		},
@@ -246,7 +251,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 		},
 		// All payment processor configs use the unified Processors map
 		Processors: map[string]*config.ProcessorConfig{
-			// CCBill config with test_mode enabled to bypass IP verification in webhook tests
+			// CCBill config with test_env enabled to bypass IP verification in webhook tests
 			"ccbill": {
 				Type:         config.ProcessorTypeCCBill,
 				ClientAccNum: "945280",
@@ -258,7 +263,7 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 				Type:            config.ProcessorTypeSolana,
 				RecipientWallet: "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh",
 				Tokens:          config.DefaultDevnetTokens(),
-				// RPCEndpoint and Network are derived from test_mode
+				// RPCEndpoint and Network are derived from test_env
 			},
 			// NMI/Mobius config for integration tests. Prefer real sandbox
 			// credentials from .env; fall back to NMI's public demo key when

@@ -492,10 +492,10 @@ flag) is propagated with a plain update. Re-mint requires `recreate=true` on the
 reconcile call; otherwise the price reports `drifted_no_recreate` / a missing
 remote reports `missing_no_recreate`.
 
-**Mode (test vs. live):** registration runs in whatever mode `test_mode`
+**Test vs. live:** registration runs in whichever environment `test_env`
 selects. Stripe test and live are entirely separate namespaces (separate objects
-and lookup_keys), so a price registered in test mode is never matched against a
-live object and vice versa.
+and lookup_keys), so a price registered in the test environment is never matched
+against a live object and vice versa.
 
 ## Admin API (`/v1/admin`, JWT + `admin` role)
 

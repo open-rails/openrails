@@ -134,10 +134,10 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 	if err != nil {
 		return nil, err
 	}
-	// Use global test_mode for CCBill IP allowlist bypass.
-	isTestMode := cfg.IsTestMode()
+	// Use global test_env for CCBill IP allowlist bypass.
+	isTestEnv := cfg.IsTestEnv()
 
-	if !isTestMode {
+	if !isTestEnv {
 		// Verify CCBill webhook comes from authorized IP ranges
 		if !iputil.IsValidCCBillIP(req.ClientIP) {
 			log.WithFields(log.Fields{
@@ -153,7 +153,7 @@ func (s *Service) handleCCBillWebhook(ctx context.Context, req HandleWebhookRequ
 		}
 		log.WithField("client_ip", req.ClientIP).Debug("CCBill webhook authenticated - valid IP range")
 	} else {
-		log.WithField("client_ip", req.ClientIP).Debug("CCBill webhook authentication bypassed - test mode enabled")
+		log.WithField("client_ip", req.ClientIP).Debug("CCBill webhook authentication bypassed - test env enabled")
 	}
 
 	prepared, err := webhookutil.PrepareCCBill(req.Body, req.EventType)

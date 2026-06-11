@@ -193,13 +193,10 @@ func TestVaultTenantSecretResolutionIsTenantScoped(t *testing.T) {
 	require.Equal(t, "tenant-b-key", clientB.SecurityKey)
 }
 
-func vaultTestConfig(testMode bool, mobiusKey string) *config.Config {
-	mode := config.ModeProduction
-	if testMode {
-		mode = config.ModeTest
-	}
+func vaultTestConfig(testEnv bool, mobiusKey string) *config.Config {
 	return &config.Config{
-		Mode: mode,
+		Mode:    config.ModeFull,
+		TestEnv: testEnv,
 		Processors: map[string]*config.ProcessorConfig{
 			"mobius": {
 				Type:        config.ProcessorTypeNMI,

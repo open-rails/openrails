@@ -395,9 +395,10 @@ or your own tooling instead — admin routes without a permission checker fail c
   non-authoritative metadata for things like checkout prefill.
 - **Admin authority:** the live `openrails:admin` permission evaluated at request time in
   the caller's own tenant (see embedded guide §5). Never derived from role names.
-- **Sandbox vs live:** `MODE=test` (the dev default) routes every processor to its
-  test/sandbox environment so you can't accidentally charge a real card; outside
-  development an explicit mode is required (see Operating modes below).
+- **Sandbox vs live:** `TEST_ENV=true` routes every processor to its test/sandbox
+  environment and enforces sandbox credentials so you can't accidentally charge a real
+  card. It is **off by default — including in dev** — and is rejected outside
+  development (see Operating modes below).
 
 ## Configuration
 
@@ -408,32 +409,52 @@ Zero-config against the bundled compose stack. Override with a `config.yaml` (re
 
 ## Operating modes & feature flags
 
-One dial picks how much OpenRails may do against the payment providers: `mode` (yaml) /
-`MODE` (env) / `--mode` (CLI flag; flag beats env beats yaml). Fine-grained feature flags under `feature_flags.*` (env: `FEATURE_FLAGS_<NAME>`)
+Two orthogonal settings, plus fine-grained feature flags:
+
+- **`mode`** (yaml) / `MODE` (env) / `--mode` (CLI flag; flag beats env beats yaml) —
+  the pure **behavior** dial: how much OpenRails may do against the payment providers.
+  One of `full | limited | readonly`.
+- **`test_env`** (yaml) / `TEST_ENV` (env) / `--test-env` (CLI flag) — the
+  **credential** axis: `true` enforces sandbox processor credentials. Default `false`.
+
+Fine-grained feature flags under `feature_flags.*` (env: `FEATURE_FLAGS_<NAME>`)
 remain as overrides on top — **the strictest setting always wins**. Every restrictive
 setting is announced with a `⚠️` warning at startup; if you expected a safety posture and
 don't see its warning in the boot log, it isn't on. Full docs in `config.example.yaml`.
 
-| `MODE=` | Money | What runs |
-|---|---|---|
-| `test` (default in dev) | sandbox | **Full behavior** — charges, dunning, deletes all run against sandbox processors; no real money can move. Rejected outside `env=development`. **Credential guarantees**: a live Stripe key (`sk_live_`/`rk_live_`) refuses to boot; each configured NMI account is probed at boot with one auth on the non-issued test card — only a simulator can approve it, so a decline proves a live account and refuses the boot (NMI sandbox accounts are otherwise undetectable — same URL, unmarked keys); Solana derives devnet structurally. |
-| `production` | live | Full behavior. |
-| `limited` | live | **Reactive-only.** Nothing system-initiated touches a provider: no dunning charges or window-expiry cancellations (dunning runs dry), no auto-top-ups, no arrears collection, no Solana pulls, no catalog provider-object writes (provider slots defer to `pending_manual_link` and converge on a later apply). Everything user/admin-initiated works — checkout charges, card/vault saves, tier changes, cancels (including their processor-side delete), resumes, refunds, webhooks. |
-| `readonly` | live creds | **Zero provider writes, even reactive ones** — a checkout/charge attempt fails loudly (`ErrProviderReadOnly`). Wire-enforced on all three rails: NMI (direct-post gate), Stripe (transport gate), Solana (transaction-submission gate). Provider *reads* (query APIs, catalog verification) and local serving still work. Implies `limited` + the deletion kill switch. For reconciliation/forensics boots. |
+| `MODE=` | What runs |
+|---|---|
+| `full` | Full behavior — charges, dunning, deletes all run. |
+| `limited` | **Reactive-only.** Nothing system-initiated touches a provider: no dunning charges or window-expiry cancellations (dunning runs dry), no auto-top-ups, no arrears collection, no Solana pulls, no catalog provider-object writes (provider slots defer to `pending_manual_link` and converge on a later apply). Everything user/admin-initiated works — checkout charges, card/vault saves, tier changes, cancels (including their processor-side delete), resumes, refunds, webhooks. |
+| `readonly` | **Zero provider writes, even reactive ones** — a checkout/charge attempt fails loudly (`ErrProviderReadOnly`). Wire-enforced on all three rails: NMI (direct-post gate), Stripe (transport gate), Solana (transaction-submission gate). Provider *reads* (query APIs, catalog verification) and local serving still work. Implies `limited` + the deletion kill switch. For reconciliation/forensics boots. |
 
-At a glance — what each mode permits:
+### `test_env` — sandbox credentials, orthogonal to mode
 
-| Operation | `test` | `production` | `limited` | `readonly` |
-|---|---|---|---|---|
-| Real money can move | ❌ (sandbox) | ✅ | ✅ | ❌ (writes blocked) |
-| User checkout / charge | ✅ sandbox | ✅ | ✅ | ❌ fails loudly |
-| Card/vault save, tier change, resume, refund | ✅ sandbox | ✅ | ✅ | ❌ |
-| User/admin cancel → processor-side delete | ✅ sandbox | ✅ | ✅ | ❌ marker left for replay |
-| Dunning charges + window-expiry cancellations | ✅ sandbox | ✅ | ❌ runs dry | ❌ |
-| Auto-top-ups, arrears collection, Solana pulls | ✅ sandbox | ✅ | ❌ | ❌ |
-| Catalog provider-object writes (bootstrap apply) | ✅ sandbox | ✅ | ❌ deferred | ❌ deferred |
-| Provider reads (query APIs, catalog verification) | ✅ | ✅ | ✅ | ✅ |
-| Webhook ingestion + local serving | ✅ | ✅ | ✅ | ✅ |
+`TEST_ENV=true` is sandbox money with whatever behavior `mode` selects (typically
+`full`): every processor routes to its test/sandbox environment, and the **credential
+guarantees** attach — a live Stripe key (`sk_live_`/`rk_live_`) refuses to boot; each
+configured NMI account is probed at boot with one auth on the non-issued test card —
+only a simulator can approve it, so a decline proves a live account and refuses the boot
+(NMI sandbox accounts are otherwise undetectable — same URL, unmarked keys); CCBill uses
+`sandbox-api.ccbill.com`; Solana derives devnet structurally. `test_env=true` is
+**rejected outside `env=development`** — sandbox money is dev-only. The old `mode=test`
+is exactly `TEST_ENV=true` + `MODE=full`.
+
+At a glance — what each mode permits (the `test_env` axis applies orthogonally: with
+`TEST_ENV=true` the same matrix holds against sandbox processors, so no real money can
+move in any mode):
+
+| Operation | `full` | `limited` | `readonly` |
+|---|---|---|---|
+| Real money can move | ✅ | ✅ | ❌ (writes blocked) |
+| User checkout / charge | ✅ | ✅ | ❌ fails loudly |
+| Card/vault save, tier change, resume, refund | ✅ | ✅ | ❌ |
+| User/admin cancel → processor-side delete | ✅ | ✅ | ❌ marker left for replay |
+| Dunning charges + window-expiry cancellations | ✅ | ❌ runs dry | ❌ |
+| Auto-top-ups, arrears collection, Solana pulls | ✅ | ❌ | ❌ |
+| Catalog provider-object writes (bootstrap apply) | ✅ | ❌ deferred | ❌ deferred |
+| Provider reads (query APIs, catalog verification) | ✅ | ✅ | ✅ |
+| Webhook ingestion + local serving | ✅ | ✅ | ✅ |
 
 Each mode is strictly more restrictive than the one before it (`readonly` ⊃ `limited`):
 `limited` draws the line at *who initiates* (the system initiates nothing; humans get
@@ -442,7 +463,11 @@ customer clicking buy). Typical uses: `limited` = migration cutover with the sit
 usable; `readonly` = reconciliation/forensics boots that must only observe.
 
 `mode` is **required outside development** (the server refuses to boot without one);
-unset in dev defaults to `test`. The old `test_mode` boolean no longer exists.
+unset in dev defaults to `full`. **Behavior change (#355):** the dev default is now
+**live credentials + full behavior** — a dev boot with real processor credentials in
+`.env` and no flags will move real money. Set `TEST_ENV=true` (or `--test-env`) for the
+old sandbox-by-default behavior. The old `mode=test` and `mode=production` values and
+the `test_mode` boolean no longer exist.
 
 Feature-flag dials on top:
 
@@ -470,7 +495,7 @@ FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true
 
 Exit path, in order: (1) unset `DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS` and restart —
 the boot rescan replays every delete skipped while the switch was on; (2) once converged,
-set `MODE=production` — dunning resumes, and the dunning window guarantees the stale
+set `MODE=full` — dunning resumes, and the dunning window guarantees the stale
 backlog is cancelled + downgraded rather than charged.
 
 All paused work is **delayed, not lost** — the workers are state-scan loops, so the first

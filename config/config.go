@@ -81,24 +81,34 @@ type Config struct {
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
-	// Mode is the single operating-mode dial (#346): how much OpenRails is
-	// allowed to do against the payment providers. One of:
-	//   - "test":       sandbox processors, FULL behavior (charges, dunning,
-	//                   deletes all run — no real money moves)
-	//   - "production": live processors, full behavior
-	//   - "limited":    live processors, REACTIVE-ONLY — no system-initiated
-	//                   provider actions (no dunning charges or window-expiry
-	//                   cancellations, no auto-top-ups, no arrears collection,
-	//                   no Solana pulls, no catalog provider-object writes).
-	//                   User/admin-initiated operations work normally,
-	//                   including their processor-side deletes.
-	//   - "readonly":   live credentials, ZERO provider writes — even reactive
-	//                   ones fail loudly. For reconciliation/forensics boots.
-	//                   Implies limited + the processor-deletion kill switch.
-	// Unset defaults to "test" in development; outside development an explicit
+	// Mode is the pure-behavior operating dial (#346, #355): how much OpenRails
+	// is allowed to do against the payment providers. It applies identically in
+	// test and live environments (sandbox vs live is the orthogonal TestEnv
+	// axis). One of:
+	//   - "full":     everything runs — charges, dunning, deletes
+	//   - "limited":  REACTIVE-ONLY — no system-initiated provider actions
+	//                 (no dunning charges or window-expiry cancellations, no
+	//                 auto-top-ups, no arrears collection, no Solana pulls,
+	//                 no catalog provider-object writes). User/admin-initiated
+	//                 operations work normally, including their processor-side
+	//                 deletes.
+	//   - "readonly": ZERO provider writes — even reactive ones fail loudly.
+	//                 For reconciliation/forensics boots. Implies limited +
+	//                 the processor-deletion kill switch.
+	// Unset defaults to "full" in development; outside development an explicit
 	// mode is REQUIRED (Validate refuses to boot without one). Feature flags
 	// remain fine-grained dials on top; the strictest setting always wins.
 	Mode string `koanf:"mode,omitempty"`
+
+	// TestEnv is the sandbox-credential axis (#355), orthogonal to Mode. When
+	// true, every processor routes to its sandbox environment AND the
+	// credential guarantees attach: a live Stripe key (sk_live_/rk_live_)
+	// refuses to boot, configured NMI accounts are probed at boot (a decline
+	// of the non-issued test card proves production credentials and refuses
+	// the boot), CCBill uses the sandbox URL, and Solana derives devnet.
+	// Default false (live credentials). test_env=true is rejected outside
+	// env=development — sandbox money is dev-only.
+	TestEnv bool `koanf:"test_env,omitempty"`
 
 	// APIURL is the base URL where billing's versioned routes are mounted.
 	// Used for generating URLs (e.g., Solana Pay transaction_request URLs).
@@ -454,10 +464,10 @@ type ProcessorConfig struct {
 	// primary RPC and the public endpoints are the fallback chain; without one,
 	// the public chain alone serves. One key, zero endpoint plumbing.
 	HeliusAPIKey string `koanf:"helius_api_key"`
-	// Network is DERIVED from the operating mode at startup (devnet under test
-	// mode, mainnet otherwise) — it is deliberately NOT configurable (#349):
-	// the mode already answers the question, and a second selector could only
-	// contradict it.
+	// Network is DERIVED from the test_env axis at startup (devnet under
+	// test_env, mainnet otherwise) — it is deliberately NOT configurable
+	// (#349): test_env already answers the question, and a second selector
+	// could only contradict it.
 	Network         string                 `koanf:"-"`
 	RecipientWallet string                 `koanf:"recipient_wallet"`
 	Tokens          map[string]TokenConfig `koanf:"tokens"`
@@ -516,7 +526,7 @@ func (p *ProcessorConfig) ToNMIProviderSettings(name string) *NMIProviderSetting
 		SecurityKey:     p.SecurityKey,
 		TokenizationKey: p.TokenizationKey,
 		WebhookSecret:   p.WebhookSecret,
-		TestMode:        false, // Will be set by caller based on the operating mode
+		TestMode:        false, // Will be set by caller based on test_env
 	}
 }
 
@@ -530,7 +540,7 @@ func (p *ProcessorConfig) ToCCBillConfig() *CCBillConfig {
 		SubscriptionTypeId: p.SubscriptionTypeId,
 		DataLinkUsername:   p.DataLinkUsername,
 		DataLinkPassword:   p.DataLinkPassword,
-		TestMode:           false, // Will be set by caller based on the operating mode
+		TestMode:           false, // Will be set by caller based on test_env
 	}
 }
 
@@ -777,7 +787,7 @@ type SolanaConfig struct {
 	// If not set, falls back to Solana public endpoints.
 	HeliusAPIKey string `koanf:"helius_api_key"`
 
-	Network         string `koanf:"-"` // derived from the operating mode: devnet (test) or mainnet
+	Network         string `koanf:"-"` // derived from test_env: devnet (test env) or mainnet
 	RecipientWallet string `koanf:"recipient_wallet"`
 
 	Tokens map[string]TokenConfig `koanf:"tokens,omitempty"`
@@ -810,21 +820,21 @@ const (
 // still attempt charges (see FeatureFlags.DunningWindowDays).
 const DefaultDunningWindowDays = 15
 
-// Operating modes (#346) — see Config.Mode.
+// Operating modes (#346, #355) — see Config.Mode. The former mode=test is
+// gone (sandbox is the orthogonal test_env axis) and "production" is renamed
+// "full".
 const (
-	ModeTest       = "test"
-	ModeProduction = "production"
-	ModeLimited    = "limited"
-	ModeReadOnly   = "readonly"
+	ModeFull     = "full"
+	ModeLimited  = "limited"
+	ModeReadOnly = "readonly"
 )
 
-// ValidModes contains all valid operating-mode values ("" = legacy/unset).
+// ValidModes contains all valid operating-mode values ("" = unset; dev only).
 var ValidModes = map[string]bool{
-	"":             true,
-	ModeTest:       true,
-	ModeProduction: true,
-	ModeLimited:    true,
-	ModeReadOnly:   true,
+	"":           true,
+	ModeFull:     true,
+	ModeLimited:  true,
+	ModeReadOnly: true,
 }
 
 // ValidDunningModes contains all valid dunning mode values
@@ -1059,7 +1069,7 @@ func Validate(cfg *Config) error {
 	// Operating mode must be a known value — a typo'd mode (e.g. "redaonly")
 	// must never silently boot with full behavior (#346).
 	if !ValidModes[strings.ToLower(strings.TrimSpace(cfg.Mode))] {
-		return fmt.Errorf("invalid mode %q: must be one of test, production, limited, readonly", cfg.Mode)
+		return fmt.Errorf("invalid mode %q: must be one of full, limited, readonly", cfg.Mode)
 	}
 
 	// Port range (#349): UnmarshalText validates string-typed values, but an
@@ -1071,15 +1081,17 @@ func Validate(cfg *Config) error {
 
 	isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""
 	if !isDev {
+		// Sandbox credentials are dev-only (#355): a production deployment
+		// must never boot pointed at sandbox processors.
+		if cfg.TestEnv {
+			return fmt.Errorf("test_env=true is not allowed outside development")
+		}
 		// Outside development the operating mode must be declared explicitly —
-		// sandbox money is dev-only, and "I forgot to set it" must never
-		// silently pick live or test behavior.
+		// "I forgot to set it" must never silently pick a behavior.
 		switch cfg.GetMode() {
-		case ModeProduction, ModeLimited, ModeReadOnly:
-		case ModeTest:
-			return fmt.Errorf("mode=test is not allowed outside development")
+		case ModeFull, ModeLimited, ModeReadOnly:
 		default:
-			return fmt.Errorf("mode is required outside development: set mode (or env MODE) to one of production, limited, readonly")
+			return fmt.Errorf("mode is required outside development: set mode (or env MODE) to one of full, limited, readonly")
 		}
 		if cfg.DB != nil {
 			if strings.TrimSpace(cfg.DB.Username) == "admin" || strings.TrimSpace(cfg.DB.Password) == "admin_password" {
@@ -1114,9 +1126,9 @@ func Validate(cfg *Config) error {
 		}
 	}
 
-	// Validate Stripe key prefix matches test_mode
+	// Validate Stripe key prefix matches test_env
 	// This runs after processor validation to check the key we'll actually use
-	if err := validateStripeKeyForTestMode(cfg); err != nil {
+	if err := validateStripeKeyForTestEnv(cfg); err != nil {
 		return err
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
@@ -1200,10 +1212,11 @@ func validateOptionalDuration(name, raw string) error {
 	return nil
 }
 
-// validateStripeKeyForTestMode checks if the Stripe API key prefix matches the operating mode.
-// If there's a mismatch, it logs a warning and clears the key to disable Stripe.
-// This prevents accidentally processing real charges in test mode or test charges in production.
-func validateStripeKeyForTestMode(cfg *Config) error {
+// validateStripeKeyForTestEnv checks if the Stripe API key prefix matches the
+// test_env axis. If there's a mismatch, it logs a warning and clears the key to
+// disable Stripe. This prevents accidentally processing real charges in a test
+// environment or test charges in a live one.
+func validateStripeKeyForTestEnv(cfg *Config) error {
 	stripeProc, ok := cfg.Processors["stripe"]
 	if !ok || stripeProc == nil {
 		return nil // No Stripe configured
@@ -1219,15 +1232,15 @@ func validateStripeKeyForTestMode(cfg *Config) error {
 	isLiveKey := strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
 	isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
 
-	if cfg.IsTestMode() && isLiveKey {
-		// Hard guarantee (#347): sandbox-money mode must never hold a live key —
-		// a mistakenly-test-moded production system would otherwise carry a
-		// credential that can move real money.
-		return fmt.Errorf("stripe live key (sk_live_/rk_live_) is not allowed in test/sandbox mode; use a test key or switch to a live mode")
+	if cfg.IsTestEnv() && isLiveKey {
+		// Hard guarantee (#347): the sandbox environment must never hold a live
+		// key — a mistakenly-test-enved production system would otherwise carry
+		// a credential that can move real money.
+		return fmt.Errorf("stripe live key (sk_live_/rk_live_) is not allowed when test_env is enabled; use a test key or unset test_env")
 	}
-	if !cfg.IsTestMode() && isTestKey {
-		log.Warn("⚠️  Stripe test key provided but test_mode is disabled (production) - disabling Stripe")
-		log.Warn("   Use a live-mode key (sk_live_/rk_live_) in live modes, or set mode=test for testing")
+	if !cfg.IsTestEnv() && isTestKey {
+		log.Warn("⚠️  Stripe test key provided but test_env is disabled (live credentials) - disabling Stripe")
+		log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_env=true for sandbox testing")
 		stripeProc.SecretKey = ""
 	}
 	return nil
@@ -1417,9 +1430,11 @@ func (cfg *Config) IsNMIProcessor(name string) bool {
 	return cfg.GetProcessorType(name) == ProcessorTypeNMI
 }
 
-// GetMode returns the normalized operating mode ("" when unset/legacy).
+// GetMode returns the normalized operating mode ("" when unset).
 // Unknown values are rejected by Validate; here they normalize to "" so a
-// pre-validation caller never misreads a typo as a real mode.
+// pre-validation caller never misreads a typo as a real mode. Unset means the
+// dev default (full behavior) — that only ever serves development, because
+// Validate requires an explicit mode outside it.
 func (cfg *Config) GetMode() string {
 	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
 	if !ValidModes[mode] {
@@ -1428,18 +1443,13 @@ func (cfg *Config) GetMode() string {
 	return mode
 }
 
-// IsTestMode returns true if payment processors should use sandbox/test
-// environments. Mode decides: test → sandbox; production/limited/readonly →
-// live. Unset mode means sandbox — that only ever serves development, because
-// Validate requires an explicit mode outside it.
-func (cfg *Config) IsTestMode() bool {
-	switch cfg.GetMode() {
-	case ModeTest:
-		return true
-	case ModeProduction, ModeLimited, ModeReadOnly:
-		return false
-	}
-	return true
+// IsTestEnv returns true if payment processors should use sandbox/test
+// environments and the sandbox-credential guarantees apply (#355): Stripe
+// live-key refusal, NMI boot probe, CCBill sandbox URL, Solana devnet.
+// Orthogonal to Mode (pure behavior). Default false; Validate rejects
+// test_env=true outside development.
+func (cfg *Config) IsTestEnv() bool {
+	return cfg.TestEnv
 }
 
 // IsLimitedMode returns true if proactive payment-provider operations
@@ -1710,6 +1720,11 @@ func Load(configPath string) (*Config, error) {
 			return "api_url"
 		}
 
+		// Special case: TEST_ENV -> test_env (top-level bool, not nested test.env)
+		if s == "test_env" {
+			return "test_env"
+		}
+
 		// Canonical Vault env vars: VAULT_ADDR is HashiCorp's standard name for
 		// the server URL, so map it to vault.address (the default first-underscore
 		// split would yield vault.addr). VAULT_TOKEN already splits correctly.
@@ -1876,8 +1891,8 @@ func Load(configPath string) (*Config, error) {
 		cfg.DB.Schema = normalizeSchema(cfg.DB.Schema)
 	}
 
-	// Log test mode status clearly at startup
-	logTestModeStatus(cfg)
+	// Log credential-environment status clearly at startup
+	logTestEnvStatus(cfg)
 
 	// Log feature flags status at startup
 	logFeatureFlagsStatus(cfg)
@@ -1895,22 +1910,21 @@ func Load(configPath string) (*Config, error) {
 func logFeatureFlagsStatus(cfg *Config) {
 	flags := cfg.GetFeatureFlags()
 
-	// Operating-mode banner (#346). The mode dial is the headline; the flag
-	// logs below cover the fine-grained dials.
+	// Operating-mode banner (#346/#355). The mode dial is the headline; the
+	// flag logs below cover the fine-grained dials. Sandbox vs live is the
+	// orthogonal test_env banner (logTestEnvStatus).
 	switch cfg.GetMode() {
 	case ModeReadOnly:
 		log.Warn("⚠️  MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
 		log.Info("   Reconciliation/forensics posture: provider reads + local serving only")
-		log.Info("   Set mode=limited or mode=production to allow writes")
+		log.Info("   Set mode=limited or mode=full to allow writes")
 	case ModeLimited:
 		log.Warn("⚠️  MODE=limited - No proactive payment-provider operations will be performed")
 		log.Info("   Dunning charges/cancellations, auto-top-ups, arrears collection, Solana pulls and catalog provider writes are paused")
 		log.Info("   Reactive operations (checkout, vault saves, user/admin cancels, webhooks) work normally")
-		log.Info("   Set mode=production to resume proactive operations")
-	case ModeProduction:
-		log.Info("Mode: production (live processors, full behavior)")
-	case ModeTest:
-		log.Info("Mode: test (sandbox processors, full behavior)")
+		log.Info("   Set mode=full to resume proactive operations")
+	case ModeFull:
+		log.Info("Mode: full (complete behavior - charges, dunning, deletes all run)")
 	}
 
 	// Log dunning mode if not default
@@ -1942,24 +1956,25 @@ func logFeatureFlagsStatus(cfg *Config) {
 	}
 }
 
-// logTestModeStatus logs the payment processing mode at startup.
-// This helps operators confirm whether they're in test or production mode.
-func logTestModeStatus(cfg *Config) {
-	if cfg.IsTestMode() {
-		log.Warn("⚠️  TEST MODE ENABLED - No real charges will be processed")
+// logTestEnvStatus logs the credential environment at startup.
+// This helps operators confirm whether they're on sandbox or live credentials.
+func logTestEnvStatus(cfg *Config) {
+	if cfg.IsTestEnv() {
+		log.Warn("⚠️  TEST ENV ENABLED - No real charges will be processed")
 		log.Info("   Payment providers will use sandbox/test environments:")
 		log.Info("   - NMI: secure.networkmerchants.com with test-mode transactions")
 		log.Info("   - CCBill: sandbox-api.ccbill.com")
 		log.Info("   - Stripe: requires sk_test_* key")
 		log.Info("   - Solana: devnet")
 	} else {
-		log.Warn("🔴 PRODUCTION MODE - Real charges enabled")
+		log.Warn("🔴 LIVE CREDENTIALS - Real charges enabled")
 		log.Info("   Payment providers will use production environments")
 
-		// Warn if running real charges in dev environment (unusual)
+		// Warn if running real charges in dev environment (worth noticing:
+		// the dev default is live credentials unless test_env is set).
 		if cfg.IsDev() {
-			log.Warn("⚠️  Real payment processing enabled in dev environment - this is unusual")
-			log.Warn("   Set mode=test (env MODE=test) to use sandbox environments")
+			log.Warn("⚠️  Real payment processing enabled in dev environment")
+			log.Warn("   Set test_env=true (env TEST_ENV=true, flag --test-env) to use sandbox environments")
 		}
 	}
 }

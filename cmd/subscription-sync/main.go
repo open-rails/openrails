@@ -152,7 +152,7 @@ func buildNMIClient(cfg *config.Config, processor string) (*nmi.NMIClient, error
 		return nil, fmt.Errorf("nmi processor '%s' security key is required", name)
 	}
 
-	return nmi.NewClient(name, settings, cfg.IsTestMode())
+	return nmi.NewClient(name, settings, cfg.IsTestEnv())
 }
 
 func fetchCCBillSubscriptions(ctx context.Context, cfg *config.Config) ([]ccbill.CCBillRecord, error) {
@@ -161,7 +161,7 @@ func fetchCCBillSubscriptions(ctx context.Context, cfg *config.Config) ([]ccbill
 		return nil, fmt.Errorf("ccbill processor not configured")
 	}
 	ccbillConfig := ccbillProc.ToCCBillConfig()
-	ccbillConfig.TestMode = cfg.IsTestMode()
+	ccbillConfig.TestMode = cfg.IsTestEnv()
 	client := ccbill.NewDataLinkClient(ccbillConfig)
 	if err := client.ValidateConfig(); err != nil {
 		return nil, err
