@@ -28,6 +28,8 @@ type RPCClientConfig struct {
 
 	// Network determines which endpoints to use (mainnet, devnet, testnet).
 	Network string
+	// ReadOnly blocks transaction submission at the wire (mode=readonly, #346).
+	ReadOnly bool
 }
 
 // NewRPCClientWithConfig creates a new Solana RPC client with fallback support.
@@ -38,6 +40,7 @@ func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 	}
 
 	fallback := NewRPCFallbackClient(RPCFallbackConfig{
+		ReadOnly:       cfg.ReadOnly,
 		CustomEndpoint: cfg.Endpoint,
 		HeliusAPIKey:   cfg.HeliusAPIKey,
 		Network:        network,

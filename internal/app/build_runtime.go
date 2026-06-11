@@ -635,6 +635,7 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 		solanaRPC = solana.NewRPCClientWithConfig(solana.RPCClientConfig{
 			HeliusAPIKey: solanaProc.HeliusAPIKey,
 			Network:      solanaNetwork,
+			ReadOnly:     cfg.IsProviderReadOnly(),
 		})
 	}
 	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, solanaRPC, cfg, priceService, fxProvider, clock)
