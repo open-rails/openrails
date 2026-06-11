@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -149,12 +150,37 @@ func createExternalTestDatabase(ctx context.Context, adminDSN string) (string, e
 		return "", fmt.Errorf("create external test database %s: %w", dbName, err)
 	}
 
-	testCfg, err := pgxpool.ParseConfig(adminDSN)
-	if err != nil {
-		return "", fmt.Errorf("parse external postgres dsn for test database: %w", err)
+	// NOTE: pgxpool's Config.ConnString() returns the ORIGINAL string the
+	// config was parsed from — mutating Config.Database does not change it.
+	// The DSN must be rewritten textually, or every "isolated" test database
+	// silently aliases the admin/dev database and the migrator runs against
+	// it (which is how migrations 003/004 once got replayed onto a live dev
+	// DB). Rewrite the URL path / dbname key explicitly instead.
+	return replaceDSNDatabase(adminDSN, dbName)
+}
+
+// replaceDSNDatabase returns dsn with its database swapped to dbName,
+// handling both URL DSNs (postgres://...) and key=value DSNs.
+func replaceDSNDatabase(dsn, dbName string) (string, error) {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		u, err := url.Parse(dsn)
+		if err != nil {
+			return "", fmt.Errorf("parse external postgres url: %w", err)
+		}
+		u.Path = "/" + dbName
+		return u.String(), nil
 	}
-	testCfg.ConnConfig.Config.Database = dbName
-	return testCfg.ConnString(), nil
+	// key=value form: drop any existing dbname and append the new one.
+	fields := strings.Fields(dsn)
+	out := make([]string, 0, len(fields)+1)
+	for _, f := range fields {
+		if strings.HasPrefix(f, "dbname=") {
+			continue
+		}
+		out = append(out, f)
+	}
+	out = append(out, "dbname="+dbName)
+	return strings.Join(out, " "), nil
 }
 
 func bootstrapAndMigrate(ctx context.Context, dsn string) error {

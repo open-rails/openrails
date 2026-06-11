@@ -215,6 +215,17 @@ func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	adminAccess.Handle(http.MethodGet, "", h(httphandlers.GetAdminUserProductAccess))
 	adminAccess.Handle(http.MethodPost, "", h(httphandlers.GrantAdminProductAccess))
 	adminAccess.Handle(http.MethodDelete, "/:id", h(httphandlers.RevokeAdminProductAccess))
+
+	// Processor reconciliation (#107 phase 2). Manual-only: POST /runs executes
+	// synchronously (advisory or enforce); enforce writes LOCAL state only —
+	// remote actions live in the findings admin queue (ack/dismiss below).
+	adminReconcile := group.Group("/reconcile")
+	adminReconcile.Handle(http.MethodPost, "/runs", h(httphandlers.AdminReconcileRun))
+	adminReconcile.Handle(http.MethodGet, "/runs", h(httphandlers.AdminReconcileListRuns))
+	adminReconcile.Handle(http.MethodGet, "/runs/:id", h(httphandlers.AdminReconcileGetRun))
+	adminReconcile.Handle(http.MethodGet, "/findings", h(httphandlers.AdminReconcileListFindings))
+	adminReconcile.Handle(http.MethodPost, "/findings/:id/ack", h(httphandlers.AdminReconcileAckFinding))
+	adminReconcile.Handle(http.MethodPost, "/findings/:id/dismiss", h(httphandlers.AdminReconcileDismissFinding))
 }
 
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {

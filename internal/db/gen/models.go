@@ -642,6 +642,52 @@ type BillingProductEntitlementFeature struct {
 	UpdatedAt            time.Time
 }
 
+// Durable local-vs-processor drift ledger (#107 PS-1..PS-9). Stable identity per (tenant, provider, finding_type, subject_key): re-runs update, disappearance auto-resolves as auto_vanished. requires_admin = true rows are the admin action queue.
+type BillingReconciliationFinding struct {
+	ID uuid.UUID
+	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
+	TenantID    uuid.UUID
+	Provider    string
+	FindingType string
+	// Stable identity of the drifted subject within (provider, finding_type): processor subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.
+	SubjectKey        string
+	Severity          string
+	Status            string
+	RequiresAdmin     bool
+	RecommendedAction *string
+	LocalEvidence     []byte
+	RemoteEvidence    []byte
+	// Class-3 local-intent annotation (design decision 5): e.g. DeletionScheduledAt marker present => "recorded delete never executed; boot rescan replays it" — keeps the admin queue to genuine unknowns.
+	IntentEvidence     []byte
+	ResolutionEvidence []byte
+	FirstSeenRun       uuid.UUID
+	LastSeenRun        uuid.UUID
+	FirstSeenAt        time.Time
+	LastSeenAt         time.Time
+	OccurrenceCount    int32
+	ResolvedAt         *time.Time
+	Resolution         *string
+	Notes              *string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment processors. Summary jsonb carries per-provider counts and the dunning-forensics report.
+type BillingReconciliationRun struct {
+	ID uuid.UUID
+	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
+	TenantID    uuid.UUID
+	Mode        string
+	Providers   []string
+	WindowSince *time.Time
+	WindowUntil *time.Time
+	StartedAt   time.Time
+	FinishedAt  *time.Time
+	Status      string
+	Summary     []byte
+	Error       *string
+}
+
 type BillingSolanaSubscription struct {
 	ID                       uuid.UUID
 	TenantID                 uuid.UUID

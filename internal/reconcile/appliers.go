@@ -1,0 +1,181 @@
+package reconcile
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/pkg/tenant"
+)
+
+// LocalWriter performs enforce mode's idempotent LOCAL writes. No method ever
+// calls a processor — that is the design invariant that lets enforce run
+// under mode=readonly. Every method reports whether it changed anything, so
+// a second enforce run is observably a no-op.
+type LocalWriter interface {
+	CancelSubscriptionLocal(ctx context.Context, a CancelLocalAction) (bool, error)
+	AdoptSubscriptionStatus(ctx context.Context, a AdoptStatusAction) (bool, error)
+	BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error)
+	RecordRefund(ctx context.Context, a RecordRefundAction) (bool, error)
+	AdoptPaymentMethod(ctx context.Context, a AdoptVaultAction) (bool, error)
+	GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error)
+	RevokeSubscriptionEntitlements(ctx context.Context, a RevokeEntitlementsAction) (int, error)
+}
+
+// PGLocalWriter applies enforce writes via the sqlc layer on a tenant-pinned
+// connection.
+type PGLocalWriter struct {
+	DB  *db.DB
+	Now func() time.Time
+}
+
+var _ LocalWriter = (*PGLocalWriter)(nil)
+
+func (w *PGLocalWriter) now() time.Time {
+	if w.Now != nil {
+		return w.Now()
+	}
+	return time.Now().UTC()
+}
+
+func (w *PGLocalWriter) CancelSubscriptionLocal(ctx context.Context, a CancelLocalAction) (bool, error) {
+	cancelType := a.CancelType
+	if cancelType == "" {
+		cancelType = "expired"
+	}
+	reason := a.Reason
+	if reason == "" {
+		reason = "reconcile: processor reports subscription terminated"
+	}
+	n, err := w.DB.Gen(ctx).ReconcileCancelSubscriptionLocal(ctx, gen.ReconcileCancelSubscriptionLocalParams{
+		Now:        w.now(),
+		CancelType: cancelType,
+		Reason:     reason,
+		ID:         a.SubscriptionID,
+	})
+	return n > 0, err
+}
+
+func (w *PGLocalWriter) AdoptSubscriptionStatus(ctx context.Context, a AdoptStatusAction) (bool, error) {
+	n, err := w.DB.Gen(ctx).ReconcileAdoptSubscriptionStatus(ctx, gen.ReconcileAdoptSubscriptionStatusParams{
+		Status:         gen.BillingSubscriptionStatus(a.Status),
+		PeriodStartsAt: a.PeriodStartsAt,
+		PeriodEndsAt:   a.PeriodEndsAt,
+		ID:             a.SubscriptionID,
+	})
+	return n > 0, err
+}
+
+func metadataJSON(m map[string]any) []byte {
+	if len(m) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error) {
+	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
+		PriceID:         a.PriceID,
+		Processor:       gen.BillingProcessorType(a.Processor),
+		TransactionID:   a.TransactionID,
+		Amount:          a.AmountCents,
+		Currency:        a.Currency,
+		SubscriptionID:  a.SubscriptionID,
+		Metadata:        metadataJSON(a.Metadata),
+		PurchasedAt:     a.PurchasedAt,
+		TenantSubjectID: a.TenantSubjectID,
+	})
+	if err != nil {
+		return false, err
+	}
+	if a.Grant != nil {
+		if _, err := w.GrantEntitlements(ctx, *a.Grant); err != nil {
+			return n > 0, err
+		}
+	}
+	return n > 0, nil
+}
+
+func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) (bool, error) {
+	if a.MarkRefundedOnly {
+		if a.RefundedPaymentID == nil {
+			return false, nil
+		}
+		n, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, *a.RefundedPaymentID)
+		return n > 0, err
+	}
+	amount := a.AmountCents
+	if amount > 0 {
+		amount = -amount // refunds are negative-amount payment rows
+	}
+	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
+		PriceID:           a.PriceID,
+		Processor:         gen.BillingProcessorType(a.Processor),
+		TransactionID:     a.TransactionID,
+		Amount:            amount,
+		Currency:          a.Currency,
+		SubscriptionID:    a.SubscriptionID,
+		RefundedPaymentID: a.RefundedPaymentID,
+		Metadata:          metadataJSON(a.Metadata),
+		PurchasedAt:       a.PurchasedAt,
+		TenantSubjectID:   a.TenantSubjectID,
+	})
+	if err != nil {
+		return false, err
+	}
+	if n > 0 && a.RefundedPaymentID != nil {
+		if _, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, *a.RefundedPaymentID); err != nil {
+			return true, err
+		}
+	}
+	return n > 0, nil
+}
+
+func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptVaultAction) (bool, error) {
+	n, err := w.DB.Gen(ctx).ReconcileAdoptPaymentMethod(ctx, gen.ReconcileAdoptPaymentMethodParams{
+		LastFour:   a.LastFour,
+		ExpiryDate: a.ExpiryDate,
+		ID:         a.PaymentMethodID,
+	})
+	return n > 0, err
+}
+
+func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error) {
+	now := w.now()
+	granted := 0
+	for _, name := range a.Entitlements {
+		n, err := w.DB.Gen(ctx).ReconcileGrantSubscriptionEntitlement(ctx, gen.ReconcileGrantSubscriptionEntitlementParams{
+			TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+			TenantSubjectID: a.TenantSubjectID,
+			Entitlement:     name,
+			StartAt:         a.StartAt,
+			EndAt:           a.EndAt,
+			SubscriptionID:  a.SubscriptionID,
+			Now:             now,
+		})
+		if err != nil {
+			return granted, err
+		}
+		granted += int(n)
+	}
+	return granted, nil
+}
+
+func (w *PGLocalWriter) RevokeSubscriptionEntitlements(ctx context.Context, a RevokeEntitlementsAction) (int, error) {
+	reason := a.Reason
+	if reason == "" {
+		reason = "reconcile: subscription not active at processor"
+	}
+	n, err := w.DB.Gen(ctx).ReconcileRevokeSubscriptionEntitlements(ctx, gen.ReconcileRevokeSubscriptionEntitlementsParams{
+		Now:            w.now(),
+		Reason:         reason,
+		SubscriptionID: a.SubscriptionID,
+	})
+	return int(n), err
+}
