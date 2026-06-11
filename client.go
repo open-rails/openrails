@@ -116,6 +116,12 @@ type Client interface {
 	AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error)
 }
 
+// SelfIssuer is the issuer keying tenant_subjects rows for self-service
+// identities whose subject is the user's own UUID — what an embedded host
+// passes to ListActiveEntitlements for its own users (internal/db/repo
+// EnsureTenantSubjectID materializes rows under it).
+const SelfIssuer = "openrails:self"
+
 // PayerTenantID is the OpenRails tenant-subject UUID a charge is billed to.
 type PayerTenantID uuid.UUID
 
