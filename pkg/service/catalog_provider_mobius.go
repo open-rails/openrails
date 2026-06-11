@@ -89,6 +89,9 @@ func (a *mobiusAdapter) Attach(_ context.Context, link map[string]string, in aut
 				return nil, fmt.Errorf("NMI recurring plan %q billing cycle (%d days) does not match catalog price (%d days)", planID, detail.DayFrequency, *in.BillingCycleDays)
 			}
 		} else {
+			if in.RemoteWritesDisabled {
+				return nil, fmt.Errorf("NMI recurring plan %q does not exist: %w", planID, errRemoteWritesDisabled)
+			}
 			if err := a.createPlan(client, planID, in); err != nil {
 				return nil, fmt.Errorf("link plan_id %q does not exist and could not be created: %w", planID, err)
 			}

@@ -473,7 +473,7 @@ func TestDunningWorkerLimitedModeTakesNoAction(t *testing.T) {
 	})
 
 	limitedCfg := *suite.App.Runtime.Config
-	limitedCfg.FeatureFlags = &config.FeatureFlags{LimitedMode: true}
+	limitedCfg.Mode = config.ModeLimited
 
 	worker := &riverjobs.DunningWorker{
 		DB:         suite.App.Runtime.DB,

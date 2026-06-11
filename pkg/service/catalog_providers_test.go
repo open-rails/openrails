@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/models"
 )
@@ -227,5 +231,70 @@ func TestResolveProviders_LinkOnlyInProviderLinks(t *testing.T) {
 	}
 	if states["ccbill"].Status != ProviderStatusLinked {
 		t.Fatalf("expected ccbill linked, got %s", states["ccbill"].Status)
+	}
+}
+
+// -- Mode-gated catalog writes (#346) ----------------------------------------
+
+// TestResolveProviders_RemoteWritesDisabledDefersAutoCreate verifies that in
+// limited/readonly mode the dispatcher never calls AutoCreate: every provider
+// slot defers to pending_manual_link with the mode message, and the price
+// still applies locally.
+func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
+	svc := &Service{rt: &app.Runtime{Config: &config.Config{Mode: config.ModeLimited}}}
+	priceID := uuid.New()
+	processors, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Slug: "premium"}, CreatePriceRequest{
+		Providers:  []string{"stripe", "mobius"},
+		UnitAmount: 2300,
+		Currency:   "usd",
+	}, priceID)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(processors) != 0 {
+		t.Fatalf("no provider objects may be linked in limited mode, got %v", processors)
+	}
+	for _, name := range []string{"stripe", "mobius"} {
+		st, ok := states[name]
+		if !ok || st.Status != ProviderStatusPendingManualLink {
+			t.Fatalf("%s: expected pending_manual_link, got %+v", name, st)
+		}
+		if st.Message != remoteWritesDisabledMessage {
+			t.Fatalf("%s: expected mode message, got %q", name, st.Message)
+		}
+	}
+	if len(pending) != 2 {
+		t.Fatalf("expected 2 pending actions, got %d", len(pending))
+	}
+}
+
+// TestMobiusAdapter_AttachMissingPlanDeferredWhenWritesDisabled verifies the
+// Attach find-or-create half: an explicit link whose NMI plan does NOT exist
+// must defer (errRemoteWritesDisabled), never create, when writes are blocked.
+func TestMobiusAdapter_AttachMissingPlanDeferredWhenWritesDisabled(t *testing.T) {
+	var sawWrite bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("report_type") != "" {
+			// Query API: report the plan as missing.
+			w.Write([]byte(`<nm_response></nm_response>`))
+			return
+		}
+		sawWrite = true // any direct-post request would be a remote write
+		w.Write([]byte("response=1"))
+	}))
+	defer server.Close()
+
+	a := newMobiusAdapterWithServer(t, server.URL)
+	cycle := 30
+	_, err := a.Attach(context.Background(), map[string]string{models.ProcessorKeyPlanID: "premium-usd-2300-30"}, autoCreateContext{
+		ProductSlug: "premium", UnitAmount: 2300, Currency: "usd", BillingCycleDays: &cycle,
+		RemoteWritesDisabled: true,
+	})
+	if !errors.Is(err, errRemoteWritesDisabled) {
+		t.Fatalf("expected errRemoteWritesDisabled, got %v", err)
+	}
+	if sawWrite {
+		t.Fatal("adapter performed a direct-post write while writes were disabled")
 	}
 }

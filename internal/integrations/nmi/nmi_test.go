@@ -95,3 +95,23 @@ func TestDeleteRecurringSubscriptionBlockedByKillSwitch(t *testing.T) {
 	err = client.DeleteRecurringSubscription("12345")
 	require.ErrorIs(t, err, ErrSubscriptionDeletesDisabled)
 }
+
+func TestReadOnlyBlocksAllDirectPostMutations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("no direct-post request may reach NMI while the client is read-only")
+	}))
+	defer server.Close()
+
+	client, err := NewClient("mobius", &config.NMIProviderSettings{
+		SecurityKey: "test-security-key",
+	}, false)
+	require.NoError(t, err)
+	client.DirectPostURL = server.URL
+	client.QueryURL = server.URL
+	client.ReadOnly = true
+
+	// Every NMI mutation funnels through sendDirectRequest; a delete is a
+	// representative write.
+	err = client.DeleteRecurringSubscription("12345")
+	require.ErrorIs(t, err, ErrProviderReadOnly)
+}

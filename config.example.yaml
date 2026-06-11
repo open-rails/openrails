@@ -21,6 +21,30 @@ env: "development"
 # If your key doesn't match test_mode, Stripe will be disabled with a warning.
 test_mode: true
 
+# Operating Mode (#346): ONE dial for how much OpenRails may do against the
+# payment providers. Feature flags below remain fine-grained overrides on top;
+# the strictest setting always wins. Env var: MODE=
+#
+#   - "test":       sandbox processors, FULL behavior (charges, dunning,
+#                   deletes all run - no real money). Dev only.
+#   - "production": live processors, full behavior.
+#   - "limited":    live processors, REACTIVE-ONLY - no system-initiated
+#                   provider actions: no dunning charges or window-expiry
+#                   cancellations (dunning runs dry), no auto-top-ups, no
+#                   arrears collection, no Solana pulls, and no catalog
+#                   provider-object writes (slots defer to pending_manual_link
+#                   and converge on a later apply). User/admin-initiated
+#                   operations work normally, including their processor-side
+#                   deletes. Cutover/incident posture.
+#   - "readonly":   live credentials, ZERO provider writes - even reactive
+#                   charges fail loudly. Provider reads + local serving only.
+#                   Implies limited + the processor-deletion kill switch.
+#                   Reconciliation/forensics posture.
+#
+# Unset = legacy behavior (test_mode/env decide; everything on). An explicit
+# test_mode always beats mode for the sandbox/live choice.
+# mode: "production"
+
 # =============================================================================
 # STANDALONE MODE ONLY
 # =============================================================================
@@ -448,7 +472,7 @@ captcha:
 #   FEATURE_FLAGS_DUNNING_WINDOW_DAYS=15
 #   FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION=true|false
 #   FEATURE_FLAGS_DISABLE_PROCESSOR_SUBSCRIPTION_DELETIONS=true|false
-#   FEATURE_FLAGS_LIMITED_MODE=true|false
+#   MODE=test|production|limited|readonly  (top-level operating mode, see CORE SETTINGS)
 
 feature_flags:
   # -------------------------------------------------------------------------
@@ -472,24 +496,8 @@ feature_flags:
   #
   dunning_mode: "on"
 
-  # -------------------------------------------------------------------------
-  # Limited Mode - No proactive operations against payment providers
-  # -------------------------------------------------------------------------
-  # When true, OpenRails takes NO system-initiated action against any payment
-  # provider:
-  #   - Dunning attempts no charges and no window-expiry cancellations
-  #     (behaves as dunning_mode=dry_run_only; dunning_mode=off stays off)
-  #   - Auto-top-up and arrears-collection charges are skipped
-  #   - Solana recurring pulls (cranker) are skipped
-  #
-  # Everything user/admin-initiated still works: checkout charges, card/vault
-  # saves, tier changes, user/admin cancellations (INCLUDING their processor-
-  # side deletes), resumes, refunds, webhook processing, alerts.
-  #
-  # Note: disable_processor_subscription_deletions is STRICTER (blocks even
-  # user-asked deletes); set both for migration cutovers.
-  #
-  limited_mode: false
+  # (Limited mode moved: it is now the top-level `mode: limited` operating
+  # mode - see CORE SETTINGS. feature_flags.limited_mode no longer exists.)
 
   # -------------------------------------------------------------------------
   # Dunning Window - How long past a missed rebill charges may be attempted

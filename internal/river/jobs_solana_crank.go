@@ -78,7 +78,7 @@ type resolvedPlan struct {
 // pull routes to FailMembership -> the existing dunning state machine.
 //
 // MISSED PERIODS ARE NEVER BACK-BILLED. If the cranker was down (outage,
-// limited_mode, #345) across one or more whole periods, resuming produces
+// mode=limited/readonly, #345/#346) across one or more whole periods, resuming produces
 // exactly ONE pull per subscription, and the new period anchors at the pull
 // moment (RenewMembership gets CurrentPeriodStartsAt=now, not the lapsed
 // boundary): one due row -> one pull -> next_pull_at = now + period. There is

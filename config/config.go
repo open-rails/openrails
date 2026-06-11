@@ -80,12 +80,33 @@ type Config struct {
 	// config.example.yaml can document deterministic webhook setups consistently.
 	Cloudflared *CloudflaredConfig `koanf:"cloudflared,omitempty"`
 
+	// Mode is the single operating-mode dial (#346): how much OpenRails is
+	// allowed to do against the payment providers. One of:
+	//   - "test":       sandbox processors, FULL behavior (charges, dunning,
+	//                   deletes all run — no real money moves)
+	//   - "production": live processors, full behavior
+	//   - "limited":    live processors, REACTIVE-ONLY — no system-initiated
+	//                   provider actions (no dunning charges or window-expiry
+	//                   cancellations, no auto-top-ups, no arrears collection,
+	//                   no Solana pulls, no catalog provider-object writes).
+	//                   User/admin-initiated operations work normally,
+	//                   including their processor-side deletes.
+	//   - "readonly":   live credentials, ZERO provider writes — even reactive
+	//                   ones fail loudly. For reconciliation/forensics boots.
+	//                   Implies limited + the processor-deletion kill switch.
+	// Empty = legacy behavior: TestMode/feature flags decide everything.
+	// Feature flags remain fine-grained dials on top; the strictest setting
+	// always wins.
+	Mode string `koanf:"mode,omitempty"`
+
 	// TestMode controls whether payment processors use sandbox/test environments.
 	// When true: NMI submits test-mode transactions, CCBill uses sandbox-api.ccbill.com,
 	// Solana uses devnet, Stripe requires sk_test_* key.
 	// When false: All processors use production environments (real charges).
 	// Defaults to true for safety. Set to false only for production deployments.
 	// Note: This is orthogonal to Env - Env controls logging/debug, TestMode controls payments.
+	// An explicit TestMode beats Mode; when nil, Mode decides (mode=test →
+	// sandbox; production/limited/readonly → live; unset → dev-env default).
 	TestMode *bool `koanf:"test_mode,omitempty"`
 
 	// APIURL is the base URL where billing's versioned routes are mounted.
@@ -823,6 +844,23 @@ const (
 // still attempt charges (see FeatureFlags.DunningWindowDays).
 const DefaultDunningWindowDays = 15
 
+// Operating modes (#346) — see Config.Mode.
+const (
+	ModeTest       = "test"
+	ModeProduction = "production"
+	ModeLimited    = "limited"
+	ModeReadOnly   = "readonly"
+)
+
+// ValidModes contains all valid operating-mode values ("" = legacy/unset).
+var ValidModes = map[string]bool{
+	"":             true,
+	ModeTest:       true,
+	ModeProduction: true,
+	ModeLimited:    true,
+	ModeReadOnly:   true,
+}
+
 // ValidDunningModes contains all valid dunning mode values
 var ValidDunningModes = map[string]bool{
 	DunningModeOn:         true,
@@ -858,18 +896,6 @@ type FeatureFlags struct {
 	// deletes that finalize user-asked cancellations.
 	DisableProcessorSubscriptionDeletions bool `koanf:"disable_processor_subscription_deletions"`
 
-	// LimitedMode disables every PROACTIVE operation against the payment
-	// providers while leaving user/admin-initiated (reactive) operations fully
-	// functional. When true:
-	//   - Dunning attempts no charges and no window-expiry cancellations
-	//     (behaves as dunning_mode=dry_run_only; dunning_mode=off stays off)
-	//   - Auto-top-up and arrears-collection charges are skipped
-	//   - Solana recurring pulls (cranker) are skipped
-	// Reactive paths are unaffected: checkout charges, vault saves, user/admin
-	// cancellations (including their processor-side deletes), resumes, refunds,
-	// webhook processing, alerts and local bookkeeping. Boot posture for
-	// migration cutovers, reconciliation runs and incident response.
-	LimitedMode bool `koanf:"limited_mode"`
 
 	// DisableEntitlementExpiration stops all entitlement/credit expiration when true.
 	// Affects: CreditExpiryWorker, HoldExpiryWorker, entitlement revocation in FailMembership.
@@ -877,10 +903,6 @@ type FeatureFlags struct {
 	// Default: false (normal expiration behavior)
 	DisableEntitlementExpiration bool `koanf:"disable_entitlement_expiration"`
 
-	// VerifyProcessorMappings enables remote verification of provided processor identifiers
-	// when using the catalog definition surface (e.g., checking a Stripe price_id exists).
-	// Default: false (link ids are validated only for presence/shape, not existence).
-	VerifyProcessorMappings bool `koanf:"verify_processor_mappings"`
 }
 
 // GetDunningMode returns the effective dunning mode, defaulting to "on" if not set or invalid.
@@ -925,13 +947,6 @@ func (f *FeatureFlags) GetDunningWindow() time.Duration {
 // processor-side subscription deletions are blocked.
 func (f *FeatureFlags) IsProcessorSubscriptionDeletionDisabled() bool {
 	return f != nil && f.DisableProcessorSubscriptionDeletions
-}
-
-// IsLimitedMode returns true if proactive payment-provider operations
-// (dunning charges/cancellations, auto-top-ups, arrears collection, Solana
-// pulls) are disabled, leaving only reactive, user-initiated operations.
-func (f *FeatureFlags) IsLimitedMode() bool {
-	return f != nil && f.LimitedMode
 }
 
 // SendGridConfig holds SendGrid email configuration.
@@ -1105,12 +1120,21 @@ func parseDurationDefault(raw string, fallback time.Duration) time.Duration {
 // Validate validates the billing configuration
 func Validate(cfg *Config) error {
 	// Skip strict validation in development environments
+	// Operating mode must be a known value — a typo'd mode (e.g. "redaonly")
+	// must never silently boot with full behavior (#346).
+	if !ValidModes[strings.ToLower(strings.TrimSpace(cfg.Mode))] {
+		return fmt.Errorf("invalid mode %q: must be one of test, production, limited, readonly", cfg.Mode)
+	}
+
 	isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""
 	if !isDev {
 		// Unset test_mode outside development means live (see IsTestMode).
 		// Only an explicit test_mode=true is rejected — sandbox isn't allowed in prod.
 		if cfg.TestMode != nil && *cfg.TestMode {
 			return fmt.Errorf("test_mode=true is not allowed outside development")
+		}
+		if cfg.GetMode() == ModeTest {
+			return fmt.Errorf("mode=test is not allowed outside development")
 		}
 		if cfg.DB != nil {
 			if strings.TrimSpace(cfg.DB.Username) == "admin" || strings.TrimSpace(cfg.DB.Password) == "admin_password" {
@@ -1472,14 +1496,48 @@ func (cfg *Config) IsNMIProcessor(name string) bool {
 	return cfg.GetProcessorType(name) == ProcessorTypeNMI
 }
 
-// IsTestMode returns true if payment processors should use sandbox/test environments.
-// An explicit TestMode always wins. When unset it follows the environment:
-// sandbox in development, live in production.
-func (cfg *Config) IsTestMode() bool {
-	if cfg.TestMode == nil {
-		return cfg.IsDev()
+// GetMode returns the normalized operating mode ("" when unset/legacy).
+// Unknown values are rejected by Validate; here they normalize to "" so a
+// pre-validation caller never misreads a typo as a real mode.
+func (cfg *Config) GetMode() string {
+	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+	if !ValidModes[mode] {
+		return ""
 	}
-	return *cfg.TestMode
+	return mode
+}
+
+// IsTestMode returns true if payment processors should use sandbox/test environments.
+// An explicit TestMode always wins. Otherwise Mode decides (test → sandbox;
+// production/limited/readonly → live). With neither set it follows the
+// environment: sandbox in development, live in production.
+func (cfg *Config) IsTestMode() bool {
+	if cfg.TestMode != nil {
+		return *cfg.TestMode
+	}
+	switch cfg.GetMode() {
+	case ModeTest:
+		return true
+	case ModeProduction, ModeLimited, ModeReadOnly:
+		return false
+	}
+	return cfg.IsDev()
+}
+
+// IsLimitedMode returns true if proactive payment-provider operations
+// (dunning charges/cancellations, auto-top-ups, arrears collection, Solana
+// pulls, catalog provider-object writes) are disabled, leaving only reactive,
+// user-initiated operations. True in limited and readonly modes.
+func (cfg *Config) IsLimitedMode() bool {
+	mode := cfg.GetMode()
+	return mode == ModeLimited || mode == ModeReadOnly
+}
+
+// IsProviderReadOnly returns true if EVERY provider write — even reactive,
+// user-initiated ones — must be blocked (mode=readonly). Reads (query APIs,
+// verification) stay allowed.
+func (cfg *Config) IsProviderReadOnly() bool {
+	return cfg.GetMode() == ModeReadOnly
 }
 
 // IsDev returns true if the environment is development.
@@ -1524,16 +1582,11 @@ func (cfg *Config) GetDunningWindow() time.Duration {
 	return cfg.GetFeatureFlags().GetDunningWindow()
 }
 
-// IsLimitedMode returns true if proactive payment-provider operations are
-// disabled by feature flag.
-func (cfg *Config) IsLimitedMode() bool {
-	return cfg.GetFeatureFlags().IsLimitedMode()
-}
-
 // IsProcessorSubscriptionDeletionDisabled returns true if outbound
-// processor-side subscription deletions are blocked by feature flag.
+// processor-side subscription deletions are blocked — by the feature flag, or
+// implicitly by readonly mode (zero provider writes).
 func (cfg *Config) IsProcessorSubscriptionDeletionDisabled() bool {
-	return cfg.GetFeatureFlags().IsProcessorSubscriptionDeletionDisabled()
+	return cfg.GetFeatureFlags().IsProcessorSubscriptionDeletionDisabled() || cfg.IsProviderReadOnly()
 }
 
 // IsEntitlementExpirationDisabled returns true if entitlement/credit expiration is disabled.
@@ -1978,10 +2031,28 @@ func Load(configPath string) (*Config, error) {
 	return cfg, nil
 }
 
-// logFeatureFlagsStatus logs the feature flags configuration at startup.
+// logFeatureFlagsStatus logs the operating mode + feature flags at startup.
 // This helps operators understand any non-default behavior.
 func logFeatureFlagsStatus(cfg *Config) {
 	flags := cfg.GetFeatureFlags()
+
+	// Operating-mode banner (#346). The mode dial is the headline; the flag
+	// logs below cover the fine-grained dials.
+	switch cfg.GetMode() {
+	case ModeReadOnly:
+		log.Warn("⚠️  MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
+		log.Info("   Reconciliation/forensics posture: provider reads + local serving only")
+		log.Info("   Set mode=limited or mode=production to allow writes")
+	case ModeLimited:
+		log.Warn("⚠️  MODE=limited - No proactive payment-provider operations will be performed")
+		log.Info("   Dunning charges/cancellations, auto-top-ups, arrears collection, Solana pulls and catalog provider writes are paused")
+		log.Info("   Reactive operations (checkout, vault saves, user/admin cancels, webhooks) work normally")
+		log.Info("   Set mode=production to resume proactive operations")
+	case ModeProduction:
+		log.Info("Mode: production (live processors, full behavior)")
+	case ModeTest:
+		log.Info("Mode: test (sandbox processors, full behavior)")
+	}
 
 	// Log dunning mode if not default
 	dunningMode := flags.GetDunningMode()
@@ -1994,14 +2065,6 @@ func logFeatureFlagsStatus(cfg *Config) {
 		log.Warn("⚠️  DUNNING DISABLED - Failed rebills will result in immediate cancellation")
 		log.Info("   No grace period, no retry attempts, no recovery workflow")
 		log.Info("   Set feature_flags.dunning_mode=on to enable normal dunning")
-	}
-
-	// Log limited mode if enabled
-	if flags.IsLimitedMode() {
-		log.Warn("⚠️  LIMITED MODE - No proactive payment-provider operations will be performed")
-		log.Info("   Dunning charges/cancellations, auto-top-ups, arrears collection and Solana pulls are paused")
-		log.Info("   Reactive operations (checkout, vault saves, user/admin cancels, webhooks) work normally")
-		log.Info("   Set feature_flags.limited_mode=false to resume proactive operations")
 	}
 
 	// Log processor subscription deletions if disabled

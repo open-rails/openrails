@@ -33,6 +33,11 @@ type NMIClient struct {
 	// bulk-deleting remote subscriptions. Set from
 	// feature_flags.disable_processor_subscription_deletions at client build.
 	SubscriptionDeletesDisabled bool
+	// ReadOnly blocks EVERY direct-post mutation (sales, vault writes, plan
+	// creates, deletes — all NMI writes flow through sendDirectRequest) with
+	// ErrProviderReadOnly; the query API stays available. Set when mode=readonly
+	// (#346) at client build.
+	ReadOnly bool
 	// httpClient bounds every gateway call with a timeout so a slow/hung NMI
 	// endpoint fails fast instead of blocking the request forever (#363/#367).
 	// The default http.DefaultClient used by http.PostForm has NO timeout.
@@ -297,6 +302,14 @@ func responseText(output url.Values, fallback string) string {
 
 func (c *NMIClient) sendDirectRequest(data url.Values) (_ string, err error) {
 	requestType := strings.TrimSpace(data.Get("type"))
+
+	if c.ReadOnly {
+		log.WithFields(log.Fields{
+			"provider":     c.providerName,
+			"request_type": requestType,
+		}).Warn("NMI direct request blocked: provider is read-only (mode=readonly)")
+		return "", ErrProviderReadOnly
+	}
 
 	resp, err := c.client().PostForm(c.DirectPostURL, data)
 	if err != nil {

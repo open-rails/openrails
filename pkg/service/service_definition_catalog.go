@@ -443,7 +443,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	// Created-as-archived: the providers were auto-created active above, so
 	// propagate active=false to match the archived lifecycle (best-effort; drift
 	// surfaces on next verify if a provider rejects it).
-	if status == models.CatalogStatusArchived && len(processors) > 0 {
+	if status == models.CatalogStatusArchived && len(processors) > 0 && !s.catalogRemoteWritesDisabled() {
 		inactive := false
 		adapters := s.providerAdapters()
 		for provider, ids := range processors {
@@ -576,13 +576,15 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 			active := *req.Status == models.CatalogStatusActive
 			mutable.IsActive = &active
 		}
-		adapters := s.providerAdapters()
-		for provider, ids := range updated.Processors {
-			adapter, ok := adapters[strings.ToLower(strings.TrimSpace(provider))]
-			if !ok {
-				continue
+		if !s.catalogRemoteWritesDisabled() {
+			adapters := s.providerAdapters()
+			for provider, ids := range updated.Processors {
+				adapter, ok := adapters[strings.ToLower(strings.TrimSpace(provider))]
+				if !ok {
+					continue
+				}
+				_ = adapter.Update(ctx, ids, mutable)
 			}
-			_ = adapter.Update(ctx, ids, mutable)
 		}
 	}
 

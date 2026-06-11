@@ -7,7 +7,7 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 346
+next_id: 348
 
 ---
 
@@ -989,5 +989,67 @@ Cutover boot posture (#343): FEATURE_FLAGS_LIMITED_MODE=true + FEATURE_FLAGS_DIS
 - [x] AutoTopupWorker/ArrearsChargeWorker: Config field + skip when limited; wire in river_register
 - [x] SolanaCrankWorker: skip when limited
 - [x] Tests: config accessors + dunning limited-mode integration test
+
+---
+# #346: unified MODE dial (test | production | limited | readonly) + catalog-write gating + dead-flag removal
+
+**Completed:** no
+**Status:** IMPLEMENTED 2026-06-11 (Claude, committed): mode dial (test|production|limited|readonly) + mode-aware accessors (feature_flags.limited_mode REMOVED, verify_processor_mappings dead-flag REMOVED); NMI readonly choke (sendDirectRequest -> ErrProviderReadOnly); catalog write gate (errRemoteWritesDisabled at mobius/stripe Attach create-points, dispatcher AutoCreate short-circuit -> pending_manual_link, 3 Update dispatch sites gated via catalogRemoteWritesDisabled); mode banner at startup; Validate rejects unknown modes + mode=test outside dev; README + config.example.yaml rewritten around the dial. Verified: build/vet clean repo-wide, unit green (config/pkg-service/nmi/river/subscriptions/app incl. new mode-matrix, NMI readonly, dispatcher-defers + mobius-attach-defers tests), mode-dependent integration tests green. Remaining: the Stripe-reactive-write follow-up task.
+
+One top-level `mode` setting (yaml `mode:` / env `MODE=`) that picks an operating preset, replacing the unintuitive `feature_flags.limited_mode` boolean. Decided in conversation 2026-06-11.
+
+## Metadata
+
+- Category: feature/safety
+- Status: in_progress
+- Passes: false
+
+## The four modes
+
+- **test** (default — preserves today's safe default): every processor routed to sandbox; FULL behavior (charges, dunning, deletes all run — just no real money).
+- **production**: live processors, full behavior.
+- **limited**: live processors; reactive-only — everything #345 blocked (dunning charges + window cancels, auto-top-ups, arrears, Solana pulls) PLUS catalog remote writes (see below). User/admin-initiated operations work, including their processor-side deletes.
+- **readonly**: live credentials, ZERO provider writes — even reactive ones. For reconciliation/forensics boots (#107): read processor state, serve local reads; a checkout/charge attempt fails loudly. Implies limited + the deletion kill switch.
+
+## Semantics / precedence
+
+- Strictest wins, no preset-vs-flag precedence puzzles: accessors OR the mode into the existing checks. `IsTestMode() = test_mode || mode==test` (explicit `TEST_MODE` always wins; when mode is set to production/limited/readonly and TEST_MODE is NOT explicitly set, the legacy test_mode=true default is suppressed). `IsLimitedMode() = mode in {limited, readonly}` (feature_flags.limited_mode REMOVED — shipped only yesterday in #345, nothing external depends on it). `IsProcessorSubscriptionDeletionDisabled() = flag || mode==readonly`. NEW `IsProviderReadOnly() = mode==readonly`, NEW `IsCatalogRemoteWriteDisabled() = mode in {limited, readonly}`.
+- Fine-grained feature flags stay as overrides/dials on top: deletion kill switch, dunning_mode, dunning_window_days, disable_entitlement_expiration.
+
+## Catalog-write gating (from the 2026-06-11 verify_processor_mappings discussion)
+
+Catalog is the one domain where OPENRAILS is the source of truth, so sync direction reverses: apply may CREATE/UPDATE provider objects (NMI createPlan, Stripe find-or-create Product/Price, Update active-flag). The bootstrap manifest applies on EVERY boot (#327), so a cutover boot could write plans to live processors at startup. In limited/readonly mode: provider VERIFICATION (read) still runs; provider WRITES (AutoCreate, Attach's find-or-create-missing half, Update) are deferred — the price still applies locally and the provider slot goes to the existing pending_manual_link state with a mode-explains-why message; a later apply (every boot) converges once the mode allows writes. Mechanism: `autoCreateContext.RemoteWritesDisabled` consulted by adapters at their write points (return errPendingManualLink), dispatcher treats Attach's sentinel like AutoCreate's.
+
+## Dead flag removal
+
+`feature_flags.verify_processor_mappings` is declared but referenced NOWHERE — #329 superseded it (verification + find-or-create now unconditional in the provider adapters). Remove from config + README + example yaml. Read-only verification needs no flag (Paul: "because it's read only, it should always be on" — it already is).
+
+## Enforcement choke points
+
+- NMI: `NMIClient.ReadOnly` — `sendDirectRequest` (ALL NMI mutations flow through it; query.php reads don't) returns `ErrProviderReadOnly` when mode==readonly. Set in createNMIClients like the deletes switch.
+- Catalog: dispatcher + adapter gate above (limited + readonly).
+- Workers: existing #345 gates now keyed off the mode-aware IsLimitedMode().
+- Solana: cranker covered by limited; user-side flows are user-signed (we read/verify/record).
+- Stripe reactive writes (checkout-session creation etc.) have NO single choke point yet — readonly blocks NMI hard but Stripe reactive writes only via the catalog/worker gates; central Stripe gate is a follow-up task.
+
+**Tasks:**
+- [x] config: top-level Mode (test|production|limited|readonly, default test), validation, mode-aware accessors, remove feature_flags.limited_mode + verify_processor_mappings, TEST_MODE explicit-set detection, startup mode banner
+- [x] NMI readonly choke point: NMIClient.ReadOnly + ErrProviderReadOnly in sendDirectRequest
+- [x] Catalog write gate: autoCreateContext.RemoteWritesDisabled, adapter write-point checks (mobius Attach createPlan, stripe Attach lookup-key path + AutoCreate, Update dispatch), dispatcher converts Attach sentinel to pending_manual_link
+- [x] README + config.example.yaml: rewrite around the mode dial; remove verify_processor_mappings row
+- [x] Tests: mode accessor matrix; NMI readonly gate; resolveProviders limited-mode -> pending (no remote calls); migrate #345 tests off feature_flags.limited_mode
+- [ ] Follow-up: central Stripe write choke point for readonly
+
+---
+
+# #347: SDK: fold entitlements read into openrails.Client (ListActiveEntitlements) — token-issuance enrichment for sibling hosts
+
+**Status:** IN FLIGHT 2026-06-11 — implementation already in the working tree (client.go + remote.go + embed/client.go + pkg/service ListActiveEntitlementRecordsForTenantSubject + conformance test additions, ~172 insertions, uncommitted; a concurrent agent owns the code). This section files the issue so the work and its consumers are tracked.
+
+#338 follow-up: add `ListActiveEntitlements(ctx, issuer, subject string, at time.Time) ([]EntitlementRecord, error)` to the unified `openrails.Client` — the payer addressed by its EXTERNAL (issuer, subject) identity, zero `at` = now, unknown subject = empty slice not error — implemented by BOTH transports (remote = the existing `/v1/service` by-external-subject entitlements route; embedded = handler-transcribed service call) and covered by the dual-transport conformance script. Purpose: sibling hosts (doujins, hentai0) enrich their access tokens with entitlement claims at mint time through the SDK instead of hand-rolled HTTP clients or direct SQL into the billing schema.
+
+**Tasks:**
+- [ ] Land the working-tree implementation (interface method + EntitlementRecord wire type + both transports + conformance coverage)
+- [ ] Push/tag a version containing it so consumers can pin (doujins #390, hentai0 #168 hold local `replace` directives until then)
 
 ---

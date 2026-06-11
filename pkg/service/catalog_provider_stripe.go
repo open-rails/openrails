@@ -51,6 +51,11 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 		// lookup_key — a link supplying only a lookup_key is find-or-created at
 		// that key (AutoCreate's flow, but at the operator's key).
 		if lookupKey := strings.TrimSpace(link[providerLookupKey]); lookupKey != "" {
+			if in.RemoteWritesDisabled {
+				// find-or-create at the key is a potential write; defer it rather
+				// than silently storing an unverified key as linked.
+				return nil, fmt.Errorf("stripe lookup_key %q find-or-create: %w", lookupKey, errRemoteWritesDisabled)
+			}
 			in.LookupKey = lookupKey
 			ids, err := a.AutoCreate(ctx, in)
 			if errors.Is(err, errPendingManualLink) {

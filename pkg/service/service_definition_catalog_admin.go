@@ -485,6 +485,10 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 				actions[name] = "would_update_remote"
 				continue
 			}
+			if s.catalogRemoteWritesDisabled() {
+				actions[name] = "skipped_remote_writes_disabled"
+				continue
+			}
 			active := local.Status == models.CatalogStatusActive
 			if err := adapter.Update(ctx, state.IDs, mutableUpdate{
 				IsActive: &active,

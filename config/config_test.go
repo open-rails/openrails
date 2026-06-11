@@ -708,12 +708,34 @@ func TestFeatureFlagsProcessorSubscriptionDeletionKillSwitch(t *testing.T) {
 	require.True(t, cfg.IsProcessorSubscriptionDeletionDisabled())
 }
 
-func TestFeatureFlagsLimitedMode(t *testing.T) {
-	var nilFlags *FeatureFlags
-	require.False(t, nilFlags.IsLimitedMode())
-	require.False(t, (&FeatureFlags{}).IsLimitedMode())
-	require.True(t, (&FeatureFlags{LimitedMode: true}).IsLimitedMode())
-
+func TestOperatingModes(t *testing.T) {
+	// legacy/unset: nothing limited, dev default decides test mode
 	require.False(t, (&Config{}).IsLimitedMode())
-	require.True(t, (&Config{FeatureFlags: &FeatureFlags{LimitedMode: true}}).IsLimitedMode())
+	require.False(t, (&Config{}).IsProviderReadOnly())
+	require.True(t, (&Config{}).IsTestMode()) // dev env default
+
+	require.True(t, (&Config{Mode: ModeTest}).IsTestMode())
+	require.False(t, (&Config{Mode: ModeProduction}).IsTestMode())
+	require.False(t, (&Config{Mode: ModeProduction}).IsLimitedMode())
+
+	limited := &Config{Mode: ModeLimited}
+	require.True(t, limited.IsLimitedMode())
+	require.False(t, limited.IsProviderReadOnly())
+	require.False(t, limited.IsTestMode()) // limited = live processors
+	require.False(t, limited.IsProcessorSubscriptionDeletionDisabled())
+
+	ro := &Config{Mode: ModeReadOnly}
+	require.True(t, ro.IsLimitedMode())
+	require.True(t, ro.IsProviderReadOnly())
+	require.False(t, ro.IsTestMode())
+	require.True(t, ro.IsProcessorSubscriptionDeletionDisabled()) // readonly implies the kill switch
+
+	// explicit TEST_MODE beats mode
+	tm := true
+	require.True(t, (&Config{Mode: ModeProduction, TestMode: &tm}).IsTestMode())
+
+	// case/space tolerant; unknown normalizes to "" pre-validation
+	require.True(t, (&Config{Mode: " Limited "}).IsLimitedMode())
+	require.False(t, (&Config{Mode: "redaonly"}).IsLimitedMode())
+	require.Error(t, Validate(&Config{Mode: "redaonly"}))
 }

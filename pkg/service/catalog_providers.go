@@ -44,6 +44,18 @@ const providerLookupKey = "lookup_key"
 // adapter's PendingAction template) rather than failing the whole call.
 var errPendingManualLink = errors.New("provider requires a manual link")
 
+// errRemoteWritesDisabled is the sentinel adapters return from a write point
+// (find-or-create inside Attach, AutoCreate) when catalog provider writes are
+// blocked by the operating mode (mode=limited/readonly, #346). The dispatcher
+// converts it to pending_manual_link — the price still applies locally and the
+// provider slot converges on a later apply once writes are allowed (the
+// bootstrap manifest re-applies on every boot). Verification reads always run.
+var errRemoteWritesDisabled = errors.New("catalog provider writes are disabled (mode=limited/readonly)")
+
+// remoteWritesDisabledMessage is the pending_manual_link message used when the
+// operating mode (not a missing capability) deferred the provider write.
+const remoteWritesDisabledMessage = "provider writes disabled (mode=limited/readonly): remote object creation deferred; re-apply once writes are allowed"
+
 // mutableUpdate carries the post-create mutable fields that Update propagates
 // to attached providers (active flag). Currency / amount / billing cycle are
 // immutable in OpenRails so they're not represented here.
@@ -128,6 +140,13 @@ type autoCreateContext struct {
 	Currency         string
 	BillingCycleDays *int
 	LookupKey        string
+
+	// RemoteWritesDisabled tells adapters that catalog provider WRITES are
+	// blocked by the operating mode (mode=limited/readonly, #346). Adapters
+	// must return errRemoteWritesDisabled at their write points (creating a
+	// missing object inside Attach, AutoCreate) and still perform read-only
+	// verification normally.
+	RemoteWritesDisabled bool
 }
 
 // providerAdapters returns the dispatch table keyed by canonical provider name.
@@ -244,15 +263,17 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	if product != nil {
 		productSlug = strings.TrimSpace(product.Slug)
 	}
+	remoteWritesDisabled := s.rt != nil && s.rt.Config != nil && s.rt.Config.IsLimitedMode()
 	pctx := autoCreateContext{
-		PriceID:          priceID,
-		ProductID:        req.ProductID,
-		Product:          product,
-		ProductSlug:      productSlug,
-		UnitAmount:       req.UnitAmount,
-		Currency:         req.Currency,
-		BillingCycleDays: req.BillingCycleDays,
-		LookupKey:        internalStripeLookupKey(productSlug, req.Currency, req.UnitAmount, req.BillingCycleDays),
+		PriceID:              priceID,
+		ProductID:            req.ProductID,
+		Product:              product,
+		ProductSlug:          productSlug,
+		UnitAmount:           req.UnitAmount,
+		Currency:             req.Currency,
+		BillingCycleDays:     req.BillingCycleDays,
+		LookupKey:            internalStripeLookupKey(productSlug, req.Currency, req.UnitAmount, req.BillingCycleDays),
+		RemoteWritesDisabled: remoteWritesDisabled,
 	}
 
 	for _, name := range names {
@@ -268,6 +289,22 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 		// object is created when a valid link is supplied.
 		if len(normalizeLinkMap(link)) > 0 {
 			ids, attachErr := adapter.Attach(ctx, link, pctx)
+			if errors.Is(attachErr, errRemoteWritesDisabled) {
+				// The link verified as MISSING remotely and creating it is blocked
+				// by the operating mode: defer, don't fail the apply. The slot
+				// converges on a later apply once writes are allowed.
+				template := adapter.PendingActionTemplate(priceID)
+				if template.Provider == "" {
+					template.Provider = name
+				}
+				states[name] = ProviderState{
+					Status:     ProviderStatusPendingManualLink,
+					SyncStatus: SyncStatusNeverSynced,
+					Message:    remoteWritesDisabledMessage,
+				}
+				pending = append(pending, template)
+				continue
+			}
 			if attachErr != nil {
 				return nil, nil, nil, fmt.Errorf("%s: %w", name, attachErr)
 			}
@@ -284,6 +321,22 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			continue
 		}
 		// Otherwise dispatch AutoCreate to mint (or find-or-attach) the object.
+		// Blocked outright when the operating mode disables provider writes —
+		// the find-half of find-or-create is not worth a special case here; the
+		// slot converges on a later apply.
+		if pctx.RemoteWritesDisabled {
+			template := adapter.PendingActionTemplate(priceID)
+			if template.Provider == "" {
+				template.Provider = name
+			}
+			states[name] = ProviderState{
+				Status:     ProviderStatusPendingManualLink,
+				SyncStatus: SyncStatusNeverSynced,
+				Message:    remoteWritesDisabledMessage,
+			}
+			pending = append(pending, template)
+			continue
+		}
 		ids, createErr := adapter.AutoCreate(ctx, pctx)
 		switch {
 		case errors.Is(createErr, errPendingManualLink):
@@ -373,4 +426,11 @@ func copyStringMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// catalogRemoteWritesDisabled reports whether catalog provider writes
+// (AutoCreate, Attach's find-or-create, Update propagation) are blocked by the
+// operating mode (mode=limited/readonly, #346). Reads/verification stay on.
+func (s *Service) catalogRemoteWritesDisabled() bool {
+	return s != nil && s.rt != nil && s.rt.Config != nil && s.rt.Config.IsLimitedMode()
 }

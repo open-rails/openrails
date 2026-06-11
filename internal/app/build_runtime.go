@@ -496,6 +496,7 @@ func createNMIClients(cfg *config.Config) (map[string]*nmi.NMIClient, error) {
 			return nil, err
 		}
 		client.SubscriptionDeletesDisabled = cfg.IsProcessorSubscriptionDeletionDisabled()
+		client.ReadOnly = cfg.IsProviderReadOnly()
 
 		clients[providerKey] = client
 	}

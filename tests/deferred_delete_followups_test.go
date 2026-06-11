@@ -262,7 +262,7 @@ func TestFailMembershipLimitedModeLeavesRemoteSubscription(t *testing.T) {
 	})
 
 	limitedCfg := *rt.Config
-	limitedCfg.FeatureFlags = &config.FeatureFlags{LimitedMode: true}
+	limitedCfg.Mode = config.ModeLimited
 
 	recorder := &recordingDeferredDeleteScheduler{}
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(
