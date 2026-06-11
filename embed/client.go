@@ -159,6 +159,17 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 		return nil, err
 	}
 
+	res, err := c.svc.Admit(ctx, admitInputFromSDK(req, payer))
+	if err != nil {
+		return nil, internalErr("admission check failed")
+	}
+	return admitResponseFromResult(res), nil
+}
+
+// admitInputFromSDK maps one SDK admit request onto the service-facade input —
+// the embedded analogue of handlers.admitInputFromRequest, shared by Admit and
+// each AdmitBatch item.
+func admitInputFromSDK(req openrails.AdmitRequest, payer identity.TenantSubjectID) billingservice.AdmitInput {
 	in := billingservice.AdmitInput{
 		TenantSubjectID: payer,
 		Actor:           strings.TrimSpace(req.Actor),
@@ -178,11 +189,10 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 			Unit: w.Unit, WindowSeconds: w.WindowSeconds, Max: w.Max,
 		})
 	}
+	return in
+}
 
-	res, err := c.svc.Admit(ctx, in)
-	if err != nil {
-		return nil, internalErr("admission check failed")
-	}
+func admitResponseFromResult(res *billingservice.AdmitResult) *openrails.AdmitResponse {
 	out := &openrails.AdmitResponse{
 		Allowed:             res.Allowed,
 		BlockedBy:           res.BlockedBy,
@@ -200,7 +210,7 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 	for _, w := range res.BudgetWindows {
 		out.BudgetWindows = append(out.BudgetWindows, budgetWindowFromDTO(w))
 	}
-	return out, nil
+	return out
 }
 
 // Authorize transcribes handlers.ServiceAuthorizeCredits (service_credits.go).
@@ -699,6 +709,189 @@ func (c *localClient) ResourceRevenueDaily(ctx context.Context, resource string,
 		out.Daily = append(out.Daily, openrails.ResourceRevenueDailyRow{Date: r.Date, AmountMicros: r.AmountMicros})
 	}
 	return out, nil
+}
+
+// maxWindowBatchItems transcribes the handler bound on one settle/admit batch
+// (service_credit_window.go).
+const maxWindowBatchItems = 1000
+
+func windowFromDTO(w *billingservice.CreditWindowDTO) *openrails.CreditWindow {
+	return &openrails.CreditWindow{
+		WindowID:      w.WindowID,
+		PayerTenantID: w.TenantSubjectID,
+		HeldMicros:    w.HeldAmount,
+		SettledMicros: w.SettledAmount,
+		Status:        w.Status,
+		ExpiresAt:     w.ExpiresAt,
+	}
+}
+
+// mapWindowErr transcribes handlers.writeWindowError (service_credit_window.go).
+func mapWindowErr(err error, fallback string) error {
+	switch {
+	case errors.Is(err, billingservice.ErrWindowNotFound):
+		return openrails.NewStatusError(http.StatusNotFound, "", "window_not_found")
+	case errors.Is(err, billingservice.ErrWindowNotOpen):
+		return openrails.NewStatusError(http.StatusConflict, "", "window_not_open")
+	case errors.Is(err, billingservice.ErrInsufficientCredits):
+		return openrails.NewStatusError(http.StatusPaymentRequired, "", "insufficient_credits")
+	default:
+		return internalErr(fallback)
+	}
+}
+
+// OpenWindow transcribes handlers.ServiceOpenCreditWindow
+// (service_credit_window.go, #335).
+func (c *localClient) OpenWindow(ctx context.Context, req openrails.OpenWindowRequest) (*openrails.CreditWindow, error) {
+	if req.CreditType == "" {
+		req.CreditType = c.creditType
+	}
+	// gin binding: credit_type + amount are `binding:"required"`.
+	if strings.TrimSpace(req.CreditType) == "" {
+		return nil, bindRequiredErr("CreditType")
+	}
+	if req.AmountMicros == 0 {
+		return nil, bindRequiredErr("Amount")
+	}
+	payer, err := parseTenantSubject(req.PayerTenantID, "tenant_subject_id required")
+	if err != nil {
+		return nil, err
+	}
+	w, serr := c.svc.OpenWindow(ctx, billingservice.OpenWindowRequest{
+		TenantSubjectID: payer,
+		Actor:           req.Actor,
+		CreditType:      req.CreditType,
+		Amount:          req.AmountMicros,
+		TTL:             time.Duration(req.TTLSeconds) * time.Second,
+	})
+	switch {
+	case errors.Is(serr, billingservice.ErrInsufficientCredits):
+		return nil, openrails.NewStatusError(http.StatusPaymentRequired, "", "insufficient_credits")
+	case errors.Is(serr, billingservice.ErrCreditTypeInactive):
+		return nil, invalidErr("credit_type_inactive")
+	case serr != nil:
+		return nil, internalErr("open window failed")
+	}
+	return windowFromDTO(w), nil
+}
+
+// SettleWindowItems transcribes handlers.ServiceSettleCreditWindows
+// (service_credit_window.go). The handler's unparseable-window-id skip is
+// unreachable through typed items (WindowID is a uuid.UUID; a nil one gets the
+// engine's own per-item invalid_item result, same as the wire).
+func (c *localClient) SettleWindowItems(ctx context.Context, items []openrails.WindowSettleItem) ([]openrails.WindowSettleResult, error) {
+	if len(items) == 0 {
+		return nil, invalidErr("items required")
+	}
+	if len(items) > maxWindowBatchItems {
+		return nil, invalidErr("too many items")
+	}
+	in := make([]billingservice.WindowSettleItemInput, 0, len(items))
+	for _, it := range items {
+		item := billingservice.WindowSettleItemInput{
+			WindowID:  it.WindowID,
+			RequestID: it.RequestID,
+			Amount:    it.AmountMicros,
+			Actor:     it.Actor,
+		}
+		if it.Usage != nil {
+			item.EventType = it.Usage.EventType
+			item.Resource = it.Usage.Resource
+			item.Metadata = it.Usage.Metadata
+		}
+		in = append(in, item)
+	}
+	settled, err := c.svc.SettleWindowItems(ctx, in)
+	if err != nil {
+		return nil, internalErr("settle failed")
+	}
+	out := make([]openrails.WindowSettleResult, 0, len(settled))
+	for _, res := range settled {
+		out = append(out, openrails.WindowSettleResult{
+			WindowID:      res.WindowID,
+			RequestID:     res.RequestID,
+			OK:            res.OK,
+			Replayed:      res.Replayed,
+			Error:         res.ErrorCode,
+			TransactionID: res.TransactionID,
+		})
+	}
+	return out, nil
+}
+
+// RefillWindow transcribes handlers.ServiceRefillCreditWindow
+// (service_credit_window.go).
+func (c *localClient) RefillWindow(ctx context.Context, windowID uuid.UUID, amountMicros, ttlSeconds int64) (*openrails.CreditWindow, error) {
+	if amountMicros <= 0 && ttlSeconds <= 0 {
+		return nil, invalidErr("amount or ttl_seconds required")
+	}
+	w, err := c.svc.RefillWindow(ctx, windowID, amountMicros, time.Duration(ttlSeconds)*time.Second)
+	if err != nil {
+		return nil, mapWindowErr(err, "refill failed")
+	}
+	return windowFromDTO(w), nil
+}
+
+// CloseWindow transcribes handlers.ServiceCloseCreditWindow
+// (service_credit_window.go).
+func (c *localClient) CloseWindow(ctx context.Context, windowID uuid.UUID) (*openrails.CreditWindow, error) {
+	w, err := c.svc.CloseWindow(ctx, windowID)
+	if err != nil {
+		return nil, mapWindowErr(err, "close failed")
+	}
+	return windowFromDTO(w), nil
+}
+
+// AdmitBatch transcribes handlers.ServiceAdmitBatch +
+// serviceAdmitBatchVerdicts (service_admission.go, #335) with full per-item
+// isolation. The per-item service-token tenant-subject scope gate is not
+// transcribed — in embedded mode the host IS the principal, exactly like a
+// tenant-wide token (so its `allows` is always true).
+func (c *localClient) AdmitBatch(ctx context.Context, items []openrails.AdmitRequest) ([]openrails.AdmitBatchVerdict, error) {
+	if len(items) == 0 {
+		return nil, invalidErr("items required")
+	}
+	if len(items) > maxWindowBatchItems {
+		return nil, invalidErr("too many items")
+	}
+	out := make([]openrails.AdmitBatchVerdict, len(items))
+	for i, item := range items {
+		if item.CreditType == "" {
+			item.CreditType = c.creditType
+		}
+		if item.EstimateMicros < 0 {
+			out[i] = openrails.AdmitBatchVerdict{Status: http.StatusBadRequest, Error: "estimate_micros must be >= 0"}
+			continue
+		}
+		payer, perr := parseTenantSubject(item.PayerTenantID, "tenant_subject_id required")
+		if perr != nil {
+			out[i] = openrails.AdmitBatchVerdict{Status: http.StatusBadRequest, Error: "tenant_subject_id required"}
+			continue
+		}
+		res, err := c.svc.Admit(ctx, admitInputFromSDK(item, payer))
+		if err != nil {
+			out[i] = openrails.AdmitBatchVerdict{Status: http.StatusInternalServerError, Error: "admission check failed"}
+			continue
+		}
+		out[i] = openrails.AdmitBatchVerdict{Status: admitVerdictStatus(res), Result: admitResponseFromResult(res)}
+	}
+	return out, nil
+}
+
+// admitVerdictStatus transcribes handlers.admitVerdictStatus: the HTTP status
+// the single admit route returns for this decision.
+func admitVerdictStatus(res *billingservice.AdmitResult) int {
+	if res.Allowed {
+		return http.StatusOK
+	}
+	switch res.BlockedBy {
+	case "throughput":
+		return http.StatusTooManyRequests
+	case "money":
+		return http.StatusPaymentRequired
+	default: // suspended, blocked, unverified, endpoint
+		return http.StatusForbidden
+	}
 }
 
 func payerString(p *openrails.PayerTenantID) string {
