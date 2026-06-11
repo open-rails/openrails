@@ -75,11 +75,6 @@ type Config struct {
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
-	// Cloudflared contains Cloudflare Tunnel settings used for local/dev tooling.
-	// Billing does not run cloudflared, but we keep these keys in config so that
-	// config.example.yaml can document deterministic webhook setups consistently.
-	Cloudflared *CloudflaredConfig `koanf:"cloudflared,omitempty"`
-
 	// Mode is the single operating-mode dial (#346): how much OpenRails is
 	// allowed to do against the payment providers. One of:
 	//   - "test":       sandbox processors, FULL behavior (charges, dunning,
@@ -803,15 +798,6 @@ type PythConfig struct {
 	MaxPriceAge      string            `koanf:"max_price_age"`
 	MaxConfidenceBPS int               `koanf:"max_confidence_bps"`
 	PriceFeeds       map[string]string `koanf:"price_feeds"`
-}
-
-type CloudflaredConfig struct {
-	// TunnelToken is the cloudflared "tunnel run token" (secret). Prefer setting via env.
-	TunnelToken string `koanf:"tunnel_token"`
-	// TunnelName is a human-friendly identifier for the tunnel (non-secret).
-	TunnelName string `koanf:"tunnel_name"`
-	// PublicHostname is the stable hostname (e.g., billing-webhooks-sandbox.example.com) routed to localhost.
-	PublicHostname string `koanf:"public_hostname"`
 }
 
 // TokenConfig defines configuration for a specific Solana token

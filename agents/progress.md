@@ -1091,11 +1091,12 @@ HARD CUT 2026-06-11 (Paul): `test_mode` removed entirely — `mode` is the only 
 # #350: config knob diet: remove useless/redundant configuration
 
 **Completed:** no
-**Status:** in_progress 2026-06-11 (Paul: "the fewer knobs we have the easier openrails will be to use operationally"). DONE: PROCESSORS_SOLANA_NETWORK override removed (commit 9b1edec) — Network is now derived purely from the operating mode (devnet under test, mainnet otherwise), koanf tag dropped (field kept as internal derived plumbing), the #348 mainnet-under-test guard deleted as unrepresentable. IN FLIGHT: full audit of config/config.go for fields that are dead (no readers outside config), redundant (superseded by another knob), or doc-only (comments admit the server never uses them); known leads: cloudflared block, ProcessorConfig.TokenizationURL.
+**Status:** DONE 2026-06-11 (Paul: "the fewer knobs we have the easier openrails will be to use operationally"). Removed: (1) PROCESSORS_SOLANA_NETWORK override (9b1edec) — Network derives purely from the operating mode (devnet under test, mainnet otherwise), koanf tag dropped, #348 mainnet-under-test guard deleted as unrepresentable; (2) the cloudflared config block (tunnel_token/tunnel_name/public_hostname) — doc-only by its own admission, zero readers; docs/cloudflared-webhooks.md remains as plain dev-tooling docs. AUDIT VERDICTS on the rest (full field-by-field sweep): everything else has live readers. NOTE two false-DEAD findings from the audit subagent, corrected by hand: feature_flags.disable_processor_subscription_deletions (read via IsProcessorSubscriptionDeletionDisabled -> NMI client wiring, #344) and dunning_window_days (read via GetDunningWindow -> dunning worker) — the agent grepped direct field reads and missed method-mediated ones. KEPT deliberately: tenant_bootstrap.file (read by cmd/billing/bootstrap_apply.go:136 as legacy manifest-path fallback — flagged as a hard-cut candidate but that file is in-flight #342 work owned by another session); tokenization_url (read by the /debug/nmi page); db url-vs-atomic-params (legit pair); ProcessorConfig.Type (required for non-reserved names).
 
 **Tasks:**
 - [x] Remove solana network override; derive from mode
-- [ ] Audit every koanf field for DEAD/REDUNDANT/DOC-ONLY; remove confirmed ones
-- [ ] Sweep config.example.yaml + .env.example to match
+- [x] Audit every koanf field for DEAD/REDUNDANT/DOC-ONLY; remove confirmed ones (cloudflared)
+- [x] Sweep config.example.yaml + .env.example to match
+- [ ] Follow-up (other session's call): hard-cut tenant_bootstrap.file once #342 bootstrap work settles
 
 ---
