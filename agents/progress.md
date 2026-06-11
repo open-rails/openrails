@@ -1197,16 +1197,14 @@ Hard cut, no aliases: ModeTest constant deleted, IsTestMode() renamed/reimplemen
 
 # #356: release v0.17.0 (batch-only entitlements) + adapt all four consumers
 
-**Status:** IN PROGRESS 2026-06-11 (owner request: "push as v0.17.0... adapt tensorhub + cozy-art + doujins + hentai0"). Executes the consumer half of #354.
-
-Merge `batch-354` into master, tag v0.17.0, then move every consumer onto the batch-only `ListActiveEntitlements(issuer, subjects []string, at) map[subject][]EntitlementRecord`. Deploy coupling: v0.16.0 consumers' GET 404s against a v0.17.0 server (enrichment degrades to no claims), so consumer bumps land together with this release.
+**Status:** DONE 2026-06-11 (owner request: "push as v0.17.0... adapt tensorhub + cozy-art + doujins + hentai0"). Executes the consumer half of #354. v0.17.1 followed same-day: exports `openrails.SelfIssuer` (the issuer embedded hosts address their own UUID users by — cozy-art needed it). Deploy note: doujins/hentai0 consumer bumps must deploy WITH the v0.17 server (their old GET 404s against it; degrades to no claims, not an outage).
 
 **Tasks:**
-- [ ] Merge batch-354 -> master (resolve drift), verify build/vet/unit/conformance, push, tag v0.17.0
-- [ ] doujins: provider mint call = batch of one; implement authkit v0.21.0 BatchEntitlementsProvider (admin list = one call); bump openrails v0.17.0 + authkit v0.21.0; auth integration suite green vs real openrails
-- [ ] hentai0: same provider adaptation + bumps (mirrors doujins)
-- [ ] cozy-art: delete the BROKEN direct-SQL provider (queries removed billing.entitlements.user_id); port the openrails-client provider + service-JWT source; bump openrails v0.14.0 -> v0.17.0, authkit v0.19.0 -> v0.21.0
-- [ ] tensorhub: bump openrails v0.13.x pseudo-version -> v0.17.0; fix Client-interface fallout (it gained entitlements + windows methods); build/tests
+- [x] Merge batch-354 -> master (resolve drift; clean), verify build/vet/unit/conformance, push, tag v0.17.0 — note: -tags=integration vet fails in internal/river (dunningOutcome vs bool), PRE-EXISTING on master, not from this branch
+- [x] doujins cc83bafe: mint = batch of one; BatchEntitlementsProvider implemented; openrails v0.17.0 + authkit v0.21.0; auth integration suite green vs real openrails. BONUS: the test harness now builds the openrails server from the PINNED module version in a throwaway module (embedded migrations) — sibling-checkout dependency + SDK/server version skew eliminated
+- [x] hentai0 52d9af11: same adaptation + bumps; build/vet/tests green
+- [x] cozy-art 220a6702 (branch rebuild): cozy-art is an EMBEDDED host — provider rewritten over Billing.Client().ListActiveEntitlements with openrails.SelfIssuer (no service JWTs needed); dead user_id SQL deleted; openrails v0.14.0 -> v0.17.1 (test_mode hard-cut mapped onto the mode dial), authkit v0.19.0 -> v0.21.0; build/vet/tests green. Deploy smoke check advised: one known-entitled user keeps premium
+- [x] tensorhub 77cf648: openrails -> v0.17.1, ZERO code changes (narrow local interfaces; entitlements not consumed); build/vet/tests green
 # #357: bootstrap apply: log provider-side catalog extras; --exhaustive archives them
 
 **Completed:** no
