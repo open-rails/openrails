@@ -936,6 +936,7 @@ Webhook-driven dunning exhaustion (FailMembership reaching MaxDunningFailures fr
 - [x] Tests: window-expiry decision, sentinel gate, terminal FailMembership; build/vet + unit suites green
 - [x] Follow-up: boot rescan re-enqueues pending DeletionScheduledAt after flag lift (optional; #107 reconcile is the catch-all)
 - [x] Follow-up (pre-existing gap): webhook-driven dunning exhaustion never deletes the remote NMI sub — needs NMI client access or a scheduled delete job from lifecycle
+- [x] TAIL CLOSED 2026-06-11: dunning worker's per-run lifecycle wired with Runtime.DeferredDeletes; inline window-expiry delete removed — ALL terminal cancellations (window expiry, 5th declined rebill, webhook exhaustion) funnel through the one scheduled deferred-delete mechanism (marker in-tx, job post-commit, kill-switch governed; no double-delete possible). Verified: TestDunningWorkerWindowExpirySchedulesDeferredDelete + full dunning/rescan/FailMembership regression green; #348 probe live-validated against the real doujins NMI sandbox key (ProbeSimulated)
 
 ---
 
