@@ -53,7 +53,7 @@ const (
 
 // NewClient creates a new CCBill client.
 // testMode: when true, uses sandbox-api.ccbill.com; when false, uses api.ccbill.com.
-// Note: The testMode param should come from config.IsTestMode().
+// Note: The testMode param should come from config.IsTestEnv().
 func NewClient(cfg *config.CCBillConfig, testMode bool) *CCBillClient {
 	cfg = requireConfig(cfg)
 
