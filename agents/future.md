@@ -560,3 +560,16 @@ Sketch: a `cloudflared` sidecar in the dev compose stack (image exists upstream;
 
 ---
 
+
+# #363: legacy tests/ suite — 5 pre-existing lifecycle/tier mock-clock failures
+
+**Found:** 2026-06-12 while fixing the #312 admin-auth wiring gap (full-suite baseline runs on base commit 5b6c89e0 prove all 5 fail identically before that change).
+
+Failing: TestLifecycleServiceUsesMockClock, TestRenewMembershipDuplicateTransactionIsNoOp, TestTierGroupDetection, TestScheduledDowngrade, TestEntitlementChangesOnTierChange.
+
+Signature (clock_test.go:337 and siblings): assertion diff shows IDENTICAL printed `time.Date` values with an empty diff — an internal `time.Time` representation mismatch (monotonic clock / location pointer), i.e. the tests compare with `==`/`require.Equal` where they need `.Equal()` or `WithinDuration`. Same class as the timestamps fixed in admin_subscription_test.go during the #312 wiring commit (1353a249).
+
+**Tasks:**
+- [ ] Switch the affected assertions to time.Time-safe comparisons; rerun the 5 tests
+- [ ] Sweep tests/ for the same require.Equal-on-time.Time pattern while in there
+---
