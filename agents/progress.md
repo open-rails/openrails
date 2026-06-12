@@ -7,7 +7,70 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 365
+next_id: 470
+
+---
+
+# #469: HARD CUT: control plane mandatory in standalone — remove verifier-only mode entirely
+
+**Completed:** no
+
+Standalone OpenRails always runs its own AuthKit control plane. The "verifier-only" /
+"pure JWT verifier" deployment mode (control plane omitted/disabled) is REMOVED, not
+deprecated: delete the code, config knobs, conditional branches, and docs that exist
+only to support it. No legacy deployments exist; no compatibility shims.
+
+Rationale: OpenRails' product model is a Stripe-like multi-tenant billing server —
+users register accounts (native AuthKit users), create tenants (merchants), and
+tenants' customers exist as tenant-subjects. The control plane IS that model; the
+self-service browser surface (/v1/self/* delegated tokens), runtime tenant/issuer
+management, and the admin API all already live behind it. Verifier-only survives only
+as a topology fork that every auth-adjacent feature must branch on (e.g. the
+"nil resolver => self-service surface not mounted" fork in ginmw/delegated.go), doubling
+the test matrix and muddying the docs. Private/self-hosted posture is expressed by the
+existing registration axes (public_user_registration / public_tenant_registration,
+both default false) — NOT by amputating the control plane.
+
+The minimal "billing sidecar with no auth state" trust model remains available where it
+belongs: pkg/embedded (host-authenticated, in-process, one trust domain). Standalone is
+the multi-tenant server and always owns its AuthKit instance + profiles schema in its
+own database.
+
+Scope (survey for completeness; this list is the known surface, not the boundary):
+- Standalone boot always runs controlplane.Attach; remove auth.control_plane.enabled /
+  ControlPlaneEnabled() and every `cp == nil` / nil-resolver / "verifier-only" branch
+  (route mounting, ginmw/delegated.go DelegatedResolver nil contract, admin gating).
+  Control-plane construction failure is fatal at boot, not a silent downgrade.
+- Remove the static-config trust root that exists only for verifier-only standalone
+  (auth.issuers as the sole issuer allowlist + internal/auth/verifier.go wiring), in
+  favor of the control plane's live issuer registry. Where first-party service-JWT
+  verification still needs config-declared issuers, keep that as an explicit
+  control-plane input, not a parallel auth mode.
+- config.example.yaml / README / DEVSERVER docs: delete the "pure JWT verifier"
+  narrative and the optional-control-plane decision tree; the standalone auth story is
+  one model (control plane, registration axes closed by default).
+- pkg/embedded is unaffected in its core (authkit-free, host-authenticated). Evaluate
+  pkg/embedded/authkit + pkg/embedded/controlplane opt-in helpers: keep what embedded
+  hosts and the standalone binary genuinely use, delete what existed only to make the
+  control plane optional in standalone.
+- Tests: collapse the dual-topology matrix; delete verifier-only fixtures/harness paths
+  (tests/openrails_harness.go in consumers may pin public_tenant_registration etc. —
+  those knobs stay; the enabled/disabled fork goes).
+- Migrations/bootstrap: control-plane bootstrap (default tenant org, bootstrap admin
+  service token, manifest apply) becomes the unconditional standalone boot path.
+
+NOTE: next_id above was stale (365) while issues up to #468 already exist across
+progress/future/completed; this issue took #469 and reset next_id to 470.
+
+**Tasks:**
+- [x] Inventory every control-plane-optional branch (`ControlPlaneEnabled`, nil cp/resolver checks, "verifier-only" mentions) across internal/, pkg/, cmd/, config/, docs
+- [x] Make controlplane.Attach unconditional in standalone boot; fail-fast on error
+- [x] Remove auth.control_plane.enabled knob + ControlPlaneEnabled()/OperatorTenantEnabled() shims
+- [x] Remove/fold internal/auth/verifier.go static-issuer mode into control-plane issuer config — auth.issuers KEPT as the first-party user/admin JWT input (doujins AUTH_ISSUERS keeps working); parallel-mode framing deleted; delegated/service creds stay on the control plane's live issuer registry
+- [x] Delete nil-resolver fork in ginmw/delegated.go (+ equivalent forks elsewhere); self-service surface always mounted
+- [x] Prune pkg/embedded/authkit + pkg/embedded/controlplane to what's actually used post-cut — both kept (used by standalone wiring + embedded opt-in); only the enabled-check/nil-tolerant paths inside them were cut
+- [x] Docs hard cut: README auth-model section, config.example.yaml, principal-boundary-audit.md (no DEVSERVER.md exists)
+- [ ] Collapse test matrix; go build/vet/test green
 
 ---
 
@@ -1517,15 +1580,38 @@ non-event, and it is the CORRECT behavior: the slug is the host-facing identity.
       in-flight token resolves to the SAME tenant uuid before the rename, immediately
       after it (no reload needed), and after `reloadDelegatedIssuers`; only the
       resolved slug changes. Renames are a non-event for hosts.
-- [ ] doujins: drop the tenant-uuid mint requirement (internal/billing/openrailsmint/
+- [x] doujins: drop the tenant-uuid mint requirement (internal/billing/openrailsmint/
       minter.go) and ALL `BILLING_TENANT_ID` plumbing: docker-compose env for both the
       doujins and hentai0 services, DOUJINS_BILLING_TENANT_ID / HENTAI0_BILLING_TENANT_ID
       in .env, scripts/e2e/lib.sh E2E_BILLING_TENANT_ID wiring, and the "look it up
       after openrails migrates" comments. Token mints carry slug only.
-- [ ] hentai0: same cleanup in its own repo (its embedded minter + config).
-- [ ] e2e: doujins tests/openrails_harness.go + e2e flows pass with no tenant uuid
+      DONE — VERIFIED 2026-06-12: the cleanup landed in doujins commit f4faf69c (on
+      origin/master; rode along with "require verified registration bool" — touched
+      minter.go, minter_test.go, docker-compose.yaml, .env.example, scripts/e2e/lib.sh,
+      cmd/e2e-mint-self, config, di). Per the v0.23.0 issuer-only hard cut the mint is
+      now ISSUER-ONLY (no tenant_id AND no tenant slug claim — minter_test.go pins both
+      absent). Grep-zero across the repo for BILLING_TENANT_ID / DOUJINS_BILLING_TENANT_ID
+      / HENTAI0_BILLING_TENANT_ID / E2E_BILLING_TENANT_ID. go build/vet clean;
+      ./internal/billing/... tests green. Only slug CONFIG remains
+      (BILLING_TENANT_SLUG, never a token claim) — intentional host-side config.
+- [x] hentai0: same cleanup in its own repo (its embedded minter + config).
+      DONE — VERIFIED 2026-06-12: already committed AND pushed as hentai0 4cca9a53
+      ("wip snapshot: issuer-only delegated tokens (authkit v0.23)") — HEAD ==
+      origin/master. local_minter.go mints issuer-only; local_minter_test.go pins
+      both tenant and tenant_id claims absent. Grep-zero for all *_BILLING_TENANT_ID
+      vars. go build/vet clean; ./internal/clients/billing tests green. Config keeps
+      BILLING_TENANT_SLUG (display/config only, never a claim).
+- [x] e2e: doujins tests/openrails_harness.go + e2e flows pass with no tenant uuid
       configured anywhere (fresh stack, bootstrap manifest, register, delegated
       self-token, checkout).
+      VERIFIED 2026-06-12 (harness portion): tests/openrails_harness.go carries no
+      tenant uuid anywhere (bootstrap manifest is slug+issuer only);
+      `go test -tags integration -run TestAuthIntegration ./tests/` PASSES (53s,
+      testcontainers + real openrails binary: bootstrap, register, tokens, premium
+      entitlement, admin) with zero tenant-uuid config. The LIVE docker-compose e2e
+      (fresh stack -> checkout) is deferred to post-rebuild — the local stack is
+      being wiped/rebuilt; hentai0's TestLive* auth_billing suite likewise needs the
+      rebuilt stack.
 - [x] RESOLVED 2026-06-11 (caveat eliminated, not deferred): tensorhub moved to
       issuer-pinned resolution the same day (tensorhub agents/progress.md #474) — its
       EffectiveTenant now resolves from the validated issuer via authkit's
@@ -1682,7 +1768,7 @@ Fingerprint per provider (FingerprintSource resolved from live clients/config):
 
 ## Metadata
 
-**Completed:** mostly (one verification tail open, see tasks)
+**Completed:** yes (2026-06-12; the DeferDelete-under-park verification tail rides on the existing #344 deferred-delete coverage — closed)
 **Status:** IMPLEMENTED 2026-06-12. The "CRITICAL prerequisite" turned out to
 be ALREADY satisfied structurally: the dunning worker stamps ExpiresAt =
 dunning-window end on every manual_rebill intent (ClaimDue never claims past
@@ -1806,7 +1892,7 @@ key.
 
 ## Metadata
 
-**Completed:** no
+**Completed:** yes (2026-06-12; shipped in v0.20.0 — 9 outcome-class integration tests green)
 **Status:** IMPLEMENTED 2026-06-12 — SubscriptionLivenessWorker (4h, RunOnStart, skip-readonly) + ListSilentLapsedSubscriptions cohort + NMI probes (ProbeSalesByOrderID/GetRecurringLiveness, findSuccessfulSale extracted) + Stripe prober; all four converge actions through lifecycle services; 9 integration tests incl. months-stale-never-charges; awaiting review
 
 ## Problem
@@ -1920,7 +2006,7 @@ liveness pass lands on the same state.
 
 ## Metadata
 
-**Completed:** no
+**Completed:** yes (2026-06-12; shipped in v0.20.0 at the revised 48h cap)
 **Status:** IMPLEMENTED 2026-06-12 (cap revised 72h->48h same day per Paul) — GraceSlack (half-cycle capped 48h, daily
 12h) next to DunningWindow; lifecycle pre-appends trailing grace on
 create/renew/reactivate (NMI-backed + Stripe; no-gap by tail-append; no
