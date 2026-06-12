@@ -562,19 +562,3 @@ Sketch: a `cloudflared` sidecar in the dev compose stack (image exists upstream;
 
 
 
-# #364: checkout attributes/checks tenant subjects via TenantSubjectIDFromString — breaks non-UUID legacy subjects (owner 404 on tier change)
-
-**Found:** 2026-06-12 by the #363 investigation. PRODUCTION bug, pre-existing on master (verified via stash-baseline): `TestChangeTierEndpoint` and `TestCheckoutBlocksTierChanges` fail on the unmodified tree.
-
-`identity.TenantSubjectIDFromString(user.ID)` deterministically maps UUID subjects to themselves but returns `uuid.Nil` for any non-UUID subject (legacy/self-service ids). The write path materializes such subjects via `EnsureTenantSubjectID` (generated row id), so any code that re-derives instead of resolving can never match:
-
-- `internal/modules/checkout/service.go:2239` — ownership check `existingSub.TenantSubjectID.String() != user.ID`: the legitimate owner of a subscription gets 404 on change-tier.
-- Same re-derivation pattern at service.go:668/796/1817, purchase_service.go:371, nmi_sale_service.go:136 — checkout writes can attribute rows to uuid.Nil / mismatched subjects for legacy ids.
-
-Origin: the #317 payable-identity hard-cut (71abfeea) converted these from `WHERE user_id` without distinguishing derive (UUID-only) from resolve (any subject). The tests/ helpers had the identical bug, fixed in #363 (985ba867) with `dbrepo.ResolveTenantSubjectID` — the same resolve-not-derive fix likely applies here, but this is hot-path identity code touching money writes (deliberate determinism per #317), so it needs deliberate triage, not a sed sweep. Related: [[#336]] (delegated self-checkout rows landing under the default tenant) is an adjacent attribution bug in the same surface.
-
-**Tasks:**
-- [ ] Decide per call-site: resolve (ResolveTenantSubjectID / EnsureTenantSubjectID) vs reject non-UUID subjects explicitly
-- [ ] Fix the ownership check at service.go:2239 (compare against the RESOLVED subject id, not the raw user id string)
-- [ ] Un-break TestChangeTierEndpoint + TestCheckoutBlocksTierChanges; audit the other 5 listed sites
----
