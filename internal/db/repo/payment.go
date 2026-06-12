@@ -174,7 +174,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 }
 
 func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +356,7 @@ func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemp
 }
 
 func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -387,7 +387,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 
 	var tsid *uuid.UUID
 	if f.UserID != "" {
-		id, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, f.UserID)
+		id, err := ResolveTenantSubjectID(f.UserID)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -531,7 +531,7 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 }
 
 func (r *PaymentRepo) GetLatestByUserAndProcessor(ctx context.Context, userID string, processor models.Processor) (*models.Payment, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -565,7 +565,7 @@ func (r *PaymentRepo) CountByUserAndProcessor(ctx context.Context, userID string
 	if userID == "" {
 		return 0, 0, fmt.Errorf("user_id is required")
 	}
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return 0, 0, err
 	}

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
@@ -32,11 +31,7 @@ func adminOperationsPagination(r *httprequest.Request) (int, int) {
 func GetAdminRepairAlerts(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	limit, offset := adminOperationsPagination(r)
-	tsid, err := repo.ResolveTenantSubjectID(ctx, r.State.DB.Qx(ctx), uuid.Nil, "system")
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve tenant subject")
-		return
-	}
+	tsid := repo.SystemTenantSubjectID
 
 	var seen *bool
 	seenParam := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("seen")))

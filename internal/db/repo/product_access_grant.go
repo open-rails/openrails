@@ -89,7 +89,7 @@ func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.Produ
 // idempotency key, or nil if none. Used to make granting idempotent.
 func (r *ProductAccessGrantRepo) GetBySource(ctx context.Context, userID string, productID uuid.UUID, sourceID string) (*models.ProductAccessGrant, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), tenantID, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (r *ProductAccessGrantRepo) GetBySource(ctx context.Context, userID string,
 // product at time t.
 func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID string, productID uuid.UUID, at time.Time) (bool, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), tenantID, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return false, err
 	}
@@ -127,7 +127,7 @@ func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID str
 // ListActiveByUser returns the user's active, in-window grants, most recent first.
 func (r *ProductAccessGrantRepo) ListActiveByUser(ctx context.Context, userID string, at time.Time) ([]models.ProductAccessGrant, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), tenantID, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (r *ProductAccessGrantRepo) ListActiveByUser(ctx context.Context, userID st
 // first. Used by admin views.
 func (r *ProductAccessGrantRepo) ListByUser(ctx context.Context, userID string) ([]models.ProductAccessGrant, error) {
 	tenantID := tenant.FromContextOrDefault(ctx).UUID()
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), tenantID, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}

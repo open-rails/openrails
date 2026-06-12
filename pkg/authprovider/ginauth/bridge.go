@@ -64,6 +64,11 @@ func (p *authenticatorProvider) Required() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if verr := uc.ValidateSubject(); verr != nil {
+			response.UnauthorizedWithMessage(c, verr.Error())
+			c.Abort()
+			return
+		}
 		applyGinUserContext(c, uc)
 		c.Next()
 	}
@@ -75,7 +80,7 @@ func (p *authenticatorProvider) Optional() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		if uc, err := p.a.Authenticate(c.Request.Context(), c.Request); err == nil {
+		if uc, err := p.a.Authenticate(c.Request.Context(), c.Request); err == nil && uc.ValidateSubject() == nil {
 			applyGinUserContext(c, uc)
 		}
 		c.Next()

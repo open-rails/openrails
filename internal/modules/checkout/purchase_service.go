@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -365,10 +364,14 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		purchasedAt = req.PurchasedAt.UTC()
 	}
 
+	payerTSID, err := payerTenantSubjectID(req.UserID)
+	if err != nil {
+		return nil, err
+	}
 	paymentID := uuidutil.NewV7()
 	payment := &models.Payment{
 		ID:                       paymentID,
-		TenantSubjectID:          identity.TenantSubjectIDFromString(req.UserID).UUID(),
+		TenantSubjectID:          payerTSID,
 		PriceID:                  price.ID,
 		SubscriptionID:           req.SubscriptionID,
 		Processor:                models.Processor(req.Processor),

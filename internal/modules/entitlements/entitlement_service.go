@@ -373,7 +373,7 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 
 		// Filter the entitlement timeline by the payable tenant subject (#317);
 		// the lock above still serializes on the userID string key.
-		tsid, terr := repo.ResolveTenantSubjectID(ctx, tx, uuid.Nil, userID)
+		tsid, terr := repo.ResolveTenantSubjectID(userID)
 		if terr != nil {
 			return terr
 		}

@@ -143,10 +143,12 @@ func freeTestPort(t *testing.T) int {
 }
 
 // setupTestServerWithAuth creates a test server with a valid JWT token.
-// The token is signed by the test issuer and will validate against the JWKS endpoint.
+// The token is signed by the test issuer and will validate against the JWKS
+// endpoint. The subject is a fixed UUID — payable identities are UUID-only
+// (#364) and the auth boundary rejects anything else.
 func setupTestServerWithAuth(t *testing.T) (*server.Server, string) {
 	srv := setupTestServer(t)
-	token := getTestIssuer().CreateToken("test-user-billing-12345", "test@billing.openrails.com")
+	token := getTestIssuer().CreateToken("b1111111-1111-4111-8111-111111111111", "test@billing.openrails.com")
 	return srv, token
 }
 
@@ -166,7 +168,7 @@ func setupTestSuiteWithAuth(t *testing.T) (*TestContainerSuite, string, string) 
 // This is the same as setupTestServerWithAuth since all tokens use RS256.
 func setupTestServerWithRSAuth(t *testing.T) (*server.Server, string) {
 	srv := setupTestServer(t)
-	token := getTestIssuer().CreateToken("test-user-billing-rs256", "rs256@billing.openrails.com")
+	token := getTestIssuer().CreateToken("b2222222-2222-4222-8222-222222222222", "rs256@billing.openrails.com")
 	return srv, token
 }
 

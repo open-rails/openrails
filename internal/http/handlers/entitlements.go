@@ -254,12 +254,12 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 func tenantSubjectForAdminGrantTarget(r *httprequest.Request, subject string) (uuid.UUID, error) {
 	value, ok := r.Get(ginmw.DelegatedContextKey)
 	if !ok {
-		// Non-delegated (org-admin JWT) caller: the target is a legacy /
-		// self-service identity, so resolve (or materialize) its payable tenant
-		// subject the same way commerce writers do (#317) — a UUID subject IS its
-		// own tenant_subject_id. Returning uuid.Nil here would make the
-		// admin_grants insert violate its tenant_subject FK and 500 every
-		// non-delegated admin grant.
+		// Non-delegated (org-admin JWT) caller: the target is a self-service
+		// identity, so resolve (or materialize) its payable tenant subject the
+		// same way commerce writers do (#317) — a UUID subject IS its own
+		// tenant_subject_id (UUID-only, #364). Returning uuid.Nil here would
+		// make the admin_grants insert violate its tenant_subject FK and 500
+		// every non-delegated admin grant.
 		return repo.EnsureTenantSubjectID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
 	}
 	resolved, ok := value.(*controlplane.ResolvedDelegated)
@@ -271,7 +271,7 @@ func tenantSubjectForAdminGrantTarget(r *httprequest.Request, subject string) (u
 	if resolved.TenantID.IsZero() || issuer == "" || subject == "" {
 		return uuid.Nil, controlplane.ErrTenantSubjectInvalid
 	}
-	return r.State.DB.Gen(r.Request.Context()).UpsertLegacyTenantSubject(r.Request.Context(), gen.UpsertLegacyTenantSubjectParams{
+	return r.State.DB.Gen(r.Request.Context()).UpsertFederatedTenantSubject(r.Request.Context(), gen.UpsertFederatedTenantSubjectParams{
 		TenantID: resolved.TenantID.UUID(),
 		Issuer:   issuer,
 		Subject:  subject,

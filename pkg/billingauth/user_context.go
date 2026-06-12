@@ -1,7 +1,8 @@
 // Package billingauth is the framework-neutral identity & auth boundary for
-// embedded OpenRails billing. It depends only on the standard library — no gin,
-// no AuthKit — so a host application can import it without pulling in HTTP
-// frameworks or auth libraries it does not use.
+// embedded OpenRails billing. It depends only on the standard library plus
+// github.com/google/uuid — no gin, no AuthKit — so a host application can
+// import it without pulling in HTTP frameworks or auth libraries it does not
+// use.
 //
 // A host brings its own auth by implementing Authenticator; OpenRails attaches
 // the resulting UserContext to the request context. The gin adapter and the
@@ -12,7 +13,10 @@ package billingauth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // UserContext is the identity OpenRails billing reads about the caller. It is
@@ -52,6 +56,19 @@ type UserContext struct {
 	// TenantRoles is the list of roles the user holds within Tenant. Only meaningful
 	// when Tenant is non-empty.
 	TenantRoles []string
+}
+
+// ValidateSubject enforces the UUID-only payable-identity contract (#364) at
+// the auth boundary: the verified principal's UserID must itself be a UUID,
+// because OpenRails uses it directly as the payable tenant_subject_id. Every
+// auth middleware (gin and net/http, Required and Optional) calls this after a
+// successful Authenticate — required routes reject the request, optional
+// routes treat it as anonymous. The returned message is client-safe.
+func (uc UserContext) ValidateSubject() error {
+	if _, err := uuid.Parse(strings.TrimSpace(uc.UserID)); err != nil {
+		return fmt.Errorf("subject %q is not a UUID: OpenRails payable identities are UUID-only", uc.UserID)
+	}
+	return nil
 }
 
 // HasRole checks if the user has a specific role (case-insensitive).

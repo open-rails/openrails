@@ -8,6 +8,7 @@ import (
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -103,6 +104,25 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 
 func (r *SubscriptionRepo) Update(ctx context.Context, s *models.Subscription) error {
 	return r.UpdateAt(ctx, s, time.Now())
+}
+
+// ReplaceForTierChange atomically persists a tier change: it writes oldSub
+// (pre-mutated by the caller to its cancelled state) and inserts newSub in ONE
+// transaction. The partial unique index
+// uq_subscriptions_tenant_subject_tier_group_active allows only one live
+// subscription per (tenant_subject, tier_group), so the old row's cancel and
+// the new row's insert must commit together — and the cancel must execute
+// first. On any failure the transaction rolls back and the old subscription
+// remains active locally (SEC-10: upgrade compensation never has to
+// reactivate it).
+func (r *SubscriptionRepo) ReplaceForTierChange(ctx context.Context, oldSub, newSub *models.Subscription, now time.Time) error {
+	return r.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txRepo := NewSubscriptionRepo(r.db.NewWithPgxTx(tx))
+		if err := txRepo.UpdateAt(ctx, oldSub, now); err != nil {
+			return err
+		}
+		return txRepo.Create(ctx, newSub)
+	})
 }
 
 func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription, now time.Time) error {
@@ -288,7 +308,7 @@ func (r *SubscriptionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.S
 }
 
 func (r *SubscriptionRepo) GetLatestByUserID(ctx context.Context, userID string) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +320,7 @@ func (r *SubscriptionRepo) GetLatestByUserID(ctx context.Context, userID string)
 }
 
 func (r *SubscriptionRepo) GetByUserIDAndPriceID(ctx context.Context, userID string, priceID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +337,7 @@ func (r *SubscriptionRepo) GetByUserIDAndPriceID(ctx context.Context, userID str
 // GetActiveOrPendingByUserIDAndProductID finds any lifecycle-owning subscription for a user and product.
 // Returns the subscription with the latest period end date.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +359,7 @@ func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID s
 	if now.IsZero() {
 		now = time.Now()
 	}
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +398,7 @@ func (r *SubscriptionRepo) GetByProcessorMetadataValue(ctx context.Context, proc
 }
 
 func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, userID string) ([]models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +414,7 @@ func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, u
 }
 
 func (r *SubscriptionRepo) GetSubscriptionsByProcessorAndUserID(ctx context.Context, userID string, processor models.Processor) ([]models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +445,7 @@ func (r *SubscriptionRepo) GetPaginatedByUserID(ctx context.Context, userID stri
 }
 
 func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -453,7 +473,7 @@ func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Contex
 
 func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.QueryOptions[SubscriptionFilters]) ([]*models.Subscription, int64, error) {
 	f := params.Filters
-	tsidResolved, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, f.UserID)
+	tsidResolved, err := ResolveTenantSubjectID(f.UserID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -526,7 +546,7 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 // where the product belongs to the specified tier group.
 // Returns the subscription with its Price and Product loaded.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}

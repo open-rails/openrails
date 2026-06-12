@@ -32,7 +32,7 @@ func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, 
 		exclude = &excludeID
 	}
 
-	tsid, err := repo.ResolveTenantSubjectID(ctx, dbb.Qx(ctx), uuid.Nil, userID)
+	tsid, err := repo.ResolveTenantSubjectID(userID)
 	if err != nil {
 		return 0, err
 	}

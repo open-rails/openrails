@@ -25,7 +25,7 @@ func (r *EntitlementRepo) SetEndAtTx(ctx context.Context, tx pgx.Tx, id uuid.UUI
 }
 
 func (r *EntitlementRepo) IsEntitled(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return false, err
 	}
@@ -44,7 +44,7 @@ func (r *EntitlementRepo) IsTenantSubjectEntitled(ctx context.Context, tenantSub
 }
 
 func (r *EntitlementRepo) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return false, err
 	}
@@ -61,7 +61,7 @@ func (r *EntitlementRepo) HasActiveIndefiniteByTenantSubject(ctx context.Context
 }
 
 func (r *EntitlementRepo) GetLatestActive(ctx context.Context, userID, entitlement string) (*models.Entitlement, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (r *EntitlementRepo) GetLatestActiveByTenantSubject(ctx context.Context, te
 }
 
 func (r *EntitlementRepo) GetLatestFiniteActive(ctx context.Context, userID, entitlement string, at time.Time) (*models.Entitlement, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +136,7 @@ func (r *EntitlementRepo) Insert(ctx context.Context, entitlement *models.Entitl
 }
 
 func (r *EntitlementRepo) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (r *EntitlementRepo) ListActiveEntitlementsByTenantSubject(ctx context.Cont
 }
 
 func (r *EntitlementRepo) ListActiveRecords(ctx context.Context, userID string, at time.Time) ([]models.Entitlement, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +357,7 @@ func (r *EntitlementRepo) ExistsBySource(ctx context.Context, sourceType models.
 }
 
 func (r *EntitlementRepo) ListByUser(ctx context.Context, userID string) ([]models.Entitlement, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}

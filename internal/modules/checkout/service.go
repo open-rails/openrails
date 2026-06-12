@@ -663,9 +663,14 @@ func (s *CheckoutService) processNMISubscription(
 		}
 	}
 
+	payerTSID, err := payerTenantSubjectID(user.ID)
+	if err != nil {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, err
+	}
 	attempt, err := s.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(user.ID).UUID(),
+		TenantSubjectID: payerTSID,
 		PriceID:         price.ID,
 		Processor:       models.Processor(provider),
 		TransactionID:   nmiSubscriptionAttemptTransactionID(orderID),
@@ -786,6 +791,10 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 		return nil, fmt.Errorf("load existing subscription: %w", err)
 	}
 
+	payerTSID, err := payerTenantSubjectID(user.ID)
+	if err != nil {
+		return nil, err
+	}
 	now := s.now().UTC()
 	var emailPtr *string
 	if req.Email != "" {
@@ -793,7 +802,7 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 	}
 	subscription := &models.Subscription{
 		ID:                       subscriptionID,
-		TenantSubjectID:          identity.TenantSubjectIDFromString(user.ID).UUID(),
+		TenantSubjectID:          payerTSID,
 		ProductID:                price.ProductID,
 		PriceID:                  price.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
@@ -1588,6 +1597,13 @@ func (s *CheckoutService) processUpgrade(
 ) (*CheckoutResponse, error) {
 	now := s.now()
 
+	// Derive the payer before any money moves (#364): a zero id must never
+	// reach the subscription/payment writes below.
+	payerTSID, err := payerTenantSubjectID(user.ID)
+	if err != nil {
+		return nil, err
+	}
+
 	// CCBill handles upgrades via their own Package Upgrade flow
 	if processor == "ccbill" {
 		return s.processCCBillUpgrade(ctx, user, newPrice, existingSub)
@@ -1814,7 +1830,7 @@ func (s *CheckoutService) processUpgrade(
 
 	newSubscription := &models.Subscription{
 		ID:                       newSubscriptionID,
-		TenantSubjectID:          identity.TenantSubjectIDFromString(user.ID).UUID(),
+		TenantSubjectID:          payerTSID,
 		ProductID:                newPrice.ProductID,
 		PriceID:                  newPrice.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec),
@@ -1839,28 +1855,28 @@ func (s *CheckoutService) processUpgrade(
 		}
 	}
 
-	if err := s.SubscriptionService.Create(ctx, newSubscription); err != nil {
-		saveErr := fmt.Errorf("failed to save upgraded subscription: %w", err)
-		// Post-charge DB failure: the user was charged the proration and a new
-		// subscription is live at NMI, but we cannot persist it locally. Compensate
-		// by refunding the proration and cancelling the new NMI subscription so the
-		// processor state matches the (unchanged) local state. The old subscription
-		// is untouched (still active locally and at NMI), so nothing to reactivate.
-		s.compensateFailedUpgrade(ctx, provider, prorationTransactionID, newSubscriptionID, resp.SubscriptionID, user.ID, &existingSub.ID, rollbackNewSubscription, saveErr)
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, saveErr)
-		return nil, saveErr
-	}
-
-	// New local row committed: mark old subscription cancelled locally.
+	// Persist the swap ATOMICALLY: the partial unique index
+	// uq_subscriptions_tenant_subject_tier_group_active allows only one live
+	// subscription per (payable subject, tier group), so the old row's cancel
+	// and the new row's insert must commit together (cancel first). On failure
+	// the transaction rolls back: the old subscription stays active locally and
+	// at NMI (SEC-10 — nothing to reactivate), and compensation only refunds
+	// the proration and cancels the new NMI subscription.
 	cancelType := models.CancelType("upgrade")
 	existingSub.Status = models.StatusCancelled
 	existingSub.CancelledAt = &now
 	existingSub.CancelType = &cancelType
 	existingSub.CancelFeedback = nil
 	existingSub.ClearRetrySchedule()
-	if err := s.SubscriptionService.Update(ctx, existingSub); err != nil {
-		log.WithError(err).WithField("subscription_id", existingSub.ID).
-			Error("failed to mark old subscription as cancelled during upgrade")
+	if err := s.SubscriptionService.ReplaceForTierChange(ctx, existingSub, newSubscription); err != nil {
+		saveErr := fmt.Errorf("failed to save upgraded subscription: %w", err)
+		// Post-charge DB failure: the user was charged the proration and a new
+		// subscription is live at NMI, but we cannot persist it locally. Compensate
+		// by refunding the proration and cancelling the new NMI subscription so the
+		// processor state matches the (unchanged) local state.
+		s.compensateFailedUpgrade(ctx, provider, prorationTransactionID, newSubscriptionID, resp.SubscriptionID, user.ID, &existingSub.ID, rollbackNewSubscription, saveErr)
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, saveErr)
+		return nil, saveErr
 	}
 
 	// Step 4: Update entitlements immediately (grant new tier entitlements)
@@ -2235,8 +2251,10 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 		if err != nil {
 			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
 		}
-		// Verify ownership
-		if existingSub.TenantSubjectID.String() != user.ID {
+		// Verify ownership: compare PARSED subject ids, not raw strings — the
+		// caller's id is a UUID (boundary-enforced, #364) but may differ in
+		// case/format from the canonical String() form.
+		if payer := identity.TenantSubjectIDFromString(user.ID); payer.IsZero() || existingSub.TenantSubjectID != payer.UUID() {
 			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
 		}
 	} else {
@@ -2331,7 +2349,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	var existingSub *models.Subscription
 	if req.SubscriptionID != uuid.Nil {
 		existingSub, err = s.SubscriptionService.GetByID(ctx, req.SubscriptionID)
-		if err != nil || existingSub.TenantSubjectID.String() != user.ID {
+		if payer := identity.TenantSubjectIDFromString(user.ID); err != nil || payer.IsZero() || existingSub.TenantSubjectID != payer.UUID() {
 			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
 		}
 	} else {

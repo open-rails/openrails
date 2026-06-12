@@ -35,41 +35,23 @@ func (q *Queries) EnsureTenantSubjectRow(ctx context.Context, arg EnsureTenantSu
 	return err
 }
 
-const getTenantSubjectIDByIssuerSubject = `-- name: GetTenantSubjectIDByIssuerSubject :one
-SELECT id FROM billing.tenant_subjects
-WHERE tenant_id = $1 AND issuer = $2 AND subject = $3
-`
-
-type GetTenantSubjectIDByIssuerSubjectParams struct {
-	TenantID uuid.UUID
-	Issuer   string
-	Subject  string
-}
-
-func (q *Queries) GetTenantSubjectIDByIssuerSubject(ctx context.Context, arg GetTenantSubjectIDByIssuerSubjectParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, getTenantSubjectIDByIssuerSubject, arg.TenantID, arg.Issuer, arg.Subject)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
-const upsertLegacyTenantSubject = `-- name: UpsertLegacyTenantSubject :one
+const upsertFederatedTenantSubject = `-- name: UpsertFederatedTenantSubject :one
 INSERT INTO billing.tenant_subjects (tenant_id, issuer, subject)
 VALUES ($1, $2, $3)
 ON CONFLICT (tenant_id, issuer, subject) DO UPDATE SET last_seen_at = now()
 RETURNING id
 `
 
-type UpsertLegacyTenantSubjectParams struct {
+type UpsertFederatedTenantSubjectParams struct {
 	TenantID uuid.UUID
 	Issuer   string
 	Subject  string
 }
 
-// Non-UUID external subject: keyed by (tenant, issuer, subject) with a
-// generated id.
-func (q *Queries) UpsertLegacyTenantSubject(ctx context.Context, arg UpsertLegacyTenantSubjectParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, upsertLegacyTenantSubject, arg.TenantID, arg.Issuer, arg.Subject)
+// Federated (delegated/tenant-issued) external subject: keyed by
+// (tenant, issuer, subject) with a generated id.
+func (q *Queries) UpsertFederatedTenantSubject(ctx context.Context, arg UpsertFederatedTenantSubjectParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, upsertFederatedTenantSubject, arg.TenantID, arg.Issuer, arg.Subject)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err

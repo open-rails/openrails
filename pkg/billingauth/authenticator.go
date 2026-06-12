@@ -51,6 +51,10 @@ func Required(a Authenticator) func(http.Handler) http.Handler {
 				WriteJSONError(w, http.StatusUnauthorized, "unauthorized", UnauthenticatedMessage(err))
 				return
 			}
+			if verr := uc.ValidateSubject(); verr != nil {
+				WriteJSONError(w, http.StatusUnauthorized, "unauthorized", verr.Error())
+				return
+			}
 			next.ServeHTTP(w, r.WithContext(SetUserContext(r.Context(), uc)))
 		})
 	}
@@ -63,7 +67,7 @@ func Optional(a Authenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if a != nil {
-				if uc, err := a.Authenticate(r.Context(), r); err == nil {
+				if uc, err := a.Authenticate(r.Context(), r); err == nil && uc.ValidateSubject() == nil {
 					r = r.WithContext(SetUserContext(r.Context(), uc))
 				}
 			}

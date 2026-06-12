@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -25,7 +26,7 @@ func (c *CheckCompletedPaymentMissingEntitlements) Run(ctx context.Context, q *g
 	// Get all one-off payments (subscription_id IS NULL) with their product
 	var params gen.AuditOneOffPaymentsWithSpecParams
 	if opts.UserID != "" {
-		tsid, err := resolveTenantSubjectID(ctx, q, opts.UserID)
+		tsid, err := repo.ResolveTenantSubjectID(opts.UserID)
 		if err != nil {
 			return nil, err
 		}

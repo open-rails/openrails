@@ -2,21 +2,14 @@ package repo
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
-
-// LegacyUserIssuer is the synthetic OIDC issuer used to key billing.tenant_subjects
-// rows for pre-hard-cut commerce identities whose external identity is just a
-// user_id string (#317). It matches the issuer the 074/075 backfills used, so
-// resolution reuses the backfilled rows rather than creating duplicates.
-const LegacyUserIssuer = "openrails:legacy-user"
 
 // SelfIssuer keys billing.tenant_subjects rows for self-service identities whose
 // external subject IS a UUID (the same value the credits/self-service hot path
@@ -24,82 +17,67 @@ const LegacyUserIssuer = "openrails:legacy-user"
 // subject UUID, so commerce and credit rows reference one payable subject (#317).
 const SelfIssuer = "openrails:self"
 
-// EnsureTenantSubjectID resolves (or creates) the billing.tenant_subjects row for
-// (tenantID, LegacyUserIssuer, userID) and returns its id, refreshing
-// last_seen_at. It is the repo-layer resolver commerce writers use to stamp the
-// payable tenant_subject_id on rows that still carry a legacy user_id while the
-// hard cut (#317) is rolled out table by table.
+// SystemTenantSubjectID is the well-known payable subject that owns
+// platform-initiated rows with no human principal (e.g. ledger repair alerts).
+// It is a fixed, documented constant — deliberately NOT uuid.Nil, which stays
+// the "no subject" zero value — and is materialized through the normal
+// self-issuer path like any other UUID subject (#364).
+var SystemTenantSubjectID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+
+// errNonUUIDSubject builds the rejection for non-UUID payable identities.
+// OpenRails is UUID-only (#364): there is no legacy issuer, no generated row
+// ids, no string subjects. The auth boundary rejects non-UUID subjects before
+// they reach handlers; this repo-layer error is defense in depth.
+func errNonUUIDSubject(userID string) error {
+	return fmt.Errorf("tenant subject %q is not a UUID: payable identities are UUID-only (#364)", userID)
+}
+
+// EnsureTenantSubjectID materializes (or refreshes) the billing.tenant_subjects
+// row for a UUID subject and returns its id — which IS the subject UUID itself
+// (#317). A non-UUID userID is rejected with an error (#364). An empty userID
+// returns the zero id without touching the database (documented no-op for
+// callers with optional identity).
 //
 // A zero tenantID falls back to the request's tenant context (and, absent that,
 // the default tenant) — the same source the commerce tables use to stamp their
-// own tenant_id column — so the resolved subject lands under the exact tenant the
-// row itself belongs to. Multi-tenant writers that already hold an explicit
-// tenant may pass it directly. An empty userID returns the zero id without
-// touching the database (nothing to resolve).
+// own tenant_id column — so the resolved subject lands under the exact tenant
+// the row itself belongs to. Multi-tenant writers that already hold an explicit
+// tenant may pass it directly.
 func EnsureTenantSubjectID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, userID string) (uuid.UUID, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return uuid.Nil, nil
 	}
+	uid, perr := uuid.Parse(userID)
+	if perr != nil {
+		return uuid.Nil, errNonUUIDSubject(userID)
+	}
 	if tenantID == uuid.Nil {
 		tenantID = tenant.FromContextOrDefault(ctx).UUID()
 	}
-	q := gen.New(qx)
-
-	// Self-service identities are their OWN UUID: the credits/self-service hot path
-	// uses identity.TenantSubjectIDFromString(user.ID) — i.e. the user UUID itself —
-	// as the payable tenant_subject_id, with no tenant_subjects row. To converge
-	// commerce and credit rows on ONE payable subject id, when the user_id is a
-	// UUID we materialize the tenant_subjects row WITH id = that UUID and return it
-	// unchanged. If a federated/self-service row with that payable id already
-	// exists, refresh last_seen_at and return it; the id is the identity here.
-	if uid, perr := uuid.Parse(userID); perr == nil {
-		return q.UpsertSelfTenantSubject(ctx, gen.UpsertSelfTenantSubjectParams{
-			ID:       uid,
-			TenantID: tenantID,
-			Issuer:   SelfIssuer,
-			Subject:  userID,
-		})
-	}
-
-	// Non-UUID external subject: key by the legacy-user issuer with a generated id.
-	return q.UpsertLegacyTenantSubject(ctx, gen.UpsertLegacyTenantSubjectParams{
+	return gen.New(qx).UpsertSelfTenantSubject(ctx, gen.UpsertSelfTenantSubjectParams{
+		ID:       uid,
 		TenantID: tenantID,
-		Issuer:   LegacyUserIssuer,
-		Subject:  userID,
+		Issuer:   SelfIssuer,
+		Subject:  uid.String(),
 	})
 }
 
-// ResolveTenantSubjectID returns the payable tenant subject id for a legacy
-// (tenantID, userID) identity WITHOUT creating a row — the read-side counterpart
-// of EnsureTenantSubjectID, used to convert `WHERE user_id = ?` read queries to
-// `WHERE tenant_subject_id = ?` (#317).
-//
-// Self-service identities are their own UUID, so a UUID userID resolves to itself
-// with no database round-trip (matching the deterministic scheme the write path
-// and migrations 075–077 use). A non-UUID external subject is looked up under the
-// legacy-user issuer; an unknown subject yields the zero id (no matching rows),
-// which callers translate to an empty result set.
-func ResolveTenantSubjectID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, userID string) (uuid.UUID, error) {
+// ResolveTenantSubjectID derives the payable tenant subject id for a userID
+// WITHOUT touching the database. Payable identities are UUID-only (#364), so a
+// UUID subject IS its own id — pure derivation, no lookup. An empty userID
+// yields the zero id (matches no rows, which callers translate to an empty
+// result set); a non-UUID userID is an error.
+func ResolveTenantSubjectID(userID string) (uuid.UUID, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return uuid.Nil, nil
 	}
-	if uid, perr := uuid.Parse(userID); perr == nil {
-		return uid, nil
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return uuid.Nil, errNonUUIDSubject(userID)
 	}
-	if tenantID == uuid.Nil {
-		tenantID = tenant.FromContextOrDefault(ctx).UUID()
-	}
-	id, err := gen.New(qx).GetTenantSubjectIDByIssuerSubject(ctx, gen.GetTenantSubjectIDByIssuerSubjectParams{
-		TenantID: tenantID,
-		Issuer:   LegacyUserIssuer,
-		Subject:  userID,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, nil
-	}
-	return id, err
+	return uid, nil
 }
 
 // ensureTenantSubjectRow makes sure a billing.tenant_subjects row exists for an

@@ -166,7 +166,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 		}
 	} else {
 		// Fallback to active subscription lookup
-		tsid, terr := repo.ResolveTenantSubjectID(ctx, w.DB.Qx(ctx), uuid.Nil, userID)
+		tsid, terr := repo.ResolveTenantSubjectID(userID)
 		if terr != nil {
 			return terr
 		}

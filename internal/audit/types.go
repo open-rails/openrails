@@ -2,18 +2,13 @@ package audit
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/repo"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // Severity levels for audit findings
@@ -246,26 +241,4 @@ func (c *Checker) GetCategories() []string {
 		}
 	}
 	return categories
-}
-
-// resolveTenantSubjectID converts an Options.UserID into the payable tenant
-// subject id used by the billing tables, mirroring repo.ResolveTenantSubjectID
-// (read-only: an unknown subject yields uuid.Nil, which matches no rows).
-func resolveTenantSubjectID(ctx context.Context, q *gen.Queries, userID string) (uuid.UUID, error) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return uuid.Nil, nil
-	}
-	if uid, perr := uuid.Parse(userID); perr == nil {
-		return uid, nil
-	}
-	id, err := q.GetTenantSubjectIDByIssuerSubject(ctx, gen.GetTenantSubjectIDByIssuerSubjectParams{
-		TenantID: tenant.FromContextOrDefault(ctx).UUID(),
-		Issuer:   repo.LegacyUserIssuer,
-		Subject:  userID,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, nil
-	}
-	return id, err
 }

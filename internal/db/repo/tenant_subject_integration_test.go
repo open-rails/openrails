@@ -43,3 +43,17 @@ func TestEnsureTenantSubjectID_UUIDReusesExistingPayableID(t *testing.T) {
 	require.Equal(t, "http://doujins:2052", issuer)
 	require.True(t, lastSeenAt.After(createdAt))
 }
+
+// Payable identities are UUID-only (#364): non-UUID subjects are rejected, the
+// empty subject stays a documented no-op.
+func TestEnsureTenantSubjectID_RejectsNonUUIDSubject(t *testing.T) {
+	ctx := context.Background()
+	pool := dbtest.SharedPGXPool(t)
+
+	_, err := EnsureTenantSubjectID(ctx, pool, tenant.DefaultID.UUID(), "legacy-user-123")
+	require.ErrorContains(t, err, "UUID-only")
+
+	id, err := EnsureTenantSubjectID(ctx, pool, tenant.DefaultID.UUID(), "")
+	require.NoError(t, err)
+	require.Equal(t, uuid.Nil, id)
+}

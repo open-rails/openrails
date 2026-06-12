@@ -65,6 +65,11 @@ func (p *authKitProvider) Required() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if verr := uc.ValidateSubject(); verr != nil {
+			response.UnauthorizedWithMessage(c, verr.Error())
+			c.Abort()
+			return
+		}
 
 		c.Set("billing.user_context", uc)
 		c.Request = c.Request.WithContext(billingauth.SetUserContext(c.Request.Context(), uc))
@@ -84,6 +89,11 @@ func (p *authKitProvider) Optional() gin.HandlerFunc {
 			if !errors.Is(err, billingauth.ErrUnauthenticated) {
 				log.WithError(err).Debug("optional jwt verification failed")
 			}
+			c.Next()
+			return
+		}
+		if verr := uc.ValidateSubject(); verr != nil {
+			log.WithError(verr).Debug("optional auth: non-UUID subject treated as anonymous")
 			c.Next()
 			return
 		}

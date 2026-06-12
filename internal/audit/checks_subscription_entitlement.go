@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/repo"
 )
 
 // S-E-1: Active subscription missing entitlements
@@ -27,7 +28,7 @@ func (c *CheckActiveSubscriptionMissingEntitlements) Run(ctx context.Context, q 
 	// Get all active subscriptions with their product
 	var params gen.AuditActiveSubscriptionsWithSpecParams
 	if opts.UserID != "" {
-		tsid, err := resolveTenantSubjectID(ctx, q, opts.UserID)
+		tsid, err := repo.ResolveTenantSubjectID(opts.UserID)
 		if err != nil {
 			return nil, err
 		}

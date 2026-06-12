@@ -95,7 +95,7 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	price := products[0].Prices[0]
 	priceID := price.ID
 
-	userID := "renewal-nmi-" + uuid.New().String()[:8]
+	userID := uuid.New().String()
 	now := suite.GetClock().Now().UTC()
 	periodEnd := now.Add(30 * 24 * time.Hour)
 

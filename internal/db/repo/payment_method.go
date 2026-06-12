@@ -143,7 +143,7 @@ func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*
 }
 
 func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*models.PaymentMethod, int64, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -251,7 +251,7 @@ func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.Paym
 
 // GetNMIBackedByUserID returns all payment methods for NMI-backed processors for a user
 func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +266,7 @@ func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID str
 }
 
 func (r *PaymentMethodRepo) ExistsForUser(ctx context.Context, id uuid.UUID, userID string) (bool, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return false, err
 	}

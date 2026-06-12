@@ -1,10 +1,12 @@
 package checkout
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/identity"
 )
 
 type UserIdentity struct {
@@ -12,6 +14,19 @@ type UserIdentity struct {
 	Email    *string
 	Username string
 	Roles    []string
+}
+
+// payerTenantSubjectID derives the payable tenant subject id from the verified
+// caller's user id. Payable identities are UUID-only (#364) — the auth boundary
+// already rejects non-UUID subjects, so a zero derivation here means a broken
+// or bypassed boundary, and the write must not proceed (it would attribute
+// money rows to uuid.Nil or a mismatched subject).
+func payerTenantSubjectID(userID string) (uuid.UUID, error) {
+	id := identity.TenantSubjectIDFromString(userID)
+	if id.IsZero() {
+		return uuid.Nil, fmt.Errorf("payer subject %q is not a UUID: payable identities are UUID-only (#364)", userID)
+	}
+	return id.UUID(), nil
 }
 
 type CheckoutRequest struct {

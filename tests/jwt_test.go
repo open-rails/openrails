@@ -50,7 +50,7 @@ func GenerateTestJWT(t *testing.T, userID, email string, isAdmin bool) string {
 // TestJWTGeneration tests JWT token generation
 func TestJWTGeneration(t *testing.T) {
 	t.Run("Generate Regular User Token", func(t *testing.T) {
-		userID := "test-user-123"
+		userID := "a1111111-1111-4111-8111-111111111111" // UUID-only subjects (#364)
 		email := "test@example.com"
 		token := GenerateTestJWT(t, userID, email, false)
 
@@ -63,7 +63,7 @@ func TestJWTGeneration(t *testing.T) {
 	})
 
 	t.Run("Generate Admin User Token", func(t *testing.T) {
-		userID := "admin-user-456"
+		userID := "a2222222-2222-4222-8222-222222222222" // UUID-only subjects (#364)
 		email := "admin@example.com"
 		token := GenerateTestJWT(t, userID, email, true)
 

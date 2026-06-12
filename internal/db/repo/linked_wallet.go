@@ -42,7 +42,7 @@ func linkedWalletFromGen(w gen.BillingLinkedWallet) (*models.LinkedWallet, error
 }
 
 func (r *LinkedWalletRepo) GetByUserIDAndChain(ctx context.Context, userID, chain string) (*models.LinkedWallet, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, w
 }
 
 func (r *LinkedWalletRepo) DeleteForUserIDAndChain(ctx context.Context, userID, chain string) error {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return err
 	}

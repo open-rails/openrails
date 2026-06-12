@@ -67,7 +67,7 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	suite := setupTestSuite(t)
 	ctx := context.Background()
 
-	userID := "service-user-" + uuid.NewString()
+	userID := uuid.NewString()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 	tenantSubject := identity.TenantSubjectID(tenantSubjectID)
 	creditTypeName := "svc_test_credits_" + uuid.NewString()

@@ -37,7 +37,7 @@ func TestTierGroupDetection(t *testing.T) {
 	premiumPriceID := tieredProducts[0].Prices[0].ID
 	premiumPlusPriceID := tieredProducts[1].Prices[0].ID
 
-	userID := "test-user-" + uuid.New().String()[:8]
+	userID := uuid.New().String()
 
 	t.Run("identifies products in same tier group", func(t *testing.T) {
 		// All three should have the same tier group
@@ -100,7 +100,7 @@ func TestTierGroupDetection(t *testing.T) {
 	})
 
 	t.Run("allows purchase when no existing subscription", func(t *testing.T) {
-		newUserID := "new-user-" + uuid.New().String()[:8]
+		newUserID := uuid.New().String()
 
 		checkoutService := suite.App.Runtime.CheckoutService
 
@@ -176,7 +176,7 @@ func TestScheduledDowngrade(t *testing.T) {
 	premiumPlusProduct := tieredProducts[1].Product
 
 	t.Run("downgrade is scheduled for end of period", func(t *testing.T) {
-		userID := "test-user-" + uuid.New().String()[:8]
+		userID := uuid.New().String()
 		now := suite.GetClock().Now()
 		periodEnd := now.Add(15 * 24 * time.Hour) // 15 days remaining
 
@@ -219,7 +219,7 @@ func TestScheduledDowngrade(t *testing.T) {
 	})
 
 	t.Run("downgrade is applied on renewal", func(t *testing.T) {
-		userID := "test-user-" + uuid.New().String()[:8]
+		userID := uuid.New().String()
 		now := suite.GetClock().Now()
 		periodEnd := now // Period ends now
 
@@ -277,7 +277,7 @@ func TestEntitlementChangesOnTierChange(t *testing.T) {
 	premiumPriceID := tieredProducts[0].Prices[0].ID     // rank 1, entitlements: [premium]
 	premiumPlusPriceID := tieredProducts[1].Prices[0].ID // rank 2, entitlements: [premium, extra]
 
-	userID := "test-user-" + uuid.New().String()[:8]
+	userID := uuid.New().String()
 
 	t.Run("upgrade grants additional entitlements", func(t *testing.T) {
 		// Create Premium subscription
@@ -328,7 +328,7 @@ func TestEntitlementChangesOnTierChange(t *testing.T) {
 	})
 
 	t.Run("downgrade revokes extra entitlements", func(t *testing.T) {
-		userID2 := "test-user-" + uuid.New().String()[:8]
+		userID2 := uuid.New().String()
 		now := suite.GetClock().Now()
 		periodEnd := now.Add(30 * 24 * time.Hour)
 
@@ -397,7 +397,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns 404 when subscription not found", func(t *testing.T) {
-		userID := "no-sub-user-" + uuid.New().String()[:8]
+		userID := uuid.New().String()
 		email := userID + "@test.example.com"
 		token := getTestIssuer().CreateToken(userID, email)
 
@@ -418,7 +418,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns 409 when already on same plan", func(t *testing.T) {
-		userID := "same-plan-user-" + uuid.New().String()[:8]
+		userID := uuid.New().String()
 		email := userID + "@test.example.com"
 		token := getTestIssuer().CreateToken(userID, email)
 
@@ -448,7 +448,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 	})
 
 	t.Run("Mobius upgrade succeeds with proration", func(t *testing.T) {
-		userID := "upgrade-user-" + uuid.New().String()[:8]
+		userID := uuid.New().String()
 		email := userID + "@test.example.com"
 		token := getTestIssuer().CreateToken(userID, email)
 
@@ -509,7 +509,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 	})
 
 	t.Run("Mobius downgrade is scheduled", func(t *testing.T) {
-		userID := "downgrade-user-" + uuid.New().String()[:8]
+		userID := uuid.New().String()
 		email := userID + "@test.example.com"
 		token := getTestIssuer().CreateToken(userID, email)
 
@@ -569,7 +569,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 	premiumPlusPriceID := tieredProducts[1].Prices[0].ID // rank 2
 
 	t.Run("checkout blocks upgrade attempts", func(t *testing.T) {
-		userID := "checkout-upgrade-" + uuid.New().String()[:8]
+		userID := uuid.New().String()
 		email := userID + "@test.example.com"
 		token := getTestIssuer().CreateToken(userID, email)
 
@@ -614,7 +614,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 	})
 
 	t.Run("checkout blocks downgrade attempts", func(t *testing.T) {
-		userID := "checkout-downgrade-" + uuid.New().String()[:8]
+		userID := uuid.New().String()
 		email := userID + "@test.example.com"
 		token := getTestIssuer().CreateToken(userID, email)
 
@@ -659,7 +659,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 	})
 
 	t.Run("checkout still works for new subscriptions", func(t *testing.T) {
-		userID := "checkout-new-" + uuid.New().String()[:8]
+		userID := uuid.New().String()
 		email := userID + "@test.example.com"
 		token := getTestIssuer().CreateToken(userID, email)
 

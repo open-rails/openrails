@@ -60,7 +60,7 @@ func (s *ProcessorCustomerService) GetCustomerID(ctx context.Context, userID, pr
 	if userID == "" || processor == "" {
 		return "", fmt.Errorf("invalid processor customer args")
 	}
-	tsid, err := repo.ResolveTenantSubjectID(ctx, s.DB.Qx(ctx), uuid.Nil, userID)
+	tsid, err := repo.ResolveTenantSubjectID(userID)
 	if err != nil {
 		return "", err
 	}

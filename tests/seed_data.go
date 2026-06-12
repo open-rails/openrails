@@ -22,16 +22,12 @@ func (suite *TestContainerSuite) ensureTenantSubject(ctx context.Context, userID
 	return tenantSubjectID
 }
 
-// resolveTenantSubject is the read-side counterpart of ensureTenantSubject: it
-// resolves a test userID to its payable tenant_subject_id WITHOUT creating a
-// row. Non-UUID test user IDs (e.g. "test-user-ab12cd34") are stored under the
-// legacy-user issuer with a GENERATED subject id by the write path, so read
-// helpers must look the mapping up in the database — the deterministic
-// identity.TenantSubjectIDFromString derivation only works for UUID user IDs
-// and silently yields uuid.Nil (empty result sets) for everything else (#363).
+// resolveTenantSubject is the read-side counterpart of ensureTenantSubject:
+// pure derivation — payable identities are UUID-only (#364), so a test userID
+// IS its own tenant_subject_id. Non-UUID test user ids are rejected.
 func (suite *TestContainerSuite) resolveTenantSubject(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
-	tenantSubjectID, err := dbrepo.ResolveTenantSubjectID(ctx, suite.Pool, tenant.DefaultID.UUID(), userID)
+	tenantSubjectID, err := dbrepo.ResolveTenantSubjectID(userID)
 	require.NoError(suite.t, err, "Failed to resolve tenant subject")
 	return tenantSubjectID
 }

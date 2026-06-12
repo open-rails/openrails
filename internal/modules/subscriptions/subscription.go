@@ -231,6 +231,14 @@ func (s *SubscriptionService) Update(ctx context.Context, subscription *models.S
 	return s.subscriptionRepo.UpdateAt(ctx, subscription, s.now())
 }
 
+// ReplaceForTierChange atomically swaps oldSub (pre-mutated by the caller to
+// its cancelled state) for newSub in one transaction, so the one-live-
+// subscription-per-(subject, tier-group) unique index is never violated and a
+// failure leaves the old subscription active (SEC-10 — nothing to reactivate).
+func (s *SubscriptionService) ReplaceForTierChange(ctx context.Context, oldSub, newSub *models.Subscription) error {
+	return s.subscriptionRepo.ReplaceForTierChange(ctx, oldSub, newSub, s.now())
+}
+
 func (s *SubscriptionService) GetSubscribers(ctx context.Context, params query.QueryOptions[GetSubscriptionsFilters]) ([]*models.Subscription, int64, error) {
 	repoParams := query.QueryOptions[repo.SubscriptionFilters]{
 		Filters: repo.SubscriptionFilters{

@@ -23,7 +23,7 @@ func TestRequiredMWPinsUserContextForHandler(t *testing.T) {
 		if r.Header.Get("Authorization") == "" {
 			return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 		}
-		return billingauth.UserContext{UserID: "user-42", Username: "ada"}, nil
+		return billingauth.UserContext{UserID: "00000000-0000-4000-8000-000000000042", Username: "ada"}, nil
 	})
 
 	var sawUser string
@@ -55,7 +55,7 @@ func TestRequiredMWPinsUserContextForHandler(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if !sawOK || sawUser != "user-42" {
-		t.Fatalf("handler r.UserContext() = (%q, %v), want (user-42, true) — UserContext not pinned for the handler", sawUser, sawOK)
+	if !sawOK || sawUser != "00000000-0000-4000-8000-000000000042" {
+		t.Fatalf("handler r.UserContext() = (%q, %v), want (00000000-0000-4000-8000-000000000042, true) — UserContext not pinned for the handler", sawUser, sawOK)
 	}
 }

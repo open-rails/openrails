@@ -21,7 +21,8 @@ func captureUC(seen *billingauth.UserContext, found *bool) http.Handler {
 }
 
 func TestRequired(t *testing.T) {
-	const uid = "user-123"
+	// Payable identities are UUID-only (#364): the boundary rejects anything else.
+	const uid = "5d8a3f6e-9c1b-4a7d-8e2f-0b1c2d3e4f5a"
 
 	t.Run("success attaches UserContext and calls next", func(t *testing.T) {
 		var seen billingauth.UserContext
@@ -83,6 +84,22 @@ func TestRequired(t *testing.T) {
 		}
 	})
 
+	t.Run("non-UUID subject is rejected with 401 (#364)", func(t *testing.T) {
+		called := false
+		auth := billingauth.AuthenticatorFunc(func(_ context.Context, _ *http.Request) (billingauth.UserContext, error) {
+			return billingauth.UserContext{UserID: "legacy-user-123"}, nil
+		})
+		h := billingauth.Required(auth)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+		if called {
+			t.Fatal("next was called despite non-UUID subject")
+		}
+	})
+
 	t.Run("nil authenticator is a 500, not a panic", func(t *testing.T) {
 		h := billingauth.Required(nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		rec := httptest.NewRecorder()
@@ -112,16 +129,34 @@ func TestOptional(t *testing.T) {
 	})
 
 	t.Run("auth success attaches UserContext", func(t *testing.T) {
+		const uid = "1b6a9c0d-2e3f-4a5b-8c7d-9e0f1a2b3c4d"
 		var found bool
 		var seen billingauth.UserContext
 		auth := billingauth.AuthenticatorFunc(func(_ context.Context, _ *http.Request) (billingauth.UserContext, error) {
-			return billingauth.UserContext{UserID: "u1"}, nil
+			return billingauth.UserContext{UserID: uid}, nil
 		})
 		h := billingauth.Optional(auth)(captureUC(&seen, &found))
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
-		if !found || seen.UserID != "u1" {
-			t.Fatalf("uc=%+v found=%v, want UserID=u1", seen, found)
+		if !found || seen.UserID != uid {
+			t.Fatalf("uc=%+v found=%v, want UserID=%q", seen, found, uid)
+		}
+	})
+
+	t.Run("non-UUID subject proceeds anonymously (#364)", func(t *testing.T) {
+		var found bool
+		var seen billingauth.UserContext
+		auth := billingauth.AuthenticatorFunc(func(_ context.Context, _ *http.Request) (billingauth.UserContext, error) {
+			return billingauth.UserContext{UserID: "legacy-user-123"}, nil
+		})
+		h := billingauth.Optional(auth)(captureUC(&seen, &found))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (optional)", rec.Code)
+		}
+		if found {
+			t.Fatal("UserContext present despite non-UUID subject on Optional")
 		}
 	})
 }

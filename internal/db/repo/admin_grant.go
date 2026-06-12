@@ -127,7 +127,7 @@ func (r *AdminGrantRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Adm
 
 // ListByUserID retrieves all admin grants for a user
 func (r *AdminGrantRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]models.AdminGrant, int, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -93,7 +93,7 @@ func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID str
 }
 
 func (r *USDCFundingSessionRepo) GetByIDForUserID(ctx context.Context, id uuid.UUID, userID string) (*models.USDCFundingSession, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func (r *USDCFundingSessionRepo) GetByIdempotencyKeyForUserID(ctx context.Contex
 	if key == "" {
 		return nil, ErrUSDCFundingSessionNotFound
 	}
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}

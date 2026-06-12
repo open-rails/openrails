@@ -163,7 +163,7 @@ func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference stri
 }
 
 func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceProcessor(ctx context.Context, userID string, priceID uuid.UUID, processor models.Processor) (*models.CheckoutSession, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}

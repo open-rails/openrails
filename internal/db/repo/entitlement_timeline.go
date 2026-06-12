@@ -55,7 +55,7 @@ func ShiftEntitlementTimeline(
 		return nil
 	}
 
-	tsid, err := ResolveTenantSubjectID(ctx, qx, uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return err
 	}
@@ -136,12 +136,8 @@ func SetEntitlementEndAtTx(ctx context.Context, qx gen.DBTX, id uuid.UUID, endAt
 	}
 	if oldEnd != nil && endAt == nil {
 		// Indefinite terminates the timeline; delete any later windows.
-		tsid, err := ResolveTenantSubjectID(ctx, qx, uuid.Nil, ent.TenantSubjectID.String())
-		if err != nil {
-			return err
-		}
 		return q.SoftDeleteLaterEntitlementWindows(ctx, gen.SoftDeleteLaterEntitlementWindowsParams{
-			TenantSubjectID: tsid,
+			TenantSubjectID: ent.TenantSubjectID,
 			Entitlement:     ent.Entitlement,
 			Now:             now,
 			FromAt:          *oldEnd,

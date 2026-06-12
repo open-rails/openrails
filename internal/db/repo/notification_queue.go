@@ -85,7 +85,7 @@ func (r *NotificationQueueRepo) GetByID(ctx context.Context, id uuid.UUID) (*mod
 }
 
 func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) 
 }
 
 func (r *NotificationQueueRepo) GetUnseenByUserID(ctx context.Context, userID string) ([]*models.NotificationQueue, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (r *NotificationQueueRepo) GetByEventType(ctx context.Context, eventType mo
 }
 
 func (r *NotificationQueueRepo) CountByUserAndEventSince(ctx context.Context, userID string, eventType models.NotificationEventType, since time.Time) (int, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return 0, err
 	}
@@ -137,7 +137,7 @@ func (r *NotificationQueueRepo) GetUsersWithPendingDigest(ctx context.Context, s
 }
 
 func (r *NotificationQueueRepo) GetPendingDigestForUser(ctx context.Context, userID string, since time.Time, limit int) ([]*models.NotificationQueue, error) {
-	tsid, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func (r *NotificationQueueRepo) Delete(ctx context.Context, id uuid.UUID) error 
 func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query.QueryOptions[NotificationFilters]) ([]*models.NotificationQueue, int64, error) {
 	var tsid *uuid.UUID
 	if opts.Filters.UserID != "" {
-		id, err := ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, opts.Filters.UserID)
+		id, err := ResolveTenantSubjectID(opts.Filters.UserID)
 		if err != nil {
 			return nil, 0, err
 		}
