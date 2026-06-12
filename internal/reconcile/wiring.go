@@ -73,6 +73,7 @@ func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]ProcessorFetc
 		Store:    &PGStore{DB: d},
 		Local:    &PGLocalStateLoader{DB: d},
 		Writer:   &PGLocalWriter{DB: d},
+		Intents:  &PGStuckIntentSource{DB: d},
 	}
 	if cfg != nil {
 		e.DisableEntitlementRevocation = cfg.IsEntitlementExpirationDisabled()

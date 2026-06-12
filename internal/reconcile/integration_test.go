@@ -515,6 +515,162 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 	}))
 }
 
+// TestReconcileStuckIntentIntegration proves the PS-10 stuck-intent finding
+// type end to end against real Postgres under RLS: non-terminal
+// billing.provider_intents rows older than the hardcoded thresholds surface as
+// findings on a run with ZERO providers configured (PS-10 is
+// provider-independent and reads only the local ledger), mode/kill-switch
+// parks stay informational, fresh intents stay invisible, enforce never
+// touches the intent rows, and a recovered intent's finding auto-resolves.
+func TestReconcileStuckIntentIntegration(t *testing.T) {
+	appDB := startReconcilePostgres(t)
+	baseCtx := tenant.WithID(context.Background(), tenant.DefaultID)
+	store := &PGStore{DB: appDB}
+
+	suffix := uuid.NewString()[:8]
+	oldPending := uuid.New()    // pending 26h, genuine failure -> admin-queued
+	parkedPending := uuid.New() // pending 26h, kill-switch park -> informational
+	freshPending := uuid.New()  // pending 1h -> no finding
+	oldUnknown := uuid.New()    // unknown_needs_verify 3h -> admin-queued
+	subscriptionID := uuid.New()
+
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		seed := func(id uuid.UUID, status string, age time.Duration, reason *string) {
+			t.Helper()
+			_, err := appDB.Qx(ctx).Exec(ctx,
+				`INSERT INTO billing.provider_intents
+				   (id, provider, intent_type, subscription_id, idempotency_key,
+				    status, attempts, next_attempt_at, origin, last_failure_reason, created_at)
+				 VALUES ($1, 'mobius', 'nmi_delete_subscription', $2, $3, $4, 2, now(), 'system', $5, now() - make_interval(mins => $6))`,
+				id, subscriptionID, fmt.Sprintf("stuck-%s-%s", id.String()[:8], suffix),
+				status, reason, int(age.Minutes()))
+			require.NoError(t, err)
+		}
+		failure := "nmi error: connection refused"
+		park := "processor subscription deletes disabled (feature_flags.disable_processor_subscription_deletions kill switch)"
+		ambiguous := "ambiguous: timeout after send"
+		seed(oldPending, "pending", 26*time.Hour, &failure)
+		seed(parkedPending, "pending", 26*time.Hour, &park)
+		seed(freshPending, "pending", time.Hour, nil)
+		seed(oldUnknown, "unknown_needs_verify", 3*time.Hour, &ambiguous)
+		return nil
+	}))
+
+	// Engine with NO fetchers: the PS-10 pass runs regardless of providers.
+	newEngine := func() *Engine {
+		return &Engine{
+			Fetchers: map[Provider]ProcessorFetcher{},
+			Store:    store,
+			Local:    &PGLocalStateLoader{DB: appDB},
+			Writer:   &PGLocalWriter{DB: appDB},
+			Intents:  &PGStuckIntentSource{DB: appDB},
+		}
+	}
+
+	// ---- check: stuck intents surface, fresh ones do not --------------------
+	var check *RunResult
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory})
+		check = res
+		return err
+	}))
+	require.NotNil(t, check)
+	assert.Equal(t, "completed", check.Status)
+
+	bySubject := map[string]FindingRecord{}
+	for _, f := range check.Findings {
+		if f.Type == FindingStuckIntent {
+			bySubject[f.SubjectKey] = f
+		}
+	}
+	require.Len(t, bySubject, 3, "old pending + parked + old unknown")
+	assert.NotContains(t, bySubject, freshPending.String(), "a fresh pending intent is not stuck")
+
+	rec := bySubject[oldPending.String()]
+	assert.Equal(t, FindingStatusAdminPending, rec.Status)
+	assert.True(t, rec.RequiresAdmin)
+	assert.Equal(t, SeverityHigh, rec.Severity)
+	assert.Equal(t, Provider("mobius"), rec.Provider)
+	assert.Equal(t, "nmi_delete_subscription", rec.IntentEvidence["intent_type"])
+	assert.Equal(t, subscriptionID.String(), rec.IntentEvidence["subscription_id"])
+	assert.Equal(t, "nmi error: connection refused", rec.IntentEvidence["last_failure_reason"])
+
+	parked := bySubject[parkedPending.String()]
+	assert.Equal(t, FindingStatusOpen, parked.Status)
+	assert.False(t, parked.RequiresAdmin, "kill-switch park is informational")
+	assert.Equal(t, SeverityLow, parked.Severity)
+
+	unknown := bySubject[oldUnknown.String()]
+	assert.Equal(t, FindingStatusAdminPending, unknown.Status)
+	assert.True(t, unknown.RequiresAdmin)
+
+	stuckRep := check.Summary.StuckIntents
+	require.NotNil(t, stuckRep)
+	assert.Equal(t, 3, stuckRep.Total)
+	assert.Equal(t, 2, stuckRep.AdminQueued)
+	assert.Equal(t, 1, stuckRep.ModeParked)
+	assert.Equal(t, 3, stuckRep.ByIntentType["nmi_delete_subscription"])
+
+	// Admin queue carries the genuine stuck intents, not the parked one.
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		queue, err := store.ListFindings(ctx, FindingFilter{Type: string(FindingStuckIntent), OnlyAdminQueue: true})
+		require.NoError(t, err)
+		assert.Len(t, queue, 2)
+		return nil
+	}))
+
+	// ---- fix: identical emission, intents untouched --------------------------
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce})
+		require.NoError(t, err)
+		require.NotNil(t, res.Summary.StuckIntents)
+		assert.Equal(t, 3, res.Summary.StuckIntents.Total, "fix emits/refreshes identically")
+
+		// fix mode never touches the ledger: statuses and attempts unchanged.
+		var status string
+		var attempts int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT status, attempts FROM billing.provider_intents WHERE id = $1`, oldPending).Scan(&status, &attempts))
+		assert.Equal(t, "pending", status)
+		assert.Equal(t, 2, attempts)
+
+		// Stable identity: one row per intent, occurrence bumped.
+		all, err := store.ListFindings(ctx, FindingFilter{Type: string(FindingStuckIntent), Limit: 50})
+		require.NoError(t, err)
+		assert.Len(t, all, 3)
+		for _, f := range all {
+			assert.Equal(t, 2, f.OccurrenceCount)
+		}
+		return nil
+	}))
+
+	// ---- recovery: succeeded/superseded intents auto-resolve -----------------
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		_, err := appDB.Qx(ctx).Exec(ctx,
+			`UPDATE billing.provider_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, oldPending)
+		require.NoError(t, err)
+		_, err = appDB.Qx(ctx).Exec(ctx,
+			`UPDATE billing.provider_intents SET status = 'superseded' WHERE id = $1`, oldUnknown)
+		require.NoError(t, err)
+		return nil
+	}))
+	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory})
+		require.NoError(t, err)
+		require.NotNil(t, res.Summary.StuckIntents)
+		assert.Equal(t, 1, res.Summary.StuckIntents.Total, "only the parked intent is still stuck")
+		assert.Equal(t, int64(2), res.Summary.StuckIntents.AutoResolved)
+
+		recovered, err := store.ListFindings(ctx, FindingFilter{Type: string(FindingStuckIntent), Status: string(FindingStatusResolved), Limit: 50})
+		require.NoError(t, err)
+		require.Len(t, recovered, 2)
+		for _, f := range recovered {
+			assert.Equal(t, "auto_vanished", f.Resolution)
+		}
+		return nil
+	}))
+}
+
 // TestReconcileRunRecordsFailure proves a fetch failure persists a failed run
 // with its error instead of half-applying.
 func TestReconcileRunRecordsFailure(t *testing.T) {
