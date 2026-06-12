@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/vault"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -131,9 +130,15 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		return nil, fmt.Errorf("load NMI sale attempt: %w", err)
 	}
 
+	subjectID, err := s.PurchaseService.PaymentService.EnsureSubjectID(ctx, user.ID)
+	if err != nil {
+		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, fmt.Errorf("resolve tenant subject for NMI sale attempt: %w", err)
+	}
+
 	attempt, err := s.PurchaseService.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(user.ID).UUID(),
+		TenantSubjectID: subjectID,
 		PriceID:         price.ID,
 		Processor:       models.Processor(provider),
 		TransactionID:   attemptTransactionID,

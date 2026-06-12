@@ -31,7 +31,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -395,9 +394,14 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if processor == "ccbill" || processor == "stripe" {
 		ttl = redirectCheckoutSessionTTL
 	}
+	subjectID, err := s.ensureSubjectID(ctx, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tenant subject for checkout session: %w", err)
+	}
+
 	session := &models.CheckoutSession{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(user.ID).UUID(),
+		TenantSubjectID: subjectID,
 		PriceID:         price.ID,
 		Mode:            mode,
 		Processor:       models.Processor(processor),
@@ -547,6 +551,13 @@ func (s *CheckoutSessionService) resolveMode(mode string, processor string, pric
 // keeps the validation contract from drifting out of sync with what the
 // processor's executor actually consumes — the drift that previously made Stripe
 // demand billing fields its hosted-checkout path never reads.
+// ensureSubjectID resolves-or-creates the payable tenant-subject id for a raw
+// user/subject string (#364): deriving via identity.TenantSubjectIDFromString
+// yields uuid.Nil for legacy (non-UUID) subjects and mis-attributes the session.
+func (s *CheckoutSessionService) ensureSubjectID(ctx context.Context, userID string) (uuid.UUID, error) {
+	return repo.EnsureTenantSubjectID(ctx, s.db.Qx(ctx), uuid.Nil, userID)
+}
+
 func (s *CheckoutSessionService) validatePayment(ctx context.Context, processor string, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
 	switch {
 	case processors.IsNMIBacked(processor):
@@ -1169,9 +1180,14 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 
 	now := s.now()
 	expiresAt := now.Add(defaultCheckoutSessionTTL)
+	subjectID, err := s.ensureSubjectID(ctx, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tenant subject for checkout session: %w", err)
+	}
+
 	session := &models.CheckoutSession{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(user.ID).UUID(),
+		TenantSubjectID: subjectID,
 		PriceID:         sessionPriceID,
 		Mode:            mode,
 		Processor:       models.ProcessorSolana,

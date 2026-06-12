@@ -22,6 +22,13 @@ type PaymentService struct {
 	clock clockwork.Clock
 }
 
+// EnsureSubjectID resolves-or-creates the payable tenant-subject id for a raw
+// user/subject string (#364). See repo.EnsureTenantSubjectID for the identity
+// scheme (UUID subjects are their own id; legacy subjects use a generated row).
+func (s *PaymentService) EnsureSubjectID(ctx context.Context, userID string) (uuid.UUID, error) {
+	return s.repo.EnsureSubjectID(ctx, userID)
+}
+
 const (
 	PaymentStatusPendingValue   = "pending"
 	PaymentStatusCompletedValue = "completed"

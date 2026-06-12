@@ -101,6 +101,18 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 	return nil
 }
 
+// EnsureSubjectID resolves-or-creates the payable tenant-subject id for a raw
+// user/subject string (#364) — the write-path companion of ResolveSubjectID.
+func (r *SubscriptionRepo) EnsureSubjectID(ctx context.Context, userID string) (uuid.UUID, error) {
+	return EnsureTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+}
+
+// ResolveSubjectID resolves the payable tenant-subject id for a raw user/subject
+// string WITHOUT creating a row (#364). Unknown legacy subjects yield uuid.Nil.
+func (r *SubscriptionRepo) ResolveSubjectID(ctx context.Context, userID string) (uuid.UUID, error) {
+	return ResolveTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+}
+
 func (r *SubscriptionRepo) Update(ctx context.Context, s *models.Subscription) error {
 	return r.UpdateAt(ctx, s, time.Now())
 }

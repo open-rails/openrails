@@ -102,6 +102,15 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 	return nil
 }
 
+// EnsureSubjectID resolves-or-creates the payable tenant-subject id for a raw
+// user/subject string (#364). UUID subjects map to themselves; non-UUID legacy
+// subjects get (or reuse) a materialized tenant_subjects row. Commerce writers
+// must stamp this id — deriving via identity.TenantSubjectIDFromString yields
+// uuid.Nil for legacy subjects and mis-attributes the row.
+func (r *PaymentRepo) EnsureSubjectID(ctx context.Context, userID string) (uuid.UUID, error) {
+	return EnsureTenantSubjectID(ctx, r.db.Qx(ctx), uuid.Nil, userID)
+}
+
 func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
 	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, payment.TenantSubjectID); err != nil {
 		return false, err

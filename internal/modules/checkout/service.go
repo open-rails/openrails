@@ -33,7 +33,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -663,9 +662,18 @@ func (s *CheckoutService) processNMISubscription(
 		}
 	}
 
+	// Resolve-or-create the payable tenant-subject id: deriving via
+	// identity.TenantSubjectIDFromString yields uuid.Nil for legacy (non-UUID)
+	// subjects and mis-attributes the attempt row (#364).
+	subjectID, err := s.PaymentService.EnsureSubjectID(ctx, user.ID)
+	if err != nil {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, fmt.Errorf("resolve tenant subject for NMI subscription attempt: %w", err)
+	}
+
 	attempt, err := s.PaymentService.ReserveProviderAttempt(ctx, &models.Payment{
 		ID:              uuidutil.NewV7(),
-		TenantSubjectID: identity.TenantSubjectIDFromString(user.ID).UUID(),
+		TenantSubjectID: subjectID,
 		PriceID:         price.ID,
 		Processor:       models.Processor(provider),
 		TransactionID:   nmiSubscriptionAttemptTransactionID(orderID),
@@ -786,6 +794,11 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 		return nil, fmt.Errorf("load existing subscription: %w", err)
 	}
 
+	subjectID, err := s.SubscriptionService.EnsureSubjectID(ctx, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tenant subject for NMI subscription: %w", err)
+	}
+
 	now := s.now().UTC()
 	var emailPtr *string
 	if req.Email != "" {
@@ -793,7 +806,7 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 	}
 	subscription := &models.Subscription{
 		ID:                       subscriptionID,
-		TenantSubjectID:          identity.TenantSubjectIDFromString(user.ID).UUID(),
+		TenantSubjectID:          subjectID,
 		ProductID:                price.ProductID,
 		PriceID:                  price.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
@@ -1714,6 +1727,14 @@ func (s *CheckoutService) processUpgrade(
 		return nil, err
 	}
 
+	// Resolve the payable tenant-subject id BEFORE any processor side-effects so
+	// a resolution failure cannot strand a charged-but-unrecorded upgrade (#364).
+	subjectID, err := s.SubscriptionService.EnsureSubjectID(ctx, user.ID)
+	if err != nil {
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
+		return nil, fmt.Errorf("resolve tenant subject for upgrade: %w", err)
+	}
+
 	// Step 1: Create the successor subscription at NMI before charging/cancelling.
 	newSubscriptionID := uuidutil.NewV7()
 
@@ -1814,7 +1835,7 @@ func (s *CheckoutService) processUpgrade(
 
 	newSubscription := &models.Subscription{
 		ID:                       newSubscriptionID,
-		TenantSubjectID:          identity.TenantSubjectIDFromString(user.ID).UUID(),
+		TenantSubjectID:          subjectID,
 		ProductID:                newPrice.ProductID,
 		PriceID:                  newPrice.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec),
@@ -2235,8 +2256,15 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 		if err != nil {
 			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
 		}
-		// Verify ownership
-		if existingSub.TenantSubjectID.String() != user.ID {
+		// Verify ownership against the RESOLVED payable tenant-subject id:
+		// legacy (non-UUID) subjects are materialized rows whose id never equals
+		// the raw subject string, so comparing against user.ID directly 404s the
+		// legitimate owner (#364).
+		callerSubjectID, rerr := s.SubscriptionService.ResolveSubjectID(ctx, user.ID)
+		if rerr != nil {
+			return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "failed to verify subscription ownership"}
+		}
+		if callerSubjectID == uuid.Nil || existingSub.TenantSubjectID != callerSubjectID {
 			return nil, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "subscription not found"}
 		}
 	} else {

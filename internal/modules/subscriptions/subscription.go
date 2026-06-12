@@ -272,6 +272,19 @@ func (s *SubscriptionService) GetSubscriptionsByProcessorAndUserID(ctx context.C
 	return s.subscriptionRepo.GetSubscriptionsByProcessorAndUserID(ctx, userID, processor)
 }
 
+// EnsureSubjectID resolves-or-creates the payable tenant-subject id for a raw
+// user/subject string (#364). UUID subjects map to themselves; non-UUID legacy
+// subjects get (or reuse) a materialized tenant_subjects row.
+func (s *SubscriptionService) EnsureSubjectID(ctx context.Context, userID string) (uuid.UUID, error) {
+	return s.subscriptionRepo.EnsureSubjectID(ctx, userID)
+}
+
+// ResolveSubjectID resolves the payable tenant-subject id for a raw user/subject
+// string WITHOUT creating a row (#364). Unknown legacy subjects yield uuid.Nil.
+func (s *SubscriptionService) ResolveSubjectID(ctx context.Context, userID string) (uuid.UUID, error) {
+	return s.subscriptionRepo.ResolveSubjectID(ctx, userID)
+}
+
 // GetActiveSubscription retrieves the active subscription for a user
 func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID string) (*models.Subscription, error) {
 	return s.subscriptionRepo.GetActiveSubscriptionAt(ctx, userID, s.now())
