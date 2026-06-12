@@ -5,6 +5,7 @@ package riverjobs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,13 +15,16 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -217,4 +221,143 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
 		tenantSubjectID, creditTypeID).Scan(&depositCount))
 	require.Equal(t, 1, depositCount)
+}
+
+// TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent pins the
+// crash-repair contract that the manual_rebill_attempts table used to provide
+// and the ledger now does (#358 phase C): a previous pass charged the period
+// (durable succeeded intent with the transaction id as evidence) but died
+// before the lifecycle update. The next pass's enqueue conflicts on the
+// content-addressed key, gets the durable success back, repairs the local
+// lifecycle — and never sends a second charge.
+func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+
+	ctx := context.Background()
+	dbi := dbtest.OpenAppDB(t, dsn)
+	pool := dbi.Pool()
+	q := gen.New(pool)
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	productID := uuid.New()
+	priceID := uuid.New()
+	paymentMethodID := uuid.New()
+	subID := uuid.New()
+	userID := uuid.New().String()
+
+	billingDays32 := int32(30)
+	description := "Test"
+	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
+		ID:          productID,
+		Slug:        "test_product_" + uuid.New().String(),
+		DisplayName: "Test Product",
+		Description: &description,
+		Status:      string(models.CatalogStatusActive),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	require.NoError(t, err)
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
+		ID: priceID, ProductID: productID, Amount: 999, Currency: "usd",
+		Status: string(models.CatalogStatusActive), BillingCycleDays: &billingDays32,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+
+	billingID := "bill_" + uuid.New().String()
+	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
+	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
+		ID: paymentMethodID, TenantSubjectID: tenantSubjectID, Processor: "mobius",
+		VaultID: "vault_" + uuid.New().String(), BillingID: &billingID,
+		InitialTransactionID: "txn_initial_" + uuid.New().String(),
+		CreatedAt:            now, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+
+	periodEnd := now.Add(-1 * time.Minute)
+	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
+	nextRetry := now.Add(-30 * time.Second)
+	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
+		ID: subID, TenantSubjectID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		Status: string(models.StatusPastDue), Processor: "mobius",
+		ProcessorSubscriptionID: "sub_test_" + uuid.New().String(),
+		PaymentMethodID:         &paymentMethodID,
+		CurrentPeriodStartsAt:   &periodStart, CurrentPeriodEndsAt: &periodEnd,
+		StartedAt: periodStart, NextRetryAt: &nextRetry,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+
+	// The durable success from the crashed pass: attempt ordinal 0
+	// (retry_attempts is NULL), evidence carries the charge's transaction id.
+	durableTxn := "txn_durable_" + uuid.NewString()[:8]
+	orderRef := fmt.Sprintf("rebill-%s-%d", subID, periodEnd.Unix())
+	payloadJSON := fmt.Sprintf(
+		`{"subscription_id":%q,"period_end":%q,"processor":"mobius","order_reference":%q,"attempt":0}`,
+		subID, periodEnd.Format(time.RFC3339), orderRef)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO billing.provider_intents
+		  (provider, intent_type, subscription_id, payload, idempotency_key, status, origin, executed_at, result_evidence)
+		VALUES ('mobius', $1, $2, $3, $4, 'succeeded', 'system', now(), $5)`,
+		intents.TypeManualRebill, subID, payloadJSON,
+		intents.ManualRebillIdempotencyKey(subID, periodEnd, "mobius", orderRef, 0),
+		fmt.Sprintf(`{"transaction_id": %q}`, durableTxn))
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.provider_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", paymentMethodID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+	})
+
+	// Gateway that REFUSES sales: any charge attempt fails the test premise.
+	var saleAttempts int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("type") == "sale" {
+			saleAttempts++
+		}
+		_, _ = w.Write([]byte("response=3&responsetext=should never be called"))
+	}))
+	t.Cleanup(srv.Close)
+	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
+		SecurityKey:   "test_security_key",
+		WebhookSecret: "test_secret",
+	}, true)
+	require.NoError(t, err)
+	client.DirectPostURL = srv.URL
+	client.QueryURL = srv.URL
+
+	worker := &DunningWorker{DB: dbi, NMIClients: map[string]*nmi.NMIClient{"mobius": client}}
+
+	priceSvc := catalog.NewPriceService(dbi)
+	productSvc := catalog.NewProductService(dbi)
+	entitlementSvc := entitlements.NewEntitlementService(dbi, nil)
+	notifSvc := subscriptions.NewNotificationService(dbi, nil)
+	paymentSvc := payments.NewPaymentService(dbi, nil)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
+	creditsSvc := credits.NewCreditsService(dbi, nil)
+
+	sub, err := repo.NewSubscriptionRepo(dbi).GetByID(ctx, subID)
+	require.NoError(t, err)
+
+	outcome := worker.processSubscription(ctx, sub, lifecycle, priceSvc, creditsSvc)
+	require.Equal(t, dunningOutcomeSucceeded, outcome)
+	assert.Zero(t, saleAttempts, "the durable success must be repaired, never re-charged")
+
+	refreshed, err := dbi.Gen(ctx).GetSubscriptionByID(ctx, subID)
+	require.NoError(t, err)
+	assert.Equal(t, string(models.StatusActive), string(refreshed.Status), "lifecycle repaired from the ledger")
+	require.NotNil(t, refreshed.CurrentPeriodEndsAt)
+	assert.True(t, refreshed.CurrentPeriodEndsAt.After(periodEnd))
+
+	var paymentCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT count(*) FROM billing.payments WHERE subscription_id = $1 AND transaction_id = $2",
+		subID, durableTxn).Scan(&paymentCount))
+	assert.Equal(t, 1, paymentCount, "repair persisted the durable charge")
 }

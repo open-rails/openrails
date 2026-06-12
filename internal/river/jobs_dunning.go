@@ -2,12 +2,11 @@ package riverjobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -15,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/analytics"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/credits"
@@ -24,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -75,6 +74,32 @@ type DunningWorker struct {
 	// producer-less wirings/tests: cancellation still happens, the remote sub
 	// is left for reconciliation.
 	DeferDelete subscriptions.DeferredDeleteScheduler
+	// Intents executes the provider-side charge through the intent ledger
+	// (#358 phase C): the worker enqueues a manual_rebill intent and runs it
+	// synchronously through the identical gate/execute/classify pipeline,
+	// driving lifecycle off the returned status. nil builds a Runner over the
+	// worker's own dependencies.
+	Intents *intents.Runner
+}
+
+// intentRunner returns the configured Runner or self-assembles one (direct
+// worker constructions in tests). Config is only attached when non-nil — a
+// typed-nil ModeView would defeat the gate's nil check.
+func (w *DunningWorker) intentRunner() *intents.Runner {
+	if w.Intents != nil {
+		return w.Intents
+	}
+	runner := &intents.Runner{
+		Store: intents.NewStore(w.DB),
+		Registry: intents.NewRegistry(
+			intents.NewManualRebillHandler(w.DB, w.Config, w.NMIClients, w.Clock, w.EventLogService),
+		),
+		Clock: w.Clock,
+	}
+	if w.Config != nil {
+		runner.Config = w.Config
+	}
+	return runner
 }
 
 func (DunningWorker) Kind() string { return KindDunning }
@@ -244,29 +269,12 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeFailed
 	}
 
-	attempt, attemptClaimed, err := w.claimManualRebillAttempt(ctx, sub.ID, periodEnd, processor, orderReference, w.now())
-	if err != nil {
-		logEntry.WithError(err).Warn("Dunning: failed to claim durable manual rebill attempt")
-		return dunningOutcomeFailed
-	}
-	if !attemptClaimed {
-		if attempt.Status == models.ManualRebillAttemptSucceeded && attempt.TransactionID != nil && sub.Status == models.StatusPastDue {
-			logEntry.WithField("manual_rebill_attempt_id", attempt.ID).Warn("Dunning: repairing local lifecycle from durable successful rebill attempt")
-			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, creditsSvc, processor, *attempt.TransactionID)
-		}
-		if attempt.Status == models.ManualRebillAttemptSucceeded {
-			logEntry.WithField("manual_rebill_attempt_id", attempt.ID).Info("Dunning: rebill already completed for this period")
-			return dunningOutcomeSucceeded
-		}
-		logEntry.WithField("manual_rebill_attempt_id", attempt.ID).Info("Dunning: durable manual rebill attempt is already resolved or needs reconciliation")
-		return dunningOutcomeFailed
-	}
-
-	// Validate payment method
+	// Validate payment method before involving the ledger: nothing chargeable
+	// exists, so no provider mutation is recorded — straight to the failure
+	// policy, exactly as before.
 	pm := sub.PaymentMethod
 	if pm == nil || pm.VaultID == "" || pm.BillingID == nil || *pm.BillingID == "" {
 		reason := "payment method unavailable for rebill"
-		_ = w.markManualRebillFailed(ctx, attempt.ID, reason)
 		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Processor:      processor,
 			SubscriptionID: &sub.ID,
@@ -277,70 +285,165 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeFailed
 	}
 
-	// Attempt manual rebill via configured NMI provider
-	rebillResp, err := client.AttemptManualRebill(nmi.ManualRebillParams{
-		VaultID:        pm.VaultID,
-		BillingID:      *pm.BillingID,
-		SubscriptionID: sub.ProcessorSubscriptionID,
-		OrderID:        orderReference,
-		PONumber:       orderReference,
+	// The provider-side charge flows through the intent ledger (#358 phase C):
+	// one system-origin intent per (subscription, period end, attempt
+	// ordinal), executed synchronously through the identical pipeline. The
+	// enqueue's conflict semantics replace the retired manual_rebill_attempts
+	// claim — a crash between charge and lifecycle update re-derives the same
+	// key and gets the durable outcome back instead of double-charging.
+	genSub, err := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID)
+	if err != nil {
+		logEntry.WithError(err).Warn("Dunning: failed to load subscription tenant for rebill intent")
+		return dunningOutcomeFailed
+	}
+	attemptOrdinal := 0
+	if sub.RetryAttempts != nil {
+		attemptOrdinal = *sub.RetryAttempts
+	}
+	windowEnd := periodEnd.Add(window)
+	intent, err := w.intentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
+		TenantID:       genSub.TenantID,
+		Provider:       provider,
+		IntentType:     intents.TypeManualRebill,
+		SubscriptionID: &sub.ID,
+		Payload: intents.ManualRebillPayload{
+			SubscriptionID: sub.ID,
+			PeriodEnd:      periodEnd,
+			Processor:      provider,
+			OrderReference: orderReference,
+			Attempt:        attemptOrdinal,
+		},
+		IdempotencyKey: intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, provider, orderReference, attemptOrdinal),
+		NextAttemptAt:  w.now().UTC(),
+		Origin:         intents.OriginSystem,
+		OriginReason:   "dunning rebill attempt",
+		ExpiresAt:      &windowEnd,
 	})
 	if err != nil {
-		msg := fmt.Sprintf("manual rebill request failed: %v", err)
-		if err2 := w.markManualRebillUnknown(ctx, attempt.ID, msg); err2 != nil {
-			logEntry.WithError(err2).Warn("Dunning: failed to mark manual rebill attempt unknown")
-		}
-		logEntry.WithError(err).Warn("Dunning: manual rebill request status unknown; not scheduling another automatic charge")
+		logEntry.WithError(err).Warn("Dunning: failed to enqueue durable manual rebill intent")
 		return dunningOutcomeFailed
 	}
+	logEntry = logEntry.WithField("intent_id", intent.ID)
 
-	if rebillResp == nil || !rebillResp.Success {
-		reason := "rebill declined"
-		responseCode := 0
-		if rebillResp != nil {
-			if rebillResp.ErrorMessage != "" {
-				reason = rebillResp.ErrorMessage
-			}
-			responseCode = rebillResp.ResponseCode
+	switch intent.Status {
+	case intents.StatusSucceeded:
+		// The handler's finalize renews the membership; if the renewal raced
+		// or this is a durable success from an earlier crashed pass (enqueue
+		// conflict), repair the local lifecycle here.
+		txnID := manualRebillEvidenceString(intent, "transaction_id")
+		if refreshed, rerr := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID); rerr == nil &&
+			models.SubscriptionStatus(refreshed.Status) == models.StatusPastDue && txnID != "" {
+			logEntry.Warn("Dunning: repairing local lifecycle from durable successful rebill intent")
+			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, creditsSvc, processor, txnID)
 		}
-		hardDecline := subscriptions.ClassifyNMIDecline(responseCode) == subscriptions.DeclineHard
-		var failureCode *string
-		if responseCode != 0 {
-			code := fmt.Sprintf("%d", responseCode)
-			failureCode = &code
-		}
+		logEntry.Info("Dunning: rebill successful")
+		return dunningOutcomeSucceeded
 
-		declineLog := logEntry.WithFields(log.Fields{
-			"response_code": responseCode,
-			"reason":        reason,
-			"hard_decline":  hardDecline,
-		})
-		if hardDecline {
-			// Emit a high-visibility signal: a hard decline permanently terminates
-			// the subscription rather than retrying.
-			declineLog.Error("Dunning: hard decline; terminating subscription without further retries")
-		} else {
-			declineLog.Warn("Dunning: soft decline; will retry on schedule")
-		}
+	case intents.StatusFailedTerminal:
+		// Declined (now, or durably on an earlier pass — the evidence carries
+		// the response code either way): classify and apply the failure
+		// policy. The next scheduled retry derives a fresh attempt ordinal.
+		return w.applyDeclinedRebill(ctx, logEntry, sub, lifecycle, processor, intent)
 
-		_ = w.markManualRebillFailed(ctx, attempt.ID, reason)
-		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Processor:      processor,
-			SubscriptionID: &sub.ID,
-			FailureReason:  &reason,
-			FailureCode:    failureCode,
-			HardDecline:    hardDecline,
-		}); err != nil {
-			logEntry.WithError(err).Warn("apply failure policy after declined rebill")
-		}
+	case intents.StatusUnknownNeedsVerify:
+		// Exactly the old markManualRebillUnknown posture: no lifecycle
+		// change, no next retry scheduled for this attempt; the intent
+		// verifier resolves it via the NMI Query API, and on late-confirmed
+		// success the handler's finalize repairs the lifecycle.
+		logEntry.Warn("Dunning: manual rebill status unknown; verifier will resolve via provider reads (no further automatic charge for this attempt)")
+		return dunningOutcomeFailed
+
+	case intents.StatusPending, intents.StatusInFlight, intents.StatusFailedRetryable:
+		// Parked (mode gate, unconfigured client) or owned by another
+		// executor; the scheduled executor drains it — or the relevance
+		// window expires it if the blocker outlasts the dunning window.
+		logEntry.WithField("reason", normalize.FromPtr(intent.LastFailureReason)).
+			Info("Dunning: rebill intent not executed this pass; ledger executor will drain it")
+		return dunningOutcomeFailed
+
+	default: // superseded, expired
+		logEntry.WithField("intent_status", intent.Status).
+			Info("Dunning: rebill intent no longer applicable")
 		return dunningOutcomeFailed
 	}
+}
 
-	if err := w.markManualRebillSucceeded(ctx, attempt.ID, rebillResp.TransactionID); err != nil {
-		logEntry.WithError(err).Error("Dunning: failed to mark manual rebill attempt succeeded after processor approval")
-		return dunningOutcomeFailed
+// applyDeclinedRebill applies the failure policy for a terminally-failed
+// rebill intent, classifying hard/soft off the decline evidence recorded on
+// the ledger.
+func (w *DunningWorker) applyDeclinedRebill(
+	ctx context.Context,
+	logEntry *log.Entry,
+	sub *models.Subscription,
+	lifecycle *subscriptions.SubscriptionLifecycleService,
+	processor models.Processor,
+	intent gen.BillingProviderIntent,
+) dunningOutcome {
+	reason := normalize.FromPtr(intent.LastFailureReason)
+	if reason == "" {
+		reason = "rebill declined"
 	}
-	return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, creditsSvc, processor, rebillResp.TransactionID)
+	responseCode := manualRebillEvidenceResponseCode(intent)
+	hardDecline := subscriptions.ClassifyNMIDecline(responseCode) == subscriptions.DeclineHard
+	var failureCode *string
+	if responseCode != 0 {
+		code := fmt.Sprintf("%d", responseCode)
+		failureCode = &code
+	}
+
+	declineLog := logEntry.WithFields(log.Fields{
+		"response_code": responseCode,
+		"reason":        reason,
+		"hard_decline":  hardDecline,
+	})
+	if hardDecline {
+		// Emit a high-visibility signal: a hard decline permanently terminates
+		// the subscription rather than retrying.
+		declineLog.Error("Dunning: hard decline; terminating subscription without further retries")
+	} else {
+		declineLog.Warn("Dunning: soft decline; will retry on schedule")
+	}
+
+	if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
+		Processor:      processor,
+		SubscriptionID: &sub.ID,
+		FailureReason:  &reason,
+		FailureCode:    failureCode,
+		HardDecline:    hardDecline,
+	}); err != nil {
+		logEntry.WithError(err).Warn("apply failure policy after declined rebill")
+	}
+	return dunningOutcomeFailed
+}
+
+// manualRebillEvidenceString reads one string field off the intent's
+// result_evidence.
+func manualRebillEvidenceString(intent gen.BillingProviderIntent, key string) string {
+	if len(intent.ResultEvidence) == 0 {
+		return ""
+	}
+	var evidence map[string]any
+	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
+		return ""
+	}
+	s, _ := evidence[key].(string)
+	return s
+}
+
+// manualRebillEvidenceResponseCode reads the gateway decline code off the
+// intent's result_evidence (0 when absent — classified soft).
+func manualRebillEvidenceResponseCode(intent gen.BillingProviderIntent) int {
+	if len(intent.ResultEvidence) == 0 {
+		return 0
+	}
+	var evidence map[string]any
+	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
+		return 0
+	}
+	if code, ok := evidence["response_code"].(float64); ok {
+		return int(code)
+	}
+	return 0
 }
 
 // expireWindowedSubscription handles a past_due subscription whose missed rebill
@@ -427,126 +530,6 @@ func (w *DunningWorker) applySuccessfulRebill(
 	return dunningOutcomeSucceeded
 }
 
-func (w *DunningWorker) claimManualRebillAttempt(ctx context.Context, subscriptionID uuid.UUID, periodEnd time.Time, processor models.Processor, orderReference string, now time.Time) (*models.ManualRebillAttempt, bool, error) {
-	if w == nil || w.DB == nil {
-		return nil, false, errors.New("dunning worker database is required")
-	}
-	claimedUntil := now.UTC().Add(dunningAttemptLease)
-	var attempt *models.ManualRebillAttempt
-	claimed := false
-
-	err := w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		row, err := q.GetManualRebillAttemptForUpdate(ctx, gen.GetManualRebillAttemptForUpdateParams{
-			SubscriptionID: subscriptionID,
-			PeriodEnd:      periodEnd.UTC(),
-		})
-		if repo.IsNotFound(err) {
-			attempt = &models.ManualRebillAttempt{
-				ID:             uuidutil.NewV7(),
-				SubscriptionID: subscriptionID,
-				PeriodEnd:      periodEnd.UTC(),
-				Processor:      processor,
-				OrderReference: orderReference,
-				Status:         models.ManualRebillAttemptPending,
-				ClaimedUntil:   &claimedUntil,
-				CreatedAt:      now.UTC(),
-				UpdatedAt:      now.UTC(),
-			}
-			if err := q.InsertManualRebillAttempt(ctx, gen.InsertManualRebillAttemptParams{
-				ID:             attempt.ID,
-				SubscriptionID: attempt.SubscriptionID,
-				PeriodEnd:      attempt.PeriodEnd,
-				Processor:      string(attempt.Processor),
-				OrderReference: attempt.OrderReference,
-				Status:         string(attempt.Status),
-				TransactionID:  attempt.TransactionID,
-				FailureReason:  attempt.FailureReason,
-				ClaimedUntil:   attempt.ClaimedUntil,
-				CreatedAt:      attempt.CreatedAt,
-				UpdatedAt:      attempt.UpdatedAt,
-			}); err != nil {
-				return fmt.Errorf("create manual rebill attempt: %w", err)
-			}
-			claimed = true
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("load manual rebill attempt: %w", err)
-		}
-		attempt = manualRebillAttemptFromGen(row)
-
-		switch attempt.Status {
-		case models.ManualRebillAttemptSucceeded, models.ManualRebillAttemptUnknown:
-			return nil
-		case models.ManualRebillAttemptPending:
-			if attempt.ClaimedUntil != nil && attempt.ClaimedUntil.After(now.UTC()) {
-				return nil
-			}
-			// A stale pending attempt may have crashed after processor approval. Mark it unknown
-			// and require reconciliation rather than risking a duplicate charge.
-			reason := "manual rebill attempt expired before completion; requires reconciliation"
-			attempt.Status = models.ManualRebillAttemptUnknown
-			attempt.FailureReason = &reason
-			attempt.ClaimedUntil = nil
-			attempt.UpdatedAt = now.UTC()
-			if err := q.UpdateManualRebillAttempt(ctx, gen.UpdateManualRebillAttemptParams{
-				ID: attempt.ID, Status: string(attempt.Status), TransactionID: attempt.TransactionID,
-				FailureReason: attempt.FailureReason, ClaimedUntil: nil, UpdatedAt: attempt.UpdatedAt,
-			}); err != nil {
-				return fmt.Errorf("mark stale manual rebill attempt unknown: %w", err)
-			}
-			return nil
-		case models.ManualRebillAttemptFailed:
-			attempt.Status = models.ManualRebillAttemptPending
-			attempt.FailureReason = nil
-			attempt.TransactionID = nil
-			attempt.ClaimedUntil = &claimedUntil
-			attempt.UpdatedAt = now.UTC()
-			if err := q.UpdateManualRebillAttempt(ctx, gen.UpdateManualRebillAttemptParams{
-				ID: attempt.ID, Status: string(attempt.Status), TransactionID: nil,
-				FailureReason: nil, ClaimedUntil: &claimedUntil, UpdatedAt: attempt.UpdatedAt,
-			}); err != nil {
-				return fmt.Errorf("claim failed manual rebill attempt: %w", err)
-			}
-			claimed = true
-			return nil
-		default:
-			return fmt.Errorf("unknown manual rebill attempt status %q", attempt.Status)
-		}
-	})
-	if err != nil {
-		return nil, false, err
-	}
-	return attempt, claimed, nil
-}
-
-func (w *DunningWorker) markManualRebillSucceeded(ctx context.Context, attemptID uuid.UUID, transactionID string) error {
-	return w.updateManualRebillAttempt(ctx, attemptID, models.ManualRebillAttemptSucceeded, &transactionID, nil)
-}
-
-func (w *DunningWorker) markManualRebillFailed(ctx context.Context, attemptID uuid.UUID, reason string) error {
-	return w.updateManualRebillAttempt(ctx, attemptID, models.ManualRebillAttemptFailed, nil, &reason)
-}
-
-func (w *DunningWorker) markManualRebillUnknown(ctx context.Context, attemptID uuid.UUID, reason string) error {
-	return w.updateManualRebillAttempt(ctx, attemptID, models.ManualRebillAttemptUnknown, nil, &reason)
-}
-
-func (w *DunningWorker) updateManualRebillAttempt(ctx context.Context, attemptID uuid.UUID, status models.ManualRebillAttemptStatus, transactionID *string, reason *string) error {
-	if w == nil || w.DB == nil {
-		return errors.New("dunning worker database is required")
-	}
-	now := w.now().UTC()
-	if err := w.DB.Gen(ctx).UpdateManualRebillAttempt(ctx, gen.UpdateManualRebillAttemptParams{
-		ID: attemptID, Status: string(status), TransactionID: transactionID,
-		FailureReason: reason, ClaimedUntil: nil, UpdatedAt: now,
-	}); err != nil {
-		return fmt.Errorf("update manual rebill attempt: %w", err)
-	}
-	return nil
-}
-
 func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Subscription, now time.Time) (bool, error) {
 	if w == nil || w.DB == nil || sub == nil {
 		return false, errors.New("dunning worker database and subscription are required")
@@ -611,22 +594,5 @@ func normalizeProcessor(value interface{}) string {
 		return normalize.Lower(string(v))
 	default:
 		return ""
-	}
-}
-
-// manualRebillAttemptFromGen maps the generated row onto the domain model.
-func manualRebillAttemptFromGen(r gen.BillingManualRebillAttempt) *models.ManualRebillAttempt {
-	return &models.ManualRebillAttempt{
-		ID:             r.ID,
-		SubscriptionID: r.SubscriptionID,
-		PeriodEnd:      r.PeriodEnd,
-		Processor:      models.Processor(r.Processor),
-		OrderReference: r.OrderReference,
-		Status:         models.ManualRebillAttemptStatus(r.Status),
-		TransactionID:  r.TransactionID,
-		FailureReason:  r.FailureReason,
-		ClaimedUntil:   r.ClaimedUntil,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
 	}
 }

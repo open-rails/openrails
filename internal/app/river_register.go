@@ -34,7 +34,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if clock == nil {
 		clock = clockwork.NewRealClock()
 	}
-	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes}); err != nil {
+	// ONE intent registry instance feeds the scheduled executor/verifier, the
+	// dunning worker's synchronous rebill path and (via Runtime.IntentRunner)
+	// the admin refund producer — per-type semantics can never diverge.
+	intentRegistry := r.buildIntentRegistry(clock)
+	if err := river.AddWorkerSafely(workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIClients: r.NMIClients, EventLogService: r.EventLogService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{Config: r.Config}); err != nil {
@@ -85,12 +89,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add resume subscription worker: %w", err)
 	}
-	// Provider intent ledger (#358 phase A): the executor drains due outbound
-	// provider mutations (deferred NMI deletes today; refunds/Stripe ops/
-	// manual rebills in phases B-C), the verifier resolves ambiguous outcomes
-	// via provider reads. These replaced the NMIDeleteSubscription worker +
-	// boot rescan.
-	intentRegistry := r.buildIntentRegistry(clock)
+	// Provider intent ledger (#358): the executor drains due outbound provider
+	// mutations (deferred NMI deletes, refunds, manual rebills), the verifier
+	// resolves ambiguous outcomes via provider reads. These replaced the
+	// NMIDeleteSubscription worker + boot rescan.
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentExecuteWorker{
 		DB:       r.DB,
 		Config:   r.Config,
@@ -189,13 +191,43 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 }
 
 // buildIntentRegistry assembles the per-type intent semantics for the
-// provider intent executor/verifier (#358). Phase A registers
-// nmi_delete_subscription; phases B-D add refunds, Stripe ops, manual rebills
-// and catalog archive ops.
+// provider intent executor/verifier (#358): deferred NMI deletes (phase A),
+// NMI/Stripe refunds (phase B) and manual rebills (phase C). Phase D adds
+// catalog archive ops.
 func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	return intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.NMIClients, clock),
+		intents.NewNMIRefundHandler(r.DB, r.NMIClients, clock),
+		intents.NewStripeRefundHandler(r.DB, r.Config, clock),
+		intents.NewManualRebillHandler(r.DB, r.Config, r.NMIClients, clock, r.EventLogService),
 	)
+}
+
+// intentRunner builds a Runner over a registry. Config is attached only when
+// non-nil so the origin x mode gate's nil check (= full mode in tests) keeps
+// working — a typed-nil ModeView would panic inside the gate.
+func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
+	runner := &intents.Runner{
+		Store:    intents.NewStore(r.DB),
+		Registry: registry,
+		Clock:    clock,
+	}
+	if r.Config != nil {
+		runner.Config = r.Config
+	}
+	return runner
+}
+
+// IntentRunner returns a Runner for synchronous enqueue+execute from request
+// paths (the admin refund producer). The registry is assembled fresh from the
+// runtime's live dependencies — same constructor set as the scheduled
+// workers, so semantics are identical.
+func (r *Runtime) IntentRunner() *intents.Runner {
+	clock := r.Clock
+	if clock == nil {
+		clock = clockwork.NewRealClock()
+	}
+	return r.intentRunner(r.buildIntentRegistry(clock), clock)
 }
 
 // catalogReconciliationInterval returns the schedule for the alert-only Stripe

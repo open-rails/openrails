@@ -21,7 +21,7 @@ var tenantOwnedTables = []string{
 	"subscriptions", "entitlements", "payments", "admin_grants",
 	"notification_queue", "processor_customers", "credit_types",
 	"credit_transactions", "credit_blocks", "credit_balances",
-	"checkout_sessions", "manual_rebill_attempts",
+	"checkout_sessions", "provider_intents",
 }
 
 // countTenantRows dispatches to the table's generated count query.
@@ -57,8 +57,8 @@ func countTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.CountTenantRowsCreditBalances(ctx, id)
 	case "checkout_sessions":
 		return q.CountTenantRowsCheckoutSessions(ctx, id)
-	case "manual_rebill_attempts":
-		return q.CountTenantRowsManualRebillAttempts(ctx, id)
+	case "provider_intents":
+		return q.CountTenantRowsProviderIntents(ctx, id)
 	default:
 		return 0, fmt.Errorf("tenancy: no count query for table %q", table)
 	}
@@ -97,8 +97,8 @@ func purgeTenantRows(ctx context.Context, q *gen.Queries, table string, id uuid.
 		return q.PurgeTenantRowsCreditBalances(ctx, id)
 	case "checkout_sessions":
 		return q.PurgeTenantRowsCheckoutSessions(ctx, id)
-	case "manual_rebill_attempts":
-		return q.PurgeTenantRowsManualRebillAttempts(ctx, id)
+	case "provider_intents":
+		return q.PurgeTenantRowsProviderIntents(ctx, id)
 	default:
 		return fmt.Errorf("tenancy: no purge query for table %q", table)
 	}

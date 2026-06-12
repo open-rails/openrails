@@ -99,17 +99,6 @@ func (q *Queries) CountTenantRowsEntitlements(ctx context.Context, tenantID uuid
 	return count, err
 }
 
-const countTenantRowsManualRebillAttempts = `-- name: CountTenantRowsManualRebillAttempts :one
-SELECT count(*) FROM billing.manual_rebill_attempts WHERE tenant_id = $1
-`
-
-func (q *Queries) CountTenantRowsManualRebillAttempts(ctx context.Context, tenantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countTenantRowsManualRebillAttempts, tenantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countTenantRowsNotificationQueue = `-- name: CountTenantRowsNotificationQueue :one
 SELECT count(*) FROM billing.notification_queue WHERE tenant_id = $1
 `
@@ -176,6 +165,17 @@ SELECT count(*) FROM billing.products WHERE tenant_id = $1
 // identifier interpolation (#334's 'unsafe SQL' kill target).
 func (q *Queries) CountTenantRowsProducts(ctx context.Context, tenantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countTenantRowsProducts, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTenantRowsProviderIntents = `-- name: CountTenantRowsProviderIntents :one
+SELECT count(*) FROM billing.provider_intents WHERE tenant_id = $1
+`
+
+func (q *Queries) CountTenantRowsProviderIntents(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTenantRowsProviderIntents, tenantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -264,15 +264,6 @@ func (q *Queries) PurgeTenantRowsEntitlements(ctx context.Context, tenantID uuid
 	return err
 }
 
-const purgeTenantRowsManualRebillAttempts = `-- name: PurgeTenantRowsManualRebillAttempts :exec
-DELETE FROM billing.manual_rebill_attempts WHERE tenant_id = $1
-`
-
-func (q *Queries) PurgeTenantRowsManualRebillAttempts(ctx context.Context, tenantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeTenantRowsManualRebillAttempts, tenantID)
-	return err
-}
-
 const purgeTenantRowsNotificationQueue = `-- name: PurgeTenantRowsNotificationQueue :exec
 DELETE FROM billing.notification_queue WHERE tenant_id = $1
 `
@@ -324,6 +315,15 @@ DELETE FROM billing.products WHERE tenant_id = $1
 
 func (q *Queries) PurgeTenantRowsProducts(ctx context.Context, tenantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeTenantRowsProducts, tenantID)
+	return err
+}
+
+const purgeTenantRowsProviderIntents = `-- name: PurgeTenantRowsProviderIntents :exec
+DELETE FROM billing.provider_intents WHERE tenant_id = $1
+`
+
+func (q *Queries) PurgeTenantRowsProviderIntents(ctx context.Context, tenantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeTenantRowsProviderIntents, tenantID)
 	return err
 }
 

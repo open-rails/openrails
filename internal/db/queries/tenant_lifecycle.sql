@@ -93,8 +93,8 @@ SELECT count(*) FROM billing.checkout_sessions WHERE tenant_id = $1;
 -- name: PurgeTenantRowsCheckoutSessions :exec
 DELETE FROM billing.checkout_sessions WHERE tenant_id = $1;
 
--- name: CountTenantRowsManualRebillAttempts :one
-SELECT count(*) FROM billing.manual_rebill_attempts WHERE tenant_id = $1;
+-- name: CountTenantRowsProviderIntents :one
+SELECT count(*) FROM billing.provider_intents WHERE tenant_id = $1;
 
--- name: PurgeTenantRowsManualRebillAttempts :exec
-DELETE FROM billing.manual_rebill_attempts WHERE tenant_id = $1;
+-- name: PurgeTenantRowsProviderIntents :exec
+DELETE FROM billing.provider_intents WHERE tenant_id = $1;

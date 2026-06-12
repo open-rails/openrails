@@ -50,10 +50,20 @@ Phase A migrated the deferred NMI `delete_subscription` onto the ledger
 retired the boot rescan + the dedicated delete River job — a startup sweep
 converts any surviving `DeletionScheduledAt` markers into ledger intents
 (idempotent), and `DeletionScheduledAt` remains as the read model, cleared by
-the intent's finalize. Still on their specialized mechanisms until phases
-B–D: refunds/Stripe ops (B), the `manual_rebill_attempts` claim table (C,
-folds in as `intent_type=manual_rebill`), and catalog archive ops (D);
-catalog `pending_manual_link` states remain converged by re-apply-on-boot.
+the intent's finalize. Phase B moved admin refunds onto the ledger
+(`nmi_refund`/`stripe_refund`, admin-origin): the local reservation flow is
+unchanged, but the provider-side money movement is a durable intent executed
+synchronously from the request — anything not finished inline (mode park,
+ambiguity) is drained by the scheduled executor/verifier, whose finalize
+completes (or releases) the reservation. Phase C retired the
+`manual_rebill_attempts` claim table (migration 011): dunning charges are
+`intent_type=manual_rebill`, system-origin (they WAIT under `limited`/
+`readonly`), one intent per (subscription, period end, attempt ordinal), with
+the dunning window as the relevance window; the verifier resolves ambiguous
+charges by querying NMI for the period's order reference and repairs the
+subscription lifecycle on late-confirmed success. Still specialized until
+phase D: catalog archive ops; catalog `pending_manual_link` states remain
+converged by re-apply-on-boot.
 
 Execution is **effectively-once**, never assumed exactly-once (impossible over
 a network). Per class: money-movers (rebills, refunds) park ambiguous outcomes

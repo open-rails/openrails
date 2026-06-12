@@ -21,6 +21,13 @@ type fakeLedger struct {
 	reasons    map[uuid.UUID]string
 	nextAt     map[uuid.UUID]time.Time
 	evidence   map[uuid.UUID]map[string]any
+
+	// Synchronous-path state: Enqueue returns enqueued (scripted conflict
+	// row); ClaimByID claims it unless claimByIDRefused.
+	enqueued        gen.BillingProviderIntent
+	claimByIDRefuse bool
+	enqueueCalls    int
+	claimByIDCalls  int
 }
 
 func newFakeLedger() *fakeLedger {
@@ -30,6 +37,36 @@ func newFakeLedger() *fakeLedger {
 		nextAt:     map[uuid.UUID]time.Time{},
 		evidence:   map[uuid.UUID]map[string]any{},
 	}
+}
+
+func (f *fakeLedger) Enqueue(context.Context, EnqueueParams) (gen.BillingProviderIntent, error) {
+	f.enqueueCalls++
+	return f.enqueued, nil
+}
+
+func (f *fakeLedger) Get(_ context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
+	row := f.enqueued
+	row.ID = id
+	if status, ok := f.transition[id]; ok {
+		row.Status = status
+	}
+	if reason, ok := f.reasons[id]; ok {
+		r := reason
+		row.LastFailureReason = &r
+	}
+	return row, nil
+}
+
+func (f *fakeLedger) ClaimByID(_ context.Context, id uuid.UUID, _, _ time.Time) (gen.BillingProviderIntent, bool, error) {
+	f.claimByIDCalls++
+	if f.claimByIDRefuse {
+		return gen.BillingProviderIntent{}, false, nil
+	}
+	row := f.enqueued
+	row.ID = id
+	row.Status = StatusInFlight
+	row.Attempts++
+	return row, true, nil
 }
 
 func (f *fakeLedger) ClaimDue(context.Context, time.Time, time.Time, int64) ([]gen.BillingProviderIntent, error) {
@@ -56,9 +93,10 @@ func (f *fakeLedger) MarkUnknown(_ context.Context, id uuid.UUID, next time.Time
 	f.nextAt[id] = next
 	return nil
 }
-func (f *fakeLedger) MarkFailedTerminal(_ context.Context, id uuid.UUID, reason string) error {
+func (f *fakeLedger) MarkFailedTerminal(_ context.Context, id uuid.UUID, reason string, ev map[string]any) error {
 	f.transition[id] = StatusFailedTerminal
 	f.reasons[id] = reason
+	f.evidence[id] = ev
 	return nil
 }
 func (f *fakeLedger) Park(_ context.Context, id uuid.UUID, next time.Time, reason string) error {
@@ -289,4 +327,104 @@ func TestRegistrySemantics(t *testing.T) {
 		reg.Register(&fakeHandler{typ: "a"})
 	})
 	assert.Panics(t, func() { reg.Register(nil) })
+}
+
+// TestEnqueueAndExecuteRunsTheIdenticalPipeline: the synchronous path claims
+// the just-enqueued intent and executes it through the same
+// gate/execute/classify machinery, returning the post-execution row.
+func TestEnqueueAndExecuteRunsTheIdenticalPipeline(t *testing.T) {
+	cases := []struct {
+		name       string
+		execute    Outcome
+		wantStatus string
+	}{
+		{"success", Succeeded(map[string]any{"transaction_id": "t1"}), StatusSucceeded},
+		{"terminal", Terminal("declined"), StatusFailedTerminal},
+		{"ambiguous", Ambiguous("timeout"), StatusUnknownNeedsVerify},
+		{"retryable", Retryable("conn refused"), StatusFailedRetryable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger := newFakeLedger()
+			h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: tc.execute}
+			ledger.enqueued = testIntent("t", OriginAdmin, 0)
+			ledger.enqueued.Status = StatusPending
+
+			r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeFull()}
+			row, err := r.EnqueueAndExecute(context.Background(), EnqueueParams{IntentType: "t", IdempotencyKey: "k"})
+			require.NoError(t, err)
+			assert.Equal(t, 1, h.executed)
+			assert.Equal(t, tc.wantStatus, row.Status)
+		})
+	}
+}
+
+// TestEnqueueAndExecuteGateParksNotErrors: a mode-gated intent comes back
+// pending with the park reason — parked is a state, never an error.
+func TestEnqueueAndExecuteGateParksNotErrors(t *testing.T) {
+	ledger := newFakeLedger()
+	h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}
+	ledger.enqueued = testIntent("t", OriginSystem, 0)
+	ledger.enqueued.Status = StatusPending
+
+	r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeLimited()}
+	row, err := r.EnqueueAndExecute(context.Background(), EnqueueParams{IntentType: "t", IdempotencyKey: "k"})
+	require.NoError(t, err)
+	assert.Zero(t, h.executed, "gated intents never attempt provider writes")
+	assert.Equal(t, StatusPending, row.Status)
+	require.NotNil(t, row.LastFailureReason)
+	assert.Contains(t, *row.LastFailureReason, "mode=limited")
+}
+
+// TestEnqueueAndExecuteConflictRowReturnedUntouched: an unclaimable conflict
+// (already succeeded) is handed back without execution — the caller acts on
+// the durable prior outcome (the dunning worker's repair path).
+func TestEnqueueAndExecuteConflictRowReturnedUntouched(t *testing.T) {
+	for _, status := range []string{StatusSucceeded, StatusFailedTerminal, StatusUnknownNeedsVerify, StatusInFlight} {
+		t.Run(status, func(t *testing.T) {
+			ledger := newFakeLedger()
+			h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}
+			ledger.enqueued = testIntent("t", OriginSystem, 1)
+			ledger.enqueued.Status = status
+
+			r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeFull()}
+			row, err := r.EnqueueAndExecute(context.Background(), EnqueueParams{IntentType: "t", IdempotencyKey: "k"})
+			require.NoError(t, err)
+			assert.Zero(t, h.executed)
+			assert.Zero(t, ledger.claimByIDCalls, "unclaimable statuses are never claimed")
+			assert.Equal(t, status, row.Status)
+		})
+	}
+}
+
+// TestEnqueueAndExecuteClaimRaceFallsBackToLedger: a pending row that races
+// into unclaimable (expiry sweep, another executor) is left to the scheduled
+// pipeline.
+func TestEnqueueAndExecuteClaimRaceFallsBackToLedger(t *testing.T) {
+	ledger := newFakeLedger()
+	h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}
+	ledger.enqueued = testIntent("t", OriginUser, 0)
+	ledger.enqueued.Status = StatusPending
+	ledger.claimByIDRefuse = true
+
+	r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeFull()}
+	row, err := r.EnqueueAndExecute(context.Background(), EnqueueParams{IntentType: "t", IdempotencyKey: "k"})
+	require.NoError(t, err)
+	assert.Zero(t, h.executed)
+	assert.Equal(t, 1, ledger.claimByIDCalls)
+	assert.Equal(t, StatusPending, row.Status)
+}
+
+// TestRunnerTerminalEvidencePersisted: terminal outcomes carry their evidence
+// (decline response codes) onto the ledger.
+func TestRunnerTerminalEvidencePersisted(t *testing.T) {
+	ledger := newFakeLedger()
+	h := &fakeHandler{typ: "t", relevance: StillRelevant(),
+		execute: TerminalWithEvidence("rebill declined", map[string]any{"response_code": 252})}
+	intent := testIntent("t", OriginSystem, 1)
+	ledger.due = []gen.BillingProviderIntent{intent}
+
+	runOnce(t, ledger, h, modeFull())
+	assert.Equal(t, StatusFailedTerminal, ledger.transition[intent.ID])
+	assert.Equal(t, map[string]any{"response_code": 252}, ledger.evidence[intent.ID])
 }

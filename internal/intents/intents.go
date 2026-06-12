@@ -102,7 +102,14 @@ func Succeeded(evidence map[string]any) Outcome {
 func Retryable(reason string) Outcome { return Outcome{Class: OutcomeRetryable, Reason: reason} }
 func Ambiguous(reason string) Outcome { return Outcome{Class: OutcomeAmbiguous, Reason: reason} }
 func Terminal(reason string) Outcome  { return Outcome{Class: OutcomeTerminal, Reason: reason} }
-func Parked(reason string) Outcome    { return Outcome{Class: OutcomeParked, Reason: reason} }
+
+// TerminalWithEvidence is Terminal plus structured forensics persisted as
+// result_evidence (e.g. a gateway decline's response code, which the dunning
+// worker classifies hard/soft off the ledger).
+func TerminalWithEvidence(reason string, evidence map[string]any) Outcome {
+	return Outcome{Class: OutcomeTerminal, Reason: reason, Evidence: evidence}
+}
+func Parked(reason string) Outcome { return Outcome{Class: OutcomeParked, Reason: reason} }
 
 // Relevance is the result of a type's relevance check: is this intent still
 // applicable, or has the world moved on (e.g. the subscription whose delete

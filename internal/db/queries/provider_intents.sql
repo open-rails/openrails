@@ -97,6 +97,26 @@ FROM due
 WHERE pi.id = due.id
 RETURNING pi.*;
 
+-- Claims ONE specific intent for the synchronous execute path (#358 phase B):
+-- a producer that just enqueued an intent leases it immediately and runs it
+-- through the same execute/classify pipeline. Deliberately ignores
+-- next_attempt_at — the interactive caller asked for the attempt NOW — but
+-- honors the relevance window and existing leases; anything not claimable here
+-- is drained by the scheduled executor instead.
+-- name: ClaimProviderIntentByID :one
+UPDATE billing.provider_intents pi
+SET status = 'in_flight',
+    claimed_until = sqlc.arg(lease_until)::timestamptz,
+    attempts = pi.attempts + 1,
+    updated_at = now()
+WHERE pi.id = sqlc.arg(id)
+  AND (
+        pi.status IN ('pending', 'failed_retryable')
+        OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= sqlc.arg(now)::timestamptz)
+      )
+  AND (pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
+RETURNING pi.*;
+
 -- Claims due unknown_needs_verify intents for the verifier. Status stays
 -- unknown_needs_verify (verification is a read, not an attempt — attempts is
 -- not bumped); the lease alone prevents double-verification.
@@ -219,6 +239,13 @@ SELECT * FROM billing.provider_intents WHERE id = $1;
 -- name: GetProviderIntentByIdempotencyKey :one
 SELECT * FROM billing.provider_intents
 WHERE tenant_id = sqlc.arg(tenant_id) AND idempotency_key = sqlc.arg(idempotency_key);
+
+-- name: CountProviderIntents :one
+SELECT count(*) FROM billing.provider_intents
+WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
+  AND (sqlc.narg(provider)::text IS NULL OR provider = sqlc.narg(provider)::text)
+  AND (sqlc.narg(intent_type)::text IS NULL OR intent_type = sqlc.narg(intent_type)::text)
+  AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid);
 
 -- name: ListProviderIntents :many
 SELECT * FROM billing.provider_intents

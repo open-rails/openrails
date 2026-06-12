@@ -160,6 +160,89 @@ func (q *Queries) ClaimDueVerifyProviderIntents(ctx context.Context, arg ClaimDu
 	return items, nil
 }
 
+const claimProviderIntentByID = `-- name: ClaimProviderIntentByID :one
+UPDATE billing.provider_intents pi
+SET status = 'in_flight',
+    claimed_until = $1::timestamptz,
+    attempts = pi.attempts + 1,
+    updated_at = now()
+WHERE pi.id = $2
+  AND (
+        pi.status IN ('pending', 'failed_retryable')
+        OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= $3::timestamptz)
+      )
+  AND (pi.expires_at IS NULL OR pi.expires_at > $3::timestamptz)
+RETURNING pi.id, pi.tenant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at
+`
+
+type ClaimProviderIntentByIDParams struct {
+	LeaseUntil time.Time
+	ID         uuid.UUID
+	Now        time.Time
+}
+
+// Claims ONE specific intent for the synchronous execute path (#358 phase B):
+// a producer that just enqueued an intent leases it immediately and runs it
+// through the same execute/classify pipeline. Deliberately ignores
+// next_attempt_at — the interactive caller asked for the attempt NOW — but
+// honors the relevance window and existing leases; anything not claimable here
+// is drained by the scheduled executor instead.
+func (q *Queries) ClaimProviderIntentByID(ctx context.Context, arg ClaimProviderIntentByIDParams) (BillingProviderIntent, error) {
+	row := q.db.QueryRow(ctx, claimProviderIntentByID, arg.LeaseUntil, arg.ID, arg.Now)
+	var i BillingProviderIntent
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Provider,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const countProviderIntents = `-- name: CountProviderIntents :one
+SELECT count(*) FROM billing.provider_intents
+WHERE ($1::text IS NULL OR status = $1::text)
+  AND ($2::text IS NULL OR provider = $2::text)
+  AND ($3::text IS NULL OR intent_type = $3::text)
+  AND ($4::uuid IS NULL OR subscription_id = $4::uuid)
+`
+
+type CountProviderIntentsParams struct {
+	Status         *string
+	Provider       *string
+	IntentType     *string
+	SubscriptionID *uuid.UUID
+}
+
+func (q *Queries) CountProviderIntents(ctx context.Context, arg CountProviderIntentsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countProviderIntents,
+		arg.Status,
+		arg.Provider,
+		arg.IntentType,
+		arg.SubscriptionID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const enqueueProviderIntent = `-- name: EnqueueProviderIntent :one
 
 

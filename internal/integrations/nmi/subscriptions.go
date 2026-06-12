@@ -34,10 +34,14 @@ type RecurringPaymentData struct {
 }
 
 type QueryFilter struct {
-	StartDate   string
-	EndDate     string
-	Condition   string
-	ActionType  string
+	StartDate  string
+	EndDate    string
+	Condition  string
+	ActionType string
+	// OrderID filters by the transaction's order_id — the correlation handle
+	// OpenRails stamps on rebills/sales, used by the intent verifier to answer
+	// "did this charge land?" via reads.
+	OrderID     string
 	PageNumber  int
 	ResultLimit int
 }
@@ -622,6 +626,9 @@ func (c *NMIClient) SearchTransactions(filter QueryFilter) (string, error) {
 	}
 	if filter.ActionType != "" {
 		values.Set("action_type", filter.ActionType)
+	}
+	if filter.OrderID != "" {
+		values.Set("order_id", filter.OrderID)
 	}
 	if filter.PageNumber > 0 {
 		values.Set("page_number", fmt.Sprintf("%d", filter.PageNumber))

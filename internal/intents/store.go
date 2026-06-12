@@ -3,10 +3,12 @@ package intents
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -85,6 +87,29 @@ func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subsc
 	})
 }
 
+// ClaimByID leases ONE specific intent for the synchronous execute path.
+// ok=false means the row is not claimable (terminal, expired, or leased by a
+// live executor) — the caller inspects the canonical row instead.
+func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error) {
+	row, err := s.db.Gen(ctx).ClaimProviderIntentByID(ctx, gen.ClaimProviderIntentByIDParams{
+		ID:         id,
+		Now:        now.UTC(),
+		LeaseUntil: leaseUntil.UTC(),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return gen.BillingProviderIntent{}, false, nil
+		}
+		return gen.BillingProviderIntent{}, false, err
+	}
+	return row, true, nil
+}
+
+// Get returns the intent row by id.
+func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
+	return s.db.Gen(ctx).GetProviderIntent(ctx, id)
+}
+
 // ClaimDue leases up to batch due executable intents (SKIP LOCKED).
 func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error) {
 	return s.db.Gen(ctx).ClaimDueProviderIntents(ctx, gen.ClaimDueProviderIntentsParams{
@@ -134,9 +159,20 @@ func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt tim
 	}))
 }
 
-func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string) error {
+// MarkFailedTerminal records an unretryable failure. evidence (optional)
+// carries structured forensics — e.g. the gateway decline response code that
+// the dunning worker's decline classification reads back off the ledger.
+func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error {
+	var ev []byte
+	if len(evidence) > 0 {
+		b, err := json.Marshal(evidence)
+		if err != nil {
+			return fmt.Errorf("intents: marshal evidence: %w", err)
+		}
+		ev = b
+	}
 	return one(s.db.Gen(ctx).MarkProviderIntentFailedTerminal(ctx, gen.MarkProviderIntentFailedTerminalParams{
-		ID: id, Reason: &reason,
+		ID: id, Reason: &reason, ResultEvidence: ev,
 	}))
 }
 

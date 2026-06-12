@@ -447,22 +447,6 @@ type BillingLinkedWallet struct {
 	UpdatedAt            time.Time
 }
 
-type BillingManualRebillAttempt struct {
-	ID             uuid.UUID
-	SubscriptionID uuid.UUID
-	PeriodEnd      time.Time
-	Processor      string
-	OrderReference string
-	Status         string
-	TransactionID  *string
-	FailureReason  *string
-	ClaimedUntil   *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-}
-
 // Queue for user notifications related to billing and subscriptions
 type BillingNotificationQueue struct {
 	ID        uuid.UUID

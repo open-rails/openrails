@@ -13,13 +13,16 @@ import (
 
 // ledger is the Store surface the Runner drives (interface for unit tests).
 type ledger interface {
+	Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error)
+	Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error)
+	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
 	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error)
 	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error)
 	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
 	MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
-	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string) error
+	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
 	Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error
 }
@@ -154,6 +157,48 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	r.apply(ctx, logEntry, stats, handler, intent, handler.Execute(ctx, intent), false)
 }
 
+// EnqueueAndExecute records the intent and immediately claims + executes THAT
+// intent through the identical gate/execute/classify pipeline the scheduled
+// executor runs (same lease mechanics, same outcome classification). The
+// returned row is the canonical post-execution state; callers branch on its
+// Status: succeeded (result_evidence says how), pending (gate/kill-switch
+// parked it — the reason is last_failure_reason, NOT an error),
+// unknown_needs_verify, failed_*. Anything not finished inline is drained
+// later by the scheduled executor/verifier — the caller's process dying
+// mid-call loses nothing.
+//
+// When the idempotency key conflicts with a row that is not claimable
+// (succeeded, terminal, mid-lease, expired) the row is returned UNTOUCHED so
+// the caller can act on the durable prior outcome (e.g. the dunning worker's
+// repair-from-successful-rebill path).
+func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error) {
+	row, err := r.Store.Enqueue(ctx, p)
+	if err != nil {
+		return gen.BillingProviderIntent{}, err
+	}
+	switch row.Status {
+	case StatusPending, StatusFailedRetryable:
+		// claimable below
+	default:
+		return row, nil
+	}
+
+	now := r.now()
+	claimed, ok, err := r.Store.ClaimByID(ctx, row.ID, now, now.Add(r.lease()))
+	if err != nil {
+		return gen.BillingProviderIntent{}, err
+	}
+	if !ok {
+		// Raced into an unclaimable state (another executor's lease, expiry
+		// sweep); the durable row stands and the scheduled pipeline owns it.
+		return r.Store.Get(ctx, row.ID)
+	}
+
+	var stats Stats
+	r.executeOne(ctx, claimed, &stats)
+	return r.Store.Get(ctx, row.ID)
+}
+
 // RunVerifyOnce claims due unknown_needs_verify intents and resolves them via
 // the handlers' read-only Verify.
 func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
@@ -221,7 +266,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		stats.Unknown++
 		logEntry.WithField("reason", outcome.Reason).Warn("intent outcome ambiguous; verifier will resolve via provider reads")
 	case OutcomeTerminal:
-		err = r.Store.MarkFailedTerminal(ctx, intent.ID, outcome.Reason)
+		err = r.Store.MarkFailedTerminal(ctx, intent.ID, outcome.Reason, outcome.Evidence)
 		stats.Terminal++
 		logEntry.WithField("reason", outcome.Reason).Error("intent failed terminally")
 	case OutcomeParked:

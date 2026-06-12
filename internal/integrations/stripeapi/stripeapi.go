@@ -76,6 +76,22 @@ func ReadOnlyClient(timeout time.Duration) *http.Client {
 	return newClient(true, timeout)
 }
 
+// IdempotencyKeyHeader is Stripe's request-dedup header: retrying a mutating
+// request with the same key replays the original outcome instead of repeating
+// the side effect (https://stripe.com/docs/api/idempotent_requests).
+const IdempotencyKeyHeader = "Idempotency-Key"
+
+// SetIdempotencyKey stamps a mutating Stripe request with an idempotency key.
+// Provider-mutation call sites driven by the intent ledger (#358) MUST stamp
+// the intent's idempotency_key so an executor retry/replay of the same intent
+// cannot move money twice. Empty keys are ignored.
+func SetIdempotencyKey(req *http.Request, key string) {
+	if req == nil || key == "" {
+		return
+	}
+	req.Header.Set(IdempotencyKeyHeader, key)
+}
+
 func newClient(readOnly bool, timeout time.Duration) *http.Client {
 	if timeout <= 0 {
 		timeout = DefaultTimeout

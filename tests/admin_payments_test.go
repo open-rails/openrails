@@ -3,11 +3,13 @@
 package tests
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,7 +17,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -721,4 +725,87 @@ func TestAdminRefundPaymentAuthBoundaries(t *testing.T) {
 
 		assert.Equal(t, http.StatusForbidden, w.Code, "User should get 403 for another user's payment")
 	})
+}
+
+// TestAdminRefundPaymentThroughIntentLedger drives the full HTTP admin refund
+// path over the provider intent ledger (#358 phase B): the provider-side
+// money movement is a durable nmi_refund intent executed synchronously, the
+// content-addressed identity (payment + amount) blocks duplicate money
+// movement across DIFFERENT admin idempotency keys, and the admin-key replay
+// returns the recorded refund.
+func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
+	suite, adminToken := setupAdminTestSuite(t)
+	products := suite.SeedProducts()
+	priceID := products[0].Prices[0].ID
+	userID := uuid.New().String()
+
+	payment := suite.CreateTestPaymentWithOptions(PaymentOptions{
+		UserID:        userID,
+		PriceID:       priceID,
+		Processor:     models.ProcessorMobius,
+		TransactionID: "txn-ledger-" + uuid.NewString()[:8],
+		Amount:        1000,
+	})
+
+	// Fake NMI gateway approving refunds.
+	var refundCalls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("type") == "refund" {
+			refundCalls.Add(1)
+			_, _ = w.Write([]byte("response=1&transactionid=txn_refund_http&responsetext=SUCCESS"))
+			return
+		}
+		_, _ = w.Write([]byte("response=1"))
+	}))
+	t.Cleanup(srv.Close)
+	nmiClient, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
+		SecurityKey:   "test_security_key",
+		WebhookSecret: "test_secret",
+	}, true)
+	require.NoError(t, err)
+	nmiClient.DirectPostURL = srv.URL
+	nmiClient.QueryURL = srv.URL
+	suite.App.Runtime.NMIClients["mobius"] = nmiClient
+
+	refundReq := func(idempotencyKey string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/admin/payments/%s/refund", payment.ID.String()),
+			strings.NewReader(`{"amount": 400}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		req.Header.Set("X-Idempotency-Key", idempotencyKey)
+		suite.Server.Handler().ServeHTTP(w, req)
+		return w
+	}
+
+	w := refundReq("ledger-key-1")
+	if w.Code == http.StatusInternalServerError && strings.Contains(w.Body.String(), "authorization unavailable") {
+		// Pre-existing suite gap (#312): this legacy suite boots without a
+		// control plane, so EVERY authenticated admin route 500s here (see the
+		// sibling TestAdminRefundPayment subtests). The ledger semantics this
+		// test pins are covered by internal/intents integration tests; this
+		// HTTP-level pin activates once the suite wires the admin checker.
+		t.Skip("admin permission checker not wired in this suite (pre-existing #312 gap)")
+	}
+	require.Equal(t, http.StatusCreated, w.Code, "synchronous ledger execution completes inline: %s", w.Body.String())
+	assert.EqualValues(t, 1, refundCalls.Load())
+
+	// The durable intent records the execution.
+	var intentStatus string
+	require.NoError(t, suite.App.Runtime.DB.Pool().QueryRow(context.Background(),
+		"SELECT status FROM billing.provider_intents WHERE intent_type = 'nmi_refund' AND payment_id = $1",
+		payment.ID).Scan(&intentStatus))
+	assert.Equal(t, "succeeded", intentStatus)
+
+	// Replay with the SAME admin idempotency key returns the recorded refund.
+	w = refundReq("ledger-key-1")
+	assert.Equal(t, http.StatusCreated, w.Code, "admin-key replay returns the recorded refund: %s", w.Body.String())
+	assert.EqualValues(t, 1, refundCalls.Load(), "replay never re-refunds")
+
+	// The SAME refund content under a DIFFERENT admin key conflicts on the
+	// content-addressed intent identity — no second money movement.
+	w = refundReq("ledger-key-2")
+	assert.Equal(t, http.StatusConflict, w.Code, "identical refund content must conflict: %s", w.Body.String())
+	assert.EqualValues(t, 1, refundCalls.Load(), "the gateway never sees a duplicate refund")
 }
