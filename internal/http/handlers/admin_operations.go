@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
@@ -156,6 +157,105 @@ func GetAdminManualRebillAttempts(r *httprequest.Request) {
 			if txn, ok := evidence["transaction_id"].(string); ok {
 				item["transaction_id"] = txn
 			}
+		}
+		items = append(items, item)
+	}
+	r.SuccessJSONPaginated(items, total, limit, offset)
+}
+
+// executesUnderMode reports the weakest operating mode that lets an intent of
+// this origin attempt its provider write (the GateExecution matrix):
+// user/admin-origin executes under limited, system-origin requires full,
+// nothing executes under readonly.
+func executesUnderMode(origin string) string {
+	if intents.Origin(origin) == intents.OriginSystem {
+		return "full"
+	}
+	return "limited"
+}
+
+// GetAdminProviderIntents lists the provider intent ledger (#358) — every
+// outbound provider mutation OpenRails wants to perform, with status and
+// type/provider/subscription filters. Under mode=limited/readonly this is the
+// dry-run view: the pending rows are exactly what the executor will drain
+// when the mode lifts, and executes_under says which mode each needs.
+func GetAdminProviderIntents(r *httprequest.Request) {
+	ctx := r.Request.Context()
+	limit, offset := adminOperationsPagination(r)
+
+	var statusFilter *string
+	status := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("status")))
+	if status == "" {
+		status = "pending"
+	}
+	if status != "all" {
+		mapped, ok := manualRebillStatusFilters[status]
+		if !ok {
+			r.ErrorJSON(http.StatusBadRequest, "invalid status")
+			return
+		}
+		statusFilter = &mapped
+	}
+	var processorFilter *string
+	if processor := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("processor"))); processor != "" {
+		processorFilter = &processor
+	}
+	var typeFilter *string
+	if t := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("type"))); t != "" {
+		typeFilter = &t
+	}
+	var subscriptionFilter *uuid.UUID
+	if s := strings.TrimSpace(r.Request.URL.Query().Get("subscription_id")); s != "" {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid subscription_id")
+			return
+		}
+		subscriptionFilter = &id
+	}
+
+	q := r.State.DB.Gen(ctx)
+	total, err := q.CountProviderIntents(ctx, gen.CountProviderIntentsParams{
+		Status: statusFilter, Provider: processorFilter, IntentType: typeFilter, SubscriptionID: subscriptionFilter,
+	})
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to count provider intents")
+		return
+	}
+	rows, err := q.ListProviderIntents(ctx, gen.ListProviderIntentsParams{
+		Status: statusFilter, Provider: processorFilter, IntentType: typeFilter, SubscriptionID: subscriptionFilter,
+		PageLimit: int64(limit), PageOffset: int64(offset),
+	})
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve provider intents")
+		return
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		item := map[string]any{
+			"id":                  row.ID,
+			"type":                row.IntentType,
+			"origin":              row.Origin,
+			"executes_under":      executesUnderMode(row.Origin),
+			"processor":           row.Provider,
+			"subscription_id":     row.SubscriptionID,
+			"payment_id":          row.PaymentID,
+			"status":              row.Status,
+			"attempts":            row.Attempts,
+			"next_attempt_at":     row.NextAttemptAt,
+			"failure_reason":      row.LastFailureReason,
+			"origin_reason":       row.OriginReason,
+			"expires_at":          row.ExpiresAt,
+			"executed_at":         row.ExecutedAt,
+			"created_at":          row.CreatedAt,
+			"updated_at":          row.UpdatedAt,
+			"account_fingerprint": row.AccountFingerprint,
+		}
+		if len(row.Payload) > 0 {
+			item["payload"] = json.RawMessage(row.Payload)
+		}
+		if len(row.ResultEvidence) > 0 {
+			item["result_evidence"] = json.RawMessage(row.ResultEvidence)
 		}
 		items = append(items, item)
 	}

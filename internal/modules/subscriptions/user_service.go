@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	openrailsdb "github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -52,12 +54,15 @@ type UserSubscriptionService struct {
 	deferDelete DeferredDeleteScheduler
 }
 
-// DeferredDeleteScheduler schedules an NMI delete_subscription to run at a future
-// time. Implemented by the River producer wiring; kept as an interface here so
-// the subscriptions package does not depend on River/pgx.
+// DeferredDeleteScheduler schedules an NMI delete_subscription intent to run
+// at a future time (#358 ledger). WithTx rebinds the scheduler onto a caller
+// transaction so the intent enqueue COMMITS ATOMICALLY with the subscription
+// update that stamps the DeletionScheduledAt marker — the marker<->intent
+// invariant holds transactionally; there is no crash window between them.
 type DeferredDeleteScheduler interface {
 	ScheduleNMIDelete(ctx context.Context, userID string, subscriptionID uuid.UUID, runAt time.Time) error
 	CancelNMIDelete(ctx context.Context, userID string, subscriptionID uuid.UUID) error
+	WithTx(tx pgx.Tx) DeferredDeleteScheduler
 }
 
 // SetDeferredDeleteScheduler injects the deferred-delete scheduler. Wired in
@@ -494,11 +499,11 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	// has already opened (now >= period_end - margin, common near rebill) or the
 	// period end is unknown/past, we delete IMMEDIATELY exactly as before.
 	deleteAt, defer_ := NMIDeferredDeleteAt(subscription, now)
+	deferScheduled := defer_ && s.deferDelete != nil
 	scheduleKillSwitchedDelete := false
-	if defer_ && s.deferDelete != nil {
-		if err := s.deferDelete.ScheduleNMIDelete(ctx, userID, subscription.ID, deleteAt); err != nil {
-			return fmt.Errorf("failed to schedule deferred subscription delete: %w", err)
-		}
+	if deferScheduled {
+		// The delete intent is enqueued below, in the SAME transaction as the
+		// cancellation update, so marker and intent commit atomically.
 		subscription.DeletionScheduledAt = &deleteAt
 	} else {
 		// Immediate delete with NMI (no scheduled job).
@@ -534,22 +539,30 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		subscription.CancelFeedback = &feedback
 	}
 
-	if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
-		return fmt.Errorf("failed to update subscription status: %w", err)
-	}
-
-	// Kill-switched inline delete: enqueue it on the provider intent ledger
-	// (#358) so it replays as soon as the switch lifts — no reboot needed.
-	// AFTER the cancellation persisted, so the executor's relevance check
-	// (status==cancelled && marker set) cannot race a not-yet-committed
-	// cancel. Best-effort: on failure the marker keeps it discoverable
-	// (startup sweep / #107 reconciliation).
-	if scheduleKillSwitchedDelete && s.deferDelete != nil {
-		if err := s.deferDelete.ScheduleNMIDelete(ctx, userID, subscription.ID, now); err != nil {
-			log.WithError(err).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-			}).Error("failed to enqueue delete intent under kill switch; marker persisted for sweep/reconciliation")
+	// Persist the cancellation; when a deferred (undo-window) or
+	// kill-switched delete is involved, enqueue its intent IN THE SAME
+	// TRANSACTION: the DeletionScheduledAt marker and the
+	// nmi_delete_subscription intent commit or roll back together, so the
+	// marker<->intent invariant cannot be broken by a crash between the two
+	// writes. Atomic commit also kills the old relevance race (the executor
+	// cannot observe the intent before the cancellation is visible).
+	if (deferScheduled || scheduleKillSwitchedDelete) && s.deferDelete != nil {
+		runAt := deleteAt
+		if scheduleKillSwitchedDelete {
+			runAt = now
 		}
+		if err := s.SubscriptionService.Database().TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			txdb := openrailsdb.NewWithPgxTx(tx)
+			txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, nil, nil, s.clock)
+			if err := txSubSvc.Update(ctx, subscription); err != nil {
+				return fmt.Errorf("failed to update subscription status: %w", err)
+			}
+			return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, userID, subscription.ID, runAt)
+		}); err != nil {
+			return fmt.Errorf("failed to persist cancellation with deferred delete intent: %w", err)
+		}
+	} else if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
+		return fmt.Errorf("failed to update subscription status: %w", err)
 	}
 
 	// Add notification

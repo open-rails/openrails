@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
@@ -139,6 +141,23 @@ type Runtime struct {
 	// mechanism (no inline deletes). User-asked cancellations use a separate
 	// user-origin instance wired into UserSubscriptionService.
 	DeferredDeletes subscriptions.DeferredDeleteScheduler
+
+	// intentFingerprints is the shared #365 account-fingerprint source — one
+	// instance so the Stripe account-id cache is reused across every
+	// producer/executor. Built lazily by AccountFingerprints().
+	intentFingerprints     *intents.RuntimeFingerprints
+	intentFingerprintsOnce sync.Once
+}
+
+// AccountFingerprints returns the #365 account-fingerprint source over the
+// runtime's live provider credentials. Producers stamp it at enqueue; the
+// executor/verifier compare against it and park intents enqueued under a
+// different provider account.
+func (r *Runtime) AccountFingerprints() intents.FingerprintSource {
+	r.intentFingerprintsOnce.Do(func() {
+		r.intentFingerprints = intents.NewRuntimeFingerprints(r.Config, r.NMIClients)
+	})
+	return r.intentFingerprints
 }
 
 // Close gracefully shuts down runtime resources.
@@ -243,14 +262,14 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 		go r.SolanaPayPoller.Start(ctx)
 	}
 
-	// Startup sweep (#358, replacing the #344 boot rescan): convert any
-	// cancelled subscription still carrying a DeletionScheduledAt marker into
-	// a durable nmi_delete_subscription intent on the ledger (idempotent via
-	// the intent idempotency_key — markers already on the ledger are a no-op,
-	// pre-ledger in-flight deferred deletes are migrated losslessly). Pure DB
-	// work, so it runs in both the in-process and external River wirings.
-	// Best-effort: on failure the markers stay discoverable for #107
-	// reconciliation and the next boot retries.
+	// Startup sweep (#358): convert deletion markers that exist WITHOUT a
+	// live intent — in steady state none exist (producers write marker +
+	// intent in one transaction); this heals markers written out of band,
+	// chiefly direct-DB legacy imports (#391). Idempotent: markers already
+	// on the ledger are a no-op. Pure DB work, so it runs in both the
+	// in-process and external River wirings. Best-effort: on failure the
+	// markers stay discoverable for #107 reconciliation and the next boot
+	// retries.
 	if _, err := r.ConvertDeferredDeleteMarkersToIntents(ctx); err != nil {
 		log.WithError(err).Warn("Deferred-delete marker sweep failed; markers remain for reconciliation")
 	}

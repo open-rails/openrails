@@ -358,9 +358,9 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 	//     mode=full. The window-expiry path no longer deletes inline — every
 	//     terminal cancellation funnels through the one ledger, so no
 	//     double-delete is possible.
-	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, intents.OriginUser,
+	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, runtime.AccountFingerprints(), intents.OriginUser,
 		"user cancellation retained an undo window; processor delete deferred to its close")
-	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, intents.OriginSystem,
+	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, runtime.AccountFingerprints(), intents.OriginSystem,
 		"terminal dunning failure; remote NMI subscription must stop rebilling")
 	runtime.DeferredDeletes = systemDeferredDeletes
 	if runtime.UserSubscriptionService != nil {

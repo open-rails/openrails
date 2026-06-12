@@ -23,13 +23,14 @@
 INSERT INTO billing.provider_intents (
     tenant_id, provider, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
-    expires_at
+    expires_at, account_fingerprint
 ) VALUES (
     sqlc.arg(tenant_id), sqlc.arg(provider), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
-    sqlc.narg(origin_reason), sqlc.narg(expires_at)
+    sqlc.narg(origin_reason), sqlc.narg(expires_at),
+    sqlc.narg(account_fingerprint)
 )
 ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -43,6 +44,10 @@ ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
     payload = CASE
         WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.payload
         ELSE billing.provider_intents.payload
+    END,
+    account_fingerprint = CASE
+        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.account_fingerprint
+        ELSE billing.provider_intents.account_fingerprint
     END,
     origin = CASE
         WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin
@@ -271,3 +276,16 @@ WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
 ORDER BY created_at DESC, id
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- #365 escape hatch: after the operator confirms a credential change points at
+-- the SAME (or intentionally-adopted) provider account, re-stamp the LIVE
+-- intents to the current fingerprint so the account guard stops parking them.
+-- Only live statuses — succeeded/terminal/superseded/expired rows keep the
+-- fingerprint they executed (or died) under as evidence.
+-- name: RefingerprintProviderIntents :execrows
+UPDATE billing.provider_intents
+SET account_fingerprint = sqlc.arg(account_fingerprint),
+    updated_at = now()
+WHERE provider = sqlc.arg(provider)
+  AND status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
+  AND account_fingerprint IS DISTINCT FROM sqlc.arg(account_fingerprint);

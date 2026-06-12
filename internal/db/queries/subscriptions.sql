@@ -213,6 +213,26 @@ SELECT * FROM billing.subscriptions sub
 WHERE sub.status = 'cancelled'
   AND sub.deletion_scheduled_at IS NOT NULL;
 
+-- name: ListSilentLapsedSubscriptions :many
+-- Subscription liveness sync (#367): the SILENT lapsed cohort — still-active
+-- subscriptions on provider-truth-probeable processors whose period lapsed
+-- past the probe slack with NO signal either way: no renewal (the period
+-- would have advanced), no failure webhook (status would be past_due — that
+-- cohort is dunning's, excluded here), and no payment recorded at/after the
+-- period end. Re-derived every pass, so an unreachable provider needs no
+-- durable read-queue: unchanged state simply reappears next cycle.
+SELECT * FROM billing.subscriptions sub
+WHERE sub.processor = ANY(sqlc.arg(processors)::text[])
+  AND sub.status = 'active'
+  AND sub.current_period_ends_at IS NOT NULL
+  AND sub.current_period_ends_at <= sqlc.arg(cutoff)::timestamptz
+  AND NOT EXISTS (
+    SELECT 1 FROM billing.payments p
+    WHERE p.subscription_id = sub.id
+      AND p.status = 'completed'
+      AND p.purchased_at >= sub.current_period_ends_at
+  );
+
 -- name: GetLatestResumableCancelledSubscription :one
 SELECT * FROM billing.subscriptions sub
 WHERE sub.tenant_subject_id = $1

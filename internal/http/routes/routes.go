@@ -155,6 +155,10 @@ func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group.Handle(http.MethodPost, "/users/:user_id/payments/off-channel", h(httphandlers.AdminCreateOffChannelPayment))
 	group.Handle(http.MethodGet, "/repair-alerts", h(httphandlers.GetAdminRepairAlerts))
 	group.Handle(http.MethodGet, "/manual-rebill-attempts", h(httphandlers.GetAdminManualRebillAttempts))
+	// Provider intent ledger (#358): the queued outbound provider mutations.
+	// Under mode=limited/readonly this is the dry-run view of what the
+	// executor will drain when the mode lifts.
+	group.Handle(http.MethodGet, "/intents", h(httphandlers.GetAdminProviderIntents))
 
 	group.Handle(http.MethodGet, "/users/:user_id", h(httphandlers.GetAdminUserBillingProfile))
 	group.Handle(http.MethodGet, "/users/:user_id/entitlements", h(httphandlers.GetAdminUserEntitlements))

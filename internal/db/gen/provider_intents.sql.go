@@ -32,7 +32,7 @@ SET status = 'in_flight',
     updated_at = now()
 FROM due
 WHERE pi.id = due.id
-RETURNING pi.id, pi.tenant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at
+RETURNING pi.id, pi.tenant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.account_fingerprint
 `
 
 type ClaimDueProviderIntentsParams struct {
@@ -80,6 +80,7 @@ func (q *Queries) ClaimDueProviderIntents(ctx context.Context, arg ClaimDueProvi
 			&i.CreatedAt,
 			&i.ExecutedAt,
 			&i.UpdatedAt,
+			&i.AccountFingerprint,
 		); err != nil {
 			return nil, err
 		}
@@ -106,7 +107,7 @@ SET claimed_until = $1::timestamptz,
     updated_at = now()
 FROM due
 WHERE pi.id = due.id
-RETURNING pi.id, pi.tenant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at
+RETURNING pi.id, pi.tenant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.account_fingerprint
 `
 
 type ClaimDueVerifyProviderIntentsParams struct {
@@ -149,6 +150,7 @@ func (q *Queries) ClaimDueVerifyProviderIntents(ctx context.Context, arg ClaimDu
 			&i.CreatedAt,
 			&i.ExecutedAt,
 			&i.UpdatedAt,
+			&i.AccountFingerprint,
 		); err != nil {
 			return nil, err
 		}
@@ -172,7 +174,7 @@ WHERE pi.id = $2
         OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= $3::timestamptz)
       )
   AND (pi.expires_at IS NULL OR pi.expires_at > $3::timestamptz)
-RETURNING pi.id, pi.tenant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at
+RETURNING pi.id, pi.tenant_id, pi.provider, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.account_fingerprint
 `
 
 type ClaimProviderIntentByIDParams struct {
@@ -212,6 +214,7 @@ func (q *Queries) ClaimProviderIntentByID(ctx context.Context, arg ClaimProvider
 		&i.CreatedAt,
 		&i.ExecutedAt,
 		&i.UpdatedAt,
+		&i.AccountFingerprint,
 	)
 	return i, err
 }
@@ -249,13 +252,14 @@ const enqueueProviderIntent = `-- name: EnqueueProviderIntent :one
 INSERT INTO billing.provider_intents (
     tenant_id, provider, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
-    expires_at
+    expires_at, account_fingerprint
 ) VALUES (
     $1, $2, $3,
     $4, $5, $6,
     $7, $8, 'pending',
     $9::timestamptz, $10,
-    $11, $12
+    $11, $12,
+    $13
 )
 ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -269,6 +273,10 @@ ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
     payload = CASE
         WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.payload
         ELSE billing.provider_intents.payload
+    END,
+    account_fingerprint = CASE
+        WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.account_fingerprint
+        ELSE billing.provider_intents.account_fingerprint
     END,
     origin = CASE
         WHEN billing.provider_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin
@@ -291,22 +299,23 @@ ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
         ELSE billing.provider_intents.last_failure_reason
     END,
     updated_at = now()
-RETURNING id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at
+RETURNING id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint
 `
 
 type EnqueueProviderIntentParams struct {
-	TenantID       uuid.UUID
-	Provider       string
-	IntentType     string
-	SubscriptionID *uuid.UUID
-	PaymentID      *uuid.UUID
-	PriceID        *uuid.UUID
-	Payload        []byte
-	IdempotencyKey string
-	NextAttemptAt  time.Time
-	Origin         string
-	OriginReason   *string
-	ExpiresAt      *time.Time
+	TenantID           uuid.UUID
+	Provider           string
+	IntentType         string
+	SubscriptionID     *uuid.UUID
+	PaymentID          *uuid.UUID
+	PriceID            *uuid.UUID
+	Payload            []byte
+	IdempotencyKey     string
+	NextAttemptAt      time.Time
+	Origin             string
+	OriginReason       *string
+	ExpiresAt          *time.Time
+	AccountFingerprint *string
 }
 
 // #358 phase A: provider intent ledger queries — idempotent enqueue, the
@@ -344,6 +353,7 @@ func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProvider
 		arg.Origin,
 		arg.OriginReason,
 		arg.ExpiresAt,
+		arg.AccountFingerprint,
 	)
 	var i BillingProviderIntent
 	err := row.Scan(
@@ -368,6 +378,7 @@ func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProvider
 		&i.CreatedAt,
 		&i.ExecutedAt,
 		&i.UpdatedAt,
+		&i.AccountFingerprint,
 	)
 	return i, err
 }
@@ -393,7 +404,7 @@ func (q *Queries) ExpireOverdueProviderIntents(ctx context.Context, now time.Tim
 
 const getProviderIntent = `-- name: GetProviderIntent :one
 
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at FROM billing.provider_intents WHERE id = $1
+SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM billing.provider_intents WHERE id = $1
 `
 
 // ============================================================================
@@ -424,12 +435,13 @@ func (q *Queries) GetProviderIntent(ctx context.Context, id uuid.UUID) (BillingP
 		&i.CreatedAt,
 		&i.ExecutedAt,
 		&i.UpdatedAt,
+		&i.AccountFingerprint,
 	)
 	return i, err
 }
 
 const getProviderIntentByIdempotencyKey = `-- name: GetProviderIntentByIdempotencyKey :one
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at FROM billing.provider_intents
+SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM billing.provider_intents
 WHERE tenant_id = $1 AND idempotency_key = $2
 `
 
@@ -463,12 +475,13 @@ func (q *Queries) GetProviderIntentByIdempotencyKey(ctx context.Context, arg Get
 		&i.CreatedAt,
 		&i.ExecutedAt,
 		&i.UpdatedAt,
+		&i.AccountFingerprint,
 	)
 	return i, err
 }
 
 const listProviderIntents = `-- name: ListProviderIntents :many
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at FROM billing.provider_intents
+SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM billing.provider_intents
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR provider = $2::text)
   AND ($3::text IS NULL OR intent_type = $3::text)
@@ -524,6 +537,7 @@ func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderInten
 			&i.CreatedAt,
 			&i.ExecutedAt,
 			&i.UpdatedAt,
+			&i.AccountFingerprint,
 		); err != nil {
 			return nil, err
 		}
@@ -537,7 +551,7 @@ func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderInten
 
 const listStuckProviderIntents = `-- name: ListStuckProviderIntents :many
 
-SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at FROM billing.provider_intents
+SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, account_fingerprint FROM billing.provider_intents
 WHERE (status IN ('pending', 'failed_retryable') AND created_at <= $1::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $2::timestamptz)
 ORDER BY created_at, id
@@ -588,6 +602,7 @@ func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckPro
 			&i.CreatedAt,
 			&i.ExecutedAt,
 			&i.UpdatedAt,
+			&i.AccountFingerprint,
 		); err != nil {
 			return nil, err
 		}
@@ -747,6 +762,33 @@ type ParkProviderIntentParams struct {
 // must not escalate backoff.
 func (q *Queries) ParkProviderIntent(ctx context.Context, arg ParkProviderIntentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, parkProviderIntent, arg.NextAttemptAt, arg.Reason, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const refingerprintProviderIntents = `-- name: RefingerprintProviderIntents :execrows
+UPDATE billing.provider_intents
+SET account_fingerprint = $1,
+    updated_at = now()
+WHERE provider = $2
+  AND status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
+  AND account_fingerprint IS DISTINCT FROM $1
+`
+
+type RefingerprintProviderIntentsParams struct {
+	AccountFingerprint *string
+	Provider           string
+}
+
+// #365 escape hatch: after the operator confirms a credential change points at
+// the SAME (or intentionally-adopted) provider account, re-stamp the LIVE
+// intents to the current fingerprint so the account guard stops parking them.
+// Only live statuses — succeeded/terminal/superseded/expired rows keep the
+// fingerprint they executed (or died) under as evidence.
+func (q *Queries) RefingerprintProviderIntents(ctx context.Context, arg RefingerprintProviderIntentsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, refingerprintProviderIntents, arg.AccountFingerprint, arg.Provider)
 	if err != nil {
 		return 0, err
 	}

@@ -92,6 +92,47 @@ is reconcile's pull: the next run reads provider state directly and the missed
 event materializes as a finding. Inbound therefore has two layers — provider
 retries + reconcile — and we build neither.
 
+**Inspecting the ledger.** `billing intents` (CLI; `--status pending|all|...`,
+`--provider`, `--type`, `--tenant`, `--format table|json`) and
+`GET /v1/admin/intents` list the queued outbound mutations read-only. Under
+`mode=limited`/`readonly` this doubles as the dry-run view of a cutover:
+pending rows are exactly what the executor drains when the mode lifts, and
+each row's `executes_under` (derived from its origin via the GateExecution
+matrix) says whether `limited` suffices or `full` is required.
+
+**Materialized backlog under mode=limited (#366).** The dunning worker's scan
+runs under `limited` and records its decisions instead of skipping: window-expired
+past_due subs (a freshly migrated backlog's bulk) get the local no-charge
+cancel + downgrade immediately, and in-window charges enqueue as PARKED
+system-origin manual_rebill intents — bounded by `expires_at` = the dunning
+window, so one can never fire stale after the mode lifts; the handler also
+re-checks relevance (still past_due, same period) at execution. Materialize
+never claims the subscription (claiming writes `last_retry_at`, which is the
+dunning-forensics evidence imported from legacy) and never applies failure
+policy. `readonly` is unchanged: pure dry-run observer.
+
+**Account guard / credential rotation (#365).** Every intent is stamped at
+enqueue with a fingerprint of the provider ACCOUNT the producer was configured
+against — always the account's own identity, never the credential: NMI uses
+the merchant identity from the gateway's profile report (query.php
+`report_type=profile` -> "nmi:<company> <email>"), Stripe the `acct_...` id
+from GET /v1/account; both fetched lazily and cached per key. The executor AND
+verifier compare it against the current credentials and park/defer on
+mismatch — a queue built against one account is never executed against
+another (NMI ids are small numerics that collide across accounts: the wrong
+account's subscription would be deleted, the wrong customer's card charged).
+Operational rules:
+
+- Key rotation within the SAME account (NMI or Stripe): no effect — the
+  fingerprint is refetched under the new key and matches.
+- Pointing a provider key at a DIFFERENT account: pending intents park with
+  "provider account changed since enqueue". Drain or expire them first, or —
+  if adopting the new account deliberately — re-stamp with
+  `billing intents refingerprint --provider=<name> --tenant=<slug> --yes`.
+- A failed fingerprint fetch (provider down) skips the guard for that pass
+  (warn logged) rather than blocking the ledger.
+- Intents enqueued before #365 carry no stamp and execute ungated.
+
 ## Reconcile (#107)
 
 Manual-only — **never scheduled**. Two modes, neither ever writes to a
@@ -112,24 +153,27 @@ default = every configured provider), `--since` / `--until` (RFC3339 or
 `YYYY-MM-DD`, bounding the transaction window), `--tenant` (slug or id;
 default tenant otherwise) and `--format table|json`. The same engine sits
 behind the admin API: `POST /v1/admin/reconcile/runs` `{mode, providers,
-since, until, materialize}` runs synchronously; `GET .../runs`,
+since, until}` runs synchronously; `GET .../runs`,
 `GET .../runs/:id`, `GET .../findings?status=&provider=&type=&admin_queue=`,
 and `POST .../findings/:id/{ack,dismiss}` work the queue.
 
-**Materialize (bootstrap mode, v1.1)** — `billing reconcile fix
---materialize` (or `"materialize": true` on the admin POST; enforce-only,
-explicit opt-in). PS-1 findings (the processor bills a subscription OpenRails
-does not know) are auto-created locally **only when both halves resolve
-unambiguously**: identity through the engine's existing matcher (a single
-vault/email match — zero or multiple candidates never guess) and plan through
-catalog provider_links (the billable price whose `processors[provider]` entry
+Every local write `fix` applies is logged (finding id, type, subject,
+evidence) and persisted as the finding's resolution evidence, so a run's
+changes are fully reconstructable from the log or the findings table.
+
+**Materialize** — part of `fix` (enforce mode; advisory never writes). PS-1
+findings (the processor bills a subscription OpenRails does not know) are
+auto-created locally **only when both halves resolve unambiguously**:
+identity through the engine's existing matcher (a single vault/email match —
+zero or multiple candidates never guess) and plan through catalog
+provider_links (the billable price whose `processors[provider]` entry
 carries the remote plan id). A materialized subscription adopts the remote
 status and period timestamps, snapshots the product's entitlement spec like a
 normal signup, gets the snapshot's latest successful charge backfilled as a
 payment, and grants entitlements through the ordinary subscription-sourced
 path; the finding resolves as `enforced` with the materialization evidence.
-Anything unresolvable behaves exactly as without the flag (admin_pending),
-with the blocker documented on the finding.
+Anything unresolvable stays admin_pending, with the blocker documented on
+the finding.
 
 Findings have stable identity across runs (re-runs update, vanished findings
 auto-resolve), carry intent evidence ("our recorded delete never executed —
@@ -195,6 +239,53 @@ is the pause that preserves retry state.
 over 2 weeks — same span, more attempts; ours is sparser because each NMI
 decline costs a per-transaction fee. Stripe-billed subscriptions use Stripe's
 dunning; this section governs NMI-backed manual dunning.)
+
+## Subscription liveness sync (#367) + renewal grace (#368)
+
+Dunning owns `past_due` (we SAW the failure). The **silence cohort** —
+`active` subscriptions whose period lapsed with NO webhook either way — now
+has an automated owner too: the subscription liveness sync, a 4-hourly
+state-scan worker (`RunOnStart=true`, so a reboot after an outage sweeps the
+backlog immediately). Per silent subscription it READS provider truth (NMI:
+the period's sale transactions by order reference + the recurring record;
+Stripe: `GET /v1/subscriptions/{id}` + latest invoice) and converges through
+the normal lifecycle services:
+
+| Probe says | Convergence |
+|---|---|
+| charged | `RenewMembership` repair — payment + entitlements backfilled exactly once, never a second charge |
+| declined | `FailMembership` + #359 schedule — **dunning owns it from here** |
+| no attempt, remote alive w/ future next billing | adopt the remote period end (clock misalignment); adoption alone grants no access |
+| remote absent/terminal | cancel locally + revoke entitlements (no remote delete — it's already gone) |
+| unreachable | nothing changes; the next pass re-derives the cohort and retries (no read-queue; the intent ledger stays mutations-only) |
+
+It never charges — charging stays inside dunning, whose derived staleness
+window cancels months-stale subscriptions instead of surprise-charging.
+Mode gating: runs under `full` AND `limited` (probes are reads, convergence
+is local writes — consistent with #366 materialize); skipped under
+`readonly`. Each pass logs an alert-style summary
+(`cohort/repaired/failed/adopted/cancelled/unreachable`).
+
+While the probe resolves the silence, the user keeps access through the
+**renewal grace window** (#368): activation and every renewal pre-append a
+trailing `grace` entitlement window `[period_end, period_end + slack)` —
+slack = half the billing cycle capped at 48h (daily: 12h), not a knob — for
+NMI-backed + Stripe subscriptions. Grace is revoked the moment truth arrives
+(renewal success, terminal failure, deliberate cancel — explicit cancels
+delete the scheduled grace, access ends at period end as the user expects)
+and lapses by its own end_at if silence outlasts the slack. See
+docs/entitlements_timeline.md → "Grace".
+
+**What reconcile (#107) remains for:** everything else — the full-surface
+manual batch tool (all PS finding types, findings ledger, admin queue,
+forensics, enforce mode). The liveness sync is the always-on, narrow,
+per-subscription slice for exactly one failure mode (inbound silence); a
+reconcile fix run before/after a liveness pass converges to the same state
+by idempotency. Note: NMI charge detection correlates by the order reference
+OpenRails stamps at signup (the local subscription id). Legacy-imported
+subscriptions whose NMI `orderid` predates OpenRails won't match the charge
+probe — their charged periods converge as period-adoption (no access
+granted) until a webhook or reconcile backfill lands the payment.
 
 ## Safety levers (recap — full details in README "Operating modes")
 

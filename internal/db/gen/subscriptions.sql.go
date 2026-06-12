@@ -869,6 +869,82 @@ func (q *Queries) ListPendingDeletionScheduledSubscriptions(ctx context.Context)
 	return items, nil
 }
 
+const listSilentLapsedSubscriptions = `-- name: ListSilentLapsedSubscriptions :many
+SELECT id, price_id, product_id, status, processor, processor_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, tenant_id, tenant_subject_id FROM billing.subscriptions sub
+WHERE sub.processor = ANY($1::text[])
+  AND sub.status = 'active'
+  AND sub.current_period_ends_at IS NOT NULL
+  AND sub.current_period_ends_at <= $2::timestamptz
+  AND NOT EXISTS (
+    SELECT 1 FROM billing.payments p
+    WHERE p.subscription_id = sub.id
+      AND p.status = 'completed'
+      AND p.purchased_at >= sub.current_period_ends_at
+  )
+`
+
+type ListSilentLapsedSubscriptionsParams struct {
+	Processors []string
+	Cutoff     time.Time
+}
+
+// Subscription liveness sync (#367): the SILENT lapsed cohort — still-active
+// subscriptions on provider-truth-probeable processors whose period lapsed
+// past the probe slack with NO signal either way: no renewal (the period
+// would have advanced), no failure webhook (status would be past_due — that
+// cohort is dunning's, excluded here), and no payment recorded at/after the
+// period end. Re-derived every pass, so an unreachable provider needs no
+// durable read-queue: unchanged state simply reappears next cycle.
+func (q *Queries) ListSilentLapsedSubscriptions(ctx context.Context, arg ListSilentLapsedSubscriptionsParams) ([]BillingSubscription, error) {
+	rows, err := q.db.Query(ctx, listSilentLapsedSubscriptions, arg.Processors, arg.Cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingSubscription
+	for rows.Next() {
+		var i BillingSubscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.ProductID,
+			&i.Status,
+			&i.Processor,
+			&i.ProcessorSubscriptionID,
+			&i.UserEmail,
+			&i.PaymentMethodID,
+			&i.CurrentPeriodStartsAt,
+			&i.CurrentPeriodEndsAt,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.GraceEndsAt,
+			&i.ScheduledPriceID,
+			&i.LastRetryAt,
+			&i.RetryAttempts,
+			&i.NextRetryAt,
+			&i.CancelledAt,
+			&i.CancelType,
+			&i.CancelFeedback,
+			&i.EntitlementsSpecSnapshot,
+			&i.CreditsSpecSnapshot,
+			&i.GatewayResponse,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TierGroup,
+			&i.DeletionScheduledAt,
+			&i.TenantID,
+			&i.TenantSubjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSubscriptionsByIDs = `-- name: ListSubscriptionsByIDs :many
 SELECT id, price_id, product_id, status, processor, processor_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, tenant_id, tenant_subject_id FROM billing.subscriptions WHERE id = ANY($1::uuid[])
 `

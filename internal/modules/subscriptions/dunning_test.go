@@ -116,3 +116,43 @@ func TestBillingCycleDaysOf(t *testing.T) {
 	seven := 7
 	require.Equal(t, 7, BillingCycleDaysOf(&models.Price{BillingCycleDays: &seven}))
 }
+
+// TestGraceSlack pins the renewal grace window derivation (#368): half the
+// billing cycle, capped at 48h; unknown cycles defensively get the cap.
+func TestGraceSlack(t *testing.T) {
+	cases := []struct {
+		cycleDays int
+		want      time.Duration
+	}{
+		{0, 48 * time.Hour},   // unknown -> monthly cap, defensively
+		{-3, 48 * time.Hour},  // nonsense -> monthly cap, defensively
+		{1, 12 * time.Hour},   // daily: half a day
+		{2, 24 * time.Hour},   // 2-day: one day
+		{5, 48 * time.Hour},   // capped (half = 60h)
+		{6, 48 * time.Hour},   // capped (half = 72h)
+		{7, 48 * time.Hour},   // weekly: capped (half = 84h)
+		{30, 48 * time.Hour},  // monthly: capped
+		{365, 48 * time.Hour}, // yearly: never more generous than monthly
+	}
+	for _, c := range cases {
+		if got := GraceSlack(c.cycleDays); got != c.want {
+			t.Errorf("GraceSlack(%d) = %s, want %s", c.cycleDays, got, c.want)
+		}
+	}
+}
+
+// TestRenewalGraceEligibleProcessor pins which processors get the
+// pre-appended renewal grace window: NMI-backed + Stripe only.
+func TestRenewalGraceEligibleProcessor(t *testing.T) {
+	if !RenewalGraceEligibleProcessor(models.ProcessorMobius) {
+		t.Error("mobius (NMI-backed) must be grace-eligible")
+	}
+	if !RenewalGraceEligibleProcessor(models.ProcessorStripe) {
+		t.Error("stripe must be grace-eligible")
+	}
+	for _, p := range []models.Processor{models.ProcessorCCBill, models.ProcessorSolana, models.ProcessorPayPal, models.ProcessorAdmin, models.ProcessorManual} {
+		if RenewalGraceEligibleProcessor(p) {
+			t.Errorf("%s must NOT be grace-eligible", p)
+		}
+	}
+}

@@ -20,7 +20,7 @@ import (
 // newReconcileCmd wires the #107 processor-reconcile CLI:
 //
 //	billing reconcile check  [--provider=... --since=... --until=...]  advisory diff
-//	billing reconcile fix    [--provider=... --since=... --until=...]  enforce (LOCAL writes only)
+//	billing reconcile fix    [--provider=... --since=... --until=...]  enforce (LOCAL writes only, incl. PS-1 materialization)
 //	billing reconcile report [--run=ID]                                latest/specified run report
 //
 // Reconciliation is manual-only by design (no scheduled runs). The remote
@@ -33,13 +33,12 @@ func newReconcileCmd() *cobra.Command {
 	}
 
 	var (
-		providers   []string
-		since       string
-		until       string
-		format      string
-		tenantSlug  string
-		runIDStr    string
-		materialize bool
+		providers  []string
+		since      string
+		until      string
+		format     string
+		tenantSlug string
+		runIDStr   string
 	)
 	addRunFlags := func(c *cobra.Command) {
 		c.Flags().StringSliceVar(&providers, "provider", nil, "Provider(s) to reconcile: nmi, ccbill, stripe, solana (default: all configured)")
@@ -53,21 +52,19 @@ func newReconcileCmd() *cobra.Command {
 		Use:   "check",
 		Short: "Advisory reconcile: fetch + diff + persist findings, ZERO local writes",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runReconcileCLI(c, reconcile.ModeAdvisory, providers, since, until, format, tenantSlug, false)
+			return runReconcileCLI(c, reconcile.ModeAdvisory, providers, since, until, format, tenantSlug)
 		},
 	}
 	addRunFlags(checkCmd)
 
 	fixCmd := &cobra.Command{
 		Use:   "fix",
-		Short: "Enforce reconcile: fetch + diff + apply idempotent LOCAL convergence writes (never touches a processor)",
+		Short: "Enforce reconcile: fetch + diff + apply idempotent LOCAL convergence writes (never touches a processor); PS-1 findings whose identity AND plan resolve unambiguously are materialized as local subscriptions, the rest stay admin_pending",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runReconcileCLI(c, reconcile.ModeEnforce, providers, since, until, format, tenantSlug, materialize)
+			return runReconcileCLI(c, reconcile.ModeEnforce, providers, since, until, format, tenantSlug)
 		},
 	}
 	addRunFlags(fixCmd)
-	fixCmd.Flags().BoolVar(&materialize, "materialize", false,
-		"Bootstrap mode (explicit opt-in): auto-create local subscriptions for PS-1 findings whose identity AND plan resolve unambiguously; everything else stays admin_pending")
 
 	reportCmd := &cobra.Command{
 		Use:   "report",
@@ -140,7 +137,7 @@ func parseReconcileCLITime(s, name string) (time.Time, error) {
 	return t, nil
 }
 
-func runReconcileCLI(cmd *cobra.Command, mode reconcile.Mode, providerNames []string, sinceStr, untilStr, format, tenantSlug string, materialize bool) error {
+func runReconcileCLI(cmd *cobra.Command, mode reconcile.Mode, providerNames []string, sinceStr, untilStr, format, tenantSlug string) error {
 	sinceT, err := parseReconcileCLITime(sinceStr, "since")
 	if err != nil {
 		return err
@@ -167,11 +164,10 @@ func runReconcileCLI(cmd *cobra.Command, mode reconcile.Mode, providerNames []st
 		eng := reconcile.NewEngine(rt.DB, rt.Config, fetchers)
 
 		res, runErr := eng.Run(ctx, reconcile.RunParams{
-			Mode:        mode,
-			Providers:   provs,
-			Since:       sinceT,
-			Until:       untilT,
-			Materialize: materialize,
+			Mode:      mode,
+			Providers: provs,
+			Since:     sinceT,
+			Until:     untilT,
 		})
 		if res == nil {
 			return runErr

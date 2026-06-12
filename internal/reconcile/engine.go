@@ -63,11 +63,6 @@ type RunParams struct {
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
 	Until time.Time
-	// Materialize (enforce-only, explicit opt-in — bootstrap mode v1.1):
-	// PS-1 findings whose identity AND plan resolve unambiguously are
-	// materialized as local subscriptions instead of going admin_pending.
-	// Ambiguous/unresolvable PS-1 behavior is unchanged.
-	Materialize bool
 }
 
 // ProviderReport is one provider's section of the run summary.
@@ -172,9 +167,6 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	}
 	if params.Mode == ModeEnforce && e.Writer == nil {
 		return nil, fmt.Errorf("reconcile: enforce mode requires a LocalWriter")
-	}
-	if params.Materialize && params.Mode != ModeEnforce {
-		return nil, fmt.Errorf("reconcile: materialize is an enforce-mode option (advisory never writes)")
 	}
 
 	providers := params.Providers
@@ -317,7 +309,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	now := e.now()
-	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{Materialize: params.Materialize})
+	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{Materialize: params.Mode == ModeEnforce})
 
 	if snap.Capabilities.Transactions {
 		history, historyNote := e.fetchHistory(ctx, provider, params)
@@ -369,6 +361,13 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 				rep.ApplySkipped++
 				continue
 			}
+			log.WithFields(log.Fields{
+				"finding_id":  rec.ID,
+				"type":        f.Type,
+				"subject_key": f.SubjectKey,
+				"provider":    provider,
+				"evidence":    evidence,
+			}).Info("reconcile: enforce applied local fix")
 			if err := e.Store.MarkFindingAutoFixed(ctx, rec.ID, evidence); err != nil {
 				rep.ApplyErrors = append(rep.ApplyErrors, fmt.Sprintf("%s/%s: mark auto_fixed: %v", f.Type, f.SubjectKey, err))
 				continue

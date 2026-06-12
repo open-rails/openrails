@@ -19,9 +19,19 @@ import (
 // the Runner's claims and transitions run on the worker pool.
 type Store struct {
 	db *db.DB
+	// Fingerprints stamps account_fingerprint at enqueue (#365). nil = no
+	// stamping (tests, supersede-only callers): intents enqueue with NULL and
+	// execute ungated, same as pre-#365 rows.
+	Fingerprints FingerprintSource
 }
 
 func NewStore(d *db.DB) *Store { return &Store{db: d} }
+
+// WithFingerprints attaches the #365 account-fingerprint source (chainable).
+func (s *Store) WithFingerprints(src FingerprintSource) *Store {
+	s.Fingerprints = src
+	return s
+}
 
 // EnqueueParams describes one logical intent. TenantID is stamped explicitly;
 // IdempotencyKey makes the enqueue effectively-once (see the query's conflict
@@ -59,19 +69,39 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	if p.OriginReason != "" {
 		originReason = &p.OriginReason
 	}
+	// #365: stamp the provider account the producer is configured against.
+	// Best-effort — an unresolvable fingerprint stamps NULL (executes ungated)
+	// rather than failing the enqueue: ledger durability beats the guard.
+	var fingerprint *string
+	if s.Fingerprints != nil {
+		if fp, ok := s.Fingerprints.AccountFingerprint(ctx, p.Provider); ok && fp != "" {
+			fingerprint = &fp
+		}
+	}
 	return s.db.Gen(ctx).EnqueueProviderIntent(ctx, gen.EnqueueProviderIntentParams{
-		TenantID:       p.TenantID,
-		Provider:       p.Provider,
-		IntentType:     p.IntentType,
-		SubscriptionID: p.SubscriptionID,
-		PaymentID:      p.PaymentID,
-		PriceID:        p.PriceID,
-		Payload:        payload,
-		IdempotencyKey: p.IdempotencyKey,
-		NextAttemptAt:  p.NextAttemptAt.UTC(),
-		Origin:         string(p.Origin),
-		OriginReason:   originReason,
-		ExpiresAt:      p.ExpiresAt,
+		TenantID:           p.TenantID,
+		Provider:           p.Provider,
+		IntentType:         p.IntentType,
+		SubscriptionID:     p.SubscriptionID,
+		PaymentID:          p.PaymentID,
+		PriceID:            p.PriceID,
+		Payload:            payload,
+		IdempotencyKey:     p.IdempotencyKey,
+		NextAttemptAt:      p.NextAttemptAt.UTC(),
+		Origin:             string(p.Origin),
+		OriginReason:       originReason,
+		ExpiresAt:          p.ExpiresAt,
+		AccountFingerprint: fingerprint,
+	})
+}
+
+// Refingerprint re-stamps every LIVE intent of the provider to the given
+// fingerprint (#365 escape hatch — operator confirmed the credential change
+// does not point at a different account, or adopts the new one deliberately).
+func (s *Store) Refingerprint(ctx context.Context, provider, fingerprint string) (int64, error) {
+	return s.db.Gen(ctx).RefingerprintProviderIntents(ctx, gen.RefingerprintProviderIntentsParams{
+		Provider:           provider,
+		AccountFingerprint: &fingerprint,
 	})
 }
 

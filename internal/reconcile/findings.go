@@ -11,8 +11,9 @@ type FindingType string
 
 const (
 	// FindingRemoteSubMissingLocal (PS-1): the processor bills a subscription
-	// OpenRails does not know. CRITICAL; always admin_pending in v1 (no
-	// auto-create — bootstrap materialization is deferred per design decision 4).
+	// OpenRails does not know. CRITICAL. Enforce materializes the local
+	// subscription when identity AND plan resolve unambiguously; ambiguous or
+	// unresolvable findings stay admin_pending.
 	FindingRemoteSubMissingLocal FindingType = "PS-1"
 	// FindingLocalActiveRemoteDead (PS-2): local says active/past_due, the
 	// processor says cancelled/expired (on NMI: absent from the recurring
@@ -126,8 +127,8 @@ type ApplyAction struct {
 }
 
 // MaterializeSubscriptionAction creates the local subscription for a PS-1
-// finding whose identity AND plan both resolved unambiguously (bootstrap mode
-// v1.1, the explicit --materialize opt-in). Identity comes from the engine's
+// finding whose identity AND plan both resolved unambiguously (applied
+// automatically in enforce mode). Identity comes from the engine's
 // existing matcher (a single vault/email match — zero or multiple candidates
 // keep the finding admin_pending), the plan from catalog provider_links (the
 // billable price whose processors[provider] ids carry the remote plan id).

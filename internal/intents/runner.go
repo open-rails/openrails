@@ -50,9 +50,30 @@ type Runner struct {
 	Registry *Registry
 	// Config gates execution by origin x operating mode. nil (tests) = full.
 	Config ModeView
-	Clock  clockwork.Clock
-	Lease  time.Duration
-	Batch  int64
+	// Fingerprints gates execution AND verification on the provider account
+	// (#365): an intent stamped with a different account fingerprint than the
+	// current credentials resolve to is parked (execute) / deferred (verify),
+	// never run — verify against the wrong account is as wrong as executing
+	// (NMI "absent = success" answered by the wrong account falsely resolves
+	// the intent). nil source, an unstamped intent, or an unresolvable
+	// current fingerprint skip the check.
+	Fingerprints FingerprintSource
+	Clock        clockwork.Clock
+	Lease        time.Duration
+	Batch        int64
+}
+
+// accountMismatch reports whether the intent was enqueued against a DIFFERENT
+// provider account than the current credentials resolve to (#365).
+func (r *Runner) accountMismatch(ctx context.Context, intent gen.BillingProviderIntent) (string, bool) {
+	if r.Fingerprints == nil || intent.AccountFingerprint == nil || *intent.AccountFingerprint == "" {
+		return "", false
+	}
+	current, ok := r.Fingerprints.AccountFingerprint(ctx, intent.Provider)
+	if !ok || current == "" || current == *intent.AccountFingerprint {
+		return "", false
+	}
+	return accountMismatchReason(*intent.AccountFingerprint, current), true
 }
 
 func (r *Runner) now() time.Time {
@@ -154,6 +175,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 		return
 	}
 
+	if reason, mismatch := r.accountMismatch(ctx, intent); mismatch {
+		r.park(ctx, logEntry, stats, intent.ID, now, reason)
+		return
+	}
+
 	r.apply(ctx, logEntry, stats, handler, intent, handler.Execute(ctx, intent), false)
 }
 
@@ -235,7 +261,19 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 			stats.Superseded++
 			continue
 		}
-		// Verification is read-only: no mode gate.
+		// Verification is read-only: no mode gate. The ACCOUNT gate still
+		// applies (#365): a verify answered by the wrong provider account is
+		// as wrong as an execute — NMI "absent = success" would falsely
+		// resolve the intent. Defer the verify instead.
+		if reason, mismatch := r.accountMismatch(ctx, intent); mismatch {
+			if err := r.Store.MarkUnknown(ctx, intent.ID, r.now().Add(ParkRetryInterval), reason); err != nil {
+				logEntry.WithError(err).Error("intent verifier: defer on account mismatch failed")
+				continue
+			}
+			stats.Unknown++
+			logEntry.WithField("reason", reason).Warn("intent verify deferred: provider account changed since enqueue")
+			continue
+		}
 		r.apply(ctx, logEntry, &stats, handler, intent, handler.Verify(ctx, intent), true)
 	}
 	return stats, nil

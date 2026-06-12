@@ -183,7 +183,7 @@ func main() {
 	mintOperatorJWTCmd.Flags().String("role", "", "Tenant role to assign (default openrails-operator)")
 
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, migrateChCmd)
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, newBootstrapCmd(), mintOperatorServiceTokenCmd, mintTenantSubjectServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd(), newReconcileCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, auditCmd, seedDevCatalogCmd, newBootstrapCmd(), mintOperatorServiceTokenCmd, mintTenantSubjectServiceTokenCmd, mintOperatorJWTCmd, newCatalogCmd(), newReconcileCmd(), newIntentsCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		log.WithError(err).Fatal("Failed to execute command")

@@ -322,13 +322,13 @@ func TestReconcileEngineIntegration(t *testing.T) {
 	}))
 }
 
-// TestReconcileMaterializeIntegration proves the PS-1 materialization
-// (bootstrap mode v1.1) end to end against real Postgres under RLS: a fake
-// snapshot carries one RESOLVABLE PS-1 (vault identity + provider_links plan)
-// and one UNRESOLVABLE PS-1. `fix --materialize` creates the local
-// subscription with remote status/periods, backfills the snapshot's charge,
-// grants entitlements via the subscription-sourced path, and resolves the
-// finding as enforced — while the unresolvable one stays admin_pending.
+// TestReconcileMaterializeIntegration proves the PS-1 materialization end to
+// end against real Postgres under RLS: a fake snapshot carries one RESOLVABLE
+// PS-1 (vault identity + provider_links plan) and one UNRESOLVABLE PS-1.
+// `fix` (enforce) creates the local subscription with remote status/periods,
+// backfills the snapshot's charge, grants entitlements via the
+// subscription-sourced path, and resolves the finding as enforced — while the
+// unresolvable one stays admin_pending.
 func TestReconcileMaterializeIntegration(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	baseCtx := tenant.WithID(context.Background(), tenant.DefaultID)
@@ -413,26 +413,26 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		}
 	}
 
-	// ---- enforce WITHOUT --materialize: both PS-1 stay admin_pending --------
+	// ---- advisory: both PS-1 stay admin_pending, nothing is created ----------
 	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		for _, f := range res.Findings {
 			if f.Type == FindingRemoteSubMissingLocal {
-				assert.Equal(t, FindingStatusAdminPending, f.Status, "PS-1 without --materialize is unchanged")
+				assert.Equal(t, FindingStatusAdminPending, f.Status, "advisory PS-1 stays admin_pending")
 			}
 		}
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM billing.subscriptions WHERE processor_subscription_id = $1`, resolvablePSID).Scan(&n))
-		assert.Zero(t, n, "no subscription created without the flag")
+		assert.Zero(t, n, "no subscription created by an advisory run")
 		return nil
 	}))
 
-	// ---- enforce WITH --materialize ------------------------------------------
+	// ---- enforce: resolvable PS-1 materializes automatically ------------------
 	var matRun *RunResult
 	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		matRun = res
 		return err
 	}))
@@ -502,7 +502,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 
 	// ---- re-run: idempotent, no duplicate subscription ------------------------
 	require.NoError(t, appDB.RunInTenantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		res, err := newEngine().Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		for _, f := range res.Findings {
 			assert.NotEqual(t, resolvablePSID, f.SubjectKey, "materialized PS-1 must not re-diff")

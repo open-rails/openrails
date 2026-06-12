@@ -38,6 +38,7 @@ type GetSubscriptionsFilters struct {
 }
 
 type SubscriptionService struct {
+	db                   *db.DB
 	subscriptionRepo     *repo.SubscriptionRepo
 	notificationRepo     *repo.NotificationQueueRepo
 	clock                clockwork.Clock
@@ -157,6 +158,10 @@ func (s *SubscriptionService) GetAvailableProducts(ctx context.Context) ([]*mode
 	return products, nil
 }
 
+// Database exposes the service's DB handle for callers that need to compose
+// multiple writes into one transaction (TenantTx + NewWithPgxTx pattern).
+func (s *SubscriptionService) Database() *db.DB { return s.db }
+
 func NewSubscriptionService(
 	db *db.DB,
 	priceService *catalog.PriceService,
@@ -167,6 +172,7 @@ func NewSubscriptionService(
 	clocks ...clockwork.Clock,
 ) *SubscriptionService {
 	return &SubscriptionService{
+		db:                   db,
 		subscriptionRepo:     repo.NewSubscriptionRepo(db),
 		notificationRepo:     repo.NewNotificationQueueRepo(db),
 		clock:                timeutil.FirstClock(clocks...),

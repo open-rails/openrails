@@ -3,7 +3,6 @@ package intents
 import (
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"strings"
@@ -233,48 +232,13 @@ func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.BillingProv
 	return Succeeded(map[string]any{"transaction_id": txnID, "verified_existing": true})
 }
 
-// nmiOrderQueryResponse mirrors the slice of the Query API transaction report
-// the rebill verifier reads (search by order_id).
-type nmiOrderQueryResponse struct {
-	XMLName      xml.Name `xml:"nm_response"`
-	Transactions []struct {
-		TransactionID string `xml:"transaction_id"`
-		OrderID       string `xml:"order_id"`
-		Actions       []struct {
-			ActionType string `xml:"action_type"`
-			Success    string `xml:"success"`
-		} `xml:"action"`
-	} `xml:"transaction"`
-	ErrorResponse string `xml:"error_response"`
-}
-
 // findSuccessfulSale queries NMI for transactions carrying the period's order
 // reference and reports the first successful sale. Every attempt for the
 // period shares the order reference, so a hit from ANY attempt counts — that
-// is the no-double-charge invariant.
+// is the no-double-charge invariant. The probe itself lives on the NMI client
+// (nmi.FindSuccessfulSaleByOrderID) so the #367 liveness sync shares it.
 func (h *ManualRebillHandler) findSuccessfulSale(client *nmi.NMIClient, p ManualRebillPayload) (transactionID string, found bool, err error) {
-	raw, err := client.SearchTransactions(nmi.QueryFilter{OrderID: p.OrderReference})
-	if err != nil {
-		return "", false, err
-	}
-	var parsed nmiOrderQueryResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return "", false, fmt.Errorf("parse transaction query response: %w", err)
-	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return "", false, fmt.Errorf("transaction query error_response: %s", msg)
-	}
-	for _, txn := range parsed.Transactions {
-		if strings.TrimSpace(txn.OrderID) != "" && strings.TrimSpace(txn.OrderID) != p.OrderReference {
-			continue
-		}
-		for _, action := range txn.Actions {
-			if strings.ToLower(strings.TrimSpace(action.ActionType)) == "sale" && strings.TrimSpace(action.Success) == "1" {
-				return strings.TrimSpace(txn.TransactionID), true, nil
-			}
-		}
-	}
-	return "", false, nil
+	return client.FindSuccessfulSaleByOrderID(p.OrderReference)
 }
 
 // finalizeSuccess repairs the local lifecycle from a confirmed successful

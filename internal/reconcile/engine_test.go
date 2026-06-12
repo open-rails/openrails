@@ -1385,10 +1385,10 @@ func materializeFixture() (*fakeLocal, *RemoteSnapshot, LocalPrice) {
 func TestMaterializePS1(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("without the flag PS-1 stays admin_pending (unchanged)", func(t *testing.T) {
+	t.Run("advisory PS-1 stays admin_pending (advisory never writes)", func(t *testing.T) {
 		local, snap, _ := materializeFixture()
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
@@ -1398,18 +1398,10 @@ func TestMaterializePS1(t *testing.T) {
 		assert.Equal(t, FindingStatusAdminPending, store.record(ProviderNMI, FindingRemoteSubMissingLocal, "remote-77").Status)
 	})
 
-	t.Run("materialize requires enforce mode", func(t *testing.T) {
-		local, snap, _ := materializeFixture()
-		eng, _, _ := newTestEngine(ProviderNMI, snap, local)
-		_, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, Materialize: true})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "enforce")
-	})
-
 	t.Run("resolvable PS-1 materializes with payment + entitlements and resolves enforced", func(t *testing.T) {
 		local, snap, price := materializeFixture()
 		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
@@ -1446,7 +1438,7 @@ func TestMaterializePS1(t *testing.T) {
 		assert.Equal(t, created.ID, st.Entitlements[0].SourceID)
 
 		// Re-run: converged, no duplicate, no second materialize write.
-		res2, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		res2, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		assert.Empty(t, findByType(res2.Findings, FindingRemoteSubMissingLocal))
 		assert.Equal(t, 1, writer.calls["materialize"])
@@ -1462,7 +1454,7 @@ func TestMaterializePS1(t *testing.T) {
 			ProcessorSubscriptionID: "other-1", Status: SubscriptionStatusActive,
 		})
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
@@ -1475,7 +1467,7 @@ func TestMaterializePS1(t *testing.T) {
 		local, snap, _ := materializeFixture()
 		local.state.Prices = nil // no provider link anywhere
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)
@@ -1489,7 +1481,7 @@ func TestMaterializePS1(t *testing.T) {
 		snap.Subscriptions[0].Status = SubscriptionStatusPastDue
 		snap.Subscriptions[0].NextBillingAt = nil
 		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, Materialize: true})
+		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
 		require.NoError(t, err)
 		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
 		require.Len(t, ps1, 1)

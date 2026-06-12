@@ -44,6 +44,20 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := river.AddWorkerSafely(workers, &riverjobs.IdempotencyCleanupWorker{Config: r.Config}); err != nil {
 		return fmt.Errorf("add idempotency cleanup worker: %w", err)
 	}
+	// Subscription liveness sync (#367): scheduled provider-truth convergence
+	// for SILENT lapsed subscriptions (active, period lapsed, no webhook
+	// either way). Read-only at the provider; converges through the normal
+	// lifecycle services and resolves #368 renewal grace windows.
+	if err := river.AddWorkerSafely(workers, &riverjobs.SubscriptionLivenessWorker{
+		DB:              r.DB,
+		Config:          r.Config,
+		Clock:           clock,
+		NMIClients:      r.NMIClients,
+		EventLogService: r.EventLogService,
+		DeferDelete:     r.DeferredDeletes,
+	}); err != nil {
+		return fmt.Errorf("add subscription liveness worker: %w", err)
+	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.CCBillReconcileWorker{DB: r.DB, DataLink: r.CCBillDataLink, NotificationService: r.NotificationService}); err != nil {
 		return fmt.Errorf("add ccbill reconcile worker: %w", err)
 	}
@@ -94,18 +108,20 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// resolves ambiguous outcomes via provider reads. These replaced the
 	// NMIDeleteSubscription worker + boot rescan.
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentExecuteWorker{
-		DB:       r.DB,
-		Config:   r.Config,
-		Clock:    clock,
-		Registry: intentRegistry,
+		DB:           r.DB,
+		Config:       r.Config,
+		Clock:        clock,
+		Registry:     intentRegistry,
+		Fingerprints: r.AccountFingerprints(),
 	}); err != nil {
 		return fmt.Errorf("add provider intent execute worker: %w", err)
 	}
 	if err := river.AddWorkerSafely(workers, &riverjobs.ProviderIntentVerifyWorker{
-		DB:       r.DB,
-		Config:   r.Config,
-		Clock:    clock,
-		Registry: intentRegistry,
+		DB:           r.DB,
+		Config:       r.Config,
+		Clock:        clock,
+		Registry:     intentRegistry,
+		Fingerprints: r.AccountFingerprints(),
 	}); err != nil {
 		return fmt.Errorf("add provider intent verify worker: %w", err)
 	}
@@ -211,9 +227,10 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 // working — a typed-nil ModeView would panic inside the gate.
 func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
 	runner := &intents.Runner{
-		Store:    intents.NewStore(r.DB),
-		Registry: registry,
-		Clock:    clock,
+		Store:        intents.NewStore(r.DB).WithFingerprints(r.AccountFingerprints()),
+		Registry:     registry,
+		Clock:        clock,
+		Fingerprints: r.AccountFingerprints(),
 	}
 	if r.Config != nil {
 		runner.Config = r.Config
@@ -296,6 +313,20 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 4 hours: subscription liveness sync (#367) — probe provider truth
+	// for silent lapsed subscriptions and converge. RunOnStart=true: a reboot
+	// after an outage is exactly when the silence cohort is largest.
+	jobs = append(jobs, river.NewPeriodicJob(
+		river.PeriodicInterval(4*time.Hour),
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.SubscriptionLivenessArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 4 * time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
 	// Daily: Idempotency cleanup

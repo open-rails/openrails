@@ -212,7 +212,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
 	creditsSvc := credits.NewCreditsService(dbi, nil)
 
-	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(ctx, sub, lifecycle, priceSvc, creditsSvc))
+	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(ctx, sub, lifecycle, priceSvc, creditsSvc, false))
 
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -345,7 +345,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	sub, err := repo.NewSubscriptionRepo(dbi).GetByID(ctx, subID)
 	require.NoError(t, err)
 
-	outcome := worker.processSubscription(ctx, sub, lifecycle, priceSvc, creditsSvc)
+	outcome := worker.processSubscription(ctx, sub, lifecycle, priceSvc, creditsSvc, false)
 	require.Equal(t, dunningOutcomeSucceeded, outcome)
 	assert.Zero(t, saleAttempts, "the durable success must be repaired, never re-charged")
 

@@ -7,12 +7,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // intentDeferredDeleteScheduler implements subscriptions.DeferredDeleteScheduler
@@ -32,8 +34,23 @@ type intentDeferredDeleteScheduler struct {
 	reason string
 }
 
-func newIntentDeferredDeleteScheduler(d *db.DB, origin intents.Origin, reason string) *intentDeferredDeleteScheduler {
-	return &intentDeferredDeleteScheduler{db: d, store: intents.NewStore(d), origin: origin, reason: reason}
+func newIntentDeferredDeleteScheduler(d *db.DB, fingerprints intents.FingerprintSource, origin intents.Origin, reason string) *intentDeferredDeleteScheduler {
+	return &intentDeferredDeleteScheduler{db: d, store: intents.NewStore(d).WithFingerprints(fingerprints), origin: origin, reason: reason}
+}
+
+// WithTx rebinds the scheduler onto the caller's transaction: the intent
+// enqueue and the caller's subscription update commit or roll back together.
+func (s *intentDeferredDeleteScheduler) WithTx(tx pgx.Tx) subscriptions.DeferredDeleteScheduler {
+	if s == nil {
+		return s
+	}
+	txdb := s.db.NewWithPgxTx(tx)
+	return &intentDeferredDeleteScheduler{
+		db:     txdb,
+		store:  intents.NewStore(txdb).WithFingerprints(s.store.Fingerprints),
+		origin: s.origin,
+		reason: s.reason,
+	}
 }
 
 // ScheduleNMIDelete enqueues the deferred delete intent, due at runAt.
@@ -79,15 +96,18 @@ func (s *intentDeferredDeleteScheduler) CancelNMIDelete(ctx context.Context, use
 	return err
 }
 
-// ConvertDeferredDeleteMarkersToIntents is the startup sweep that replaced
-// the #344 boot rescan: every cancelled subscription still carrying a
-// DeletionScheduledAt marker gets a durable nmi_delete_subscription intent
-// enqueued on the ledger (the marker stays, as the read model, until the
-// intent's finalize clears it). Idempotent via the intent idempotency_key, so
-// it doubles as the one-time migration of pre-ledger pending markers
-// (in-flight deferred deletes scheduled as River jobs by older builds) AND as
-// a self-healing pass for any marker that lost its intent. Each intent is due
-// at max(now, DeletionScheduledAt): a still-open undo window is honored,
+// ConvertDeferredDeleteMarkersToIntents is the startup sweep that converts
+// any cancelled subscription still carrying a DeletionScheduledAt marker
+// WITHOUT a live intent into a durable nmi_delete_subscription intent (the
+// marker stays, as the read model, until the intent's finalize clears it).
+//
+// In steady state this finds nothing: the producers write marker + intent in
+// ONE transaction, so they cannot diverge. The sweep exists for markers
+// written OUT OF BAND — above all direct-DB imports (the doujins legacy
+// migration stamps deletion_scheduled_at on imported void subscriptions,
+// #391, and this sweep is what turns them into delete intents on the next
+// boot). Idempotent via the intent idempotency_key. Each intent is due at
+// max(now, DeletionScheduledAt): a still-open undo window is honored,
 // anything overdue runs on the executor's next pass.
 //
 // Converted markers are enqueued user-origin: the pre-ledger delete job
@@ -112,7 +132,7 @@ func (r *Runtime) ConvertDeferredDeleteMarkersToIntents(ctx context.Context) (in
 	if r.Clock != nil {
 		now = r.Clock.Now().UTC()
 	}
-	store := intents.NewStore(r.DB)
+	store := intents.NewStore(r.DB).WithFingerprints(r.AccountFingerprints())
 
 	converted := 0
 	for _, sub := range rows {

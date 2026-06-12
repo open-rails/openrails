@@ -1570,3 +1570,435 @@ authkit release (profile relaxation, backward compatible — tokens WITH the cla
 valid) -> openrails pin bump + tests (no behavior change) -> doujins/hentai0 cleanup
 (env vars deleted; mints go slug-only). No migration, no data movement; outstanding
 tokens are unaffected either way.
+
+# #365: intent-account-fingerprint-guard: park pending intents when provider credentials point at a different account
+
+## Metadata
+
+**Completed:** yes
+**Status:** IMPLEMENTED 2026-06-12 (same day as planned). Migration 013 +
+sqlc; FingerprintSource (intents/fingerprint.go) — NMI resolver REVISED
+2026-06-12 per Paul (key-hash rejected: it breaks key rotation): the
+fingerprint is now the MERCHANT IDENTITY from query.php report_type=profile
+("nmi:<company> <email>"; verified live against the Mobius sandbox), lazily
+fetched + cached per security key exactly like the Stripe acct-id resolver,
+so same-account key rotation refetches and matches (no false park); Store stamps at enqueue (best-effort,
+NULL on unresolvable); Runner parks on execute mismatch AND defers verify on
+mismatch; wired at every construction site (intentRunner, both intent workers,
+dunning fallback runner, both deferred-delete schedulers, marker sweep);
+`billing intents refingerprint --provider --tenant --yes` escape hatch;
+fingerprint surfaced in `billing intents` table/json + GET /v1/admin/intents;
+unit tests (runner guard execute/verify, NMI determinism, stripe fetch/cache/
+rotation, provider-map resolution) green; docs (operations.md account-guard
+runbook, README intents section). All checklist items below done.
+
+## Problem
+
+Intents on the provider intent ledger (#358) are bound to credentials only by
+(tenant_id, provider-key string). `h.Clients[intent.Provider]` resolves whatever
+credentials are CURRENTLY configured under that key. Swap the credentials behind
+"mobius" or "stripe" to a DIFFERENT provider account while intents are pending and
+the executor will run them against the new account.
+
+Severity is provider-shaped:
+- Stripe: accidentally safe — object ids (ch_/sub_/re_) are globally unique, wrong
+  account = "no such object" = terminal failure. Noisy but never wrong-object.
+- NMI: genuinely dangerous — subscription ids and customer_vault_ids are small
+  NUMERICS. On a different NMI account the same id can exist and belong to a
+  different merchant's customer: nmi_delete_subscription deletes an unrelated
+  subscription; manual_rebill charges a STRANGER'S CARD. Worse, verify-then-execute
+  inverts: "absent = success" answered by the wrong account falsely resolves the
+  intent and clears the local DeletionScheduledAt marker.
+- The verify pass runs with NO mode gate (read-only), so wrong-account
+  verification is reachable even under mode=readonly.
+
+## Design
+
+Stamp an account fingerprint on every intent at enqueue; compare at execute AND
+verify; PARK (never fail) on mismatch. Park-not-fail matches ledger philosophy:
+swap back -> queue drains; intentional swap -> parked rows surface in
+`openrails intents` for explicit refingerprint/cleanup.
+
+Fingerprint per provider (FingerprintSource resolved from live clients/config):
+- NMI-backed providers: "nmi:" + sha256(SecurityKey)[:16]. Local, always
+  available. Security-key rotation (same account) WILL park pending intents —
+  acceptable: rotation is rare, the escape hatch is one command, and false-park
+  is the safe failure direction. (NMI has no whoami API to do better.)
+- stripe: "stripe:" + account id from GET /v1/account (raw HTTP through the
+  stripeapi choke point; lazy on first use, cached per secret key — key rotation
+  within the SAME account refetches and matches, NO false park). Fetch failure ->
+  source returns unknown -> check skipped this pass (warn log); a wrong-account
+  swap still gets caught on a later pass / fails at execution like today.
+- solana: EXEMPT, documented — addresses are globally-unique pubkeys; a PDA from
+  the wrong cluster/keypair simply does not exist, execution cannot hit a wrong
+  object.
+- NULL fingerprint on the intent (pre-#365 rows) = grandfathered: executes
+  without the check (otherwise every existing deployment parks its whole queue
+  on upgrade).
+
+## Tasks
+
+- [x] Migration 013_intent_account_fingerprint: ALTER TABLE
+      billing.provider_intents ADD COLUMN account_fingerprint text (nullable;
+      comment documents NULL = pre-guard, grandfathered).
+- [x] provider_intents.sql: EnqueueProviderIntent inserts account_fingerprint and
+      refreshes it on the pending/superseded/expired conflict branches (latest
+      enqueue wins, same as payload); new RefingerprintProviderIntents update
+      (live statuses only: pending/failed_retryable/unknown_needs_verify) for the
+      escape hatch. Regenerate sqlc (task sqlc).
+- [x] intents package: FingerprintSource interface
+      (Fingerprint(ctx, provider) (string, bool)); Store.Fingerprints field —
+      Enqueue stamps best-effort (resolver miss/error logs + stamps NULL, never
+      fails the enqueue); Runner.Fingerprints field — executeOne parks on
+      mismatch after GateExecution, verify pass MarkUnknown-with-reason on
+      mismatch (verify must be guarded too, see Problem).
+- [x] fingerprint sources: nmi.NMIClient.AccountFingerprint() (sha256 of
+      SecurityKey); stripe account fetch via stripeapi GET /v1/account with
+      per-key cache (internal/integrations/stripeapi or a small
+      internal/intents/fingerprint.go composite over Runtime deps).
+- [x] wiring: Runtime.AccountFingerprints() built once from NMIClients + stripe
+      config; attach at every Store/Runner construction site that enqueues or
+      executes: app/river_register.go intentRunner, app/deferred_delete_scheduler.go
+      (both NewStore sites), river/jobs_provider_intents.go (both workers — add
+      the source to worker deps), river/jobs_dunning.go. jobs_subscription_manage
+      only supersedes; no stamp needed.
+- [x] escape hatch CLI: `openrails intents refingerprint --provider=... --tenant=...
+      --yes` — re-stamps live intents to the CURRENT fingerprint after the
+      operator confirms the account is intentionally the same/new; prints count.
+      (Covers legit NMI security-key rotation.)
+- [x] surfaces: account_fingerprint (short form) in `openrails intents` table +
+      GET /v1/admin/intents JSON; park reason "provider account changed since
+      enqueue (intent <fp> vs current <fp>)" is visible in LAST FAILURE already.
+- [x] tests: store stamps at enqueue; revive-conflict refreshes stamp; runner
+      parks on execute mismatch; verifier defers on mismatch; NULL grandfathered
+      executes; stripe cache refetch-on-key-change; refingerprint updates only
+      live statuses.
+- [x] docs: operations.md credential-rotation runbook paragraph (drain-or-
+      refingerprint before pointing a provider key at a DIFFERENT account; NMI
+      key rotation parks pending intents -> run refingerprint); README intents
+      section one-liner.
+
+# #366: materialize the migration backlog under mode=limited: dunning decisions become parked intents + local convergence, not a log line
+
+## Metadata
+
+**Completed:** mostly (one verification tail open, see tasks)
+**Status:** IMPLEMENTED 2026-06-12. The "CRITICAL prerequisite" turned out to
+be ALREADY satisfied structurally: the dunning worker stamps ExpiresAt =
+dunning-window end on every manual_rebill intent (ClaimDue never claims past
+expires_at; ExpireOverdue sweeps), and ManualRebillHandler.CheckRelevance
+re-checks still-past_due + same-period at execution — so a parked charge
+cannot fire stale; no handler change was needed. Worker change shipped:
+limited-mode demotion to dry_run_only replaced with materialize (window-expiry
+local cancel+downgrade applies via the unchanged lifecycle path incl.
+DeferDelete; in-window charges Enqueue-only as parked system-origin intents —
+deliberately NO claim, because claimDunningAttempt writes last_retry_at which
+is the dunning-forensics evidence imported from legacy, and NO
+payment-method failure policy). readonly unchanged (pure observer).
+Integration tests green vs real PG: materialize records pending/system/
+window-bounded intent WITH the #365 fingerprint, zero NMI calls, last_retry_at
+untouched, idempotent re-pass; window-expiry still cancels locally. Docs:
+README safe-boot section (visible-not-implied backlog + cutover sequence),
+operations.md materialized-backlog paragraph.
+
+## Original status
+
+**Status:** PLANNED 2026-06-12 (Paul: "if we migrate over a user whose account
+failed to be rebilled, we'd want to queue up some dunning actions for it, or at
+least queue up that it should be deleted from NMI, and we'd also want to
+downgrade the user's entitlements")
+
+## Problem
+
+A legacy migration imports HISTORICAL state (stale past_due subs, failed
+rebills, dead-at-processor subscriptions) — state that implies WORK. Today none
+of that work surfaces until MODE=full:
+
+- jobs_dunning.go:126 demotes dunning to dry_run_only under limited mode: the
+  worker queries due subscriptions, logs a count, does NOTHING. No manual_rebill
+  intents, no window-expiry cancel+downgrade, no deferred NMI deletes.
+- Consequence 1 (visibility): `openrails intents` shows an EMPTY ledger after a
+  migration — the "drain forecast" dry-run is vacuous exactly when the operator
+  most needs it (pre-cutover). The backlog is implicit in subscription rows.
+- Consequence 2 (correctness): users whose subs died months ago on the legacy
+  system keep premium entitlements locally until full mode (or a reconcile fix
+  vs the processor) finally converges them.
+- The decision logic (staleness window: charge within window, cancel+downgrade
+  past it) and the execution are fused in one full-mode pass; there is no way
+  to get decisions early and execution later.
+
+The migration itself must NOT enqueue intents (rejected): it would duplicate
+the staleness/schedule derivation at import time, rot as state changes, and
+violate the state-scan principle (workers derive work from state; the ledger
+is an execution outbox, not a second source of truth).
+
+## Design
+
+Split decision from execution using machinery that already exists: the
+origin x mode gate already parks system-origin intents under limited. So let
+the dunning worker RUN its scan under limited — every provider action it
+decides on becomes an enqueued intent that the gate parks (visible, durable,
+drains on MODE=full), and the purely-local lifecycle consequences apply
+immediately (limited mode only restricts PROVIDER writes; reconcile fix
+already does local convergence under readonly by design).
+
+Under mode=limited, dunning_mode=on ("materialize" behavior — replaces the
+dry_run_only demotion):
+- window-expired due subs (the bulk of a migration backlog): apply the local
+  cancel + entitlement downgrade NOW (same code path as full mode; respects
+  FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION for operators who want a frozen
+  system) and schedule the deferred NMI delete intent — system-origin, parks,
+  shows in the drain forecast.
+- within-window due subs: enqueue the manual_rebill intent through the normal
+  EnqueueAndExecute path — the gate parks it (system-origin under limited);
+  the charge fires on MODE=full via the scheduled executor.
+- readonly mode: UNCHANGED (stays dry_run_only/skip). Readonly is the
+  strictly-observing forensics boot; materializing lifecycle changes there
+  would taint observation. The operator path is readonly (observe) -> limited
+  (materialize + converge) -> full (execute).
+
+CRITICAL correctness prerequisite: a parked manual_rebill intent may sit for
+weeks before the mode lifts. The staleness window MUST be re-derived at
+EXECUTION time (handler relevance/execute), not only at scan time — verify
+manual_rebill.CheckRelevance covers (a) sub still past_due with this period,
+(b) still INSIDE the staleness window at execution; add the window check if
+missing, with outcome superseded ("window expired while parked") + the worker
+or a follow-up scan applies cancel+downgrade.
+
+Interplay with #365: parked backlog intents carry the account fingerprint of
+the creds that enqueued them; a cutover that also swaps to a different
+provider account parks them with the changed-account reason instead of firing
+— exactly the double-safety wanted for migration cutovers.
+
+Idempotency: enqueue is effectively-once per logical intent (tenant,
+idempotency_key); re-scans refresh pending rows rather than duplicating. A
+later full-mode scan that re-decides the same charge converges on the same
+key.
+
+## Tasks
+
+- [x] manual_rebill handler: NO CHANGE NEEDED — ExpiresAt(=window end) bounds
+      claiming and CheckRelevance re-checks past_due+period at execution
+      (verified 2026-06-12).
+- [x] jobs_dunning.go: replace the limited-mode dry_run_only demotion with
+      materialize behavior — run the scan; window-expiry path applies local
+      cancel+downgrade (existing code; respect
+      FEATURE_FLAGS_DISABLE_ENTITLEMENT_EXPIRATION) + DeferDelete enqueue;
+      charge path enqueues via intentRunner (gate parks). readonly: unchanged
+      skip. Log line states the materialize totals (parked charges, local
+      cancellations, deferred deletes).
+- [ ] verify DeferredDeleteScheduler + FailMembership paths run cleanly when
+      the resulting intents only park (no regressions from execution never
+      happening inline).
+- [x] tests: limited-mode dunning run on a seeded backlog — asserts N parked
+      manual_rebill + M parked nmi_delete intents, local cancellations +
+      downgrades applied, NO provider calls (fake NMI client asserts zero
+      writes); entitlement-expiration flag freezes the local part; flip to
+      full -> executor drains the parked set.
+- [x] docs: README safe-boot section + operations.md cutover posture — the
+      operator story becomes: migrate -> boot limited -> first dunning cycle
+      materializes the backlog -> `openrails intents` shows the real drain
+      forecast -> review/refingerprint -> MODE=full drains it. Update the
+      "All paused work is delayed, not lost" paragraph to mention the parked
+      backlog is now VISIBLE.
+
+# #367: subscription liveness sync — scheduled provider-truth convergence for SILENT lapsed subscriptions (NMI + Stripe)
+
+## Metadata
+
+**Completed:** no
+**Status:** IMPLEMENTED 2026-06-12 — SubscriptionLivenessWorker (4h, RunOnStart, skip-readonly) + ListSilentLapsedSubscriptions cohort + NMI probes (ProbeSalesByOrderID/GetRecurringLiveness, findSuccessfulSale extracted) + Stripe prober; all four converge actions through lifecycle services; 9 integration tests incl. months-stale-never-charges; awaiting review
+
+## Problem
+
+A subscription whose period lapses with NO provider signal (no rebill-success,
+no rebill-failure webhook) currently converges only when a human runs
+`reconcile`. Locally the entitlement window expires (fail-closed, good) but
+the row sits as a zombie (status=active, period in the past): dunning never
+sees it (it scans status=past_due only), so a user whose card WAS charged at
+NMI but whose webhook was lost has paid and lost access until a manual
+reconcile fix backfills (PS-4). Detection exists (audit SS-1) but is also
+manual. The migration cutover makes this acute: imported subs can be months
+past their period end with unknown remote liveness.
+
+## Design (Paul, 2026-06-12)
+
+Period end + slack passes with no signal -> reach out to the provider for
+THAT subscription's state; converge local state; route the consequence into
+the existing pipelines. Must work regardless of how stale the gap is.
+
+Mapped onto what exists — this is a state-scan worker, NOT a new queue:
+
+- COHORT (the "no signal" detector): NMI-backed (and stripe) subs with
+  status='active' AND current_period_ends_at < now - slack (slack ~1 day)
+  AND no recorded payment for the period. past_due rows are EXCLUDED — that
+  cohort is dunning's, already owned end to end. Re-derived every cycle, so
+  "queue + dedupe the check when the provider is unreachable" is inherent:
+  an unreachable provider just leaves state unchanged and the next cycle
+  retries — no durable read-queue needed (the intent ledger stays
+  mutations-only by design).
+- PROBE (read-only, two lookups reusing dunning-verify + reconcile fetcher
+  queries): (a) the period's transactions by order reference/subscription id
+  — charged? declined?; (b) the remote recurring record — alive?
+  next_billing_at?
+- CONVERGE, by probe outcome:
+  - charged       -> RenewMembership repair (same path as dunning's
+                     verified-existing-sale repair; entitlements + payment
+                     backfill, never a second charge).
+  - declined      -> FailMembership + #359 retry schedule -> dunning OWNS it
+                     from here (its manual_rebill intents, staleness window,
+                     window-expiry cancel+downgrade all apply unchanged).
+  - never attempted, remote alive with future next_billing_at (the
+    date-misalignment case) -> adopt the remote period timestamps
+    (PS-3-equivalent local write); entitlement window extends through the
+    normal renewal-shaped path only when a charge actually exists — period
+    adoption alone never grants access.
+  - remote absent/terminal -> PS-2-equivalent: cancel locally + revoke
+    subscription-sourced entitlements (no remote delete needed — it is
+    already gone; if a deletion IS needed it goes through the nmi_delete
+    intent, whose verify-then-execute finalize IS the "atomically linked"
+    two-system sync Paul described).
+- STALENESS: months-old gaps safe by construction — charging decisions stay
+  inside dunning (whose derived staleness window cancels instead of
+  charging); the liveness sync itself never charges, it only reads and
+  converges.
+- MODE GATING: probes are reads; convergence is local writes + parked
+  intents. Run under full AND limited (consistent with #366 materialize);
+  SKIP under readonly (pure observer, consistent everywhere).
+- PROVIDERS: NMI (query.php per-sub: the whole point); stripe (GET
+  /v1/subscriptions/{id} + latest invoice — lower urgency since Stripe runs
+  its own dunning and retries webhooks for days, but repairs long outages);
+  CCBill EXCLUDED (no per-record API — the existing 6h DataLink bulk worker
+  is its version of this); Solana EXCLUDED (the cranker is already
+  pull-based; there were never webhooks).
+- CADENCE: every 4-6h, RunOnStart=true (a reboot after an outage is exactly
+  when the silence cohort is largest). Alert-style summary log per pass
+  (cohort size, repaired/failed/adopted/cancelled/unreachable counts).
+
+## Interplay with #368 (renewal grace)
+
+The liveness sync is #368's RESOLVER: its charged-repair revokes grace and
+grants the real paid window; its confirmed-dead outcomes revoke grace with
+the cancellation; its period-adoption outcome (provider clock misalignment)
+re-anchors the next expectation. Grace guarantees the user keeps access
+during the uncertainty the probe is resolving.
+
+## Relationship to reconcile (#107)
+
+NOT a replacement and does not violate reconcile's manual-only decision:
+reconcile stays the full-surface manual batch tool (all PS types, findings
+ledger, admin queue, forensics). The liveness sync is the always-on, narrow,
+per-subscription slice for exactly one failure mode (inbound silence), acting
+through the normal lifecycle services so every action is evidence-logged.
+Overlap is convergent by idempotency: a reconcile fix run before/after a
+liveness pass lands on the same state.
+
+## Tasks
+
+- [x] cohort query (ListSilentLapsedSubscriptions: processor-filtered,
+      active, period_end < now - slack, no payment for period) + sqlc.
+- [x] NMI prober: reuse/extract dunning's findSuccessfulSale (charged?) +
+      QueryRecurringSubscriptions (remote liveness, next_billing_at);
+      classify charged/declined/no-attempt-alive/absent.
+- [x] converge actions via lifecycle services (RenewMembership repair,
+      FailMembership+schedule, period adoption, cancel+revoke); all
+      idempotent; respect DISABLE_ENTITLEMENT_EXPIRATION for the revoke path.
+- [x] stripe prober (GET subscription + latest invoice through stripeapi)
+      with the same classification.
+- [x] River worker + periodic registration (4-6h, RunOnStart=true), mode
+      gate (skip readonly), pass-summary log.
+- [x] tests: integration vs real PG with fake NMI server per outcome class
+      (charged-repair grants access + backfills payment exactly once;
+      declined routes into dunning state; misalignment adopts period without
+      granting access; absent cancels+revokes; unreachable leaves state
+      untouched and the next pass retries); months-stale fixture proves no
+      charge is ever issued by this worker.
+- [x] docs: operations.md (the silence cohort now has an automated owner;
+      what reconcile remains for), README one-liner near the dunning section.
+
+# #368: renewal grace windows — silence at period end extends access briefly instead of cutting it; #367 resolves the uncertainty
+
+## Metadata
+
+**Completed:** no
+**Status:** IMPLEMENTED 2026-06-12 (cap revised 72h->48h same day per Paul) — GraceSlack (half-cycle capped 48h, daily
+12h) next to DunningWindow; lifecycle pre-appends trailing grace on
+create/renew/reactivate (NMI-backed + Stripe; no-gap by tail-append; no
+resurrection grace for stale periods); deliberate period-end cancel deletes
+scheduled grace; D-3 + DB exclusion half-open semantics verified; docs
+generalized; integration tests green; awaiting review. (Original plan
+2026-06-12, Paul's product decision: "I'd rather be generous and give our
+users more access than they're entitled to, than end it early and have them
+complaining. This is the principle behind manual-dunning as well." Also:
+provider schedules are not minute-aligned with ours — NMI may think July 1
+where we think June 30.)
+
+## Problem
+
+Subscription entitlement windows end at exactly current_period_ends_at.
+Renewal appends the next window; SILENCE (no webhook either way) means access
+cuts off at the period-end second even when (a) NMI actually charged and we
+missed the webhook, (b) NMI simply bills on its own day boundary, or (c) the
+webhook is merely late. Fail-closed protects revenue but punishes paying
+users; Paul wants fail-open-for-a-bounded-window.
+
+## Design — do NOT change window semantics; generalize the existing grace primitive
+
+The entitlement timeline already has the right tool: `grace` source windows
+(used today for CCBill retry windows — docs/entitlements_timeline.md). Paid
+windows stay truthful (end_at = period end; audit S-E-4 keeps working;
+end_at stays immutable); generosity is a SEPARATE, bounded, revocable window:
+
+- On subscription creation AND every renewal (NMI-backed + stripe; CCBill
+  keeps its own retry-driven grace; solana excluded — pull-based, no
+  webhooks to miss), append alongside the paid window a trailing grace
+  window: [period_end, period_end + graceSlack], source_type='grace',
+  source_id = subscription id. Pre-appended (not granted lazily) so there is
+  NEVER an access gap regardless of worker cadence.
+- graceSlack: bounded "little extra time" — min(48h, half the billing
+  cycle) (daily cycles get 12h, monthly+ get 48h; REVISED 2026-06-12 from
+  72h per Paul: this grace is for provider rounding/late webhooks, dunning
+  has its own grace). Named constant + derived helper next to DunningWindow;
+  NOT a config knob.
+- Grace ends the moment truth arrives (same revoke-on-resolution pattern the
+  CCBill handler already implements):
+  - renewal success (webhook, dunning success, #367 charged-repair) ->
+    revoke active grace + delete future grace for the sub; the new paid
+    window (+ its own new trailing grace) takes over.
+  - confirmed dead (terminal decline, remote absent/cancelled, window-expiry
+    cancel+downgrade) -> revoke grace immediately with the rest.
+  - USER-initiATED cancel (deliberate, knows the contract) -> delete the
+    scheduled/future grace at cancel time; access ends at period end as the
+    user expects. No generosity for explicit cancellation.
+  - still-silence past the slack -> grace lapses by its own end_at;
+    fail-closed eventually. #367 keeps probing and can still repair later
+    (charged-repair re-grants the paid window).
+- DISABLE_ENTITLEMENT_EXPIRATION interplay: none needed — grace windows
+  expire by timestamp, the flag governs revocation sweeps, and revocation
+  paths above already run only on affirmative evidence.
+
+This also resolves the missed-success-webhook asymmetry: the user keeps
+access through grace while #367's probe finds the NMI charge and repairs the
+lifecycle — the paid window lands before grace runs out in any same-week
+resolution.
+
+## Tasks
+
+- [x] graceSlack helper (cadence-derived, capped) + unit tests.
+- [x] lifecycle: append trailing grace window on activate/renew for
+      NMI-backed + stripe subs; revoke/delete grace on renewal success,
+      terminal failure, and user cancel (mirror the CCBill revoke pattern);
+      idempotent (deterministic source ids per (sub, period)).
+- [x] migration interplay: imported ACTIVE subs get the same trailing grace
+      from their imported period end ONLY when period_end + slack > now
+      (months-stale imports must not get resurrection grace) — note for the
+      doujins migration audit follow-up.
+- [x] audit: confirm S-E/D-3 checks tolerate one scheduled grace window per
+      sub (overlap exclusion constraint: grace starts exactly at paid end —
+      verify half-open interval semantics).
+- [x] tests: no-gap property (paid end == grace start); revocation on each
+      resolution class; user-cancel deletes future grace; daily-cycle slack
+      cap; integration with #367 charged-repair (grace revoked, paid window
+      granted, no double access).
+- [x] docs: entitlements_timeline.md grace section generalized; README
+      lifecycle paragraph (silence now = bounded grace, then fail-closed).

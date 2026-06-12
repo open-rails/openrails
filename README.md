@@ -497,6 +497,21 @@ of slack (14 days for monthly subs, 3 days for weekly, zero for daily). Anything
 is cancelled + downgraded **without** a charge — a card that failed months ago is never
 surprise-charged by a catch-up run.
 
+**Silence is owned too (#367/#368).** Dunning covers the failures we *saw*; an active
+subscription whose period lapses with NO webhook either way (lost success webhook,
+provider billing on its own day boundary, dead webhook pipe) is covered by two
+mechanisms working together. First, access doesn't cut off at the period-end second:
+every activation/renewal pre-appends a bounded, revocable **grace window** (half the
+billing cycle, capped at 72h; 12h for daily — not a knob) that any resolution revokes,
+and that a deliberate cancel deletes (no generosity for explicit cancellation). Second,
+a 4-hourly **subscription liveness sync** probes the provider per silent subscription
+(read-only — it never charges) and converges: provider charged → membership repaired
+and the payment backfilled exactly once; declined → routed into dunning; remote alive
+with a future billing date → the remote period end is adopted (no access granted);
+remote gone → cancelled locally with entitlements revoked. Unreachable providers just
+leave state for the next pass. Runs under `full` and `limited`; skipped under
+`readonly`. Details in docs/operations.md.
+
 ### Safe boot with production credentials
 
 Booting against real processor accounts (e.g. a migration cutover or reconciliation run),
@@ -524,6 +539,118 @@ collect, due Solana subscriptions pull). Missed periods are never back-billed: a
 subscription that skipped whole periods gets exactly ONE pull with the new period anchored
 at the pull moment (the on-chain program independently caps pulls at one plan-amount per
 period), and dunning past the window cancels instead of charging.
+
+Under `MODE=limited` the paused backlog is also **visible, not just implied** (#366): the
+dunning scan still runs and *materializes* its decisions — months-stale past_due subs
+(the migration-import shape) are cancelled + downgraded locally right away (no charge;
+respects the entitlement-expiration kill switch), and in-window charges are enqueued as
+**parked** system-origin intents. So after a migration the cutover sequence is: boot
+`limited` → the first dunning cycle materializes the backlog → `openrails intents` shows
+the real drain forecast → review (and `refingerprint` if credentials moved) → `MODE=full`
+drains exactly what you saw. Under `readonly` nothing materializes — that mode stays a
+pure observer for forensics.
+
+## Consistency checks & corrections
+
+**`audit`** — checks internal DB consistency. Read-only, report-only:
+ - 30 checks across nine categories:
+   - duplicates
+   - foreign keys
+   - subscription/entitlement state
+   - payment↔entitlement
+   - payment methods
+   - admin grants
+   - temporal sanity
+
+```bash
+openrails audit                                  # full audit, table output
+openrails audit --format=json                    # json | csv | table
+openrails audit --severity=HIGH                  # CRITICAL | HIGH | MEDIUM | LOW floor
+openrails audit --category=duplicates,temporal   # repeatable filter
+openrails audit --user-id=<uuid>                 # single user
+```
+
+**`reconcile`** — local state vs. the payment processors as the source of truth.
+Pulls the payment processor's records and compares to OpenRails local records, looking for inconsistencies.
+Reports error codes from PS-1...PS-10.
+
+```bash
+openrails reconcile check --tenant=<slug>                 # advisory: fetch + diff + persist findings, zero writes
+openrails reconcile fix --tenant=<slug>                   # enforce: same diff + local convergence writes; every applied change is logged and recorded on the finding
+openrails reconcile report --tenant=<slug>                # latest run: summary, open findings, dunning forensics
+openrails reconcile report --tenant=<slug> --run=<uuid>   # a specific run
+
+# common flags:
+#   --tenant=<slug-or-id>                 (default: the seeded "default" tenant —
+#                                          on multi-tenant installs you almost always want this set)
+#   --provider=nmi,ccbill,stripe,solana   (default: all configured)
+#   --since=2026-01-01 --until=2026-06-01 (transaction window)
+#   --format=table|json
+```
+
+The same runs are exposed behind the admin API (`POST /v1/admin/reconcile/runs`);
+see [docs/operations.md](docs/operations.md) for the full finding taxonomy and
+enforcement semantics.
+
+**`intents`** — read-only view of the provider intent ledger (#358): every queued
+outbound provider mutation. Under `MODE=limited`/`readonly` this is the dry-run
+view of what the executor will drain when the mode lifts — user/admin-origin
+intents execute under `limited`, system-origin only under `full`, nothing under
+`readonly`.
+
+```bash
+openrails intents --tenant=<slug>                         # pending intents + drain forecast by mode
+openrails intents --tenant=<slug> --status=all            # full ledger history
+openrails intents --tenant=<slug> --type=nmi_delete_subscription --format=json
+
+# also: GET /v1/admin/intents?status=&processor=&type=&subscription_id=
+```
+
+Intents are bound to the provider ACCOUNT they were enqueued against (an
+account fingerprint stamped at enqueue): swapping credentials to a different
+NMI/Stripe account parks the pending queue instead of executing it against the
+wrong account. After a confirmed same-account credential change, re-stamp with
+`openrails intents refingerprint --provider=<name> --tenant=<slug> --yes`.
+See docs/operations.md ("Account guard / credential rotation").
+
+### The two pending-work queues
+
+Before a cutover (raising `MODE=limited`/`readonly` to `full`), there are exactly two
+places where deferred work accumulates. Check both:
+
+**1. What fires automatically when the mode is raised** — the provider intent ledger.
+Every outbound provider mutation OpenRails wanted but couldn't execute under the
+current mode is parked here as `pending`, and the executor drains it the moment the
+mode allows. This is the dry run for "what happens when we let it loose":
+
+```bash
+openrails intents --tenant=<slug>          # pending rows + the drain forecast footer:
+                                           #   "N execute under mode=limited, M require mode=full"
+# HTTP: GET /v1/admin/intents              (each row carries executes_under: limited|full)
+```
+
+If the forecast shows something you do NOT want to fire (e.g. a backlog of dunning
+charges), resolve it before raising the mode — the staleness window already protects
+against months-old charges, but review is cheap and irreversible mistakes aren't.
+
+**2. What never fires automatically — the admin findings queue.** Reconcile findings
+whose fix requires a *remote* mutation or a judgment call (PS-1 ghost subscriptions,
+PS-6 chargebacks, PS-8 duplicate subs needing cancel + refund at the processor) are
+queued for a human and stay `admin_pending` forever until acted on. Raising the mode
+does nothing to this queue — that is the safety design, not an oversight:
+
+```bash
+openrails reconcile report --tenant=<slug>   # open findings of the latest run, incl. the admin queue
+
+# HTTP, filterable across runs:
+#   GET  /v1/admin/reconcile/findings?admin_queue=true&status=admin_pending
+#   POST /v1/admin/reconcile/findings/:id/ack      {"notes": "cancelled dupe at NMI, refunded"}
+#   POST /v1/admin/reconcile/findings/:id/dismiss  {"notes": "false positive"}
+```
+
+Work the queue by doing the remote action yourself at the processor (cancel, refund,
+investigate), then `ack` the finding with notes; `dismiss` records a false positive.
+The next reconcile run independently verifies reality converged.
 
 ## Documentation
 

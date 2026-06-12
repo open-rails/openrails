@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/processors"
 )
 
 // Cadence-relative dunning (#359).
@@ -228,4 +229,55 @@ func BillingCycleDaysOf(price *models.Price) int {
 		return 0
 	}
 	return *price.BillingCycleDays
+}
+
+// Renewal grace windows (#368).
+//
+// Silence at period end (no renewal webhook either way) no longer cuts access
+// at the period-end second: activation and every renewal pre-append a bounded,
+// revocable `grace` entitlement window trailing the paid window, so a missed
+// success webhook, a provider billing on its own day boundary, or a merely
+// late webhook never gates a paying user. Paid windows stay truthful (end_at
+// = period end, immutable); generosity is a SEPARATE window that the #367
+// liveness sync (or any renewal/terminal resolution) revokes the moment truth
+// arrives. NOT a config knob — cadence-derived and hardcoded, like the
+// dunning schedule.
+const (
+	// graceSlackCap bounds the trailing grace window: at most 48h of silence
+	// generosity (Paul, 2026-06-12). This grace exists for provider-side
+	// schedule rounding and late webhooks — NOT for dunning, which has its
+	// own processor-driven grace; anything a rounding error can't explain
+	// within two days is the #367 prober's and dunning's problem.
+	graceSlackCap = 48 * time.Hour
+	// LivenessProbeSlack is how long past current_period_ends_at a silent
+	// active subscription must be before the #367 liveness sync treats it as
+	// part of the silent-lapsed cohort. One day tolerates provider-side day
+	// boundaries and late webhooks before any provider probe fires.
+	LivenessProbeSlack = 24 * time.Hour
+)
+
+// GraceSlack returns the duration of the trailing renewal grace window for a
+// billing cycle expressed in days: half the billing cycle, capped at 48h
+// (daily cycles get 12h, 3-day 36h, 4-day-and-longer incl. monthly 48h).
+// billingCycleDays <= 0
+// means the cycle is unknown (one-time price); the monthly cap is returned
+// defensively to match the Dunning* fallbacks.
+func GraceSlack(billingCycleDays int) time.Duration {
+	if billingCycleDays <= 0 {
+		return graceSlackCap
+	}
+	half := time.Duration(billingCycleDays) * 12 * time.Hour
+	if half > graceSlackCap {
+		return graceSlackCap
+	}
+	return half
+}
+
+// RenewalGraceEligibleProcessor reports whether a processor's subscriptions
+// get the pre-appended renewal grace window (#368): NMI-backed + Stripe.
+// CCBill keeps its own retry-driven grace (the webhook handler appends grace
+// from CCBill's nextRetryDate); Solana is pull-based — OpenRails is the only
+// puller, so there is no webhook silence to bridge.
+func RenewalGraceEligibleProcessor(processor models.Processor) bool {
+	return processors.IsNMIBackedProcessor(processor) || processor == models.ProcessorStripe
 }

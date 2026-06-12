@@ -44,6 +44,10 @@ const (
 	// dunningOutcomeWindowExpired: the missed rebill is older than the dunning
 	// window — the subscription was cancelled + downgraded without a charge.
 	dunningOutcomeWindowExpired
+	// dunningOutcomeMaterialized (#366, mode=limited): the charge decision was
+	// recorded as a parked system-origin intent on the ledger instead of
+	// executed; the scheduled executor drains it at mode=full.
+	dunningOutcomeMaterialized
 )
 
 // DunningArgs triggers a dunning run that processes all due past_due subscriptions.
@@ -89,12 +93,14 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 	if w.Intents != nil {
 		return w.Intents
 	}
+	fingerprints := intents.NewRuntimeFingerprints(w.Config, w.NMIClients)
 	runner := &intents.Runner{
-		Store: intents.NewStore(w.DB),
+		Store: intents.NewStore(w.DB).WithFingerprints(fingerprints),
 		Registry: intents.NewRegistry(
 			intents.NewManualRebillHandler(w.DB, w.Config, w.NMIClients, w.Clock, w.EventLogService),
 		),
-		Clock: w.Clock,
+		Clock:        w.Clock,
+		Fingerprints: fingerprints,
 	}
 	if w.Config != nil {
 		runner.Config = w.Config
@@ -119,13 +125,26 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		dunningMode = w.Config.GetDunningMode()
 	}
 
-	// Limited mode (#345): dunning is a PROACTIVE operation, so demote to
-	// dry-run — due subscriptions are listed with state preserved, but nothing
-	// is charged and nothing is window-expiry cancelled. "off" stays off (it is
-	// about failure semantics, not proactivity).
-	if w.Config != nil && w.Config.IsLimitedMode() && dunningMode == config.DunningModeOn {
-		log.WithContext(ctx).Warn("Limited mode: dunning demoted to dry_run_only (no charges, no window-expiry cancellations)")
-		dunningMode = config.DunningModeDryRunOnly
+	// Mode handling (#345/#366). Dunning is a PROACTIVE operation, so provider
+	// charges never fire outside mode=full — but the SCAN still runs under
+	// limited and MATERIALIZES its decisions (#366): window-expired subs are
+	// cancelled + downgraded locally NOW (the no-charge path; local writes are
+	// limited-legal, and the lifecycle respects the entitlement-expiration
+	// kill switch), and in-window charges are enqueued as parked system-origin
+	// intents the ledger executor drains at mode=full. That makes a freshly
+	// migrated backlog VISIBLE in `billing intents` instead of implicit in
+	// subscription rows. Readonly stays a pure observer: demote to
+	// dry_run_only exactly as before (forensics boots must not mutate state).
+	materialize := false
+	if w.Config != nil && dunningMode == config.DunningModeOn {
+		switch {
+		case w.Config.IsProviderReadOnly():
+			log.WithContext(ctx).Warn("Readonly mode: dunning demoted to dry_run_only (no charges, no cancellations, no intents)")
+			dunningMode = config.DunningModeDryRunOnly
+		case w.Config.IsLimitedMode():
+			materialize = true
+			log.WithContext(ctx).Warn("Limited mode: dunning materializes decisions — local window-expiry cancellations apply, charge intents enqueue PARKED (no provider writes until mode=full)")
+		}
 	}
 
 	// If dunning is completely off, skip - FailMembership handles immediate cancellation
@@ -182,13 +201,16 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	successCount := 0
 	failCount := 0
 	windowExpiredCount := 0
+	materializedCount := 0
 
 	for _, sub := range dueSubscriptions {
-		switch w.processSubscription(ctx, &sub, lifecycle, priceSvc, creditsSvc) {
+		switch w.processSubscription(ctx, &sub, lifecycle, priceSvc, creditsSvc, materialize) {
 		case dunningOutcomeSucceeded:
 			successCount++
 		case dunningOutcomeWindowExpired:
 			windowExpiredCount++
+		case dunningOutcomeMaterialized:
+			materializedCount++
 		default:
 			failCount++
 		}
@@ -199,6 +221,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		"success":        successCount,
 		"failed":         failCount,
 		"window_expired": windowExpiredCount,
+		"materialized":   materializedCount,
 	}).Info("Dunning: run completed")
 
 	return nil
@@ -211,6 +234,7 @@ func (w *DunningWorker) processSubscription(
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	priceSvc *catalog.PriceService,
 	creditsSvc *credits.CreditsService,
+	materialize bool,
 ) dunningOutcome {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
@@ -257,6 +281,54 @@ func (w *DunningWorker) processSubscription(
 	if orderReference == "" {
 		logEntry.Warn("Dunning: unable to build rebill order reference; skipping rebill")
 		return dunningOutcomeFailed
+	}
+
+	// Materialize (#366, mode=limited): record the charge decision as a
+	// parked intent and stop — no claim (claiming writes last_retry_at, which
+	// is dunning FORENSIC evidence and must keep its imported value until a
+	// real attempt), no payment-method failure policy, no lifecycle movement.
+	// The ledger executor drains the intent at mode=full; its relevance
+	// re-check and the ExpiresAt dunning-window bound guarantee a parked
+	// charge never fires stale.
+	if materialize {
+		genSub, err := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID)
+		if err != nil {
+			logEntry.WithError(err).Warn("Dunning (materialize): failed to load subscription tenant for rebill intent")
+			return dunningOutcomeFailed
+		}
+		attemptOrdinal := 0
+		if sub.RetryAttempts != nil {
+			attemptOrdinal = *sub.RetryAttempts
+		}
+		windowEnd := periodEnd.Add(window)
+		row, err := w.intentRunner().Store.Enqueue(ctx, intents.EnqueueParams{
+			TenantID:       genSub.TenantID,
+			Provider:       provider,
+			IntentType:     intents.TypeManualRebill,
+			SubscriptionID: &sub.ID,
+			Payload: intents.ManualRebillPayload{
+				SubscriptionID: sub.ID,
+				PeriodEnd:      periodEnd,
+				Processor:      provider,
+				OrderReference: orderReference,
+				Attempt:        attemptOrdinal,
+			},
+			IdempotencyKey: intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, provider, orderReference, attemptOrdinal),
+			NextAttemptAt:  w.now().UTC(),
+			Origin:         intents.OriginSystem,
+			OriginReason:   "dunning rebill attempt (materialized under mode=limited)",
+			ExpiresAt:      &windowEnd,
+		})
+		if err != nil {
+			logEntry.WithError(err).Warn("Dunning (materialize): failed to enqueue rebill intent")
+			return dunningOutcomeFailed
+		}
+		logEntry.WithFields(log.Fields{
+			"intent_id":     row.ID,
+			"intent_status": row.Status,
+			"window_end":    windowEnd,
+		}).Info("Dunning (materialize): charge intent on the ledger; executor drains it when the mode allows")
+		return dunningOutcomeMaterialized
 	}
 
 	claimed, err := w.claimDunningAttempt(ctx, sub, w.now())

@@ -368,9 +368,9 @@ const deletionIntentAction = "no admin action needed: the provider intent execut
 
 // diffOptions carries per-run diff behavior switches.
 type diffOptions struct {
-	// Materialize (enforce-only, explicit opt-in): PS-1 findings whose
-	// identity and plan both resolve unambiguously carry a materialize apply
-	// action instead of going admin_pending.
+	// Materialize (set automatically in enforce mode; advisory never writes):
+	// PS-1 findings whose identity and plan both resolve unambiguously carry
+	// a materialize apply action instead of going admin_pending.
 	Materialize bool
 }
 
@@ -493,7 +493,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		Status:            FindingStatusAdminPending,
 		RequiresAdmin:     true,
 		RemoteEvidence:    remoteEv,
-		RecommendedAction: "the processor is billing a subscription OpenRails does not know; investigate and either import it locally or cancel it at the processor (remote action, admin-only). Default (no --materialize): no auto-create",
+		RecommendedAction: "the processor is billing a subscription OpenRails does not know; investigate and either import it locally or cancel it at the processor (remote action, admin-only). Advisory runs never auto-create",
 	}
 	// Email fallback: surface candidates so the admin sees the likely owner,
 	// but never auto-link (zero or multiple matches = human decision).
@@ -510,7 +510,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 			}
 			f.LocalEvidence = map[string]any{"email_candidates": matches}
 			if len(candidates) == 1 {
-				f.RecommendedAction = "the processor bills a subscription unknown locally, but exactly one local subscription shares its email (see local_evidence); verify and link/import manually, or re-run enforce with --materialize"
+				f.RecommendedAction = "the processor bills a subscription unknown locally, but exactly one local subscription shares its email (see local_evidence); verify and link/import manually, or re-run fix (enforce materializes resolvable PS-1s)"
 			}
 		}
 	}

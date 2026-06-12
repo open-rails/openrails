@@ -598,6 +598,26 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, proc
 	return out, nil
 }
 
+// ListSilentLapsed returns the #367 silent-lapsed cohort: active
+// subscriptions on the given processors whose current period ended at or
+// before cutoff with no recorded payment at/after the lapsed boundary (Price
+// + PaymentMethod relations attached) — the subscription liveness sync's work
+// list. past_due rows are excluded by the query; that cohort is dunning's.
+func (r *SubscriptionRepo) ListSilentLapsed(ctx context.Context, processors []string, cutoff time.Time) ([]models.Subscription, error) {
+	rows, err := r.db.Gen(ctx).ListSilentLapsedSubscriptions(ctx, gen.ListSilentLapsedSubscriptionsParams{
+		Processors: processors,
+		Cutoff:     cutoff,
+	})
+	if err != nil {
+		return nil, err
+	}
+	subs, err := r.manyWithDetails(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return derefSubs(subs), nil
+}
+
 // ListPendingDeletionScheduled returns cancelled subscriptions that still
 // carry a deletion_scheduled_at marker — their deferred processor-side delete
 // never finalized (#344 follow-up boot rescan). No relations attached.

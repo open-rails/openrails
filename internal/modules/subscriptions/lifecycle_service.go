@@ -117,6 +117,68 @@ func (s *SubscriptionLifecycleService) now() time.Time {
 	return time.Now()
 }
 
+// appendRenewalGraceWindows pre-appends the #368 trailing grace window
+// [periodEnd, periodEnd + GraceSlack(cycle)) for each of the subscription's
+// entitlements (source_type='grace', source_id=subscription id), so SILENCE
+// at period end — a lost success webhook, a provider billing on its own day
+// boundary, a merely late webhook — extends access briefly instead of cutting
+// it at the period-end second. Called on activation and on every renewal for
+// grace-eligible processors (NMI-backed + Stripe; see
+// RenewalGraceEligibleProcessor), right after the paid window push, so the
+// timeline tail is the paid period end and the grace window starts exactly
+// there (no-gap property; the DB period range is half-open, so touching
+// boundaries never violate the overlap exclusion).
+//
+// Bounded + revocable by design: truth arriving revokes it (renewal success
+// revokes-then-pushes in RenewMembership; terminal failure revokes in
+// FailMembership/ExpireMembership; a deliberate cancel deletes the scheduled
+// grace in CancelMembership; the #367 liveness sync resolves the silence the
+// grace is bridging). Still-silence past the slack just lapses by end_at —
+// fail-closed eventually, no revocation sweep involved, so the
+// DISABLE_ENTITLEMENT_EXPIRATION flag needs no special handling here.
+//
+// Idempotent: re-pushing the same (sub, period) grace lands in
+// PushNewEntitlement's covered-window branch and returns the existing row.
+// Months-stale period ends (e.g. imported subscriptions) get no resurrection
+// grace: the push is skipped once periodEnd + slack is already in the past.
+// Failures are logged, never returned — generosity must not fail the renewal.
+func (s *SubscriptionLifecycleService) appendRenewalGraceWindows(
+	ctx context.Context,
+	entitlementService *entitlements.EntitlementService,
+	subscription *models.Subscription,
+	entNames []string,
+	periodEnd time.Time,
+	billingCycleDays int,
+) {
+	if entitlementService == nil || subscription == nil || periodEnd.IsZero() || len(entNames) == 0 {
+		return
+	}
+	if !RenewalGraceEligibleProcessor(subscription.Processor) {
+		return
+	}
+	notBefore := periodEnd.UTC()
+	graceEnd := notBefore.Add(GraceSlack(billingCycleDays))
+	if !graceEnd.After(s.now().UTC()) {
+		return
+	}
+	for _, entName := range entNames {
+		if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
+			UserID:      subscription.TenantSubjectID.String(),
+			Entitlement: entName,
+			NotBefore:   &notBefore,
+			EndAt:       &graceEnd,
+			SourceType:  models.EntitlementSourceGrace,
+			SourceID:    subscription.ID,
+		}); err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"entitlement":     entName,
+				"grace_end":       graceEnd,
+			}).Error("failed to pre-append renewal grace window")
+		}
+	}
+}
+
 func (s *SubscriptionLifecycleService) dispatchNotifications(ctx context.Context, notifications []*models.NotificationQueue) {
 	if s.NotificationService == nil {
 		return
@@ -407,6 +469,16 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			"entitlements":    entNames,
 		}).Info("Preparing to grant subscription entitlements")
 
+		// A membership created with an ALREADY-elapsed period (stale import /
+		// backfill shapes) grants no access window — the period is over.
+		if !periodEndsAt.UTC().After(s.now().UTC()) {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+				"period_end":      periodEndsAt,
+			}).Warn("Membership period already elapsed; creating lifecycle records without granting entitlement windows")
+			entNames = nil
+		}
+
 		for _, ent := range entNames {
 			existsBySource, err := entitlementService.ExistsBySource(ctx, models.EntitlementSourceSubscription, subscription.ID, ent)
 			if err != nil {
@@ -455,6 +527,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				"window_end":      window.EndAt,
 			}).Info("Granted subscription entitlement")
 		}
+
+		// #368: pre-append the trailing renewal grace window right behind the
+		// paid window, so silence at the first renewal never gates the user.
+		s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleDaysOf(price))
 	}
 
 	notification := &models.NotificationQueue{
@@ -749,6 +825,19 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		if entitlementsSpec != nil {
 			notBefore := periodStartsAt.UTC()
 			endAt := periodEndsAt.UTC()
+			// A renewal whose period is ALREADY entirely elapsed (a months-
+			// stale backfill repair, e.g. the #367 liveness sync walking
+			// charged-but-silent periods forward) grants no access window —
+			// the period is over. Skipping the push (instead of letting
+			// PushNewEntitlement error on the uncoverable past window) keeps
+			// the payment backfill + period advance committing.
+			grantWindows := endAt.After(s.now().UTC())
+			if !grantWindows {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+					"period_end":      endAt,
+				}).Warn("Renewal period already elapsed; advancing lifecycle without granting entitlement windows")
+			}
 			for entName := range entitlementsSpec {
 				// If the subscription had processor-driven grace windows (e.g. CCBill dunning),
 				// remove them before pushing the next paid window. Otherwise, the grace tail can
@@ -765,6 +854,9 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 					return fmt.Errorf("failed to clear grace entitlement %s on renewal: %w", entName, err)
 				}
 
+				if !grantWindows {
+					continue
+				}
 				if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
 					UserID:      subscription.TenantSubjectID.String(),
 					Entitlement: entName,
@@ -776,6 +868,15 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 					return fmt.Errorf("failed to grant renewal entitlement %s: %w", entName, err)
 				}
 			}
+
+			// #368: the old period's grace was revoked above and the new paid
+			// window pushed; pre-append the NEXT trailing grace window so the
+			// next renewal's silence is bridged too.
+			entNames := make([]string, 0, len(entitlementsSpec))
+			for entName := range entitlementsSpec {
+				entNames = append(entNames, entName)
+			}
+			s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleDaysOf(price))
 		}
 
 		// Handle entitlements for downgrade
@@ -988,6 +1089,10 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 			}
 		}
 
+		// #368: a reactivated membership renews like any other — pre-append
+		// the trailing grace window behind the restored paid window.
+		s.appendRenewalGraceWindows(ctx, entitlementService, subscription, entNames, periodEndsAt, BillingCycleDaysOf(price))
+
 		reactivated = subscription
 		return nil
 	})
@@ -1132,6 +1237,17 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 					"subscription_id": subscription.ID,
 				}).Error("failed to revoke entitlements during cancellation")
+			}
+		} else if entSvc != nil {
+			// #368: a deliberate period-end cancellation keeps paid access
+			// until the term ends but forfeits silence generosity — the
+			// pre-appended renewal grace window (scheduled to start at period
+			// end) is deleted NOW, so access ends exactly at the period end
+			// the user expects. No generosity for explicit cancellation.
+			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.TenantSubjectID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceGrace); err != nil {
+				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+					"subscription_id": subscription.ID,
+				}).Error("failed to delete scheduled grace windows during period-end cancellation")
 			}
 		}
 
@@ -1513,16 +1629,13 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 
-		// #344 follow-up (pre-existing gap): a terminal payment-failure
-		// cancellation of an NMI-backed subscription must also stop the
-		// processor-side recurring subscription, or NMI keeps retrying it
-		// monthly forever. This was previously only handled by the dunning
-		// worker's window-expiry path; webhook-driven dunning exhaustion
-		// stranded the remote sub. Persist the durable DeletionScheduledAt
-		// marker inside the tx (so a lost job is recoverable via the boot
-		// rescan / #107 reconciliation) and enqueue the deferred delete after
-		// commit. The NMI delete worker plus the #344 client-level kill switch
-		// then govern actual execution.
+		// #344 follow-up: a terminal payment-failure cancellation of an
+		// NMI-backed subscription must also stop the processor-side recurring
+		// subscription, or NMI keeps retrying it monthly forever. The
+		// DeletionScheduledAt marker AND the nmi_delete intent are both
+		// written inside this transaction (atomic — no crash window between
+		// marker and intent). The intent executor plus the #344 client-level
+		// kill switch then govern actual execution.
 		if subscription.Status == models.StatusCancelled &&
 			processors.IsNMIBackedProcessor(subscription.Processor) &&
 			subscription.ProcessorSubscriptionID != "" {
@@ -1545,6 +1658,16 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				"subscription_id": subscription.ID,
 			}).Error("Failed to update subscription during failure flow")
 			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+
+		// Terminal cancellation with a remote NMI schedule: enqueue the
+		// deferred delete intent IN THIS TRANSACTION so the
+		// DeletionScheduledAt marker and the intent commit atomically (no
+		// crash window between them).
+		if scheduleDeferredDelete {
+			if err := s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, subscription.TenantSubjectID.String(), subscription.ID, now); err != nil {
+				return fmt.Errorf("enqueue deferred NMI delete with cancellation: %w", err)
+			}
 		}
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscription_id": subscription.ID,
@@ -1651,17 +1774,12 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	// pending delete discoverable (startup marker sweep / #107
 	// reconciliation), so we log instead of failing the flow.
 	if scheduleDeferredDelete {
-		if err := s.deferDelete.ScheduleNMIDelete(ctx, userID, subscriptionID, s.now()); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"subscription_id": subscriptionID,
-				"user_id":         userID,
-			}).Error("failed to schedule deferred NMI delete after terminal payment failure; marker persisted for rescan/reconciliation")
-		} else {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": subscriptionID,
-				"user_id":         userID,
-			}).Info("scheduled deferred NMI delete after terminal payment failure")
-		}
+		// Enqueued inside the failure-flow transaction above; this is just
+		// the operator-visible confirmation.
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id": subscriptionID,
+			"user_id":         userID,
+		}).Info("scheduled deferred NMI delete after terminal payment failure (committed with the cancellation)")
 	}
 
 	s.dispatchNotifications(ctx, notifications)
