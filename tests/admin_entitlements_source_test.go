@@ -113,7 +113,10 @@ func TestAdminEntitlementAppendsAfterLatestEnd(t *testing.T) {
 
 	require.Equal(t, models.EntitlementSourceAdmin, created.SourceType)
 	require.NotNil(t, created.SourceID)
-	require.Equal(t, subEnd, created.StartAt)
+	// WithinDuration instead of Equal: these times cross a DB + JSON round
+	// trip, which can change the time.Time internal representation (location
+	// pointer) even when the instants are identical.
+	require.WithinDuration(t, subEnd, created.StartAt, 0)
 	require.NotNil(t, created.EndAt)
-	require.Equal(t, subEnd.Add(7*24*time.Hour), *created.EndAt)
+	require.WithinDuration(t, subEnd.Add(7*24*time.Hour), *created.EndAt, 0)
 }

@@ -12,7 +12,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/tenant"
 )
 
@@ -20,6 +19,20 @@ func (suite *TestContainerSuite) ensureTenantSubject(ctx context.Context, userID
 	suite.t.Helper()
 	tenantSubjectID, err := dbrepo.EnsureTenantSubjectID(ctx, suite.Pool, tenant.DefaultID.UUID(), userID)
 	require.NoError(suite.t, err, "Failed to ensure tenant subject")
+	return tenantSubjectID
+}
+
+// resolveTenantSubject is the read-side counterpart of ensureTenantSubject: it
+// resolves a test userID to its payable tenant_subject_id WITHOUT creating a
+// row. Non-UUID test user IDs (e.g. "test-user-ab12cd34") are stored under the
+// legacy-user issuer with a GENERATED subject id by the write path, so read
+// helpers must look the mapping up in the database — the deterministic
+// identity.TenantSubjectIDFromString derivation only works for UUID user IDs
+// and silently yields uuid.Nil (empty result sets) for everything else (#363).
+func (suite *TestContainerSuite) resolveTenantSubject(ctx context.Context, userID string) uuid.UUID {
+	suite.t.Helper()
+	tenantSubjectID, err := dbrepo.ResolveTenantSubjectID(ctx, suite.Pool, tenant.DefaultID.UUID(), userID)
+	require.NoError(suite.t, err, "Failed to resolve tenant subject")
 	return tenantSubjectID
 }
 
@@ -891,7 +904,7 @@ func (suite *TestContainerSuite) GetSubscription(id uuid.UUID) *models.Subscript
 func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*models.Subscription {
 	suite.t.Helper()
 	ctx := context.Background()
-	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
+	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	repo := dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB)
 	var subs []*models.Subscription
@@ -910,7 +923,7 @@ func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*m
 func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Payment {
 	suite.t.Helper()
 	ctx := context.Background()
-	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
+	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	repo := dbrepo.NewPaymentRepo(suite.App.Runtime.DB)
 	var payments []*models.Payment
@@ -929,7 +942,7 @@ func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Pa
 func (suite *TestContainerSuite) GetPaymentMethodsByUserID(userID string) []*models.PaymentMethod {
 	suite.t.Helper()
 	ctx := context.Background()
-	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
+	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	repo := dbrepo.NewPaymentMethodRepo(suite.App.Runtime.DB)
 	var pms []*models.PaymentMethod
@@ -965,7 +978,7 @@ func (suite *TestContainerSuite) GetEntitlementsByUserID(userID string) []*model
 	suite.t.Helper()
 	ctx := context.Background()
 	now := time.Now()
-	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
+	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	rows := suite.QueryEntitlements(ctx, `
 		WHERE tenant_subject_id = $1
@@ -986,7 +999,7 @@ func (suite *TestContainerSuite) GetEntitlementsByUserID(userID string) []*model
 func (suite *TestContainerSuite) CountUnreadNotifications(userID string) int {
 	suite.t.Helper()
 	ctx := context.Background()
-	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
+	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	return suite.Count(ctx,
 		"SELECT COUNT(*) FROM billing.notification_queue WHERE tenant_subject_id = $1 AND seen = false",
@@ -1050,7 +1063,7 @@ func (suite *TestContainerSuite) SeedCCBillTestDataWithSubscription() *models.Su
 func (suite *TestContainerSuite) CleanupSubscriptionsForUser(userID string) {
 	suite.t.Helper()
 	ctx := context.Background()
-	tenantSubjectID := identity.TenantSubjectIDFromString(userID).UUID()
+	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	// Also delete entitlements for this user
 	_, _ = suite.Pool.Exec(ctx,

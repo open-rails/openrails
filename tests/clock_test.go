@@ -332,9 +332,12 @@ func TestLifecycleServiceUsesMockClock(t *testing.T) {
 		updatedSub, err := suite.App.Runtime.SubscriptionService.GetByID(ctx, sub.ID)
 		require.NoError(t, err)
 
-		// Verify cancellation timestamp uses the mock clock
+		// Verify cancellation timestamp uses the mock clock.
+		// WithinDuration instead of Equal: the DB round-trip changes the
+		// time.Time internal representation (location pointer), which fails
+		// require.Equal/reflect.DeepEqual even when the instants are identical.
 		require.NotNil(t, updatedSub.CancelledAt)
-		assert.Equal(t, cancelTime.Truncate(time.Second), updatedSub.CancelledAt.Truncate(time.Second),
+		assert.WithinDuration(t, cancelTime, *updatedSub.CancelledAt, 0,
 			"CancelMembership should use mock clock for CancelledAt timestamp")
 	})
 }
