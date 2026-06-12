@@ -64,15 +64,12 @@ func runBootstrapApply(cmd *cobra.Command, opts bootstrapApplyOptions) error {
 		return fmt.Errorf("config not loaded; bootstrap apply requires --config")
 	}
 
-	// --exhaustive archives provider-side catalog objects — a provider WRITE.
-	// Catalog provider writes are gated by the operating mode (#346), so refuse
-	// UP FRONT under limited/readonly rather than half-running (the readonly
-	// wire chokes would reject the POSTs anyway, but loudly and mid-apply).
-	// Default extras detection/logging is read-only and runs in every mode.
-	if opts.exhaustive && !opts.dryRun && cfg.IsLimitedMode() {
-		return fmt.Errorf("bootstrap apply --exhaustive refused: mode=%s disables catalog provider writes, so provider-side extras cannot be archived; re-run under mode=full (without --exhaustive, extras are still detected and logged read-only)", cfg.GetMode())
-	}
-
+	// --exhaustive archives provider-side catalog objects — provider WRITES
+	// that flow through the provider intent ledger (#358) as ADMIN-origin
+	// intents (the flag is an explicit human request). No up-front mode
+	// refusal: under mode=limited the intents execute; under readonly they
+	// PARK durably and the server's scheduled executor drains them when the
+	// mode lifts. Default extras detection/logging is read-only in every mode.
 	embeddedApp, err := embedded.New(embedded.Options{Config: cfg})
 	if err != nil {
 		return fmt.Errorf("bootstrap application: %w", err)
@@ -164,8 +161,9 @@ func resolveBootstrapManifestPath(_ *config.Config) string {
 // EXTRAS — products/prices/plans on the provider account that are NOT in the
 // local catalog (#357). By default extras are only logged (read-only; they are
 // ignorable and never touched). Under exhaustive=true the OpenRails-marked
-// extras are ARCHIVED (never deleted): Stripe active=false; NMI/CCBill surface
-// pending manual actions. Foreign provider objects are never touched.
+// extras are ARCHIVED (never deleted) through the provider intent ledger
+// (#358): Stripe active=false; Solana plans sunset on-chain; NMI/CCBill
+// surface pending manual actions. Foreign provider objects are never touched.
 func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BootstrapManifest, out io.Writer, dryRun bool, exhaustive bool) error {
 	if len(manifest.Tenants) > 0 {
 		if dryRun {
@@ -252,8 +250,8 @@ func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out i
 		return nil
 	}
 
-	fmt.Fprintf(out, "\ncatalog extras: %d provider-side object(s) not in the local catalog (scanned %d stripe products, %d stripe prices, %d nmi plans)\n",
-		len(report.Extras), report.ScannedStripeProducts, report.ScannedStripePrices, report.ScannedNMIPlans)
+	fmt.Fprintf(out, "\ncatalog extras: %d provider-side object(s) not in the local catalog (scanned %d stripe products, %d stripe prices, %d nmi plans, %d solana plans)\n",
+		len(report.Extras), report.ScannedStripeProducts, report.ScannedStripePrices, report.ScannedNMIPlans, report.ScannedSolanaPlans)
 	for _, e := range report.Extras {
 		marker := "foreign — never touched"
 		if e.Owned {
@@ -286,8 +284,17 @@ func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out i
 		return nil
 	}
 	outcomes, archiveErr := svc.ArchiveCatalogExtras(ctx, report.Extras)
+	var archived, parked, failedN int
 	fmt.Fprintf(out, "\nexhaustive archive outcomes:\n")
 	for _, o := range outcomes {
+		switch o.Action {
+		case billingservice.CatalogExtraArchived:
+			archived++
+		case billingservice.CatalogExtraArchiveParked:
+			parked++
+		case billingservice.CatalogExtraArchiveFailed:
+			failedN++
+		}
 		fmt.Fprintf(out, "  - %s %s %s: %s (%s)\n", o.Extra.Provider, o.Extra.ObjectType, o.Extra.ExternalID, o.Action, o.Detail)
 		log.WithFields(log.Fields{
 			"event":       "catalog_extra_archive",
@@ -296,8 +303,11 @@ func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out i
 			"external_id": o.Extra.ExternalID,
 			"action":      string(o.Action),
 			"detail":      o.Detail,
+			"intent_id":   o.IntentID,
 		}).Info("bootstrap apply --exhaustive: catalog extra archive outcome")
 	}
+	fmt.Fprintf(out, "exhaustive summary: %d archived, %d parked (durable — the intent executor drains them; NOT an error), %d failed\n",
+		archived, parked, failedN)
 	return archiveErr
 }
 

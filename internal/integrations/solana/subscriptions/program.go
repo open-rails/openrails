@@ -28,6 +28,7 @@ const (
 	discInitSubscriptionAuthority byte = 0
 	discRevokeDelegation          byte = 3
 	discCreatePlan                byte = 7
+	discUpdatePlan                byte = 8
 	discTransferSubscription      byte = 10
 	discSubscribe                 byte = 11
 	discCancelSubscription        byte = 12

@@ -30,6 +30,15 @@ import (
 //	data.metadataUri   byte[128]  (utf8, zero-padded)
 const planAccountDiscriminator byte = 1
 
+// Plan statuses (PlanAccount.Status and updatePlan's status argument), from the
+// IDL planStatus enum. sunset blocks NEW subscribe calls (the program rejects
+// them with "Plan is in sunset status") while existing subscriptions continue
+// to bill — the on-chain equivalent of Stripe's active=false archive.
+const (
+	PlanStatusSunset uint8 = 0
+	PlanStatusActive uint8 = 1
+)
+
 const (
 	pubkeyLen      = 32
 	metadataURILen = 128

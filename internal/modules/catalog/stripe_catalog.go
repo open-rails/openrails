@@ -171,6 +171,10 @@ type UpdateProductParams struct {
 	Active      *bool
 	// Metadata replaces the keys provided; to clear a key set its value to "".
 	Metadata map[string]string
+	// IdempotencyKey, when set, is sent as the Stripe Idempotency-Key header so
+	// a replayed mutation (e.g. an archive intent's lease reclaim, #358) is
+	// deduplicated by Stripe itself.
+	IdempotencyKey string
 }
 
 // UpdateProduct propagates mutable fields to an existing Stripe Product.
@@ -203,7 +207,7 @@ func (s *StripeCatalogService) UpdateProduct(ctx context.Context, stripeProductI
 	if len(form) == 0 {
 		return nil
 	}
-	_, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products/"+url.PathEscape(id), form, "")
+	_, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products/"+url.PathEscape(id), form, params.IdempotencyKey)
 	return err
 }
 
@@ -214,6 +218,8 @@ type UpdatePriceParams struct {
 	Active    *bool
 	LookupKey *string // set to "" to clear
 	Metadata  map[string]string
+	// IdempotencyKey: see UpdateProductParams.IdempotencyKey.
+	IdempotencyKey string
 }
 
 // UpdatePrice propagates mutable fields to an existing Stripe Price.
@@ -247,7 +253,7 @@ func (s *StripeCatalogService) UpdatePrice(ctx context.Context, stripePriceID st
 	if len(form) == 0 {
 		return nil
 	}
-	_, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices/"+url.PathEscape(id), form, "")
+	_, err := s.stripePostForm(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices/"+url.PathEscape(id), form, params.IdempotencyKey)
 	return err
 }
 
@@ -287,6 +293,63 @@ func (s *StripeCatalogService) RetrieveProduct(ctx context.Context, stripeProduc
 		return nil, err
 	}
 	return &out, nil
+}
+
+// FindProduct fetches a Stripe Product by ID, with absence as a first-class
+// answer: a 404 returns (nil, false, nil) so verify-then-execute callers (#358
+// archive intents) can distinguish "gone" from "read failed".
+func (s *StripeCatalogService) FindProduct(ctx context.Context, stripeProductID string) (*StripeProduct, bool, error) {
+	stripeProc := s.Config.GetStripeProcessor()
+	if stripeProc == nil || stripeProc.SecretKey == "" {
+		return nil, false, fmt.Errorf("stripe is not configured")
+	}
+	id := strings.TrimSpace(stripeProductID)
+	if id == "" {
+		return nil, false, fmt.Errorf("stripe_product_id required")
+	}
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/products/"+url.PathEscape(id))
+	if err != nil {
+		return nil, false, err
+	}
+	if status == http.StatusNotFound {
+		return nil, false, nil
+	}
+	if status >= 300 {
+		return nil, false, fmt.Errorf("stripe product retrieve failed: %s", parseStripeError(body))
+	}
+	var out StripeProduct
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, false, err
+	}
+	return &out, true, nil
+}
+
+// FindPrice fetches a Stripe Price by ID; 404 returns (nil, false, nil). See
+// FindProduct.
+func (s *StripeCatalogService) FindPrice(ctx context.Context, stripePriceID string) (*StripePrice, bool, error) {
+	stripeProc := s.Config.GetStripeProcessor()
+	if stripeProc == nil || stripeProc.SecretKey == "" {
+		return nil, false, fmt.Errorf("stripe is not configured")
+	}
+	id := strings.TrimSpace(stripePriceID)
+	if id == "" {
+		return nil, false, fmt.Errorf("stripe_price_id required")
+	}
+	body, status, err := s.stripeGet(ctx, stripeProc.SecretKey, "https://api.stripe.com/v1/prices/"+url.PathEscape(id))
+	if err != nil {
+		return nil, false, err
+	}
+	if status == http.StatusNotFound {
+		return nil, false, nil
+	}
+	if status >= 300 {
+		return nil, false, fmt.Errorf("stripe price retrieve failed: %s", parseStripeError(body))
+	}
+	var out StripePrice
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, false, err
+	}
+	return &out, true, nil
 }
 
 // StripePrice is the subset of Stripe's Price resource OpenRails reads.

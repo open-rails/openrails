@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
 // Issue #208 declarative-provider primitives.
@@ -187,13 +188,10 @@ func priceCycleToken(billingCycleDays *int) string {
 // Format: "<product_slug>.<currency>.<unit_amount>.<cycle>" where <cycle> is the
 // billing_cycle_days for a recurring price or "onetime" for a one-time price.
 // Example: "pro.usd.2900.30" or "pro.usd.500.onetime".
+// Canonical implementation: catalog.OpenRailsPriceContentKey (shared with the
+// #358 archive-intent relevance checks).
 func openRailsPriceContentKey(productSlug, currency string, unitAmount int64, billingCycleDays *int) string {
-	return strings.Join([]string{
-		strings.TrimSpace(productSlug),
-		strings.ToLower(strings.TrimSpace(currency)),
-		strconv.FormatInt(unitAmount, 10),
-		priceCycleToken(billingCycleDays),
-	}, ".")
+	return catalog.OpenRailsPriceContentKey(productSlug, currency, unitAmount, billingCycleDays)
 }
 
 // internalStripeLookupKey is the deterministic Stripe lookup_key OpenRails

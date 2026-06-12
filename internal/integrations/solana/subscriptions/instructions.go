@@ -64,6 +64,45 @@ func encodeCreatePlan(p CreatePlanParams) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// UpdatePlanParams are the inputs for update_plan (discriminator 8): the plan's
+// MUTABLE fields — status, endTs, pullers, metadataUri (the IDL updatePlanData
+// struct). The core terms (amount / period / mint / destinations) are immutable.
+// The program overwrites ALL four mutable fields, so callers must echo the
+// current on-chain values for anything they do not intend to change.
+type UpdatePlanParams struct {
+	Owner   solanago.PublicKey // signer; must be the plan's on-chain owner
+	PlanPDA solanago.PublicKey // writable
+
+	Status      uint8 // PlanStatusSunset | PlanStatusActive
+	EndTs       int64
+	Pullers     [4]solanago.PublicKey
+	MetadataURI string // <= 128 bytes
+}
+
+// BuildUpdatePlan builds the update_plan instruction (IDL: updatePlan).
+// Accounts (IDL order): owner(s), planPda(w). Data: u8 discriminator,
+// updatePlanData{status u8, endTs i64, pullers [4]pubkey, metadataUri byte[128]}.
+func BuildUpdatePlan(p UpdatePlanParams) (solanago.Instruction, error) {
+	var buf bytes.Buffer
+	buf.WriteByte(discUpdatePlan)
+	buf.WriteByte(p.Status)
+	buf.Write(i64le(p.EndTs))
+	for _, k := range p.Pullers {
+		buf.Write(k.Bytes())
+	}
+	uri, err := writeFixedString(p.MetadataURI, metadataURILen)
+	if err != nil {
+		return nil, err
+	}
+	buf.Write(uri)
+
+	accounts := solanago.AccountMetaSlice{
+		solanago.NewAccountMeta(p.Owner, false, true),
+		solanago.NewAccountMeta(p.PlanPDA, true, false),
+	}
+	return solanago.NewInstruction(ProgramID, accounts, buf.Bytes()), nil
+}
+
 // InitSubscriptionAuthorityParams are inputs for initialize_subscription_authority (0).
 type InitSubscriptionAuthorityParams struct {
 	Owner                 solanago.PublicKey // signer + writable

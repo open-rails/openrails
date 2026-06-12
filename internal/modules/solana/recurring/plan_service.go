@@ -2,6 +2,7 @@ package recurring
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -145,11 +146,12 @@ func (h *PlanHandle) ToProcessorConfig() map[string]string {
 // closed: a non-allowlisted token, an out-of-range period, or a zero amount are
 // rejected before any on-chain action.
 //
-// Immutability reality (issue #254). The deployed solana-program/subscriptions
-// program publishes IMMUTABLE plans: it exposes ONLY create_plan — there is no
-// update_plan/delete_plan instruction (confirmed: subscriptions.BuildCreatePlan
-// exists, but no update/delete builder). So PublishPlan never mutates an existing
-// plan. Instead, when a reader is wired, it is idempotent-or-reject:
+// Immutability reality (issue #254, refined by #357). The deployed
+// solana-program/subscriptions program publishes plans whose CORE TERMS
+// (mint/amount/period) are IMMUTABLE: update_plan (see SunsetPlan) touches only
+// the mutable status/end_ts/pullers/metadata fields, never the terms. So
+// PublishPlan never mutates an existing plan. Instead, when a reader is wired,
+// it is idempotent-or-reject:
 //
 //   - Plan PDA absent            -> submit create_plan (the normal path).
 //   - Plan PDA present, terms MATCH (mint/amount/period) -> idempotent no-op
@@ -351,6 +353,47 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		MerchantAddress: merchant.String(),
 		Signature:       sig.String(),
 	}, nil
+}
+
+// ErrPlanSunsetNotOwned: the plan account at the PDA is owned by a different
+// merchant than this tenant's — sunsetting someone else's plan is refused
+// before any on-chain action (and would fail the program's owner check anyway).
+var ErrPlanSunsetNotOwned = errors.New("recurring: plan is not owned by this tenant's merchant; refusing to sunset")
+
+// SunsetPlan flips an on-chain plan to status=sunset via update_plan (#357/#358):
+// the program then rejects NEW subscribe calls ("Plan is in sunset status")
+// while existing subscriptions keep billing — the exact archive semantics of
+// Stripe's active=false. The caller supplies the CURRENT decoded plan account
+// (it has already verified the plan exists and is not yet sunset); its mutable
+// fields are echoed so the update changes status and nothing else. Signed by
+// the tenant's merchant key, which must equal the plan's owner.
+func (s *PlanService) SunsetPlan(ctx context.Context, tenantID tenant.ID, planPDA solanago.PublicKey, current *subscriptions.PlanAccount) (signature string, err error) {
+	if current == nil {
+		return "", fmt.Errorf("recurring: sunset requires the current plan account")
+	}
+	merchant, err := s.submitter.MerchantAddress(ctx, tenantID)
+	if err != nil {
+		return "", fmt.Errorf("recurring: resolve tenant merchant address: %w", err)
+	}
+	if !current.Owner.Equals(merchant) {
+		return "", fmt.Errorf("%w (plan owner %s, tenant merchant %s)", ErrPlanSunsetNotOwned, current.Owner, merchant)
+	}
+	ix, err := subscriptions.BuildUpdatePlan(subscriptions.UpdatePlanParams{
+		Owner:       merchant,
+		PlanPDA:     planPDA,
+		Status:      subscriptions.PlanStatusSunset,
+		EndTs:       current.EndTs,
+		Pullers:     current.Pullers,
+		MetadataURI: current.MetadataURI,
+	})
+	if err != nil {
+		return "", fmt.Errorf("recurring: build update_plan: %w", err)
+	}
+	sig, err := s.submitter.Submit(ctx, tenantID, []solanago.Instruction{ix})
+	if err != nil {
+		return "", fmt.Errorf("recurring: submit update_plan (sunset): %w", err)
+	}
+	return sig.String(), nil
 }
 
 // ensureReceivingATA idempotently provisions owner's associated token account for

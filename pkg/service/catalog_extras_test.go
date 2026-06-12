@@ -2,21 +2,24 @@ package service
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // -- fixtures -----------------------------------------------------------------
@@ -205,75 +208,54 @@ func TestDetectNMIExtras_OverQueryAPI(t *testing.T) {
 	}
 }
 
-// -- archive: mode refusal -------------------------------------------------------
+// -- archive: through the provider intent ledger (#358 phase D) -------------------
 
-func TestArchiveCatalogExtras_RefusesUnderLimitedAndReadonly(t *testing.T) {
-	for _, mode := range []string{config.ModeLimited, config.ModeReadOnly} {
-		svc := &Service{rt: &app.Runtime{Config: &config.Config{Mode: mode}}}
-		_, err := svc.ArchiveCatalogExtras(context.Background(), []CatalogExtra{
-			{Provider: "stripe", ObjectType: "price", ExternalID: "price_x", Owned: true, Active: true},
-		})
-		if !errors.Is(err, ErrCatalogExtrasArchiveDisabled) {
-			t.Errorf("mode=%s: expected ErrCatalogExtrasArchiveDisabled, got %v", mode, err)
-		}
+// fakeIntentExecutor records every EnqueueAndExecute call and scripts the
+// returned intent row per intent type.
+type fakeIntentExecutor struct {
+	calls  []intents.EnqueueParams
+	script func(p intents.EnqueueParams) gen.BillingProviderIntent
+	err    error
+}
+
+func (f *fakeIntentExecutor) EnqueueAndExecute(_ context.Context, p intents.EnqueueParams) (gen.BillingProviderIntent, error) {
+	f.calls = append(f.calls, p)
+	if f.err != nil {
+		return gen.BillingProviderIntent{}, f.err
+	}
+	if f.script != nil {
+		return f.script(p), nil
+	}
+	return gen.BillingProviderIntent{
+		ID:         uuid.New(),
+		IntentType: p.IntentType,
+		Provider:   p.Provider,
+		Status:     intents.StatusSucceeded,
+	}, nil
+}
+
+func succeededRow(p intents.EnqueueParams, evidence string) gen.BillingProviderIntent {
+	return gen.BillingProviderIntent{
+		ID: uuid.New(), IntentType: p.IntentType, Provider: p.Provider,
+		Status: intents.StatusSucceeded, ResultEvidence: []byte(evidence),
 	}
 }
 
-func TestArchiveCatalogExtras_AllowedUnderFullMode(t *testing.T) {
-	// Full mode passes the gate; with stripe unconfigured the only stripe
-	// outcome is a per-object failure (not a refusal), proving the gate is
-	// mode-driven, not config-driven.
-	svc := &Service{rt: &app.Runtime{Config: &config.Config{Mode: config.ModeFull}}}
-	outcomes, err := svc.ArchiveCatalogExtras(context.Background(), []CatalogExtra{
-		{Provider: "mobius", ObjectType: "plan", ExternalID: "retired-usd-900-30", Owned: true, Active: true},
-	})
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if len(outcomes) != 1 || outcomes[0].Action != CatalogExtraManualActionRequired {
-		t.Fatalf("expected manual_action_required for the NMI plan, got %+v", outcomes)
-	}
-}
-
-// -- archive: per-provider calls + ownership guard --------------------------------
-
-// fakeStripeArchiver records every archive call so tests can assert exactly
-// which objects were touched and with what params.
-type fakeStripeArchiver struct {
-	productCalls map[string]catalog.UpdateProductParams
-	priceCalls   map[string]catalog.UpdatePriceParams
-	err          error
-}
-
-func newFakeStripeArchiver() *fakeStripeArchiver {
-	return &fakeStripeArchiver{
-		productCalls: map[string]catalog.UpdateProductParams{},
-		priceCalls:   map[string]catalog.UpdatePriceParams{},
-	}
-}
-
-func (f *fakeStripeArchiver) UpdateProduct(_ context.Context, id string, params catalog.UpdateProductParams) error {
-	f.productCalls[id] = params
-	return f.err
-}
-
-func (f *fakeStripeArchiver) UpdatePrice(_ context.Context, id string, params catalog.UpdatePriceParams) error {
-	f.priceCalls[id] = params
-	return f.err
-}
-
-func TestArchiveCatalogExtrasWith_ArchivesOnlyOwnedStripeObjects(t *testing.T) {
-	archiver := newFakeStripeArchiver()
+func TestArchiveCatalogExtrasVia_EnqueuesOnlyOwnedActiveObjects(t *testing.T) {
+	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.BillingProviderIntent {
+		return succeededRow(p, `{"archived":true}`)
+	}}
 	extras := []CatalogExtra{
-		{Provider: "stripe", ObjectType: "price", ExternalID: "price_ours", Owned: true, Active: true},
-		{Provider: "stripe", ObjectType: "product", ExternalID: "prod_ours", Owned: true, Active: true},
+		{Provider: "stripe", ObjectType: "price", ExternalID: "price_ours", Owned: true, Active: true, MarkerKey: "retired.usd.900.30"},
+		{Provider: "stripe", ObjectType: "product", ExternalID: "prod_ours", Owned: true, Active: true, MarkerKey: "retired"},
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_foreign", Owned: false, Active: true},
 		{Provider: "stripe", ObjectType: "product", ExternalID: "prod_foreign", Owned: false, Active: true},
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_ours_inactive", Owned: true, Active: false},
 		{Provider: "mobius", ObjectType: "plan", ExternalID: "retired-usd-900-30", Owned: true, Active: true},
 		{Provider: "mobius", ObjectType: "plan", ExternalID: "legacy-vip-plan", Owned: false, Active: true},
+		{Provider: "solana", ObjectType: "plan", ExternalID: "5tzFkiKscXHK5ZXCGbXZxdw7gTfCvqSGpHGxVJD6oxBd", Owned: true, Active: true},
 	}
-	outcomes, err := archiveCatalogExtrasWith(context.Background(), archiver, extras)
+	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, tenant.DefaultID.UUID(), time.Now().UTC(), extras)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -281,15 +263,34 @@ func TestArchiveCatalogExtrasWith_ArchivesOnlyOwnedStripeObjects(t *testing.T) {
 		t.Fatalf("expected %d outcomes, got %d", len(extras), len(outcomes))
 	}
 
-	// Exactly the OWNED ACTIVE stripe objects were archived, with active=false.
-	if len(archiver.priceCalls) != 1 || len(archiver.productCalls) != 1 {
-		t.Fatalf("expected exactly one price + one product archive call, got prices=%v products=%v", archiver.priceCalls, archiver.productCalls)
+	// Exactly the OWNED ACTIVE stripe objects + the solana plan became intents.
+	if len(exec.calls) != 3 {
+		t.Fatalf("expected exactly 3 archive intents, got %d: %+v", len(exec.calls), exec.calls)
 	}
-	if p, ok := archiver.priceCalls["price_ours"]; !ok || p.Active == nil || *p.Active != false {
-		t.Errorf("price_ours must be archived with active=false, got %+v", p)
+	byType := map[string]intents.EnqueueParams{}
+	for _, c := range exec.calls {
+		byType[c.IntentType] = c
+		if c.Origin != intents.OriginAdmin {
+			t.Errorf("%s: archive intents must be ADMIN-origin (the --exhaustive flag is a human request), got %q", c.IntentType, c.Origin)
+		}
+		if c.TenantID != tenant.DefaultID.UUID() {
+			t.Errorf("%s: tenant not stamped", c.IntentType)
+		}
 	}
-	if p, ok := archiver.productCalls["prod_ours"]; !ok || p.Active == nil || *p.Active != false {
-		t.Errorf("prod_ours must be archived with active=false, got %+v", p)
+	if c, ok := byType[intents.TypeStripeArchivePrice]; !ok {
+		t.Error("missing stripe_archive_price intent")
+	} else if c.IdempotencyKey != intents.StripeArchiveIdempotencyKey(intents.TypeStripeArchivePrice, "price_ours") {
+		t.Errorf("price idempotency key not content-addressed: %q", c.IdempotencyKey)
+	}
+	if c, ok := byType[intents.TypeStripeArchiveProduct]; !ok {
+		t.Error("missing stripe_archive_product intent")
+	} else if p, _ := c.Payload.(intents.StripeArchivePayload); p.ObjectID != "prod_ours" || p.MarkerKey != "retired" {
+		t.Errorf("product payload must carry object id + ownership marker, got %+v", p)
+	}
+	if c, ok := byType[intents.TypeSolanaSunsetPlan]; !ok {
+		t.Error("missing solana_sunset_plan intent")
+	} else if p, _ := c.Payload.(intents.SolanaSunsetPayload); p.PlanPDA != "5tzFkiKscXHK5ZXCGbXZxdw7gTfCvqSGpHGxVJD6oxBd" {
+		t.Errorf("solana payload must carry the plan pda, got %+v", p)
 	}
 
 	byID := map[string]CatalogExtraArchiveOutcome{}
@@ -304,30 +305,37 @@ func TestArchiveCatalogExtrasWith_ArchivesOnlyOwnedStripeObjects(t *testing.T) {
 		"price_ours_inactive": CatalogExtraSkippedInactive,
 		"retired-usd-900-30":  CatalogExtraManualActionRequired,
 		"legacy-vip-plan":     CatalogExtraSkippedForeign,
+		"5tzFkiKscXHK5ZXCGbXZxdw7gTfCvqSGpHGxVJD6oxBd": CatalogExtraArchived,
 	} {
 		if got := byID[id].Action; got != wantAction {
 			t.Errorf("%s: expected action %s, got %s", id, wantAction, got)
 		}
 	}
-	// The NMI manual action carries the deletion-is-unsafe explanation.
+	// The NMI manual action carries the deletion-is-unsafe explanation; NMI
+	// never becomes an intent (it has NO archive write path, by design).
 	if d := byID["retired-usd-900-30"].Detail; !strings.Contains(d, "zero subscribers") {
 		t.Errorf("NMI manual action detail must instruct verifying zero subscribers, got %q", d)
 	}
+	for _, c := range exec.calls {
+		if c.Provider == "mobius" {
+			t.Fatalf("an NMI archive intent was enqueued; NMI must stay manual-only: %+v", c)
+		}
+	}
 }
 
-func TestArchiveCatalogExtrasWith_ForeignNeverTouchedEvenOnExhaustive(t *testing.T) {
-	archiver := newFakeStripeArchiver()
+func TestArchiveCatalogExtrasVia_ForeignNeverTouchedEvenOnExhaustive(t *testing.T) {
+	exec := &fakeIntentExecutor{}
 	extras := []CatalogExtra{
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_foreign", Owned: false, Active: true},
 		{Provider: "stripe", ObjectType: "product", ExternalID: "prod_foreign", Owned: false, Active: true},
 		{Provider: "mobius", ObjectType: "plan", ExternalID: "tenant-plan", Owned: false, Active: true},
 	}
-	outcomes, err := archiveCatalogExtrasWith(context.Background(), archiver, extras)
+	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, tenant.DefaultID.UUID(), time.Now().UTC(), extras)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if len(archiver.priceCalls) != 0 || len(archiver.productCalls) != 0 {
-		t.Fatalf("foreign objects must never receive archive calls: prices=%v products=%v", archiver.priceCalls, archiver.productCalls)
+	if len(exec.calls) != 0 {
+		t.Fatalf("foreign objects must never become archive intents: %+v", exec.calls)
 	}
 	for _, o := range outcomes {
 		if o.Action != CatalogExtraSkippedForeign {
@@ -336,16 +344,54 @@ func TestArchiveCatalogExtrasWith_ForeignNeverTouchedEvenOnExhaustive(t *testing
 	}
 }
 
-func TestArchiveCatalogExtrasWith_AggregatesWriteFailures(t *testing.T) {
-	archiver := newFakeStripeArchiver()
-	archiver.err = fmt.Errorf("stripe 500")
+// TestArchiveCatalogExtrasVia_ParkedIsDurableNotError pins ruling #358-D: a
+// gate-parked (readonly) or provider-down intent is reported PARKED with the
+// reason — the sweep does NOT abort and does NOT error; the scheduled executor
+// drains the queue later.
+func TestArchiveCatalogExtrasVia_ParkedIsDurableNotError(t *testing.T) {
+	reason := "mode=readonly blocks all provider writes"
+	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.BillingProviderIntent {
+		return gen.BillingProviderIntent{
+			ID: uuid.New(), IntentType: p.IntentType, Provider: p.Provider,
+			Status: intents.StatusPending, LastFailureReason: &reason,
+		}
+	}}
 	extras := []CatalogExtra{
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_a", Owned: true, Active: true},
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_b", Owned: true, Active: true},
 	}
-	outcomes, err := archiveCatalogExtrasWith(context.Background(), archiver, extras)
+	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, tenant.DefaultID.UUID(), time.Now().UTC(), extras)
+	if err != nil {
+		t.Fatalf("parked outcomes are NOT an error, got: %v", err)
+	}
+	for _, o := range outcomes {
+		if o.Action != CatalogExtraArchiveParked {
+			t.Errorf("%s: expected parked, got %s", o.Extra.ExternalID, o.Action)
+		}
+		if !strings.Contains(o.Detail, "mode=readonly") {
+			t.Errorf("%s: parked detail must carry the gate reason, got %q", o.Extra.ExternalID, o.Detail)
+		}
+		if o.IntentID == "" {
+			t.Errorf("%s: parked outcome must reference the durable intent row", o.Extra.ExternalID)
+		}
+	}
+}
+
+func TestArchiveCatalogExtrasVia_TerminalFailuresAggregate(t *testing.T) {
+	reason := "stripe refused"
+	exec := &fakeIntentExecutor{script: func(p intents.EnqueueParams) gen.BillingProviderIntent {
+		return gen.BillingProviderIntent{
+			ID: uuid.New(), IntentType: p.IntentType, Provider: p.Provider,
+			Status: intents.StatusFailedTerminal, LastFailureReason: &reason,
+		}
+	}}
+	extras := []CatalogExtra{
+		{Provider: "stripe", ObjectType: "price", ExternalID: "price_a", Owned: true, Active: true},
+		{Provider: "stripe", ObjectType: "price", ExternalID: "price_b", Owned: true, Active: true},
+	}
+	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, tenant.DefaultID.UUID(), time.Now().UTC(), extras)
 	if err == nil {
-		t.Fatal("expected an aggregate error when archive writes fail")
+		t.Fatal("expected an aggregate error when archive intents fail terminally")
 	}
 	if len(outcomes) != 2 {
 		t.Fatalf("the pass must continue past failures; got %d outcomes", len(outcomes))
@@ -354,6 +400,81 @@ func TestArchiveCatalogExtrasWith_AggregatesWriteFailures(t *testing.T) {
 		if o.Action != CatalogExtraArchiveFailed {
 			t.Errorf("%s: expected failed, got %s", o.Extra.ExternalID, o.Action)
 		}
+	}
+}
+
+// -- solana sunset-needed detection ------------------------------------------------
+
+// fakeSolanaReader maps base58 PDA -> raw account bytes (nil entry = absent).
+type fakeSolanaReader struct {
+	accounts map[string][]byte
+	err      error
+}
+
+func (f *fakeSolanaReader) GetAccountData(_ context.Context, address solanago.PublicKey) ([]byte, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.accounts[address.String()], nil
+}
+
+// encodeTestPlanAccount builds a minimal valid Plan account blob with the
+// given status.
+func encodeTestPlanAccount(status uint8) []byte {
+	blob := make([]byte, subscriptions.PlanAccountSize)
+	blob[0] = 1 // plan account discriminator
+	blob[33] = 1
+	blob[34] = status
+	return blob
+}
+
+func TestComputeSolanaSunsetExtras(t *testing.T) {
+	cycle := 30
+	productID := uuid.New()
+	product := &models.Product{ID: productID, Slug: "premium"}
+	mkPrice := func(pda string, status models.CatalogStatus) *models.Price {
+		return &models.Price{
+			ID: uuid.New(), ProductID: productID, Amount: 2300, Currency: "usd",
+			BillingCycleDays: &cycle, Status: status,
+			Processors: map[string]map[string]string{
+				string(models.ProcessorSolana): {"plan_pda": pda},
+			},
+		}
+	}
+	pdaActiveArchived := solanago.NewWallet().PublicKey().String()  // archived price, plan still active -> EXTRA
+	pdaSunsetArchived := solanago.NewWallet().PublicKey().String()  // archived price, plan already sunset -> converged
+	pdaAbsentArchived := solanago.NewWallet().PublicKey().String()  // archived price, plan gone -> nothing to do
+	pdaActiveLive := solanago.NewWallet().PublicKey().String()      // ACTIVE price -> in the live catalog, never an extra
+
+	snap := buildSnapshotFromRows([]*models.Product{product}, []*models.Price{
+		mkPrice(pdaActiveArchived, models.CatalogStatusArchived),
+		mkPrice(pdaSunsetArchived, models.CatalogStatusArchived),
+		mkPrice(pdaAbsentArchived, models.CatalogStatusArchived),
+		mkPrice(pdaActiveLive, models.CatalogStatusActive),
+	})
+	reader := &fakeSolanaReader{accounts: map[string][]byte{
+		pdaActiveArchived: encodeTestPlanAccount(1), // active
+		pdaSunsetArchived: encodeTestPlanAccount(0), // sunset
+		pdaAbsentArchived: nil,
+		pdaActiveLive:     encodeTestPlanAccount(1),
+	}}
+
+	extras, scanned, notes := computeSolanaSunsetExtras(context.Background(), reader, snap)
+	if len(notes) != 0 {
+		t.Fatalf("unexpected notes: %+v", notes)
+	}
+	if scanned != 3 {
+		t.Errorf("expected 3 scanned plans (the live-price plan is never read), got %d", scanned)
+	}
+	if len(extras) != 1 {
+		t.Fatalf("expected exactly 1 sunset-needed extra, got %+v", extras)
+	}
+	e := extras[0]
+	if e.Provider != "solana" || e.ObjectType != "plan" || e.ExternalID != pdaActiveArchived || !e.Owned || !e.Active {
+		t.Errorf("unexpected extra %+v", e)
+	}
+	if e.Label != "premium.usd.2300.30" {
+		t.Errorf("label should be the price content key, got %q", e.Label)
 	}
 }
 

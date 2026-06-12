@@ -192,14 +192,17 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 
 // buildIntentRegistry assembles the per-type intent semantics for the
 // provider intent executor/verifier (#358): deferred NMI deletes (phase A),
-// NMI/Stripe refunds (phase B) and manual rebills (phase C). Phase D adds
-// catalog archive ops.
+// NMI/Stripe refunds (phase B), manual rebills (phase C) and catalog archive
+// ops — Stripe product/price archives + Solana plan sunsets (phase D).
 func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	return intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.NMIClients, clock),
 		intents.NewNMIRefundHandler(r.DB, r.NMIClients, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, clock),
 		intents.NewManualRebillHandler(r.DB, r.Config, r.NMIClients, clock, r.EventLogService),
+		intents.NewStripeArchiveProductHandler(r.DB, r.Config, clock),
+		intents.NewStripeArchivePriceHandler(r.DB, r.Config, clock),
+		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPC, clock),
 	)
 }
 

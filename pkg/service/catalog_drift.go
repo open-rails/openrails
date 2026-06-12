@@ -197,15 +197,10 @@ func computeCatalogDrift(
 // deriving it from the lookup_key ("openrails.<content_key>" -> strip the
 // prefix). Returns "" when neither is present (a Stripe-native price OpenRails
 // doesn't own).
+// Canonical implementation: catalog.RemoteStripePriceContentKey (shared with
+// the #358 archive-intent relevance checks).
 func stripePriceContentKey(sp catalog.StripePrice) string {
-	if k := strings.TrimSpace(sp.Metadata[catalog.StripeMetadataOpenRailsPriceKey]); k != "" {
-		return k
-	}
-	const lookupPrefix = "openrails."
-	if lk := strings.TrimSpace(sp.LookupKey); strings.HasPrefix(lk, lookupPrefix) {
-		return strings.TrimPrefix(lk, lookupPrefix)
-	}
-	return ""
+	return catalog.RemoteStripePriceContentKey(sp)
 }
 
 // diffProductFields compares an OpenRails product against its Stripe mirror and

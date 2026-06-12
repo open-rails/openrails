@@ -179,19 +179,31 @@ provider-side catalog objects that are NOT in the local catalog** (Stripe
 products/prices, NMI recurring plans) and logs them, classified as
 `openrails-marked` (bearing our ownership markers: `openrails.*` lookup keys /
 `openrails_product_key`/`openrails_price_key` metadata / content-addressed NMI
-plan ids) or `foreign`. This detection is read-only, runs in every mode, and
-extras are ignorable — the default apply never touches them.
+plan ids) or `foreign`. For Solana — whose plans are PDAs with no enumeration
+API, so foreign plans are unobservable — the scan instead reads back the plans
+referenced by **local** handles and reports those still `active` on-chain while
+no purchasable local price references them (sunset-needed). This detection is
+read-only, runs in every mode, and extras are ignorable — the default apply
+never touches them.
 
 Pass `--exhaustive` to declare the local catalog authoritative-and-exhaustive:
 the **openrails-marked** extras are then **archived, never deleted** — Stripe
 objects get `active=false` (existing subscriptions keep billing; new purchases
-become impossible); NMI plans surface a pending manual action (NMI has no plan
-archive, and plan deletion is irreversible and unsafe while subscribers exist —
-verify zero subscribers in the control center, then delete manually); CCBill
-(no API) and Solana (no plan enumeration) are note-only. Foreign provider
-objects are **never** touched, even under `--exhaustive`. Because archiving is
-a provider write, `--exhaustive` refuses up front under `mode=limited` or
-`mode=readonly`.
+become impossible); Solana plans are sunset on-chain (`update_plan
+status=sunset`: new subscribes are rejected, existing subscriptions continue);
+NMI plans surface a pending manual action (NMI has no plan archive, and plan
+deletion is irreversible and unsafe while subscribers exist — verify zero
+subscribers in the control center, then delete manually); CCBill (no API) is
+note-only. Foreign provider objects are **never** touched, even under
+`--exhaustive`.
+
+Each archive write is an **admin-origin provider intent** (#358): it executes
+inline when the operating mode allows, and otherwise **parks durably** —
+`mode=limited` executes (the flag is an explicit human request), `mode=readonly`
+parks, and a provider being down parks/retries rather than aborting the sweep.
+Parked outcomes are **not errors**: the server's scheduled intent executor
+drains them automatically once the blocker lifts. The CLI output distinguishes
+`archived` / `parked` (with the reason) / `failed` per object.
 
 ### Provider identity & idempotency
 
