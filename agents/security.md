@@ -10,6 +10,8 @@
 
 # #SEC-1: ccbill-ip-list-configurable
 
+**Status:** implemented — verified in code 2026-06-12 (automated review; sub-task checkboxes left for the closing agent). `processors.ccbill.allowed_cidrs` config (config/config.go ProcessorsConfig.AllowedCIDRs) feeds `iputil.Configure` (internal/shared/iputil/ccbill.go), which parses CIDRs at boot and fails fast on invalid entries; hard-coded ranges remain only as documented fallback defaults.
+
 **Priority:** high
 **Files:** internal/shared/iputil/ccbill.go
 
@@ -42,6 +44,8 @@ Add security scanning tools to the GitHub CI/CD pipeline. Run on PR open and/or 
 ---
 
 # #SEC-3: webhook-body-size-limit
+
+**Status:** implemented — verified in code 2026-06-12 (automated review). `ginmw.BodyLimit` no longer exempts webhook routes (internal/http/middleware/ginmw/security.go) and per-processor `http.MaxBytesReader` caps with 413 responses live in internal/http/handlers/webhook.go.
 
 **Priority:** high
 **Files:** internal/http/middleware/security.go, internal/http/handlers/webhook.go
@@ -77,6 +81,8 @@ Implement more granular rate limiting within the OpenRails service: by IP, by au
 
 # #SEC-5: hard-stop-empty-expected-audience
 
+**Status:** implemented — verified in code 2026-06-12 (automated review). Boot-time validation refuses to start outside development when `auth.expected_audience` is empty (config/config.go ~1095), alongside hard stops for empty issuers, default issuers, default ClickHouse credentials, and empty cors_origins.
+
 **Priority:** high
 **Files:** internal/auth/verifier.go, config/config.go
 
@@ -105,6 +111,8 @@ Superseded by SEC-12 / issue 220 hard cut. The X-API-KEY service-auth path shoul
 
 # #SEC-7: proration-rounding-fix
 
+**Status:** implemented — verified in code 2026-06-12 (automated review). `CalculateProration` computes remaining time in seconds and rounds UP to the nearest whole day, with the policy documented in a code comment (internal/modules/checkout/service.go ~2153).
+
 **Priority:** medium
 **Files:** internal/modules/checkout/service.go
 
@@ -120,6 +128,8 @@ CalculateProration truncates to whole days, causing $0 proration near period end
 ---
 
 # #SEC-8: dunning-hard-decline-stop
+
+**Status:** implemented — verified in code 2026-06-12 (automated review). NMI decline codes are categorized hard-vs-soft (internal/modules/subscriptions/dunning.go `DeclineHard`), hard declines terminate without further retries and emit a high-visibility log (internal/river/jobs_dunning.go).
 
 **Priority:** medium
 **Files:** internal/modules/subscriptions/dunning.go, internal/river/jobs_dunning.go
@@ -139,6 +149,8 @@ FailMembership / dunning retries should only apply on NMI and must check the dec
 ---
 
 # #SEC-9: operator-admin-db-check
+
+**Status:** superseded/implemented — verified in code 2026-06-12 (automated review). The #312 hard cut replaced claims-trusting admin checks with live, request-time permission evaluation: `AdminPermissionChecker.HasAdminPermission` / `PlatformSuperadminChecker` (internal/auth/policy/admin.go), so a revoked admin loses authority immediately rather than at JWT expiry.
 
 **Priority:** medium
 **Files:** internal/auth/policy/admin.go
@@ -176,6 +188,8 @@ The NMI tier upgrade flow (processUpgrade) charges the card at step 2, cancels o
 
 # #SEC-11: eliminate-newraw-pattern
 
+**Status:** implemented — verified in code 2026-06-12 (automated review). No `NewRaw` usages remain in the tree; the audit package uses parameterized sqlc queries. The lint-rule follow-up folds into the broader #334 sqlc migration.
+
 **Priority:** low
 **Files:** internal/audit/checks_subscription_state.go, internal/audit/checks_payment_method.go, internal/audit/checks_temporal.go
 
@@ -210,6 +224,8 @@ Replace the shared X-API-KEY bearer-secret model for service-to-service auth wit
 
 # #SEC-13: credit-deposit-overflow-guard
 
+**Status:** implemented — verified in code 2026-06-12 (automated review). Overflow guard before the addition in depositTx (internal/modules/credits/credits_service.go ~399).
+
 **Priority:** low
 **Files:** internal/modules/credits/credits_service.go
 
@@ -228,6 +244,8 @@ In credits_service.go depositTx(), the line `newBal := bal.Balance + params.Amou
 
 # #SEC-14: upgrade-pgx-dependency
 
+**Status:** done — go.mod bumped to github.com/jackc/pgx/v5 v5.9.2 in this change (was v5.9.0 after an earlier partial upgrade; tracker filed against v5.7.6). Build and unit tests pass.
+
 **Priority:** high
 **Files:** go.mod
 
@@ -242,6 +260,8 @@ Upgrade github.com/jackc/pgx/v5 from v5.7.6 to v5.9.2+. Fixes 4 genuine CVEs: 2x
 ---
 
 # #SEC-15: upgrade-x-net-dependency
+
+**Status:** implemented — verified 2026-06-12 (automated review): go.mod already pins golang.org/x/net v0.55.0.
 
 **Priority:** low
 **Files:** go.mod
