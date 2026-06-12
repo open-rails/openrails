@@ -3,6 +3,9 @@ package nmi
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/open-rails/openrails/config"
@@ -116,21 +119,28 @@ func TestReadOnlyBlocksAllDirectPostMutations(t *testing.T) {
 	require.ErrorIs(t, err, ErrProviderReadOnly)
 }
 
-// probeServer simulates an NMI gateway for the test-mode probe. verdicts maps
-// the auth amount to the response code returned ("1" approved, "2" declined,
-// "3" error).
-func probeServer(t *testing.T, verdicts map[string]string) *httptest.Server {
+// probeServer simulates an NMI gateway for the test-mode probe. authCode is
+// the response code returned for auths ("1" approved, "2" declined, "3"
+// error). Every auth's randomized amount and order_id are validated and
+// recorded into seen (when non-nil) for repeat-safety assertions.
+func probeServer(t *testing.T, authCode string, seen *[]url.Values) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
 		switch r.Form.Get("type") {
 		case "auth":
-			code, ok := verdicts[r.Form.Get("amount")]
-			if !ok {
-				t.Errorf("unexpected probe amount %q", r.Form.Get("amount"))
-				code = "3"
+			// The probe amount must stay in the randomized [$1.01, $1.99]
+			// band and the order_id must keep the auditable prefix (#362).
+			amount, err := strconv.ParseFloat(r.Form.Get("amount"), 64)
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, amount, 1.01)
+			require.LessOrEqual(t, amount, 1.99)
+			require.True(t, strings.HasPrefix(r.Form.Get("order_id"), "openrails-testmode-probe-"),
+				"unexpected probe order_id %q", r.Form.Get("order_id"))
+			if seen != nil {
+				*seen = append(*seen, r.Form)
 			}
-			w.Write([]byte("response=" + code + "&responsetext=PROBE&transactionid=99001&response_code=100"))
+			w.Write([]byte("response=" + authCode + "&responsetext=PROBE&transactionid=99001&response_code=100"))
 		case "void":
 			w.Write([]byte("response=1&responsetext=SUCCESS&transactionid=99001"))
 		default:
@@ -149,7 +159,7 @@ func probeClient(t *testing.T, serverURL string) *NMIClient {
 
 func TestProbeTestMode(t *testing.T) {
 	t.Run("test card approved -> simulating (only a simulator approves a non-issued PAN)", func(t *testing.T) {
-		server := probeServer(t, map[string]string{"1.00": "1"})
+		server := probeServer(t, "1", nil)
 		defer server.Close()
 		result, err := probeClient(t, server.URL).ProbeTestMode()
 		require.NoError(t, err)
@@ -157,7 +167,7 @@ func TestProbeTestMode(t *testing.T) {
 	})
 
 	t.Run("test card declined -> live account", func(t *testing.T) {
-		server := probeServer(t, map[string]string{"1.00": "2"})
+		server := probeServer(t, "2", nil)
 		defer server.Close()
 		result, err := probeClient(t, server.URL).ProbeTestMode()
 		require.NoError(t, err)
@@ -165,7 +175,7 @@ func TestProbeTestMode(t *testing.T) {
 	})
 
 	t.Run("gateway error (bad credentials) -> indeterminate", func(t *testing.T) {
-		server := probeServer(t, map[string]string{"1.00": "3"})
+		server := probeServer(t, "3", nil)
 		defer server.Close()
 		result, err := probeClient(t, server.URL).ProbeTestMode()
 		require.Error(t, err)
@@ -173,10 +183,28 @@ func TestProbeTestMode(t *testing.T) {
 	})
 
 	t.Run("transport failure -> indeterminate", func(t *testing.T) {
-		server := probeServer(t, nil)
+		server := probeServer(t, "1", nil)
 		server.Close() // refuse connections
 		result, err := probeClient(t, server.URL).ProbeTestMode()
 		require.Error(t, err)
 		require.Equal(t, ProbeIndeterminate, result)
+	})
+
+	t.Run("repeated probes randomize order_id so duplicate detection never trips (#362)", func(t *testing.T) {
+		var seen []url.Values
+		server := probeServer(t, "1", &seen)
+		defer server.Close()
+		client := probeClient(t, server.URL)
+		for range 3 {
+			result, err := client.ProbeTestMode()
+			require.NoError(t, err)
+			require.Equal(t, ProbeSimulated, result)
+		}
+		require.Len(t, seen, 3)
+		orderIDs := map[string]bool{}
+		for _, form := range seen {
+			orderIDs[form.Get("order_id")] = true
+		}
+		require.Len(t, orderIDs, 3, "each probe must carry a unique order_id")
 	})
 }

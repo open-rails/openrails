@@ -151,11 +151,9 @@ func TestNMIMobiusConfiguredAccountRecurringSubscription(t *testing.T) {
 	planID := "openrails-it-" + uuid.NewString()
 	err := client.AddRecurringPlan(planID, "OpenRails integration test", 123, 30, 0)
 	require.NoError(t, err, "configured Mobius/NMI account should create a temporary recurring plan")
-	t.Cleanup(func() {
-		if err := client.DeleteRecurringPlan(planID); err != nil {
-			t.Logf("failed to delete temporary NMI recurring plan %s: %v", planID, err)
-		}
-	})
+	// NMI has no API verb to delete a plan (portal-only; #362), so the
+	// temporary plan stays behind. It is harmless: no subscribers bill on it.
+	t.Logf("temporary NMI recurring plan %s left in the sandbox (plan deletion is portal-only)", planID)
 
 	resp, err := client.AddRecurringSubscription(nmi.RecurringPaymentData{
 		CardUserData: nmi.CardUserData{

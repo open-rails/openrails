@@ -468,40 +468,6 @@ func (c *NMIClient) EditRecurringPlan(planID, planName string, planAmountCents i
 	return nil
 }
 
-// DeleteRecurringPlan soft-deletes an NMI Recurring Plan (recurring=delete_plan).
-// NOTE: deleting a plan in NMI does not stop existing subscriptions billing on
-// it, so OpenRails deliberately does not call this on price deactivation; it is
-// retained for explicit cleanup paths only.
-func (c *NMIClient) DeleteRecurringPlan(planID string) error {
-	if err := c.checkConfiguration(); err != nil {
-		return err
-	}
-	if strings.TrimSpace(planID) == "" {
-		return errors.New("planID is required")
-	}
-
-	values := url.Values{
-		"recurring":    {"delete_plan"},
-		"security_key": {c.SecurityKey},
-		"plan_id":      {planID},
-	}
-
-	response, err := c.sendDirectRequest(values)
-	if err != nil {
-		return err
-	}
-
-	output, err := parseDirectResponse(response)
-	if err != nil {
-		return err
-	}
-	if !isDirectResponseApproved(output) {
-		return fmt.Errorf("failed to delete recurring plan: %s", responseText(output, response))
-	}
-
-	return nil
-}
-
 // recurringPlanQueryResponse mirrors the XML returned by the NMI Query API for
 // the recurring_plans report type. Only the fields OpenRails needs are mapped.
 type recurringPlanQueryResponse struct {

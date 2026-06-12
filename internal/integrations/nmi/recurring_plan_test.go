@@ -94,21 +94,6 @@ func TestEditRecurringPlan_RequiresPlanID(t *testing.T) {
 	require.Error(t, client.EditRecurringPlan("", "name", 100))
 }
 
-func TestDeleteRecurringPlan_RequestShape(t *testing.T) {
-	var seen url.Values
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, r.ParseForm())
-		seen = r.Form
-		_, _ = w.Write([]byte("response=1&responsetext=SUCCESS"))
-	}))
-	t.Cleanup(server.Close)
-
-	client := newTestClient(t, server.URL)
-	require.NoError(t, client.DeleteRecurringPlan("openrails-abc"))
-	assert.Equal(t, "delete_plan", seen.Get("recurring"))
-	assert.Equal(t, "openrails-abc", seen.Get("plan_id"))
-}
-
 func TestGetRecurringPlanByID_FoundParsesAmount(t *testing.T) {
 	var seen url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

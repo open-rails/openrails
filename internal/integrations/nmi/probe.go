@@ -2,6 +2,7 @@ package nmi
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net/url"
 	"strings"
 
@@ -19,19 +20,33 @@ import (
 // (docs.nmi.com/reference/testing-methods). One authorization-only probe is
 // therefore conclusive:
 //
-//	auth $1.00 on the test card APPROVED -> the account is simulating (safe)
-//	auth $1.00 on the test card DECLINED -> the account is LIVE
+//	auth on the test card APPROVED -> the account is simulating (safe)
+//	auth on the test card DECLINED -> the account is LIVE
 //	transport/credential errors (response=3) -> indeterminate
 //
 // The probe is harmless on a live account — an auth on a non-issued PAN is
 // declined and no money can move (it does cost one declined-attempt gateway
 // fee, typically cents). An approved simulated auth is voided (best-effort)
 // for tidiness.
+//
+// The amount and order_id are randomized per attempt: NMI's duplicate-
+// transaction check rejects a repeat of the same card+amount+order_id within
+// its window (response=3 "Duplicate transaction"), and the processor refuses
+// dup_seconds=0, so a fixed probe would turn back-to-back boots (#362) into
+// ProbeIndeterminate. The verdict is amount-independent — no production
+// processor approves a non-issued PAN at any amount.
 
 const (
-	probeTestCard   = "4111111111111111"
-	probeTestExpiry = "1029" // the documented test-card expiry (10/29)
+	probeTestCard      = "4111111111111111"
+	probeTestExpiry    = "1029" // the documented test-card expiry (10/29)
+	probeOrderIDPrefix = "openrails-testmode-probe-"
 )
+
+// probeAmount returns a randomized auth amount in [$1.01, $1.99] so repeated
+// probes never trip duplicate-transaction detection.
+func probeAmount() string {
+	return fmt.Sprintf("1.%02d", 1+rand.IntN(99))
+}
 
 // TestModeProbeResult classifies what the probe learned about the account.
 type TestModeProbeResult int
@@ -56,7 +71,7 @@ func (c *NMIClient) ProbeTestMode() (TestModeProbeResult, error) {
 		return ProbeIndeterminate, err
 	}
 
-	approved, txnID, gatewayErr, err := c.probeAuth("1.00")
+	approved, txnID, gatewayErr, err := c.probeAuth(probeAmount())
 	if err != nil {
 		return ProbeIndeterminate, err
 	}
@@ -83,7 +98,7 @@ func (c *NMIClient) probeAuth(amount string) (approved bool, txnID string, gatew
 		"ccnumber":     {probeTestCard},
 		"ccexp":        {probeTestExpiry},
 		"amount":       {amount},
-		"order_id":     {"openrails-testmode-probe"},
+		"order_id":     {probeOrderIDPrefix + fmt.Sprintf("%08x", rand.Uint32())},
 	}
 	response, err := c.sendDirectRequest(values)
 	if err != nil {
@@ -101,7 +116,7 @@ func (c *NMIClient) probeAuth(amount string) (approved bool, txnID string, gatew
 
 // voidProbe best-effort voids an approved probe authorization. On a
 // simulating account the void is itself simulated; failures only get logged —
-// an unvoided $1.00 test-card auth holds no real funds.
+// an unvoided test-card auth holds no real funds.
 func (c *NMIClient) voidProbe(txnID string) {
 	if strings.TrimSpace(txnID) == "" {
 		return
