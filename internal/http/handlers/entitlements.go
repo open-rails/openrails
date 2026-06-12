@@ -254,7 +254,13 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 func tenantSubjectForAdminGrantTarget(r *httprequest.Request, subject string) (uuid.UUID, error) {
 	value, ok := r.Get(ginmw.DelegatedContextKey)
 	if !ok {
-		return uuid.Nil, nil
+		// Non-delegated (org-admin JWT) caller: the target is a legacy /
+		// self-service identity, so resolve (or materialize) its payable tenant
+		// subject the same way commerce writers do (#317) — a UUID subject IS its
+		// own tenant_subject_id. Returning uuid.Nil here would make the
+		// admin_grants insert violate its tenant_subject FK and 500 every
+		// non-delegated admin grant.
+		return repo.EnsureTenantSubjectID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
 	}
 	resolved, ok := value.(*controlplane.ResolvedDelegated)
 	if !ok || resolved == nil {
