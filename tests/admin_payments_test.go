@@ -780,14 +780,6 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	}
 
 	w := refundReq("ledger-key-1")
-	if w.Code == http.StatusInternalServerError && strings.Contains(w.Body.String(), "authorization unavailable") {
-		// Pre-existing suite gap (#312): this legacy suite boots without a
-		// control plane, so EVERY authenticated admin route 500s here (see the
-		// sibling TestAdminRefundPayment subtests). The ledger semantics this
-		// test pins are covered by internal/intents integration tests; this
-		// HTTP-level pin activates once the suite wires the admin checker.
-		t.Skip("admin permission checker not wired in this suite (pre-existing #312 gap)")
-	}
 	require.Equal(t, http.StatusCreated, w.Code, "synchronous ledger execution completes inline: %s", w.Body.String())
 	assert.EqualValues(t, 1, refundCalls.Load())
 

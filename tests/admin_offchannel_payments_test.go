@@ -61,7 +61,9 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 	require.Equal(t, int64(1500), p.Amount)
 	require.Equal(t, int64(29999), p.ListAmount) // canonical list price from seed data
 	require.Equal(t, "usd", p.Currency)
-	require.Equal(t, fixedNow, p.PurchasedAt)
+	// Instant equality, not struct equality: the DB round-trip can hand back the
+	// same instant with a different internal time.Time representation.
+	require.WithinDuration(t, fixedNow, p.PurchasedAt, 0)
 	require.NotNil(t, p.DiscountReason)
 	require.Equal(t, "manual_discount", *p.DiscountReason)
 	require.NotNil(t, p.DiscountCode)

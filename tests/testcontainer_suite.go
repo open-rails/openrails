@@ -16,10 +16,12 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/ginboot"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/migrate"
+	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -247,7 +249,13 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			// held in the caller's OWN tenant (control-plane evaluated), or a
 			// deployment-minted admin service token — NOT a claim-based operator
 			// tenant. Admin-route integration tests therefore require the embedded
-			// control plane wired with the test admin granted openrails:admin.
+			// control plane wired with the test admin granted openrails:admin, so
+			// the suite enables it here exactly like a production standalone boot.
+			ControlPlane: &config.ControlPlaneConfig{
+				Enabled:     true,
+				Issuer:      "https://controlplane.openrails.test",
+				TokenPrefix: "openrails",
+			},
 		},
 		// All payment processor configs use the unified Processors map
 		Processors: map[string]*config.ProcessorConfig{
@@ -413,6 +421,16 @@ func (suite *TestContainerSuite) initializeServer() {
 	// Get the pgx pool from the app runtime
 	suite.Pool = assembled.App.Runtime.DB.Pool()
 	suite.Server = assembled.Server
+
+	// Bootstrap the control plane exactly like the standalone serve path (#312):
+	// ensure the default tenant's AuthKit org exists with the operator role
+	// holding the full openrails:* catalog, so admin identities created by the
+	// test helpers carry LIVE openrails:admin authority. Idempotent; runs after
+	// migrations (profiles.* + billing.tenants exist).
+	_, err = embcp.RunBootstrap(suite.ctx, suite.App, controlplane.BootstrapOptions{
+		MintInitialServiceToken: false,
+	})
+	require.NoError(suite.t, err, "control plane bootstrap")
 
 	// Start workers in-process for the integration suite (separate from HTTP server).
 	workersCtx, cancel := context.WithCancel(context.Background())
