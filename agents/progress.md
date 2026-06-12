@@ -236,6 +236,7 @@ Cross-referencing the two distinguishes 'dunning tried and failed' (local retry 
 - [x] Admin API endpoints (POST /admin/v1/reconcile/runs, GET runs/{id}, findings list/ack) + thin CLI wrapper — phase 2: synchronous POST /v1/admin/reconcile/runs {mode, providers, since, until} -> run+summary+findings, GET runs / runs/:id / findings?status=&provider=&type=&admin_queue=, ack/dismiss; CLI `billing reconcile check|fix|report [--provider --since --until --tenant --format table|json]` over the same engine (cmd/billing/reconcile.go)
 - [ ] Optional: River-scheduled advisory run + alerting on new findings — REJECTED per decision 3 (manual-only; no recurring runs)
 - [x] Tests with mocked fetchers per provider — phase 2: table-driven unit suite across the whole taxonomy (fake fetchers/store/writer: identity stability, auto-resolve, breaker abort, intent annotation, capability gating, ambiguous identity, enforce idempotency, advisory-never-writes, dismissed-stays-dismissed) + integration suite (-tags=integration: seeded PG, advisory persists, enforce converges + admin queue holds PS-1/PS-8, rerun stable, ack lifecycle); also fixed internal/dbtest createExternalTestDatabase silently aliasing the admin/dev DB (pgx ConnString() returns the ORIGINAL dsn), which had bricked the external-DB integration path
+- [x] Stuck-intent finding type (PS-10, the #358 tie-in): every run flags non-terminal intents past hardcoded thresholds (pending/failed_retryable >24h; in_flight/unknown_needs_verify >2h), provider-independent (reads only the local ledger, ignores --provider filters); mode/kill-switch-parked intents are informational (the wait is by design), everything else admin-queued; subject_key=intent id, cross-provider auto-resolve on recovery; fix never touches intent rows; rendered in run summary + `reconcile report`; migration 012 extends the findings-type CHECK (2026-06-11)
 - [ ] Runbook doc for the doujins cutover reconcile
 
 ---
@@ -1220,56 +1221,6 @@ Hard cut, no aliases: ModeTest constant deleted, IsTestMode() renamed/reimplemen
 - [x] Ownership-marker guard; mode interplay (refuse/defer under limited/readonly with clear message)
 - [x] Tests + docs
 ---
-# #358: provider intent ledger: durable, effectively-once outbox for ALL outbound provider mutations
-
-**Completed:** no (phase A done 2026-06-11; phases B-D open)
-**Status:** PHASE A SHIPPED 2026-06-11. Migration 010 (billing.provider_intents: RLS/tenancy per 008 conventions; unique (tenant_id, idempotency_key); statuses pending|in_flight|succeeded|unknown_needs_verify|failed_retryable|failed_terminal|superseded|expired) + sqlc (internal/db/queries/provider_intents.sql: idempotent enqueue with revive-on-supersede/expire conflict semantics, SKIP LOCKED lease claims for executor+verifier, all transitions, supersede-by-subject, expire-overdue). Core: internal/intents (Handler registry with per-type CheckRelevance/Execute/Verify/Backoff; GateExecution origin×mode matrix — user/admin execute under limited, system needs full, readonly parks everything; parks recorded as last_failure_reason, never errors, and don't burn attempts). River: ProviderIntentExecuteWorker (every 1m + RunOnStart, expires overdue then claims/executes) + ProviderIntentVerifyWorker (every 5m, reads-only resolution) in river_register — the endorsed scheduled ACTION pipeline. NMI delete migrated: intent_type=nmi_delete_subscription, verify-then-execute (query recurring report; absent=success), kill switch parks pending at execution; producers (user_service cancel incl. its kill-switch inline path, lifecycle FailMembership, dunning worker via Runtime.DeferredDeletes) enqueue intents through the kept DeferredDeleteScheduler interface (user-origin for user cancels, system-origin for dunning exhaustion); DeletionScheduledAt kept as read model, cleared by the handler's finalize. RETIRED: NMIDeleteSubscriptionWorker + Runtime.RescanPendingDeferredDeletes — replaced by Runtime.ConvertDeferredDeleteMarkersToIntents startup sweep (idempotent marker→intent conversion, runs in both river wirings; converted markers user-origin to preserve execute-under-limited behavior). Resume supersedes via SupersedeBySubject (ResumeSubscriptionWorker + CancelNMIDelete); executor relevance re-check stays the authoritative resume guard. Verified: unit (gate matrix, backoff, registry, runner classification, NMI parse/kill-switch) + integration internal/intents (fake-NMI executor/verifier flows, ambiguous→verify→resolve, kill-switch park+drain, limited/readonly origin gating, supersede/revive, expiry, lease reclaim) + adapted #344 regression suite (tests/deferred_delete_followups_test.go: marker sweep, FailMembership system-origin intents, limited-mode, user-cancel→user-origin intent→resume supersede) + dunning integration regressions all green.
-
-## The unifying insight
-
-Class-3 divergence (missed outbound actions) is prevented structurally when every provider mutation flows through ONE durable intent pipeline. This week's piecemeal builds are all instances of it: DeletionScheduledAt markers + boot rescan (#344), the manual_rebill_attempts claim table, pending_manual_link catalog states + re-apply-every-boot. Generalize them.
-
-## Schema sketch
-
-`billing.provider_intents`: id, tenant_id, provider, intent_type (delete_subscription | manual_rebill | refund | plan_create | plan_archive | vault_update | ...), subject ids (subscription/payment/price...), payload jsonb, idempotency_key (unique), status (pending | in_flight | succeeded | unknown_needs_verify | failed_retryable | failed_terminal | superseded | expired), attempts, next_attempt_at, claimed_until (single-executor lease, SKIP LOCKED), origin (user | admin | system) + reason, relevance/expiry condition, result_evidence jsonb, executed_at. RLS + tenant stamping per schema conventions.
-
-## Effectively-once semantics (NOT literal exactly-once — impossible over a network; per-class strategy)
-
-- MONEY-MOVING (rebill, refund, arrears, top-up): lease -> attempt -> on ambiguous outcome park as unknown_needs_verify; a verifier resolves via the provider READ API before any retry; never blind-retry. (= the existing manual_rebill_attempts pattern, generalized.) Stripe ops additionally send Idempotency-Key.
-- DELETE/CANCEL: verify-then-execute; absent = success; blind retry harmless.
-- CREATE (plans/prices): content-addressed find-or-create (already idempotent).
-
-## Mode interplay (the payoff Paul named)
-
-readonly/limited/kill-switch/provider-down/bad-creds stop being ERRORS and become reasons an intent stays pending (status note says why). Origin gates execution: user/admin-origin intents (their cancel's delete, an admin refund) execute under limited (reactive completion — matches today's deferred-delete behavior); system-origin intents (dunning charge) wait for full mode. Nothing attempts a provider write under readonly (wire chokes are the backstop; the executor checks first and parks politely). When the mode lifts, the executor drains the queue — replacing the boot-rescan special case with the general mechanism.
-
-## Relevance windows
-
-Each type defines validity: delete valid while the sub exists and is cancelled (superseded if resumed); rebill valid inside the dunning window (#344) — expiry -> expired with a finding; refund valid until executed or admin-cancelled. Expired/terminal intents surface in reconcile (#107) as findings.
-
-## #107 tie-in (already wired in phase 2)
-
-Findings carry intent_evidence referencing the ledger; PS-2/PS-3 with a live pending intent recommend "executor replays" not admin action; NEW finding type for stuck intents (pending/unknown beyond threshold).
-
-## Confirmed + inbound non-goal (Paul 2026-06-11)
-
-Plan CONFIRMED: "a table recording all outbound intents, a scheduled worker attempts them when possible, with an expiration period after which re-attempt is no longer possible or no longer makes sense. No outbound operations are lost." (The no-recurring-jobs ruling on #107 applies to reconcile RUNS; the intent executor is the action pipeline and is explicitly endorsed as a scheduled worker.)
-
-NON-GOAL — no inbound/webhook durable queue: we are one system; if the DB is down we could not enqueue either (shared fate). Inbound durability = the PROVIDER's at-least-once webhook retries (handlers stay idempotent) + #107 reconcile as the batch backstop for outages long enough to exhaust provider retries. Build nothing inbound.
-
-## Phasing (after in-flight #107 phase 2 + #355 land)
-
-- A: table + sqlc + executor worker (lease/SKIP LOCKED, backoff, mode/origin gating) + verifier loop for unknown_needs_verify; migrate NMI delete_subscription onto it (DeletionScheduledAt becomes a view onto the intent; boot rescan retired).
-- B: refunds + Stripe cancel/portal ops (Idempotency-Key support in stripeapi).
-- C: fold manual_rebill_attempts in as intent_type=manual_rebill (preserve its exact verify semantics).
-- D: catalog archive ops (#357 --exhaustive executes through the ledger).
-
-**Tasks:**
-- [x] Phase A: schema + executor + verifier + NMI deletes migrated + rescan retired (2026-06-11; migration 010, internal/intents, #107 stuck-intent finding type deferred to the reconcile follow-up)
-- [ ] Phase B: refunds/Stripe ops + Idempotency-Key
-- [ ] Phase C: manual rebills folded in
-- [ ] Phase D: #357 archive ops through the ledger
----
 # #359: cadence-relative dunning: schedule derived from billing cycle; dunning_window_days knob deleted
 
 **Completed:** yes (2026-06-11)
@@ -1440,7 +1391,16 @@ publish age 6s). EURC registry mint verified via Jupiter token API:
 # #361: delegated-tokens-slug-only-tenant-identity
 
 **Completed:** no
-**Status:** PLANNED 2026-06-11
+**Status:** IN_PROGRESS 2026-06-11 (UPDATED later same day): the authkit profile is now a
+HARD CUT, not a relaxation — releasing as v0.22.0. Delegated tokens carry tenant identity
+as `tenant` (slug) + validated `iss` ONLY; `DelegatedAccessParams` has no `TenantID`
+field, and the verifier REJECTS any delegated token carrying a `tenant_id` claim
+(`delegated_access_has_tenant_id`) — no legacy acceptance. `Claims.TenantID` is populated
+only by opaque service-token DB resolution; `IssuerOptions.TrustedResourceAccount`
+matches the slug claim only; new `core.Service.TouchTenantSubjectForIssuer`. openrails
+ADAPTED 2026-06-11 (see openrails task notes below) via a TEMPORARY
+`replace github.com/open-rails/authkit => /home/fidika/authkit` in go.mod — swap to the
+pinned v0.22.0 once tagged (release still needs Paul). Host cleanups still pending.
 
 Host apps (doujins, hentai0) must never need to know their OpenRails tenant uuid. A
 tenant knows its chosen name (slug) the way a user knows their username; the uuid is
@@ -1476,7 +1436,9 @@ non-event, and it is the CORRECT behavior: the slug is the host-facing identity.
   token profile: `MintDelegatedAccessToken` errors `tenant_id required`
   (authkit/http/delegation.go) and the verifier rejects `missing_tenant_id`
   (authkit/http/verifier.go ~660). Authkit's resource-account binding check already
-  accepts a match on EITHER the slug or the uuid.
+  accepts a match on EITHER the slug or the uuid. (STALE as of the v0.22.0 hard cut:
+  the binding check now matches the slug ONLY, and a token carrying `tenant_id` is
+  rejected outright.)
 - Consequence: doujins/hentai0 carry `BILLING_TENANT_ID` env plumbing
   (DOUJINS_BILLING_TENANT_ID / HENTAI0_BILLING_TENANT_ID -> openrailsmint minter), a
   random uuidv7 that goes stale on every dev-stack reset, with "SELECT id FROM
@@ -1492,20 +1454,45 @@ non-event, and it is the CORRECT behavior: the slug is the host-facing identity.
   resolution is tensorhub's debt, out of scope here.
 
 **Tasks:**
-- [ ] authkit: make `tenant_id` OPTIONAL on the delegated-access profile — drop the
+- [x] authkit: make `tenant_id` OPTIONAL on the delegated-access profile — drop the
       mint-time `tenant_id required` error in `MintDelegatedAccessToken` and the
       verify-time `missing_tenant_id` rejection; keep the claim pass-through when
       present and keep `validateDelegatedIssuerResourceAccount` slug-or-uuid binding
       unchanged. Document that receivers which key on `tenant_id` (tensorhub) must
-      enforce presence themselves. Version bump + release.
-- [ ] openrails: bump the pinned authkit; add/adjust a controlplane test proving a
+      enforce presence themselves. DONE 2026-06-11 in the authkit working tree:
+      http/delegation.go (mint), http/verifier.go (verify), http/claims.go docs, new
+      http/delegation_slug_only_test.go (slug-only mint+verify; claim absent not empty;
+      slug-trusted issuer accepts slug-only; uuid-trusted issuer fails closed without /
+      with-wrong uuid). Full `go test ./...` green.
+      SUPERSEDED 2026-06-11 (v0.22.0 HARD CUT): `tenant_id` is no longer optional — it
+      is FORBIDDEN. Mint cannot write the claim (`DelegatedAccessParams.TenantID`
+      removed) and the verifier rejects any delegated token carrying it
+      (`delegated_access_has_tenant_id`). There is no pass-through and no legacy
+      acceptance; receivers that keyed on the claim (tensorhub) must move to
+      issuer-pinned resolution before adopting v0.22.0.
+- [ ] authkit: version bump + release (tag + push — needs Paul; current consumers pin
+      v0.21.0, openrails pins v0.19.0).
+- [x] openrails: bump the pinned authkit; add/adjust a controlplane test proving a
       delegated token WITHOUT `tenant_id` resolves end-to-end (issuer-pinned tenant,
       slug cross-check, TouchTenantSubject) — codifying that openrails never needs
-      the claim.
-- [ ] openrails: add a slug-rename semantics test: after renaming a tenant's slug, a
+      the claim. DONE 2026-06-11: TEMPORARY go.mod replace -> /home/fidika/authkit
+      until v0.22.0 is tagged; `ResolveDelegated` needed NO logic change (already
+      issuer-pinned + slug cross-check, never read the claim). New integration test
+      `TestDelegatedTokenWithoutTenantIDResolvesEndToEnd` (issuer_federation_
+      integration_test.go) pins the wire shape (no tenant_id claim) + full resolution
+      incl. tenant_subjects upsert + idempotency; new unit test
+      `TestDelegatedVerify_RejectsTenantIDClaim` (delegated_test.go) pins the HARD CUT
+      (a hand-signed token carrying tenant_id is REJECTED, not just optional-and-
+      ignored). mintDelegated/mintFed helpers no longer set TenantID. Full unit suite
+      + controlplane integration suite (testcontainers) green.
+- [x] openrails: add a slug-rename semantics test: after renaming a tenant's slug, a
       token carrying the OLD slug claim is rejected (tenant-claim mismatch) and a
       token with the NEW slug validates — documenting rename behavior instead of
-      discovering it in prod.
+      discovering it in prod. DONE 2026-06-11: `TestSlugRenameSemantics`
+      (issuer_federation_integration_test.go): old-slug token rejected even BEFORE
+      registry reload (ResolveDelegated DB cross-check) and after; new-slug token
+      validates after `reloadDelegatedIssuers` (the operational step that refreshes
+      the verifier's TrustedResourceAccount slug binding); tenant uuid unchanged.
 - [ ] doujins: drop the tenant-uuid mint requirement (internal/billing/openrailsmint/
       minter.go) and ALL `BILLING_TENANT_ID` plumbing: docker-compose env for both the
       doujins and hentai0 services, DOUJINS_BILLING_TENANT_ID / HENTAI0_BILLING_TENANT_ID
@@ -1515,9 +1502,43 @@ non-event, and it is the CORRECT behavior: the slug is the host-facing identity.
 - [ ] e2e: doujins tests/openrails_harness.go + e2e flows pass with no tenant uuid
       configured anywhere (fresh stack, bootstrap manifest, register, delegated
       self-token, checkout).
-- [ ] Note in the authkit release notes: hosts minting for TENSORHUB audiences still
-      need the uuid until tensorhub moves to issuer-pinned resolution (tensorhub debt,
-      tracked in tensorhub's own tracker).
+- [x] RESOLVED 2026-06-11 (caveat eliminated, not deferred): tensorhub moved to
+      issuer-pinned resolution the same day (tensorhub agents/progress.md #474) — its
+      EffectiveTenant now resolves from the validated issuer via authkit's
+      profiles.tenant_issuers registry (issuer -> slug -> tenants.id, rename-proof via
+      tenant_renames), identical uuid to the old claim so no storage migration; and
+      cozy-art dropped PLATFORM_TENANT_ID entirely. NO host anywhere needs a receiver
+      uuid anymore; nothing to caveat in the release notes.
+
+## Identity principles (clarified 2026-06-11)
+
+Two different identifiers, two different rules:
+
+- TENANT identity crossing the host->openrails boundary is the SLUG (mutable,
+  host-chosen, like a username). The tenant's openrails uuid never leaves openrails.
+- DELEGATED USER identity crossing the boundary (`delegated_sub`) is the HOST's
+  canonical user uuid — stable precisely so host-side username renames (cozy ->
+  cozy2) never fracture the openrails payment account. The host owns and trivially
+  knows its users' uuids. VERIFIED already implemented: doujins MintSessionToken
+  passes the authenticated `userCtx.User.ID` (never request input), hentai0
+  MintSelfTokenWithIdentity likewise passes the canonical subject; openrails
+  TouchTenantSubject upserts the payable subject keyed on (tenant_id, issuer,
+  subject) verbatim. No changes needed.
+
+## OPEN QUESTION (Paul): per-issuer payable-subject keying vs #259 shared namespace
+
+`billing.tenant_subjects` is keyed (tenant_id, ISSUER, subject) — the integration test
+explicitly asserts the same canonical subject from the doujins vs hentai0 issuers
+creates TWO different payable subjects — and entitlement reads are issuer-scoped
+(`ListActiveEntitlementRecordsByExternalSubjects(issuer, subjects)`). But the #259
+comment in controlplane/delegated.go says delegated_sub must be the canonical shared
+user id "so a token from EITHER issuer resolves to the SAME OpenRails billing
+account". As implemented, a premium subscription bought through a doujins-issued
+token will NOT surface to an entitlement query made with a hentai0-issued token for
+the same canonical user. Decide: (a) intended — the two sites bill separately despite
+the shared user store (then fix the #259 comment), or (b) shared-namespace tenants
+need (tenant_id, subject) resolution — a schema/lookup change with a merge migration,
+guarded per-tenant so single-issuer tenants keep fail-closed per-issuer isolation.
 
 ## Rollout order
 

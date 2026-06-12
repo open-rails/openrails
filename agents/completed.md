@@ -8380,3 +8380,56 @@ OUTCOME (2026-06-08): tasks 1-7 done. Validated end-to-end: with hentai0 DOWN, `
 **Status:** DONE 2026-06-11, commit 0d65111 (entry restored 2026-06-11 — it was lost in tracker churn during the json->markdown conversion window). The startup bootstrap is plan-then-execute with no internal transaction, so simultaneous replica cold starts against an empty control plane each planned the same creates and raced the inserts (23505 on unique_prices_product_amount_cycle), crash-looping the loser. Fix: session-level pg_advisory_lock (key 0x6f72_626f_6f74 "orboot") taken on a DEDICATED pool conn and held across plan+apply, released via context.WithoutCancel; auto-releases if the holder dies, so the second replica plans against the converged state. Follow-on hard cut (#350, same day): the legacy `tenant_bootstrap.file` config knob + TENANTS_FILE env mapping were removed — the manifest lives at the conventional path or is passed explicitly to `bootstrap apply`.
 
 ---
+
+# #358: provider intent ledger: durable, effectively-once outbox for ALL outbound provider mutations
+
+**Completed:** yes (2026-06-11 — all phases A-D)
+**Status:** ALL PHASES SHIPPED 2026-06-11. Phase B (refunds): nmi_refund/stripe_refund admin-origin intents; local reservation flow preserved (reserve -> intent -> complete), provider mutation executed synchronously via the new Runner.EnqueueAndExecute (identical gate/classify pipeline; parked is a status, not an error — handler finalize completes/releases the reservation on async drain); Stripe mutations send the intent's idempotency_key as Idempotency-Key (stripeapi.SetIdempotencyKey); ambiguity -> unknown_needs_verify, verifier resolves via provider reads (NMI transaction report refund actions, Stripe refund list by metadata-mirrored key); admin HTTP responses: 201 succeeded / 202 parked-or-ambiguous with open reservation / 502 terminal / 409 same-content-different-admin-key. Phase C (manual rebills): manual_rebill_attempts table DROPPED (migration 011) — the ledger IS the claim; dunning worker enqueues one system-origin intent per (sub, period_end, attempt ordinal = RetryAttempts) and drives lifecycle (ClassifyNMIDecline + FailMembership per #359 cadence) off the returned status; declines are failed_terminal (retry cadence belongs to the dunning schedule, never intent backoff); ambiguous preserves old markManualRebillUnknown posture, verifier queries NMI by the period's order reference and on late-confirmed success repairs lifecycle (RenewMembership + credits) from the finalize; system origin parks under limited/readonly BY DESIGN, dunning window = relevance window so a long limited stint expires rather than catch-up-charges; enqueue-conflict returns the durable succeeded row -> crash-repair path preserved; GetAdminManualRebillAttempts repointed at the ledger (response shape changed, hard cut). Phase D (catalog archives): stripe_archive_product/stripe_archive_price/solana_sunset_plan admin-origin intents from bootstrap apply --exhaustive (#357); verify-then-execute (404/already-archived = success), relevance expires if the object joins the local catalog (shared ExtrasIndex predicate in internal/modules/catalog); provider-down parks instead of aborting the sweep; NMI verified write-free and pinned so by test; Solana: BuildUpdatePlan implemented from the official IDL (updatePlan disc 8, status-only flip), extras detected from our own stored plan handles (chain has no enumeration), foreign-owner -> terminal, submit ambiguity -> verify by account read-back. PS-10 stuck-intent reconcile finding shipped under #107 (migration 012). Original phase A status follows.
+
+PHASE A SHIPPED 2026-06-11. Migration 010 (billing.provider_intents: RLS/tenancy per 008 conventions; unique (tenant_id, idempotency_key); statuses pending|in_flight|succeeded|unknown_needs_verify|failed_retryable|failed_terminal|superseded|expired) + sqlc (internal/db/queries/provider_intents.sql: idempotent enqueue with revive-on-supersede/expire conflict semantics, SKIP LOCKED lease claims for executor+verifier, all transitions, supersede-by-subject, expire-overdue). Core: internal/intents (Handler registry with per-type CheckRelevance/Execute/Verify/Backoff; GateExecution origin×mode matrix — user/admin execute under limited, system needs full, readonly parks everything; parks recorded as last_failure_reason, never errors, and don't burn attempts). River: ProviderIntentExecuteWorker (every 1m + RunOnStart, expires overdue then claims/executes) + ProviderIntentVerifyWorker (every 5m, reads-only resolution) in river_register — the endorsed scheduled ACTION pipeline. NMI delete migrated: intent_type=nmi_delete_subscription, verify-then-execute (query recurring report; absent=success), kill switch parks pending at execution; producers (user_service cancel incl. its kill-switch inline path, lifecycle FailMembership, dunning worker via Runtime.DeferredDeletes) enqueue intents through the kept DeferredDeleteScheduler interface (user-origin for user cancels, system-origin for dunning exhaustion); DeletionScheduledAt kept as read model, cleared by the handler's finalize. RETIRED: NMIDeleteSubscriptionWorker + Runtime.RescanPendingDeferredDeletes — replaced by Runtime.ConvertDeferredDeleteMarkersToIntents startup sweep (idempotent marker→intent conversion, runs in both river wirings; converted markers user-origin to preserve execute-under-limited behavior). Resume supersedes via SupersedeBySubject (ResumeSubscriptionWorker + CancelNMIDelete); executor relevance re-check stays the authoritative resume guard. Verified: unit (gate matrix, backoff, registry, runner classification, NMI parse/kill-switch) + integration internal/intents (fake-NMI executor/verifier flows, ambiguous→verify→resolve, kill-switch park+drain, limited/readonly origin gating, supersede/revive, expiry, lease reclaim) + adapted #344 regression suite (tests/deferred_delete_followups_test.go: marker sweep, FailMembership system-origin intents, limited-mode, user-cancel→user-origin intent→resume supersede) + dunning integration regressions all green.
+
+## The unifying insight
+
+Class-3 divergence (missed outbound actions) is prevented structurally when every provider mutation flows through ONE durable intent pipeline. This week's piecemeal builds are all instances of it: DeletionScheduledAt markers + boot rescan (#344), the manual_rebill_attempts claim table, pending_manual_link catalog states + re-apply-every-boot. Generalize them.
+
+## Schema sketch
+
+`billing.provider_intents`: id, tenant_id, provider, intent_type (delete_subscription | manual_rebill | refund | plan_create | plan_archive | vault_update | ...), subject ids (subscription/payment/price...), payload jsonb, idempotency_key (unique), status (pending | in_flight | succeeded | unknown_needs_verify | failed_retryable | failed_terminal | superseded | expired), attempts, next_attempt_at, claimed_until (single-executor lease, SKIP LOCKED), origin (user | admin | system) + reason, relevance/expiry condition, result_evidence jsonb, executed_at. RLS + tenant stamping per schema conventions.
+
+## Effectively-once semantics (NOT literal exactly-once — impossible over a network; per-class strategy)
+
+- MONEY-MOVING (rebill, refund, arrears, top-up): lease -> attempt -> on ambiguous outcome park as unknown_needs_verify; a verifier resolves via the provider READ API before any retry; never blind-retry. (= the existing manual_rebill_attempts pattern, generalized.) Stripe ops additionally send Idempotency-Key.
+- DELETE/CANCEL: verify-then-execute; absent = success; blind retry harmless.
+- CREATE (plans/prices): content-addressed find-or-create (already idempotent).
+
+## Mode interplay (the payoff Paul named)
+
+readonly/limited/kill-switch/provider-down/bad-creds stop being ERRORS and become reasons an intent stays pending (status note says why). Origin gates execution: user/admin-origin intents (their cancel's delete, an admin refund) execute under limited (reactive completion — matches today's deferred-delete behavior); system-origin intents (dunning charge) wait for full mode. Nothing attempts a provider write under readonly (wire chokes are the backstop; the executor checks first and parks politely). When the mode lifts, the executor drains the queue — replacing the boot-rescan special case with the general mechanism.
+
+## Relevance windows
+
+Each type defines validity: delete valid while the sub exists and is cancelled (superseded if resumed); rebill valid inside the dunning window (#344) — expiry -> expired with a finding; refund valid until executed or admin-cancelled. Expired/terminal intents surface in reconcile (#107) as findings.
+
+## #107 tie-in (already wired in phase 2)
+
+Findings carry intent_evidence referencing the ledger; PS-2/PS-3 with a live pending intent recommend "executor replays" not admin action; NEW finding type for stuck intents (pending/unknown beyond threshold).
+
+## Confirmed + inbound non-goal (Paul 2026-06-11)
+
+Plan CONFIRMED: "a table recording all outbound intents, a scheduled worker attempts them when possible, with an expiration period after which re-attempt is no longer possible or no longer makes sense. No outbound operations are lost." (The no-recurring-jobs ruling on #107 applies to reconcile RUNS; the intent executor is the action pipeline and is explicitly endorsed as a scheduled worker.)
+
+NON-GOAL — no inbound/webhook durable queue: we are one system; if the DB is down we could not enqueue either (shared fate). Inbound durability = the PROVIDER's at-least-once webhook retries (handlers stay idempotent) + #107 reconcile as the batch backstop for outages long enough to exhaust provider retries. Build nothing inbound.
+
+## Phasing (after in-flight #107 phase 2 + #355 land)
+
+- A: table + sqlc + executor worker (lease/SKIP LOCKED, backoff, mode/origin gating) + verifier loop for unknown_needs_verify; migrate NMI delete_subscription onto it (DeletionScheduledAt becomes a view onto the intent; boot rescan retired).
+- B: refunds + Stripe cancel/portal ops (Idempotency-Key support in stripeapi).
+- C: fold manual_rebill_attempts in as intent_type=manual_rebill (preserve its exact verify semantics).
+- D: catalog archive ops (#357 --exhaustive executes through the ledger).
+
+**Tasks:**
+- [x] Phase A: schema + executor + verifier + NMI deletes migrated + rescan retired (2026-06-11; migration 010, internal/intents, #107 stuck-intent finding type deferred to the reconcile follow-up)
+- [x] Phase B: refunds/Stripe ops + Idempotency-Key (2026-06-11)
+- [x] Phase C: manual rebills folded in; manual_rebill_attempts dropped, migration 011 (2026-06-11)
+- [x] Phase D: #357 archive ops through the ledger; Solana BuildUpdatePlan built from the official IDL (2026-06-11)
+---

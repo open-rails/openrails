@@ -61,9 +61,18 @@ completes (or releases) the reservation. Phase C retired the
 `readonly`), one intent per (subscription, period end, attempt ordinal), with
 the dunning window as the relevance window; the verifier resolves ambiguous
 charges by querying NMI for the period's order reference and repairs the
-subscription lifecycle on late-confirmed success. Still specialized until
-phase D: catalog archive ops; catalog `pending_manual_link` states remain
-converged by re-apply-on-boot.
+subscription lifecycle on late-confirmed success. Phase D routed catalog
+archive ops through the ledger (`stripe_archive_product`,
+`stripe_archive_price`, `solana_sunset_plan`; admin-origin): `bootstrap apply
+--exhaustive` (#357) enqueues+executes an intent per extra, so a provider
+being down no longer aborts the sweep — items park and drain durably, and an
+intent expires if its object joins the local catalog before execution. NMI
+deliberately has NO archive write path (plan edits affect live subscribers);
+Solana extras are detected from our own stored plan handles (the chain has no
+plan enumeration) and sunset flips only the plan status. With D, **all four
+phases are shipped — every outbound provider mutation flows through the
+ledger.** Catalog `pending_manual_link` states remain converged by
+re-apply-on-boot (idempotent by construction — no intent needed).
 
 Execution is **effectively-once**, never assumed exactly-once (impossible over
 a network). Per class: money-movers (rebills, refunds) park ambiguous outcomes
@@ -125,7 +134,18 @@ with the blocker documented on the finding.
 Findings have stable identity across runs (re-runs update, vanished findings
 auto-resolve), carry intent evidence ("our recorded delete never executed —
 the executor replays it") so the admin queue holds only genuine unknowns, and
-include the dunning-forensics report. NMI safety note: cancelled
+include the dunning-forensics report.
+
+**Stuck intents (PS-10).** Every run — regardless of `--provider` filters,
+reading only the local ledger — flags provider intents sitting non-terminal
+too long: `pending`/`failed_retryable` older than 24h, and
+`in_flight`/`unknown_needs_verify` older than 2h (a healthy verifier resolves
+unknowns in minutes). Thresholds are hardcoded — no knobs. Intents parked by
+operating mode or the kill switch are *informational* (that wait is by
+design; the executor drains them when the blocker lifts); everything else
+stuck is admin-queued — it means provider failures, bad credentials, or a
+dead worker. Findings auto-resolve when the intent completes or recovers;
+`fix` never touches intent rows (the executor/verifier own them). NMI safety note: cancelled
 subscriptions *vanish* from NMI's recurring report rather than changing
 status, so the engine refuses to act when the remote active set is
 implausibly small versus local (circuit breaker against mass-cancellation
