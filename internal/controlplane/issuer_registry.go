@@ -132,10 +132,14 @@ func (c *ControlPlane) reloadDelegatedIssuers(ctx context.Context) error {
 		// explicit keys are supplied, so remove first to make issuer rotations
 		// take effect immediately after registry reload.
 		c.delegatedVerifier.RemoveIssuer(iss.Issuer)
+		// No IssuerOptions.TenantSlug: it only populates the service-JWT
+		// principal's Tenant, which OpenRails never reads — ResolveServiceJWT and
+		// ResolveDelegated both resolve the tenant LIVE from billing.tenants via
+		// tenantForIssuer, so a cached slug could only go stale between renames
+		// and reloads.
 		if err := c.delegatedVerifier.AddIssuer(iss.Issuer, iss.Audiences, authhttp.IssuerOptions{
-			JWKSURI:                iss.JWKSURI,
-			CacheTTL:               delegatedIssuerJWKSCacheTTL,
-			TrustedResourceAccount: iss.TenantSlug,
+			JWKSURI:  iss.JWKSURI,
+			CacheTTL: delegatedIssuerJWKSCacheTTL,
 		}); err != nil {
 			return fmt.Errorf("controlplane: register delegated issuer %q: %w", iss.Issuer, err)
 		}

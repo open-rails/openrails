@@ -1391,16 +1391,17 @@ publish age 6s). EURC registry mint verified via Jupiter token API:
 # #361: delegated-tokens-slug-only-tenant-identity
 
 **Completed:** no
-**Status:** IN_PROGRESS 2026-06-11 (UPDATED later same day): the authkit profile is now a
-HARD CUT, not a relaxation — releasing as v0.22.0. Delegated tokens carry tenant identity
-as `tenant` (slug) + validated `iss` ONLY; `DelegatedAccessParams` has no `TenantID`
-field, and the verifier REJECTS any delegated token carrying a `tenant_id` claim
-(`delegated_access_has_tenant_id`) — no legacy acceptance. `Claims.TenantID` is populated
-only by opaque service-token DB resolution; `IssuerOptions.TrustedResourceAccount`
-matches the slug claim only; new `core.Service.TouchTenantSubjectForIssuer`. openrails
-ADAPTED 2026-06-11 (see openrails task notes below) via a TEMPORARY
-`replace github.com/open-rails/authkit => /home/fidika/authkit` in go.mod — swap to the
-pinned v0.22.0 once tagged (release still needs Paul). Host cleanups still pending.
+**Status:** IN_PROGRESS 2026-06-11 (UPDATED AGAIN same day — authkit v0.23.0 PUBLISHED):
+the profile is now ISSUER-ONLY, a hard cut beyond v0.22.0's slug-only cut. Delegated
+tokens carry NO tenant claims at all (neither `tenant_id` nor the `tenant` slug): the
+VALIDATED `iss` IS the tenant identity, resolved purely from the receiver's issuer
+registry. `DelegatedAccessParams.Tenant` and `DelegatedPrincipal.Tenant` are removed;
+the verifier rejects `tenant` (`delegated_access_has_tenant`) same as `tenant_id`;
+`IssuerOptions.TrustedResourceAccount` is replaced by `IssuerOptions.TenantSlug`
+(issuer-registry data, never compared against claims — the mismatch check is gone).
+Tenant slug renames are fully TRANSPARENT to in-flight tokens. openrails ADAPTED
+2026-06-11 with a DIRECT pin to v0.23.0 (no replace directive — see openrails task
+notes below). Host cleanups still pending.
 
 Host apps (doujins, hentai0) must never need to know their OpenRails tenant uuid. A
 tenant knows its chosen name (slug) the way a user knows their username; the uuid is
@@ -1470,8 +1471,16 @@ non-event, and it is the CORRECT behavior: the slug is the host-facing identity.
       (`delegated_access_has_tenant_id`). There is no pass-through and no legacy
       acceptance; receivers that keyed on the claim (tensorhub) must move to
       issuer-pinned resolution before adopting v0.22.0.
-- [ ] authkit: version bump + release (tag + push — needs Paul; current consumers pin
-      v0.21.0, openrails pins v0.19.0).
+- [x] authkit: version bump + release. DONE 2026-06-11: v0.23.0 PUBLISHED — and it
+      EXTENDS the hard cut to the full ISSUER-ONLY profile: delegated tokens carry NO
+      tenant claims at all (neither `tenant_id` nor the `tenant` slug). The VALIDATED
+      `iss` IS the tenant identity; receivers resolve the tenant purely from their
+      issuer registry. `DelegatedAccessParams.Tenant` and `DelegatedPrincipal.Tenant`
+      are removed, the verifier rejects a `tenant` claim (`delegated_access_has_tenant`)
+      same as `tenant_id`, and `IssuerOptions.TrustedResourceAccount` is replaced by
+      `IssuerOptions.TenantSlug` (issuer-registry data; never compared against claims —
+      the slug mismatch check no longer exists). Consequence: tenant slug renames are
+      fully TRANSPARENT to in-flight delegated tokens.
 - [x] openrails: bump the pinned authkit; add/adjust a controlplane test proving a
       delegated token WITHOUT `tenant_id` resolves end-to-end (issuer-pinned tenant,
       slug cross-check, TouchTenantSubject) — codifying that openrails never needs
@@ -1485,6 +1494,16 @@ non-event, and it is the CORRECT behavior: the slug is the host-facing identity.
       (a hand-signed token carrying tenant_id is REJECTED, not just optional-and-
       ignored). mintDelegated/mintFed helpers no longer set TenantID. Full unit suite
       + controlplane integration suite (testcontainers) green.
+      RE-ADAPTED 2026-06-11 (authkit v0.23.0 issuer-only): openrails now pins
+      `github.com/open-rails/authkit v0.23.0` DIRECTLY (no replace directive).
+      `ResolveDelegated` no longer reads `principal.Tenant` or cross-checks any slug
+      claim (the claim cannot exist); `ResolvedDelegated.Tenant`/`TenantSlug` come
+      purely from the issuer-registry resolution (tenantForIssuer).
+      `reloadDelegatedIssuers` drops the per-issuer slug option entirely (openrails
+      never reads the service-JWT principal's Tenant — ResolveServiceJWT resolves
+      live from billing.tenants via tenantForIssuer). The end-to-end test now
+      asserts the minted token carries NO `tenant` claim either; new unit twin
+      `TestDelegatedVerify_RejectsTenantSlugClaim` pins `delegated_access_has_tenant`.
 - [x] openrails: add a slug-rename semantics test: after renaming a tenant's slug, a
       token carrying the OLD slug claim is rejected (tenant-claim mismatch) and a
       token with the NEW slug validates — documenting rename behavior instead of
@@ -1493,6 +1512,11 @@ non-event, and it is the CORRECT behavior: the slug is the host-facing identity.
       registry reload (ResolveDelegated DB cross-check) and after; new-slug token
       validates after `reloadDelegatedIssuers` (the operational step that refreshes
       the verifier's TrustedResourceAccount slug binding); tenant uuid unchanged.
+      SUPERSEDED 2026-06-11 (v0.23.0): that rejection behavior is GONE — tokens carry
+      no slug claim, so the test is REWRITTEN as rename-TRANSPARENCY: the SAME
+      in-flight token resolves to the SAME tenant uuid before the rename, immediately
+      after it (no reload needed), and after `reloadDelegatedIssuers`; only the
+      resolved slug changes. Renames are a non-event for hosts.
 - [ ] doujins: drop the tenant-uuid mint requirement (internal/billing/openrailsmint/
       minter.go) and ALL `BILLING_TENANT_ID` plumbing: docker-compose env for both the
       doujins and hentai0 services, DOUJINS_BILLING_TENANT_ID / HENTAI0_BILLING_TENANT_ID

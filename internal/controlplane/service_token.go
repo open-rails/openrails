@@ -27,9 +27,11 @@ const (
 // the service token's granted OpenRails permission strings.
 type ResolvedServiceToken struct {
 	// AuthKitTenantID is the immutable AuthKit tenant uuid that owns the
-	// service token (claim/source `tenant_id`). It is the canonical
-	// cross-service identifier; always populated on the service-token path
-	// (empty only on the issuer-pinned service-JWT path).
+	// service token, resolved by AuthKit's opaque service-token DB lookup —
+	// never from a JWT claim (delegated tokens carry NO tenant claims; the
+	// validated iss is the tenant identity, #361 / authkit v0.23.0). It is the
+	// canonical cross-service identifier; always populated on the service-token
+	// path (empty only on the issuer-pinned service-JWT path).
 	AuthKitTenantID string
 	// AuthKitTenantSlug is the AuthKit tenant slug that owns the service
 	// token. Slugs are MUTABLE — presentation/audit only.

@@ -25,10 +25,13 @@ import (
 // middleware tests).
 
 const (
-	testDelegatedIssuer   = "https://billing.test.example"
-	testDelegatedKID      = "test-kid-1"
-	canonicalAudience     = "openrails"
-	testDelegatedSubject  = "end-user-42"
+	testDelegatedIssuer  = "https://billing.test.example"
+	testDelegatedKID     = "test-kid-1"
+	canonicalAudience    = "openrails"
+	testDelegatedSubject = "end-user-42"
+	// testDelegatedTenant / testDelegatedTenantID are LEGACY claim values used
+	// only to prove the issuer-only hard cut (#361, authkit v0.23.0): tokens
+	// carrying `tenant` (slug) or `tenant_id` (uuid) are rejected.
 	testDelegatedTenant   = "operator"
 	testDelegatedTenantID = "11111111-1111-1111-1111-111111111111"
 	wrongAudience         = "tensorhub"
@@ -43,7 +46,6 @@ func newTestDelegatedVerifier(t *testing.T) (*authhttp.Verifier, jwtkit.Signer) 
 	require.NoError(t, err)
 
 	v := authhttp.NewVerifier(
-		authhttp.WithTenantMode("multi"),
 		authhttp.WithPermissionCatalog(func(permissions []string) error {
 			if len(permissions) == 0 {
 				return errors.New("delegated token carries no permissions")
@@ -74,12 +76,6 @@ func mintDelegated(t *testing.T, signer jwtkit.Signer, p authhttp.DelegatedAcces
 	if p.DelegatedSubject == "" {
 		p.DelegatedSubject = testDelegatedSubject
 	}
-	if p.Tenant == "" {
-		p.Tenant = testDelegatedTenant
-	}
-	if p.TenantID == "" {
-		p.TenantID = testDelegatedTenantID
-	}
 	tok, err := authhttp.MintDelegatedAccessToken(context.Background(), signer, p)
 	require.NoError(t, err)
 	return tok
@@ -94,7 +90,7 @@ func TestDelegatedVerify_SucceedsWithSelfPermissionAndAudience(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "", cl.UserID, "delegated token must not carry a normal sub")
 	require.Equal(t, testDelegatedSubject, dp.DelegatedSubject)
-	require.Equal(t, testDelegatedTenant, dp.Tenant)
+	require.Equal(t, testDelegatedIssuer, dp.Issuer, "the validated iss is the tenant identity")
 	require.Contains(t, dp.Permissions, PermSelfBillingRead)
 }
 
@@ -138,8 +134,6 @@ func TestDelegatedVerify_RejectsExpired(t *testing.T) {
 		jwt.MapClaims{
 			"iss":           testDelegatedIssuer,
 			"aud":           []string{canonicalAudience},
-			"tenant":        testDelegatedTenant,
-			"tenant_id":     testDelegatedTenantID,
 			"delegated_sub": testDelegatedSubject,
 			"permissions":   []string{PermSelfBillingRead},
 			"iat":           past.Unix(),
@@ -150,6 +144,56 @@ func TestDelegatedVerify_RejectsExpired(t *testing.T) {
 	require.NoError(t, err)
 	_, _, verr := v.VerifyDelegatedAccess(tok)
 	require.Error(t, verr, "expired delegated token must be rejected")
+}
+
+// HARD CUT (#361, authkit v0.23.0): the issuer-only delegated-token profile.
+// Tenant identity is the validated `iss` ONLY; a token still carrying the
+// legacy `tenant_id` uuid claim is rejected outright — there is no
+// legacy-acceptance window. (MintDelegatedAccessToken can no longer write the
+// claim, so this signs the forbidden shape by hand.)
+func TestDelegatedVerify_RejectsTenantIDClaim(t *testing.T) {
+	v, signer := newTestDelegatedVerifier(t)
+	hs := signer.(jwtkit.HeaderSigner)
+	now := time.Now()
+	tok, err := hs.SignWithHeaders(context.Background(),
+		jwt.MapClaims{
+			"iss":           testDelegatedIssuer,
+			"aud":           []string{canonicalAudience},
+			"tenant_id":     testDelegatedTenantID,
+			"delegated_sub": testDelegatedSubject,
+			"permissions":   []string{PermSelfBillingRead},
+			"iat":           now.Unix(),
+			"exp":           now.Add(time.Minute).Unix(),
+		},
+		map[string]any{"typ": authhttp.DelegatedAccessTokenType},
+	)
+	require.NoError(t, err)
+	_, _, verr := v.VerifyDelegatedAccess(tok)
+	require.Error(t, verr, "a delegated token carrying a tenant_id claim must be rejected (issuer-only hard cut)")
+}
+
+// Twin of the tenant_id rejection: the `tenant` slug claim is equally
+// forbidden (authkit v0.23.0 `delegated_access_has_tenant`). Tokens carry NO
+// tenant claims of any kind.
+func TestDelegatedVerify_RejectsTenantSlugClaim(t *testing.T) {
+	v, signer := newTestDelegatedVerifier(t)
+	hs := signer.(jwtkit.HeaderSigner)
+	now := time.Now()
+	tok, err := hs.SignWithHeaders(context.Background(),
+		jwt.MapClaims{
+			"iss":           testDelegatedIssuer,
+			"aud":           []string{canonicalAudience},
+			"tenant":        testDelegatedTenant,
+			"delegated_sub": testDelegatedSubject,
+			"permissions":   []string{PermSelfBillingRead},
+			"iat":           now.Unix(),
+			"exp":           now.Add(time.Minute).Unix(),
+		},
+		map[string]any{"typ": authhttp.DelegatedAccessTokenType},
+	)
+	require.NoError(t, err)
+	_, _, verr := v.VerifyDelegatedAccess(tok)
+	require.Error(t, verr, "a delegated token carrying a tenant slug claim must be rejected (issuer-only hard cut)")
 }
 
 func TestDelegatedVerify_RejectsNoPermissions(t *testing.T) {

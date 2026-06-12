@@ -152,7 +152,6 @@ func jwksServer(t *testing.T, signer *jwtkit.RSASigner) *httptest.Server {
 func newFedControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	t.Helper()
 	v := authhttp.NewVerifier(
-		authhttp.WithTenantMode("multi"),
 		authhttp.WithPermissionCatalog(func(perms []string) error {
 			if len(perms) == 0 {
 				return errors.New("no perms")
@@ -175,30 +174,22 @@ func newFedControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	}
 }
 
-func mintFed(t *testing.T, signer *jwtkit.RSASigner, issuer, sub string, perms []string, tenantClaim string) string {
+func mintFed(t *testing.T, signer *jwtkit.RSASigner, issuer, sub string, perms []string) string {
 	t.Helper()
-	return mintFedWithAudience(t, signer, issuer, sub, perms, tenantClaim, []string{"openrails"})
+	return mintFedWithAudience(t, signer, issuer, sub, perms, []string{"openrails"})
 }
 
-func mintFedWithAudience(t *testing.T, signer *jwtkit.RSASigner, issuer, sub string, perms []string, tenantClaim string, audiences []string) string {
+func mintFedWithAudience(t *testing.T, signer *jwtkit.RSASigner, issuer, sub string, perms []string, audiences []string) string {
 	t.Helper()
-	// authkit v0.19.0 requires the `tenant_id` (uuid) claim at mint. OpenRails'
-	// federated resolution is issuer-pinned, so the value only needs to be a
-	// stable uuid for the tenant the issuer is registered to.
-	tenantID := map[string]string{
-		"tenant-a": fedTenantA.String(),
-		"tenant-b": fedTenantB.String(),
-	}[tenantClaim]
-	if tenantID == "" {
-		tenantID = fedTenantA.String()
-	}
+	// Issuer-only delegated-token profile (#361, authkit v0.23.0 hard cut):
+	// tenant identity is the validated `iss` ONLY. There are NO tenant claims —
+	// the mint API cannot write `tenant` or `tenant_id` and the verifier rejects
+	// tokens that carry either.
 	tok, err := authhttp.MintDelegatedAccessToken(context.Background(), signer, authhttp.DelegatedAccessParams{
 		Issuer:           issuer,
 		Audiences:        audiences,
 		DelegatedSubject: sub,
 		Permissions:      perms,
-		Tenant:           tenantClaim,
-		TenantID:         tenantID,
 		TTL:              5 * time.Minute,
 	})
 	require.NoError(t, err)
@@ -277,6 +268,102 @@ func TestTouchTenantSubjectIsIdempotentPerOIDCTuple(t *testing.T) {
 		   AND subject = 'user-1'
 	`, fedTenantA.String()).Scan(&count))
 	require.Equal(t, 2, count)
+}
+
+// TestDelegatedTokenWithoutTenantIDResolvesEndToEnd codifies the #361
+// issuer-only contract end-to-end: a delegated token carrying NO tenant claims
+// at all (the only shape authkit v0.23.0 can mint — both `tenant` and
+// `tenant_id` are forbidden, not optional) resolves through the full path:
+// issuer-pinned tenant (validated `iss` -> registry) and TouchTenantSubject
+// payable-subject upsert. OpenRails never needs a tenant identifier to ride in
+// a token.
+func TestDelegatedTokenWithoutTenantIDResolvesEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	pool := newFedTestPool(t)
+	cp := newFedControlPlane(t, pool)
+
+	sg, err := jwtkit.NewRSASigner(2048, "issuer-only-kid")
+	require.NoError(t, err)
+	iss := "https://issuer-only.test"
+	registerIssuerRow(t, pool, fedTenantA, iss, jwksServer(t, sg).URL, true)
+	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
+
+	tok := mintFed(t, sg, iss, "issuer-only-user", []string{PermSelfBillingRead})
+
+	// Pin the wire shape: the minted token carries NO tenant claims of any kind.
+	claims := jwt.MapClaims{}
+	_, _, perr := jwt.NewParser().ParseUnverified(tok, claims)
+	require.NoError(t, perr)
+	_, hasTenantID := claims["tenant_id"]
+	require.False(t, hasTenantID, "delegated token must not carry a tenant_id claim")
+	_, hasTenant := claims["tenant"]
+	require.False(t, hasTenant, "delegated token must not carry a tenant slug claim")
+
+	res, err := cp.ResolveDelegated(ctx, tok)
+	require.NoError(t, err)
+	require.Equal(t, fedTenantA, res.TenantID, "tenant is pinned from the validated iss via the issuer registry")
+	require.Equal(t, "tenant-a", res.TenantSlug)
+	require.Equal(t, "issuer-only-user", res.DelegatedSubject)
+
+	// TouchTenantSubject ran: the payable subject row exists for the tuple and
+	// matches what resolution returned; resolving again is idempotent.
+	var subjectID string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT id::text
+		  FROM billing.tenant_subjects
+		 WHERE tenant_id = $1 AND issuer = $2 AND subject = 'issuer-only-user'
+	`, fedTenantA.String(), iss).Scan(&subjectID))
+	require.Equal(t, subjectID, res.TenantSubjectID.String())
+
+	again, err := cp.ResolveDelegated(ctx, tok)
+	require.NoError(t, err)
+	require.Equal(t, res.TenantSubjectID, again.TenantSubjectID)
+}
+
+// TestSlugRenameSemantics documents the #361 / authkit v0.23.0 rename behavior:
+// delegated tokens carry NO tenant claims, so a tenant slug rename in
+// billing.tenants is fully TRANSPARENT to in-flight tokens. The SAME token
+// resolves to the SAME tenant uuid before the rename, after the rename, and
+// after the registry reload — only the reported slug changes.
+func TestSlugRenameSemantics(t *testing.T) {
+	ctx := context.Background()
+	pool := newFedTestPool(t)
+	cp := newFedControlPlane(t, pool)
+
+	sg, err := jwtkit.NewRSASigner(2048, "rename-kid")
+	require.NoError(t, err)
+	iss := "https://rename.test"
+	registerIssuerRow(t, pool, fedTenantA, iss, jwksServer(t, sg).URL, true)
+	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
+
+	tok := mintFed(t, sg, iss, "rename-user", []string{PermSelfBillingRead})
+	res, err := cp.ResolveDelegated(ctx, tok)
+	require.NoError(t, err, "pre-rename token resolves")
+	require.Equal(t, fedTenantA, res.TenantID)
+	require.Equal(t, "tenant-a", res.TenantSlug)
+
+	// Rename the tenant's slug (restore afterwards so a shared
+	// OPENRAILS_TEST_DB_DSN database is not left renamed for other tests).
+	_, err = pool.Exec(ctx, `UPDATE billing.tenants SET slug = 'tenant-a-renamed' WHERE id = $1`, fedTenantA.String())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `UPDATE billing.tenants SET slug = 'tenant-a' WHERE id = $1`, fedTenantA.String())
+	})
+
+	// The SAME token keeps resolving immediately after the rename — no reload
+	// required, because the tenant is pinned from the validated iss, never from
+	// a slug claim.
+	res, err = cp.ResolveDelegated(ctx, tok)
+	require.NoError(t, err, "rename is transparent to in-flight tokens")
+	require.Equal(t, fedTenantA, res.TenantID, "rename does not change the tenant's internal identity")
+	require.Equal(t, "tenant-a-renamed", res.TenantSlug, "the resolved slug tracks the directory live")
+
+	// And it still resolves identically after the registry reload.
+	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
+	res, err = cp.ResolveDelegated(ctx, tok)
+	require.NoError(t, err)
+	require.Equal(t, fedTenantA, res.TenantID)
+	require.Equal(t, "tenant-a-renamed", res.TenantSlug)
 }
 
 func TestFederatedServiceJWTs(t *testing.T) {
@@ -429,7 +516,7 @@ func federatedMultiIssuer(t *testing.T, pool *pgxpool.Pool) {
 		issuer string
 		signer *jwtkit.RSASigner
 	}{{issA1, sgA1}, {issA2, sgA2}} {
-		tok := mintFed(t, iss.signer, iss.issuer, "shared-user-1", []string{PermSelfBillingRead}, "tenant-a")
+		tok := mintFed(t, iss.signer, iss.issuer, "shared-user-1", []string{PermSelfBillingRead})
 		res, err := cp.ResolveDelegated(ctx, tok)
 		require.NoError(t, err, "issuer %s", iss.issuer)
 		require.Equal(t, fedTenantA, res.TenantID)
@@ -438,15 +525,27 @@ func federatedMultiIssuer(t *testing.T, pool *pgxpool.Pool) {
 	}
 
 	// Tenant B's issuer resolves to B (distinct).
-	tokB := mintFed(t, sgB, issB, "b-user", []string{PermSelfBillingRead}, "tenant-b")
+	tokB := mintFed(t, sgB, issB, "b-user", []string{PermSelfBillingRead})
 	resB, err := cp.ResolveDelegated(ctx, tokB)
 	require.NoError(t, err)
 	require.Equal(t, fedTenantB, resB.TenantID)
 
-	// CROSS-TENANT: tenant A's issuer naming tenant B in its `tenant` claim is
-	// rejected — a tenant-signed token can never assert a tenant other than the
-	// one its (globally-unique) issuer is pinned to.
-	forged := mintFed(t, sgA1, issA1, "evil", []string{PermSelfBillingRead}, "tenant-b")
+	// CROSS-TENANT: forging another tenant is structurally impossible — tokens
+	// carry NO tenant claims (issuer-only profile), so the only tenant assertion
+	// a token can make is its validated `iss`, which is pinned to one tenant.
+	// A hand-signed token that smuggles a `tenant` claim naming tenant B is
+	// rejected outright by the verifier (delegated_access_has_tenant).
+	now := time.Now()
+	forged, err := sgA1.SignWithHeaders(ctx, jwt.MapClaims{
+		"iss":           issA1,
+		"aud":           []string{"openrails"},
+		"tenant":        "tenant-b",
+		"delegated_sub": "evil",
+		"permissions":   []string{PermSelfBillingRead},
+		"iat":           now.Unix(),
+		"exp":           now.Add(time.Minute).Unix(),
+	}, map[string]any{"typ": authhttp.DelegatedAccessTokenType})
+	require.NoError(t, err)
 	_, err = cp.ResolveDelegated(ctx, forged)
 	require.ErrorIs(t, err, ErrDelegatedInvalid)
 }
@@ -462,8 +561,8 @@ func federatedKillSwitch(t *testing.T, pool *pgxpool.Pool) {
 	registerIssuerRow(t, pool, fedTenantA, issA2, jwksServer(t, sgA2).URL, true)
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
 
-	tokA1 := mintFed(t, sgA1, issA1, "u", []string{PermSelfBillingRead}, "tenant-a")
-	tokA2 := mintFed(t, sgA2, issA2, "u", []string{PermSelfBillingRead}, "tenant-a")
+	tokA1 := mintFed(t, sgA1, issA1, "u", []string{PermSelfBillingRead})
+	tokA2 := mintFed(t, sgA2, issA2, "u", []string{PermSelfBillingRead})
 	_, err := cp.ResolveDelegated(ctx, tokA1)
 	require.NoError(t, err)
 
@@ -487,7 +586,7 @@ func federatedTenantAdmin(t *testing.T, pool *pgxpool.Pool) {
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
 
 	// The acting admin is the delegated_sub; the token carries a tenant-admin perm.
-	tok := mintFed(t, sg, iss, "admin-user", []string{PermTenantBillingRead, PermTenantEntitlementsWrite}, "tenant-a")
+	tok := mintFed(t, sg, iss, "admin-user", []string{PermTenantBillingRead, PermTenantEntitlementsWrite})
 	res, err := cp.ResolveDelegated(ctx, tok)
 	require.NoError(t, err)
 	require.Equal(t, fedTenantA, res.TenantID)
@@ -504,7 +603,7 @@ func federatedWrongAudience(t *testing.T, pool *pgxpool.Pool) {
 	registerIssuerRow(t, pool, fedTenantA, iss, jwksServer(t, sg).URL, true)
 	require.NoError(t, cp.reloadDelegatedIssuers(ctx))
 
-	tok := mintFedWithAudience(t, sg, iss, "u", []string{PermSelfBillingRead}, "tenant-a", []string{"tensorhub"})
+	tok := mintFedWithAudience(t, sg, iss, "u", []string{PermSelfBillingRead}, []string{"tensorhub"})
 	_, err := cp.ResolveDelegated(ctx, tok)
 	require.ErrorIs(t, err, ErrDelegatedInvalid)
 }
@@ -516,7 +615,7 @@ func federatedUnregistered(t *testing.T, pool *pgxpool.Pool) {
 	// A perfectly-valid signer whose issuer was never registered. Its key is not
 	// in the verifier, so it fails closed.
 	sg, _ := jwtkit.NewRSASigner(2048, "ghost-kid")
-	tok := mintFed(t, sg, "https://ghost.test", "u", []string{PermSelfBillingRead}, "tenant-a")
+	tok := mintFed(t, sg, "https://ghost.test", "u", []string{PermSelfBillingRead})
 	_, err := cp.ResolveDelegated(ctx, tok)
 	require.Error(t, err)
 }
@@ -533,7 +632,7 @@ func federatedGlobalUniqueness(t *testing.T, pool *pgxpool.Pool) {
 	require.NoError(t, cp.RegisterDelegatedIssuer(ctx, RegisterDelegatedIssuerParams{
 		TenantID: fedTenantA, Issuer: iss, JWKSURI: js, Audiences: []string{"openrails"},
 	}))
-	oldToken := mintFed(t, sg, iss, "rotated-user", []string{PermSelfBillingRead}, "tenant-a")
+	oldToken := mintFed(t, sg, iss, "rotated-user", []string{PermSelfBillingRead})
 	_, err := cp.ResolveDelegated(ctx, oldToken)
 	require.NoError(t, err)
 
@@ -550,7 +649,7 @@ func federatedGlobalUniqueness(t *testing.T, pool *pgxpool.Pool) {
 	}))
 	_, err = cp.ResolveDelegated(ctx, oldToken)
 	require.ErrorIs(t, err, ErrDelegatedInvalid)
-	newToken := mintFed(t, sg2, iss, "rotated-user", []string{PermSelfBillingRead}, "tenant-a")
+	newToken := mintFed(t, sg2, iss, "rotated-user", []string{PermSelfBillingRead})
 	_, err = cp.ResolveDelegated(ctx, newToken)
 	require.NoError(t, err)
 }

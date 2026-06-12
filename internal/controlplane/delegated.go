@@ -21,9 +21,10 @@ import (
 // `delegated_sub`), the resolved OpenRails tenant the user belongs to, and the
 // token's `openrails:self:*` permission grants.
 type ResolvedDelegated struct {
-	// Tenant is the AuthKit tenant slug from the token's `tenant` claim. It is the
-	// tenant that administers the user's billing namespace; it maps to an OpenRails
-	// tenant via the billing.tenants directory (same mapping as service tokens).
+	// Tenant is the resolved tenant's slug, sourced from the issuer registry
+	// (billing.tenants via the validated `iss`). Delegated tokens carry NO
+	// tenant claims (authkit v0.23.0 issuer-only profile); the slug is
+	// receiver-side directory data, identical to TenantSlug.
 	Tenant string
 	// TenantID is the resolved OpenRails tenant (#223).
 	TenantID tenant.ID
@@ -153,19 +154,17 @@ func newDelegatedVerifier(coreSvc *authcore.Service, tokenPrefix string) (*authh
 //     AuthKit delegated access token (`delegated_sub` present, NO `sub`),
 //   - enforces that every `permissions` entry is in the {self, tenant-admin}
 //     catalog (#259), never a service/operator grant,
-//   - resolves the OpenRails tenant: for a FEDERATED tenant-signed token (#259)
-//     from the VALIDATED `iss` via the issuer registry (issuer is globally
-//     unique -> pins exactly one tenant); for a SELF-ISSUED token (migration
-//     window) from the `tenant` claim (AuthKit tenant slug) via billing.tenants.
+//   - resolves the OpenRails tenant from the VALIDATED `iss` via the issuer
+//     registry (issuer is globally unique -> pins exactly one tenant). Tokens
+//     carry NO tenant claims (authkit v0.23.0 issuer-only profile); the
+//     verifier rejects any token carrying `tenant` or `tenant_id`.
 //
 // Returns:
 //   - authcore.ErrAccessTokenExpired for an expired token,
-//   - ErrServiceTokenTenantUnresolved when a self-issued token's tenant maps to no active
-//     tenant,
 //   - ErrDelegatedIssuerUnknown when a federated token's issuer is not
 //     registered+enabled for an active tenant (cross-tenant / unmapped),
 //   - ErrDelegatedInvalid for any other rejection (bad signature/audience/type,
-//     normal-sub token, missing/forbidden permission, tenant-claim mismatch).
+//     normal-sub token, missing/forbidden permission, forbidden tenant claim).
 func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*ResolvedDelegated, error) {
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrDelegatedNotConfigured
@@ -202,24 +201,18 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 	}
 
 	issuer := strings.TrimSpace(principal.Issuer)
-	authKitTenantSlug := strings.TrimSpace(principal.Tenant)
 
 	// FEDERATED tenant-signed token (issue #259): the tenant is pinned from the
 	// VALIDATED `iss` via the issuer registry. Because `issuer` is globally unique,
 	// a given signing key can only ever resolve to its own tenant
 	// (no-cross-tenant-forgery). An unregistered/disabled issuer fails closed.
-	// There is no longer a self-issued path: every delegated token is tenant-signed
-	// and verified through the tenant's registered JWKS.
+	// The token carries no tenant claims (issuer-only profile, authkit v0.23.0):
+	// the issuer registry is the SOLE source of tenant identity, so slug renames
+	// never invalidate in-flight tokens.
 	tid, tslug, err := c.tenantForIssuer(ctx, issuer)
 	if err != nil {
 		return nil, err
 	}
-	// If the token ALSO carries a `tenant` claim, it MUST agree with the issuer's
-	// OpenRails tenant/resource slug.
-	if authKitTenantSlug != "" && !strings.EqualFold(authKitTenantSlug, tslug) {
-		return nil, ErrDelegatedInvalid
-	}
-	tenLbl := tslug
 
 	tenantSubjectID, err := c.TouchTenantSubject(ctx, tid, issuer, subject)
 	if err != nil {
@@ -227,7 +220,7 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string) (*Res
 	}
 
 	return &ResolvedDelegated{
-		Tenant:               tenLbl,
+		Tenant:               tslug,
 		TenantID:             tid,
 		TenantSlug:           tslug,
 		TenantSubjectID:      tenantSubjectID,
