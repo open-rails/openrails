@@ -60,6 +60,10 @@ type Store interface {
 	UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding) (FindingRecord, error)
 	ListOpenFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error)
 	AutoResolveVanished(ctx context.Context, provider Provider, runID uuid.UUID, types []FindingType) (int64, error)
+	// AutoResolveVanishedAllProviders is the PS-10 variant: stuck-intent
+	// findings are emitted on every run regardless of provider filters, so
+	// their vanish sweep crosses providers.
+	AutoResolveVanishedAllProviders(ctx context.Context, runID uuid.UUID, types []FindingType) (int64, error)
 	MarkFindingVanished(ctx context.Context, id uuid.UUID) error
 	MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, resolutionEvidence map[string]any) error
 }
@@ -170,6 +174,17 @@ func (s *PGStore) AutoResolveVanished(ctx context.Context, provider Provider, ru
 	}
 	return s.DB.Gen(ctx).AutoResolveVanishedReconciliationFindings(ctx, gen.AutoResolveVanishedReconciliationFindingsParams{
 		Provider:     string(provider),
+		RunID:        runID,
+		FindingTypes: names,
+	})
+}
+
+func (s *PGStore) AutoResolveVanishedAllProviders(ctx context.Context, runID uuid.UUID, types []FindingType) (int64, error) {
+	names := make([]string, 0, len(types))
+	for _, t := range types {
+		names = append(names, string(t))
+	}
+	return s.DB.Gen(ctx).AutoResolveVanishedReconciliationFindingsAllProviders(ctx, gen.AutoResolveVanishedReconciliationFindingsAllProvidersParams{
 		RunID:        runID,
 		FindingTypes: names,
 	})

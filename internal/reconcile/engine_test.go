@@ -190,6 +190,33 @@ func (s *memStore) AutoResolveVanished(ctx context.Context, provider Provider, r
 	return n, nil
 }
 
+func (s *memStore) AutoResolveVanishedAllProviders(ctx context.Context, runID uuid.UUID, types []FindingType) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	typeSet := map[FindingType]bool{}
+	for _, t := range types {
+		typeSet[t] = true
+	}
+	var n int64
+	now := time.Now()
+	for _, rec := range s.findings {
+		if !typeSet[rec.Type] {
+			continue
+		}
+		if rec.Status != FindingStatusOpen && rec.Status != FindingStatusAdminPending {
+			continue
+		}
+		if rec.LastSeenRun == runID {
+			continue
+		}
+		rec.Status = FindingStatusResolved
+		rec.Resolution = "auto_vanished"
+		rec.ResolvedAt = &now
+		n++
+	}
+	return n, nil
+}
+
 func (s *memStore) MarkFindingVanished(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

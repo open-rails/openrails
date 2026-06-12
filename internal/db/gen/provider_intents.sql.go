@@ -452,6 +452,70 @@ func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderInten
 	return items, nil
 }
 
+const listStuckProviderIntents = `-- name: ListStuckProviderIntents :many
+
+SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at FROM billing.provider_intents
+WHERE (status IN ('pending', 'failed_retryable') AND created_at <= $1::timestamptz)
+   OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $2::timestamptz)
+ORDER BY created_at, id
+`
+
+type ListStuckProviderIntentsParams struct {
+	ActionCutoff time.Time
+	VerifyCutoff time.Time
+}
+
+// ============================================================================
+// Reconcile (#107 PS-10): stuck-intent detection
+// ============================================================================
+// Non-terminal intents that have sat in the ledger beyond the reconcile
+// engine's hardcoded stuck thresholds: pending/failed_retryable older than the
+// action cutoff (24h), in_flight/unknown_needs_verify older than the verify
+// cutoff (2h — a healthy verifier resolves unknowns in minutes; an in_flight
+// lease outliving hours means a dead executor). Read-only; runs tenant-scoped
+// on the engine's tenant-pinned connection.
+func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckProviderIntentsParams) ([]BillingProviderIntent, error) {
+	rows, err := q.db.Query(ctx, listStuckProviderIntents, arg.ActionCutoff, arg.VerifyCutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingProviderIntent
+	for rows.Next() {
+		var i BillingProviderIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Provider,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markProviderIntentFailedRetryable = `-- name: MarkProviderIntentFailedRetryable :execrows
 UPDATE billing.provider_intents
 SET status = 'failed_retryable',

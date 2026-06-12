@@ -210,6 +210,22 @@ WHERE status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
   AND expires_at <= sqlc.arg(now)::timestamptz;
 
 -- ============================================================================
+-- Reconcile (#107 PS-10): stuck-intent detection
+-- ============================================================================
+
+-- Non-terminal intents that have sat in the ledger beyond the reconcile
+-- engine's hardcoded stuck thresholds: pending/failed_retryable older than the
+-- action cutoff (24h), in_flight/unknown_needs_verify older than the verify
+-- cutoff (2h — a healthy verifier resolves unknowns in minutes; an in_flight
+-- lease outliving hours means a dead executor). Read-only; runs tenant-scoped
+-- on the engine's tenant-pinned connection.
+-- name: ListStuckProviderIntents :many
+SELECT * FROM billing.provider_intents
+WHERE (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz)
+   OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
+ORDER BY created_at, id;
+
+-- ============================================================================
 -- Reads
 -- ============================================================================
 

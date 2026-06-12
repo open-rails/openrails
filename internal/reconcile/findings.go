@@ -45,6 +45,16 @@ const (
 	// subscription, either direction. Enforce: grant/revoke
 	// SUBSCRIPTION-sourced entitlements only.
 	FindingEntitlementMismatch FindingType = "PS-9"
+	// FindingStuckIntent (PS-10): a provider intent (#358 ledger) sat
+	// non-terminal beyond the hardcoded stuck thresholds (pending/
+	// failed_retryable > 24h; in_flight/unknown_needs_verify > 2h).
+	// Provider-independent: emitted on EVERY run from the local ledger alone,
+	// regardless of provider filters; no provider calls. Mode/kill-switch
+	// parks are informational (the executor drains them when the blocker
+	// lifts); everything else is admin_pending — it means provider failures,
+	// bad credentials, or a dead worker. Neither check nor fix ever touches
+	// the intent itself: the executor/verifier own it.
+	FindingStuckIntent FindingType = "PS-10"
 )
 
 // Severity of a finding.

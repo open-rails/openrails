@@ -29,6 +29,10 @@ type Engine struct {
 	// Writer applies enforce-mode local writes. May be nil for advisory-only
 	// engines.
 	Writer LocalWriter
+	// Intents is the PS-10 stuck-intent source (#358 provider intent ledger,
+	// LOCAL read only). The pass runs on every run regardless of provider
+	// filters; nil skips it (unit-test engines without a ledger).
+	Intents StuckIntentSource
 	// History is the THIRD dunning-forensics evidence source (OpenRails'
 	// own ClickHouse analytics events, incl. imported legacy history). May be
 	// nil / unconfigured: the forensics report then carries a note instead —
@@ -91,7 +95,10 @@ type ProviderReport struct {
 type RunSummary struct {
 	Mode      Mode                       `json:"mode"`
 	Providers map[string]*ProviderReport `json:"providers"`
-	Totals    SummaryTotals              `json:"totals"`
+	// StuckIntents is the provider-independent PS-10 section (one per run,
+	// not per provider). Nil when the engine has no intent source.
+	StuckIntents *StuckIntentReport `json:"stuck_intents,omitempty"`
+	Totals       SummaryTotals      `json:"totals"`
 }
 
 // SummaryTotals aggregates across providers.
@@ -215,6 +222,21 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		summary.Totals.AdminPending += rep.AdminPending
 		summary.Totals.AutoResolved += rep.AutoResolved
 		summary.Totals.AutoFixed += rep.AutoFixed
+	}
+
+	// PS-10 stuck provider intents: provider-independent, every run, local
+	// ledger only — it runs even when --provider narrowed the sections above,
+	// and identically in check and fix (no applier exists for it).
+	stuckRep, stuckErr := e.runStuckIntents(ctx, runID, result)
+	summary.StuckIntents = stuckRep
+	if stuckErr != nil {
+		providerErrs = append(providerErrs, fmt.Sprintf("stuck-intents: %v", stuckErr))
+		log.WithError(stuckErr).Error("reconcile: stuck-intent pass failed")
+	}
+	if stuckRep != nil {
+		summary.Totals.Findings += stuckRep.Total
+		summary.Totals.AdminPending += stuckRep.AdminQueued
+		summary.Totals.AutoResolved += stuckRep.AutoResolved
 	}
 
 	status := "completed"

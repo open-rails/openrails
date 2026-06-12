@@ -117,6 +117,21 @@ WHERE provider = sqlc.arg(provider)
   AND last_seen_run <> sqlc.arg(run_id)
   AND finding_type = ANY (sqlc.arg(finding_types)::text[]);
 
+-- PS-10 stuck-intent findings are provider-independent (the subject is the
+-- intent ledger; the finding carries the intent's own provider), so their
+-- vanish sweep crosses providers: any open finding of the given types not
+-- refreshed by the just-completed run recovered (the intent reached a
+-- terminal-good status or no longer meets the stuck criteria).
+-- name: AutoResolveVanishedReconciliationFindingsAllProviders :execrows
+UPDATE billing.reconciliation_findings
+SET status = 'resolved',
+    resolution = 'auto_vanished',
+    resolved_at = now(),
+    updated_at = now()
+WHERE status IN ('open', 'admin_pending')
+  AND last_seen_run <> sqlc.arg(run_id)
+  AND finding_type = ANY (sqlc.arg(finding_types)::text[]);
+
 -- name: MarkReconciliationFindingVanished :execrows
 UPDATE billing.reconciliation_findings
 SET status = 'resolved',
