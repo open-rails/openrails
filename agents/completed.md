@@ -8447,3 +8447,17 @@ NON-GOAL — no inbound/webhook durable queue: we are one system; if the DB is d
 - [x] Probe amount randomized $1.01-$1.99, order_id `openrails-testmode-probe-<8 hex>`; live-validated 3x back-to-back ProbeSimulated, zero duplicate errors; probe auths confirmed auto-voided (voidProbe already existed) (2026-06-12)
 - [x] DeleteRecurringPlan REMOVED (hard cut): NMI documents no delete_plan verb — plan deletion is portal-only; the error was the gateway falling through to payment validation on an unrecognized recurring value. Orphan smoke plan or-358-smoke-plan-08545df2 confirmed subscriber-free; delete via merchant portal when convenient (2026-06-12)
 ---
+
+# #363: legacy tests/ suite — 5 pre-existing lifecycle/tier mock-clock failures
+
+**Completed:** yes (2026-06-12, commit 985ba867 merged to master)
+**Found:** 2026-06-12 while fixing the #312 admin-auth wiring gap (full-suite baseline runs on base commit 5b6c89e0 prove all 5 fail identically before that change).
+
+Failing: TestLifecycleServiceUsesMockClock, TestRenewMembershipDuplicateTransactionIsNoOp, TestTierGroupDetection, TestScheduledDowngrade, TestEntitlementChangesOnTierChange.
+
+Signature (clock_test.go:337 and siblings): assertion diff shows IDENTICAL printed `time.Date` values with an empty diff — an internal `time.Time` representation mismatch (monotonic clock / location pointer), i.e. the tests compare with `==`/`require.Equal` where they need `.Equal()` or `WithinDuration`. Same class as the timestamps fixed in admin_subscription_test.go during the #312 wiring commit (1353a249).
+
+**Tasks:**
+- [x] FIXED — but the fingerprint held for only 1 of 5: TestLifecycleServiceUsesMockClock was the genuine time.Time trap (clock_test.go:337, WithinDuration fix). The other 4 were a tests/seed_data.go identity bug from the #317 hard-cut (71abfeea): read/cleanup helpers derived tenant subjects via identity.TenantSubjectIDFromString, which returns uuid.Nil for non-UUID legacy test user ids, while the write path uses EnsureTenantSubjectID (generated id) — so reads found nothing and cleanup deleted nothing. Fixed with a resolveTenantSubject helper wrapping dbrepo.ResolveTenantSubjectID across all six helpers. All 5 tests green on master (2026-06-12)
+- [x] Sweep done: 2 additional latent call sites converted (admin_entitlements_source_test.go:116/118); everything else already time.Time-safe. Side discovery filed as [[#364]]: the SAME TenantSubjectIDFromString-on-non-UUID-subject pattern exists in PRODUCTION checkout code and breaks tier changes for legacy subjects
+---

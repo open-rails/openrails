@@ -561,15 +561,20 @@ Sketch: a `cloudflared` sidecar in the dev compose stack (image exists upstream;
 ---
 
 
-# #363: legacy tests/ suite — 5 pre-existing lifecycle/tier mock-clock failures
 
-**Found:** 2026-06-12 while fixing the #312 admin-auth wiring gap (full-suite baseline runs on base commit 5b6c89e0 prove all 5 fail identically before that change).
+# #364: checkout attributes/checks tenant subjects via TenantSubjectIDFromString — breaks non-UUID legacy subjects (owner 404 on tier change)
 
-Failing: TestLifecycleServiceUsesMockClock, TestRenewMembershipDuplicateTransactionIsNoOp, TestTierGroupDetection, TestScheduledDowngrade, TestEntitlementChangesOnTierChange.
+**Found:** 2026-06-12 by the #363 investigation. PRODUCTION bug, pre-existing on master (verified via stash-baseline): `TestChangeTierEndpoint` and `TestCheckoutBlocksTierChanges` fail on the unmodified tree.
 
-Signature (clock_test.go:337 and siblings): assertion diff shows IDENTICAL printed `time.Date` values with an empty diff — an internal `time.Time` representation mismatch (monotonic clock / location pointer), i.e. the tests compare with `==`/`require.Equal` where they need `.Equal()` or `WithinDuration`. Same class as the timestamps fixed in admin_subscription_test.go during the #312 wiring commit (1353a249).
+`identity.TenantSubjectIDFromString(user.ID)` deterministically maps UUID subjects to themselves but returns `uuid.Nil` for any non-UUID subject (legacy/self-service ids). The write path materializes such subjects via `EnsureTenantSubjectID` (generated row id), so any code that re-derives instead of resolving can never match:
+
+- `internal/modules/checkout/service.go:2239` — ownership check `existingSub.TenantSubjectID.String() != user.ID`: the legitimate owner of a subscription gets 404 on change-tier.
+- Same re-derivation pattern at service.go:668/796/1817, purchase_service.go:371, nmi_sale_service.go:136 — checkout writes can attribute rows to uuid.Nil / mismatched subjects for legacy ids.
+
+Origin: the #317 payable-identity hard-cut (71abfeea) converted these from `WHERE user_id` without distinguishing derive (UUID-only) from resolve (any subject). The tests/ helpers had the identical bug, fixed in #363 (985ba867) with `dbrepo.ResolveTenantSubjectID` — the same resolve-not-derive fix likely applies here, but this is hot-path identity code touching money writes (deliberate determinism per #317), so it needs deliberate triage, not a sed sweep. Related: [[#336]] (delegated self-checkout rows landing under the default tenant) is an adjacent attribution bug in the same surface.
 
 **Tasks:**
-- [ ] Switch the affected assertions to time.Time-safe comparisons; rerun the 5 tests
-- [ ] Sweep tests/ for the same require.Equal-on-time.Time pattern while in there
+- [ ] Decide per call-site: resolve (ResolveTenantSubjectID / EnsureTenantSubjectID) vs reject non-UUID subjects explicitly
+- [ ] Fix the ownership check at service.go:2239 (compare against the RESOLVED subject id, not the raw user id string)
+- [ ] Un-break TestChangeTierEndpoint + TestCheckoutBlocksTierChanges; audit the other 5 listed sites
 ---
