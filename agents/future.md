@@ -559,3 +559,16 @@ Sketch: a `cloudflared` sidecar in the dev compose stack (image exists upstream;
 - [ ] Update docs/cloudflared-webhooks.md from manual steps to the supported flow
 
 ---
+
+# #362: NMI client tails found by the #358 live sandbox smoke
+
+**Found:** 2026-06-12, live smoke of the intent ledger against the Mobius sandbox (all 4 ledger validations PASSED; these are adjacent client bugs, not ledger bugs).
+
+1. **ProbeTestMode is not repeat-safe inside NMI's duplicate-detection window** (internal/integrations/nmi/probe.go): fixed $1.00 amount + fixed order_id `openrails-testmode-probe` means a second probe within the window returns `response=3 "Duplicate transaction REFID:..."` -> ProbeIndeterminate. The sandbox processor also rejects `dup_seconds=0` ("Disabling Duplicate Check is not allowed for this processor"). Mostly masked by the 12h probe-verdict cache (#348) — bites only when the cache can't be read/written on a quick restart. Fix: randomize the probe amount (101–199¢); the semantics (non-issued 4111 PAN approval ⇒ simulator) are amount-independent.
+
+2. **NMIClient.DeleteRecurringPlan does not work against the real gateway**: `recurring=delete_plan` reproducibly returns `response=3 "The ccnumber field is required" response_code=300` — the gateway doesn't recognize the verb and falls through to payment validation (add/edit plan verbs work fine). Unused by any #358 handler (NMI archive is a deliberate non-goal per #357), but any future cleanup path relying on it will fail. Either find the correct verb or delete the method.
+
+**Tasks:**
+- [ ] Randomize probe amount; keep order_id stable for auditability or suffix it
+- [ ] Fix or remove DeleteRecurringPlan
+---
