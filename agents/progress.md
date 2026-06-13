@@ -7,7 +7,96 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 473
+next_id: 474
+
+---
+
+# #473: hierarchical money budget scopes — platform→payer caps (us) + payer→role/invoker caps (the tenant), composed in ONE admit verdict over ONE balance
+
+The money axis (payer-protection, tensorhub #475) has a HIERARCHY of limits set by TWO different
+authorities. This issue makes the OpenRails budgets engine express all of them, evaluate them
+together in one admit, and keep them editable only by their rightful owner.
+
+## Terminology (OpenRails vs tensorhub vocab)
+- **tenant** = the host platform (= tensorhub). Top RLS isolation.
+- **subject** (tenant_subject / payer) = the billing principal that holds the credit balance — a
+  tensorhub TENANT like cozy-art, or a native user (#437). "payer" below = subject.
+- **actor** = the invoker that made the request (a delegated-user like PaulFidika; for a native-user
+  payer, actor == subject).
+- **role** = a subject-defined grouping with a granted spend budget, assigned to the subject's users.
+
+## The hierarchy (who caps whom)
+1. **Platform → payer** (set by US / the tenant=tensorhub): cap each payer's TOTAL spend. Protects
+   us + the payer from unpayable debt (arrears exposure; tensorhub #475 scope B / problem #3). Keyed
+   on `(subject)`, OWNER = platform.
+2. **Payer → role** (set by the SUBJECT, e.g. cozy-art): a shared budget pool for all users holding a
+   role. Keyed on `(subject, role)`, OWNER = subject. NEW scope.
+3. **Payer → invoker** (set by the SUBJECT): per-delegated-user cap by plan. Keyed on `(subject, actor)`,
+   OWNER = subject. ALREADY EXISTS.
+(A subject may also self-cap its own total: `(subject)`, OWNER = subject — distinct from the
+platform's `(subject)` cap.)
+
+## Design — generalized scope + owner, composed
+Model a budget policy as **{scope, owner, windows[]}**:
+- `scope` ∈ { `subject` | `actor` | `role` } (extensible). The window's effective key is the
+  subject uuid, plus the actor uuid or role uuid for those scopes.
+- `owner` ∈ { `platform` | `subject` } — determines WHO may write it and that the subject can
+  neither see nor loosen a platform-owned window.
+- `windows[]` = the fixed-interval windows (5h/1w/30d, #401) with LimitMicros + cadence.
+
+**Admit evaluation (composition):** for a request `(subject, actor, roles[])` gather every matching
+budget window — platform `(subject)`, subject `(subject)`, each `(subject, role)` the actor holds,
+`(subject, actor)` — RESERVE against ALL of them, and DENY if ANY would breach (whichever-first,
+return the blocking window + retry hint). On settle, capture/release ALL reserved windows.
+
+**Key invariants:**
+- Budgets are GATES, not wallets. A `(subject, role)` cap of $100/wk does NOT give the role its own
+  $100 — it means users with that role may collectively spend ≤ $100/wk OF THE SUBJECT'S BALANCE.
+  Sub-budgets MAY over-subscribe (Σ caps > balance); the payer BALANCE is the hard floor.
+- ONE balance debit per request (the subject's), regardless of how many windows gate it. Windows
+  track reserved/used independently; they do not each debit.
+- The subject CANNOT edit or loosen a platform-owned window (enforced by owner + a separate write
+  path / authz; not exposed in the subject's policy doc).
+- Identity: all window keys are immutable UUIDs (subject, actor, role), never slug/username (#475/#476
+  convention).
+
+## What exists / what's new
+- EXISTS: `(subject, actor)` budget windows + reserve/capture/release lifecycle (#304/#337); fixed
+  cadence (#401). #306 already lists the "tenant→owner limit level" (= platform→payer, level 1) and a
+  tensorhub→OpenRails policy-ownership migration as future bullets — this issue SUBSUMES and details
+  those, and adds the role scope.
+- NEW: the `role` scope key `(subject, role)`; the `owner` (platform|subject) discriminator + a
+  platform-writable policy store separate from the subject's editable policy; multi-window admit
+  composition across scopes in one verdict; role(s) carried on the admit request.
+
+## Tasks
+- [ ] Generalize the budget policy to `{scope, owner, windows[]}`; add the `role` scope and the
+      `(subject, role)` key; migration + RLS.
+- [ ] `owner` discriminator + a PLATFORM-owned policy store (writable only by platform admins, NOT
+      via the subject's policy doc); subject-owned policies stay where they are.
+- [ ] Admit composition: evaluate platform `(subject)` + subject `(subject)` + every `(subject, role)`
+      + `(subject, actor)` in one verdict; reserve all, deny on first breach, return blocking window.
+- [ ] Settlement: capture/release ALL reserved windows for a request (idempotent on request_id);
+      single balance debit unchanged.
+- [ ] Admit request carries the actor's role(s) (from the host; tensorhub reads them from the
+      delegated JWT/permission set).
+- [ ] VERIFY: platform cap denies even when role+invoker are under; role pool shared across two users
+      of the same role; invoker cap independent; over-subscription (Σ caps > balance) still floored by
+      balance; subject cannot raise the platform cap; whichever-first blocking-window reporting.
+
+## Open decisions
+- **Multiple roles per user:** enforce ALL of the user's role-budget windows (conservative,
+  whichever-first) vs a single governing role. RECOMMEND enforce-all; revisit if surprising.
+- **Level-1 timing:** the platform→payer cap is mooted today by prepaid-only (balance is the cap);
+  build the scope/owner machinery now, wire the actual platform cap when arrears ships (#475 scope B).
+- **Policy store shape:** extend `tier_policies` JSONB with scope/owner, or a dedicated
+  `budget_policies` table keyed (subject, scope, key, owner). Lean dedicated table for the
+  platform-vs-subject write-authz split.
+
+## Related
+tensorhub #475 (payer-protection — the consumer; scope A = roles/invoker, scope B = platform cap),
+#476 (capacity, separate axis), #437 (billing principal = subject), #306 (supersedes its tenant→owner
++ policy-ownership bullets), #304/#337/#401 (budgets engine + fixed windows).
 
 ---
 
