@@ -435,11 +435,13 @@ func (suite *TestContainerSuite) initializeServer() {
 	suite.Server = assembled.Server
 
 	// Bootstrap the control plane exactly like the standalone serve path (#312):
-	// ensure the default tenant's AuthKit org exists with the operator role
-	// holding the full openrails:* catalog, so admin identities created by the
-	// test helpers carry LIVE openrails:admin authority. Idempotent; runs after
-	// migrations (profiles.* + openrails.tenants exist).
+	// ensure the test tenant's AuthKit org exists with the operator role holding
+	// the full openrails:* catalog, so admin identities created by the test
+	// helpers carry LIVE openrails:admin authority. Idempotent; runs after
+	// migrations (profiles.* + openrails.tenants exist). #336: bootstrap is
+	// pinned to an explicit tenant slug (no default tenant).
 	_, err = embcp.RunBootstrap(suite.ctx, suite.App, controlplane.BootstrapOptions{
+		BootstrapTenantSlug:     dbtest.TestTenantSlug,
 		MintInitialServiceToken: false,
 	})
 	require.NoError(suite.t, err, "control plane bootstrap")
