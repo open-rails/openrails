@@ -985,6 +985,26 @@ Traced the actual write paths. The `app.tenant_id` GUC is NOT the missing piece 
 - [ ] go build/vet + unit + integration green
 - [ ] (de-scoped) embed.Options.Tenant pinned-client — only if a direct non-HTTP Client() write to a tenant table appears; checkout path is covered by the conn middleware + migration. doujins needs NO changes either way.
 
+## SCOPE EXPANSION (2026-06-13, owner directive) — remove the "default tenant" entirely; tenant_id strictly required
+
+Owner: "there is no such thing as a default tenant — that concept doesn't even make sense. The tenant column should be required (non-nullable). A missing tenant must be an ERROR, not a silent default." This supersedes the fallback half of migration 014.
+
+Target end state:
+- **DB:** every tenant_id column stays NOT NULL and its DEFAULT becomes `(NULLIF(current_setting('app.tenant_id', true), ''))::uuid` with NO `…0001` fallback. GUC set → stamps; GUC unset → NULL → NOT NULL violation → loud error. (Revise migration 014: drop the COALESCE-to-default-tenant.)
+- **Go (pkg/tenant):** delete `DefaultID`, `DefaultSlug`, `IsDefault`, and `FromContextOrDefault`. Replace the latter with a require-or-error accessor; a missing tenant is an error at the call site, not a silent default.
+- Delete the seeded "default" tenant row (002_seed) and scrub the `…0001` literal from migrations/queries/Go.
+- Single-tenant / embedded hosts no longer ride a "default" tenant — they run as their OWN configured tenant (doujins resolves slug `doujins`); the GUC is always set from the resolved/configured tenant. This is where the earlier "pin the tenant at embedded-client construction, like DB.Schema" directive lands: a required per-instance tenant, not a default.
+
+This is a LARGE, COUPLED refactor and CANNOT land incrementally-green: the instant the default tenant is gone, every write path / seed / test that doesn't set the GUC errors at once, so the whole change (migration + ~114 `FromContextOrDefault` call sites converted to require-or-error + seed + RLS + worker GUC) must land together and be verified in one pass against the integration suite (confirmed runnable here, testcontainers).
+
+OPEN DESIGN QUESTION for the owner: genuinely platform-global tables (`platform_audit`, `platform_break_glass`, possibly `credit_types`) currently carry tenant_id defaulting to `…0001`. With no default tenant, either (a) they drop tenant_id (they're not tenant-scoped), or (b) platform ops run under an explicit platform context. Needs a decision before the literal can be fully removed.
+
+WORKER-FIX FINDING (2026-06-13): the dunning worker loop holds `models.Subscription`, which has NO TenantID field (the gen type used deeper, `genSub`, does). So pinning the worker's tenant requires exposing tenant_id on `ListDueDunningSubscriptions` (query + model) or resolving it via tenant_subject_id — i.e., a small query/model change + sqlc regen, not a one-liner. Folded into the refactor above.
+
+## Status of work (2026-06-13)
+- DONE + committed: migration 014 (GUC-derived default WITH interim `…0001` fallback) — fixes the HTTP self-checkout repro (the conn is already GUC-pinned by TenantDBConnMW). Validated set/unset/empty behavior.
+- NOT done (the scope-expansion refactor above): remove default tenant + strict-required (no fallback) + worker GUC + 114-site conversion + seed/RLS scrub + RLS integration test. This is the remaining bulk of #336 and is a dedicated focused effort (single coupled change, full-suite verified).
+
 ---
 
 # #335: Batch admission: prepaid credit windows (bulk hold + batched settle) so callers stop paying an HTTP hop per request
