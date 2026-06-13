@@ -50,7 +50,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	fixedTime := time.Date(2024, 8, 1, 10, 0, 0, 0, time.UTC)
 	mockClock := clockwork.NewFakeClockAt(fixedTime)
 	suite := setupTestSuite(t, WithSuiteClock(mockClock))
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 
 	rt := suite.App.Runtime
 	require.Equal(t, mockClock, rt.Clock)

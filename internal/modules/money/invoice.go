@@ -270,20 +270,34 @@ func (s *MoneyService) GetInvoiceByID(ctx context.Context, payer identity.Tenant
 }
 
 // FinalizeDueInvoices finalizes the [from, to) invoice for every known payer
-// (every account with a balance row) in the request tenant. Idempotent per
-// account. Returns the number of invoices finalized/returned.
+// (every account row) in the request tenant. Idempotent per account. Returns
+// the number of invoices finalized/returned.
 //
-// TODO(#472 schema cleanup): there is no ListMoneyAccountPairs gen query yet (the
-// credit-era ListCreditAccountPairs enumerated payers by credit_type and is gone
-// from the money domain). The per-payer enumerator query must be added to
-// internal/db/queries/money_accounts.sql before this can finalize all accounts;
-// until then it is a no-op. FinalizeInvoice(payer, …) works per-payer.
+// FinalizeInvoice is not yet currency-aware (it finalizes the USD statement),
+// so we finalize once per distinct payer; non-USD currencies are a follow-up.
 func (s *MoneyService) FinalizeDueInvoices(ctx context.Context, from, to time.Time) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
 	}
-	if _, err := tenant.Require(ctx); err != nil {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
 		return 0, err
 	}
-	return 0, nil
+	pairs, err := s.db.Gen(ctx).ListMoneyAccountPairs(ctx, tid.UUID())
+	if err != nil {
+		return 0, err
+	}
+	seen := make(map[uuid.UUID]struct{}, len(pairs))
+	count := 0
+	for _, p := range pairs {
+		if _, dup := seen[p.TenantSubjectID]; dup {
+			continue
+		}
+		seen[p.TenantSubjectID] = struct{}{}
+		if _, err := s.FinalizeInvoice(ctx, identity.TenantSubjectID(p.TenantSubjectID), from, to); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, nil
 }

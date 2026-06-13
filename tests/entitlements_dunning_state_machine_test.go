@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +25,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.NotNil(t, rt.SubscriptionService)
 	require.NotNil(t, rt.SubscriptionLifecycleService)
 
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 
 	// Keep simulated times in the past relative to the DB server's NOW() to avoid
 	// constraints like chk_payment_not_future during RenewalSuccess.

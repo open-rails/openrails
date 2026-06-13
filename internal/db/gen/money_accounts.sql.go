@@ -39,7 +39,6 @@ func (q *Queries) AddMoneyOutstandingOwed(ctx context.Context, arg AddMoneyOutst
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-
 SELECT id, tenant_id, tenant_subject_id, billing_mode, max_spend_per_day_micros, max_spend_per_month_micros, max_outstanding_owed_micros, low_balance_threshold_micros, auto_topup_enabled, auto_topup_amount_cents, auto_topup_payment_method_id, default_credit_expiry_days, hard_stop_on_breach, alert_threshold_pct, outstanding_owed_micros, last_alert_at, last_topup_at, created_at, updated_at, verified_payment_method, verified_at, suspended_at, suspend_reason, tier, currency FROM openrails.money_accounts
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = $3
 LIMIT 1
@@ -51,9 +50,6 @@ type GetMoneyAccountSettingsParams struct {
 	Currency        string
 }
 
-// openrails.money_accounts: per-(tenant, payer, currency) spend policy + money-in
-// state (#237/#239/#240/#241/#298/#299/#302). amounts are the currency's minor unit
-// (default µ$). currency is a system code; the Go registry is authority.
 func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccountSettingsParams) (BillingMoneyAccount, error) {
 	row := q.db.QueryRow(ctx, getMoneyAccountSettings, arg.TenantID, arg.TenantSubjectID, arg.Currency)
 	var i BillingMoneyAccount
@@ -257,6 +253,45 @@ func (q *Queries) ListChargeableArrearsMoneyAccounts(ctx context.Context, arg Li
 			&i.OutstandingOwedMicros,
 			&i.AutoTopupPaymentMethodID,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMoneyAccountPairs = `-- name: ListMoneyAccountPairs :many
+
+SELECT DISTINCT tenant_subject_id, currency
+FROM openrails.money_balances
+WHERE tenant_id = $1
+ORDER BY tenant_subject_id, currency
+`
+
+type ListMoneyAccountPairsRow struct {
+	TenantSubjectID uuid.UUID
+	Currency        string
+}
+
+// openrails.money_accounts: per-(tenant, payer, currency) spend policy + money-in
+// state (#237/#239/#240/#241/#298/#299/#302). amounts are the currency's minor unit
+// (default µ$). currency is a system code; the Go registry is authority.
+// Distinct (payer, currency) pairs to finalize invoices for (#472). Sourced from
+// money_balances — the row every payer with money activity has (a money_accounts
+// row only exists once spend settings are configured).
+func (q *Queries) ListMoneyAccountPairs(ctx context.Context, tenantID uuid.UUID) ([]ListMoneyAccountPairsRow, error) {
+	rows, err := q.db.Query(ctx, listMoneyAccountPairs, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMoneyAccountPairsRow
+	for rows.Next() {
+		var i ListMoneyAccountPairsRow
+		if err := rows.Scan(&i.TenantSubjectID, &i.Currency); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

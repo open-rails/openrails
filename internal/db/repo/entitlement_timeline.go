@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 func entitlementTimelineLockKey(userID, entitlement string) int64 {
@@ -254,6 +255,16 @@ func InsertTimelineWindow(ctx context.Context, qx gen.DBTX, ent *models.Entitlem
 	var sourceID *uuid.UUID
 	if ent.SourceID != nil && *ent.SourceID != uuid.Nil {
 		sourceID = ent.SourceID
+	}
+	// Stamp the resolved tenant (#223/#336) when the caller did not set one, so
+	// timeline windows are tenant-scoped consistently with reads — RLS WITH CHECK
+	// can't backfill it under an RLS-bypassing role.
+	if (ent.TenantID == uuid.UUID{}) {
+		tid, err := tenant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		ent.TenantID = tid.UUID()
 	}
 	_, err := gen.New(qx).CreateEntitlement(ctx, gen.CreateEntitlementParams{
 		ID:              ent.ID,

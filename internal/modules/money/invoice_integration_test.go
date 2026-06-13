@@ -91,11 +91,9 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	require.Equal(t, int64(500), inv.MoneyMovements["owed_accrual"])
 }
 
-// NOTE(#472): FinalizeDueInvoices is currently a stub on the money ledger
-// (internal/modules/money/invoice.go returns 0, nil) — the due-account
-// enumeration is Stage-B work still in flight. Until it lands, this asserts the
-// stub contract (no error, nothing finalized). Restore the enumeration
-// assertions once the production method is implemented.
+// FinalizeDueInvoices enumerates the tenant's payers and finalizes each one's
+// invoice for the period (#472). The deposit above creates the payer's
+// money_accounts row, so enumeration must find and finalize it.
 func TestFinalizeDueInvoices_EnumeratesAccount(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
@@ -110,5 +108,11 @@ func TestFinalizeDueInvoices_EnumeratesAccount(t *testing.T) {
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
 	n, err := svc.FinalizeDueInvoices(ctx, from, to)
 	require.NoError(t, err)
-	require.Equal(t, 0, n, "FinalizeDueInvoices is a stub pending #472 Stage-B enumeration")
+	require.GreaterOrEqual(t, n, 1, "the depositing payer must be enumerated and finalized")
+
+	// the payer's invoice for the period is now persisted
+	inv, err := svc.FinalizeInvoice(ctx, payer, from, to)
+	require.NoError(t, err)
+	require.Equal(t, int64(2_000), inv.UsageTotal)
+	require.Equal(t, "finalized", inv.Status)
 }

@@ -346,7 +346,7 @@ func (suite *TestContainerSuite) DefaultTestProducts() []TestProduct {
 // SeedProducts creates test products in the database (idempotent - uses UPSERT)
 func (suite *TestContainerSuite) SeedProducts() []TestProduct {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 
 	testProducts := suite.DefaultTestProducts()
 	now := time.Now()
@@ -386,13 +386,14 @@ func (suite *TestContainerSuite) upsertProduct(ctx context.Context, p *models.Pr
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.products (
 			id, slug, display_name, description, entitlements_spec, credits_spec,
-			tier_group, tier_rank, status, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			tier_group, tier_rank, status, created_at, updated_at, tenant_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (id) DO UPDATE SET `+onConflictSet,
 		p.ID, p.Slug, p.DisplayName, p.Description,
 		suite.mustJSONB(p.EntitlementsSpec, len(p.EntitlementsSpec) == 0),
 		suite.mustJSONB(p.CreditsSpec, len(p.CreditsSpec) == 0),
-		p.TierGroup, p.TierRank, catalogStatusOrDefault(p.Status), p.CreatedAt, p.UpdatedAt)
+		p.TierGroup, p.TierRank, catalogStatusOrDefault(p.Status), p.CreatedAt, p.UpdatedAt,
+		dbtest.TestTenantID.UUID())
 	require.NoError(suite.t, err, "Failed to seed product %s", p.Slug)
 }
 
@@ -413,13 +414,13 @@ func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price 
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.prices (
 			id, product_id, status, amount, currency, billing_cycle_days,
-			processors, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			processors, created_at, updated_at, tenant_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (id) DO NOTHING`,
 		price.ID, price.ProductID, status, price.Amount, price.Currency,
 		price.BillingCycleDays,
 		suite.mustJSONB(price.Processors, len(price.Processors) == 0),
-		price.CreatedAt, price.UpdatedAt)
+		price.CreatedAt, price.UpdatedAt, dbtest.TestTenantID.UUID())
 	require.NoError(suite.t, err, "Failed to seed price %s", price.ID)
 }
 
@@ -518,7 +519,7 @@ func (suite *TestContainerSuite) TieredTestProducts() []TestProduct {
 // SeedTieredProducts creates tiered test products in the database for upgrade/downgrade testing
 func (suite *TestContainerSuite) SeedTieredProducts() []TestProduct {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 
 	testProducts := suite.TieredTestProducts()
 	now := time.Now()
@@ -546,7 +547,7 @@ func (suite *TestContainerSuite) SeedTieredProducts() []TestProduct {
 // CreateTestSubscription creates a test subscription for a user
 func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID uuid.UUID, status models.SubscriptionStatus) *models.Subscription {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 
@@ -596,7 +597,7 @@ type SubscriptionOptions struct {
 
 func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts SubscriptionOptions) *models.Subscription {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	now := suite.GetClock().Now()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, opts.UserID)
 
@@ -660,7 +661,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 // CreateTestPaymentMethod creates a test payment method for a user
 func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.PaymentMethod {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	now := suite.GetClock().Now()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 
@@ -698,7 +699,7 @@ type PaymentMethodOptions struct {
 
 func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts PaymentMethodOptions) *models.PaymentMethod {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, opts.UserID)
 
@@ -735,7 +736,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 // CreateTestPayment creates a test payment record
 func (suite *TestContainerSuite) CreateTestPayment(userID string, priceID uuid.UUID, subscriptionID *uuid.UUID) *models.Payment {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 
@@ -772,7 +773,7 @@ type PaymentOptions struct {
 
 func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOptions) *models.Payment {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, opts.UserID)
 
@@ -815,7 +816,7 @@ func (suite *TestContainerSuite) CreateTestPaymentWithOptions(opts PaymentOption
 // Uses the mock clock if set, otherwise falls back to real time.
 func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlementName string, sourceID *uuid.UUID, sourceType models.EntitlementSourceType) *models.Entitlement {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	now := suite.GetClock().Now()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 
@@ -865,7 +866,7 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 // CreateTestNotification creates a test notification for a user
 func (suite *TestContainerSuite) CreateTestNotification(userID string, eventType models.NotificationEventType, data map[string]any) *models.NotificationQueue {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 
@@ -888,7 +889,7 @@ func (suite *TestContainerSuite) CreateTestNotification(userID string, eventType
 // GetSubscription retrieves a subscription by ID
 func (suite *TestContainerSuite) GetSubscription(id uuid.UUID) *models.Subscription {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 
 	sub, err := dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get subscription %s", id)
@@ -899,7 +900,7 @@ func (suite *TestContainerSuite) GetSubscription(id uuid.UUID) *models.Subscript
 // GetAllSubscriptionsByUserID retrieves all subscriptions for a user
 func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*models.Subscription {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	repo := dbrepo.NewSubscriptionRepo(suite.App.Runtime.DB)
@@ -918,7 +919,7 @@ func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*m
 // GetPaymentsByUserID retrieves all payments for a user
 func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Payment {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	repo := dbrepo.NewPaymentRepo(suite.App.Runtime.DB)
@@ -937,7 +938,7 @@ func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Pa
 // GetPaymentMethodsByUserID retrieves all payment methods for a user
 func (suite *TestContainerSuite) GetPaymentMethodsByUserID(userID string) []*models.PaymentMethod {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	repo := dbrepo.NewPaymentMethodRepo(suite.App.Runtime.DB)
@@ -972,7 +973,7 @@ func (suite *TestContainerSuite) queryIDs(ctx context.Context, query string, arg
 // GetEntitlementsByUserID retrieves all active entitlements for a user
 func (suite *TestContainerSuite) GetEntitlementsByUserID(userID string) []*models.Entitlement {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
 	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
@@ -994,7 +995,7 @@ func (suite *TestContainerSuite) GetEntitlementsByUserID(userID string) []*model
 // CountUnreadNotifications returns the count of unread notifications for a user
 func (suite *TestContainerSuite) CountUnreadNotifications(userID string) int {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	return suite.Count(ctx,
@@ -1006,7 +1007,7 @@ func (suite *TestContainerSuite) CountUnreadNotifications(userID string) int {
 // CCBill webhooks include the username, which we resolve to user_id via profiles.users.
 func (suite *TestContainerSuite) CreateProfileUser(userID string, username string) {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	now := time.Now()
 
 	// Insert into profiles.users table (profiles schema, not billing schema).
@@ -1058,7 +1059,7 @@ func (suite *TestContainerSuite) SeedCCBillTestDataWithSubscription() *models.Su
 // Use this for test isolation when tests share the same suite
 func (suite *TestContainerSuite) CleanupSubscriptionsForUser(userID string) {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	tenantSubjectID := suite.resolveTenantSubject(ctx, userID)
 
 	// Also delete entitlements for this user

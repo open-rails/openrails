@@ -2,6 +2,15 @@
 -- state (#237/#239/#240/#241/#298/#299/#302). amounts are the currency's minor unit
 -- (default µ$). currency is a system code; the Go registry is authority.
 
+-- name: ListMoneyAccountPairs :many
+-- Distinct (payer, currency) pairs to finalize invoices for (#472). Sourced from
+-- money_balances — the row every payer with money activity has (a money_accounts
+-- row only exists once spend settings are configured).
+SELECT DISTINCT tenant_subject_id, currency
+FROM openrails.money_balances
+WHERE tenant_id = $1
+ORDER BY tenant_subject_id, currency;
+
 -- name: GetMoneyAccountSettings :one
 SELECT * FROM openrails.money_accounts
 WHERE tenant_id = $1 AND tenant_subject_id = $2 AND currency = sqlc.arg(currency)
