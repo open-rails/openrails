@@ -2,19 +2,18 @@ package webhookutil
 
 import (
 	"bytes"
-	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/shared/sigverify"
 )
 
 var (
@@ -213,106 +212,36 @@ func NormalizeCCBillPayload(body []byte) ([]byte, error) {
 }
 
 func VerifyStripeSignature(secret, header string, body []byte, tolerance time.Duration) error {
-	timestamp, signatures := ParseStripeSignatureHeader(header)
-	if timestamp == "" || len(signatures) == 0 {
-		return fmt.Errorf("invalid stripe signature header")
-	}
-
-	tsInt, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid stripe signature timestamp")
-	}
-
-	if tolerance > 0 {
-		now := time.Now().Unix()
-		if now-tsInt > int64(tolerance.Seconds()) || tsInt-now > int64(tolerance.Seconds()) {
-			return fmt.Errorf("stripe signature timestamp outside tolerance")
-		}
-	}
-
-	signedPayload := fmt.Sprintf("%s.%s", timestamp, string(body))
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(signedPayload))
-	expected := hex.EncodeToString(mac.Sum(nil))
-	for _, sig := range signatures {
-		if hmac.Equal([]byte(expected), []byte(sig)) {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("stripe signature mismatch")
+	return sigverify.VerifyStripe(secret, header, body, tolerance)
 }
 
 func ParseStripeSignatureHeader(header string) (string, []string) {
-	parts := strings.Split(header, ",")
-	var ts string
-	sigs := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "t=") {
-			ts = strings.TrimPrefix(part, "t=")
-			continue
-		}
-		if strings.HasPrefix(part, "v1=") {
-			sigs = append(sigs, strings.TrimPrefix(part, "v1="))
-		}
-	}
-	return ts, sigs
+	return sigverify.ParseStripeSignatureHeader(header)
 }
 
+// NMISignatureTolerance is the replay window the public ingestion path enforces
+// on NMI webhook timestamps.
+const NMISignatureTolerance = 5 * time.Minute
+
+// VerifyNMISignature authenticates an NMI webhook and rejects timestamps outside
+// NMISignatureTolerance (replay protection for the public ingestion endpoint).
 func VerifyNMISignature(secret, header string, body []byte) error {
-	timestamp, signature, err := ParseNMISignatureHeader(header)
-	if err != nil {
-		return err
-	}
-	tsInt, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid webhook signature timestamp")
-	}
-	now := time.Now().Unix()
-	const nmiSignatureTolerance = int64(5 * 60)
-	if now-tsInt > nmiSignatureTolerance || tsInt-now > nmiSignatureTolerance {
-		return fmt.Errorf("webhook signature timestamp outside tolerance")
-	}
+	return VerifyNMISignatureWithTolerance(secret, header, body, NMISignatureTolerance)
+}
 
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(timestamp + "." + string(body)))
-	expectedSig := mac.Sum(nil)
-	providedSig, err := hex.DecodeString(strings.ToLower(signature))
-	if err != nil {
-		return fmt.Errorf("invalid webhook signature")
-	}
-	if !hmac.Equal(providedSig, expectedSig) {
-		return fmt.Errorf("invalid webhook signature")
-	}
-
-	return nil
+// VerifyNMISignatureWithTolerance authenticates an NMI webhook's HMAC and, when
+// tolerance > 0, rejects timestamps outside that window. A non-positive
+// tolerance verifies the HMAC only and SKIPS the replay-window check — used by
+// the queued re-verification path, where a job may legitimately be processed
+// (or retried) long after the original delivery, so the window no longer
+// applies but signature integrity must still hold. This is the single source of
+// truth for NMI signature verification; do not reimplement it elsewhere.
+func VerifyNMISignatureWithTolerance(secret, header string, body []byte, tolerance time.Duration) error {
+	return sigverify.VerifyNMI(secret, header, body, tolerance)
 }
 
 func ParseNMISignatureHeader(header string) (string, string, error) {
-	var ts string
-	var sig string
-
-	parts := strings.Split(header, ",")
-	for _, part := range parts {
-		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-
-		switch strings.TrimSpace(kv[0]) {
-		case "t":
-			ts = strings.Trim(strings.TrimSpace(kv[1]), `"'`)
-		case "s":
-			sig = strings.Trim(strings.TrimSpace(kv[1]), `"'`)
-		}
-	}
-
-	if ts == "" || sig == "" {
-		return "", "", fmt.Errorf("unrecognized webhook signature format")
-	}
-
-	return ts, sig, nil
+	return sigverify.ParseNMISignatureHeader(header)
 }
 
 func ValidateNMISignature(secret string, body []byte, phpHeader string) (string, error) {

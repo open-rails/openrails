@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/internal/shared/sigverify"
 )
 
 // WebhookEventType is the normalized, processor-agnostic classification of an
@@ -123,7 +124,13 @@ func (h StripeWebhookHandler) Verify(msg *WebhookMessage) error {
 	if msg == nil {
 		return fmt.Errorf("nil webhook message")
 	}
-	return verifyQueuedStripeSignature(h.Secret, msg.Signature, msg.Payload, h.Tolerance)
+	if strings.TrimSpace(h.Secret) == "" {
+		return fmt.Errorf("stripe webhook secret not configured")
+	}
+	// Delegate to the canonical verifier (single source of truth). Tolerance is
+	// the configured replay window; the queued path may legitimately pass 0 to
+	// skip it for delayed/retried jobs while still checking the HMAC.
+	return sigverify.VerifyStripe(h.Secret, msg.Signature, msg.Payload, h.Tolerance)
 }
 
 func (h StripeWebhookHandler) Normalize(msg *WebhookMessage) (WebhookEvent, error) {
@@ -219,7 +226,13 @@ func (h NMIWebhookHandler) Verify(msg *WebhookMessage) error {
 	if h.SecretFor != nil {
 		secret = h.SecretFor(msg.Processor)
 	}
-	return verifyQueuedNMISignature(secret, msg.Signature, msg.Payload)
+	if strings.TrimSpace(secret) == "" {
+		return fmt.Errorf("nmi webhook secret not configured")
+	}
+	// Delegate to the canonical verifier with tolerance 0: the queued re-verify
+	// authenticates the HMAC but does not re-impose the replay window, since a
+	// job may be processed well after the original delivery.
+	return sigverify.VerifyNMI(secret, msg.Signature, msg.Payload, 0)
 }
 
 func (h NMIWebhookHandler) Normalize(msg *WebhookMessage) (WebhookEvent, error) {

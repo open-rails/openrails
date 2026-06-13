@@ -2,12 +2,8 @@ package webhooks
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -194,97 +190,4 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 
 func webhookSignatureVerified(event *WebhookMessage) bool {
 	return event != nil && event.SignatureValid != nil && *event.SignatureValid
-}
-
-func verifyQueuedStripeSignature(secret, header string, body []byte, tolerance time.Duration) error {
-	timestamp, signatures := parseStripeSignatureHeader(header)
-	if strings.TrimSpace(secret) == "" {
-		return fmt.Errorf("stripe webhook secret not configured")
-	}
-	if timestamp == "" || len(signatures) == 0 {
-		return fmt.Errorf("invalid stripe signature header")
-	}
-	tsInt, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid stripe signature timestamp")
-	}
-	if tolerance > 0 {
-		now := time.Now().Unix()
-		if now-tsInt > int64(tolerance.Seconds()) || tsInt-now > int64(tolerance.Seconds()) {
-			return fmt.Errorf("stripe signature timestamp outside tolerance")
-		}
-	}
-	signedPayload := fmt.Sprintf("%s.%s", timestamp, string(body))
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(signedPayload))
-	expected := hex.EncodeToString(mac.Sum(nil))
-	for _, sig := range signatures {
-		if hmac.Equal([]byte(expected), []byte(sig)) {
-			return nil
-		}
-	}
-	return fmt.Errorf("stripe signature mismatch")
-}
-
-func parseStripeSignatureHeader(header string) (string, []string) {
-	parts := strings.Split(header, ",")
-	var ts string
-	sigs := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "t=") {
-			ts = strings.TrimPrefix(part, "t=")
-			continue
-		}
-		if strings.HasPrefix(part, "v1=") {
-			sigs = append(sigs, strings.TrimPrefix(part, "v1="))
-		}
-	}
-	return ts, sigs
-}
-
-func verifyQueuedNMISignature(secret, header string, body []byte) error {
-	if strings.TrimSpace(secret) == "" {
-		return fmt.Errorf("nmi webhook secret not configured")
-	}
-	timestamp, signature, err := parseNMISignatureHeader(header)
-	if err != nil {
-		return err
-	}
-	if _, err := strconv.ParseInt(timestamp, 10, 64); err != nil {
-		return fmt.Errorf("invalid webhook signature timestamp")
-	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(timestamp + "." + string(body)))
-	expectedSig := mac.Sum(nil)
-	providedSig, err := hex.DecodeString(strings.ToLower(signature))
-	if err != nil {
-		return fmt.Errorf("invalid webhook signature")
-	}
-	if !hmac.Equal(providedSig, expectedSig) {
-		return fmt.Errorf("invalid webhook signature")
-	}
-	return nil
-}
-
-func parseNMISignatureHeader(header string) (string, string, error) {
-	var ts string
-	var sig string
-	parts := strings.Split(header, ",")
-	for _, part := range parts {
-		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		switch strings.TrimSpace(kv[0]) {
-		case "t":
-			ts = strings.Trim(strings.TrimSpace(kv[1]), `"'`)
-		case "s":
-			sig = strings.Trim(strings.TrimSpace(kv[1]), `"'`)
-		}
-	}
-	if ts == "" || sig == "" {
-		return "", "", fmt.Errorf("unrecognized webhook signature format")
-	}
-	return ts, sig, nil
 }
