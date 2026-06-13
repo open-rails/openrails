@@ -84,9 +84,9 @@ func (r *ResolvedDelegated) HasPermission(perm string) bool {
 	return false
 }
 
-// ErrDelegatedNotConfigured indicates the deployment has no delegated-token
-// verifier (verifier-only / no control plane). The self-service surface is not
-// mounted in that mode, so this is a defensive guard.
+// ErrDelegatedNotConfigured indicates the control plane has no delegated-token
+// verifier. That is a wiring bug (#469: the standalone always builds one), so
+// this is a defensive fail-closed guard.
 var ErrDelegatedNotConfigured = errors.New("controlplane: delegated access verifier not configured")
 
 // ErrDelegatedInvalid is the sanitized error for any delegated-token rejection
@@ -94,9 +94,8 @@ var ErrDelegatedNotConfigured = errors.New("controlplane: delegated access verif
 // internal verifier detail to the response.
 var ErrDelegatedInvalid = errors.New("controlplane: invalid delegated access token")
 
-// DelegatedVerifier returns the control plane's delegated-access-token verifier,
-// or nil when the deployment is verifier-only. Exposed for the middleware and
-// tests.
+// DelegatedVerifier returns the control plane's delegated-access-token verifier.
+// Exposed for the middleware and tests.
 func (c *ControlPlane) DelegatedVerifier() *authhttp.Verifier {
 	if c == nil {
 		return nil

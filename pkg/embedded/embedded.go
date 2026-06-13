@@ -35,9 +35,8 @@ type Options struct {
 	// {tenant, subject, permissions} principal; the standalone/gin handler then
 	// mounts the self surface authenticated by it, even without a control
 	// plane. When nil, the surface authenticates via the control plane's
-	// delegated-token verifier (the default), and is not mounted in
-	// verifier-only mode. See billingauth.DelegatedAuthenticatorFunc for a
-	// closure example.
+	// delegated-token verifier (the default). See
+	// billingauth.DelegatedAuthenticatorFunc for a closure example.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	Cache                  cache.Cache
 }

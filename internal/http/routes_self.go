@@ -18,20 +18,14 @@ import (
 // logged-in end-user; the browser calls OpenRails directly with it. Every
 // operation is scoped to the token's delegated_sub + resolved tenant.
 //
-// IDENTITY IS HOST-PLUGGABLE (issue #339): the surface is mounted when EITHER
-// the OpenRails-owned AuthKit control plane (the default delegated-token
-// verifier) OR a host-supplied billingauth.DelegatedAuthenticator is
-// configured. A host running OpenRails as a subsystem verifies its own
-// credential and supplies the explicitly mapped principal — one system, one
-// credential; the host-supplied seam takes precedence when both are present.
-// With neither configured there is no delegated identity source and the
-// surface is not mounted.
+// The surface is ALWAYS mounted (#469): the OpenRails-owned AuthKit control
+// plane is the default delegated-token verifier. IDENTITY IS HOST-PLUGGABLE
+// (issue #339): a host-supplied billingauth.DelegatedAuthenticator overrides
+// the control-plane verifier — a host running OpenRails as a subsystem
+// verifies its own credential and supplies the explicitly mapped principal,
+// one system, one credential.
 func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 	delegatedMW := s.delegatedMiddleware()
-	if delegatedMW == nil {
-		log.Info("no delegated identity source (control plane or host delegated authenticator); self-service API routes will not be mounted")
-		return
-	}
 
 	group := e.Group(StandaloneV1Prefix + httproutes.SelfRoutePrefix)
 	httproutes.RegisterSelfServiceRoutes(group, s.runtime, delegatedMW)
@@ -53,13 +47,10 @@ func (s *Server) registerSelfServiceRoutes(e *gin.Engine) {
 // delegatedMiddleware picks the delegated-identity middleware for the
 // self-service + tenant-admin surfaces (#339): the host-supplied
 // DelegatedAuthenticator when present (an explicit override), else the
-// control plane's delegated-token verifier, else nil (surface not mounted).
+// control plane's delegated-token verifier (always available, #469).
 func (s *Server) delegatedMiddleware() gin.HandlerFunc {
 	if s.delegatedAuthenticator != nil {
 		return ginmw.DelegatedPrincipalRequired(s.delegatedAuthenticator)
 	}
-	if s.controlPlane != nil {
-		return ginmw.DelegatedSelfRequired(s.controlPlane)
-	}
-	return nil
+	return ginmw.DelegatedSelfRequired(s.controlPlane)
 }

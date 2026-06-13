@@ -23,13 +23,9 @@ import (
 const PlatformPrefix = "/platform"
 
 // registerPlatformRoutes mounts the platform-superadmin cross-tenant API. No-op
-// when the control plane / platform services are absent (verifier-only mode), or
-// when no platform tenant is configured (the superadmin gate could never pass, so
-// the surface stays closed).
+// when no platform tenant is configured (the superadmin gate could never pass,
+// so the surface stays closed).
 func (s *Server) registerPlatformRoutes(e *gin.Engine) {
-	if s.controlPlane == nil || s.tenancy == nil || s.platformAudit == nil {
-		return
-	}
 	if s.controlPlane.PlatformTenantSlug() == "" {
 		// No platform tenant configured: do not mount a surface nobody can pass.
 		log.Info("platform superadmin routes not mounted: no platform tenant configured")

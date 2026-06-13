@@ -5,8 +5,8 @@ server-to-server machine credentials.
 
 ## Service credential surface
 
-`/v1/service/*` is mounted only when the OpenRails AuthKit control plane exists.
-Every route is behind `ServiceTokenRequired`. That middleware accepts either:
+`/v1/service/*` is always mounted (the OpenRails AuthKit control plane is
+mandatory in standalone mode, #469). Every route is behind `ServiceTokenRequired`. That middleware accepts either:
 
 - a generated OpenRails/AuthKit opaque service token; or
 - a first-party OIDC service JWT from a registered tenant issuer.
@@ -57,9 +57,10 @@ separate "operator"/"admin"/"platform" AuthKit *tenant* acting as the admin
 authority, no JWT role-claim gate, and no global-admin DB fallback. The default
 tenant hosts its own admin role. Initial generated admin service tokens are
 minted only through explicit operator/admin token-minting commands, not through
-declarative bootstrap YAML. `/v1/admin/*` (and `/v1/admin/tenants/*`) fail
-closed when no control plane is wired (verifier-only mode), because there is then
-no live authority to evaluate.
+declarative bootstrap YAML. The control plane is always present in standalone
+mode (#469); `/v1/admin/*` (and `/v1/admin/tenants/*`) fail closed for embedded
+hosts that wire no control plane, because there is then no live authority to
+evaluate.
 
 Canonical identity vocabulary lives in
 `docs/authkit-tenant-oidc-glossary.md`. New docs and route examples should use

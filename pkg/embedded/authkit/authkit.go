@@ -20,8 +20,11 @@ import (
 // issuers, optionally constraining the token audience. Pass the returned value
 // as embedded.Options.Authenticator.
 //
-// This is the verifier-only ("pure verifier") auth mode that used to be wired
-// implicitly from Config.Auth.Issuers inside the embedded core. It is now opt-in.
+// This is the first-party issuer verifier that used to be wired implicitly
+// from Config.Auth.Issuers inside the embedded core. It is an INPUT to the
+// auth stack (the user/admin JWT surface), not a standalone auth mode — #469
+// removed the "verifier-only" deployment; standalone always also runs the
+// AuthKit control plane.
 func NewVerifierAuthenticator(issuers []string, expectedAud string) (billingauth.Authenticator, error) {
 	return auth.NewAuthenticator(&config.AuthConfig{
 		Issuers:          issuers,

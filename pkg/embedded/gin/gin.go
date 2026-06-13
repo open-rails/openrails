@@ -117,11 +117,12 @@ func routeAuthenticator(e *embedded.Embedded, opts RouteOptions) billingauth.Aut
 
 // newServer constructs the gin billing server graph from the embedded app.
 //
-// This is the standalone/opt-in surface, so it opts into the AuthKit verifier and
-// the OpenRails-owned control plane (#284) that the embedded core no longer wires
-// implicitly: it builds the verifier from config when none was injected and
-// attaches the control plane when enabled. Both are no-ops if already present /
-// disabled.
+// This is the standalone surface, so it wires the AuthKit verifier and the
+// OpenRails-owned control plane (#284) that the embedded core does not wire
+// implicitly: it builds the first-party JWT verifier from config when none was
+// injected and ALWAYS attaches the control plane (#469 — there is no
+// verifier-only standalone mode; attach failure is fatal). Both steps are
+// no-ops if already present.
 func newServer(e *embedded.Embedded) (*server.Server, error) {
 	a := e.App()
 	if a == nil {

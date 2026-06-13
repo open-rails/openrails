@@ -15,23 +15,10 @@ import (
 	tenantpkg "github.com/open-rails/openrails/pkg/tenant"
 )
 
-// Issue #339: the self-service surface mounts when EITHER the control plane
-// (the default delegated-token verifier) OR a host-supplied
-// DelegatedAuthenticator is configured. These tests pin the gate at the
+// Issue #339: the self-service surface is always mounted (#469); a
+// host-supplied DelegatedAuthenticator overrides the control plane's
+// delegated-token verifier. This test pins the override at the
 // server-registration level without a live control plane.
-
-func TestRegisterSelfServiceRoutes_NotMountedWithoutAnyDelegatedIdentitySource(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	srv := &Server{cfg: &config.Config{}} // no control plane, no host authenticator
-	e := gin.New()
-	srv.registerSelfServiceRoutes(e)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/self/status", nil)
-	w := httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	require.Equal(t, http.StatusNotFound, w.Code)
-}
 
 type mountTestDelegatedAuthenticator struct{}
 
@@ -46,7 +33,8 @@ func (mountTestDelegatedAuthenticator) AuthenticateDelegated(context.Context, *h
 func TestRegisterSelfServiceRoutes_MountedWithHostDelegatedAuthenticatorOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// The previously impossible case: control plane nil, host authenticator set.
+	// Host authenticator set: it takes precedence, so no control plane is
+	// needed to register the surface in this unit test.
 	srv := &Server{cfg: &config.Config{}, delegatedAuthenticator: mountTestDelegatedAuthenticator{}}
 	e := gin.New()
 	srv.registerSelfServiceRoutes(e)

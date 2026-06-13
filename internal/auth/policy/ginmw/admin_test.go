@@ -55,7 +55,7 @@ func TestAdminPermissionRequired(t *testing.T) {
 			wantBody:   "authentication required",
 		},
 		{
-			name:       "nil checker -> 500 (verifier-only mode fails closed)",
+			name:       "nil checker -> 500 (no control plane wired fails closed)",
 			checker:    nil,
 			uc:         authprovider.UserContext{UserID: "user-1", Tenant: "acme"},
 			wantStatus: http.StatusInternalServerError,

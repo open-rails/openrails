@@ -18,8 +18,8 @@ bookkeeping). It is additive and idempotent.
 
 ## Lifecycle service — `tenancy.Service`
 
-Built in the HTTP server only when the control plane is present (it reuses the
-control plane's pgx pool and tenant provisioner). All operations are
+Built in the HTTP server (the control plane is always present, #469); it reuses
+the control plane's pgx pool and tenant provisioner. All operations are
 idempotent.
 
 | Operation | Behaviour |

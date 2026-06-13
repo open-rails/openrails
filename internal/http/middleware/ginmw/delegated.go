@@ -26,8 +26,8 @@ const (
 
 // DelegatedResolver validates a presented browser-direct delegated access token
 // against live AuthKit + tenant-directory state. The control plane implements
-// it; tests can inject a fake. nil resolver => the deployment is not delegated-
-// token-capable (verifier-only mode), and the self-service surface is not mounted.
+// it; tests can inject a fake. A nil resolver is a wiring bug (#469: the
+// standalone always has a control plane) and the middleware fails closed.
 type DelegatedResolver interface {
 	// ResolveDelegated verifies the delegated access token (aud=openrails, no
 	// sub, self-permissions) and resolves its tenant + acting user

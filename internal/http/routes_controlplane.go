@@ -14,11 +14,8 @@ const ControlPlaneAuthPrefix = "/auth"
 // registerControlPlaneAuthRoutes selectively mounts the AuthKit route groups
 // OpenRails intentionally exposes (#224 task 4). In locked-down/self-hosted mode
 // this is only the login/session/user groups; AuthKit DefaultAPI() is never
-// mounted. No-op when the control plane is disabled (verifier-only mode).
+// mounted.
 func (s *Server) registerControlPlaneAuthRoutes(e *gin.Engine) {
-	if s == nil || s.controlPlane == nil || e == nil {
-		return
-	}
 	group := e.Group(ControlPlaneAuthPrefix)
 	n := cpginroutes.MountAuthRoutes(s.controlPlane, group)
 	log.WithFields(log.Fields{

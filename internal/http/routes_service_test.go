@@ -8,29 +8,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	httproutes "github.com/open-rails/openrails/internal/http/routes/ginroutes"
 )
 
 // Issue #222: the private/mTLS service trust surface is removed. The
-// server-to-server surface is now service token-authenticated and lives on the PUBLIC
-// engine under /v1/service/*, and is mounted ONLY when the OpenRails-owned
-// AuthKit control plane is configured (it resolves service tokens). These tests assert that
-// removal + gating without requiring a live control plane.
-
-func TestRegisterServiceRoutes_NotMountedWithoutControlPlane(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	srv := &Server{cfg: &config.Config{}} // controlPlane is nil (verifier-only mode)
-	e := gin.New()
-	srv.registerServiceRoutes(e)
-
-	// No control plane => no service token issuer => the service surface is not mounted.
-	req := httptest.NewRequest(http.MethodGet, "/v1/service/tenant-subjects/00000000-0000-0000-0000-000000000001/entitlements", nil)
-	w := httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	require.Equal(t, http.StatusNotFound, w.Code)
-}
+// server-to-server surface is service token-authenticated and lives on the
+// PUBLIC engine under /v1/service/*; the always-present control plane (#469)
+// resolves service tokens. This test asserts the service-token gate without
+// requiring a live control plane.
 
 func TestRegisterServiceRoutes_ServiceTokenAuthGatesMountedSurface(t *testing.T) {
 	gin.SetMode(gin.TestMode)

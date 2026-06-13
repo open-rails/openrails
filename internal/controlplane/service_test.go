@@ -7,56 +7,27 @@ import (
 	"github.com/open-rails/openrails/config"
 )
 
-func TestNew_DisabledReturnsNil(t *testing.T) {
-	// No auth config at all.
-	cp, err := New(context.Background(), &config.Config{}, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestNew_RequiresControlPlaneConfig(t *testing.T) {
+	// HARD CUT (#469): the control plane is mandatory — a missing
+	// auth.control_plane section is a construction error, never a nil control
+	// plane ("verifier-only mode" is gone).
+	if _, err := New(context.Background(), &config.Config{}, nil); err == nil {
+		t.Fatal("expected error when auth.control_plane is missing")
 	}
-	if cp != nil {
-		t.Fatal("expected nil control plane when disabled")
-	}
-
-	// Auth present but control plane disabled.
-	cfg := &config.Config{Auth: &config.AuthConfig{}}
-	cp, err = New(context.Background(), cfg, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cp != nil {
-		t.Fatal("expected nil control plane when control plane disabled")
+	if _, err := New(context.Background(), &config.Config{Auth: &config.AuthConfig{}}, nil); err == nil {
+		t.Fatal("expected error when auth.control_plane is missing")
 	}
 }
 
-func TestNew_EnabledRequiresPool(t *testing.T) {
+func TestNew_RequiresPool(t *testing.T) {
 	cfg := &config.Config{Auth: &config.AuthConfig{
 		ExpectedAudience: "openrails-app",
 		ControlPlane: &config.ControlPlaneConfig{
-			Enabled: true,
-			Issuer:  "https://billing.example.com",
+			Issuer: "https://billing.example.com",
 		},
 	}}
 	if _, err := New(context.Background(), cfg, nil); err == nil {
-		t.Fatal("expected error when pool is nil and control plane enabled")
-	}
-}
-
-func TestControlPlaneEnabled(t *testing.T) {
-	var a *config.AuthConfig
-	if a.ControlPlaneEnabled() {
-		t.Error("nil auth config should not enable control plane")
-	}
-	a = &config.AuthConfig{}
-	if a.ControlPlaneEnabled() {
-		t.Error("empty auth config should not enable control plane")
-	}
-	a.ControlPlane = &config.ControlPlaneConfig{Enabled: false}
-	if a.ControlPlaneEnabled() {
-		t.Error("disabled control plane should report disabled")
-	}
-	a.ControlPlane.Enabled = true
-	if !a.ControlPlaneEnabled() {
-		t.Error("enabled control plane should report enabled")
+		t.Fatal("expected error when pool is nil")
 	}
 }
 

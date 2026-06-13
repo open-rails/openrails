@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	policyginmw "github.com/open-rails/openrails/internal/auth/policy/ginmw"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/platform"
@@ -25,21 +24,13 @@ import (
 const TenantAdminPrefix = "/admin/tenants"
 
 // registerTenantAdminRoutes mounts the admin-gated tenant provisioning API.
-// No-op without the tenancy service (verifier-only mode).
 func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
-	if s.tenancy == nil {
-		return
-	}
 	group := e.Group(StandaloneV1Prefix + TenantAdminPrefix)
 	group.Use(s.authProvider.Required())
 	// HARDCUT (#312): tenant provisioning is gated by the LIVE openrails:admin
 	// permission held in the caller's own tenant — not a claim-based operator
-	// tenant. A nil checker (verifier-only mode) fails closed.
-	var adminChecker authpolicy.AdminPermissionChecker
-	if s.controlPlane != nil {
-		adminChecker = s.controlPlane
-	}
-	group.Use(policyginmw.AdminPermissionRequired(adminChecker, controlplane.PermAdmin))
+	// tenant. The control plane (always present, #469) is the checker.
+	group.Use(policyginmw.AdminPermissionRequired(s.controlPlane, controlplane.PermAdmin))
 
 	group.POST("", s.tenantProvisionHandler())
 	group.GET("/:id", s.tenantGetHandler())
@@ -65,11 +56,9 @@ func (s *Server) registerTenantAdminRoutes(e *gin.Engine) {
 // mutations means every cross-tenant tenant-lifecycle change is recorded with
 // actor, target tenant, action, reason, and before/after where applicable.
 //
-// The audit log is nil in verifier-only mode (no control-plane pool); the helper
-// is then a no-op so the admin routes keep working. A persisted-audit failure on
-// a real platform deployment is logged but does not fail the request the
-// mutation already succeeded; platform-superadmin break-glass grants, by
-// contrast, treat audit failure as fatal.
+// A persisted-audit failure on a real platform deployment is logged but does
+// not fail the request — the mutation already succeeded; platform-superadmin
+// break-glass grants, by contrast, treat audit failure as fatal.
 func (s *Server) auditTenantMutation(c *gin.Context, action string, target *tenant.ID, reason string, before, after any) {
 	if s.platformAudit == nil {
 		return

@@ -252,7 +252,6 @@ func (suite *TestContainerSuite) initializeDatabaseConnections() {
 			// control plane wired with the test admin granted openrails:admin, so
 			// the suite enables it here exactly like a production standalone boot.
 			ControlPlane: &config.ControlPlaneConfig{
-				Enabled:     true,
 				Issuer:      "https://controlplane.openrails.test",
 				TokenPrefix: "openrails",
 			},

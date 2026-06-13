@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -72,6 +73,12 @@ func (r *recordingDeferredDeleteScheduler) ScheduleNMIDelete(_ context.Context, 
 
 func (r *recordingDeferredDeleteScheduler) CancelNMIDelete(context.Context, string, uuid.UUID) error {
 	return nil
+}
+
+// WithTx satisfies subscriptions.DeferredDeleteScheduler; the recorder has no
+// transactional state, so the same instance keeps recording.
+func (r *recordingDeferredDeleteScheduler) WithTx(pgx.Tx) subscriptions.DeferredDeleteScheduler {
+	return r
 }
 
 // TestMarkerConversionSweepEnqueuesIntents verifies the #358 startup sweep

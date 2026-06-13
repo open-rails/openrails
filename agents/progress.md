@@ -7,7 +7,19 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 470
+next_id: 471
+
+---
+
+# #470: Fix stale TestDunningWorkerLimitedModeTakesNoAction (pre-#366 semantics) 
+
+**Completed:** no
+
+`tests/dunning_worker_test.go` `TestDunningWorkerLimitedModeTakesNoAction` still asserts the pre-#366 limited-mode contract (subscription stays `past_due`, `next_retry_at` non-nil — i.e. "takes no action"). Commit a67cc3f5 (#366 limited-mode materialize) changed the behavior deliberately: limited mode now materializes decisions — local window-expiry cancellations APPLY (subscription cancelled, entitlements revoked, remote processor sub left alive for reconciliation), and charge intents enqueue PARKED. The test was never updated and fails on every integration run (found during #469 verification; NOT a #469 regression — confirmed via a67cc3f5 history).
+
+**Tasks:**
+- [ ] Rewrite the test to assert #366 semantics: window-expired sub → cancelled locally + entitlements revoked + NO provider writes + parked charge intents; rename accordingly (e.g. TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites)
+- [ ] Keep/add a companion assertion that a NON-expired past_due sub takes no action in limited mode (the surviving half of the old contract)
 
 ---
 
@@ -70,7 +82,7 @@ progress/future/completed; this issue took #469 and reset next_id to 470.
 - [x] Delete nil-resolver fork in ginmw/delegated.go (+ equivalent forks elsewhere); self-service surface always mounted
 - [x] Prune pkg/embedded/authkit + pkg/embedded/controlplane to what's actually used post-cut — both kept (used by standalone wiring + embedded opt-in); only the enabled-check/nil-tolerant paths inside them were cut
 - [x] Docs hard cut: README auth-model section, config.example.yaml, principal-boundary-audit.md (no DEVSERVER.md exists)
-- [ ] Collapse test matrix; go build/vet/test green
+- [x] Collapse test matrix; go build/vet/test green — build/vet/unit suites green. Integration suite (`-tags=integration ./tests/`): verbose run completed all #469-relevant tests green; ONE failure, `TestDunningWorkerLimitedModeTakesNoAction`, confirmed PRE-EXISTING (encodes pre-#366 "takes no action" semantics; behavior changed in a67cc3f5 — filed as #470; clean HEAD can't even build the integration tests, fixed in this tree). Suite also exceeded a 45m wall under heavy concurrent machine load (3 sibling agent runs + dev compose); re-run on a quiet machine before tagging.
 
 ---
 

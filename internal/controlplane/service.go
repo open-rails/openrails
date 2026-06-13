@@ -21,9 +21,9 @@ import (
 // wraps an AuthKit http.Service (which exposes selectable route groups) and its
 // underlying core.Service (used for in-process tenant/role/service-token bootstrap calls).
 //
-// It is constructed only when auth.control_plane.enabled is true. In pure
-// verifier mode this is never built and OpenRails keeps acting as an external
-// JWT verifier.
+// HARD CUT (#469): the control plane is mandatory in standalone mode — the
+// standalone binary always constructs it at boot and a construction failure is
+// fatal. pkg/embedded hosts opt in via pkg/embedded/controlplane.Attach.
 type ControlPlane struct {
 	cfg     *config.Config
 	authSvc *authhttp.Service
@@ -70,20 +70,20 @@ func registrationMode(locked bool) authcore.RegistrationMode {
 // schema (in self-hosted mode this is the same database OpenRails uses). The
 // caller owns the pool lifecycle.
 //
-// Returns (nil, nil) when the control plane is disabled — callers should treat
-// a nil ControlPlane as "verifier-only mode".
+// The control plane is mandatory in standalone mode (#469): every input is
+// required and a failure here is a boot failure, never a silent downgrade.
 func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*ControlPlane, error) {
-	if cfg == nil || cfg.Auth == nil || !cfg.Auth.ControlPlaneEnabled() {
-		return nil, nil
+	if cfg == nil || cfg.Auth == nil || cfg.Auth.ControlPlane == nil {
+		return nil, errors.New("controlplane: auth.control_plane configuration is required (the control plane is mandatory in standalone mode, #469)")
 	}
 	if pool == nil {
-		return nil, errors.New("controlplane: pgx pool is required when the control plane is enabled")
+		return nil, errors.New("controlplane: pgx pool is required")
 	}
 	cp := cfg.Auth.ControlPlane
 
 	issuer := strings.TrimSpace(cp.Issuer)
 	if issuer == "" {
-		return nil, errors.New("controlplane: auth.control_plane.issuer is required when enabled")
+		return nil, errors.New("controlplane: auth.control_plane.issuer is required")
 	}
 
 	// Audiences default to the verifier's expected audience so issued/accepted

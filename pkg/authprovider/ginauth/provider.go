@@ -10,8 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Provider is the app-facing auth boundary for verification middleware.
-// Billing is a verifier-only service; it does not mount AuthKit routes or mint tokens.
+// Provider is the app-facing auth boundary for the user/admin JWT verification
+// middleware. It only VERIFIES the first-party credential; minting delegated /
+// service credentials is the control plane's job.
 //
 // The middleware must set the user context in the Gin context using:
 //

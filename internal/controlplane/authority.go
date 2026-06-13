@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// ErrNoControlPlane is returned by authority checks when the control plane is
-// not configured (verifier-only mode), so callers can fall back to the legacy
-// JWT/role policy explicitly rather than silently allowing or denying.
+// ErrNoControlPlane is returned by authority checks invoked on a nil control
+// plane (an embedded host that never attached one), so callers fail closed
+// explicitly rather than silently allowing or denying.
 var ErrNoControlPlane = errors.New("controlplane: not configured")
 
 // HasAdminPermission reports whether the given user holds perm in the caller's
