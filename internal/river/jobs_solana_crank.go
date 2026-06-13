@@ -265,7 +265,11 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 				// That failure was terminal under the schedule (FailMembership
 				// cancelled the membership); advance one period so this record
 				// doesn't hot-loop while the cancellation settles.
-				gap = time.Duration(periodHours) * time.Hour
+				periodHoursI64, err := safecast.Convert[int64](periodHours)
+				if err != nil {
+					return fmt.Errorf("solana crank: period hours overflow: %w", err)
+				}
+				gap = time.Duration(periodHoursI64) * time.Hour
 			}
 			nextRetry := w.now().Add(gap)
 			return repo.SetNextPullAt(ctx, row.ID, nextRetry)
