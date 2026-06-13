@@ -7,7 +7,32 @@
 > replacement — never rewrite the whole file.
 
 
-next_id: 471
+next_id: 472
+
+---
+
+# #471: Rename migration app key + default schema `billing` -> `openrails`
+
+**Completed:** no
+**Priority:** low (branding/clarity; no functional benefit). Deferred — file now, do later.
+
+Make OpenRails identify itself as `openrails` everywhere a name is exposed, instead of the generic `billing`, for branding + naming consistency. Two coupled renames:
+
+1. **migratekit app/tracking key** `billing` -> `openrails` (the `public.migrations.app` value). Hard-coded in ~5 spots: `internal/migrate/migrator.go` (NewPostgres key, ClickHouse `App`, self-validation), `internal/app/build_runtime.go` `validateDatabase` (`MigrationSource{App: "billing"}` + the ClickHouse `App`). This is the value the embedded engine's boot validation greps for, which is why doujins/hentai0 were forced to match it — so this rename MUST land in openrails first, then the host repos follow.
+2. **Default Postgres schema** `billing` -> `openrails` (`config/config.go` `DefaultSchema`). NOT just a constant flip: the migration SQL is hard-qualified `billing.*` (529 refs in `001_schema.up.sql` alone, more across the set + runtime queries). #165 made the schema nominally configurable via `WithSchema`/search_path, but the qualified DDL means the knob doesn't actually relocate tables. Proper fix = schema-template the SQL (the way authkit #69 templated `profiles.`) with default `openrails`, OR a blanket `billing.` -> `openrails.` rewrite if configurability is abandoned. Decide which; schema name and app key are independent (authkit app manages `profiles` schema) so they need not be equal, but the user wants both to read `openrails`.
+
+**Upgrade path for existing databases** (the footgun — must ship with the rename):
+- Postgres: `ALTER SCHEMA billing RENAME TO openrails;` (moves all contained tables incl. `billing.river_*` in one shot) + `UPDATE public.migrations SET app='openrails' WHERE app='billing';`. Mis-sequencing bricks boot (engine re-applies already-applied DDL, migratekit doesn't tolerate "already exists"; or validateDatabase fatals on `openrails` pending while rows say `billing`).
+- ClickHouse: rename the tracker `app` rows; confirm whether the CH side uses a `billing`-named database/prefix that also needs moving.
+
+**Host follow-up (separate, after the openrails tag):** bump the pin in doujins + hentai0; flip their migratekit source key `billing`->`openrails`; update the `billing` schema name in their river-billing provisioning + the `010_openrails_embed_control_plane_cleanup` migration's `billing.tenants` reference + the embed config schema + any `billing.*` references in host code; run the shared-dev-DB `ALTER SCHEMA` + tracker `UPDATE` once.
+
+**Tasks:**
+- [ ] openrails: rename app key `billing`->`openrails` (all ~5 hard-coded spots, PG + CH)
+- [ ] openrails: default schema -> `openrails` (schema-template or rewrite the qualified DDL; runtime queries too)
+- [ ] openrails: ship the `ALTER SCHEMA` + tracker-`UPDATE` upgrade migration (PG + CH); fail-safe sequencing
+- [ ] openrails: build/vet/test (incl. integration) green; tag a release
+- [ ] hosts (doujins #389 / hentai0 #169 follow-up): pin bump + source-key + schema-name + cleanup-migration ref + shared-DB data migration
 
 ---
 
