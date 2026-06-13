@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/crypto"
+	"github.com/open-rails/openrails/internal/db"
 	dbrepo "github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -27,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/pkg/authprovider/ginauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type Dependencies struct {
@@ -84,6 +86,13 @@ type Server struct {
 	platformAudit      *platform.AuditLog
 	platformBreakGlass *platform.BreakGlass
 	platformMetrics    *platform.Metrics
+
+	// configuredTenant is the construction-time tenant this engine is bound to
+	// (#336), resolved ONCE at boot from cfg.Tenant (a SLUG) → internal
+	// tenant.ID. Zero when no tenant is configured (tenant-owned operations
+	// then hard-fail downstream by design — there is no default tenant). The
+	// gin tenant-resolution middleware and the Solana-secret seed pin it.
+	configuredTenant tenant.ID
 
 	// publicHandler is the single "full surface" HTTP handler. It includes
 	// health + debug (dev only) + user + admin + webhook routes AND the
@@ -167,6 +176,19 @@ func New(deps Dependencies) (*Server, error) {
 		delegatedAuthenticator: deps.DelegatedAuthenticator,
 		controlPlane:           deps.ControlPlane,
 		captchaStore:           captcha.NewChallengeStore(deps.Redis),
+	}
+
+	// Resolve the construction-time tenant SLUG (cfg.Tenant) → internal
+	// tenant.ID exactly once at boot (#336). An empty slug yields the zero id
+	// (no tenant pinned; tenant-owned ops hard-fail downstream by design — no
+	// default tenant); a non-empty-but-unknown slug fails boot.
+	{
+		ctx := context.Background()
+		configured, terr := db.ResolveTenantSlug(ctx, deps.Runtime.DB.Qx(ctx), deps.Config.Tenant)
+		if terr != nil {
+			return nil, fmt.Errorf("resolve configured tenant: %w", terr)
+		}
+		s.configuredTenant = configured
 	}
 
 	// Wire the live admin-permission checker onto the runtime so mixed
@@ -265,14 +287,15 @@ func New(deps Dependencies) (*Server, error) {
 		}
 
 		// Single-install bridge (#253): a global-config Solana private key is seeded
-		// only into the default tenant's secret store as solana/private_key. Named
-		// tenants must be configured explicitly by an operator credential rotation.
-		// Idempotent; never overwrites an existing secret. No-op when Solana is
-		// unconfigured or uses Vault Transit (non-extractable key, so no global
-		// private key is set).
+		// only into the CONFIGURED tenant's secret store as solana/private_key
+		// (#336: no default tenant — the seed no-ops when no tenant is configured).
+		// Named tenants must be configured explicitly by an operator credential
+		// rotation. Idempotent; never overwrites an existing secret. No-op when
+		// Solana is unconfigured or uses Vault Transit (non-extractable key, so no
+		// global private key is set).
 		if pc := deps.Config.GetSolanaProcessor(); pc != nil {
-			if err := recurring.SeedDefaultTenantSolanaSecret(context.Background(), secretStore, pc.PrivateKey); err != nil {
-				return nil, fmt.Errorf("seed default tenant solana secret: %w", err)
+			if err := recurring.SeedConfiguredTenantSolanaSecret(context.Background(), secretStore, s.configuredTenant, pc.PrivateKey); err != nil {
+				return nil, fmt.Errorf("seed configured tenant solana secret: %w", err)
 			}
 		}
 
@@ -454,8 +477,10 @@ func (s *Server) newPublicEngine() *gin.Engine {
 	e.Use(ginmw.CORS(s.cfg.AllowedCORSOrigins()))
 	e.Use(ginmw.BodyLimit(middleware.DefaultMaxBodyBytes))
 	// Resolve the tenant / billing namespace before authorization and before any
-	// tenant-owned DB access (issue #223). Defaults to the single default tenant.
-	e.Use(ginmw.ResolveTenant())
+	// tenant-owned DB access (issue #223). Pins the construction-time configured
+	// tenant resolved once at boot (#336); zero when none is configured, in
+	// which case tenant-owned operations hard-fail (there is no default tenant).
+	e.Use(ginmw.ResolveTenant(s.configuredTenant))
 	if s.authProvider != nil {
 		e.Use(s.authProvider.Optional())
 	}

@@ -10,7 +10,9 @@
 package embedhttp
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,10 +22,12 @@ import (
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/captcha"
 	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // EmbeddedV1Prefix is the canonical API prefix for embedded mode handlers.
@@ -129,12 +133,35 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	if s.Cfg != nil {
 		origins = s.Cfg.AllowedCORSOrigins()
 	}
+	// Resolve the configured tenant SLUG → internal tenant.ID once at
+	// bootstrap (#336): the resolver pins it per request. A non-empty-but-
+	// unknown slug is a configuration error that must fail boot.
+	configured, err := s.resolveConfiguredTenant()
+	if err != nil {
+		panic(fmt.Sprintf("embedhttp: resolve configured tenant: %v", err))
+	}
 	return middleware.ChainHTTP(mux,
 		middleware.SecurityHeadersHTTP(),
 		middleware.CORSHTTP(origins),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveTenantHTTP(),
+		middleware.ResolveTenantHTTP(configured),
 	)
+}
+
+// resolveConfiguredTenant resolves the construction-time tenant SLUG
+// (Cfg.Tenant) to the internal tenant.ID via the Runtime's pool (#336). An
+// empty slug yields the zero id (no tenant pinned; tenant-owned ops hard-fail
+// downstream by design); a non-empty-but-unknown slug is an error.
+func (s *Assembler) resolveConfiguredTenant() (tenant.ID, error) {
+	var slug string
+	if s.Cfg != nil {
+		slug = s.Cfg.Tenant
+	}
+	if slug == "" || s.Runtime == nil || s.Runtime.DB == nil {
+		return tenant.ID{}, nil
+	}
+	ctx := context.Background()
+	return db.ResolveTenantSlug(ctx, s.Runtime.DB.Qx(ctx), slug)
 }
 
 // captchaStatusHandler is the gin-free captcha status endpoint (issue #282).

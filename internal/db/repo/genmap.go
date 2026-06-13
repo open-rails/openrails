@@ -149,6 +149,7 @@ func derefUUID(u *uuid.UUID) uuid.UUID {
 func subscriptionFromGen(s gen.BillingSubscription) (*models.Subscription, error) {
 	m := &models.Subscription{
 		ID:                      s.ID,
+		TenantID:                s.TenantID,
 		TenantSubjectID:         s.TenantSubjectID,
 		ProductID:               s.ProductID,
 		PriceID:                 derefUUID(s.PriceID),

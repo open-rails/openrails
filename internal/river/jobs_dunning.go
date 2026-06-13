@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -204,7 +205,17 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	materializedCount := 0
 
 	for _, sub := range dueSubscriptions {
-		switch w.processSubscription(ctx, &sub, lifecycle, priceSvc, creditsSvc, materialize) {
+		// #336: pin the subscription's tenant so writes in processSubscription
+		// (payment inserts, lifecycle updates) carry the app.tenant_id GUC.
+		outcome := dunningOutcomeFailed
+		if err := w.DB.RunInTenantConn(tenant.WithID(ctx, tenant.ID(sub.TenantID)), func(tctx context.Context) error {
+			outcome = w.processSubscription(tctx, &sub, lifecycle, priceSvc, creditsSvc, materialize)
+			return nil
+		}); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
+				Error("Dunning: failed to pin tenant connection; counting subscription as failed")
+		}
+		switch outcome {
 		case dunningOutcomeSucceeded:
 			successCount++
 		case dunningOutcomeWindowExpired:

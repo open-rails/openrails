@@ -61,6 +61,16 @@ type Options struct {
 	// context does not kill long-running workers; cancellation is Close's job.
 	// Leave false to drive workers yourself via Runtime.RunWorkers.
 	RunWorkers bool
+
+	// Tenant binds this embedded engine to a single tenant at construction
+	// (#336): doujins/hentai0 set it to their 'doujins' tenant SLUG. There is
+	// no default tenant — leave it empty only if you resolve a tenant per
+	// request some other way, otherwise tenant-owned operations hard-fail. It
+	// is propagated to Config.Tenant in New; the slug is resolved to the
+	// internal tenant id once at bootstrap so the HTTP resolver and the
+	// Solana-secret seed pin it. To serve another tenant, construct another
+	// engine/client.
+	Tenant string
 }
 
 // HandlerOptions selects the HTTP route groups for Runtime.Handler. It is
@@ -83,6 +93,12 @@ type Runtime struct {
 func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
+	}
+	// Bind the engine to its construction-time tenant (#336): propagate the
+	// slug to Config.Tenant so the HTTP resolver and tenant-owned boot work pin
+	// it (resolved slug→id once at bootstrap, downstream).
+	if opts.Tenant != "" {
+		opts.Config.Tenant = opts.Tenant
 	}
 	if opts.RunMigrations {
 		if opts.Config.DB == nil || opts.Config.DB.URL == "" {

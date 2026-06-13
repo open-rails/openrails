@@ -33,6 +33,9 @@ const (
 
 type Subscription struct {
 	ID uuid.UUID `json:"id"`
+	// TenantID is the owning tenant (#336): lets workers pin app.tenant_id when
+	// writing on this subscription's behalf.
+	TenantID uuid.UUID `json:"tenant_id"`
 	// TenantSubjectID is the OpenRails payable tenant subject for this row (#317).
 	// Additive during the hard-cut rollout; writers populate it and readers move to
 	// it before user_id is dropped. Join openrails.tenant_subjects for issuer/subject.

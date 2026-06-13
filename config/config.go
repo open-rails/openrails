@@ -82,6 +82,16 @@ type Config struct {
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 2053)
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
+	// Tenant is the construction-time tenant this OpenRails engine is bound to
+	// (#336): a tenant SLUG (the public-surface identifier; the UUID is an
+	// internal detail resolved once at bootstrap via db.ResolveTenantSlug).
+	// There is NO default tenant — every tenant-owned write resolves its tenant
+	// from here (later: per-request resolution). When empty, no tenant is
+	// pinned and tenant-owned operations hard-fail (tenant.Require →
+	// ErrNoTenant), by design. Embedded hosts set it via embed.Options.Tenant;
+	// standalone via `tenant:` / TENANT.
+	Tenant string `koanf:"tenant,omitempty"`
+
 	// Mode is the pure-behavior operating dial (#346, #355): how much OpenRails
 	// is allowed to do against the payment providers. It applies identically in
 	// test and live environments (sandbox vs live is the orthogonal TestEnv
