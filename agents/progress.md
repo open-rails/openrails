@@ -13,7 +13,7 @@ next_id: 472
 
 # #471: Rename migration app key + default schema `billing` -> `openrails`
 
-**Completed:** no
+**Completed:** yes (openrails v0.22.0 tagged; hosts renamed+bumped, uncommitted pending Paul's review)
 **Priority:** low (branding/clarity; no functional benefit). Deferred — file now, do later.
 
 Make OpenRails identify itself as `openrails` everywhere a name is exposed, instead of the generic `billing`, for branding + naming consistency. Two coupled renames:
@@ -43,8 +43,13 @@ DELIBERATELY KEPT as `billing` (out of schema/app-key scope): cobra cmd `Use`/`c
 - [x] openrails: rename app key `billing`->`openrails` (PG NewPostgres + ValidatePostgres + CH App, via `config.MigratekitApp`)
 - [x] openrails: default schema -> `openrails`, made truly configurable via execution-time rewrite (runtime queries + migration DDL)
 - [x] ~~ship the `ALTER SCHEMA` upgrade migration~~ — N/A, hard cut / greenfield (no data migration)
-- [x] openrails: build/vet/test green (added schema-rewrite unit tests in internal/db + internal/migrate); **tag a release — Paul (no autonomous commits)**
-- [ ] hosts (doujins #389 / hentai0 #169 / tensorhub / cozy-art): BLOCKED on the openrails tag — pin bump + source-key->`openrails` + schema-name->`openrails` (or drop, default) + their `billing.*` cross-schema SQL -> `openrails.*` + cozy-art `create schema billing`/restore-list. Must land atomically with the pin bump (renaming host SQL against an old pin that still builds `billing` breaks it).
+- [x] openrails: build/vet/test green (added schema-rewrite unit tests in internal/db + internal/migrate); committed + pushed + **tagged v0.22.0** (Paul authorized the commit/push/tag for this).
+- [x] hosts pin-bumped to v0.22.0 + renamed (all build+vet+gofmt clean; changes left UNCOMMITTED for Paul to review/commit):
+  - doujins: app key->`openrails` (NewPostgres + MigrationSource + WithSchema + identity test), bun `"billing".`->`"openrails".` table exprs, legacy_migrate targetColumnSpec schema, 76 SQL qualifiers, bootstrap CREATE SCHEMA, runRiver schema, restore/schema lists. KEPT doujins' OWN `koanf:"billing"` config section + `billing-app` audience + prose.
+  - hentai0: targeted SQL-table rename only (integration test + repo TableExpr); KEPT Go `billing` pkg selectors, `billing.public_url`/`billing.hmovie-moe.us` config+host, `doujins:billing.inspect` permission.
+  - tensorhub: bootstrap schema only (all `billing.*` are config keys under its `billing:` section; embeds engine on default schema).
+  - cozy-art (branch `rebuild`): targeted SQL-table rename, app key (`applyMigrations`), `create schema`, bootstrap, backup/restore schema+tracker lists, AND the pool `search_path` `cozyart,billing,...`->`cozyart,openrails,...`. KEPT Go `billing` pkg selectors + `koanf:"billing"`/config-map/API field.
+  - NOTE: shared dev DBs still hold a `billing` schema — hard cut means re-bootstrap into `openrails` (drop old `billing` schema) on next deploy / dev-DB reset.
 
 ---
 
