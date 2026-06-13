@@ -19,11 +19,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-func refundIntent(t *testing.T, intentType string, payload RefundPayload) gen.BillingProviderIntent {
+func refundIntent(t *testing.T, intentType string, payload RefundPayload) gen.OpenrailsProviderIntent {
 	t.Helper()
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
-	return gen.BillingProviderIntent{
+	return gen.OpenrailsProviderIntent{
 		ID:             uuid.New(),
 		IntentType:     intentType,
 		Provider:       "mobius",

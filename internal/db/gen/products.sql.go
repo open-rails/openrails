@@ -104,9 +104,9 @@ const getProductByID = `-- name: GetProductByID :one
 SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products WHERE id = $1
 `
 
-func (q *Queries) GetProductByID(ctx context.Context, id uuid.UUID) (BillingProduct, error) {
+func (q *Queries) GetProductByID(ctx context.Context, id uuid.UUID) (OpenrailsProduct, error) {
 	row := q.db.QueryRow(ctx, getProductByID, id)
-	var i BillingProduct
+	var i OpenrailsProduct
 	err := row.Scan(
 		&i.ID,
 		&i.Slug,
@@ -128,9 +128,9 @@ const getProductBySlug = `-- name: GetProductBySlug :one
 SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products WHERE slug = $1
 `
 
-func (q *Queries) GetProductBySlug(ctx context.Context, slug string) (BillingProduct, error) {
+func (q *Queries) GetProductBySlug(ctx context.Context, slug string) (OpenrailsProduct, error) {
 	row := q.db.QueryRow(ctx, getProductBySlug, slug)
-	var i BillingProduct
+	var i OpenrailsProduct
 	err := row.Scan(
 		&i.ID,
 		&i.Slug,
@@ -152,15 +152,15 @@ const listActiveProducts = `-- name: ListActiveProducts :many
 SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products WHERE status = 'active'
 `
 
-func (q *Queries) ListActiveProducts(ctx context.Context) ([]BillingProduct, error) {
+func (q *Queries) ListActiveProducts(ctx context.Context) ([]OpenrailsProduct, error) {
 	rows, err := q.db.Query(ctx, listActiveProducts)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProduct
+	var items []OpenrailsProduct
 	for rows.Next() {
-		var i BillingProduct
+		var i OpenrailsProduct
 		if err := rows.Scan(
 			&i.ID,
 			&i.Slug,
@@ -197,15 +197,15 @@ type ListActiveProductsPagedParams struct {
 	PageLimit  int32
 }
 
-func (q *Queries) ListActiveProductsPaged(ctx context.Context, arg ListActiveProductsPagedParams) ([]BillingProduct, error) {
+func (q *Queries) ListActiveProductsPaged(ctx context.Context, arg ListActiveProductsPagedParams) ([]OpenrailsProduct, error) {
 	rows, err := q.db.Query(ctx, listActiveProductsPaged, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProduct
+	var items []OpenrailsProduct
 	for rows.Next() {
-		var i BillingProduct
+		var i OpenrailsProduct
 		if err := rows.Scan(
 			&i.ID,
 			&i.Slug,
@@ -234,15 +234,15 @@ const listAllProducts = `-- name: ListAllProducts :many
 SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products
 `
 
-func (q *Queries) ListAllProducts(ctx context.Context) ([]BillingProduct, error) {
+func (q *Queries) ListAllProducts(ctx context.Context) ([]OpenrailsProduct, error) {
 	rows, err := q.db.Query(ctx, listAllProducts)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProduct
+	var items []OpenrailsProduct
 	for rows.Next() {
-		var i BillingProduct
+		var i OpenrailsProduct
 		if err := rows.Scan(
 			&i.ID,
 			&i.Slug,
@@ -278,15 +278,15 @@ type ListAllProductsPagedParams struct {
 	PageLimit  int32
 }
 
-func (q *Queries) ListAllProductsPaged(ctx context.Context, arg ListAllProductsPagedParams) ([]BillingProduct, error) {
+func (q *Queries) ListAllProductsPaged(ctx context.Context, arg ListAllProductsPagedParams) ([]OpenrailsProduct, error) {
 	rows, err := q.db.Query(ctx, listAllProductsPaged, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProduct
+	var items []OpenrailsProduct
 	for rows.Next() {
-		var i BillingProduct
+		var i OpenrailsProduct
 		if err := rows.Scan(
 			&i.ID,
 			&i.Slug,
@@ -315,15 +315,15 @@ const listProductsByIDs = `-- name: ListProductsByIDs :many
 SELECT id, slug, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, status, created_at, updated_at, tenant_id FROM openrails.products WHERE id = ANY($1::uuid[])
 `
 
-func (q *Queries) ListProductsByIDs(ctx context.Context, ids []uuid.UUID) ([]BillingProduct, error) {
+func (q *Queries) ListProductsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsProduct, error) {
 	rows, err := q.db.Query(ctx, listProductsByIDs, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProduct
+	var items []OpenrailsProduct
 	for rows.Next() {
-		var i BillingProduct
+		var i OpenrailsProduct
 		if err := rows.Scan(
 			&i.ID,
 			&i.Slug,

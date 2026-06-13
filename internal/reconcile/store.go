@@ -317,7 +317,7 @@ func (s *PGStore) DismissFinding(ctx context.Context, id uuid.UUID, notes string
 	return n > 0, err
 }
 
-func findingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
+func findingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord {
 	rec := FindingRecord{
 		ID:              row.ID,
 		TenantID:        row.TenantID,
@@ -350,7 +350,7 @@ func findingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 	return rec
 }
 
-func runRecordFromRow(row gen.BillingReconciliationRun) RunRecord {
+func runRecordFromRow(row gen.OpenrailsReconciliationRun) RunRecord {
 	rec := RunRecord{
 		ID:          row.ID,
 		TenantID:    row.TenantID,

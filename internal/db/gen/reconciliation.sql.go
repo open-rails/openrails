@@ -119,7 +119,7 @@ type CreateReconciliationRunParams struct {
 // ============================================================================
 // Run lifecycle
 // ============================================================================
-func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconciliationRunParams) (BillingReconciliationRun, error) {
+func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconciliationRunParams) (OpenrailsReconciliationRun, error) {
 	row := q.db.QueryRow(ctx, createReconciliationRun,
 		arg.TenantID,
 		arg.Mode,
@@ -127,7 +127,7 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 		arg.WindowSince,
 		arg.WindowUntil,
 	)
-	var i BillingReconciliationRun
+	var i OpenrailsReconciliationRun
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -202,9 +202,9 @@ ORDER BY started_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (BillingReconciliationRun, error) {
+func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReconciliationRun, error) {
 	row := q.db.QueryRow(ctx, getLatestReconciliationRun)
-	var i BillingReconciliationRun
+	var i OpenrailsReconciliationRun
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -225,9 +225,9 @@ const getReconciliationFinding = `-- name: GetReconciliationFinding :one
 SELECT id, tenant_id, provider, finding_type, subject_key, severity, status, requires_admin, recommended_action, local_evidence, remote_evidence, intent_evidence, resolution_evidence, first_seen_run, last_seen_run, first_seen_at, last_seen_at, occurrence_count, resolved_at, resolution, notes, created_at, updated_at FROM openrails.reconciliation_findings WHERE id = $1
 `
 
-func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (BillingReconciliationFinding, error) {
+func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationFinding, error) {
 	row := q.db.QueryRow(ctx, getReconciliationFinding, id)
-	var i BillingReconciliationFinding
+	var i OpenrailsReconciliationFinding
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -260,9 +260,9 @@ const getReconciliationRun = `-- name: GetReconciliationRun :one
 SELECT id, tenant_id, mode, providers, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs WHERE id = $1
 `
 
-func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (BillingReconciliationRun, error) {
+func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationRun, error) {
 	row := q.db.QueryRow(ctx, getReconciliationRun, id)
-	var i BillingReconciliationRun
+	var i OpenrailsReconciliationRun
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -285,15 +285,15 @@ WHERE provider = $1 AND status IN ('open', 'admin_pending')
 ORDER BY finding_type, subject_key
 `
 
-func (q *Queries) ListOpenReconciliationFindingsByProvider(ctx context.Context, provider string) ([]BillingReconciliationFinding, error) {
+func (q *Queries) ListOpenReconciliationFindingsByProvider(ctx context.Context, provider string) ([]OpenrailsReconciliationFinding, error) {
 	rows, err := q.db.Query(ctx, listOpenReconciliationFindingsByProvider, provider)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingReconciliationFinding
+	var items []OpenrailsReconciliationFinding
 	for rows.Next() {
-		var i BillingReconciliationFinding
+		var i OpenrailsReconciliationFinding
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -348,7 +348,7 @@ type ListReconciliationFindingsParams struct {
 	PageLimit      int64
 }
 
-func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconciliationFindingsParams) ([]BillingReconciliationFinding, error) {
+func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconciliationFindingsParams) ([]OpenrailsReconciliationFinding, error) {
 	rows, err := q.db.Query(ctx, listReconciliationFindings,
 		arg.Status,
 		arg.Provider,
@@ -361,9 +361,9 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingReconciliationFinding
+	var items []OpenrailsReconciliationFinding
 	for rows.Next() {
-		var i BillingReconciliationFinding
+		var i OpenrailsReconciliationFinding
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -410,15 +410,15 @@ type ListReconciliationRunsParams struct {
 	PageLimit  int64
 }
 
-func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconciliationRunsParams) ([]BillingReconciliationRun, error) {
+func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconciliationRunsParams) ([]OpenrailsReconciliationRun, error) {
 	rows, err := q.db.Query(ctx, listReconciliationRuns, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingReconciliationRun
+	var items []OpenrailsReconciliationRun
 	for rows.Next() {
-		var i BillingReconciliationRun
+		var i OpenrailsReconciliationRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -520,7 +520,7 @@ WHERE id = $4
 `
 
 type ReconcileAdoptSubscriptionStatusParams struct {
-	Status         BillingSubscriptionStatus
+	Status         OpenrailsSubscriptionStatus
 	PeriodStartsAt *time.Time
 	PeriodEndsAt   *time.Time
 	ID             uuid.UUID
@@ -562,7 +562,7 @@ ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING
 type ReconcileBackfillPaymentParams struct {
 	TenantID        uuid.UUID
 	PriceID         uuid.UUID
-	Processor       BillingProcessorType
+	Processor       OpenrailsProcessorType
 	TransactionID   string
 	Amount          int64
 	Currency        string
@@ -745,10 +745,10 @@ type ReconcileListPaymentsByTransactionIDsParams struct {
 type ReconcileListPaymentsByTransactionIDsRow struct {
 	ID                uuid.UUID
 	TenantSubjectID   uuid.UUID
-	Processor         BillingProcessorType
+	Processor         OpenrailsProcessorType
 	TransactionID     string
 	Amount            int64
-	Status            BillingPurchaseStatus
+	Status            OpenrailsPurchaseStatus
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
 	PurchasedAt       time.Time
@@ -931,7 +931,7 @@ type ReconcileListSubscriptionsByProcessorsRow struct {
 	TenantSubjectID          uuid.UUID
 	PriceID                  *uuid.UUID
 	ProductID                uuid.UUID
-	Status                   BillingSubscriptionStatus
+	Status                   OpenrailsSubscriptionStatus
 	Processor                string
 	ProcessorSubscriptionID  string
 	UserEmail                *string
@@ -1035,7 +1035,7 @@ RETURNING id, entitlements_spec_snapshot
 
 type ReconcileMaterializeSubscriptionParams struct {
 	TenantID                uuid.UUID
-	Status                  BillingSubscriptionStatus
+	Status                  OpenrailsSubscriptionStatus
 	Processor               string
 	ProcessorSubscriptionID string
 	UserEmail               *string
@@ -1112,7 +1112,7 @@ ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING
 type ReconcileRecordRefundParams struct {
 	TenantID          uuid.UUID
 	PriceID           uuid.UUID
-	Processor         BillingProcessorType
+	Processor         OpenrailsProcessorType
 	TransactionID     string
 	Amount            int64
 	Currency          string
@@ -1240,7 +1240,7 @@ type UpsertReconciliationFindingParams struct {
 // REOPENED with the freshly computed status; a dismissed finding stays
 // dismissed (an admin explicitly silenced this identity) but keeps counting
 // occurrences so the dismissal is auditable against reality.
-func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertReconciliationFindingParams) (BillingReconciliationFinding, error) {
+func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertReconciliationFindingParams) (OpenrailsReconciliationFinding, error) {
 	row := q.db.QueryRow(ctx, upsertReconciliationFinding,
 		arg.TenantID,
 		arg.Provider,
@@ -1255,7 +1255,7 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 		arg.IntentEvidence,
 		arg.RunID,
 	)
-	var i BillingReconciliationFinding
+	var i OpenrailsReconciliationFinding
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,

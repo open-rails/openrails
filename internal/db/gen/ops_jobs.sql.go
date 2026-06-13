@@ -112,15 +112,15 @@ WHERE resolved_at IS NULL
 
 // Operational job state: catalog drift events (reconciliation). Manual rebill
 // attempts were folded into openrails.provider_intents (#358 phase C).
-func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]BillingCatalogDriftEvent, error) {
+func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]OpenrailsCatalogDriftEvent, error) {
 	rows, err := q.db.Query(ctx, listOpenCatalogDriftEvents)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingCatalogDriftEvent
+	var items []OpenrailsCatalogDriftEvent
 	for rows.Next() {
-		var i BillingCatalogDriftEvent
+		var i OpenrailsCatalogDriftEvent
 		if err := rows.Scan(
 			&i.ID,
 			&i.Provider,
@@ -163,7 +163,7 @@ type ListOpenCatalogDriftFilteredParams struct {
 	ResourceType *string
 }
 
-func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpenCatalogDriftFilteredParams) ([]BillingCatalogDriftEvent, error) {
+func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpenCatalogDriftFilteredParams) ([]OpenrailsCatalogDriftEvent, error) {
 	rows, err := q.db.Query(ctx, listOpenCatalogDriftFiltered,
 		arg.Column1,
 		arg.Column2,
@@ -175,9 +175,9 @@ func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpen
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingCatalogDriftEvent
+	var items []OpenrailsCatalogDriftEvent
 	for rows.Next() {
-		var i BillingCatalogDriftEvent
+		var i OpenrailsCatalogDriftEvent
 		if err := rows.Scan(
 			&i.ID,
 			&i.Provider,

@@ -46,14 +46,14 @@ type GetInvoiceByPeriodParams struct {
 
 // openrails.invoices: monthly itemized statements (#303), immutable once
 // finalized; one per (tenant, payer, period).
-func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriodParams) (BillingInvoice, error) {
+func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriodParams) (OpenrailsInvoice, error) {
 	row := q.db.QueryRow(ctx, getInvoiceByPeriod,
 		arg.TenantID,
 		arg.TenantSubjectID,
 		arg.PeriodFrom,
 		arg.PeriodTo,
 	)
-	var i BillingInvoice
+	var i OpenrailsInvoice
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -88,9 +88,9 @@ type GetInvoiceForPayerParams struct {
 	ID              uuid.UUID
 }
 
-func (q *Queries) GetInvoiceForPayer(ctx context.Context, arg GetInvoiceForPayerParams) (BillingInvoice, error) {
+func (q *Queries) GetInvoiceForPayer(ctx context.Context, arg GetInvoiceForPayerParams) (OpenrailsInvoice, error) {
 	row := q.db.QueryRow(ctx, getInvoiceForPayer, arg.TenantID, arg.TenantSubjectID, arg.ID)
-	var i BillingInvoice
+	var i OpenrailsInvoice
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -207,7 +207,7 @@ type ListInvoicesByPayerParams struct {
 	Column4         int32
 }
 
-func (q *Queries) ListInvoicesByPayer(ctx context.Context, arg ListInvoicesByPayerParams) ([]BillingInvoice, error) {
+func (q *Queries) ListInvoicesByPayer(ctx context.Context, arg ListInvoicesByPayerParams) ([]OpenrailsInvoice, error) {
 	rows, err := q.db.Query(ctx, listInvoicesByPayer,
 		arg.TenantID,
 		arg.TenantSubjectID,
@@ -218,9 +218,9 @@ func (q *Queries) ListInvoicesByPayer(ctx context.Context, arg ListInvoicesByPay
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingInvoice
+	var items []OpenrailsInvoice
 	for rows.Next() {
-		var i BillingInvoice
+		var i OpenrailsInvoice
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,

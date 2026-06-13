@@ -828,7 +828,7 @@ func (s *Service) persistCatalogDrift(ctx context.Context, desired []models.Cata
 
 // driftEventFromGen maps the generated row onto the domain model (NULL text
 // columns flatten to "" like the bun nullzero tags did).
-func driftEventFromGen(r gen.BillingCatalogDriftEvent) models.CatalogDriftEvent {
+func driftEventFromGen(r gen.OpenrailsCatalogDriftEvent) models.CatalogDriftEvent {
 	return models.CatalogDriftEvent{
 		ID:                    r.ID,
 		Provider:              models.CatalogDriftProvider(r.Provider),

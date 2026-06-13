@@ -88,7 +88,7 @@ func NewManualRebillHandler(d *db.DB, cfg *config.Config, clients map[string]*nm
 func (h *ManualRebillHandler) Type() string                         { return TypeManualRebill }
 func (h *ManualRebillHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
-func decodeManualRebillPayload(intent gen.BillingProviderIntent) (ManualRebillPayload, error) {
+func decodeManualRebillPayload(intent gen.OpenrailsProviderIntent) (ManualRebillPayload, error) {
 	var p ManualRebillPayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("manual rebill intent has no payload")
@@ -106,7 +106,7 @@ func decodeManualRebillPayload(intent gen.BillingProviderIntent) (ManualRebillPa
 // past_due ON THE SAME period. Recovery (webhook rebill, user fix), terminal
 // cancellation or a period advance all supersede; the dunning window itself
 // is the intent's expires_at, enforced by the executor's expiry sweep.
-func (h *ManualRebillHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
+func (h *ManualRebillHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	p, err := decodeManualRebillPayload(intent)
 	if err != nil {
 		return SupersededBy("unusable manual rebill intent: " + err.Error()), nil
@@ -127,7 +127,7 @@ func (h *ManualRebillHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 	return StillRelevant(), nil
 }
 
-func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	client, ok := h.Clients[strings.ToLower(intent.Provider)]
 	if !ok || client == nil {
 		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Provider))
@@ -210,7 +210,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.BillingPro
 // happened) — finalize repairs the lifecycle and the intent succeeds; a clean
 // read with no successful sale means no money moved and the executor may
 // retry this attempt.
-func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	client, ok := h.Clients[strings.ToLower(intent.Provider)]
 	if !ok || client == nil {
 		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Provider))

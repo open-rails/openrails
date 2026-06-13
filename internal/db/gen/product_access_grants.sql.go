@@ -83,9 +83,9 @@ type GetProductAccessGrantByIDParams struct {
 	ID       uuid.UUID
 }
 
-func (q *Queries) GetProductAccessGrantByID(ctx context.Context, arg GetProductAccessGrantByIDParams) (BillingProductAccessGrant, error) {
+func (q *Queries) GetProductAccessGrantByID(ctx context.Context, arg GetProductAccessGrantByIDParams) (OpenrailsProductAccessGrant, error) {
 	row := q.db.QueryRow(ctx, getProductAccessGrantByID, arg.TenantID, arg.ID)
-	var i BillingProductAccessGrant
+	var i OpenrailsProductAccessGrant
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -121,14 +121,14 @@ type GetProductAccessGrantBySourceParams struct {
 	SourceID        string
 }
 
-func (q *Queries) GetProductAccessGrantBySource(ctx context.Context, arg GetProductAccessGrantBySourceParams) (BillingProductAccessGrant, error) {
+func (q *Queries) GetProductAccessGrantBySource(ctx context.Context, arg GetProductAccessGrantBySourceParams) (OpenrailsProductAccessGrant, error) {
 	row := q.db.QueryRow(ctx, getProductAccessGrantBySource,
 		arg.TenantID,
 		arg.TenantSubjectID,
 		arg.ProductID,
 		arg.SourceID,
 	)
-	var i BillingProductAccessGrant
+	var i OpenrailsProductAccessGrant
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -197,15 +197,15 @@ type ListActiveProductAccessGrantsByTenantSubjectParams struct {
 	At              time.Time
 }
 
-func (q *Queries) ListActiveProductAccessGrantsByTenantSubject(ctx context.Context, arg ListActiveProductAccessGrantsByTenantSubjectParams) ([]BillingProductAccessGrant, error) {
+func (q *Queries) ListActiveProductAccessGrantsByTenantSubject(ctx context.Context, arg ListActiveProductAccessGrantsByTenantSubjectParams) ([]OpenrailsProductAccessGrant, error) {
 	rows, err := q.db.Query(ctx, listActiveProductAccessGrantsByTenantSubject, arg.TenantID, arg.TenantSubjectID, arg.At)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProductAccessGrant
+	var items []OpenrailsProductAccessGrant
 	for rows.Next() {
-		var i BillingProductAccessGrant
+		var i OpenrailsProductAccessGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -244,15 +244,15 @@ type ListProductAccessGrantsByTenantSubjectParams struct {
 	TenantSubjectID uuid.UUID
 }
 
-func (q *Queries) ListProductAccessGrantsByTenantSubject(ctx context.Context, arg ListProductAccessGrantsByTenantSubjectParams) ([]BillingProductAccessGrant, error) {
+func (q *Queries) ListProductAccessGrantsByTenantSubject(ctx context.Context, arg ListProductAccessGrantsByTenantSubjectParams) ([]OpenrailsProductAccessGrant, error) {
 	rows, err := q.db.Query(ctx, listProductAccessGrantsByTenantSubject, arg.TenantID, arg.TenantSubjectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProductAccessGrant
+	var items []OpenrailsProductAccessGrant
 	for rows.Next() {
-		var i BillingProductAccessGrant
+		var i OpenrailsProductAccessGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,

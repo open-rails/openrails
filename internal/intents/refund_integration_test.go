@@ -172,7 +172,7 @@ func (fx refundFixture) reservation(t *testing.T) (status, transactionID string,
 	return row.Status, row.TransactionID, row.Metadata
 }
 
-func (fx refundFixture) intentByID(t *testing.T, id uuid.UUID) gen.BillingProviderIntent {
+func (fx refundFixture) intentByID(t *testing.T, id uuid.UUID) gen.OpenrailsProviderIntent {
 	t.Helper()
 	row, err := fx.db.Gen(context.Background()).GetProviderIntent(context.Background(), id)
 	require.NoError(t, err)

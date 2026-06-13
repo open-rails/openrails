@@ -416,7 +416,7 @@ func effectiveStart(st *models.BudgetWindowState, cadence string, windowSeconds 
 }
 
 // windowStateFromGen maps the generated row onto the domain model.
-func windowStateFromGen(r gen.BillingBudgetWindowState) *models.BudgetWindowState {
+func windowStateFromGen(r gen.OpenrailsBudgetWindowState) *models.BudgetWindowState {
 	return &models.BudgetWindowState{
 		ID:              r.ID,
 		TenantID:        r.TenantID,
@@ -479,7 +479,7 @@ func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identit
 			TenantID: tenantID, TenantSubjectID: payerID,
 			Actor: actor, WindowKey: w.Key,
 		}
-		var row gen.BillingBudgetWindowState
+		var row gen.OpenrailsBudgetWindowState
 		var serr error
 		if lock {
 			row, serr = q.GetBudgetWindowStateForUpdate(ctx, gen.GetBudgetWindowStateForUpdateParams(stateKey))

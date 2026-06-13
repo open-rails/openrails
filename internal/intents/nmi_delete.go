@@ -79,7 +79,7 @@ func (h *NMIDeleteHandler) now() time.Time {
 // still cancelled with a pending deferred delete. This re-check at execution
 // time is the AUTHORITATIVE resume guard (a missed advisory supersede on
 // resume cannot cause an erroneous delete), mirroring the retired worker.
-func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
+func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
 		if repo.IsNotFound(err) {
@@ -93,7 +93,7 @@ func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.Billin
 	return StillRelevant(), nil
 }
 
-func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	client, ok := h.Clients[strings.ToLower(intent.Provider)]
 	if !ok || client == nil {
 		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Provider))
@@ -157,7 +157,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingProvid
 // Verify resolves an ambiguous delete by reading the provider: absent means
 // the delete (whenever it happened) is done; present means it definitely has
 // not happened and the executor may retry.
-func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	client, ok := h.Clients[strings.ToLower(intent.Provider)]
 	if !ok || client == nil {
 		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Provider))
@@ -186,7 +186,7 @@ func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.BillingProvide
 	return Retryable("subscription still present at provider; delete verified not executed")
 }
 
-func (h *NMIDeleteHandler) loadSubscription(ctx context.Context, intent gen.BillingProviderIntent) (*models.Subscription, error) {
+func (h *NMIDeleteHandler) loadSubscription(ctx context.Context, intent gen.OpenrailsProviderIntent) (*models.Subscription, error) {
 	if intent.SubscriptionID == nil {
 		return nil, fmt.Errorf("intent has no subscription_id")
 	}
@@ -196,7 +196,7 @@ func (h *NMIDeleteHandler) loadSubscription(ctx context.Context, intent gen.Bill
 // finalize clears the DeletionScheduledAt read model: the cancellation is now
 // destructive (no longer resumable). Idempotent — a cleared marker is left
 // alone.
-func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.BillingProviderIntent) error {
+func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.OpenrailsProviderIntent) error {
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
 		if repo.IsNotFound(err) {

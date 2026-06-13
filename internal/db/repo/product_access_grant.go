@@ -25,7 +25,7 @@ func NewProductAccessGrantRepo(d *db.DB) *ProductAccessGrantRepo {
 	return &ProductAccessGrantRepo{db: d}
 }
 
-func productAccessGrantFromGen(g gen.BillingProductAccessGrant) *models.ProductAccessGrant {
+func productAccessGrantFromGen(g gen.OpenrailsProductAccessGrant) *models.ProductAccessGrant {
 	m := &models.ProductAccessGrant{
 		ID:              g.ID,
 		TenantID:        g.TenantID,

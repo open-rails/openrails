@@ -50,7 +50,7 @@ type StripeArchivePayload struct {
 	Label     string `json:"label,omitempty"`
 }
 
-func decodeStripeArchivePayload(intent gen.BillingProviderIntent) (StripeArchivePayload, error) {
+func decodeStripeArchivePayload(intent gen.OpenrailsProviderIntent) (StripeArchivePayload, error) {
 	var p StripeArchivePayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("stripe archive intent has no payload")
@@ -117,7 +117,7 @@ func (h *stripeArchiveCore) stripeConfigured() bool {
 // the object has since been added/linked locally, archiving the remote copy
 // would be wrong -> superseded. Local reads only; the same extra-ness
 // definition detection uses (catalog.ExtrasIndex).
-func (h *stripeArchiveCore) checkRelevance(ctx context.Context, intent gen.BillingProviderIntent, isExtra func(catalog.ExtrasIndex, StripeArchivePayload) bool) (Relevance, error) {
+func (h *stripeArchiveCore) checkRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent, isExtra func(catalog.ExtrasIndex, StripeArchivePayload) bool) (Relevance, error) {
 	p, err := decodeStripeArchivePayload(intent)
 	if err != nil {
 		// Malformed payloads can never become executable; superseding surfaces
@@ -141,7 +141,7 @@ func (h *stripeArchiveCore) checkRelevance(ctx context.Context, intent gen.Billi
 // cleanly retryable — never ambiguous.
 func (h *stripeArchiveCore) execute(
 	ctx context.Context,
-	intent gen.BillingProviderIntent,
+	intent gen.OpenrailsProviderIntent,
 	read func(ctx context.Context, id string) (active bool, found bool, err error),
 	write func(ctx context.Context, id, idempotencyKey string) error,
 ) Outcome {
@@ -175,7 +175,7 @@ func (h *stripeArchiveCore) execute(
 // provider means done; still active means it definitely has not happened.
 func (h *stripeArchiveCore) verify(
 	ctx context.Context,
-	intent gen.BillingProviderIntent,
+	intent gen.OpenrailsProviderIntent,
 	read func(ctx context.Context, id string) (active bool, found bool, err error),
 ) Outcome {
 	if !h.stripeConfigured() {
@@ -218,7 +218,7 @@ func NewStripeArchiveProductHandler(d *db.DB, cfg *config.Config, _ clockwork.Cl
 
 func (h *StripeArchiveProductHandler) Type() string { return TypeStripeArchiveProduct }
 
-func (h *StripeArchiveProductHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
+func (h *StripeArchiveProductHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent, func(ix catalog.ExtrasIndex, p StripeArchivePayload) bool {
 		extra, _ := ix.StripeProductExtra(catalog.StripeProduct{
 			ID:       p.ObjectID,
@@ -236,14 +236,14 @@ func (h *StripeArchiveProductHandler) readProduct(ctx context.Context, id string
 	return obj.Active, true, nil
 }
 
-func (h *StripeArchiveProductHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *StripeArchiveProductHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	return h.execute(ctx, intent, h.readProduct, func(ctx context.Context, id, key string) error {
 		inactive := false
 		return h.Stripe.UpdateProduct(ctx, id, catalog.UpdateProductParams{Active: &inactive, IdempotencyKey: key})
 	})
 }
 
-func (h *StripeArchiveProductHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *StripeArchiveProductHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	return h.verify(ctx, intent, h.readProduct)
 }
 
@@ -267,7 +267,7 @@ func NewStripeArchivePriceHandler(d *db.DB, cfg *config.Config, _ clockwork.Cloc
 
 func (h *StripeArchivePriceHandler) Type() string { return TypeStripeArchivePrice }
 
-func (h *StripeArchivePriceHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
+func (h *StripeArchivePriceHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent, func(ix catalog.ExtrasIndex, p StripeArchivePayload) bool {
 		extra, _ := ix.StripePriceExtra(catalog.StripePrice{
 			ID:       p.ObjectID,
@@ -285,13 +285,13 @@ func (h *StripeArchivePriceHandler) readPrice(ctx context.Context, id string) (b
 	return obj.Active, true, nil
 }
 
-func (h *StripeArchivePriceHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *StripeArchivePriceHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	return h.execute(ctx, intent, h.readPrice, func(ctx context.Context, id, key string) error {
 		inactive := false
 		return h.Stripe.UpdatePrice(ctx, id, catalog.UpdatePriceParams{Active: &inactive, IdempotencyKey: key})
 	})
 }
 
-func (h *StripeArchivePriceHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *StripeArchivePriceHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	return h.verify(ctx, intent, h.readPrice)
 }

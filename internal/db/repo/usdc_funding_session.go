@@ -25,7 +25,7 @@ func NewUSDCFundingSessionRepo(d *db.DB) *USDCFundingSessionRepo {
 	return &USDCFundingSessionRepo{db: d}
 }
 
-func usdcFundingSessionFromGen(s gen.BillingUsdcFundingSession) (*models.USDCFundingSession, error) {
+func usdcFundingSessionFromGen(s gen.OpenrailsUsdcFundingSession) (*models.USDCFundingSession, error) {
 	m := &models.USDCFundingSession{
 		ID:                s.ID,
 		TenantID:          s.TenantID,

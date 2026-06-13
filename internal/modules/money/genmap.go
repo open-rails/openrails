@@ -29,7 +29,7 @@ func toJSONBC[M ~map[string]V, V any](m M) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-func moneyBalanceFromGen(r gen.BillingMoneyBalance) *models.MoneyBalance {
+func moneyBalanceFromGen(r gen.OpenrailsMoneyBalance) *models.MoneyBalance {
 	return &models.MoneyBalance{
 		ID:              r.ID,
 		TenantID:        r.TenantID,
@@ -42,7 +42,7 @@ func moneyBalanceFromGen(r gen.BillingMoneyBalance) *models.MoneyBalance {
 	}
 }
 
-func moneyTransactionFromGen(r gen.BillingMoneyTransaction) (*models.MoneyTransaction, error) {
+func moneyTransactionFromGen(r gen.OpenrailsMoneyTransaction) (*models.MoneyTransaction, error) {
 	m := &models.MoneyTransaction{
 		ID:              r.ID,
 		TenantID:        r.TenantID,
@@ -69,7 +69,7 @@ func moneyTransactionFromGen(r gen.BillingMoneyTransaction) (*models.MoneyTransa
 	return m, nil
 }
 
-func settingsFromGen(r gen.BillingMoneyAccount) *models.MoneyAccount {
+func settingsFromGen(r gen.OpenrailsMoneyAccount) *models.MoneyAccount {
 	var expiry *int
 	if r.DefaultCreditExpiryDays != nil {
 		v := int(*r.DefaultCreditExpiryDays)
@@ -104,7 +104,7 @@ func settingsFromGen(r gen.BillingMoneyAccount) *models.MoneyAccount {
 	}
 }
 
-func spendLimitFromGen(r gen.BillingMoneySpendLimit) *models.MoneySpendLimit {
+func spendLimitFromGen(r gen.OpenrailsMoneySpendLimit) *models.MoneySpendLimit {
 	return &models.MoneySpendLimit{
 		ID:                     r.ID,
 		TenantID:               r.TenantID,
@@ -118,7 +118,7 @@ func spendLimitFromGen(r gen.BillingMoneySpendLimit) *models.MoneySpendLimit {
 	}
 }
 
-func usageEventFromGen(r gen.BillingUsageEvent) (*models.UsageEvent, error) {
+func usageEventFromGen(r gen.OpenrailsUsageEvent) (*models.UsageEvent, error) {
 	m := &models.UsageEvent{
 		ID:                 r.ID,
 		TenantID:           r.TenantID,
@@ -142,7 +142,7 @@ func usageEventFromGen(r gen.BillingUsageEvent) (*models.UsageEvent, error) {
 	return m, nil
 }
 
-func invoiceFromGen(r gen.BillingInvoice) (*models.Invoice, error) {
+func invoiceFromGen(r gen.OpenrailsInvoice) (*models.Invoice, error) {
 	m := &models.Invoice{
 		ID:              r.ID,
 		TenantID:        r.TenantID,

@@ -22,7 +22,7 @@ func NewSolanaSubscriptionRepo(d *db.DB) *SolanaSubscriptionRepo {
 	return &SolanaSubscriptionRepo{db: d}
 }
 
-func solanaSubscriptionFromGen(s gen.BillingSolanaSubscription) *models.SolanaSubscription {
+func solanaSubscriptionFromGen(s gen.OpenrailsSolanaSubscription) *models.SolanaSubscription {
 	return &models.SolanaSubscription{
 		ID:                       s.ID,
 		TenantID:                 s.TenantID,

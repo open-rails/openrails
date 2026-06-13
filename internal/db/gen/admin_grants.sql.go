@@ -84,9 +84,9 @@ const getAdminGrantByID = `-- name: GetAdminGrantByID :one
 SELECT id, price_id, granted_by, reason, payment_id, duration_days, created_at, tenant_id, tenant_subject_id FROM openrails.admin_grants WHERE id = $1
 `
 
-func (q *Queries) GetAdminGrantByID(ctx context.Context, id uuid.UUID) (BillingAdminGrant, error) {
+func (q *Queries) GetAdminGrantByID(ctx context.Context, id uuid.UUID) (OpenrailsAdminGrant, error) {
 	row := q.db.QueryRow(ctx, getAdminGrantByID, id)
-	var i BillingAdminGrant
+	var i OpenrailsAdminGrant
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -114,15 +114,15 @@ type ListAdminGrantsByGrantedByParams struct {
 	PageLimit  int32
 }
 
-func (q *Queries) ListAdminGrantsByGrantedBy(ctx context.Context, arg ListAdminGrantsByGrantedByParams) ([]BillingAdminGrant, error) {
+func (q *Queries) ListAdminGrantsByGrantedBy(ctx context.Context, arg ListAdminGrantsByGrantedByParams) ([]OpenrailsAdminGrant, error) {
 	rows, err := q.db.Query(ctx, listAdminGrantsByGrantedBy, arg.GrantedBy, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingAdminGrant
+	var items []OpenrailsAdminGrant
 	for rows.Next() {
-		var i BillingAdminGrant
+		var i OpenrailsAdminGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -157,15 +157,15 @@ type ListAdminGrantsByTenantSubjectParams struct {
 	PageLimit       int32
 }
 
-func (q *Queries) ListAdminGrantsByTenantSubject(ctx context.Context, arg ListAdminGrantsByTenantSubjectParams) ([]BillingAdminGrant, error) {
+func (q *Queries) ListAdminGrantsByTenantSubject(ctx context.Context, arg ListAdminGrantsByTenantSubjectParams) ([]OpenrailsAdminGrant, error) {
 	rows, err := q.db.Query(ctx, listAdminGrantsByTenantSubject, arg.TenantSubjectID, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingAdminGrant
+	var items []OpenrailsAdminGrant
 	for rows.Next() {
-		var i BillingAdminGrant
+		var i OpenrailsAdminGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,

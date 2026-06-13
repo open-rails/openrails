@@ -137,9 +137,9 @@ const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
 SELECT id, price_id, mode, processor, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, processor_fields, processor_state, metadata, idempotency_key, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.checkout_sessions WHERE id = $1
 `
 
-func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (BillingCheckoutSession, error) {
+func (q *Queries) GetCheckoutSessionByID(ctx context.Context, id uuid.UUID) (OpenrailsCheckoutSession, error) {
 	row := q.db.QueryRow(ctx, getCheckoutSessionByID, id)
-	var i BillingCheckoutSession
+	var i OpenrailsCheckoutSession
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -171,9 +171,9 @@ WHERE cs.reference = $1
 LIMIT 1
 `
 
-func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, reference *string) (BillingCheckoutSession, error) {
+func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, reference *string) (OpenrailsCheckoutSession, error) {
 	row := q.db.QueryRow(ctx, getCheckoutSessionByReference, reference)
-	var i BillingCheckoutSession
+	var i OpenrailsCheckoutSession
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -217,14 +217,14 @@ type GetLatestOpenCheckoutSessionParams struct {
 	Now             time.Time
 }
 
-func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLatestOpenCheckoutSessionParams) (BillingCheckoutSession, error) {
+func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLatestOpenCheckoutSessionParams) (OpenrailsCheckoutSession, error) {
 	row := q.db.QueryRow(ctx, getLatestOpenCheckoutSession,
 		arg.TenantSubjectID,
 		arg.PriceID,
 		arg.Processor,
 		arg.Now,
 	)
-	var i BillingCheckoutSession
+	var i OpenrailsCheckoutSession
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,

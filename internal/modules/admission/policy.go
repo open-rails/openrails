@@ -176,7 +176,7 @@ type BudgetScopePolicy struct {
 	Windows  []models.BudgetWindowPolicy
 }
 
-func budgetPolicyFromGen(r gen.BillingBudgetPolicy) (BudgetScopePolicy, error) {
+func budgetPolicyFromGen(r gen.OpenrailsBudgetPolicy) (BudgetScopePolicy, error) {
 	p := BudgetScopePolicy{Scope: r.Scope, Owner: r.Owner, ScopeKey: r.ScopeKey}
 	if len(r.Windows) > 0 {
 		if err := json.Unmarshal(r.Windows, &p.Windows); err != nil {

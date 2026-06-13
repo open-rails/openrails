@@ -14,11 +14,11 @@ import (
 
 // ledger is the Store surface the Runner drives (interface for unit tests).
 type ledger interface {
-	Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error)
-	Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error)
-	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
-	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error)
-	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error)
+	Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProviderIntent, error)
+	Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsProviderIntent, error)
+	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsProviderIntent, bool, error)
+	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
+	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error)
 	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
 	MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
@@ -66,7 +66,7 @@ type Runner struct {
 
 // accountMismatch reports whether the intent was enqueued against a DIFFERENT
 // provider account than the current credentials resolve to (#365).
-func (r *Runner) accountMismatch(ctx context.Context, intent gen.BillingProviderIntent) (string, bool) {
+func (r *Runner) accountMismatch(ctx context.Context, intent gen.OpenrailsProviderIntent) (string, bool) {
 	if r.Fingerprints == nil || intent.AccountFingerprint == nil || *intent.AccountFingerprint == "" {
 		return "", false
 	}
@@ -136,7 +136,7 @@ func (r *Runner) RunExecuteOnce(ctx context.Context) (Stats, error) {
 	return stats, nil
 }
 
-func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderIntent, stats *Stats) {
+func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsProviderIntent, stats *Stats) {
 	logEntry := log.WithContext(ctx).WithFields(log.Fields{
 		"intent_id":   intent.ID,
 		"intent_type": intent.IntentType,
@@ -202,10 +202,10 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 // (succeeded, terminal, mid-lease, expired) the row is returned UNTOUCHED so
 // the caller can act on the durable prior outcome (e.g. the dunning worker's
 // repair-from-successful-rebill path).
-func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error) {
+func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.OpenrailsProviderIntent, error) {
 	row, err := r.Store.Enqueue(ctx, p)
 	if err != nil {
-		return gen.BillingProviderIntent{}, err
+		return gen.OpenrailsProviderIntent{}, err
 	}
 	switch row.Status {
 	case StatusPending, StatusFailedRetryable:
@@ -217,7 +217,7 @@ func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.Bi
 	now := r.now()
 	claimed, ok, err := r.Store.ClaimByID(ctx, row.ID, now, now.Add(r.lease()))
 	if err != nil {
-		return gen.BillingProviderIntent{}, err
+		return gen.OpenrailsProviderIntent{}, err
 	}
 	if !ok {
 		// Raced into an unclaimable state (another executor's lease, expiry
@@ -290,7 +290,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 // the verifier's interpretation of OutcomeAmbiguous (still inconclusive ->
 // backoff the next verify) vs the executor's (fresh ambiguity -> first verify
 // soon).
-func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.BillingProviderIntent, outcome Outcome, verifying bool) {
+func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.OpenrailsProviderIntent, outcome Outcome, verifying bool) {
 	now := r.now()
 	var err error
 	switch outcome.Class {

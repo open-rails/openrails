@@ -170,14 +170,14 @@ func (fx rebillFixture) rebillRunner(client *nmi.NMIClient, cfg *config.Config) 
 	}
 }
 
-func (fx rebillFixture) subscription(t *testing.T) gen.BillingSubscription {
+func (fx rebillFixture) subscription(t *testing.T) gen.OpenrailsSubscription {
 	t.Helper()
 	row, err := fx.db.Gen(context.Background()).GetSubscriptionByID(context.Background(), fx.subID)
 	require.NoError(t, err)
 	return row
 }
 
-func (fx rebillFixture) intentByID(t *testing.T, id uuid.UUID) gen.BillingProviderIntent {
+func (fx rebillFixture) intentByID(t *testing.T, id uuid.UUID) gen.OpenrailsProviderIntent {
 	t.Helper()
 	row, err := fx.db.Gen(context.Background()).GetProviderIntent(context.Background(), id)
 	require.NoError(t, err)

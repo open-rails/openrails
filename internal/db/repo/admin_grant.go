@@ -19,7 +19,7 @@ func NewAdminGrantRepo(db *db.DB) *AdminGrantRepo {
 	return &AdminGrantRepo{db: db}
 }
 
-func adminGrantFromGen(g gen.BillingAdminGrant) *models.AdminGrant {
+func adminGrantFromGen(g gen.OpenrailsAdminGrant) *models.AdminGrant {
 	return &models.AdminGrant{
 		ID:              g.ID,
 		TenantSubjectID: g.TenantSubjectID,
@@ -175,7 +175,7 @@ func (r *AdminGrantRepo) ListByGrantedBy(ctx context.Context, grantedBy string, 
 	return r.grantsWithRelations(ctx, rows, int(total))
 }
 
-func (r *AdminGrantRepo) grantsWithRelations(ctx context.Context, rows []gen.BillingAdminGrant, total int) ([]models.AdminGrant, int, error) {
+func (r *AdminGrantRepo) grantsWithRelations(ctx context.Context, rows []gen.OpenrailsAdminGrant, total int) ([]models.AdminGrant, int, error) {
 	grants := make([]*models.AdminGrant, 0, len(rows))
 	for _, row := range rows {
 		grants = append(grants, adminGrantFromGen(row))

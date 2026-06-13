@@ -537,7 +537,7 @@ func persistCatalogDriftJob(ctx context.Context, database *db.DB, desired []mode
 
 // catalogDriftEventFromGen maps the generated row onto the domain model
 // (NULL text columns flatten to "" like the bun nullzero tags did).
-func catalogDriftEventFromGen(r gen.BillingCatalogDriftEvent) models.CatalogDriftEvent {
+func catalogDriftEventFromGen(r gen.OpenrailsCatalogDriftEvent) models.CatalogDriftEvent {
 	return models.CatalogDriftEvent{
 		ID:                    r.ID,
 		Provider:              models.CatalogDriftProvider(r.Provider),

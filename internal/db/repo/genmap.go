@@ -36,7 +36,7 @@ func toJSONB[M ~map[string]V, V any](m M) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-func paymentFromGen(p gen.BillingPayment) (*models.Payment, error) {
+func paymentFromGen(p gen.OpenrailsPayment) (*models.Payment, error) {
 	m := &models.Payment{
 		ID:                p.ID,
 		TenantSubjectID:   p.TenantSubjectID,
@@ -71,7 +71,7 @@ func paymentFromGen(p gen.BillingPayment) (*models.Payment, error) {
 	return m, nil
 }
 
-func paymentsFromGen(rows []gen.BillingPayment) ([]*models.Payment, error) {
+func paymentsFromGen(rows []gen.OpenrailsPayment) ([]*models.Payment, error) {
 	out := make([]*models.Payment, 0, len(rows))
 	for _, r := range rows {
 		m, err := paymentFromGen(r)
@@ -83,7 +83,7 @@ func paymentsFromGen(rows []gen.BillingPayment) ([]*models.Payment, error) {
 	return out, nil
 }
 
-func priceFromGen(p gen.BillingPrice) (*models.Price, error) {
+func priceFromGen(p gen.OpenrailsPrice) (*models.Price, error) {
 	m := &models.Price{
 		ID:               p.ID,
 		TenantID:         p.TenantID,
@@ -101,7 +101,7 @@ func priceFromGen(p gen.BillingPrice) (*models.Price, error) {
 	return m, nil
 }
 
-func productFromGen(p gen.BillingProduct) (*models.Product, error) {
+func productFromGen(p gen.OpenrailsProduct) (*models.Product, error) {
 	m := &models.Product{
 		ID:          p.ID,
 		TenantID:    p.TenantID,
@@ -146,7 +146,7 @@ func derefUUID(u *uuid.UUID) uuid.UUID {
 	return *u
 }
 
-func subscriptionFromGen(s gen.BillingSubscription) (*models.Subscription, error) {
+func subscriptionFromGen(s gen.OpenrailsSubscription) (*models.Subscription, error) {
 	m := &models.Subscription{
 		ID:                      s.ID,
 		TenantID:                s.TenantID,
@@ -187,7 +187,7 @@ func subscriptionFromGen(s gen.BillingSubscription) (*models.Subscription, error
 	return m, nil
 }
 
-func subscriptionsFromGen(rows []gen.BillingSubscription) ([]*models.Subscription, error) {
+func subscriptionsFromGen(rows []gen.OpenrailsSubscription) ([]*models.Subscription, error) {
 	out := make([]*models.Subscription, 0, len(rows))
 	for _, r := range rows {
 		m, err := subscriptionFromGen(r)
@@ -199,7 +199,7 @@ func subscriptionsFromGen(rows []gen.BillingSubscription) ([]*models.Subscriptio
 	return out, nil
 }
 
-func paymentMethodFromGen(p gen.BillingPaymentMethod) (*models.PaymentMethod, error) {
+func paymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*models.PaymentMethod, error) {
 	m := &models.PaymentMethod{
 		ID:                   p.ID,
 		TenantSubjectID:      p.TenantSubjectID,
@@ -220,7 +220,7 @@ func paymentMethodFromGen(p gen.BillingPaymentMethod) (*models.PaymentMethod, er
 	return m, nil
 }
 
-func paymentMethodsFromGen(rows []gen.BillingPaymentMethod) ([]*models.PaymentMethod, error) {
+func paymentMethodsFromGen(rows []gen.OpenrailsPaymentMethod) ([]*models.PaymentMethod, error) {
 	out := make([]*models.PaymentMethod, 0, len(rows))
 	for _, r := range rows {
 		m, err := paymentMethodFromGen(r)
@@ -232,7 +232,7 @@ func paymentMethodsFromGen(rows []gen.BillingPaymentMethod) ([]*models.PaymentMe
 	return out, nil
 }
 
-func checkoutSessionFromGen(c gen.BillingCheckoutSession) (*models.CheckoutSession, error) {
+func checkoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*models.CheckoutSession, error) {
 	m := &models.CheckoutSession{
 		ID:              c.ID,
 		TenantSubjectID: c.TenantSubjectID,
@@ -263,7 +263,7 @@ func checkoutSessionFromGen(c gen.BillingCheckoutSession) (*models.CheckoutSessi
 	return m, nil
 }
 
-func entitlementFromGen(e gen.BillingEntitlement) *models.Entitlement {
+func entitlementFromGen(e gen.OpenrailsEntitlement) *models.Entitlement {
 	sourceID := e.SourceID
 	m := &models.Entitlement{
 		ID:              e.ID,
@@ -286,7 +286,7 @@ func entitlementFromGen(e gen.BillingEntitlement) *models.Entitlement {
 	return m
 }
 
-func entitlementsFromGen(rows []gen.BillingEntitlement) []models.Entitlement {
+func entitlementsFromGen(rows []gen.OpenrailsEntitlement) []models.Entitlement {
 	out := make([]models.Entitlement, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, *entitlementFromGen(r))

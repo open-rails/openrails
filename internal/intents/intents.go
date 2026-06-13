@@ -131,16 +131,16 @@ type Handler interface {
 	// CheckRelevance reports whether the intent is still applicable. A
 	// returned error keeps the intent pending (re-checked on the next run);
 	// Applicable=false marks it superseded.
-	CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error)
+	CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error)
 	// Execute performs the provider mutation, honoring per-type
 	// effectively-once semantics (deletes verify-then-execute, money movers
 	// never blind-retry, ...). Kill switches are checked here, at execution
 	// time, and reported as OutcomeParked.
-	Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome
+	Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome
 	// Verify resolves an unknown_needs_verify intent using provider READS
 	// only. OutcomeRetryable means "verified NOT executed" (the executor may
 	// retry); OutcomeAmbiguous means still inconclusive.
-	Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome
+	Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome
 	// Backoff returns the delay before the next attempt after the given
 	// number of attempts (>= 1).
 	Backoff(attempts int32) time.Duration
