@@ -15,7 +15,12 @@ type Verifier interface {
 	Verify(token string) (authhttp.Claims, error)
 }
 
-// NewVerifier builds an authkit-backed verifier using billing auth config.
+// NewVerifier builds an authkit-backed verifier over the config-declared
+// FIRST-PARTY issuer allowlist (auth.issuers): host-app-issued user/admin JWTs
+// verify against each issuer's published JWKS. This is an input to the always-on
+// auth stack — not a deployment mode (#469 removed "verifier-only" standalone;
+// the AuthKit control plane always runs alongside it and owns delegated/service
+// credentials via its live issuer registry).
 // Supports multiple issuers to accept tokens from multiple IdPs/environments.
 func NewVerifier(cfg *config.AuthConfig) (Verifier, error) {
 	if cfg == nil {

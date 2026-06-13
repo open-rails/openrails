@@ -38,15 +38,16 @@ type App struct {
 
 	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224),
 	// held as `any` so the embedded CORE (internal/app, pkg/embedded, embedhttp)
-	// imports neither internal/controlplane nor — through it — AuthKit (#284). It
-	// is nil in verifier-only mode. The standalone/opt-in path attaches the
-	// concrete *controlplane.ControlPlane via SetControlPlane and recovers it with
-	// a type assertion (see pkg/embedded/controlplane).
+	// imports neither internal/controlplane nor — through it — AuthKit (#284).
+	// It is nil only for embedded hosts that never attach one; the standalone
+	// path ALWAYS attaches the concrete *controlplane.ControlPlane via
+	// SetControlPlane (#469) and recovers it with a type assertion (see
+	// pkg/embedded/controlplane).
 	ControlPlane any
 
 	stopRedisMonitor context.CancelFunc
 	// controlPlanePool is an OpenRails-owned pgx pool backing the control plane,
-	// created only when the control plane is enabled and no pool was injected. It
+	// created only when the control plane is attached and no pool was injected. It
 	// is attached together with ControlPlane via SetControlPlane and closed here.
 	controlPlanePool *pgxpool.Pool
 }

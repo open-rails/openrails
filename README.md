@@ -66,9 +66,13 @@ The rule across both modes is: **one credential per trust domain.**
   uses its normal session credential for everything, including the mounted billing routes.
   Your code verifies it and hands OpenRails the resulting identity through a Go interface.
   **One token.** OpenRails never parses your credential at all.
-- **Standalone:** OpenRails is a separate system across a network boundary. Identity claims
-  that cross that boundary must be independently verifiable, so each caller class gets a
-  credential scoped to exactly what it may do:
+- **Standalone:** OpenRails is a separate system across a network boundary, and it always
+  runs its own AuthKit control plane — the in-process authority that issues and verifies
+  these credentials, holds the runtime tenant/issuer registry, and gates admin routes.
+  (There is no control-plane-less "verifier-only" standalone; a private deployment keeps
+  `public_user_registration` / `public_tenant_registration` closed, which is the default.)
+  Identity claims that cross that boundary must be independently verifiable, so each caller
+  class gets a credential scoped to exactly what it may do:
   - your **backend** uses a **service token** (`openrails_st_...`) or a first-party OIDC
     service JWT — server-to-server, never sent to browsers;
   - your **frontend** uses a short-lived **delegated access token** that *your own backend*
@@ -378,7 +382,8 @@ plain `NewHTTPHandler` mux carries the user/admin/webhook groups.
 
 Admin authority is the **live `openrails:admin` permission in the caller's own tenant**,
 checked per request against the control plane — OpenRails never interprets your role names,
-and there is no role-string fallback. The control plane is opt-in for embedded hosts
+and there is no role-string fallback. The standalone service always runs the control plane;
+for embedded hosts it is opt-in
 (`pkg/embedded/controlplane.Attach`); if you don't attach one, mount with
 `IncludeAdmin: false` and run admin operations through the in-process `Service()` facade
 or your own tooling instead — admin routes without a permission checker fail closed.

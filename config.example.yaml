@@ -151,13 +151,22 @@ redis:
   db: 0                 # Redis database number (default: 0)
 
 # =============================================================================
-# AUTHENTICATION (JWT Verifier)
+# AUTHENTICATION
 # =============================================================================
-# Billing is a JWT verifier (not issuer). It verifies tokens from your IdP.
+# Standalone OpenRails has ONE auth model (#469): it always runs its own
+# AuthKit control plane (delegated browser tokens, service tokens, the runtime
+# tenant/issuer registry, /auth routes, admin authority), with both
+# registration axes CLOSED by default. There is no "verifier-only" mode.
+#
+# auth.issuers is the config-declared FIRST-PARTY issuer allowlist for the
+# user/admin JWT surface: host-app-issued JWTs verify against each issuer's
+# {issuer}/.well-known/jwks.json (OIDC). It is an input to the auth stack, not
+# an alternative mode. Delegated/service credentials use the control plane's
+# live issuer registry instead (register via POST /v1/service/tenant/issuers
+# or the bootstrap manifest).
 
 auth:
-  # Issuers - array of token issuer URLs
-  # Billing fetches public keys from each {issuer}/.well-known/jwks.json per OIDC spec
+  # First-party issuers - array of token issuer URLs for host-app user JWTs.
   issuers:
     - "http://localhost:8080"
     - "http://localhost:8081"
@@ -169,20 +178,25 @@ auth:
   expected_audience: "openrails-app"
 
   # ---------------------------------------------------------------------------
-  # OpenRails-owned AuthKit control plane (#224). OPTIONAL and OFF by default.
-  # When omitted/disabled, OpenRails is a pure JWT verifier (current behavior).
-  # When enabled, OpenRails builds an in-process AuthKit control plane:
+  # OpenRails-owned AuthKit control plane (#224). ALWAYS ON in standalone mode
+  # (#469): this section tunes it, it cannot switch it off. The control plane
   #   * selectively mounts only intentional AuthKit route groups under /auth
-  #     (NEVER AuthKit DefaultAPI in locked-down mode),
-  #   * disables public native-user registration + public tenant registration,
+  #     (NEVER AuthKit DefaultAPI in the locked-down posture),
+  #   * issues + verifies delegated browser tokens and tenant service tokens,
   #   * provides the in-process AuthKit core used by tenant manifest bootstrap.
-  # The control plane needs a database holding AuthKit's profiles.* schema.
+  # It needs a database holding AuthKit's profiles.* schema (`billing migrate up`
+  # applies those migrations).
+  #
+  # `issuer` is REQUIRED outside development; in development it defaults to
+  # api_url (or http://localhost:<port>). Private/self-hosted posture is the
+  # registration axes below (both default false = closed) — never a disabled
+  # control plane.
   # ---------------------------------------------------------------------------
   # control_plane:
-  #   enabled: true
   #   issuer: "https://openrails.mysite.com" # AuthKit token issuer this CP signs as
   #   token_prefix: "openrails"               # generated service token brand prefix -> openrails_st_...
-  #   locked_down: true                       # self-hosted posture (default true)
+  #   # public_user_registration: false       # default false: native-user signup is admin/bootstrap-only
+  #   # public_tenant_registration: false     # default false: tenant onboarding is admin/bootstrap-only
   #   # issued_audiences: ["openrails-app"]   # defaults to expected_audience
   #   # expected_audiences: ["openrails-app"]
 

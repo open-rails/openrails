@@ -15,9 +15,7 @@ import (
 )
 
 // DelegatedIssuerAdmin manages a tenant's FEDERATED delegated-token issuers
-// (issue #259). The control plane implements it; tests inject a fake. nil => the
-// deployment cannot manage issuers (verifier-only mode) and the routes are not
-// mounted.
+// (issue #259). The control plane implements it; tests inject a fake.
 type DelegatedIssuerAdmin interface {
 	RegisterDelegatedIssuer(ctx context.Context, p controlplane.RegisterDelegatedIssuerParams) error
 	DisableDelegatedIssuer(ctx context.Context, tenantID tenant.ID, issuer string) error

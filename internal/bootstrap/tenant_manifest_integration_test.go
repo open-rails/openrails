@@ -242,7 +242,6 @@ func newTenantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlpla
 		Auth: &config.AuthConfig{
 			ExpectedAudience: "openrails",
 			ControlPlane: &config.ControlPlaneConfig{
-				Enabled:     true,
 				Issuer:      "https://openrails.test",
 				TokenPrefix: "openrails",
 			},

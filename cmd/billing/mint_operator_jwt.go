@@ -47,7 +47,7 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	}
 	cp := embcp.Get(embeddedApp.App())
 	if cp == nil || cp.Core() == nil {
-		return fmt.Errorf("control plane is not enabled (set auth.control_plane.enabled + issuer)")
+		return fmt.Errorf("control plane unavailable (set auth.control_plane.issuer)")
 	}
 	core := cp.Core()
 

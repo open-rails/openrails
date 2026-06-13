@@ -40,9 +40,11 @@ func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
 		}
 	}()
 
-	// Standalone opts in to the AuthKit verifier (#284): the embedded core no
-	// longer builds a default verifier, so when no Authenticator was injected we
-	// construct the AuthKit-backed one from config here.
+	// Standalone wires the AuthKit first-party JWT verifier (#284): the embedded
+	// core no longer builds a default verifier, so when no Authenticator was
+	// injected we construct the AuthKit-backed one from the config-declared
+	// first-party issuers (auth.issuers) here. This is an input to the user/admin
+	// JWT surface, not an auth mode (#469).
 	if application.Authenticator == nil && cfg.Auth != nil && len(cfg.Auth.Issuers) > 0 {
 		authn, aerr := embauthkit.NewVerifierAuthenticatorFromConfig(cfg.Auth)
 		if aerr != nil {
@@ -51,9 +53,8 @@ func NewServer(cfg *config.Config, opts *bootstrap.Options) (*Result, error) {
 		application.Authenticator = authn
 	}
 
-	// Standalone opts in to the OpenRails-owned AuthKit control plane (#284):
-	// build it (when enabled in config) and attach to the app, reusing an injected
-	// pool when present. No-op in verifier-only mode.
+	// Standalone always attaches the OpenRails-owned AuthKit control plane
+	// (#284/#469), reusing an injected pool when present. Failure is fatal.
 	var injectedPool = func() *pgxpool.Pool {
 		if opts != nil {
 			return opts.PGXPool

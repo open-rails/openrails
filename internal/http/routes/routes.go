@@ -19,8 +19,9 @@ type Options struct {
 
 	// AdminPermissionChecker is the LIVE authority for admin routes (#312): admin
 	// routes require the openrails:admin permission evaluated live against the
-	// CALLER'S OWN tenant. nil in verifier-only mode, in which case admin routes
-	// fail closed (there is no operator-tenant or role-claim fallback).
+	// CALLER'S OWN tenant. nil for embedded hosts without a control plane, in
+	// which case admin routes fail closed (there is no operator-tenant or
+	// role-claim fallback).
 	AdminPermissionChecker authpolicy.AdminPermissionChecker
 }
 
@@ -130,8 +131,8 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 func RegisterAdminRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	// HARDCUT (#312): admin authority is the LIVE openrails:admin permission held
 	// in the caller's OWN tenant — evaluated at request time by the control plane,
-	// not a claim-based operator-tenant gate. When no control plane is wired
-	// (verifier-only mode) the checker is nil and the gate fails closed.
+	// not a claim-based operator-tenant gate. When an embedded host wires no
+	// control plane the checker is nil and the gate fails closed.
 	mw := []router.Middleware{
 		opts.requiredMW(),
 		authpolicy.AdminPermissionRequiredMW(opts.AdminPermissionChecker, authpolicy.PermAdmin),

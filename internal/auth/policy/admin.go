@@ -39,9 +39,9 @@ type PlatformSuperadminChecker interface {
 // IsLiveAdmin reports whether the given UserContext holds the live openrails:admin
 // permission in its OWN tenant (#312). It is the soft-authorization helper used
 // by mixed public/admin read endpoints (e.g. showing inactive catalog rows to
-// admins). When checker is nil (verifier-only mode) or the caller carries no
-// tenant context, it returns false — there is no operator-tenant or DB-role
-// fallback.
+// admins). When checker is nil (an embedded host with no control plane) or the
+// caller carries no tenant context, it returns false — there is no
+// operator-tenant or DB-role fallback.
 func IsLiveAdmin(ctx context.Context, checker AdminPermissionChecker, uc authprovider.UserContext) (bool, error) {
 	if checker == nil || strings.TrimSpace(uc.UserID) == "" || strings.TrimSpace(uc.Tenant) == "" {
 		return false, nil

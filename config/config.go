@@ -658,7 +658,13 @@ func (c *Config) AllowedCORSOrigins() []string {
 }
 
 type AuthConfig struct {
-	Issuers          []string `koanf:"issuers"`           // List of expected token issuers (e.g., ["https://issuer.example.com"])
+	// Issuers is the config-declared allowlist of FIRST-PARTY token issuers for
+	// the user/admin JWT surface: OpenRails fetches each issuer's JWKS and
+	// verifies host-app-issued user JWTs against it. This is an INPUT to the
+	// always-on auth stack — NOT a standalone auth mode (#469 removed the
+	// "verifier-only" deployment). Delegated browser tokens use the control
+	// plane's live issuer registry instead.
+	Issuers          []string `koanf:"issuers"`
 	ExpectedAudience string   `koanf:"expected_audience"` // Accept token only if it contains this audience (e.g., "openrails-app")
 
 	// HARDCUT (#312): there is no `auth.operator_tenant_slug` /
@@ -669,26 +675,26 @@ type AuthConfig struct {
 	// deprecated keys.
 
 	// ControlPlane configures OpenRails' OpenRails-owned AuthKit control plane
-	// (issue #224). When nil/disabled, OpenRails behaves as a pure JWT verifier
-	// (current default). When enabled, OpenRails builds an in-process AuthKit
-	// core/service, can selectively mount AuthKit route groups, and bootstraps
-	// the default tenant's operator tenant + roles + permission catalog + initial
-	// operator service token.
+	// (issue #224). HARD CUT (#469): the control plane is MANDATORY in standalone
+	// mode — there is no "verifier-only" deployment. Standalone boot always
+	// builds the in-process AuthKit core/service, mounts the selective AuthKit
+	// route groups, and runs control-plane bootstrap; construction failure is
+	// fatal. Load materializes this section when omitted (dev defaults the
+	// issuer); the former `enabled` knob is rejected. Private/self-hosted
+	// posture is expressed by the registration axes below, never by removing
+	// the control plane.
 	ControlPlane *ControlPlaneConfig `koanf:"control_plane,omitempty"`
 }
 
 // ControlPlaneConfig configures the OpenRails-owned AuthKit control plane
-// (issue #224). It is OPTIONAL and OFF by default: a deployment that only
-// verifies externally-issued JWTs does not set this. A self-hosted, locked-down
-// deployment enables it to own user/org/role/service token operations in-process.
+// (issue #224). HARD CUT (#469): the control plane is always on in standalone
+// mode. The section tunes it (issuer, audiences, registration posture); it does
+// not switch it off. pkg/embedded hosts that want it opt in by calling
+// pkg/embedded/controlplane.Attach.
 type ControlPlaneConfig struct {
-	// Enabled turns on the in-process AuthKit control plane. When false (the
-	// default), OpenRails does not construct an AuthKit core/service and does not
-	// run control-plane bootstrap.
-	Enabled bool `koanf:"enabled,omitempty"`
-
 	// Issuer is the AuthKit token issuer this OpenRails control plane signs as
-	// (e.g. "https://billing.mysite.com"). Required when Enabled.
+	// (e.g. "https://billing.mysite.com"). Required outside development; in
+	// development Load defaults it to api_url (or http://localhost:<port>).
 	Issuer string `koanf:"issuer,omitempty"`
 
 	// IssuedAudiences are the audiences placed on tokens this control plane
@@ -717,11 +723,6 @@ type ControlPlaneConfig struct {
 	// "openrails-bootstrap-admin".
 	BootstrapAdminServiceTokenName string `koanf:"bootstrap_admin_service_token_name,omitempty"`
 
-	// OperatorServiceTokenName is a deprecated compatibility field for older
-	// committed OpenRails call sites. It is intentionally not loadable from
-	// config; new deployments use BootstrapAdminServiceTokenName.
-	OperatorServiceTokenName string `koanf:"-"`
-
 	// PlatformTenantSlug is the AuthKit tenant slug for the managed-hosting PLATFORM
 	// superadmin org (issue #226), DISTINCT from any tenant operator tenant. The
 	// platform tenant holds the openrails-platform-superadmin role with the
@@ -742,30 +743,6 @@ type ControlPlaneConfig struct {
 // surface is not mounted and no platform-superadmin is bootstrapped.
 func (cp *ControlPlaneConfig) PlatformTenantEnabled() bool {
 	return cp != nil && strings.TrimSpace(cp.PlatformTenantSlug) != ""
-}
-
-// ControlPlaneEnabled reports whether the OpenRails-owned AuthKit control plane
-// is enabled for this deployment.
-func (c *AuthConfig) ControlPlaneEnabled() bool {
-	return c != nil && c.ControlPlane != nil && c.ControlPlane.Enabled
-}
-
-// OperatorTenantEnabled is a deprecated compatibility shim for pre-#312 call
-// sites that still compile against the operator-tenant helper names.
-func (c *AuthConfig) OperatorTenantEnabled() bool {
-	return c.ControlPlaneEnabled()
-}
-
-// EffectiveOperatorTenantSlug is a deprecated compatibility shim for pre-#312
-// call sites. Deprecated operator-tenant config keys are still rejected by Load.
-func (c *AuthConfig) EffectiveOperatorTenantSlug() string {
-	return "operator"
-}
-
-// EffectiveOperatorTenantAdminRoles is a deprecated compatibility shim for
-// pre-#312 call sites. New admin authorization uses live openrails:admin grants.
-func (c *AuthConfig) EffectiveOperatorTenantAdminRoles() []string {
-	return []string{"owner", "admin"}
 }
 
 // UserRegistrationOpen reports whether public native-user self-registration is
@@ -1809,6 +1786,16 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("loading environment variables: %w", err)
 	}
 
+	// HARD CUT (#469): the AuthKit control plane is always on in standalone
+	// mode; the verifier-only deployment mode is gone. The former
+	// auth.control_plane.enabled knob is rejected — not silently ignored — so a
+	// deployment that believed it was toggling the control plane finds out at
+	// load time. Private posture is the registration axes, not a disabled
+	// control plane.
+	if k.Exists("auth.control_plane.enabled") {
+		return nil, fmt.Errorf("auth.control_plane.enabled was removed (#469): the control plane is always on in standalone mode — delete the key; use auth.control_plane.public_user_registration / public_tenant_registration to keep registration closed")
+	}
+
 	// Unmarshal into config struct (overlay onto defaults)
 	if err := k.Unmarshal("", cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
@@ -1863,6 +1850,30 @@ func Load(configPath string) (*Config, error) {
 			normalized[key] = proc
 		}
 		cfg.Processors = normalized
+	}
+
+	// The control plane is mandatory in standalone mode (#469): materialize the
+	// config section when omitted. In development the issuer defaults to the
+	// deployment's own base URL so zero-config dev boots; outside development a
+	// missing issuer fails fast at control-plane construction.
+	if cfg.Auth == nil {
+		cfg.Auth = &AuthConfig{}
+	}
+	if cfg.Auth.ControlPlane == nil {
+		cfg.Auth.ControlPlane = &ControlPlaneConfig{}
+	}
+	if strings.TrimSpace(cfg.Auth.ControlPlane.Issuer) == "" {
+		if isDev := cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == ""; isDev {
+			issuer := strings.TrimSpace(cfg.APIURL)
+			if issuer == "" {
+				port := int(cfg.Port)
+				if port == 0 {
+					port = 2053
+				}
+				issuer = fmt.Sprintf("http://localhost:%d", port)
+			}
+			cfg.Auth.ControlPlane.Issuer = strings.TrimRight(issuer, "/")
+		}
 	}
 
 	// Assemble DB URL from pieces if not explicitly set

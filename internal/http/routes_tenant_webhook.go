@@ -23,14 +23,9 @@ import (
 // the trust boundary — OpenRails always re-derives the secret and re-verifies.
 const TenantWebhookPrefix = "/t/:tenant/webhooks"
 
-// registerTenantWebhookRoutes mounts the tenant-scoped webhook surface. No-op
-// without the tenancy service (verifier-only mode), where the single default
-// tenant continues to use the global /v1/webhooks/:provider surface.
+// registerTenantWebhookRoutes mounts the tenant-scoped webhook surface. The
+// single default tenant may still use the global /v1/webhooks/:provider surface.
 func (s *Server) registerTenantWebhookRoutes(e *gin.Engine) {
-	if s.tenancy == nil {
-		log.Info("tenancy service disabled; tenant-scoped webhook routes will not be mounted")
-		return
-	}
 	group := e.Group(StandaloneV1Prefix + TenantWebhookPrefix)
 	group.POST("/:provider", s.tenantWebhookHandler())
 	log.WithField("prefix", StandaloneV1Prefix+TenantWebhookPrefix).

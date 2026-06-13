@@ -22,8 +22,7 @@ type Options struct {
 	Authenticator billingauth.Authenticator
 	// DelegatedAuthenticator is the optional host-pluggable identity seam for
 	// the delegated self-service surface (#339). When nil, that surface
-	// authenticates via the control plane's delegated-token verifier (and is
-	// not mounted in verifier-only mode).
+	// authenticates via the control plane's delegated-token verifier.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	Cache                  cache.Cache
 	Clock                  clockwork.Clock

@@ -32,7 +32,7 @@ func mintOperatorServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 	cp := embcp.Get(embeddedApp.App())
 	if cp == nil || cp.Core() == nil {
-		return fmt.Errorf("control plane is not enabled")
+		return fmt.Errorf("control plane unavailable (set auth.control_plane.issuer)")
 	}
 
 	authorityTenantSlug, err := cmd.Flags().GetString("org")

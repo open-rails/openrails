@@ -103,6 +103,52 @@ clickhouse:
 	assert.Equal(t, "envclickhouse:9000", cfg.ClickHouse.ClientAddr)
 }
 
+func TestLoad_RejectsRemovedControlPlaneEnabledKnob(t *testing.T) {
+	// HARD CUT (#469): the control plane is always on; auth.control_plane.enabled
+	// is a load error, not an ignored key — whichever way it was set.
+	for _, val := range []string{"true", "false"} {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "config.yaml")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`
+auth:
+  control_plane:
+    enabled: `+val+`
+    issuer: "https://billing.example.com"
+`), 0o600))
+
+		_, err := Load(cfgPath)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "auth.control_plane.enabled was removed")
+	}
+}
+
+func TestLoad_ControlPlaneMaterializedWithDevIssuerDefault(t *testing.T) {
+	// The control plane section is materialized even when omitted (#469); in
+	// development the issuer defaults to the deployment's own base URL.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("env: development\n"), 0o600))
+
+	cfg, err := Load(cfgPath)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Auth)
+	require.NotNil(t, cfg.Auth.ControlPlane)
+	require.Equal(t, "http://localhost:2053", cfg.Auth.ControlPlane.Issuer)
+	// Registration axes default closed.
+	require.False(t, cfg.Auth.ControlPlane.UserRegistrationOpen())
+	require.False(t, cfg.Auth.ControlPlane.TenantRegistrationOpen())
+}
+
+func TestLoad_ControlPlaneIssuerFromAPIURLInDev(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("env: development\napi_url: \"http://openrails:2053/\"\n"), 0o600))
+
+	cfg, err := Load(cfgPath)
+	require.NoError(t, err)
+	require.Equal(t, "http://openrails:2053", cfg.Auth.ControlPlane.Issuer)
+}
+
 func TestLoad_RequiresExplicitTypeForCustomProcessors(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

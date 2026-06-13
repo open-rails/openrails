@@ -101,9 +101,9 @@ const startupBootstrapLockKey = int64(0x6f72_626f_6f74) // "orboot"
 // ArchiveMissingProducts:false, so nothing is ever removed — so reapplying on
 // every boot is safe and lets a mounted bootstrap file converge an existing
 // control plane (e.g. register a delegated issuer that was added after the DB
-// was first provisioned). No-op when no manifest is configured/present or the
-// control plane is disabled. Concurrent replicas serialize on a session-level
-// advisory lock (#342); the lock auto-releases if the holder dies.
+// was first provisioned). No-op when no manifest is configured/present.
+// Concurrent replicas serialize on a session-level advisory lock (#342); the
+// lock auto-releases if the holder dies.
 func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) error {
 	path := resolveBootstrapManifestPath(cfg)
 	if path == "" {
@@ -111,7 +111,7 @@ func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) 
 	}
 	cp := embcp.Get(a)
 	if cp == nil {
-		return nil // verifier-only mode; nothing to provision
+		return fmt.Errorf("startup bootstrap: control plane not attached (#469: it is mandatory in standalone mode)")
 	}
 	manifest, err := bootstrap.LoadBootstrapManifest(path)
 	if err != nil {
@@ -171,7 +171,7 @@ func applyBootstrapManifest(ctx context.Context, cfg *config.Config, a *app.App,
 		} else {
 			cp := embcp.Get(a)
 			if cp == nil {
-				return fmt.Errorf("tenant bootstrap requires auth.control_plane.enabled")
+				return fmt.Errorf("tenant bootstrap: control plane not attached")
 			}
 			if err := bootstrap.ReconcileTenantManifestData(ctx, cfg, cp, manifest.TenantManifest(), bootstrap.TenantManifestReconcileOptions{}); err != nil {
 				return fmt.Errorf("tenant bootstrap: %w", err)
@@ -318,7 +318,7 @@ func contextForBootstrapCatalog(ctx context.Context, a *app.App, catalogName str
 	}
 	cp := embcp.Get(a)
 	if cp == nil || cp.Pool() == nil {
-		return nil, fmt.Errorf("catalog %q declares a tenant name but auth.control_plane.enabled is not available", catalogName)
+		return nil, fmt.Errorf("catalog %q declares a tenant name but the control plane is not attached", catalogName)
 	}
 	var id string
 	if err := cp.Pool().QueryRow(ctx, `SELECT id::text FROM billing.tenants WHERE lower(slug) = lower($1)`, slug).Scan(&id); err != nil {

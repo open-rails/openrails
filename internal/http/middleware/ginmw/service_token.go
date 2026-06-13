@@ -25,7 +25,8 @@ const (
 
 // ServiceTokenResolver validates a presented OpenRails-issued service token against live AuthKit +
 // tenant-directory state. The control plane implements it; tests can inject a
-// fake. nil resolver => the deployment is not service token-capable (verifier-only mode).
+// fake. A nil resolver is a wiring bug (#469: the standalone always has a
+// control plane) and the middleware fails closed.
 type ServiceTokenResolver interface {
 	// LooksLikeServiceToken reports whether token carries this deployment's service token marker.
 	LooksLikeServiceToken(token string) bool

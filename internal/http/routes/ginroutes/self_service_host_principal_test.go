@@ -18,9 +18,10 @@ import (
 
 // These tests pin the HOST-PLUGGABLE identity seam for the self-service
 // surface (issue #339): a host-supplied billingauth.DelegatedAuthenticator
-// authenticates /v1/self/* with NO control plane anywhere (the previously
-// impossible verifier-only case), and the explicit-mapping contract is
-// enforced fail-closed (empty tenant/subject/permissions => 401; permissions
+// authenticates /v1/self/* with NO control plane wired in the test fixture
+// (the host seam overrides the control-plane verifier), and the
+// explicit-mapping contract is enforced fail-closed (empty
+// tenant/subject/permissions => 401; permissions
 // outside the delegated catalog => 401; missing write permission => 403 on
 // the settings PUT).
 

@@ -14,15 +14,9 @@ import (
 // no separate trust surface or port — machine callers present a service token as a Bearer
 // token on the one public tenant API.
 //
-// Mounted only when the OpenRails-owned AuthKit control plane is configured (it is
-// what resolves and authorizes service tokens). In verifier-only mode there is no service token issuer
-// and the service surface is not mounted.
+// The OpenRails-owned AuthKit control plane is what resolves and authorizes
+// service tokens; it is always present on this surface (#469).
 func (s *Server) registerServiceRoutes(e *gin.Engine) {
-	if s.controlPlane == nil {
-		log.Info("control plane disabled; service token service API routes will not be mounted")
-		return
-	}
-
 	group := e.Group(StandaloneV1Prefix + httproutes.ServiceRoutePrefix)
 	httproutes.RegisterServiceRoutes(group, s.runtime, ginmw.ServiceTokenRequired(s.controlPlane), s.controlPlane)
 

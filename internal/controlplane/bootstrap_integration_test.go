@@ -108,14 +108,13 @@ func applyBootstrapTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.P
 	require.NoError(t, err)
 }
 
-func newEnabledControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
+func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	t.Helper()
 	cfg := &config.Config{
 		Env: "test",
 		Auth: &config.AuthConfig{
 			ExpectedAudience: "openrails-app",
 			ControlPlane: &config.ControlPlaneConfig{
-				Enabled:     true,
 				Issuer:      "https://billing.test",
 				TokenPrefix: "openrails",
 			},
@@ -130,7 +129,7 @@ func newEnabledControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 func TestBootstrap_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
-	cp := newEnabledControlPlane(t, pool)
+	cp := newTestControlPlane(t, pool)
 
 	// First run: creates the operator tenant, seeds role/perms, mints service token, records tenant.
 	res1, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: true})
@@ -200,7 +199,7 @@ func resourceIDs(resources []authcore.ServiceTokenResource, kind string) []strin
 func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
-	cp := newEnabledControlPlane(t, pool)
+	cp := newTestControlPlane(t, pool)
 
 	_, err := cp.Bootstrap(ctx, BootstrapOptions{MintInitialServiceToken: false})
 	require.NoError(t, err)
@@ -236,7 +235,6 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 		Auth: &config.AuthConfig{
 			ExpectedAudience: "openrails-app",
 			ControlPlane: &config.ControlPlaneConfig{
-				Enabled:            true,
 				Issuer:             "https://billing.test",
 				TokenPrefix:        "openrails",
 				PlatformTenantSlug: "openrails-platform",
@@ -300,7 +298,7 @@ func TestBootstrapPlatform_SeedsSuperadminInSeparateTenant(t *testing.T) {
 func TestDelegatedTenantResolution(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
-	cp := newEnabledControlPlane(t, pool)
+	cp := newTestControlPlane(t, pool)
 
 	// A second, suspended tenant owned by a distinct AuthKit tenant (uuid+slug linked).
 	_, err := pool.Exec(ctx, `

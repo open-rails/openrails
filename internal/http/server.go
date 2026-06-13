@@ -39,16 +39,15 @@ type Dependencies struct {
 	// reconstructed from it via ginauth.ProviderFromAuthenticator (#285).
 	Authenticator billingauth.Authenticator
 	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224).
-	// nil in verifier-only mode. When present, the server selectively mounts the
+	// REQUIRED (#469): the standalone gin surface always runs with a control
+	// plane — there is no verifier-only mode. The server selectively mounts the
 	// intentional AuthKit route groups (never DefaultAPI in locked-down mode).
 	ControlPlane *controlplane.ControlPlane
 	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
 	// the browser-direct self-service surface (issue #339). When set, the host
 	// verifies the incoming credential itself and supplies the explicitly
-	// mapped principal; /v1/self/* + /v1/tenant-admin/* are then mounted even
-	// without a control plane, authenticated by this seam. When both this and
-	// the control plane are configured, the host-supplied authenticator wins
-	// (an explicit override of the default control-plane verifier).
+	// mapped principal for /v1/self/* + /v1/tenant-admin/*, OVERRIDING the
+	// control plane's default delegated-token verifier.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 }
 
@@ -71,18 +70,17 @@ type Server struct {
 	captchaStore           *captcha.ChallengeStore
 
 	// tenancy is the tenant provisioning + lifecycle + per-tenant secret service
-	// (issue #225). Built only when the control plane is present (it owns the
-	// billing.* control-plane pool and the operator-tenant provisioner). nil in
-	// verifier-only mode: the tenant webhook + provisioning admin routes are then
-	// not mounted and the single default tenant continues via the global webhook.
+	// (issue #225). It reuses the control plane's pgx pool (the billing.*
+	// control-plane DB) and operator-tenant provisioner, and is always built
+	// (#469: the control plane is mandatory on this surface).
 	tenancy *tenancy.Service
 
 	// Platform superadmin layer (issue #226), DISTINCT from per-tenant operator
-	// admin. Built only when the control plane is present (they share the
-	// billing.* control-plane pool). platformAudit records every cross-tenant
-	// superadmin mutation; platformBreakGlass manages time-boxed elevation;
-	// platformMetrics aggregates platform-wide tenant metrics. nil in
-	// verifier-only mode: the /v1/platform/* surface is then not mounted.
+	// admin, sharing the billing.* control-plane pool. platformAudit records
+	// every cross-tenant superadmin mutation; platformBreakGlass manages
+	// time-boxed elevation; platformMetrics aggregates platform-wide tenant
+	// metrics. The /v1/platform/* surface itself is mounted only when a
+	// platform tenant is configured.
 	platformAudit      *platform.AuditLog
 	platformBreakGlass *platform.BreakGlass
 	platformMetrics    *platform.Metrics
@@ -146,6 +144,15 @@ func New(deps Dependencies) (*Server, error) {
 	if deps.Authenticator == nil {
 		return nil, fmt.Errorf("authenticator is required")
 	}
+	// HARD CUT (#469): the standalone surface always runs with the AuthKit
+	// control plane; a missing control plane is a boot failure, not a degraded
+	// "verifier-only" server.
+	if deps.ControlPlane == nil {
+		return nil, fmt.Errorf("control plane is required (#469: standalone always runs the AuthKit control plane)")
+	}
+	if deps.ControlPlane.Pool() == nil {
+		return nil, fmt.Errorf("control plane pool is required")
+	}
 
 	s := &Server{
 		cfg:     deps.Config,
@@ -164,18 +171,15 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Wire the live admin-permission checker onto the runtime so mixed
 	// public/admin read endpoints (e.g. catalog inactive rows) can evaluate
-	// openrails:admin for the caller's own tenant (#312). Only when the control
-	// plane is present, to avoid boxing a typed-nil pointer into the interface.
-	if deps.ControlPlane != nil && deps.Runtime != nil {
-		deps.Runtime.AdminChecker = deps.ControlPlane
-	}
+	// openrails:admin for the caller's own tenant (#312).
+	deps.Runtime.AdminChecker = deps.ControlPlane
 
-	// Build the tenant provisioning/lifecycle/secret service when the control
-	// plane is present (issue #225). It reuses the control plane's pgx pool (the
-	// OpenRails-owned billing.* control-plane DB) and operator-tenant provisioner. The
-	// DB-backed secret store is the self-hosted default and needs no live Vault; a
-	// managed deployment swaps in the Vault-backed store with the same addressing.
-	if deps.ControlPlane != nil && deps.ControlPlane.Pool() != nil {
+	// Build the tenant provisioning/lifecycle/secret service (issue #225). It
+	// reuses the control plane's pgx pool (the OpenRails-owned billing.*
+	// control-plane DB) and operator-tenant provisioner. The DB-backed secret
+	// store is the self-hosted default and needs no live Vault; a managed
+	// deployment swaps in the Vault-backed store with the same addressing.
+	{
 		var secretStore tenancy.TenantSecretStore
 		var solanaTransit solanaint.TransitClient
 
@@ -406,28 +410,25 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Selective AuthKit route mounting (#224). In locked-down mode this mounts
 	// ONLY the intentional AuthKit route groups (login/session/user) under
-	// /auth — never AuthKit DefaultAPI. No-op in verifier-only mode.
+	// /auth — never AuthKit DefaultAPI.
 	s.registerControlPlaneAuthRoutes(s.publicHandler)
 
-	// Server-to-server service API: service token-authenticated, on the SAME public engine
-	// (issue #222). No private port, no mTLS listener. No-op without a control
-	// plane (verifier-only mode has no service token issuer).
+	// Server-to-server service API: service token-authenticated, on the SAME
+	// public engine (issue #222). No private port, no mTLS listener.
 	s.registerServiceRoutes(s.publicHandler)
 
 	// Browser-direct self-service API: delegated-access-token-authenticated, on
-	// the SAME public engine (issue #222 browser tier). Mounted when the control
-	// plane OR a host-supplied DelegatedAuthenticator is configured (#339);
-	// no-op otherwise.
+	// the SAME public engine (issue #222 browser tier). Always mounted (#469);
+	// a host-supplied DelegatedAuthenticator overrides the control plane's
+	// delegated-token verifier (#339).
 	s.registerSelfServiceRoutes(s.publicHandler)
 
 	// Tenant-scoped webhook routing (issue #225): /v1/t/:tenant/webhooks/:provider
 	// resolves the tenant from the path slug, then loads THAT tenant's signing
-	// secret and verifies the signature AFTER tenant resolution. No-op without the
-	// tenancy service (verifier-only mode).
+	// secret and verifies the signature AFTER tenant resolution.
 	s.registerTenantWebhookRoutes(s.publicHandler)
 
-	// Operator-gated tenant provisioning/lifecycle admin API (issue #225). No-op
-	// without the tenancy service.
+	// Operator-gated tenant provisioning/lifecycle admin API (issue #225).
 	s.registerTenantAdminRoutes(s.publicHandler)
 
 	// Platform-superadmin cross-tenant admin API (issue #226), gated by
@@ -473,12 +474,9 @@ func (s *Server) newHTTPHandlerMux(opts HTTPHandlerOptions) http.Handler {
 		CaptchaStore:  s.captchaStore,
 		Authenticator: s.embeddedAuthenticator(),
 	}
-	// Only set the live admin-permission checker when the control plane is
-	// actually present (#284): a nil *controlplane.ControlPlane boxed into the
-	// AdminPermissionChecker interface would be non-nil and misfire.
-	if s.controlPlane != nil {
-		asm.AdminChecker = s.controlPlane
-	}
+	// The control plane is always present on this surface (#469); it is the
+	// live admin-permission checker.
+	asm.AdminChecker = s.controlPlane
 	return asm.NewHTTPHandler(embedhttp.Options{
 		IncludeUser:     opts.IncludeUser,
 		IncludeAdmin:    opts.IncludeAdmin,

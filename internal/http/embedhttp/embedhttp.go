@@ -60,8 +60,9 @@ type Assembler struct {
 	Runtime *app.Runtime
 	// AdminChecker is the live admin permission checker (#312), held as the neutral
 	// authpolicy.AdminPermissionChecker interface so this core package imports
-	// neither internal/controlplane nor AuthKit (#284). nil in verifier-only mode.
-	// The concrete *controlplane.ControlPlane satisfies it.
+	// neither internal/controlplane nor AuthKit (#284). nil for embedded hosts
+	// without a control plane (admin routes then fail closed). The concrete
+	// *controlplane.ControlPlane satisfies it.
 	AdminChecker  authpolicy.AdminPermissionChecker
 	CaptchaStore  *captcha.ChallengeStore
 	Authenticator billingauth.Authenticator

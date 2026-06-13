@@ -215,17 +215,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Opt into the OpenRails-owned AuthKit control plane (#284): the embedded core
-	// no longer builds it, so the standalone attaches it here (no-op in
-	// verifier-only mode) before bootstrapping.
+	// Attach the OpenRails-owned AuthKit control plane (#284). MANDATORY in
+	// standalone mode (#469): construction failure exits non-zero — there is no
+	// verifier-only downgrade.
 	if err := embcp.Attach(context.Background(), embeddedApp.App(), cfg, nil); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	// Bootstrap the OpenRails-owned AuthKit control plane (#224) when enabled.
-	// Idempotent + a no-op in verifier-only mode. Runs after migrations have been
-	// applied (migrations are a separate `billing migrate` step) and at startup.
+	// Bootstrap the OpenRails-owned AuthKit control plane (#224). Idempotent;
+	// runs after migrations have been applied (migrations are a separate
+	// `billing migrate` step) and at startup.
 	if res, err := embcp.RunBootstrap(context.Background(), embeddedApp.App(), controlplane.BootstrapOptions{MintInitialServiceToken: true}); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("control plane bootstrap: %w", err)

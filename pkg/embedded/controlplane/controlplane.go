@@ -1,9 +1,11 @@
-// Package controlplane is the OPT-IN OpenRails AuthKit control-plane helper for
-// the standalone binary and AuthKit-using embedded hosts (#284). The embedded
-// CORE (pkg/embedded.New -> bootstrap.NewApp -> internal/app) deliberately does
-// NOT import internal/controlplane (and through it AuthKit): control-plane /
-// tenant-management is standalone-only. Importing THIS package is what pulls the
-// control plane (and AuthKit) onto a host's graph.
+// Package controlplane wires the OpenRails AuthKit control plane onto an app
+// graph (#284). The embedded CORE (pkg/embedded.New -> bootstrap.NewApp ->
+// internal/app) deliberately does NOT import internal/controlplane (and through
+// it AuthKit): embedded hosts are host-authenticated and opt in by importing
+// THIS package, which is what pulls the control plane (and AuthKit) onto a
+// host's graph. The STANDALONE binary, by contrast, always attaches the control
+// plane (#469): there is no verifier-only standalone mode, and an Attach
+// failure is fatal at boot.
 //
 // The control plane is held on app.App as `any` (App.ControlPlane); this package
 // builds the concrete *controlplane.ControlPlane, attaches it via
@@ -22,8 +24,8 @@ import (
 )
 
 // Get recovers the concrete *controlplane.ControlPlane attached to the app, or
-// nil when the control plane is disabled (verifier-only mode) or the field holds
-// some other type.
+// nil when no control plane has been attached (an embedded host that never
+// called Attach) or the field holds some other type.
 func Get(a *app.App) *controlplane.ControlPlane {
 	if a == nil {
 		return nil
@@ -32,21 +34,15 @@ func Get(a *app.App) *controlplane.ControlPlane {
 	return cp
 }
 
-// Attach builds the OpenRails-owned AuthKit control plane (#224) when enabled in
-// config and attaches it to the app. It is a no-op (control plane left nil) when
-// cfg.Auth.ControlPlaneEnabled() is false. injectedPool, when non-nil, is reused
+// Attach builds the OpenRails-owned AuthKit control plane (#224) and attaches it
+// to the app. Construction always happens (#469: there is no disabled state);
+// any failure — missing issuer, bad keys, unreachable DB — is returned so the
+// standalone boot path can exit non-zero. injectedPool, when non-nil, is reused
 // as the control-plane pool; otherwise Attach creates an OpenRails-owned pool
 // whose lifecycle App.Close manages.
-//
-// This is the construction that used to live in internal/app.BootstrapWithOptions
-// (#284); the standalone/opt-in path now calls it explicitly after building the
-// app.
 func Attach(ctx context.Context, a *app.App, cfg *config.Config, injectedPool *pgxpool.Pool) error {
 	if a == nil || cfg == nil {
-		return nil
-	}
-	if cfg.Auth == nil || !cfg.Auth.ControlPlaneEnabled() {
-		return nil
+		return fmt.Errorf("control plane: app and config are required")
 	}
 
 	// The control plane needs a pgx pool over the database holding AuthKit's
@@ -80,15 +76,16 @@ func Attach(ctx context.Context, a *app.App, cfg *config.Config, injectedPool *p
 
 // RunBootstrap idempotently bootstraps the OpenRails-owned AuthKit control plane
 // (#224): ensures the bootstrap authority, OpenRails operator role, the
-// openrails.* permission catalog, and an initial operator service token. It is
-// a no-op when the control plane is disabled.
+// openrails.* permission catalog, and an initial operator service token.
+// Calling it without an attached control plane is a wiring error (#469: the
+// standalone always attaches one first).
 //
 // Call it AFTER migrations have run (so billing.tenants and profiles.* exist) and
 // at startup. Safe to re-run. This was App.RunControlPlaneBootstrap before #284.
 func RunBootstrap(ctx context.Context, a *app.App, opts controlplane.BootstrapOptions) (*controlplane.BootstrapResult, error) {
 	cp := Get(a)
 	if cp == nil {
-		return nil, nil
+		return nil, fmt.Errorf("control plane bootstrap: no control plane attached (call Attach first)")
 	}
 	if !opts.MintInitialServiceToken {
 		opts.MintInitialServiceToken = true
