@@ -464,12 +464,11 @@ type ProcessorConfig struct {
 	WebhookSecret   string `koanf:"webhook_secret"`
 
 	// --- CCBill fields (type: ccbill) ---
-	Salt               string `koanf:"salt"`
-	ClientSubAcc       string `koanf:"client_sub_acc"`
-	ClientAccNum       string `koanf:"client_acc_num"`
-	SubscriptionTypeId string `koanf:"subscription_type_id"`
-	DataLinkUsername   string `koanf:"datalink_username"`
-	DataLinkPassword   string `koanf:"datalink_password"`
+	Salt             string `koanf:"salt"`
+	ClientSubAcc     string `koanf:"client_sub_acc"`
+	ClientAccNum     string `koanf:"client_acc_num"`
+	DataLinkUsername string `koanf:"datalink_username"`
+	DataLinkPassword string `koanf:"datalink_password"`
 	// AllowedCIDRs is the CCBill webhook source allowlist (CIDR notation). When
 	// empty, the documented default ranges are used. Supplying it via config/env
 	// lets the ranges be rotated without a code deploy. Parsed at boot (fail-fast
@@ -563,14 +562,13 @@ func (p *ProcessorConfig) ToNMIProviderSettings(name string) *NMIProviderSetting
 // Only valid for CCBill-type processors.
 func (p *ProcessorConfig) ToCCBillConfig() *CCBillConfig {
 	return &CCBillConfig{
-		Salt:               p.Salt,
-		ClientSubAcc:       p.ClientSubAcc,
-		ClientAccNum:       p.ClientAccNum,
-		SubscriptionTypeId: p.SubscriptionTypeId,
-		DataLinkUsername:   p.DataLinkUsername,
-		DataLinkPassword:   p.DataLinkPassword,
-		AllowedCIDRs:       p.AllowedCIDRs,
-		TestMode:           false, // Will be set by caller based on global test_mode
+		Salt:             p.Salt,
+		ClientSubAcc:     p.ClientSubAcc,
+		ClientAccNum:     p.ClientAccNum,
+		DataLinkUsername: p.DataLinkUsername,
+		DataLinkPassword: p.DataLinkPassword,
+		AllowedCIDRs:     p.AllowedCIDRs,
+		TestMode:         false, // Will be set by caller based on global test_mode
 	}
 }
 
@@ -606,11 +604,10 @@ type NMIProviderSettings struct {
 }
 
 type CCBillConfig struct {
-	Salt               string `koanf:"salt"`
-	ClientSubAcc       string `koanf:"client_sub_acc"`
-	ClientAccNum       string `koanf:"client_acc_num"`
-	SubscriptionTypeId string `koanf:"subscription_type_id"`
-	TestMode           bool   `koanf:"test_mode"`
+	Salt         string `koanf:"salt"`
+	ClientSubAcc string `koanf:"client_sub_acc"`
+	ClientAccNum string `koanf:"client_acc_num"`
+	TestMode     bool   `koanf:"test_mode"`
 
 	DataLinkUsername string `koanf:"datalink_username"`
 	DataLinkPassword string `koanf:"datalink_password"`

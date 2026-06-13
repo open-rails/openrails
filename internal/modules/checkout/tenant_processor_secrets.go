@@ -167,7 +167,6 @@ func parseTenantCCBillConfig(raw string, base *config.CCBillConfig) (*config.CCB
 	set(&cfg.ClientAccNum, "client_acc_num", "clientAccNum", "ClientAccNum")
 	set(&cfg.ClientSubAcc, "client_sub_acc", "clientSubAcc", "ClientSubAcc")
 	set(&cfg.Salt, "salt", "Salt")
-	set(&cfg.SubscriptionTypeId, "subscription_type_id", "subscriptionTypeId", "SubscriptionTypeId")
 	set(&cfg.DataLinkUsername, "datalink_username", "dataLinkUsername", "DataLinkUsername")
 	set(&cfg.DataLinkPassword, "datalink_password", "dataLinkPassword", "DataLinkPassword")
 

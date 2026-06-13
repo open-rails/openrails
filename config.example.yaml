@@ -296,7 +296,6 @@ processors:
   ccbill:
     client_acc_num: "your-ccbill-account-number"
     client_sub_acc: "your-ccbill-subaccount"
-    subscription_type_id: "0001"  # Must match CCBill portal config
     # salt: set via PROCESSORS_CCBILL_SALT env var
 
     # CCBill retry/dunning behavior is controlled by CCBill itself. OpenRails follows the
