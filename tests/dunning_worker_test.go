@@ -15,7 +15,9 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
@@ -446,51 +448,140 @@ func TestDunningWorkerWithinWindowIsNotExpired(t *testing.T) {
 	assert.Equal(t, models.StatusPastDue, updated.Status)
 }
 
-// TestDunningWorkerLimitedModeTakesNoAction verifies limited mode (#345):
-// dunning is demoted to dry-run, so even a window-stale past_due subscription
-// is neither charged nor window-expiry cancelled — it is left untouched.
-func TestDunningWorkerLimitedModeTakesNoAction(t *testing.T) {
+// queryManualRebillIntent returns (count, status, origin) for the manual_rebill
+// charge intents (#358/#366) on the provider intent ledger for the subscription.
+func queryManualRebillIntent(t *testing.T, suite *TestContainerSuite, subID uuid.UUID) (count int, status, origin string) {
+	t.Helper()
+	err := suite.Pool.QueryRow(context.Background(), `
+		SELECT COUNT(*), COALESCE(MAX(status), ''), COALESCE(MAX(origin), '')
+		FROM openrails.provider_intents
+		WHERE intent_type = $1 AND subscription_id = $2`,
+		intents.TypeManualRebill, subID).Scan(&count, &status, &origin)
+	require.NoError(t, err)
+	return count, status, origin
+}
+
+// TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites verifies the
+// #366 limited-mode contract (changed from the pre-#366 "takes no action" of
+// #345). Limited mode no longer dry-runs dunning — it MATERIALIZES decisions
+// locally while making ZERO provider/processor writes:
+//
+//   - a window-EXPIRED past_due sub is cancelled locally + its entitlements are
+//     revoked, with NO provider write (no nmi_delete intent, no deferred-delete
+//     marker — the remote processor sub is left alive for reconciliation);
+//   - an IN-WINDOW past_due sub records its charge decision as a PARKED
+//     system-origin manual_rebill intent on the ledger (the executor drains it
+//     only at mode=full), while the subscription row itself takes no action —
+//     it stays past_due with retry state preserved and is never charged.
+func TestDunningWorkerLimitedModeMaterializesWithoutProviderWrites(t *testing.T) {
 	suite := setupTestSuite(t)
+	ctx := context.Background()
+	rt := suite.App.Runtime
 
 	products := suite.SeedProducts()
 	priceID := products[0].Prices[0].ID
 
-	userID := uuid.New().String()
-	pm := suite.CreateTestPaymentMethod(userID)
-
 	pastRetry := time.Now().Add(-1 * time.Hour)
-	stalePeriodEnd := time.Now().Add(-60 * 24 * time.Hour)
 	retryAttempts := 1
 
-	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-		UserID:              userID,
+	// Sub A: window-EXPIRED -> cancel + revoke locally, no provider writes.
+	expiredUser := uuid.New().String()
+	expiredPM := suite.CreateTestPaymentMethod(expiredUser)
+	stalePeriodEnd := time.Now().Add(-60 * 24 * time.Hour) // far beyond the derived 14-day monthly window
+	expiredSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              expiredUser,
 		PriceID:             priceID,
 		Status:              models.StatusPastDue,
 		Processor:           models.ProcessorMobius,
-		PaymentMethodID:     &pm.ID,
+		PaymentMethodID:     &expiredPM.ID,
 		RetryAttempts:       &retryAttempts,
 		NextRetryAt:         &pastRetry,
 		PeriodStart:         stalePeriodEnd.Add(-30 * 24 * time.Hour),
 		CurrentPeriodEndsAt: &stalePeriodEnd,
 	})
+	// Seed a currently-active subscription entitlement (end in the future) so a
+	// later IsEntitled(now)==false unambiguously proves window-expiry revoked it.
+	entStart := time.Now().Add(-30 * 24 * time.Hour).UTC()
+	entEnd := time.Now().Add(30 * 24 * time.Hour).UTC()
+	suite.InsertEntitlement(dbtest.WithTestTenant(ctx), &models.Entitlement{
+		ID:              uuid.New(),
+		TenantSubjectID: suite.ensureTenantSubject(ctx, expiredUser),
+		Entitlement:     "premium",
+		StartAt:         entStart,
+		EndAt:           &entEnd,
+		SourceType:      models.EntitlementSourceSubscription,
+		SourceID:        &expiredSub.ID,
+		CreatedAt:       entStart,
+		UpdatedAt:       entStart,
+	})
 
-	limitedCfg := *suite.App.Runtime.Config
+	// Sub B: IN-WINDOW -> charge decision materialized as a parked intent; the
+	// subscription row itself is untouched (the surviving half of the old
+	// "takes no action" contract).
+	inWindowUser := uuid.New().String()
+	inWindowPM := suite.CreateTestPaymentMethod(inWindowUser)
+	recentPeriodEnd := time.Now().Add(-3 * 24 * time.Hour) // inside the derived 14-day monthly window
+	inWindowSub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID:              inWindowUser,
+		PriceID:             priceID,
+		Status:              models.StatusPastDue,
+		Processor:           models.ProcessorMobius,
+		PaymentMethodID:     &inWindowPM.ID,
+		RetryAttempts:       &retryAttempts,
+		NextRetryAt:         &pastRetry,
+		PeriodStart:         recentPeriodEnd.Add(-30 * 24 * time.Hour),
+		CurrentPeriodEndsAt: &recentPeriodEnd,
+	})
+
+	limitedCfg := *rt.Config
 	limitedCfg.Mode = config.ModeLimited
 
+	// A zero-value NMI client: present (so the scan proceeds) but unconfigured —
+	// any attempted provider call would error, proving the limited-mode path
+	// never reaches the processor. DeferDelete is intentionally nil: limited
+	// mode must not schedule a remote delete regardless.
 	worker := &riverjobs.DunningWorker{
-		DB:         suite.App.Runtime.DB,
+		DB:         rt.DB,
 		Config:     &limitedCfg,
 		NMIClients: map[string]*nmi.NMIClient{string(models.ProcessorMobius): {}},
 	}
 
-	err := worker.Work(context.Background(), &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}})
-	require.NoError(t, err)
+	require.NoError(t, worker.Work(ctx, &river.Job[riverjobs.DunningArgs]{Args: riverjobs.DunningArgs{}}))
 
-	updated := suite.GetSubscription(sub.ID)
-	assert.Equal(t, models.StatusPastDue, updated.Status)
-	require.NotNil(t, updated.RetryAttempts)
-	assert.Equal(t, 1, *updated.RetryAttempts)
-	assert.Nil(t, updated.CancelledAt)
+	// --- Sub A: window-expired cancels + revokes locally, no provider writes ---
+	expired := suite.GetSubscription(expiredSub.ID)
+	require.Equal(t, models.StatusCancelled, expired.Status, "window-expired sub is cancelled locally in limited mode")
+	require.NotNil(t, expired.CancelType)
+	assert.Equal(t, models.CancelTypeExpired, *expired.CancelType)
+	assert.NotNil(t, expired.CancelledAt)
+	assert.Nil(t, expired.NextRetryAt)
+	assert.Nil(t, expired.RetryAttempts)
+
+	entitled, err := rt.EntitlementService.IsEntitled(dbtest.WithTestTenant(ctx), expiredUser, "premium", time.Now().UTC())
+	require.NoError(t, err)
+	assert.False(t, entitled, "window-expiry cancellation revokes entitlements")
+
+	// No provider write: limited mode leaves the remote sub alive for
+	// reconciliation — no deferred-delete marker, no delete intent.
+	assert.Nil(t, expired.DeletionScheduledAt, "limited mode must not stamp a proactive deletion marker")
+	delCount, _, _ := queryNMIDeleteIntents(t, suite, expiredSub.ID)
+	assert.Zero(t, delCount, "limited mode must not enqueue a provider delete intent")
+	// The no-charge (window-expiry) path never records a charge intent either.
+	rebillCount, _, _ := queryManualRebillIntent(t, suite, expiredSub.ID)
+	assert.Zero(t, rebillCount, "window-expired sub takes the no-charge path; no rebill intent")
+
+	// --- Sub B: in-window charge decision parked; sub row untouched ---
+	inWindow := suite.GetSubscription(inWindowSub.ID)
+	assert.Equal(t, models.StatusPastDue, inWindow.Status, "in-window sub row is untouched in limited mode")
+	require.NotNil(t, inWindow.RetryAttempts)
+	assert.Equal(t, 1, *inWindow.RetryAttempts, "retry state preserved — no claim writes last_retry_at")
+	assert.Nil(t, inWindow.CancelledAt)
+	assert.Nil(t, inWindow.DeletionScheduledAt)
+
+	count, status, origin := queryManualRebillIntent(t, suite, inWindowSub.ID)
+	require.Equal(t, 1, count, "in-window charge decision is materialized as exactly one ledger intent")
+	assert.Equal(t, string(intents.OriginSystem), origin, "materialized rebill is system-origin (parked until mode=full)")
+	assert.Equal(t, intents.StatusPending, status, "parked: pending on the ledger, drained only when mode allows")
 }
 
 // createDunningCycleProductPrice seeds an active Mobius product+price with the
