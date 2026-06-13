@@ -99,7 +99,8 @@ func TestCreditsLifecycle_HoldIdempotentAndCaptureReleaseExpire(t *testing.T) {
 	require.Equal(t, int64(200), bal.HeldBalance)
 
 	// 2) Release hold.
-	require.NoError(t, moneySvc.ReleaseHold(ctx, hold1.ID))
+	_, relErr := moneySvc.ReleaseHold(ctx, hold1.ID)
+	require.NoError(t, relErr)
 	bal, err = moneySvc.GetBalance(ctx, userID)
 	require.NoError(t, err)
 	require.Equal(t, int64(1000), bal.Balance)
