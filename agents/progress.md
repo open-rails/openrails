@@ -77,13 +77,18 @@ scale (USD/USDC/EUR=6dp, JPY=4dp, SOL=9dp lamports), FX-convertible; (2) the mon
 currency-aware; (3) CUSTOM CREDITS = tenant-defined, no fixed FX (gold-coins, non-µ$ api-credits)
 — deferred to #473. Tensorhub "API credits" = USD money (no custom credit). Products grant
 balances ({unit, amount}) alongside entitlements; non-1:1 = price≠grant.
-- [ ] A. Currency dimension: add `currency text NOT NULL DEFAULT 'USD'` (+ CHECK in the known set)
-      to money_balances/transactions/blocks/windows/accounts/spend_limits; include currency in the
-      uniques; Go currency registry (code→decimals/kind); thread currency (default USD) through the
-      money queries + MoneyService; USDC funding → USDC balance, SOL → lamports. FX = later.
-- [ ] B. Product balance grants: grants_spec on products ({unit, amount}); deposit-on-purchase for
-      one-off + subscription (generalize the existing credits_spec/GrantSubscriptionCredits), in the
-      grant's currency, alongside entitlements.
+- [x] A. Currency dimension (commit f94b9af2): currency column on all money_* (uniques include it);
+      Go currency registry (USD/USDC/EUR=6dp, JPY=4dp, SOL=9dp); MoneyService threads currency
+      (default USD). Seam ready for USDC/EUR/JPY/SOL; FX = later.
+      UNIT NAMESPACE (Paul): unqualified code (`usd`,`jpy`) = built-in currency; qualified
+      `tenant-slug/name` (`tensorhub/api-credit`) = per-tenant custom credit (#473). One `currency`
+      column hosts both.
+- [ ] B. Product benefits = ONE "what you get" section (alongside entitlements): credit/currency
+      grants. A grant = {unit (currency code; default 'usd'), amount (minor units), expiry_days
+      (default 365; null = never)}. On purchase (one-off AND subscription) deposit each grant as a
+      money_block in the grant's currency with expires_at = now + expiry_days (money_blocks already
+      carry expires_at). Generalize the existing products.credits_spec/GrantSubscriptionCredits to
+      one-off + currency + configurable expiry; keep entitlements as the other benefit.
 - [ ] C. Integration parity: update money/*_integration_test.go + admission/river integration tests
       to the money API + currency; full integration suite green (minus the 8 pre-existing-on-master).
 
