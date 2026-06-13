@@ -90,7 +90,7 @@ type refundFixture struct {
 // charge) plus the open admin refund reservation the intent finalizes.
 func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
