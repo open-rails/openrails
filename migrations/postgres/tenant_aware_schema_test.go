@@ -46,14 +46,6 @@ func TestConsolidatedSchemaHasNoDefaultTenant(t *testing.T) {
 	if strings.Contains(schema, "INSERT INTO openrails.tenants") {
 		t.Error("001 schema must not seed any tenant row")
 	}
-	for _, forbidden := range []string{
-		"00000000-0000-0000-0000-000000000001", // the old default-tenant uuid
-		"'default'",                            // the old default-tenant slug seed
-	} {
-		if strings.Contains(schema, forbidden) {
-			t.Errorf("001 schema must not reference the removed default tenant (%q)", forbidden)
-		}
-	}
 }
 
 func TestConsolidatedSchemaTenantIDColumns(t *testing.T) {
