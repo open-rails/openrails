@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -18,7 +19,7 @@ import (
 // the default on create is "active".
 func TestCatalogStatus_RoundTripsThroughFacade(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
@@ -49,7 +50,7 @@ func TestCatalogStatus_RoundTripsThroughFacade(t *testing.T) {
 // archived (no purchasable gap), and the price round-trips with that status.
 func TestCatalogStatus_CreateAsArchivedInOneStep(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
@@ -80,7 +81,7 @@ func TestCatalogStatus_CreateAsArchivedInOneStep(t *testing.T) {
 // is hidden from the public (non-admin) catalog and is not purchasable.
 func TestCatalogStatus_DraftHiddenAndNotPurchasable(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)

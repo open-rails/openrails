@@ -21,7 +21,7 @@ import (
 
 func TestCreditExpiryWorker_HoldsDoNotReserveLots_CaptureSpillsToOwedAfterExpiry(t *testing.T) {
 	suite := setupTestSuite(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestTenant(context.Background())
 
 	creditTypeName := "test-credit-expiry-hold-" + uuid.New().String()[:8]
 	creditType := suite.createTestCreditType(creditTypeName)
