@@ -155,6 +155,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	}
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                      sub.ID,
+		TenantID:                dbtest.TestTenantID.UUID(),
 		TenantSubjectID:         sub.TenantSubjectID,
 		ProductID:               sub.ProductID,
 		PriceID:                 &priceID,
@@ -212,7 +213,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
 	creditsSvc := credits.NewCreditsService(dbi, nil)
 
-	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(ctx, sub, lifecycle, priceSvc, creditsSvc, false))
+	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, creditsSvc, false))
 
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -279,7 +280,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-30 * time.Second)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, TenantSubjectID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		ID: subID, TenantID: dbtest.TestTenantID.UUID(), TenantSubjectID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Processor: "mobius",
 		ProcessorSubscriptionID: "sub_test_" + uuid.New().String(),
 		PaymentMethodID:         &paymentMethodID,
@@ -345,7 +346,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	sub, err := repo.NewSubscriptionRepo(dbi).GetByID(ctx, subID)
 	require.NoError(t, err)
 
-	outcome := worker.processSubscription(ctx, sub, lifecycle, priceSvc, creditsSvc, false)
+	outcome := worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, creditsSvc, false)
 	require.Equal(t, dunningOutcomeSucceeded, outcome)
 	assert.Zero(t, saleAttempts, "the durable success must be repaired, never re-charged")
 

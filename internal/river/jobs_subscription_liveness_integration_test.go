@@ -95,7 +95,7 @@ func newLivenessFixture(t *testing.T, processor models.Processor, periodEndAgo t
 	periodEnd := now.Add(-periodEndAgo)
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: f.subID, TenantSubjectID: tenantSubjectID, ProductID: f.productID, PriceID: &f.priceID,
+		ID: f.subID, TenantID: dbtest.TestTenantID.UUID(), TenantSubjectID: tenantSubjectID, ProductID: f.productID, PriceID: &f.priceID,
 		Status: string(models.StatusActive), Processor: string(processor),
 		ProcessorSubscriptionID: f.procSubID, PaymentMethodID: &f.paymentMethodID,
 		EntitlementsSpecSnapshot: []byte(`{"premium": null}`),

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/tenant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -179,7 +180,17 @@ func (w *SubscriptionLivenessWorker) Work(ctx context.Context, job *river.Job[Su
 
 	var repaired, failed, adopted, cancelled, unreachable, skipped int
 	for i := range cohort {
-		switch w.processSubscription(ctx, &cohort[i], deps) {
+		// #336: pin the subscription's tenant so the lifecycle convergence
+		// writes (renew/fail/adopt) carry the app.tenant_id GUC.
+		outcome := livenessOutcomeUnreachable
+		if err := w.DB.RunInTenantConn(tenant.WithID(ctx, tenant.ID(cohort[i].TenantID)), func(tctx context.Context) error {
+			outcome = w.processSubscription(tctx, &cohort[i], deps)
+			return nil
+		}); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("subscription_id", cohort[i].ID).
+				Error("Liveness: failed to pin tenant connection; counting subscription as unreachable")
+		}
+		switch outcome {
 		case livenessOutcomeRepaired:
 			repaired++
 		case livenessOutcomeFailed:
