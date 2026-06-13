@@ -2,9 +2,10 @@
 -- finalized; one per (tenant, payer, period).
 
 -- name: GetInvoiceByPeriod :one
+-- Idempotency key is per (payer, period, currency): one invoice per currency (#474).
 SELECT * FROM openrails.invoices
 WHERE tenant_id = $1 AND tenant_subject_id = $2
-  AND period_from = $3 AND period_to = $4
+  AND period_from = $3 AND period_to = $4 AND currency = sqlc.arg(currency)
 LIMIT 1;
 
 -- name: InsertInvoice :exec

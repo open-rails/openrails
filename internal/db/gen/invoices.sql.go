@@ -33,7 +33,7 @@ const getInvoiceByPeriod = `-- name: GetInvoiceByPeriod :one
 
 SELECT id, tenant_id, tenant_subject_id, currency, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, line_items, money_movements, status, finalized_at, created_at, updated_at FROM openrails.invoices
 WHERE tenant_id = $1 AND tenant_subject_id = $2
-  AND period_from = $3 AND period_to = $4
+  AND period_from = $3 AND period_to = $4 AND currency = $5
 LIMIT 1
 `
 
@@ -42,16 +42,19 @@ type GetInvoiceByPeriodParams struct {
 	TenantSubjectID uuid.UUID
 	PeriodFrom      time.Time
 	PeriodTo        time.Time
+	Currency        string
 }
 
 // openrails.invoices: monthly itemized statements (#303), immutable once
 // finalized; one per (tenant, payer, period).
+// Idempotency key is per (payer, period, currency): one invoice per currency (#474).
 func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriodParams) (OpenrailsInvoice, error) {
 	row := q.db.QueryRow(ctx, getInvoiceByPeriod,
 		arg.TenantID,
 		arg.TenantSubjectID,
 		arg.PeriodFrom,
 		arg.PeriodTo,
+		arg.Currency,
 	)
 	var i OpenrailsInvoice
 	err := row.Scan(

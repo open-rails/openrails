@@ -18,15 +18,16 @@ import (
 )
 
 // FinalizeInvoice builds and finalizes the monthly itemized invoice for
-// (payer, credit_type) over [from, to) (issue #303). Line items are rolled up
-// from openrails.usage_events; money movements + totals from the credit ledger;
-// both snapshotted on the immutable finalized invoice. Idempotent: re-finalizing
-// the same period returns the existing invoice.
+// (payer, currency) over [from, to) (issue #303/#474). Line items are rolled up
+// from openrails.usage_events; money movements + totals from the money ledger in
+// that currency; both snapshotted on the immutable finalized invoice. Idempotent:
+// re-finalizing the same (period, currency) returns the existing invoice. currency
+// "" defaults to USD; billing is external-currency-only (#474 invariant).
 //
 // The invoice is a STATEMENT. For prepaid it is informational (usage was drawn
 // from balance); for arrears the owed_accrued total is what the #301 sweep
 // settles via the existing charge path. No charge is initiated here.
-func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.TenantSubjectID, from, to time.Time) (*models.Invoice, error) {
+func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.TenantSubjectID, currency string, from, to time.Time) (*models.Invoice, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -35,6 +36,11 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Tenan
 	}
 	if !to.After(from) {
 		return nil, fmt.Errorf("invalid period: to must be after from")
+	}
+	// #474 invariant: invoices are external-currency-only (reject custom credits).
+	cur := normalizeCurrency(currency)
+	if err := RequireBillingCurrency(cur); err != nil {
+		return nil, err
 	}
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -53,10 +59,10 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Tenan
 		payerID := payer.UUID()
 		pfrom, pto := from.UTC(), to.UTC()
 
-		// Idempotency: one invoice per (payer, period).
+		// Idempotency: one invoice per (payer, period, currency).
 		existing, gerr := q.GetInvoiceByPeriod(ctx, gen.GetInvoiceByPeriodParams{
 			TenantID: tenantID, TenantSubjectID: payerID,
-			PeriodFrom: pfrom, PeriodTo: pto,
+			PeriodFrom: pfrom, PeriodTo: pto, Currency: cur,
 		})
 		if gerr == nil {
 			inv, gerr = invoiceFromGen(existing)
@@ -101,7 +107,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Tenan
 
 		// --- money movements (ledger, by transaction_type) ---
 		movs, merr := q.SumMoneyMovementsInPeriodByPayer(ctx, gen.SumMoneyMovementsInPeriodByPayerParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 			PeriodFrom: pfrom, PeriodTo: pto,
 		})
 		if merr != nil {
@@ -115,7 +121,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Tenan
 		// --- closing balance snapshot ---
 		var closing int64
 		bal, balErr := q.GetMoneyBalance(ctx, gen.GetMoneyBalanceParams{
-			TenantID: tenantID, TenantSubjectID: payerID, Currency: DefaultCurrency,
+			TenantID: tenantID, TenantSubjectID: payerID, Currency: cur,
 		})
 		if balErr == nil {
 			closing = bal.Balance
@@ -128,7 +134,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Tenan
 			ID:              uuidutil.NewV7(),
 			TenantID:        tenantID,
 			TenantSubjectID: payerID,
-			Currency:        "usd", // µ$ = 1e-6 USD
+			Currency:        cur, // amounts are minor units of this currency (#474)
 			PeriodFrom:      pfrom,
 			PeriodTo:        pto,
 			UsageTotal:      usageTotal,
@@ -269,12 +275,10 @@ func (s *MoneyService) GetInvoiceByID(ctx context.Context, payer identity.Tenant
 	return inv, nil
 }
 
-// FinalizeDueInvoices finalizes the [from, to) invoice for every known payer
-// (every account row) in the request tenant. Idempotent per account. Returns
-// the number of invoices finalized/returned.
-//
-// FinalizeInvoice is not yet currency-aware (it finalizes the USD statement),
-// so we finalize once per distinct payer; non-USD currencies are a follow-up.
+// FinalizeDueInvoices finalizes the [from, to) invoice for every (payer, currency)
+// pair with money activity in the request tenant. Idempotent per pair. Returns the
+// number of invoices finalized/returned. Invoices are denominated per currency
+// (#474), so a payer with both USD and USDC balances gets one invoice each.
 func (s *MoneyService) FinalizeDueInvoices(ctx context.Context, from, to time.Time) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
@@ -287,14 +291,13 @@ func (s *MoneyService) FinalizeDueInvoices(ctx context.Context, from, to time.Ti
 	if err != nil {
 		return 0, err
 	}
-	seen := make(map[uuid.UUID]struct{}, len(pairs))
 	count := 0
 	for _, p := range pairs {
-		if _, dup := seen[p.TenantSubjectID]; dup {
+		// Custom-credit balances (#475 qualified codes) are not billed — skip them.
+		if RequireBillingCurrency(normalizeCurrency(p.Currency)) != nil {
 			continue
 		}
-		seen[p.TenantSubjectID] = struct{}{}
-		if _, err := s.FinalizeInvoice(ctx, identity.TenantSubjectID(p.TenantSubjectID), from, to); err != nil {
+		if _, err := s.FinalizeInvoice(ctx, identity.TenantSubjectID(p.TenantSubjectID), p.Currency, from, to); err != nil {
 			return count, err
 		}
 		count++
