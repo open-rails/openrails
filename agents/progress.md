@@ -1022,12 +1022,23 @@ The base resolvers (#1) and boot seed (#2) need a tenant when there's no per-req
 - **Base HTTP resolver:** when it cannot resolve a tenant, do NOT default — leave it UNRESOLVED so downstream `tenant.Require` errors (a request with no tenant is a 4xx). Embedded/single-tenant hosts that want a per-instance tenant supply it via a CONFIGURED tenant (the embedded host already knows its slug, e.g. doujins='doujins') threaded into the resolver — this is `embed.Options.Tenant` / a standalone `config` tenant. NOT a default.
 - **Boot seed / CLIs:** take the configured/explicit tenant; error if absent.
 
-### Remaining tasks (branch)
-- [ ] Decide + implement the configured-tenant mechanism (embed.Options.Tenant + standalone config) and fix the 3 production build blockers (http_base, ginmw/tenant, solana/recurring/wiring) + cmd/billing bootstrap/reconcile.
-- [ ] Worker fix: expose tenant_id on `ListDueDunningSubscriptions` (models.Subscription has no TenantID) + RunInTenantConn(sub.TenantID) in the dunning loop (sqlc regen).
-- [ ] ~43 test files: convert to dbtest.TestTenantID / WithTestTenant; set the GUC where they insert directly.
-- [ ] RLS integration test (delegated self-checkout under a non-default tenant asserts every written row's tenant_id) + full suite green.
-- [ ] Land migration 014's no-fallback form (replaces the interim committed version) as part of the green change.
+### CONFIRMED DESIGN (owner, 2026-06-13): tenant-bound at construction, no default, identical embedded/remote
+The OpenRails engine/client is bound to a SINGLE tenant at construction (e.g. doujins/hentai0 construct theirs with tenant='doujins'). Same interface for embedded and remote — remote↔embedded is "mostly a config change". Multiple tenants = multiple clients (one per tenant). No default tenant in either mode; a missing tenant must hard-fail (insert with no tenant fails 100% — that exposes the error, by design). So the construction-time tenant is the resolver's source; per-request multi-tenant resolution (#222) would layer on top later.
+
+### DONE on branch (commit 65edd8c7) — resolver/seed mechanism
+- `ginmw.ResolveTenant(configured)` + `middleware.ResolveTenantHTTP(configured)`: pin the configured construction tenant; if zero, pin NOTHING → downstream `tenant.Require` errors (no silent default).
+- `recurring.SeedConfiguredTenantSolanaSecret(tenantID)`: seeds the global-config Solana key under the configured tenant; no-op if zero.
+(Branch does NOT compile yet — callers still use old signatures; this is the next step.)
+
+### Remaining (branch wip/336-remove-default-tenant), in order
+- [ ] Add the construction tenant source: `embedded.Options.Tenant tenant.ID` (+ `embed.Options.Tenant`) for embedded; a `config` tenant slug for standalone, resolved slug→id at bootstrap via `GetTenantBySlug` (profiles.sql) / tenancy lifecycle resolver; resolve once and FAIL boot if the configured slug doesn't exist.
+- [ ] Wire the resolved id into the 4 callers: server.go:458 `ResolveTenant(id)`, embedhttp.go:136 + gin/self.go:80 `ResolveTenantHTTP(id)`, server.go:274 `SeedConfiguredTenantSolanaSecret(id, …)`. Plus cmd/billing bootstrap/reconcile already require an explicit tenant.
+- [ ] Remote client: bind its tenant at construction too (parity with embedded), so doujins/hentai0 set tenant='doujins' once.
+- [ ] `go build ./...` green on the branch.
+- [ ] Worker fix: expose tenant_id on `ListDueDunningSubscriptions` (models.Subscription has no TenantID → add to query/model, sqlc regen) + RunInTenantConn(sub.TenantID) in the dunning loop.
+- [ ] Test harness (tests/testcontainer_suite.go): set `suite.Config` construction tenant = dbtest.TestTenantID (already seeded via dbtest.EnsureTestTenant) so the standalone server the suite builds pins it — this makes MOST of the ~43 test files pass without per-test changes (they relied on the default; now they ride the construction tenant). Only tests asserting a specific tenant or using >1 tenant need edits.
+- [ ] RLS integration test: a non-default tenant's self-checkout stamps tenant_id on checkout_sessions/subscriptions/payments/payment_methods/entitlements; assert under the openrails_app role.
+- [ ] Full suite green; then merge branch to master (migration 014's no-fallback form replaces the interim committed version).
 
 ---
 
