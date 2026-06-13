@@ -18,8 +18,8 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
@@ -113,12 +113,12 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
-	creditsSvc := credits.NewCreditsService(dbi, nil)
+	moneySvc := money.NewMoneyService(dbi, nil)
 
 	sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(ctx, subID)
 	require.NoError(t, err)
 
-	outcome := worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, creditsSvc, true)
+	outcome := worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	assert.Zero(t, nmiMutations.Load(), "materialize must not send a provider mutation")
 
@@ -149,7 +149,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Nil(t, lastRetryAt, "materialize must not write last_retry_at (dunning forensics evidence)")
 
 	// Idempotent: a second materialize pass refreshes the same pending intent.
-	outcome = worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, creditsSvc, true)
+	outcome = worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	var intentCount int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -230,12 +230,12 @@ func TestDunningWorker_MaterializeWindowExpiryStillCancelsLocally(t *testing.T) 
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
-	creditsSvc := credits.NewCreditsService(dbi, nil)
+	moneySvc := money.NewMoneyService(dbi, nil)
 
 	sub, err := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil).GetByID(ctx, subID)
 	require.NoError(t, err)
 
-	outcome := worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, creditsSvc, true)
+	outcome := worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, moneySvc, true)
 	assert.Equal(t, dunningOutcomeWindowExpired, outcome)
 	assert.Zero(t, nmiMutations.Load(), "window expiry never charges")
 

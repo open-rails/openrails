@@ -72,38 +72,24 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	userID := uuid.NewString()
 	tenantSubjectID := suite.ensureTenantSubject(ctx, userID)
 	tenantSubject := identity.TenantSubjectID(tenantSubjectID)
+	// credit_type is accepted-and-ignored on the wire; money needs no type row.
 	creditTypeName := "svc_test_credits_" + uuid.NewString()
 
-	// Seed a credit type and starting balance.
-	ct := &models.CreditType{
-		ID:            uuid.New(),
-		Name:          creditTypeName,
-		DisplayName:   "Service Test Credits",
-		Unit:          "USD",
-		DecimalPlaces: 2,
-		IsActive:      true,
-		CreatedAt:     time.Now().UTC(),
-	}
-	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		ct.ID, dbtest.TestTenantID.UUID(), ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
-	require.NoError(t, err)
-
-	ucb := &models.CreditBalance{
+	// Seed a starting money balance (USD).
+	ucb := &models.MoneyBalance{
 		ID:              uuid.New(),
 		TenantID:        dbtest.TestTenantID.UUID(),
 		TenantSubjectID: tenantSubjectID,
-		CreditTypeID:    ct.ID,
+		Currency:        "USD",
 		Balance:         10_000,
 		HeldBalance:     0,
 		CreatedAt:       time.Now().UTC(),
 		UpdatedAt:       time.Now().UTC(),
 	}
-	_, err = suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.credit_balances (id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at)
+	_, err := suite.Pool.Exec(ctx, `
+		INSERT INTO openrails.money_balances (id, tenant_id, tenant_subject_id, currency, balance, held_balance, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		ucb.ID, ucb.TenantID, ucb.TenantSubjectID, ucb.CreditTypeID, ucb.Balance, ucb.HeldBalance, ucb.CreatedAt, ucb.UpdatedAt)
+		ucb.ID, ucb.TenantID, ucb.TenantSubjectID, ucb.Currency, ucb.Balance, ucb.HeldBalance, ucb.CreatedAt, ucb.UpdatedAt)
 	require.NoError(t, err)
 
 	// Seed an entitlement. source_id is NOT NULL (the originating
@@ -177,7 +163,6 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	hold1, err := svc.HoldCredits(ctx, billingservice.HoldCreditsRequest{
 		TenantSubjectID: &tenantSubject,
 		Actor:           userID,
-		CreditType:      creditTypeName,
 		Amount:          123,
 		Source:          "svc_test",
 		SourceID:        "hold-1",

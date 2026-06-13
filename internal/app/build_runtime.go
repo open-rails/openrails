@@ -816,6 +816,9 @@ func createServices(database *db.DB, cfg *config.Config, ccbillRESTClient *ccbil
 	// flow. Additive to feature entitlements; nil-safe.
 	if checkoutService.PurchaseService != nil {
 		checkoutService.PurchaseService.SetProductAccessService(productAccessService)
+		// Wire credit/currency balance grants (#472) into the one-time purchase
+		// flow. Additive to feature entitlements; nil-safe.
+		checkoutService.PurchaseService.SetMoneyService(moneyService)
 	}
 	subscriptionLifecycleService.EventLogService = nil // reset until ClickHouse init
 

@@ -74,11 +74,11 @@ func (p *Product) IsPurchasable() bool { return p.Status == CatalogStatusActive 
 // draft remains billable.
 func (p *Product) IsBillable() bool { return p.Status != CatalogStatusDraft }
 
-// CreditsSpec defines bundled credit grants for a product (e.g., promo credits on signup,
-// or a recurring monthly stipend on renewals).
+// CreditsSpec defines bundled credit/currency balance grants for a product — the
+// other half of "what you get" alongside entitlements (#472). Each entry deposits
+// a balance on purchase / subscription event.
 //
-// Keys are credit type names (openrails.credit_types.name). Amounts are stored as BIGINT in the
-// credit type's base units (unit-agnostic), not USD cents.
+// Keys are grant labels (scope idempotency). Amount is in the minor units of Unit.
 type CreditsSpec map[string]CreditGrantSpec
 
 type CreditGrantCadence string
@@ -88,10 +88,41 @@ const (
 	CreditGrantCadencePerRenewal CreditGrantCadence = "per_renewal"
 )
 
+// DefaultCreditGrantExpiryDays is the grant expiry when expiry_days is omitted (#472).
+const DefaultCreditGrantExpiryDays = 365
+
 type CreditGrantSpec struct {
-	Amount      int64              `json:"amount"`
+	// Unit is the currency code of the granted balance (#472). "" => "usd".
+	// Unqualified = built-in currency; a future tenant/name = custom credit (#473).
+	Unit   string `json:"unit,omitempty"`
+	Amount int64  `json:"amount"`
+	// ExpiryDays: balance expires now+N days. null/omitted => 365 default; explicit
+	// 0 => never expires (#472).
+	ExpiryDays *int `json:"expiry_days,omitempty"`
+	// ExpiresDays is the legacy field name, still parsed for backward compat.
 	ExpiresDays *int               `json:"expires_days,omitempty"`
 	Cadence     CreditGrantCadence `json:"cadence,omitempty"` // once|per_renewal (default once)
+}
+
+// UnitOrDefault returns the grant's currency code, defaulting to "usd" (#472).
+func (g CreditGrantSpec) UnitOrDefault() string {
+	if g.Unit == "" {
+		return "usd"
+	}
+	return g.Unit
+}
+
+// EffectiveExpiryDays resolves grant expiry in days (#472): prefers expiry_days,
+// then legacy expires_days, else the 365 default. The returned value is 0 only
+// when explicitly set to 0 — meaning NEVER expires. null/omitted yields 365.
+func (g CreditGrantSpec) EffectiveExpiryDays() int {
+	if g.ExpiryDays != nil {
+		return *g.ExpiryDays
+	}
+	if g.ExpiresDays != nil {
+		return *g.ExpiresDays
+	}
+	return DefaultCreditGrantExpiryDays
 }
 
 func CloneEntitlementsSpec(spec map[string]*int) map[string]*int {
@@ -120,6 +151,10 @@ func CloneCreditsSpec(spec CreditsSpec) CreditsSpec {
 		if value.ExpiresDays != nil {
 			v := *value.ExpiresDays
 			cloned.ExpiresDays = &v
+		}
+		if value.ExpiryDays != nil {
+			v := *value.ExpiryDays
+			cloned.ExpiryDays = &v
 		}
 		out[key] = cloned
 	}

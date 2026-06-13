@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -20,9 +21,10 @@ type GrantSubscriptionCreditsParams struct {
 	Source         string                    // for deposit transaction (e.g., "subscription_initial", "subscription_renewal")
 }
 
-// validateCreditGrantSpec validates one promo-money grant spec. The grant key is
-// just a label now (#472: money has no credit_type); a non-empty key still scopes
-// the per-grant idempotency.
+// validateCreditGrantSpec validates one credit/currency grant spec (#472). The
+// grant key is just a label; a non-empty key scopes per-grant idempotency. Unit
+// defaults to usd and must be a known built-in currency. expiry_days==0 means
+// never-expire (only an explicit negative is invalid).
 func validateCreditGrantSpec(grantKey string, spec models.CreditGrantSpec) error {
 	if strings.TrimSpace(grantKey) == "" {
 		return fmt.Errorf("grant key is empty")
@@ -30,8 +32,14 @@ func validateCreditGrantSpec(grantKey string, spec models.CreditGrantSpec) error
 	if spec.Amount <= 0 {
 		return fmt.Errorf("invalid credits_spec: %s amount must be > 0", grantKey)
 	}
-	if spec.ExpiresDays != nil && *spec.ExpiresDays <= 0 {
-		return fmt.Errorf("invalid credits_spec: %s expires_days must be > 0", grantKey)
+	if err := ValidateCurrency(spec.UnitOrDefault()); err != nil {
+		return fmt.Errorf("invalid credits_spec: %s %w", grantKey, err)
+	}
+	if spec.ExpiryDays != nil && *spec.ExpiryDays < 0 {
+		return fmt.Errorf("invalid credits_spec: %s expiry_days must be >= 0", grantKey)
+	}
+	if spec.ExpiresDays != nil && *spec.ExpiresDays < 0 {
+		return fmt.Errorf("invalid credits_spec: %s expires_days must be >= 0", grantKey)
 	}
 	cadence := spec.Cadence
 	if cadence == "" {
@@ -41,6 +49,17 @@ func validateCreditGrantSpec(grantKey string, spec models.CreditGrantSpec) error
 		return fmt.Errorf("invalid credits_spec: %s cadence must be 'once' or 'per_renewal'", grantKey)
 	}
 	return nil
+}
+
+// grantExpiry resolves a grant's deposit expiry: now + EffectiveExpiryDays, or nil
+// (never) when the resolved value is 0 (#472).
+func grantExpiry(now time.Time, spec models.CreditGrantSpec) *time.Time {
+	days := spec.EffectiveExpiryDays()
+	if days <= 0 {
+		return nil
+	}
+	t := now.Add(time.Duration(days) * 24 * time.Hour)
+	return &t
 }
 
 // GrantSubscriptionCredits grants the promo MONEY (µ$) defined in
@@ -111,18 +130,13 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 			}
 			grantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
 
-			var expiresAt *time.Time
-			if spec.ExpiresDays != nil && *spec.ExpiresDays > 0 {
-				t := now.Add(time.Duration(*spec.ExpiresDays) * 24 * time.Hour)
-				expiresAt = &t
-			}
-
 			if _, err := s.depositTx(ctx, q, DepositParams{
 				Actor:     sub.TenantSubjectID.String(),
+				Currency:  spec.UnitOrDefault(),
 				Amount:    spec.Amount,
 				Source:    strings.TrimSpace(params.Source),
 				SourceID:  &grantID,
-				ExpiresAt: expiresAt,
+				ExpiresAt: grantExpiry(now, spec),
 			}); err != nil {
 				return err
 			}
@@ -131,13 +145,79 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 				"subscription_id": sub.ID,
 				"period_end":      params.PeriodEnd.UTC(),
 				"grant_label":     label,
+				"unit":            spec.UnitOrDefault(),
 				"amount":          spec.Amount,
-				"expires_days":    spec.ExpiresDays,
+				"expiry_days":     spec.EffectiveExpiryDays(),
 				"cadence":         cadence,
 				"grant_id":        grantID,
-			}).Info("subscription money grant applied")
+			}).Info("subscription credit grant applied")
 		}
 
+		return nil
+	})
+}
+
+// GrantPurchaseCreditsParams grants a one-off purchase's credit/currency balances
+// (#472) — the other half of "what you get" alongside entitlements. Payer is the
+// payment owner's tenant subject; PaymentID scopes idempotency per (payment, label).
+type GrantPurchaseCreditsParams struct {
+	Payer     identity.TenantSubjectID
+	PaymentID uuid.UUID
+	Spec      models.CreditsSpec
+	Source    string // deposit source label (e.g., "purchase")
+}
+
+// GrantPurchaseCredits deposits each credits_spec entry of a completed one-off
+// purchase as an expiring balance. Idempotent per (payment, grant label) via a
+// deterministic deposit SourceID, so webhook/poll re-delivery never double-grants.
+func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPurchaseCreditsParams) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("money service not initialized")
+	}
+	if params.Payer.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	if params.PaymentID == uuid.Nil {
+		return fmt.Errorf("payment_id required")
+	}
+	if strings.TrimSpace(params.Source) == "" {
+		return fmt.Errorf("source required")
+	}
+	if len(params.Spec) == 0 {
+		return nil
+	}
+
+	payer := params.Payer
+	return s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		now := s.now()
+		for label, spec := range params.Spec {
+			label = strings.TrimSpace(label)
+			if err := validateCreditGrantSpec(label, spec); err != nil {
+				return err
+			}
+			grantKey := fmt.Sprintf("openrails:purchase_credit_grant:%s:%s", params.PaymentID, label)
+			grantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
+			if _, err := s.depositTx(ctx, q, DepositParams{
+				TenantSubjectID: &payer,
+				Actor:           payer.String(),
+				Currency:        spec.UnitOrDefault(),
+				Amount:          spec.Amount,
+				Source:          strings.TrimSpace(params.Source),
+				SourceID:        &grantID,
+				ExpiresAt:       grantExpiry(now, spec),
+			}); err != nil {
+				return err
+			}
+			log.WithContext(ctx).WithFields(log.Fields{
+				"payment_id":  params.PaymentID,
+				"grant_label": label,
+				"unit":        spec.UnitOrDefault(),
+				"amount":      spec.Amount,
+				"expiry_days": spec.EffectiveExpiryDays(),
+				"grant_id":    grantID,
+			}).Info("purchase credit grant applied")
+		}
 		return nil
 	})
 }

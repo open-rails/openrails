@@ -20,8 +20,8 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/credits"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
@@ -38,16 +38,17 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	var exists bool
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='money_blocks')").
 		Scan(&exists))
 	if !exists {
-		t.Skip("openrails.credit_blocks not found; run migrations before integration tests")
+		t.Skip("openrails.money_blocks not found; run migrations before integration tests")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
 
-	creditTypeName := "test_credits_" + uuid.New().String()
-	creditTypeID := uuid.New()
+	// The grant spec key is just a label now (#472: money has no credit_type);
+	// Unit "USD" deposits into the USD money balance.
+	grantLabel := "test_credits_" + uuid.New().String()
 	productID := uuid.New()
 	priceID := uuid.New()
 	paymentMethodID := uuid.New()
@@ -57,19 +58,8 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	billingDays := 30
 	billingDays32 := int32(billingDays)
 
-	_, err := q.CreateCreditType(ctx, gen.CreateCreditTypeParams{
-		ID:            creditTypeID,
-		Name:          creditTypeName,
-		DisplayName:   "Test Credits",
-		Unit:          "units",
-		DecimalPlaces: 0,
-		IsActive:      true,
-		CreatedAt:     now,
-	})
-	require.NoError(t, err)
-
 	creditsSpecJSON, err := json.Marshal(models.CreditsSpec{
-		creditTypeName: {Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
+		grantLabel: {Unit: "USD", Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
 	})
 	require.NoError(t, err)
 	description := "Test"
@@ -173,15 +163,14 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = $1", creditTypeID)
 	})
 
 	// Stub NMI direct post endpoint for AttemptManualRebill.
@@ -211,16 +200,16 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
-	creditsSvc := credits.NewCreditsService(dbi, nil)
+	moneySvc := money.NewMoneyService(dbi, nil)
 
-	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, creditsSvc, false))
+	require.Equal(t, dunningOutcomeSucceeded, worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, moneySvc, false))
 
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.credit_transactions
-		 WHERE tenant_subject_id = $1 AND credit_type_id = $2
+		`SELECT count(*) FROM openrails.money_transactions
+		 WHERE tenant_subject_id = $1 AND currency = 'USD'
 		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
-		tenantSubjectID, creditTypeID).Scan(&depositCount))
+		tenantSubjectID).Scan(&depositCount))
 	require.Equal(t, 1, depositCount)
 }
 
@@ -341,12 +330,12 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil, nil)
-	creditsSvc := credits.NewCreditsService(dbi, nil)
+	moneySvc := money.NewMoneyService(dbi, nil)
 
 	sub, err := repo.NewSubscriptionRepo(dbi).GetByID(ctx, subID)
 	require.NoError(t, err)
 
-	outcome := worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, creditsSvc, false)
+	outcome := worker.processSubscription(dbtest.WithTestTenant(ctx), sub, lifecycle, priceSvc, moneySvc, false)
 	require.Equal(t, dunningOutcomeSucceeded, outcome)
 	assert.Zero(t, saleAttempts, "the durable success must be repaired, never re-charged")
 

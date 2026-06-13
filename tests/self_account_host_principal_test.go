@@ -82,12 +82,9 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
 
-	// A dedicated credit type for this test.
+	// credit_type is accepted-and-ignored on the wire (#472); the self/account
+	// surface echoes the requested type back, money needs no type row.
 	ctName := "self_acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	_, err = svc.CreateCreditType(ctx, billingservice.CreateCreditTypeRequest{
-		Name: ctName, DisplayName: "Self Account Test", Unit: "micros", DecimalPlaces: 6,
-	})
-	require.NoError(t, err)
 
 	subjectA := uuid.NewString()
 	subjectB := uuid.NewString()
@@ -98,7 +95,6 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	_, err = svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
 		TenantSubjectID: &payerA,
 		Actor:           subjectA,
-		CreditType:      ctName,
 		Amount:          7_500_000,
 		Source:          "test_seed",
 		SourceID:        &sourceID,

@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,39 +24,22 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
-
-	// Ensure migration table exists; if not, fail fast with a helpful message.
-	var exists bool
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
-		Scan(&exists))
-	if !exists {
-		t.Skip("openrails.credit_blocks not found; run migrations before integration tests")
-	}
+	dbtest.EnsureTestTenant(ctx, t, pool)
+	ctx = dbtest.WithTestTenant(ctx)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(30 * 24 * time.Hour)
 
-	creditTypeName := "test_credits_" + uuid.New().String()
-	creditTypeID := uuid.New()
+	// The grant spec key is just a label now (#472: money has no credit_type).
+	grantLabel := "test_credits_" + uuid.New().String()
 	productID := uuid.New()
 	subID := uuid.New()
 	userID := uuid.New().String()
 	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 
-	_, err := q.CreateCreditType(ctx, gen.CreateCreditTypeParams{
-		ID:            creditTypeID,
-		Name:          creditTypeName,
-		DisplayName:   "Test Credits",
-		Unit:          "units",
-		DecimalPlaces: 0,
-		IsActive:      true,
-		CreatedAt:     now,
-	})
-	require.NoError(t, err)
-
+	// Unit "USD" so the grant deposits into the USD money balance.
 	creditsSpec, err := json.Marshal(models.CreditsSpec{
-		creditTypeName: {Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
+		grantLabel: {Unit: "USD", Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
 	})
 	require.NoError(t, err)
 	desc := "Test"
@@ -101,24 +84,24 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = $1", creditTypeID)
 	})
 
-	creditsSvc := credits.NewMoneyService(dbi)
-	creditsSvc.SetClock(nil)
+	moneySvc := money.NewMoneyService(dbi)
+	moneySvc.SetClock(nil)
 
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+	require.NoError(t, moneySvc.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadencePerRenewal,
 		Source:         "subscription_renewal",
 	}))
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+	require.NoError(t, moneySvc.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadencePerRenewal,
@@ -127,33 +110,33 @@ func runGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 
 	var depositCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.credit_transactions
-		 WHERE tenant_subject_id = $1 AND credit_type_id = $2
+		`SELECT count(*) FROM openrails.money_transactions
+		 WHERE tenant_subject_id = $1 AND currency = 'USD'
 		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'`,
-		tenantSubjectID, creditTypeID).Scan(&depositCount))
+		tenantSubjectID).Scan(&depositCount))
 	require.Equal(t, 1, depositCount)
 
-	expectedGrantID := uuid.NewSHA1(
-		uuid.NameSpaceOID,
-		[]byte(fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s:%s", models.CreditGrantCadencePerRenewal, subID, creditTypeID, periodEnd.UTC().Format(time.RFC3339Nano))),
-	)
+	// Deterministic grant SourceID: openrails:sub_credit_grant:<cadence>:<subID>:<label>:<periodEnd>.
+	grantKey := fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s:%s",
+		models.CreditGrantCadencePerRenewal, subID, grantLabel, periodEnd.UTC().Format(time.RFC3339Nano))
+	expectedGrantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(grantKey))
 
-	dep := new(models.CreditTransaction)
+	dep := new(models.MoneyTransaction)
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT source_id FROM openrails.credit_transactions
-		 WHERE tenant_subject_id = $1 AND credit_type_id = $2
+		`SELECT source_id FROM openrails.money_transactions
+		 WHERE tenant_subject_id = $1 AND currency = 'USD'
 		   AND transaction_type = 'deposit' AND source = 'subscription_renewal'
 		 LIMIT 1`,
-		tenantSubjectID, creditTypeID).Scan(&dep.SourceID))
+		tenantSubjectID).Scan(&dep.SourceID))
 	require.NotNil(t, dep.SourceID)
 	require.Equal(t, expectedGrantID.String(), *dep.SourceID)
 
-	bal := new(models.CreditBalance)
+	bal := new(models.MoneyBalance)
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT balance FROM openrails.credit_balances
-		 WHERE tenant_subject_id = $1 AND credit_type_id = $2
+		`SELECT balance FROM openrails.money_balances
+		 WHERE tenant_subject_id = $1 AND currency = 'USD'
 		 LIMIT 1`,
-		tenantSubjectID, creditTypeID).Scan(&bal.Balance))
+		tenantSubjectID).Scan(&bal.Balance))
 	require.Equal(t, int64(100), bal.Balance)
 }
 
@@ -163,7 +146,7 @@ func TestGrantSubscriptionCredits_Idempotent_PerPeriod(t *testing.T) {
 
 func TestGrantSubscriptionCredits_ReplaySafety_StripeStyle(t *testing.T) {
 	// This simulates replayed “renewal success” processing (e.g., Stripe invoice.paid re-delivery)
-	// by calling GrantSubscriptionCredits twice for the same (subscription_id, credit_type, period_end).
+	// by calling GrantSubscriptionCredits twice for the same (subscription_id, grant label, period_end).
 	runGrantSubscriptionCredits_Idempotent_PerPeriod(t)
 }
 
@@ -174,51 +157,24 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbi.Pool()
 	q := gen.New(pool)
-
-	var exists bool
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='billing' AND table_name='credit_blocks')").
-		Scan(&exists))
-	if !exists {
-		t.Skip("openrails.credit_blocks not found; run migrations before integration tests")
-	}
+	dbtest.EnsureTestTenant(ctx, t, pool)
+	ctx = dbtest.WithTestTenant(ctx)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	periodEnd := now.Add(30 * 24 * time.Hour)
 
-	ctOnceName := "test_once_" + uuid.New().String()
-	ctRenewName := "test_renew_" + uuid.New().String()
-	ctOnceID := uuid.New()
-	ctRenewID := uuid.New()
+	// Two grant labels, both crediting the SAME USD money balance (#472: money has
+	// no credit_type — there is one balance per currency).
+	onceLabel := "test_once_" + uuid.New().String()
+	renewLabel := "test_renew_" + uuid.New().String()
 	productID := uuid.New()
 	subID := uuid.New()
 	userID := uuid.New().String()
 	tenantSubjectID := dbtest.EnsureTenantSubjectIDPgx(ctx, t, pool, userID)
 
-	_, err := q.CreateCreditType(ctx, gen.CreateCreditTypeParams{
-		ID:            ctOnceID,
-		Name:          ctOnceName,
-		DisplayName:   "Once Credits",
-		Unit:          "units",
-		DecimalPlaces: 0,
-		IsActive:      true,
-		CreatedAt:     now,
-	})
-	require.NoError(t, err)
-	_, err = q.CreateCreditType(ctx, gen.CreateCreditTypeParams{
-		ID:            ctRenewID,
-		Name:          ctRenewName,
-		DisplayName:   "Renew Credits",
-		Unit:          "units",
-		DecimalPlaces: 0,
-		IsActive:      true,
-		CreatedAt:     now,
-	})
-	require.NoError(t, err)
-
 	creditsSpec, err := json.Marshal(models.CreditsSpec{
-		ctOnceName:  {Amount: 10, Cadence: models.CreditGrantCadenceOnce},
-		ctRenewName: {Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
+		onceLabel:  {Unit: "USD", Amount: 10, Cadence: models.CreditGrantCadenceOnce},
+		renewLabel: {Unit: "USD", Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
 	})
 	require.NoError(t, err)
 	desc := "Test"
@@ -263,24 +219,24 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_balances WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_transactions WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_blocks WHERE tenant_subject_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_balances WHERE tenant_subject_id = $1", tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.credit_types WHERE id = ANY($1::uuid[])", []uuid.UUID{ctOnceID, ctRenewID})
 	})
 
-	creditsSvc := credits.NewMoneyService(dbi)
+	moneySvc := money.NewMoneyService(dbi)
 
 	// Once grant should apply once.
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+	require.NoError(t, moneySvc.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadenceOnce,
 		Source:         "subscription_initial",
 	}))
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+	require.NoError(t, moneySvc.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadenceOnce,
@@ -288,28 +244,23 @@ func TestGrantSubscriptionCredits_MixedCadence(t *testing.T) {
 	}))
 
 	// Renewal grant should apply once.
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+	require.NoError(t, moneySvc.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadencePerRenewal,
 		Source:         "subscription_renewal",
 	}))
-	require.NoError(t, creditsSvc.GrantSubscriptionCredits(ctx, credits.GrantSubscriptionCreditsParams{
+	require.NoError(t, moneySvc.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
 		SubscriptionID: subID,
 		PeriodEnd:      periodEnd,
 		Cadence:        models.CreditGrantCadencePerRenewal,
 		Source:         "subscription_renewal",
 	}))
 
-	// Total should be 10 + 100 across two types, each exactly once.
-	balOnce := new(models.CreditBalance)
+	// Both labels credit the one USD balance: 10 (once) + 100 (renewal), each once.
+	bal := new(models.MoneyBalance)
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT balance FROM openrails.credit_balances WHERE tenant_subject_id = $1 AND credit_type_id = $2",
-		tenantSubjectID, ctOnceID).Scan(&balOnce.Balance))
-	require.Equal(t, int64(10), balOnce.Balance)
-	balRenew := new(models.CreditBalance)
-	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT balance FROM openrails.credit_balances WHERE tenant_subject_id = $1 AND credit_type_id = $2",
-		tenantSubjectID, ctRenewID).Scan(&balRenew.Balance))
-	require.Equal(t, int64(100), balRenew.Balance)
+		"SELECT balance FROM openrails.money_balances WHERE tenant_subject_id = $1 AND currency = 'USD'",
+		tenantSubjectID).Scan(&bal.Balance))
+	require.Equal(t, int64(110), bal.Balance)
 }

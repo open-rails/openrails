@@ -13,8 +13,10 @@ import (
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
@@ -64,7 +66,17 @@ type CheckoutPurchaseService struct {
 	// are an additive, separate model). Wired post-construction via
 	// SetProductAccessService so existing constructor call sites are unchanged.
 	ProductAccessService productAccessGranter
-	clock                clockwork.Clock
+	// MoneyService deposits a one-off purchase's credit/currency balances (#472) —
+	// the other half of "what you get" alongside entitlements. Optional; wired
+	// post-construction so existing constructor call sites are unchanged.
+	MoneyService purchaseCreditGranter
+	clock        clockwork.Clock
+}
+
+// purchaseCreditGranter is the subset of MoneyService the purchase flow needs to
+// deposit a product's credit/currency grants (#472).
+type purchaseCreditGranter interface {
+	GrantPurchaseCredits(ctx context.Context, params money.GrantPurchaseCreditsParams) error
 }
 
 // productAccessGranter is the subset of the product-access service the purchase
@@ -108,6 +120,12 @@ func (s *CheckoutPurchaseService) SetClock(c clockwork.Clock) {
 // sites stay unchanged.
 func (s *CheckoutPurchaseService) SetProductAccessService(g productAccessGranter) {
 	s.ProductAccessService = g
+}
+
+// SetMoneyService wires the credit/currency grant service (#472) into the one-time
+// purchase flow. Additive to feature entitlements; nil-safe.
+func (s *CheckoutPurchaseService) SetMoneyService(g purchaseCreditGranter) {
+	s.MoneyService = g
 }
 
 func (s *CheckoutPurchaseService) Clock() clockwork.Clock {
@@ -437,6 +455,14 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		// grant the same way it repairs entitlements.
 		s.grantProductAccess(ctx, req.UserID, product.ID, existingPayment.ID, existingPayment.SubscriptionID != nil, price.BillingCycleDays)
 
+		// Re-deposit the purchase credit/currency grants (#472); idempotent per
+		// (payment, label) so re-delivery repairs without double-granting.
+		creditsSpec := existingPayment.CreditsSpecSnapshot
+		if len(creditsSpec) == 0 {
+			creditsSpec = product.CreditsSpec
+		}
+		s.grantPurchaseCredits(ctx, req.UserID, creditsSpec, existingPayment.ID, existingPayment.SubscriptionID != nil)
+
 		grantedEntitlements := make([]string, 0, len(entitlementsSpec))
 		for entName := range entitlementsSpec {
 			grantedEntitlements = append(grantedEntitlements, entName)
@@ -468,6 +494,11 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	// purchases — additive to the feature entitlements granted above. Keyed on the
 	// payment id so it is idempotent; skipped for subscription purchases.
 	s.grantProductAccess(ctx, req.UserID, product.ID, paymentID, req.SubscriptionID != nil, price.BillingCycleDays)
+
+	// Credit/currency balance grants (#472) — the other half of "what you get"
+	// alongside entitlements. Keyed on payment id for idempotency; skipped for
+	// subscription purchases (those grant credits per period).
+	s.grantPurchaseCredits(ctx, req.UserID, product.CreditsSpec, paymentID, req.SubscriptionID != nil)
 
 	var delayedStart *time.Time
 	if coverage.HasCoverage && coverage.EndDate != nil {
@@ -511,6 +542,34 @@ func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID
 		log.WithError(err).WithFields(log.Fields{
 			"user_id": userID, "product_id": productID, "payment_id": paymentID,
 		}).Error("failed to record product access grant after purchase")
+	}
+}
+
+// grantPurchaseCredits deposits a one-time purchase's credit/currency balances
+// (#472) — the other half of "what you get" alongside entitlements. Idempotent
+// per (payment, grant label) inside MoneyService, so a replayed webhook/poll
+// never double-grants. Skipped for subscription purchases (those grant credits
+// via GrantSubscriptionCredits per period). A nil MoneyService makes this a no-op.
+func (s *CheckoutPurchaseService) grantPurchaseCredits(ctx context.Context, userID string, creditsSpec models.CreditsSpec, paymentID uuid.UUID, isSubscription bool) {
+	if s.MoneyService == nil || len(creditsSpec) == 0 || isSubscription {
+		return
+	}
+	payer := identity.TenantSubjectIDFromString(userID)
+	if payer.IsZero() {
+		log.WithField("user_id", userID).Error("skip purchase credit grant: payer is not a UUID")
+		return
+	}
+	if err := s.MoneyService.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
+		Payer:     payer,
+		PaymentID: paymentID,
+		Spec:      creditsSpec,
+		Source:    "purchase",
+	}); err != nil {
+		// Non-fatal: the payment + entitlements already succeeded. Log and continue
+		// so a grant write failure never blocks fulfilment; re-delivery repairs it.
+		log.WithError(err).WithFields(log.Fields{
+			"user_id": userID, "payment_id": paymentID,
+		}).Error("failed to grant purchase credits")
 	}
 }
 

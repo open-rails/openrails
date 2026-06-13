@@ -1,6 +1,9 @@
 package money
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // System currency registry (#472). Currency is system-fixed, NOT tenant-scoped:
 // the codebase is the authority (there is no DB CHECK). amount columns are
@@ -24,8 +27,10 @@ var currencies = map[string]Currency{
 	"SOL":  {Code: "SOL", Decimals: 9, Kind: "crypto"},
 }
 
-// normalizeCurrency maps "" to the default; otherwise returns c unchanged.
+// normalizeCurrency maps "" to the default and upper-cases the code, so built-in
+// currency codes are case-insensitive ("usd" == "USD"). Registry keys are upper.
 func normalizeCurrency(c string) string {
+	c = strings.ToUpper(strings.TrimSpace(c))
 	if c == "" {
 		return DefaultCurrency
 	}

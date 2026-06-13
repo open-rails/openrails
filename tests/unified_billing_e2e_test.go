@@ -33,8 +33,8 @@ package tests
 // deposit, hold, capture, release, get-credits, transaction lookup -- because
 // that is the standalone server-to-server contract gen-orchestrator / Tensorhub
 // actually use. Ledger correctness (rows, statuses, balances, conservation) is
-// then asserted directly against the openrails.credit_transactions /
-// credit_balances tables. We fall back to the in-process facade only where
+// then asserted directly against the openrails.money_transactions /
+// money_balances tables. We fall back to the in-process facade only where
 // no public route exists; every scenario below has one, so all flow over HTTP.
 
 import (
@@ -68,28 +68,13 @@ type billingE2EHarness struct {
 	suite      *TestContainerSuite
 	router     *gin.Engine
 	creditType string
-	creditTyID uuid.UUID
 }
 
 func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHarness {
 	t.Helper()
-	ctx := context.Background()
 
+	// credit_type is accepted-and-ignored on the wire; money needs no type row.
 	creditTypeName := "e2e_credits_" + uuid.NewString()
-	ct := &models.CreditType{
-		ID:            uuid.New(),
-		Name:          creditTypeName,
-		DisplayName:   "Unified Billing E2E Credits",
-		Unit:          "USD",
-		DecimalPlaces: 2,
-		IsActive:      true,
-		CreatedAt:     time.Now().UTC(),
-	}
-	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.credit_types (id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		ct.ID, dbtest.TestTenantID.UUID(), ct.Name, ct.DisplayName, ct.Unit, ct.DecimalPlaces, ct.IsActive, ct.CreatedAt)
-	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -111,7 +96,6 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 		suite:      suite,
 		router:     router,
 		creditType: creditTypeName,
-		creditTyID: ct.ID,
 	}
 }
 
@@ -209,19 +193,19 @@ func (h *billingE2EHarness) balance(userID string) balanceView {
 	return balanceView{Balance: payload.BalanceMicros, HeldBalance: payload.HeldMicros}
 }
 
-// ledgerRows returns all credit_transactions for a tenant subject and this credit
-// type, for direct ledger assertions.
-func (h *billingE2EHarness) ledgerRows(userID string) []models.CreditTransaction {
+// ledgerRows returns all money_transactions for a tenant subject (USD), for
+// direct ledger assertions.
+func (h *billingE2EHarness) ledgerRows(userID string) []models.MoneyTransaction {
 	h.t.Helper()
 	owner := personalOwnerID(userID)
 	pgRows, err := h.suite.Pool.Query(context.Background(),
-		"SELECT "+creditTransactionCols+" FROM openrails.credit_transactions WHERE tenant_subject_id = $1 AND credit_type_id = $2 ORDER BY created_at ASC",
-		owner, h.creditTyID)
+		"SELECT "+moneyTransactionCols+" FROM openrails.money_transactions WHERE tenant_subject_id = $1 AND currency = $2 ORDER BY created_at ASC",
+		owner, "USD")
 	require.NoError(h.t, err)
 	defer pgRows.Close()
-	var rows []models.CreditTransaction
+	var rows []models.MoneyTransaction
 	for pgRows.Next() {
-		trx, err := scanCreditTransaction(pgRows)
+		trx, err := scanMoneyTransaction(pgRows)
 		require.NoError(h.t, err)
 		rows = append(rows, *trx)
 	}
@@ -230,16 +214,16 @@ func (h *billingE2EHarness) ledgerRows(userID string) []models.CreditTransaction
 }
 
 // rawBalanceRow returns the persisted balance row for a tenant subject, or nil.
-func (h *billingE2EHarness) rawBalanceRow(userID string) *models.CreditBalance {
+func (h *billingE2EHarness) rawBalanceRow(userID string) *models.MoneyBalance {
 	h.t.Helper()
 	owner := personalOwnerID(userID)
-	bal := new(models.CreditBalance)
+	bal := new(models.MoneyBalance)
 	err := h.suite.Pool.QueryRow(context.Background(), `
-		SELECT id, tenant_id, tenant_subject_id, credit_type_id, balance, held_balance, created_at, updated_at
-		FROM openrails.credit_balances
-		WHERE tenant_subject_id = $1 AND credit_type_id = $2
-		LIMIT 1`, owner, h.creditTyID).
-		Scan(&bal.ID, &bal.TenantID, &bal.TenantSubjectID, &bal.CreditTypeID,
+		SELECT id, tenant_id, tenant_subject_id, currency, balance, held_balance, created_at, updated_at
+		FROM openrails.money_balances
+		WHERE tenant_subject_id = $1 AND currency = $2
+		LIMIT 1`, owner, "USD").
+		Scan(&bal.ID, &bal.TenantID, &bal.TenantSubjectID, &bal.Currency,
 			&bal.Balance, &bal.HeldBalance, &bal.CreatedAt, &bal.UpdatedAt)
 	if err != nil {
 		return nil
@@ -258,7 +242,7 @@ func (h *billingE2EHarness) sumLedgerAmounts(userID string) int64 {
 	return total
 }
 
-func countByType(rows []models.CreditTransaction, txType string) int {
+func countByType(rows []models.MoneyTransaction, txType string) int {
 	n := 0
 	for _, r := range rows {
 		if r.TransactionType == txType {
@@ -268,7 +252,7 @@ func countByType(rows []models.CreditTransaction, txType string) int {
 	return n
 }
 
-func findHold(rows []models.CreditTransaction, holdID string) *models.CreditTransaction {
+func findHold(rows []models.MoneyTransaction, holdID string) *models.MoneyTransaction {
 	for i := range rows {
 		if rows[i].ID.String() == holdID && rows[i].TransactionType == "hold" {
 			return &rows[i]

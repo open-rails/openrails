@@ -89,6 +89,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 			type key struct {
 				TenantID        uuid.UUID
 				TenantSubjectID uuid.UUID
+				Currency        string
 			}
 			releasedTotals := make(map[key]int64)
 
@@ -97,7 +98,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				if hold.AuthorizedAmount == nil || *hold.AuthorizedAmount <= 0 {
 					continue
 				}
-				k := key{TenantID: hold.TenantID, TenantSubjectID: hold.TenantSubjectID}
+				k := key{TenantID: hold.TenantID, TenantSubjectID: hold.TenantSubjectID, Currency: hold.Currency}
 				releasedTotals[k] += *hold.AuthorizedAmount
 
 				// Mark hold as expired
@@ -113,7 +114,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				}
 
 				bal, err := q.LockMoneyBalance(ctx, gen.LockMoneyBalanceParams{
-					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID,
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, Currency: k.Currency,
 				})
 				if err != nil {
 					return err
@@ -127,7 +128,7 @@ func (w HoldExpiryWorker) Work(ctx context.Context, job *river.Job[HoldExpiryArg
 				}
 
 				if err := q.SetMoneyHeldBalance(ctx, gen.SetMoneyHeldBalanceParams{
-					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID,
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, Currency: k.Currency,
 					HeldBalance: newHeldBalance, UpdatedAt: now,
 				}); err != nil {
 					return err

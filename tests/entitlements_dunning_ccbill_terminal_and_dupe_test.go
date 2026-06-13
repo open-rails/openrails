@@ -297,7 +297,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 		SubscriptionLifecycleService: rt.SubscriptionLifecycleService,
 		NotificationService:          rt.NotificationService,
 		EventLogService:              rt.EventLogService,
-		CreditsService:               rt.CreditsService,
+		MoneyService:                 rt.MoneyService,
 	}
 
 	require.NoError(t, webhook.HandleCCBillWebhook(ctx))

@@ -73,18 +73,18 @@ func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *mode
 	require.NoError(suite.t, dbrepo.NewNotificationQueueRepo(suite.App.Runtime.DB).Create(ctx, n), "Failed to insert notification")
 }
 
-// insertCreditBlock inserts a credit lot (openrails.credit_blocks). The caller
-// must set TenantID and TenantSubjectID.
-func (suite *TestContainerSuite) insertCreditBlock(ctx context.Context, b *models.CreditBlock) {
+// insertMoneyBlock inserts a money lot (openrails.money_blocks). The caller
+// must set TenantID, TenantSubjectID, and Currency.
+func (suite *TestContainerSuite) insertMoneyBlock(ctx context.Context, b *models.MoneyBlock) {
 	suite.t.Helper()
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.credit_blocks (
-			id, tenant_id, tenant_subject_id, credit_type_id, original_amount,
+		INSERT INTO openrails.money_blocks (
+			id, tenant_id, tenant_subject_id, currency, original_amount,
 			remaining_amount, expires_at, source_transaction_id, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		b.ID, b.TenantID, b.TenantSubjectID, b.CreditTypeID, b.OriginalAmount,
+		b.ID, b.TenantID, b.TenantSubjectID, b.Currency, b.OriginalAmount,
 		b.RemainingAmount, b.ExpiresAt, b.SourceTransactionID, b.CreatedAt)
-	require.NoError(suite.t, err, "Failed to insert credit block")
+	require.NoError(suite.t, err, "Failed to insert money block")
 }
 
 // --- read helpers ---

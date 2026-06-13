@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-rails/openrails/internal/modules/credits"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,15 +14,15 @@ import (
 // actual exceeds the prepaid balance — drawing balance first, then spilling to
 // owed (previously this errored in withdrawBalanceAndBlocks).
 func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
-	svc, _, payer, ct, ctx := moneyInEnv(t)
-	bm := credits.BillingModeArrears
-	_, err := svc.UpsertAccountSettings(ctx, payer, ct, credits.AccountSettingsInput{BillingMode: &bm})
+	svc, _, payer, cur, ctx := moneyInEnv(t)
+	bm := money.BillingModeArrears
+	_, err := svc.UpsertAccountSettings(ctx, payer, money.AccountSettingsInput{BillingMode: &bm})
 	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, credits.CreditDepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), CreditType: ct, Amount: 300, Source: "seed"})
+	_, err = svc.Deposit(ctx, money.DepositParams{TenantSubjectID: &payer, Actor: payer.UUID().String(), Amount: 300, Source: "seed"})
 	require.NoError(t, err)
 
-	res, err := svc.AuthorizeAndHold(ctx, credits.AuthorizeHoldInput{
-		Payer: payer, Actor: "user:a", CreditType: ct, EstimateMicros: 1000,
+	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
+		Payer: payer, Actor: "user:a", EstimateMicros: 1000,
 		Source: "req", SourceID: "h1", ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
@@ -32,8 +32,8 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 	_, err = svc.CaptureHold(ctx, res.Hold.ID, 800)
 	require.NoError(t, err, "arrears capture past balance must not error")
 
-	bal, _ := svc.GetBalanceForTenantSubject(ctx, payer, ct)
+	bal, _ := svc.GetBalanceForTenantSubject(ctx, payer, cur)
 	require.Equal(t, int64(0), bal.Balance, "balance drawn first")
-	owed, _ := svc.GetOutstandingOwed(ctx, payer, ct)
+	owed, _ := svc.GetOutstandingOwed(ctx, payer, cur)
 	require.Equal(t, int64(500), owed, "remainder (800-300) spilled to owed")
 }

@@ -76,6 +76,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			type key struct {
 				TenantID        uuid.UUID
 				TenantSubjectID uuid.UUID
+				Currency        string
 			}
 			expiredTotals := make(map[key]int64)
 			for i := range blocks {
@@ -85,6 +86,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 				k := key{
 					TenantID:        blocks[i].TenantID,
 					TenantSubjectID: blocks[i].TenantSubjectID,
+					Currency:        blocks[i].Currency,
 				}
 				expiredTotals[k] += blocks[i].RemainingAmount
 				if err := q.SetMoneyBlockRemaining(ctx, gen.SetMoneyBlockRemainingParams{
@@ -99,7 +101,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 					continue
 				}
 				balKey := gen.LockMoneyBalanceParams{
-					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID,
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, Currency: k.Currency,
 				}
 				bal, err := q.LockMoneyBalance(ctx, balKey)
 				if err != nil && !errorsIsNoRows(err) {
@@ -107,7 +109,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 				}
 				if errorsIsNoRows(err) {
 					if err := q.InsertMoneyBalanceIfAbsent(ctx, gen.InsertMoneyBalanceIfAbsentParams{
-						ID: uuidutil.NewV7(), TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID,
+						ID: uuidutil.NewV7(), TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, Currency: k.Currency,
 						Now: now,
 					}); err != nil {
 						return err
@@ -124,7 +126,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 				}
 
 				if err := q.SetMoneyBalance(ctx, gen.SetMoneyBalanceParams{
-					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID,
+					TenantID: k.TenantID, TenantSubjectID: k.TenantSubjectID, Currency: k.Currency,
 					Balance: newBalance, UpdatedAt: now,
 				}); err != nil {
 					return err
@@ -134,6 +136,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 					ID:              uuidutil.NewV7(),
 					TenantID:        k.TenantID,
 					TenantSubjectID: k.TenantSubjectID,
+					Currency:        k.Currency,
 					// System event: no caller actor; payer-derived per money_in convention.
 					Actor:           k.TenantSubjectID.String(),
 					Amount:          -amount,

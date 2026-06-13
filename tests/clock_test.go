@@ -62,7 +62,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	require.Equal(t, mockClock, rt.WebhookDispatcher.Clock)
 	require.Equal(t, mockClock, rt.CheckoutService.Clock())
 	require.Equal(t, mockClock, rt.CheckoutSessionService.Clock())
-	require.Equal(t, mockClock, rt.CreditsService.Clock())
+	require.Equal(t, mockClock, rt.MoneyService.Clock())
 	require.Equal(t, mockClock, rt.SolanaPayService.Clock())
 	require.Equal(t, mockClock, rt.SolanaTransactionService.Clock())
 	if rt.EventLogService != nil {
@@ -177,44 +177,43 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, isEntitled)
 
-	creditType := suite.createTestCreditType("clock-expiry-" + uuid.New().String()[:8])
 	creditUserID := uuid.New().String()
-	balance := suite.createTestCreditBalance(creditUserID, creditType.ID, 100, 25)
+	balance := suite.createTestMoneyBalance(creditUserID, 100, 25)
 	holdExpiry := mockClock.Now().Add(time.Hour)
-	hold := suite.createTestCreditHold(creditUserID, creditType.ID, 25, "active", holdExpiry)
+	hold := suite.createTestMoneyHold(creditUserID, 25, "active", holdExpiry)
 	blockExpiry := mockClock.Now().Add(time.Hour)
-	block := &models.CreditBlock{
+	block := &models.MoneyBlock{
 		ID:              uuid.New(),
 		TenantID:        dbtest.TestTenantID.UUID(),
 		TenantSubjectID: suite.ensureTenantSubject(ctx, creditUserID),
-		CreditTypeID:    creditType.ID,
+		Currency:        "USD",
 		OriginalAmount:  75,
 		RemainingAmount: 75,
 		ExpiresAt:       &blockExpiry,
 		CreatedAt:       mockClock.Now(),
 	}
-	suite.insertCreditBlock(ctx, block)
+	suite.insertMoneyBlock(ctx, block)
 
 	holdWorker := &riverjobs.HoldExpiryWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock}
 	creditWorker := &riverjobs.CreditExpiryWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock}
 
 	require.NoError(t, holdWorker.Work(ctx, &river.Job[riverjobs.HoldExpiryArgs]{Args: riverjobs.HoldExpiryArgs{}}))
 	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
-	assert.Equal(t, "active", suite.getCreditHold(hold.ID).Status)
+	assert.Equal(t, "active", suite.getMoneyHold(hold.ID).Status)
 	var remaining int64
 	require.NoError(t, suite.Pool.QueryRow(ctx,
-		"SELECT remaining_amount FROM openrails.credit_blocks WHERE id = $1", block.ID).Scan(&remaining))
+		"SELECT remaining_amount FROM openrails.money_blocks WHERE id = $1", block.ID).Scan(&remaining))
 	assert.Equal(t, int64(75), remaining)
 
 	mockClock.Advance(2 * time.Hour)
 	require.NoError(t, holdWorker.Work(ctx, &river.Job[riverjobs.HoldExpiryArgs]{Args: riverjobs.HoldExpiryArgs{}}))
 	require.NoError(t, creditWorker.Work(ctx, &river.Job[riverjobs.CreditExpiryArgs]{Args: riverjobs.CreditExpiryArgs{}}))
-	assert.Equal(t, "expired", suite.getCreditHold(hold.ID).Status)
-	updatedBalance := suite.getCreditBalance(balance.ID)
+	assert.Equal(t, "expired", suite.getMoneyHold(hold.ID).Status)
+	updatedBalance := suite.getMoneyBalance(balance.ID)
 	assert.Equal(t, int64(0), updatedBalance.HeldBalance)
 	assert.Equal(t, int64(25), updatedBalance.Balance)
 	require.NoError(t, suite.Pool.QueryRow(ctx,
-		"SELECT remaining_amount FROM openrails.credit_blocks WHERE id = $1", block.ID).Scan(&remaining))
+		"SELECT remaining_amount FROM openrails.money_blocks WHERE id = $1", block.ID).Scan(&remaining))
 	assert.Equal(t, int64(0), remaining)
 }
 

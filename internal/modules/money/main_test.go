@@ -19,14 +19,15 @@ import (
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
 // seedTenantSubject materializes the openrails.tenant_subjects row a direct
-// payable-row insert needs to satisfy the tenant_subject_id FK (migrations
-// 076/078, #317). The id IS the payable subject id (the credits/self-service
-// deterministic scheme, issuer openrails:self); tenant_id is the default tenant.
+// money-row insert needs to satisfy the tenant_subject_id FK. The id IS the
+// payable subject id (issuer openrails:self); tenant_id is the canonical test
+// tenant (#336: no default tenant).
 func seedTenantSubject(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tsID uuid.UUID) {
 	t.Helper()
+	dbtest.EnsureTestTenant(ctx, t, pool)
 	_, err := pool.Exec(ctx,
 		`INSERT INTO openrails.tenant_subjects (id, tenant_id, issuer, subject)
-		 VALUES ($1, '00000000-0000-0000-0000-000000000001', 'openrails:self', $2::text)
-		 ON CONFLICT DO NOTHING`, tsID, tsID)
+		 VALUES ($1, $2, 'openrails:self', $3::text)
+		 ON CONFLICT DO NOTHING`, tsID, dbtest.TestTenantID.UUID(), tsID)
 	require.NoError(t, err)
 }

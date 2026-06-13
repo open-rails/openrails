@@ -631,8 +631,8 @@ func (suite *TestContainerSuite) setClock(clock clockwork.Clock) {
 	if rt.PaymentService != nil {
 		rt.PaymentService.SetClock(clock)
 	}
-	if rt.CreditsService != nil {
-		rt.CreditsService.SetClock(clock)
+	if rt.MoneyService != nil {
+		rt.MoneyService.SetClock(clock)
 	}
 
 	// Vault and payment method services
