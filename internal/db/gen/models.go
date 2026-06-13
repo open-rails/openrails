@@ -40,7 +40,7 @@ func (e *BillingProcessorType) Scan(src interface{}) error {
 
 type NullBillingProcessorType struct {
 	BillingProcessorType BillingProcessorType
-	Valid                bool // Valid is true if BillingProcessorType is not NULL
+	Valid                  bool // Valid is true if BillingProcessorType is not NULL
 }
 
 // Scan implements the Scanner interface.
@@ -84,7 +84,7 @@ func (e *BillingPurchaseStatus) Scan(src interface{}) error {
 
 type NullBillingPurchaseStatus struct {
 	BillingPurchaseStatus BillingPurchaseStatus
-	Valid                 bool // Valid is true if BillingPurchaseStatus is not NULL
+	Valid                   bool // Valid is true if BillingPurchaseStatus is not NULL
 }
 
 // Scan implements the Scanner interface.
@@ -130,7 +130,7 @@ func (e *BillingSubscriptionStatus) Scan(src interface{}) error {
 
 type NullBillingSubscriptionStatus struct {
 	BillingSubscriptionStatus BillingSubscriptionStatus
-	Valid                     bool // Valid is true if BillingSubscriptionStatus is not NULL
+	Valid                       bool // Valid is true if BillingSubscriptionStatus is not NULL
 }
 
 // Scan implements the Scanner interface.
@@ -151,6 +151,14 @@ func (ns NullBillingSubscriptionStatus) Value() (driver.Value, error) {
 	return string(ns.BillingSubscriptionStatus), nil
 }
 
+type Migration struct {
+	ID         int64
+	App        string
+	Database   string
+	Name       string
+	MigratedAt time.Time
+}
+
 // Records admin-initiated product grants (comps, contest winners, manual payments, partnerships)
 type BillingAdminGrant struct {
 	ID uuid.UUID
@@ -163,19 +171,16 @@ type BillingAdminGrant struct {
 	// Optional link to Payment record if money was received
 	PaymentID *uuid.UUID
 	// Override entitlement duration (NULL=use Product spec, 0=indefinite, N=N days)
-	DurationDays *int32
-	CreatedAt    time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	DurationDays    *int32
+	CreatedAt       time.Time
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 }
 
 // Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor's passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).
 type BillingBudgetReservation struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 	// Caller-supplied principal string whose rolling money-budget windows are capped. Opaque to OpenRails.
 	Actor          string
@@ -218,8 +223,7 @@ type BillingCatalogDriftEvent struct {
 	ExternalValue         *string
 	DetectedAt            time.Time
 	ResolvedAt            *time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
+	TenantID              uuid.UUID
 }
 
 type BillingCheckoutSession struct {
@@ -241,17 +245,14 @@ type BillingCheckoutSession struct {
 	IdempotencyKey  *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 }
 
 // Per-(tenant, tenant subject, credit_type) spend policy + money-in config (issue #237). Tensorhub SETS these; OpenRails STORES + ENFORCES them.
 type BillingCreditAccountSetting struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID                        uuid.UUID
+	TenantID                  uuid.UUID
 	TenantSubjectID           uuid.UUID
 	CreditTypeID              uuid.UUID
 	BillingMode               string
@@ -280,15 +281,13 @@ type BillingCreditAccountSetting struct {
 }
 
 type BillingCreditBalance struct {
-	ID           uuid.UUID
-	CreditTypeID uuid.UUID
-	Balance      int64
-	HeldBalance  int64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	CreditTypeID    uuid.UUID
+	Balance         int64
+	HeldBalance     int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 }
 
@@ -300,17 +299,14 @@ type BillingCreditBlock struct {
 	ExpiresAt           *time.Time
 	SourceTransactionID *uuid.UUID
 	CreatedAt           time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
-	TenantSubjectID uuid.UUID
+	TenantID            uuid.UUID
+	TenantSubjectID     uuid.UUID
 }
 
 // Optional per-actor spend caps for a tenant subject (issue #237/#246). actor is a caller-supplied opaque principal string.
 type BillingCreditSpendLimit struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 	CreditTypeID    uuid.UUID
 	// Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.
@@ -342,10 +338,8 @@ type BillingCreditTransaction struct {
 	CapturedAmount   *int64
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
-	TenantSubjectID uuid.UUID
+	TenantID         uuid.UUID
+	TenantSubjectID  uuid.UUID
 }
 
 type BillingCreditType struct {
@@ -356,16 +350,13 @@ type BillingCreditType struct {
 	DecimalPlaces int32
 	IsActive      bool
 	CreatedAt     time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
+	TenantID      uuid.UUID
 }
 
 // Prepaid credit windows (issue #335): one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry.
 type BillingCreditWindow struct {
-	ID uuid.UUID
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 	CreditTypeID    uuid.UUID
 	// Total reserved for this window (open + refills). Reflected in credit_balances.held_balance while status=open.
@@ -391,8 +382,7 @@ type BillingEntitlement struct {
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
 	Period       pgtype.Range[pgtype.Timestamptz]
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
+	TenantID     uuid.UUID
 	// OpenRails payable tenant subject for this entitlement window.
 	TenantSubjectID uuid.UUID
 }
@@ -411,9 +401,8 @@ type BillingEntitlementFeature struct {
 
 // Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the credit ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.
 type BillingInvoice struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 	CreditTypeID    uuid.UUID
 	Currency        string
@@ -449,14 +438,12 @@ type BillingLinkedWallet struct {
 
 // Queue for user notifications related to billing and subscriptions
 type BillingNotificationQueue struct {
-	ID        uuid.UUID
-	EventType string
-	Data      []byte
-	Seen      bool
-	CreatedAt time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	EventType       string
+	Data            []byte
+	Seen            bool
+	CreatedAt       time.Time
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 }
 
@@ -483,17 +470,14 @@ type BillingPayment struct {
 	CreatedAt                time.Time
 	CardBrand                *string
 	CardLast4                *string
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
-	TenantSubjectID uuid.UUID
+	TenantID                 uuid.UUID
+	TenantSubjectID          uuid.UUID
 }
 
 // Tenant-scoped blocklist of known-bad payment identifiers (issue #300). tenant_subject_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.
 type BillingPaymentBlocklist struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	TenantID        uuid.UUID
 	TenantSubjectID *uuid.UUID
 	Kind            string
 	Value           string
@@ -517,10 +501,8 @@ type BillingPaymentMethod struct {
 	Metadata             []byte
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
-	TenantSubjectID uuid.UUID
+	TenantID             uuid.UUID
+	TenantSubjectID      uuid.UUID
 }
 
 // Append-only cross-tenant platform superadmin audit log (issue #226). Records actor, target tenant, action, reason, and before/after state. CROSS-TENANT control-plane state: NOT purged by tenant delete.
@@ -559,8 +541,7 @@ type BillingPrice struct {
 	Status           string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
+	TenantID         uuid.UUID
 }
 
 // Cached NMI test-mode probe verdicts (#348): one row per (provider, sha256(security_key)). Fresh 'live' refuses boot from cache, fresh 'simulated' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.
@@ -573,14 +554,12 @@ type BillingProbeVerdict struct {
 }
 
 type BillingProcessorCustomer struct {
-	ID         uuid.UUID
-	Processor  string
-	CustomerID string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	Processor       string
+	CustomerID      string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 }
 
@@ -600,26 +579,24 @@ type BillingProduct struct {
 	Status    string
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
+	TenantID  uuid.UUID
 }
 
 // Durable, application-facing product ownership/access (issue #250). Distinct from feature entitlements: answers "does this user own product X?" / "list products this user can access". A successful one-time purchase creates a grant; refunds/chargebacks/admin revocation revoke it.
 type BillingProductAccessGrant struct {
-	ID           uuid.UUID
-	TenantID     uuid.UUID
-	ProductID    uuid.UUID
-	SourceType   string
-	SourceID     string
-	PaymentID    *uuid.UUID
-	Status       string
-	StartsAt     time.Time
-	EndsAt       *time.Time
-	RevokedAt    *time.Time
-	RevokeReason *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	ProductID       uuid.UUID
+	SourceType      string
+	SourceID        string
+	PaymentID       *uuid.UUID
+	Status          string
+	StartsAt        time.Time
+	EndsAt          *time.Time
+	RevokedAt       *time.Time
+	RevokeReason    *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 	TenantSubjectID uuid.UUID
 }
 
@@ -637,8 +614,7 @@ type BillingProductEntitlementFeature struct {
 
 // Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
 type BillingProviderIntent struct {
-	ID uuid.UUID
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
+	ID       uuid.UUID
 	TenantID uuid.UUID
 	// Provider/processor key the mutation targets (e.g. 'mobius' for an NMI-backed processor, 'stripe').
 	Provider string
@@ -673,8 +649,7 @@ type BillingProviderIntent struct {
 
 // Durable local-vs-processor drift ledger (#107 PS-1..PS-9). Stable identity per (tenant, provider, finding_type, subject_key): re-runs update, disappearance auto-resolves as auto_vanished. requires_admin = true rows are the admin action queue.
 type BillingReconciliationFinding struct {
-	ID uuid.UUID
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
+	ID          uuid.UUID
 	TenantID    uuid.UUID
 	Provider    string
 	FindingType string
@@ -703,8 +678,7 @@ type BillingReconciliationFinding struct {
 
 // One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment processors. Summary jsonb carries per-provider counts and the dunning-forensics report.
 type BillingReconciliationRun struct {
-	ID uuid.UUID
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
+	ID          uuid.UUID
 	TenantID    uuid.UUID
 	Mode        string
 	Providers   []string
@@ -768,16 +742,14 @@ type BillingSubscription struct {
 	// Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_user_tier_group_active, which enforces one active/pending subscription per (user, tier group).
 	TierGroup           *string
 	DeletionScheduledAt *time.Time
-	// Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the 'default' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.
-	TenantSubjectID uuid.UUID
+	TenantID            uuid.UUID
+	TenantSubjectID     uuid.UUID
 }
 
-// Tenant / billing-namespace directory. GLOBAL (control-plane) table, not tenant-scoped. Self-hosted installs have exactly one row (slug=default).
+// Tenant / billing-namespace directory. GLOBAL (control-plane) table, not tenant-scoped. Tenants are created explicitly; there is no default tenant.
 type BillingTenant struct {
 	ID uuid.UUID
-	// Stable tenant slug used in tenant-scoped routes and resolution. The well-known value 'default' is the single-tenant / self-hosted namespace.
+	// Stable tenant slug used in tenant-scoped routes and resolution.
 	Slug   string
 	Name   string
 	Status string
@@ -871,9 +843,8 @@ type BillingTenantSubject struct {
 
 // Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in credit_account_settings; rolling money budgets are #304.
 type BillingTierPolicy struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 	Tier            string
 	Policy          []byte
@@ -884,9 +855,8 @@ type BillingTierPolicy struct {
 
 // Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.
 type BillingUsageEvent struct {
-	ID       uuid.UUID
-	TenantID uuid.UUID
-	// OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.
+	ID              uuid.UUID
+	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
 	// Caller-supplied principal string (e.g. a username slug) that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.
 	Actor string
@@ -925,14 +895,6 @@ type BillingUsdcFundingSession struct {
 	ExpiresAt         *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
-}
-
-type Migration struct {
-	ID         int64
-	App        string
-	Database   string
-	Name       string
-	MigratedAt time.Time
 }
 
 type ProfilesUser struct {

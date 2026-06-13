@@ -15,10 +15,10 @@ import (
 const createCreditType = `-- name: CreateCreditType :execrows
 
 INSERT INTO openrails.credit_types (
-    id, name, display_name, unit, decimal_places, is_active, created_at
+    id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    COALESCE(NULLIF($7::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $1, $7::uuid, $2, $3, $4, $5, $6,
+    COALESCE(NULLIF($8::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `
 
@@ -29,6 +29,7 @@ type CreateCreditTypeParams struct {
 	Unit          string
 	DecimalPlaces int32
 	IsActive      bool
+	TenantID      uuid.UUID
 	CreatedAt     time.Time
 }
 
@@ -41,6 +42,7 @@ func (q *Queries) CreateCreditType(ctx context.Context, arg CreateCreditTypePara
 		arg.Unit,
 		arg.DecimalPlaces,
 		arg.IsActive,
+		arg.TenantID,
 		arg.CreatedAt,
 	)
 	if err != nil {

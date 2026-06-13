@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/query"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type SubscriptionFilters struct {
@@ -92,6 +93,11 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 	if err != nil {
 		return err
 	}
+	tid, terr := tenant.Require(ctx)
+	if terr != nil {
+		return terr
+	}
+	params.TenantID = tid.UUID()
 	rows, err := r.db.Gen(ctx).CreateSubscription(ctx, params)
 	if err != nil {
 		return err

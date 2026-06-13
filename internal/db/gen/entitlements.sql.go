@@ -73,8 +73,7 @@ INSERT INTO openrails.entitlements (
     source_id, source_type, revoked_at, revoke_reason, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    COALESCE(NULLIF($5::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    $5::uuid,
     NULLIF($6::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
     $1, $2, $7, $8, $3,
     $9, $10,

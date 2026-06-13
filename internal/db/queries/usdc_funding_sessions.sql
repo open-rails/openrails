@@ -8,8 +8,7 @@ INSERT INTO openrails.usdc_funding_sessions (
     last_checked_at, expires_at, created_at, updated_at
 ) VALUES (
     $1,
-    COALESCE(NULLIF(sqlc.arg(tenant_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    sqlc.arg(tenant_id)::uuid,
     $2, sqlc.narg(checkout_session_id), $3, $4, $5, $6, $7,
     sqlc.narg(provider_session_id), $8, $9, sqlc.narg(return_url),
     sqlc.narg(idempotency_key), sqlc.arg(metadata),

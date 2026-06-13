@@ -49,19 +49,19 @@ func (q *Queries) BindSolanaCheckoutSession(ctx context.Context, arg BindSolanaC
 const createCheckoutSession = `-- name: CreateCheckoutSession :execrows
 
 INSERT INTO openrails.checkout_sessions (
-    id, tenant_subject_id, price_id, mode, processor, status, amount,
+    id, tenant_id, tenant_subject_id, price_id, mode, processor, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
     subscription_id, metadata, processor_fields, processor_state,
     idempotency_key, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7,
-    COALESCE(NULLIF($8::text, ''), 'usd'),
-    $9, $10, $11,
-    $12, $13, $14,
-    $15, $16,
-    $17,
-    COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $1, $8::uuid, $2, $3, $4, $5, $6, $7,
+    COALESCE(NULLIF($9::text, ''), 'usd'),
+    $10, $11, $12,
+    $13, $14, $15,
+    $16, $17,
+    $18,
+    COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    COALESCE(NULLIF($20::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `
 
@@ -73,6 +73,7 @@ type CreateCheckoutSessionParams struct {
 	Processor       string
 	Status          string
 	Amount          int64
+	TenantID        uuid.UUID
 	Currency        string
 	ExpiresAt       *time.Time
 	Reference       *string
@@ -97,6 +98,7 @@ func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutS
 		arg.Processor,
 		arg.Status,
 		arg.Amount,
+		arg.TenantID,
 		arg.Currency,
 		arg.ExpiresAt,
 		arg.Reference,

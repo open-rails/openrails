@@ -2,12 +2,12 @@
 
 -- name: CreateCheckoutSession :execrows
 INSERT INTO openrails.checkout_sessions (
-    id, tenant_subject_id, price_id, mode, processor, status, amount,
+    id, tenant_id, tenant_subject_id, price_id, mode, processor, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
     subscription_id, metadata, processor_fields, processor_state,
     idempotency_key, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7,
+    $1, sqlc.arg(tenant_id)::uuid, $2, $3, $4, $5, $6, $7,
     COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
     sqlc.narg(expires_at), sqlc.narg(reference), sqlc.narg(transaction_id),
     sqlc.narg(payment_id), sqlc.narg(subscription_id), sqlc.narg(metadata),

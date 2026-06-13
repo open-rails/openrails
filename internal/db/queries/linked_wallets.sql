@@ -11,8 +11,7 @@ INSERT INTO openrails.linked_wallets (
     verified_at, display_name, metadata, created_at, updated_at
 ) VALUES (
     $1,
-    COALESCE(NULLIF(sqlc.arg(tenant_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    sqlc.arg(tenant_id)::uuid,
     $2, $3, $4, $5, $6, sqlc.narg(display_name), sqlc.arg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())

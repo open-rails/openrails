@@ -267,8 +267,7 @@ INSERT INTO openrails.solana_subscriptions (
     next_pull_at, status, created_at, updated_at
 ) VALUES (
     $1,
-    COALESCE(NULLIF($14::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    $14::uuid,
     $2, $3, $4, $5, $6, $7, $8, $9,
     $15, $16,
     $10, $11, $12, $13

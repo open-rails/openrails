@@ -82,7 +82,12 @@ func metadataJSON(m map[string]any) []byte {
 }
 
 func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
 	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
+		TenantID:        tid.UUID(),
 		PriceID:         a.PriceID,
 		Processor:       gen.BillingProcessorType(a.Processor),
 		TransactionID:   a.TransactionID,
@@ -116,7 +121,12 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	if amount > 0 {
 		amount = -amount // refunds are negative-amount payment rows
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
 	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
+		TenantID:          tid.UUID(),
 		PriceID:           a.PriceID,
 		Processor:         gen.BillingProcessorType(a.Processor),
 		TransactionID:     a.TransactionID,
@@ -184,7 +194,12 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 	if email := a.UserEmail; email != "" {
 		emailPtr = &email
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return MaterializeResult{}, err
+	}
 	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
+		TenantID:                tid.UUID(),
 		Status:                  gen.BillingSubscriptionStatus(a.Status),
 		Processor:               a.Processor,
 		ProcessorSubscriptionID: a.ProcessorSubscriptionID,

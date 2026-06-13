@@ -173,22 +173,22 @@ func (q *Queries) CountPaymentsFiltered(ctx context.Context, arg CountPaymentsFi
 const createPayment = `-- name: CreatePayment :execrows
 
 INSERT INTO openrails.payments (
-    id, price_id, processor, transaction_id, amount, list_amount, currency,
+    id, tenant_id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
     card_last4, tenant_subject_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    COALESCE(NULLIF($7::text, ''), 'usd'),
-    COALESCE(NULLIF($8::text, ''), 'completed')::openrails.purchase_status,
-    $9, $10,
-    $11, $12,
-    $13, $14,
-    $15, $16,
-    COALESCE(NULLIF($17::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    $1, $7::uuid, $2, $3, $4, $5, $6,
+    COALESCE(NULLIF($8::text, ''), 'usd'),
+    COALESCE(NULLIF($9::text, ''), 'completed')::openrails.purchase_status,
+    $10, $11,
+    $12, $13,
+    $14, $15,
+    $16, $17,
     COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $19, $20, $21
+    COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    $20, $21, $22
 )
 `
 
@@ -199,6 +199,7 @@ type CreatePaymentParams struct {
 	TransactionID            string
 	Amount                   int64
 	ListAmount               int64
+	TenantID                 uuid.UUID
 	Currency                 string
 	Status                   string
 	SubscriptionID           *uuid.UUID
@@ -221,8 +222,8 @@ type CreatePaymentParams struct {
 // Insert semantics replicate the bun-era model tags: a zero value on a
 // column with a default (status, currency, purchased_at, created_at) falls
 // back to that default via COALESCE/NULLIF, matching bun's
-// "zero + default tag => DEFAULT" rule. tenant_id is never written by the
-// app (column default + RLS WITH CHECK own it).
+// "zero + default tag => DEFAULT" rule. tenant_id is written explicitly
+// (RLS WITH CHECK still enforces it).
 func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createPayment,
 		arg.ID,
@@ -231,6 +232,7 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (i
 		arg.TransactionID,
 		arg.Amount,
 		arg.ListAmount,
+		arg.TenantID,
 		arg.Currency,
 		arg.Status,
 		arg.SubscriptionID,
@@ -255,22 +257,22 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (i
 
 const createPaymentIfNotExists = `-- name: CreatePaymentIfNotExists :execrows
 INSERT INTO openrails.payments (
-    id, price_id, processor, transaction_id, amount, list_amount, currency,
+    id, tenant_id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     credits_spec_snapshot, metadata, purchased_at, created_at, card_brand,
     card_last4, tenant_subject_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    COALESCE(NULLIF($7::text, ''), 'usd'),
-    COALESCE(NULLIF($8::text, ''), 'completed')::openrails.purchase_status,
-    $9, $10,
-    $11, $12,
-    $13, $14,
-    $15, $16,
-    COALESCE(NULLIF($17::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    $1, $7::uuid, $2, $3, $4, $5, $6,
+    COALESCE(NULLIF($8::text, ''), 'usd'),
+    COALESCE(NULLIF($9::text, ''), 'completed')::openrails.purchase_status,
+    $10, $11,
+    $12, $13,
+    $14, $15,
+    $16, $17,
     COALESCE(NULLIF($18::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $19, $20, $21
+    COALESCE(NULLIF($19::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    $20, $21, $22
 )
 ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING
 `
@@ -282,6 +284,7 @@ type CreatePaymentIfNotExistsParams struct {
 	TransactionID            string
 	Amount                   int64
 	ListAmount               int64
+	TenantID                 uuid.UUID
 	Currency                 string
 	Status                   string
 	SubscriptionID           *uuid.UUID
@@ -307,6 +310,7 @@ func (q *Queries) CreatePaymentIfNotExists(ctx context.Context, arg CreatePaymen
 		arg.TransactionID,
 		arg.Amount,
 		arg.ListAmount,
+		arg.TenantID,
 		arg.Currency,
 		arg.Status,
 		arg.SubscriptionID,

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type PaymentFilters struct {
@@ -92,6 +93,11 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 	if err != nil {
 		return err
 	}
+	tid, terr := tenant.Require(ctx)
+	if terr != nil {
+		return terr
+	}
+	params.TenantID = tid.UUID()
 	rows, err := r.db.Gen(ctx).CreatePayment(ctx, params)
 	if err != nil {
 		return err
@@ -110,6 +116,11 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 	if err != nil {
 		return false, err
 	}
+	tid, terr := tenant.Require(ctx)
+	if terr != nil {
+		return false, terr
+	}
+	params.TenantID = tid.UUID()
 	rows, err := r.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil {
 		return false, err

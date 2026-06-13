@@ -6,8 +6,7 @@ INSERT INTO openrails.products (
     credits_spec, tier_group, tier_rank, status, created_at, updated_at
 ) VALUES (
     $1,
-    COALESCE(NULLIF(sqlc.arg(tenant_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    sqlc.arg(tenant_id)::uuid,
     $2, $3, sqlc.narg(description), sqlc.narg(entitlements_spec),
     sqlc.narg(credits_spec), sqlc.narg(tier_group),
     COALESCE(NULLIF(sqlc.arg(tier_rank)::int, 0), 0),

@@ -1,16 +1,14 @@
 -- =============================================================================
--- OpenRails billing schema - consolidated final Postgres schema.
+-- OpenRails billing schema — single consolidated Postgres schema.
 --
--- Greenfield hardcut: this structural migration represents the final schema after
--- the historical OpenRails billing migrations through 082. Historical backfills,
--- transition-only renames, and obsolete intermediate objects are intentionally
--- omitted. Production-safe seed rows live in 002_seed.up.sql.
+-- Final structural state of the billing schema, hand-written in topological
+-- order (a table follows every table it FKs to, so FKs are inline named
+-- table-constraints). No "default tenant": tenant_id is REQUIRED on every
+-- tenant-scoped table — uuid NOT NULL with NO default. Writers must stamp
+-- tenant_id explicitly; the RLS tenant_isolation policy enforces it against the
+-- app.tenant_id GUC. No seed rows are created here: tenants and credit types
+-- (incl. usd_micro) are provisioned explicitly per-tenant, not seeded.
 -- =============================================================================
-
---
---
-
-
 
 SET statement_timeout = '300s';
 SET lock_timeout = '10s';
@@ -21,12 +19,7 @@ SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
 
---
--- Name: billing; Type: SCHEMA; Schema: -; Owner: -
---
-
 CREATE SCHEMA IF NOT EXISTS openrails;
-
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
@@ -37,11 +30,6 @@ BEGIN
         CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
     END IF;
 END $$;
-
-
---
--- Name: processor_type; Type: TYPE; Schema: billing; Owner: -
---
 
 CREATE TYPE openrails.processor_type AS ENUM (
     'paypal',
@@ -54,22 +42,12 @@ CREATE TYPE openrails.processor_type AS ENUM (
     'manual'
 );
 
-
---
--- Name: purchase_status; Type: TYPE; Schema: billing; Owner: -
---
-
 CREATE TYPE openrails.purchase_status AS ENUM (
     'pending',
     'completed',
     'failed',
     'refunded'
 );
-
-
---
--- Name: subscription_status; Type: TYPE; Schema: billing; Owner: -
---
 
 CREATE TYPE openrails.subscription_status AS ENUM (
     'pending',
@@ -79,11 +57,6 @@ CREATE TYPE openrails.subscription_status AS ENUM (
     'failed',
     'past_due'
 );
-
-
---
--- Name: subscriptions_set_tier_group(); Type: FUNCTION; Schema: billing; Owner: -
---
 
 CREATE FUNCTION openrails.subscriptions_set_tier_group() RETURNS trigger
     LANGUAGE plpgsql
@@ -96,216 +69,446 @@ BEGIN
 END;
 $$;
 
-
 SET default_tablespace = '';
-
 SET default_table_access_method = heap;
 
---
--- Name: admin_grants; Type: TABLE; Schema: billing; Owner: -
---
+-- =============================================================================
+-- tenants
+-- =============================================================================
 
-CREATE TABLE openrails.admin_grants (
+CREATE TABLE openrails.tenants (
     id uuid DEFAULT uuidv7() NOT NULL,
-    price_id uuid,
-    granted_by text NOT NULL,
-    reason text NOT NULL,
-    payment_id uuid,
-    duration_days integer,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL
-);
-
-ALTER TABLE ONLY openrails.admin_grants FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE admin_grants; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.admin_grants IS 'Records admin-initiated product grants (comps, contest winners, manual payments, partnerships)';
-
-
---
--- Name: COLUMN admin_grants.price_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.admin_grants.price_id IS 'Price/Product being granted - entitlements derived from Product.EntitlementsSpec';
-
-
---
--- Name: COLUMN admin_grants.granted_by; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.admin_grants.granted_by IS 'Admin user ID who made the grant';
-
-
---
--- Name: COLUMN admin_grants.reason; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.admin_grants.reason IS 'Reason for grant: comp, contest_winner, refund_compensation, partnership, manual_payment, etc.';
-
-
---
--- Name: COLUMN admin_grants.payment_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.admin_grants.payment_id IS 'Optional link to Payment record if money was received';
-
-
---
--- Name: COLUMN admin_grants.duration_days; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.admin_grants.duration_days IS 'Override entitlement duration (NULL=use Product spec, 0=indefinite, N=N days)';
-
-
---
--- Name: COLUMN admin_grants.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.admin_grants.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: COLUMN admin_grants.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.admin_grants.tenant_subject_id IS 'OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: budget_reservations; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.budget_reservations (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT budget_reservations_tenant_subject_id_not_null NOT NULL,
-    actor text CONSTRAINT budget_reservations_actor_not_null NOT NULL,
-    amount_micros bigint NOT NULL,
-    captured_micros bigint DEFAULT 0 NOT NULL,
+    slug text NOT NULL,
+    name text NOT NULL,
     status text DEFAULT 'active'::text NOT NULL,
-    source text NOT NULL,
-    source_id text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    expires_at timestamp with time zone,
-    CONSTRAINT budget_reservations_status_check CHECK ((status = ANY (ARRAY['active'::text, 'captured'::text, 'released'::text])))
-);
-
-ALTER TABLE ONLY openrails.budget_reservations FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE budget_reservations; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.budget_reservations IS 'Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor''s passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).';
-
-
---
--- Name: COLUMN budget_reservations.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.budget_reservations.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: COLUMN budget_reservations.actor; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.budget_reservations.actor IS 'Caller-supplied principal string whose rolling money-budget windows are capped. Opaque to OpenRails.';
-
-
---
--- Name: catalog_drift_events; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.catalog_drift_events (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    provider text NOT NULL,
-    kind text NOT NULL,
-    openrails_resource_type text NOT NULL,
-    openrails_resource_id text,
-    external_resource_id text,
-    field text,
-    openrails_value text,
-    external_value text,
-    detected_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    resolved_at timestamp with time zone,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    CONSTRAINT catalog_drift_events_kind_check CHECK ((kind = ANY (ARRAY['orphan_in_stripe'::text, 'missing_in_stripe'::text, 'orphan_in_nmi'::text, 'missing_in_nmi'::text, 'field_drift'::text]))),
-    CONSTRAINT catalog_drift_events_openrails_resource_type_check CHECK ((openrails_resource_type = ANY (ARRAY['product'::text, 'price'::text]))),
-    CONSTRAINT catalog_drift_events_provider_check CHECK ((provider = ANY (ARRAY['stripe'::text, 'nmi'::text])))
-);
-
-ALTER TABLE ONLY openrails.catalog_drift_events FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE catalog_drift_events; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.catalog_drift_events IS 'Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.';
-
-
---
--- Name: COLUMN catalog_drift_events.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.catalog_drift_events.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: checkout_sessions; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.checkout_sessions (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    price_id uuid NOT NULL,
-    mode text NOT NULL,
-    processor text NOT NULL,
-    status text NOT NULL,
-    amount bigint NOT NULL,
-    currency text DEFAULT 'usd'::text NOT NULL,
-    expires_at timestamp with time zone,
-    reference text,
-    transaction_id text,
-    payment_id uuid,
-    subscription_id uuid,
-    processor_fields jsonb,
-    processor_state jsonb,
-    metadata jsonb,
-    idempotency_key text,
+    authkit_tenant_id text,
+    authkit_tenant_slug text,
+    plan text,
+    region text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
-    CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text])))
+    suspended_at timestamp with time zone,
+    deleted_at timestamp with time zone,
+    billing_tier text,
+    stripe_account_id text,
+    webhook_host text,
+    webhook_path text,
+    provisioned_at timestamp with time zone,
+    CONSTRAINT tenants_pkey PRIMARY KEY (id),
+    CONSTRAINT uq_tenants_slug UNIQUE (slug),
+    CONSTRAINT tenants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text, 'deleted'::text])))
 );
 
-ALTER TABLE ONLY openrails.checkout_sessions FORCE ROW LEVEL SECURITY;
+CREATE UNIQUE INDEX uq_tenants_authkit_tenant_id ON openrails.tenants USING btree (authkit_tenant_id) WHERE (authkit_tenant_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_tenants_webhook_host ON openrails.tenants USING btree (lower(webhook_host)) WHERE (webhook_host IS NOT NULL);
 
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenants TO openrails_app;
 
---
--- Name: COLUMN checkout_sessions.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
+COMMENT ON TABLE openrails.tenants IS 'Tenant / billing-namespace directory. GLOBAL (control-plane) table, not tenant-scoped. Tenants are created explicitly; there is no default tenant.';
+COMMENT ON COLUMN openrails.tenants.slug IS 'Stable tenant slug used in tenant-scoped routes and resolution.';
+COMMENT ON COLUMN openrails.tenants.authkit_tenant_id IS 'OpenRails-owned AuthKit tenant id that operates this tenant (control plane). Nullable until org ownership is wired in #221/#222.';
+COMMENT ON COLUMN openrails.tenants.billing_tier IS 'The platform''s OWN billing tier for this tenant (eats own dogfood, issue #225). Distinct from plan (free-form hosting metadata).';
+COMMENT ON COLUMN openrails.tenants.webhook_host IS 'Optional host an ingress uses to route inbound webhooks to this tenant. OpenRails verifies the signature AFTER tenant resolution (router is not the trust boundary).';
 
-COMMENT ON COLUMN openrails.checkout_sessions.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
+-- =============================================================================
+-- tenant_subjects
+-- =============================================================================
 
+CREATE TABLE openrails.tenant_subjects (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    issuer text NOT NULL,
+    subject text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT tenant_subjects_pkey PRIMARY KEY (id),
+    CONSTRAINT uq_tenant_subjects_issuer_subject UNIQUE (tenant_id, issuer, subject),
+    CONSTRAINT tenant_subjects_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES openrails.tenants(id)
+);
 
---
--- Name: COLUMN checkout_sessions.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
+CREATE INDEX idx_tenant_subjects_tenant ON openrails.tenant_subjects USING btree (tenant_id);
 
-COMMENT ON COLUMN openrails.checkout_sessions.tenant_subject_id IS 'OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_subjects TO openrails_app;
 
+COMMENT ON TABLE openrails.tenant_subjects IS 'OpenRails payable identity. One row per OIDC-style subject under an OpenRails tenant; billing tables reference this row.';
+COMMENT ON COLUMN openrails.tenant_subjects.issuer IS 'OIDC issuer that asserted the subject.';
+COMMENT ON COLUMN openrails.tenant_subjects.subject IS 'OIDC subject asserted by issuer. May represent a human, company, tenant, service, or chained delegated principal.';
 
---
--- Name: credit_account_settings; Type: TABLE; Schema: billing; Owner: -
---
+-- =============================================================================
+-- tenant_delegated_issuers
+-- =============================================================================
+
+CREATE TABLE openrails.tenant_delegated_issuers (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    issuer text NOT NULL,
+    jwks_uri text NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    audiences text[] DEFAULT '{}'::text[] NOT NULL,
+    CONSTRAINT tenant_delegated_issuers_pkey PRIMARY KEY (id),
+    CONSTRAINT uq_tenant_delegated_issuers_issuer UNIQUE (issuer),
+    CONSTRAINT tenant_delegated_issuers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES openrails.tenants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_tenant_delegated_issuers_enabled ON openrails.tenant_delegated_issuers USING btree (enabled) WHERE enabled;
+CREATE INDEX idx_tenant_delegated_issuers_tenant ON openrails.tenant_delegated_issuers USING btree (tenant_id);
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_delegated_issuers TO openrails_app;
+
+COMMENT ON TABLE openrails.tenant_delegated_issuers IS 'Federated delegated-token issuer registry (issue #259). Maps a globally-unique token issuer (iss) to the OpenRails tenant it speaks for and the JWKS URL its public keys are fetched from. MANY issuers -> ONE tenant (multiple host apps = distinct keys, one tenant, shared users). GLOBAL control-plane table, not tenant-scoped.';
+COMMENT ON COLUMN openrails.tenant_delegated_issuers.issuer IS 'Token iss value. GLOBALLY UNIQUE -> maps to exactly one tenant (no cross-tenant forgery).';
+COMMENT ON COLUMN openrails.tenant_delegated_issuers.jwks_uri IS 'The ONLY URL OpenRails fetches this issuer''s keys from (allowlist; token-supplied URLs never honored).';
+COMMENT ON COLUMN openrails.tenant_delegated_issuers.enabled IS 'Per-issuer kill-switch. Only enabled rows are loaded into the live verifier; disabling evicts without affecting sibling issuers of the same tenant.';
+COMMENT ON COLUMN openrails.tenant_delegated_issuers.audiences IS 'Accepted OIDC JWT aud values for this tenant issuer.';
+
+-- =============================================================================
+-- tenant_deks
+-- =============================================================================
+
+CREATE TABLE openrails.tenant_deks (
+    tenant_id uuid NOT NULL,
+    wrapped_dek bytea NOT NULL,
+    key_version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT pk_tenant_deks PRIMARY KEY (tenant_id)
+);
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_deks TO openrails_app;
+
+COMMENT ON TABLE openrails.tenant_deks IS 'Wrapped per-tenant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = tenant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. GLOBAL control-plane table.';
+COMMENT ON COLUMN openrails.tenant_deks.wrapped_dek IS 'AES-256-GCM(master_key, tenant_dek): nonce(12) || ciphertext(32) || tag(16).';
+
+-- =============================================================================
+-- tenant_secrets
+-- =============================================================================
+
+CREATE TABLE openrails.tenant_secrets (
+    tenant_id uuid NOT NULL,
+    name text NOT NULL,
+    value text NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT pk_tenant_secrets PRIMARY KEY (tenant_id, name)
+);
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_secrets TO openrails_app;
+
+COMMENT ON TABLE openrails.tenant_secrets IS 'DB-backed per-tenant secret store (issue #225). Namespaced by (tenant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. GLOBAL control-plane table.';
+
+-- =============================================================================
+-- tenant_exports
+-- =============================================================================
+
+CREATE TABLE openrails.tenant_exports (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    status text DEFAULT 'completed'::text NOT NULL,
+    location text,
+    row_counts jsonb,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    completed_at timestamp with time zone,
+    CONSTRAINT tenant_exports_pkey PRIMARY KEY (id),
+    CONSTRAINT tenant_exports_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'completed'::text, 'failed'::text])))
+);
+
+CREATE INDEX idx_tenant_exports_tenant ON openrails.tenant_exports USING btree (tenant_id, created_at DESC);
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_exports TO openrails_app;
+
+COMMENT ON TABLE openrails.tenant_exports IS 'Tenant logical-export bookkeeping (issue #225). Tenant deletion is gated on a completed export row (export-before-delete).';
+
+-- =============================================================================
+-- tenant_credential_audit
+-- =============================================================================
+
+CREATE TABLE openrails.tenant_credential_audit (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    name text NOT NULL,
+    action text NOT NULL,
+    actor text,
+    detail text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT tenant_credential_audit_pkey PRIMARY KEY (id),
+    CONSTRAINT tenant_credential_audit_action_check CHECK ((action = ANY (ARRAY['put'::text, 'rotate'::text, 'delete'::text, 'test'::text])))
+);
+
+CREATE INDEX idx_tenant_credential_audit_tenant ON openrails.tenant_credential_audit USING btree (tenant_id, created_at DESC);
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_credential_audit TO openrails_app;
+
+COMMENT ON TABLE openrails.tenant_credential_audit IS 'Append-only audit log of per-tenant credential put/rotate/delete/test events (issue #225).';
+
+-- =============================================================================
+-- products
+-- =============================================================================
+
+CREATE TABLE openrails.products (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    slug text NOT NULL,
+    display_name text NOT NULL,
+    description text,
+    entitlements_spec jsonb,
+    credits_spec jsonb,
+    tier_group character varying(100),
+    tier_rank integer DEFAULT 0 NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    CONSTRAINT products_pkey PRIMARY KEY (id),
+    CONSTRAINT products_slug_key UNIQUE (slug),
+    CONSTRAINT products_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'archived'::text])))
+);
+
+ALTER TABLE ONLY openrails.products FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_products_slug ON openrails.products USING btree (slug);
+CREATE INDEX idx_products_status ON openrails.products USING btree (status);
+CREATE INDEX idx_products_tenant_id ON openrails.products USING btree (tenant_id);
+CREATE INDEX idx_products_tier_group ON openrails.products USING btree (tier_group) WHERE (tier_group IS NOT NULL);
+
+ALTER TABLE openrails.products ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.products USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.products TO openrails_app;
+
+COMMENT ON TABLE openrails.products IS 'Product definitions that can be purchased or subscribed to';
+COMMENT ON COLUMN openrails.products.credits_spec IS 'Bundled promo credits spec (amount, expiry, cadence) for subscriptions';
+COMMENT ON COLUMN openrails.products.tier_group IS 'Semantic group name for mutually-exclusive products (e.g., "premium"). Products in same group require upgrade/downgrade, not parallel ownership.';
+COMMENT ON COLUMN openrails.products.tier_rank IS 'Tier ranking within group. Higher = more premium. Used to determine upgrade (higher rank) vs downgrade (lower rank) direction.';
+
+-- =============================================================================
+-- prices
+-- =============================================================================
+
+CREATE TABLE openrails.prices (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    product_id uuid NOT NULL,
+    amount bigint NOT NULL,
+    currency text NOT NULL,
+    billing_cycle_days integer,
+    processors jsonb,
+    status text DEFAULT 'active'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    CONSTRAINT prices_pkey PRIMARY KEY (id),
+    CONSTRAINT unique_prices_product_amount_cycle UNIQUE (product_id, amount, currency, billing_cycle_days),
+    CONSTRAINT prices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'archived'::text]))),
+    CONSTRAINT prices_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id) ON DELETE RESTRICT
+);
+
+ALTER TABLE ONLY openrails.prices FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_prices_processors ON openrails.prices USING gin (processors);
+CREATE INDEX idx_prices_product_id ON openrails.prices USING btree (product_id);
+CREATE INDEX idx_prices_status ON openrails.prices USING btree (status);
+CREATE INDEX idx_prices_tenant_id ON openrails.prices USING btree (tenant_id);
+
+ALTER TABLE openrails.prices ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.prices USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.prices TO openrails_app;
+
+COMMENT ON TABLE openrails.prices IS 'Pricing tiers for products with processor-specific identifiers';
+
+-- =============================================================================
+-- entitlement_features
+-- =============================================================================
+
+CREATE TABLE openrails.entitlement_features (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    lookup_key text NOT NULL,
+    name text NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    metadata jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT entitlement_features_pkey PRIMARY KEY (id),
+    CONSTRAINT entitlement_features_tenant_lookup_key_key UNIQUE (tenant_id, lookup_key)
+);
+
+ALTER TABLE ONLY openrails.entitlement_features FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE openrails.entitlement_features ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.entitlement_features USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlement_features TO openrails_app;
+
+COMMENT ON TABLE openrails.entitlement_features IS 'Stripe-shaped first-class entitlement feature definitions (issue #245). lookup_key is the stable value carried in AuthKit JWT entitlements and host-app checks. The internal openrails.entitlements window ledger remains the source of truth for active access.';
+
+-- =============================================================================
+-- product_entitlement_features
+-- =============================================================================
+
+CREATE TABLE openrails.product_entitlement_features (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    product_id uuid NOT NULL,
+    entitlement_feature_id uuid NOT NULL,
+    duration_days integer,
+    metadata jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT product_entitlement_features_pkey PRIMARY KEY (id),
+    CONSTRAINT product_entitlement_features_unique UNIQUE (tenant_id, product_id, entitlement_feature_id),
+    CONSTRAINT product_entitlement_features_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id) ON DELETE CASCADE,
+    CONSTRAINT product_entitlement_features_entitlement_feature_id_fkey FOREIGN KEY (entitlement_feature_id) REFERENCES openrails.entitlement_features(id) ON DELETE CASCADE
+);
+
+ALTER TABLE ONLY openrails.product_entitlement_features FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_product_entitlement_features_feature ON openrails.product_entitlement_features USING btree (tenant_id, entitlement_feature_id);
+CREATE INDEX idx_product_entitlement_features_product ON openrails.product_entitlement_features USING btree (tenant_id, product_id);
+
+ALTER TABLE openrails.product_entitlement_features ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.product_entitlement_features USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_entitlement_features TO openrails_app;
+
+COMMENT ON TABLE openrails.product_entitlement_features IS 'Stripe-shaped product_feature attachments (issue #245): which entitlement features a product grants when purchased. duration_days null = indefinite.';
+
+-- =============================================================================
+-- credit_types
+-- =============================================================================
+
+CREATE TABLE openrails.credit_types (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    name text NOT NULL,
+    display_name text NOT NULL,
+    unit text DEFAULT 'usd'::text NOT NULL,
+    decimal_places integer DEFAULT 2 NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    CONSTRAINT credit_types_pkey PRIMARY KEY (id),
+    CONSTRAINT credit_types_tenant_name_key UNIQUE (tenant_id, name)
+);
+
+ALTER TABLE ONLY openrails.credit_types FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_credit_types_tenant_id ON openrails.credit_types USING btree (tenant_id);
+
+ALTER TABLE openrails.credit_types ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.credit_types USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_types TO openrails_app;
+
+-- =============================================================================
+-- credit_transactions
+-- =============================================================================
+
+CREATE TABLE openrails.credit_transactions (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    actor text CONSTRAINT credit_transactions_actor_not_null NOT NULL,
+    resource text,
+    metadata jsonb,
+    credit_type_id uuid NOT NULL,
+    amount bigint NOT NULL,
+    balance_after bigint,
+    transaction_type text NOT NULL,
+    source text NOT NULL,
+    source_id text,
+    expires_at timestamp with time zone,
+    description text,
+    status text DEFAULT 'posted'::text NOT NULL,
+    authorized_amount bigint,
+    captured_amount bigint,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT credit_transactions_tenant_subject_id_not_null NOT NULL,
+    CONSTRAINT credit_transactions_pkey PRIMARY KEY (id),
+    CONSTRAINT credit_transactions_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id),
+    CONSTRAINT credit_transactions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.credit_transactions FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_credit_holds_active_expires ON openrails.credit_transactions USING btree (expires_at) WHERE ((transaction_type = 'hold'::text) AND (status = 'active'::text));
+CREATE INDEX idx_credit_transactions_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, created_at DESC);
+CREATE INDEX idx_credit_transactions_payer_actor ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, actor, created_at DESC);
+CREATE INDEX idx_credit_transactions_tenant_id ON openrails.credit_transactions USING btree (tenant_id);
+CREATE UNIQUE INDEX uniq_credit_deposit_idem_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, source, source_id) WHERE ((transaction_type = 'deposit'::text) AND (source_id IS NOT NULL));
+CREATE UNIQUE INDEX uniq_credit_hold_idem_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, source, source_id) WHERE (transaction_type = 'hold'::text);
+CREATE UNIQUE INDEX uniq_credit_withdrawal_idem_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, source, source_id) WHERE ((transaction_type = 'withdrawal'::text) AND (source_id IS NOT NULL));
+
+ALTER TABLE openrails.credit_transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.credit_transactions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_transactions TO openrails_app;
+
+COMMENT ON COLUMN openrails.credit_transactions.metadata IS 'Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.';
+COMMENT ON COLUMN openrails.credit_transactions.actor IS 'Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.';
+COMMENT ON COLUMN openrails.credit_transactions.resource IS 'Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.';
+
+-- =============================================================================
+-- credit_blocks
+-- =============================================================================
+
+CREATE TABLE openrails.credit_blocks (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    credit_type_id uuid NOT NULL,
+    original_amount bigint NOT NULL,
+    remaining_amount bigint NOT NULL,
+    expires_at timestamp with time zone,
+    source_transaction_id uuid,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT credit_blocks_tenant_subject_id_not_null NOT NULL,
+    CONSTRAINT credit_blocks_pkey PRIMARY KEY (id),
+    CONSTRAINT credit_blocks_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id),
+    CONSTRAINT credit_blocks_source_transaction_id_fkey FOREIGN KEY (source_transaction_id) REFERENCES openrails.credit_transactions(id),
+    CONSTRAINT credit_blocks_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.credit_blocks FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_credit_blocks_payer ON openrails.credit_blocks USING btree (tenant_id, tenant_subject_id, credit_type_id, expires_at);
+CREATE INDEX idx_credit_blocks_tenant_id ON openrails.credit_blocks USING btree (tenant_id);
+
+ALTER TABLE openrails.credit_blocks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.credit_blocks USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_blocks TO openrails_app;
+
+-- =============================================================================
+-- credit_balances
+-- =============================================================================
+
+CREATE TABLE openrails.credit_balances (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    credit_type_id uuid NOT NULL,
+    balance bigint DEFAULT 0 NOT NULL,
+    held_balance bigint DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT credit_balances_tenant_subject_id_not_null NOT NULL,
+    CONSTRAINT credit_balances_pkey PRIMARY KEY (id),
+    CONSTRAINT credit_balances_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id),
+    CONSTRAINT credit_balances_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.credit_balances FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_credit_balances_tenant_id ON openrails.credit_balances USING btree (tenant_id);
+CREATE UNIQUE INDEX uq_credit_balances_payer_type ON openrails.credit_balances USING btree (tenant_id, tenant_subject_id, credit_type_id);
+
+ALTER TABLE openrails.credit_balances ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.credit_balances USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_balances TO openrails_app;
+
+-- =============================================================================
+-- credit_account_settings
+-- =============================================================================
 
 CREATE TABLE openrails.credit_account_settings (
     id uuid NOT NULL,
@@ -333,78 +536,30 @@ CREATE TABLE openrails.credit_account_settings (
     suspended_at timestamp with time zone,
     suspend_reason text,
     tier text,
+    CONSTRAINT credit_account_settings_pkey PRIMARY KEY (id),
     CONSTRAINT credit_account_settings_alert_pct_chk CHECK (((alert_threshold_pct >= 0) AND (alert_threshold_pct <= 100))),
     CONSTRAINT credit_account_settings_billing_mode_chk CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text]))),
-    CONSTRAINT credit_account_settings_owed_nonneg_chk CHECK ((outstanding_owed_micros >= 0))
+    CONSTRAINT credit_account_settings_owed_nonneg_chk CHECK ((outstanding_owed_micros >= 0)),
+    CONSTRAINT credit_account_settings_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id) ON DELETE CASCADE,
+    CONSTRAINT credit_account_settings_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.credit_account_settings FORCE ROW LEVEL SECURITY;
 
+CREATE UNIQUE INDEX uq_credit_account_settings_payer_type ON openrails.credit_account_settings USING btree (tenant_id, tenant_subject_id, credit_type_id);
 
---
--- Name: TABLE credit_account_settings; Type: COMMENT; Schema: billing; Owner: -
---
+ALTER TABLE openrails.credit_account_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.credit_account_settings USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_account_settings TO openrails_app;
 
 COMMENT ON TABLE openrails.credit_account_settings IS 'Per-(tenant, tenant subject, credit_type) spend policy + money-in config (issue #237). Tensorhub SETS these; OpenRails STORES + ENFORCES them.';
-
-
---
--- Name: COLUMN credit_account_settings.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_account_settings.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: COLUMN credit_account_settings.verified_payment_method; Type: COMMENT; Schema: billing; Owner: -
---
-
 COMMENT ON COLUMN openrails.credit_account_settings.verified_payment_method IS 'True once the account has a verified payment method (set after a successful $1 auth-and-void verification charge — issue #299). The charge itself is a separate slice.';
-
-
---
--- Name: COLUMN credit_account_settings.suspended_at; Type: COMMENT; Schema: billing; Owner: -
---
-
 COMMENT ON COLUMN openrails.credit_account_settings.suspended_at IS 'When set, the account is suspended (issue #299). Admission-deny-on-suspended wiring is a separate slice.';
 
-
---
--- Name: credit_blocks; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.credit_blocks (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    credit_type_id uuid NOT NULL,
-    original_amount bigint NOT NULL,
-    remaining_amount bigint NOT NULL,
-    expires_at timestamp with time zone,
-    source_transaction_id uuid,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT credit_blocks_tenant_subject_id_not_null NOT NULL
-);
-
-ALTER TABLE ONLY openrails.credit_blocks FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN credit_blocks.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_blocks.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: COLUMN credit_blocks.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_blocks.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: credit_spend_limits; Type: TABLE; Schema: billing; Owner: -
---
+-- =============================================================================
+-- credit_spend_limits
+-- =============================================================================
 
 CREATE TABLE openrails.credit_spend_limits (
     id uuid NOT NULL,
@@ -415,361 +570,65 @@ CREATE TABLE openrails.credit_spend_limits (
     max_spend_per_day_micros bigint,
     max_spend_per_month_micros bigint,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT credit_spend_limits_pkey PRIMARY KEY (id),
+    CONSTRAINT credit_spend_limits_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id) ON DELETE CASCADE,
+    CONSTRAINT credit_spend_limits_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.credit_spend_limits FORCE ROW LEVEL SECURITY;
 
+CREATE UNIQUE INDEX uq_credit_spend_limits_payer_actor ON openrails.credit_spend_limits USING btree (tenant_id, tenant_subject_id, credit_type_id, actor);
 
---
--- Name: TABLE credit_spend_limits; Type: COMMENT; Schema: billing; Owner: -
---
+ALTER TABLE openrails.credit_spend_limits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.credit_spend_limits USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_spend_limits TO openrails_app;
 
 COMMENT ON TABLE openrails.credit_spend_limits IS 'Optional per-actor spend caps for a tenant subject (issue #237/#246). actor is a caller-supplied opaque principal string.';
-
-
---
--- Name: COLUMN credit_spend_limits.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_spend_limits.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: COLUMN credit_spend_limits.actor; Type: COMMENT; Schema: billing; Owner: -
---
-
 COMMENT ON COLUMN openrails.credit_spend_limits.actor IS 'Caller-supplied principal string whose spend is capped by this row. Opaque to OpenRails.';
 
+-- =============================================================================
+-- credit_windows
+-- =============================================================================
 
---
--- Name: credit_transactions; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.credit_transactions (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    actor text CONSTRAINT credit_transactions_actor_not_null NOT NULL,
-    resource text,
-    metadata jsonb,
-    credit_type_id uuid NOT NULL,
-    amount bigint NOT NULL,
-    balance_after bigint,
-    transaction_type text NOT NULL,
-    source text NOT NULL,
-    source_id text,
-    expires_at timestamp with time zone,
-    description text,
-    status text DEFAULT 'posted'::text NOT NULL,
-    authorized_amount bigint,
-    captured_amount bigint,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT credit_transactions_tenant_subject_id_not_null NOT NULL
-);
-
-ALTER TABLE ONLY openrails.credit_transactions FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN credit_transactions.metadata; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_transactions.metadata IS 'Optional caller-supplied long-tail attribution. Opaque to OpenRails; joins use source/source_id, never these.';
-
-
---
--- Name: COLUMN credit_transactions.actor; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_transactions.actor IS 'Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.';
-
-
---
--- Name: COLUMN credit_transactions.resource; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_transactions.resource IS 'Caller-supplied free-form string for what the charge was for (charge-A was for resource-B). Opaque to OpenRails; nullable.';
-
-
---
--- Name: COLUMN credit_transactions.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_transactions.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: COLUMN credit_transactions.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_transactions.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: credit_types; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.credit_types (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    name text NOT NULL,
-    display_name text NOT NULL,
-    unit text DEFAULT 'usd'::text NOT NULL,
-    decimal_places integer DEFAULT 2 NOT NULL,
-    is_active boolean DEFAULT true NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL
-);
-
-ALTER TABLE ONLY openrails.credit_types FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN credit_types.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_types.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: entitlement_features; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.entitlement_features (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    lookup_key text NOT NULL,
-    name text NOT NULL,
-    active boolean DEFAULT true NOT NULL,
-    metadata jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-ALTER TABLE ONLY openrails.entitlement_features FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE entitlement_features; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.entitlement_features IS 'Stripe-shaped first-class entitlement feature definitions (issue #245). lookup_key is the stable value carried in AuthKit JWT entitlements and host-app checks. The internal openrails.entitlements window ledger remains the source of truth for active access.';
-
-
---
--- Name: entitlements; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.entitlements (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    entitlement text NOT NULL,
-    start_at timestamp with time zone NOT NULL,
-    end_at timestamp with time zone,
-    source_id uuid NOT NULL,
-    source_type text NOT NULL,
-    revoked_at timestamp with time zone,
-    revoke_reason text,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    deleted_at timestamp with time zone,
-    period tstzrange GENERATED ALWAYS AS (tstzrange(start_at, COALESCE(end_at, 'infinity'::timestamp with time zone), '[)'::text)) STORED,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
-    CONSTRAINT chk_entitlements_source_type CHECK ((source_type = ANY (ARRAY['subscription'::text, 'one_off'::text, 'admin'::text, 'grace'::text]))),
-    CONSTRAINT chk_revoke_fields_together CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
-    CONSTRAINT chk_valid_time_window CHECK (((end_at IS NULL) OR (start_at < end_at)))
-);
-
-ALTER TABLE ONLY openrails.entitlements FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN entitlements.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.entitlements.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: COLUMN entitlements.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.entitlements.tenant_subject_id IS 'OpenRails payable tenant subject for this entitlement window.';
-
-
---
--- Name: invoices; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.invoices (
+CREATE TABLE openrails.credit_windows (
     id uuid DEFAULT uuidv7() NOT NULL,
     tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT invoices_tenant_subject_id_not_null NOT NULL,
+    tenant_subject_id uuid CONSTRAINT credit_windows_tenant_subject_id_not_null NOT NULL,
     credit_type_id uuid NOT NULL,
-    currency text DEFAULT ''::text NOT NULL,
-    period_from timestamp with time zone NOT NULL,
-    period_to timestamp with time zone NOT NULL,
-    usage_total bigint DEFAULT 0 NOT NULL,
-    deposits_total bigint DEFAULT 0 NOT NULL,
-    owed_accrued bigint DEFAULT 0 NOT NULL,
-    owed_paid bigint DEFAULT 0 NOT NULL,
-    closing_balance bigint DEFAULT 0 NOT NULL,
-    line_items jsonb DEFAULT '[]'::jsonb NOT NULL,
-    money_movements jsonb DEFAULT '{}'::jsonb NOT NULL,
-    status text DEFAULT 'draft'::text NOT NULL,
-    finalized_at timestamp with time zone,
+    held_amount bigint NOT NULL,
+    settled_amount bigint DEFAULT 0 NOT NULL,
+    status text DEFAULT 'open'::text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'finalized'::text, 'voided'::text])))
+    CONSTRAINT credit_windows_pkey PRIMARY KEY (id),
+    CONSTRAINT credit_windows_status_chk CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text, 'expired'::text]))),
+    CONSTRAINT credit_windows_held_nonneg_chk CHECK ((held_amount >= 0)),
+    CONSTRAINT credit_windows_settled_within_held_chk CHECK (((settled_amount >= 0) AND (settled_amount <= held_amount))),
+    CONSTRAINT credit_windows_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id),
+    CONSTRAINT credit_windows_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id)
 );
 
-ALTER TABLE ONLY openrails.invoices FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.credit_windows FORCE ROW LEVEL SECURITY;
 
+CREATE INDEX idx_credit_windows_subject_status ON openrails.credit_windows USING btree (tenant_subject_id, status);
+CREATE INDEX idx_credit_windows_open_expires ON openrails.credit_windows USING btree (expires_at) WHERE (status = 'open'::text);
+CREATE INDEX idx_credit_windows_tenant_id ON openrails.credit_windows USING btree (tenant_id);
 
---
--- Name: TABLE invoices; Type: COMMENT; Schema: billing; Owner: -
---
+ALTER TABLE openrails.credit_windows ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.credit_windows USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 
-COMMENT ON TABLE openrails.invoices IS 'Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the credit ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.';
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_windows TO openrails_app;
 
+COMMENT ON TABLE openrails.credit_windows IS 'Prepaid credit windows (issue #335): one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry.';
+COMMENT ON COLUMN openrails.credit_windows.held_amount IS 'Total reserved for this window (open + refills). Reflected in credit_balances.held_balance while status=open.';
+COMMENT ON COLUMN openrails.credit_windows.settled_amount IS 'Sum of settled actuals. Server enforces settled_amount <= held_amount; the unsettled remainder releases at close/expiry.';
 
---
--- Name: COLUMN invoices.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.invoices.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: linked_wallets; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.linked_wallets (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
-    chain text NOT NULL,
-    address text NOT NULL,
-    verification_provider text NOT NULL,
-    verified_at timestamp with time zone NOT NULL,
-    display_name text,
-    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT linked_wallets_chain_address_nonempty CHECK (((btrim(chain) <> ''::text) AND (btrim(address) <> ''::text)))
-);
-
-
---
--- Name: TABLE linked_wallets; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.linked_wallets IS 'Verified user wallet links for browser self-service billing identity. The wallet must come from trusted delegated-token claims, not request body input.';
-
-
---
--- Name: manual_rebill_attempts; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.manual_rebill_attempts (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    subscription_id uuid NOT NULL,
-    period_end timestamp with time zone NOT NULL,
-    processor text NOT NULL,
-    order_reference text NOT NULL,
-    status text NOT NULL,
-    transaction_id text,
-    failure_reason text,
-    claimed_until timestamp with time zone,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    CONSTRAINT manual_rebill_attempts_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'succeeded'::text, 'failed'::text, 'unknown'::text])))
-);
-
-ALTER TABLE ONLY openrails.manual_rebill_attempts FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN manual_rebill_attempts.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.manual_rebill_attempts.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: notification_queue; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.notification_queue (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    event_type text NOT NULL,
-    data jsonb NOT NULL,
-    seen boolean DEFAULT false NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL
-);
-
-ALTER TABLE ONLY openrails.notification_queue FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE notification_queue; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.notification_queue IS 'Queue for user notifications related to billing and subscriptions';
-
-
---
--- Name: COLUMN notification_queue.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.notification_queue.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: COLUMN notification_queue.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.notification_queue.tenant_subject_id IS 'OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: payment_blocklist; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.payment_blocklist (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid,
-    kind text NOT NULL,
-    value text NOT NULL,
-    reason text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT payment_blocklist_kind_check CHECK ((kind = ANY (ARRAY['card_fingerprint'::text, 'processor_customer'::text, 'email'::text, 'ip'::text])))
-);
-
-ALTER TABLE ONLY openrails.payment_blocklist FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE payment_blocklist; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.payment_blocklist IS 'Tenant-scoped blocklist of known-bad payment identifiers (issue #300). tenant_subject_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.';
-
-
---
--- Name: COLUMN payment_blocklist.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.payment_blocklist.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: payment_methods; Type: TABLE; Schema: billing; Owner: -
---
+-- =============================================================================
+-- payment_methods
+-- =============================================================================
 
 CREATE TABLE openrails.payment_methods (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -784,374 +643,33 @@ CREATE TABLE openrails.payment_methods (
     metadata jsonb,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid NOT NULL,
+    CONSTRAINT payment_methods_pkey PRIMARY KEY (id),
+    CONSTRAINT payment_methods_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.payment_methods FORCE ROW LEVEL SECURITY;
 
+CREATE INDEX idx_payment_methods_processor ON openrails.payment_methods USING btree (processor);
+CREATE INDEX idx_payment_methods_tenant_id ON openrails.payment_methods USING btree (tenant_id);
+CREATE INDEX idx_payment_methods_tenant_subject ON openrails.payment_methods USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+CREATE INDEX idx_payment_methods_vault_id ON openrails.payment_methods USING btree (vault_id);
+CREATE UNIQUE INDEX uq_payment_methods_tenant_processor_vault ON openrails.payment_methods USING btree (tenant_id, processor, vault_id);
+CREATE UNIQUE INDEX uq_payment_methods_tenant_subject_vault ON openrails.payment_methods USING btree (tenant_id, tenant_subject_id, vault_id);
 
---
--- Name: TABLE payment_methods; Type: COMMENT; Schema: billing; Owner: -
---
+ALTER TABLE openrails.payment_methods ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.payment_methods USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payment_methods TO openrails_app;
 
 COMMENT ON TABLE openrails.payment_methods IS 'Generalized payment method table supporting multiple processors.';
-
-
---
--- Name: COLUMN payment_methods.processor; Type: COMMENT; Schema: billing; Owner: -
---
-
 COMMENT ON COLUMN openrails.payment_methods.processor IS 'Payment processor type: nmi, ccbill, stripe, etc.';
-
-
---
--- Name: COLUMN payment_methods.vault_id; Type: COMMENT; Schema: billing; Owner: -
---
-
 COMMENT ON COLUMN openrails.payment_methods.vault_id IS 'Primary payment method identifier in the processor system';
 
-
---
--- Name: COLUMN payment_methods.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.payment_methods.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: COLUMN payment_methods.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.payment_methods.tenant_subject_id IS 'OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: payments; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.payments (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    price_id uuid NOT NULL,
-    processor openrails.processor_type NOT NULL,
-    transaction_id text NOT NULL,
-    amount bigint NOT NULL,
-    list_amount bigint NOT NULL,
-    currency text DEFAULT 'usd'::text NOT NULL,
-    status openrails.purchase_status DEFAULT 'completed'::openrails.purchase_status NOT NULL,
-    subscription_id uuid,
-    refunded_payment_id uuid,
-    discount_code text,
-    discount_reason text,
-    discount_metadata jsonb,
-    entitlements_spec_snapshot jsonb,
-    credits_spec_snapshot jsonb,
-    metadata jsonb,
-    purchased_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    card_brand text,
-    card_last4 text,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL,
-    CONSTRAINT chk_payment_not_future CHECK ((purchased_at <= (now() + '00:05:00'::interval)))
-);
-
-ALTER TABLE ONLY openrails.payments FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE payments; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.payments IS 'Records of all payment transactions (formerly purchases table)';
-
-
---
--- Name: COLUMN payments.subscription_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.payments.subscription_id IS 'Links a payment to the subscription that generated it (nullable for one-off payments)';
-
-
---
--- Name: COLUMN payments.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.payments.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: COLUMN payments.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.payments.tenant_subject_id IS 'OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: platform_audit; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.platform_audit (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    actor_user_id text NOT NULL,
-    actor_tenant text,
-    action text NOT NULL,
-    target_tenant_id uuid,
-    reason text,
-    before_state jsonb,
-    after_state jsonb,
-    detail jsonb,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-
---
--- Name: TABLE platform_audit; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.platform_audit IS 'Append-only cross-tenant platform superadmin audit log (issue #226). Records actor, target tenant, action, reason, and before/after state. CROSS-TENANT control-plane state: NOT purged by tenant delete.';
-
-
---
--- Name: platform_break_glass; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.platform_break_glass (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    actor_user_id text NOT NULL,
-    target_tenant_id uuid,
-    justification text NOT NULL,
-    granted_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    expires_at timestamp with time zone NOT NULL,
-    revoked_at timestamp with time zone,
-    CONSTRAINT chk_break_glass_justified CHECK ((length(btrim(justification)) > 0)),
-    CONSTRAINT chk_break_glass_window CHECK ((expires_at > granted_at))
-);
-
-
---
--- Name: TABLE platform_break_glass; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.platform_break_glass IS 'Time-boxed break-glass elevation grants (issue #226). Each grant carries a written justification and an expiry, and is mirrored into platform_audit. CROSS-TENANT control-plane state.';
-
-
---
--- Name: prices; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.prices (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    product_id uuid NOT NULL,
-    amount bigint NOT NULL,
-    currency text NOT NULL,
-    billing_cycle_days integer,
-    processors jsonb,
-    status text DEFAULT 'active'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    CONSTRAINT prices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'archived'::text])))
-);
-
-ALTER TABLE ONLY openrails.prices FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE prices; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.prices IS 'Pricing tiers for products with processor-specific identifiers';
-
-
---
--- Name: COLUMN prices.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.prices.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: processor_customers; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.processor_customers (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    processor text NOT NULL,
-    customer_id text NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid NOT NULL
-);
-
-ALTER TABLE ONLY openrails.processor_customers FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN processor_customers.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.processor_customers.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: COLUMN processor_customers.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.processor_customers.tenant_subject_id IS 'OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: product_access_grants; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.product_access_grants (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    product_id uuid NOT NULL,
-    source_type text NOT NULL,
-    source_id text DEFAULT ''::text NOT NULL,
-    payment_id uuid,
-    status text DEFAULT 'active'::text NOT NULL,
-    starts_at timestamp with time zone DEFAULT now() NOT NULL,
-    ends_at timestamp with time zone,
-    revoked_at timestamp with time zone,
-    revoke_reason text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    tenant_subject_id uuid NOT NULL,
-    CONSTRAINT product_access_grants_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text]))),
-    CONSTRAINT product_access_grants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'revoked'::text])))
-);
-
-ALTER TABLE ONLY openrails.product_access_grants FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE product_access_grants; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.product_access_grants IS 'Durable, application-facing product ownership/access (issue #250). Distinct from feature entitlements: answers "does this user own product X?" / "list products this user can access". A successful one-time purchase creates a grant; refunds/chargebacks/admin revocation revoke it.';
-
-
---
--- Name: COLUMN product_access_grants.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.product_access_grants.tenant_subject_id IS 'OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: product_entitlement_features; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.product_entitlement_features (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    product_id uuid NOT NULL,
-    entitlement_feature_id uuid NOT NULL,
-    duration_days integer,
-    metadata jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-ALTER TABLE ONLY openrails.product_entitlement_features FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE product_entitlement_features; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.product_entitlement_features IS 'Stripe-shaped product_feature attachments (issue #245): which entitlement features a product grants when purchased. duration_days null = indefinite.';
-
-
---
--- Name: products; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.products (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    slug text NOT NULL,
-    display_name text NOT NULL,
-    description text,
-    entitlements_spec jsonb,
-    credits_spec jsonb,
-    tier_group character varying(100),
-    tier_rank integer DEFAULT 0 NOT NULL,
-    status text DEFAULT 'active'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    CONSTRAINT products_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'archived'::text])))
-);
-
-ALTER TABLE ONLY openrails.products FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE products; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.products IS 'Product definitions that can be purchased or subscribed to';
-
-
---
--- Name: COLUMN products.credits_spec; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.products.credits_spec IS 'Bundled promo credits spec (amount, expiry, cadence) for subscriptions';
-
-
---
--- Name: COLUMN products.tier_group; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.products.tier_group IS 'Semantic group name for mutually-exclusive products (e.g., "premium"). Products in same group require upgrade/downgrade, not parallel ownership.';
-
-
---
--- Name: COLUMN products.tier_rank; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.products.tier_rank IS 'Tier ranking within group. Higher = more premium. Used to determine upgrade (higher rank) vs downgrade (lower rank) direction.';
-
-
---
--- Name: COLUMN products.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.products.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: solana_subscriptions; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.solana_subscriptions (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    subscription_id uuid NOT NULL,
-    subscriber_wallet text NOT NULL,
-    authority_pda text NOT NULL,
-    subscription_pda text NOT NULL,
-    plan_pda text NOT NULL,
-    merchant_address text NOT NULL,
-    mint text NOT NULL,
-    plan_created_at_fingerprint bigint NOT NULL,
-    last_pulled_period_start timestamp with time zone,
-    last_signature text,
-    next_pull_at timestamp with time zone NOT NULL,
-    status text DEFAULT 'active'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: subscriptions; Type: TABLE; Schema: billing; Owner: -
---
+-- =============================================================================
+-- subscriptions
+-- =============================================================================
 
 CREATE TABLE openrails.subscriptions (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1181,395 +699,158 @@ CREATE TABLE openrails.subscriptions (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     tier_group character varying(100),
     deletion_scheduled_at timestamp with time zone,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
+    tenant_id uuid NOT NULL,
     tenant_subject_id uuid NOT NULL,
+    CONSTRAINT subscriptions_pkey PRIMARY KEY (id),
     CONSTRAINT chk_cancelled_has_timestamp CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancelled_at IS NOT NULL))),
     CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancel_type IS NOT NULL))),
     CONSTRAINT chk_cancelled_no_retry_schedule CHECK (((status <> 'cancelled'::openrails.subscription_status) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
     CONSTRAINT chk_ended_not_before_cancelled CHECK (((ended_at IS NULL) OR (cancelled_at IS NULL) OR (ended_at >= cancelled_at))),
     CONSTRAINT chk_past_due_has_period_end CHECK (((status <> 'past_due'::openrails.subscription_status) OR (current_period_ends_at IS NOT NULL))),
-    CONSTRAINT chk_valid_period CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at)))
+    CONSTRAINT chk_valid_period CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at))),
+    CONSTRAINT subscriptions_payment_method_id_fkey FOREIGN KEY (payment_method_id) REFERENCES openrails.payment_methods(id) ON DELETE SET NULL,
+    CONSTRAINT subscriptions_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id),
+    CONSTRAINT subscriptions_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id),
+    CONSTRAINT subscriptions_scheduled_price_id_fkey FOREIGN KEY (scheduled_price_id) REFERENCES openrails.prices(id),
+    CONSTRAINT subscriptions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
 );
 
 ALTER TABLE ONLY openrails.subscriptions FORCE ROW LEVEL SECURITY;
 
+CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF product_id ON openrails.subscriptions FOR EACH ROW EXECUTE FUNCTION openrails.subscriptions_set_tier_group();
 
---
--- Name: TABLE subscriptions; Type: COMMENT; Schema: billing; Owner: -
---
+CREATE INDEX idx_subscriptions_due_dunning ON openrails.subscriptions USING btree (next_retry_at, processor) WHERE ((status = 'past_due'::openrails.subscription_status) AND (next_retry_at IS NOT NULL));
+CREATE INDEX idx_subscriptions_grace_ends_at ON openrails.subscriptions USING btree (grace_ends_at) WHERE (grace_ends_at IS NOT NULL);
+CREATE INDEX idx_subscriptions_next_retry_at ON openrails.subscriptions USING btree (next_retry_at) WHERE (next_retry_at IS NOT NULL);
+CREATE INDEX idx_subscriptions_payment_method_id ON openrails.subscriptions USING btree (payment_method_id);
+CREATE INDEX idx_subscriptions_price_id ON openrails.subscriptions USING btree (price_id);
+CREATE INDEX idx_subscriptions_processor ON openrails.subscriptions USING btree (processor);
+CREATE INDEX idx_subscriptions_processor_subscription ON openrails.subscriptions USING btree (processor, processor_subscription_id);
+CREATE INDEX idx_subscriptions_product_id ON openrails.subscriptions USING btree (product_id);
+CREATE INDEX idx_subscriptions_status ON openrails.subscriptions USING btree (status);
+CREATE INDEX idx_subscriptions_tenant_id ON openrails.subscriptions USING btree (tenant_id);
+CREATE INDEX idx_subscriptions_tenant_subject ON openrails.subscriptions USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_subscriptions_tenant_processor_subscription_id ON openrails.subscriptions USING btree (tenant_id, processor, processor_subscription_id) WHERE (processor_subscription_id <> ''::text);
+CREATE UNIQUE INDEX uq_subscriptions_tenant_subject_product_lifecycle ON openrails.subscriptions USING btree (tenant_id, tenant_subject_id, product_id) WHERE (status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status, 'past_due'::openrails.subscription_status]));
+CREATE UNIQUE INDEX uq_subscriptions_tenant_subject_tier_group_active ON openrails.subscriptions USING btree (tenant_subject_id, tier_group) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status])) AND (tier_group IS NOT NULL));
+
+ALTER TABLE openrails.subscriptions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.subscriptions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.subscriptions TO openrails_app;
 
 COMMENT ON TABLE openrails.subscriptions IS 'Core subscription records tracking user billing relationships';
-
-
---
--- Name: COLUMN subscriptions.product_id; Type: COMMENT; Schema: billing; Owner: -
---
-
 COMMENT ON COLUMN openrails.subscriptions.product_id IS 'Denormalized product ID for efficient user+product lookups without joining prices';
-
-
---
--- Name: COLUMN subscriptions.scheduled_price_id; Type: COMMENT; Schema: billing; Owner: -
---
-
 COMMENT ON COLUMN openrails.subscriptions.scheduled_price_id IS 'Price ID for scheduled tier change (downgrade). Applied at end of current billing period during renewal.';
-
-
---
--- Name: COLUMN subscriptions.tier_group; Type: COMMENT; Schema: billing; Owner: -
---
-
 COMMENT ON COLUMN openrails.subscriptions.tier_group IS 'Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_user_tier_group_active, which enforces one active/pending subscription per (user, tier group).';
 
+-- =============================================================================
+-- payments
+-- =============================================================================
 
---
--- Name: COLUMN subscriptions.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.subscriptions.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: COLUMN subscriptions.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.subscriptions.tenant_subject_id IS 'OpenRails payable tenant subject for this row (#317). Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: tenant_credential_audit; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.tenant_credential_audit (
+CREATE TABLE openrails.payments (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    name text NOT NULL,
-    action text NOT NULL,
-    actor text,
-    detail text,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT tenant_credential_audit_action_check CHECK ((action = ANY (ARRAY['put'::text, 'rotate'::text, 'delete'::text, 'test'::text])))
-);
-
-
---
--- Name: TABLE tenant_credential_audit; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.tenant_credential_audit IS 'Append-only audit log of per-tenant credential put/rotate/delete/test events (issue #225).';
-
-
---
--- Name: tenant_deks; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.tenant_deks (
-    tenant_id uuid NOT NULL,
-    wrapped_dek bytea NOT NULL,
-    key_version integer DEFAULT 1 NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-
---
--- Name: TABLE tenant_deks; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.tenant_deks IS 'Wrapped per-tenant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = tenant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. GLOBAL control-plane table.';
-
-
---
--- Name: COLUMN tenant_deks.wrapped_dek; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenant_deks.wrapped_dek IS 'AES-256-GCM(master_key, tenant_dek): nonce(12) || ciphertext(32) || tag(16).';
-
-
---
--- Name: tenant_delegated_issuers; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.tenant_delegated_issuers (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    issuer text NOT NULL,
-    jwks_uri text NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    audiences text[] DEFAULT '{}'::text[] NOT NULL
-);
-
-
---
--- Name: TABLE tenant_delegated_issuers; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.tenant_delegated_issuers IS 'Federated delegated-token issuer registry (issue #259). Maps a globally-unique token issuer (iss) to the OpenRails tenant it speaks for and the JWKS URL its public keys are fetched from. MANY issuers -> ONE tenant (multiple host apps = distinct keys, one tenant, shared users). GLOBAL control-plane table, not tenant-scoped.';
-
-
---
--- Name: COLUMN tenant_delegated_issuers.issuer; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenant_delegated_issuers.issuer IS 'Token iss value. GLOBALLY UNIQUE -> maps to exactly one tenant (no cross-tenant forgery).';
-
-
---
--- Name: COLUMN tenant_delegated_issuers.jwks_uri; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenant_delegated_issuers.jwks_uri IS 'The ONLY URL OpenRails fetches this issuer''s keys from (allowlist; token-supplied URLs never honored).';
-
-
---
--- Name: COLUMN tenant_delegated_issuers.enabled; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenant_delegated_issuers.enabled IS 'Per-issuer kill-switch. Only enabled rows are loaded into the live verifier; disabling evicts without affecting sibling issuers of the same tenant.';
-
-
---
--- Name: COLUMN tenant_delegated_issuers.audiences; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenant_delegated_issuers.audiences IS 'Accepted OIDC JWT aud values for this tenant issuer.';
-
-
---
--- Name: tenant_exports; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.tenant_exports (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    status text DEFAULT 'completed'::text NOT NULL,
-    location text,
-    row_counts jsonb,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    completed_at timestamp with time zone,
-    CONSTRAINT tenant_exports_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'completed'::text, 'failed'::text])))
-);
-
-
---
--- Name: TABLE tenant_exports; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.tenant_exports IS 'Tenant logical-export bookkeeping (issue #225). Tenant deletion is gated on a completed export row (export-before-delete).';
-
-
---
--- Name: tenant_secrets; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.tenant_secrets (
-    tenant_id uuid NOT NULL,
-    name text NOT NULL,
-    value text NOT NULL,
-    version integer DEFAULT 1 NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-
---
--- Name: TABLE tenant_secrets; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.tenant_secrets IS 'DB-backed per-tenant secret store (issue #225). Namespaced by (tenant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. GLOBAL control-plane table.';
-
-
---
--- Name: tenant_subjects; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.tenant_subjects (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    issuer text NOT NULL,
-    subject text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    last_seen_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: TABLE tenant_subjects; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.tenant_subjects IS 'OpenRails payable identity. One row per OIDC-style subject under an OpenRails tenant; billing tables reference this row.';
-
-
---
--- Name: COLUMN tenant_subjects.issuer; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenant_subjects.issuer IS 'OIDC issuer that asserted the subject.';
-
-
---
--- Name: COLUMN tenant_subjects.subject; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenant_subjects.subject IS 'OIDC subject asserted by issuer. May represent a human, company, tenant, service, or chained delegated principal.';
-
-
---
--- Name: tenants; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.tenants (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    slug text NOT NULL,
-    name text NOT NULL,
-    status text DEFAULT 'active'::text NOT NULL,
-    authkit_tenant_id text,
-    authkit_tenant_slug text,
-    plan text,
-    region text,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    suspended_at timestamp with time zone,
-    deleted_at timestamp with time zone,
-    billing_tier text,
-    stripe_account_id text,
-    webhook_host text,
-    webhook_path text,
-    provisioned_at timestamp with time zone,
-    CONSTRAINT tenants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text, 'deleted'::text])))
-);
-
-
---
--- Name: TABLE tenants; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.tenants IS 'Tenant / billing-namespace directory. GLOBAL (control-plane) table, not tenant-scoped. Self-hosted installs have exactly one row (slug=default).';
-
-
---
--- Name: COLUMN tenants.slug; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenants.slug IS 'Stable tenant slug used in tenant-scoped routes and resolution. The well-known value ''default'' is the single-tenant / self-hosted namespace.';
-
-
---
--- Name: COLUMN tenants.authkit_tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenants.authkit_tenant_id IS 'OpenRails-owned AuthKit tenant id that operates this tenant (control plane). Nullable until org ownership is wired in #221/#222.';
-
-
---
--- Name: COLUMN tenants.billing_tier; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenants.billing_tier IS 'The platform''s OWN billing tier for this tenant (eats own dogfood, issue #225). Distinct from plan (free-form hosting metadata).';
-
-
---
--- Name: COLUMN tenants.webhook_host; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tenants.webhook_host IS 'Optional host an ingress uses to route inbound webhooks to this tenant. OpenRails verifies the signature AFTER tenant resolution (router is not the trust boundary).';
-
-
---
--- Name: tier_policies; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.tier_policies (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT tier_policies_tenant_subject_id_not_null NOT NULL,
-    tier text NOT NULL,
-    policy jsonb DEFAULT '{}'::jsonb NOT NULL,
-    policy_version bigint DEFAULT 1 NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-ALTER TABLE ONLY openrails.tier_policies FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: TABLE tier_policies; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.tier_policies IS 'Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in credit_account_settings; rolling money budgets are #304.';
-
-
---
--- Name: COLUMN tier_policies.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.tier_policies.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: usage_events; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.usage_events (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT usage_events_tenant_subject_id_not_null NOT NULL,
-    actor text CONSTRAINT usage_events_actor_not_null NOT NULL,
-    resource text,
-    credit_type_id uuid NOT NULL,
-    event_type text NOT NULL,
-    dimensions jsonb DEFAULT '{}'::jsonb NOT NULL,
+    price_id uuid NOT NULL,
+    processor openrails.processor_type NOT NULL,
+    transaction_id text NOT NULL,
     amount bigint NOT NULL,
-    source text NOT NULL,
-    source_id text NOT NULL,
-    credit_transaction_id uuid,
+    list_amount bigint NOT NULL,
+    currency text DEFAULT 'usd'::text NOT NULL,
+    status openrails.purchase_status DEFAULT 'completed'::openrails.purchase_status NOT NULL,
+    subscription_id uuid,
+    refunded_payment_id uuid,
+    discount_code text,
+    discount_reason text,
+    discount_metadata jsonb,
+    entitlements_spec_snapshot jsonb,
+    credits_spec_snapshot jsonb,
     metadata jsonb,
-    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT usage_events_amount_check CHECK ((amount >= 0))
+    purchased_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    card_brand text,
+    card_last4 text,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid NOT NULL,
+    CONSTRAINT payments_pkey PRIMARY KEY (id),
+    CONSTRAINT chk_payment_not_future CHECK ((purchased_at <= (now() + '00:05:00'::interval))),
+    CONSTRAINT payments_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id),
+    CONSTRAINT payments_refunded_payment_id_fkey FOREIGN KEY (refunded_payment_id) REFERENCES openrails.payments(id),
+    CONSTRAINT payments_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE SET NULL,
+    CONSTRAINT payments_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
 );
 
-ALTER TABLE ONLY openrails.usage_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.payments FORCE ROW LEVEL SECURITY;
 
+CREATE INDEX idx_payments_price_id ON openrails.payments USING btree (price_id);
+CREATE INDEX idx_payments_processor ON openrails.payments USING btree (processor);
+CREATE INDEX idx_payments_purchased_at ON openrails.payments USING btree (purchased_at);
+CREATE INDEX idx_payments_refunded_payment_id ON openrails.payments USING btree (refunded_payment_id);
+CREATE INDEX idx_payments_subscription_id ON openrails.payments USING btree (subscription_id);
+CREATE INDEX idx_payments_tenant_id ON openrails.payments USING btree (tenant_id);
+CREATE INDEX idx_payments_tenant_subject ON openrails.payments USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_payments_tenant_processor_transaction ON openrails.payments USING btree (tenant_id, processor, transaction_id);
 
---
--- Name: TABLE usage_events; Type: COMMENT; Schema: billing; Owner: -
---
+ALTER TABLE openrails.payments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.payments USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 
-COMMENT ON TABLE openrails.usage_events IS 'Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.';
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payments TO openrails_app;
 
+COMMENT ON TABLE openrails.payments IS 'Records of all payment transactions (formerly purchases table)';
+COMMENT ON COLUMN openrails.payments.subscription_id IS 'Links a payment to the subscription that generated it (nullable for one-off payments)';
 
---
--- Name: COLUMN usage_events.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
+-- =============================================================================
+-- checkout_sessions
+-- =============================================================================
 
-COMMENT ON COLUMN openrails.usage_events.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
+CREATE TABLE openrails.checkout_sessions (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    price_id uuid NOT NULL,
+    mode text NOT NULL,
+    processor text NOT NULL,
+    status text NOT NULL,
+    amount bigint NOT NULL,
+    currency text DEFAULT 'usd'::text NOT NULL,
+    expires_at timestamp with time zone,
+    reference text,
+    transaction_id text,
+    payment_id uuid,
+    subscription_id uuid,
+    processor_fields jsonb,
+    processor_state jsonb,
+    metadata jsonb,
+    idempotency_key text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid NOT NULL,
+    CONSTRAINT checkout_sessions_pkey PRIMARY KEY (id),
+    CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text]))),
+    CONSTRAINT checkout_sessions_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES openrails.payments(id),
+    CONSTRAINT checkout_sessions_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id),
+    CONSTRAINT checkout_sessions_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id),
+    CONSTRAINT checkout_sessions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
 
+ALTER TABLE ONLY openrails.checkout_sessions FORCE ROW LEVEL SECURITY;
 
---
--- Name: COLUMN usage_events.actor; Type: COMMENT; Schema: billing; Owner: -
---
+CREATE INDEX checkout_sessions_expires_at_idx ON openrails.checkout_sessions USING btree (expires_at);
+CREATE UNIQUE INDEX checkout_sessions_processor_reference_idx ON openrails.checkout_sessions USING btree (processor, reference) WHERE (reference IS NOT NULL);
+CREATE UNIQUE INDEX checkout_sessions_processor_transaction_id_idx ON openrails.checkout_sessions USING btree (processor, transaction_id) WHERE (transaction_id IS NOT NULL);
+CREATE INDEX idx_checkout_sessions_tenant_id ON openrails.checkout_sessions USING btree (tenant_id);
+CREATE INDEX idx_checkout_sessions_tenant_subject ON openrails.checkout_sessions USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
 
-COMMENT ON COLUMN openrails.usage_events.actor IS 'Caller-supplied principal string (e.g. a username slug) that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.';
+ALTER TABLE openrails.checkout_sessions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.checkout_sessions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.checkout_sessions TO openrails_app;
 
---
--- Name: COLUMN usage_events.resource; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.usage_events.resource IS 'Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.';
-
-
---
--- Name: usdc_funding_sessions; Type: TABLE; Schema: billing; Owner: -
---
+-- =============================================================================
+-- usdc_funding_sessions
+-- =============================================================================
 
 CREATE TABLE openrails.usdc_funding_sessions (
     id uuid DEFAULT uuidv7() NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
+    tenant_id uuid NOT NULL,
     tenant_subject_id uuid NOT NULL,
     checkout_session_id uuid,
     provider text NOT NULL,
@@ -1587,2295 +868,722 @@ CREATE TABLE openrails.usdc_funding_sessions (
     expires_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT usdc_funding_sessions_pkey PRIMARY KEY (id),
     CONSTRAINT usdc_funding_sessions_asset_valid CHECK ((asset = 'USDC'::text)),
     CONSTRAINT usdc_funding_sessions_nonempty CHECK (((btrim(wallet_address) <> ''::text) AND (btrim(network) <> ''::text) AND (btrim(requested_amount) <> ''::text) AND (btrim(provider_url) <> ''::text))),
     CONSTRAINT usdc_funding_sessions_provider_valid CHECK ((provider = ANY (ARRAY['robinhood'::text, 'coinbase'::text]))),
-    CONSTRAINT usdc_funding_sessions_status_valid CHECK ((status = ANY (ARRAY['created'::text, 'opened'::text, 'pending_provider'::text, 'pending_settlement'::text, 'funded'::text, 'failed'::text, 'expired'::text, 'cancelled'::text])))
+    CONSTRAINT usdc_funding_sessions_status_valid CHECK ((status = ANY (ARRAY['created'::text, 'opened'::text, 'pending_provider'::text, 'pending_settlement'::text, 'funded'::text, 'failed'::text, 'expired'::text, 'cancelled'::text]))),
+    CONSTRAINT usdc_funding_sessions_checkout_session_id_fkey FOREIGN KEY (checkout_session_id) REFERENCES openrails.checkout_sessions(id) ON DELETE SET NULL,
+    CONSTRAINT usdc_funding_sessions_tenant_subject_id_fkey FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id) ON DELETE CASCADE
 );
-
-
---
--- Name: TABLE usdc_funding_sessions; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON TABLE openrails.usdc_funding_sessions IS 'External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.';
-
-
---
--- Name: credit_balances; Type: TABLE; Schema: billing; Owner: -
---
-
-CREATE TABLE openrails.credit_balances (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    credit_type_id uuid NOT NULL,
-    balance bigint DEFAULT 0 NOT NULL,
-    held_balance bigint DEFAULT 0 NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001'::uuid NOT NULL,
-    tenant_subject_id uuid CONSTRAINT credit_balances_tenant_subject_id_not_null NOT NULL
-);
-
-ALTER TABLE ONLY openrails.credit_balances FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: COLUMN credit_balances.tenant_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_balances.tenant_id IS 'Tenant / billing-namespace this row belongs to (issue #223). NOT NULL; defaults to the ''default'' tenant for single-tenant writers, stamped explicitly by multi-tenant writers.';
-
-
---
--- Name: COLUMN credit_balances.tenant_subject_id; Type: COMMENT; Schema: billing; Owner: -
---
-
-COMMENT ON COLUMN openrails.credit_balances.tenant_subject_id IS 'OpenRails payable tenant subject id. Join openrails.tenant_subjects for tenant_id, issuer, and subject.';
-
-
---
--- Name: admin_grants admin_grants_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.admin_grants
-    ADD CONSTRAINT admin_grants_pkey PRIMARY KEY (id);
-
-
---
--- Name: budget_reservations budget_reservations_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.budget_reservations
-    ADD CONSTRAINT budget_reservations_pkey PRIMARY KEY (id);
-
-
---
--- Name: catalog_drift_events catalog_drift_events_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.catalog_drift_events
-    ADD CONSTRAINT catalog_drift_events_pkey PRIMARY KEY (id);
-
-
---
--- Name: checkout_sessions checkout_sessions_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_pkey PRIMARY KEY (id);
-
-
---
--- Name: credit_account_settings credit_account_settings_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_account_settings
-    ADD CONSTRAINT credit_account_settings_pkey PRIMARY KEY (id);
-
-
---
--- Name: credit_blocks credit_blocks_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_blocks
-    ADD CONSTRAINT credit_blocks_pkey PRIMARY KEY (id);
-
-
---
--- Name: credit_spend_limits credit_spend_limits_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_spend_limits
-    ADD CONSTRAINT credit_spend_limits_pkey PRIMARY KEY (id);
-
-
---
--- Name: credit_transactions credit_transactions_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_transactions
-    ADD CONSTRAINT credit_transactions_pkey PRIMARY KEY (id);
-
-
---
--- Name: credit_types credit_types_name_key; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_types
-    ADD CONSTRAINT credit_types_name_key UNIQUE (name);
-
-
---
--- Name: credit_types credit_types_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_types
-    ADD CONSTRAINT credit_types_pkey PRIMARY KEY (id);
-
-
---
--- Name: entitlement_features entitlement_features_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.entitlement_features
-    ADD CONSTRAINT entitlement_features_pkey PRIMARY KEY (id);
-
-
---
--- Name: entitlement_features entitlement_features_tenant_lookup_key_key; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.entitlement_features
-    ADD CONSTRAINT entitlement_features_tenant_lookup_key_key UNIQUE (tenant_id, lookup_key);
-
-
---
--- Name: entitlements entitlements_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.entitlements
-    ADD CONSTRAINT entitlements_pkey PRIMARY KEY (id);
-
-
---
--- Name: entitlements entitlements_tenant_subject_no_overlap; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.entitlements
-    ADD CONSTRAINT entitlements_tenant_subject_no_overlap EXCLUDE USING gist (tenant_id WITH =, tenant_subject_id WITH =, entitlement WITH =, period WITH &&) WHERE (((tenant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL)));
-
-
---
--- Name: invoices invoices_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.invoices
-    ADD CONSTRAINT invoices_pkey PRIMARY KEY (id);
-
-
---
--- Name: linked_wallets linked_wallets_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.linked_wallets
-    ADD CONSTRAINT linked_wallets_pkey PRIMARY KEY (id);
-
-
---
--- Name: linked_wallets linked_wallets_unique_chain_address; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.linked_wallets
-    ADD CONSTRAINT linked_wallets_unique_chain_address UNIQUE (tenant_id, chain, address);
-
-
---
--- Name: linked_wallets linked_wallets_unique_subject_chain; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.linked_wallets
-    ADD CONSTRAINT linked_wallets_unique_subject_chain UNIQUE (tenant_id, tenant_subject_id, chain);
-
-
---
--- Name: manual_rebill_attempts manual_rebill_attempts_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.manual_rebill_attempts
-    ADD CONSTRAINT manual_rebill_attempts_pkey PRIMARY KEY (id);
-
-
---
--- Name: notification_queue notification_queue_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.notification_queue
-    ADD CONSTRAINT notification_queue_pkey PRIMARY KEY (id);
-
-
---
--- Name: payment_blocklist payment_blocklist_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.payment_blocklist
-    ADD CONSTRAINT payment_blocklist_pkey PRIMARY KEY (id);
-
-
---
--- Name: payment_methods payment_methods_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.payment_methods
-    ADD CONSTRAINT payment_methods_pkey PRIMARY KEY (id);
-
-
---
--- Name: payments payments_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_pkey PRIMARY KEY (id);
-
-
---
--- Name: tenant_deks pk_tenant_deks; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenant_deks
-    ADD CONSTRAINT pk_tenant_deks PRIMARY KEY (tenant_id);
-
-
---
--- Name: tenant_secrets pk_tenant_secrets; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenant_secrets
-    ADD CONSTRAINT pk_tenant_secrets PRIMARY KEY (tenant_id, name);
-
-
---
--- Name: platform_audit platform_audit_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.platform_audit
-    ADD CONSTRAINT platform_audit_pkey PRIMARY KEY (id);
-
-
---
--- Name: platform_break_glass platform_break_glass_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.platform_break_glass
-    ADD CONSTRAINT platform_break_glass_pkey PRIMARY KEY (id);
-
-
---
--- Name: prices prices_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.prices
-    ADD CONSTRAINT prices_pkey PRIMARY KEY (id);
-
-
---
--- Name: processor_customers processor_customers_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.processor_customers
-    ADD CONSTRAINT processor_customers_pkey PRIMARY KEY (id);
-
-
---
--- Name: product_access_grants product_access_grants_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.product_access_grants
-    ADD CONSTRAINT product_access_grants_pkey PRIMARY KEY (id);
-
-
---
--- Name: product_entitlement_features product_entitlement_features_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.product_entitlement_features
-    ADD CONSTRAINT product_entitlement_features_pkey PRIMARY KEY (id);
-
-
---
--- Name: product_entitlement_features product_entitlement_features_unique; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.product_entitlement_features
-    ADD CONSTRAINT product_entitlement_features_unique UNIQUE (tenant_id, product_id, entitlement_feature_id);
-
-
---
--- Name: products products_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.products
-    ADD CONSTRAINT products_pkey PRIMARY KEY (id);
-
-
---
--- Name: products products_slug_key; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.products
-    ADD CONSTRAINT products_slug_key UNIQUE (slug);
-
-
---
--- Name: solana_subscriptions solana_subscriptions_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.solana_subscriptions
-    ADD CONSTRAINT solana_subscriptions_pkey PRIMARY KEY (id);
-
-
---
--- Name: solana_subscriptions solana_subscriptions_subscription_pda_key; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.solana_subscriptions
-    ADD CONSTRAINT solana_subscriptions_subscription_pda_key UNIQUE (subscription_pda);
-
-
---
--- Name: subscriptions subscriptions_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_pkey PRIMARY KEY (id);
-
-
---
--- Name: tenant_credential_audit tenant_credential_audit_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenant_credential_audit
-    ADD CONSTRAINT tenant_credential_audit_pkey PRIMARY KEY (id);
-
-
---
--- Name: tenant_delegated_issuers tenant_delegated_issuers_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenant_delegated_issuers
-    ADD CONSTRAINT tenant_delegated_issuers_pkey PRIMARY KEY (id);
-
-
---
--- Name: tenant_exports tenant_exports_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenant_exports
-    ADD CONSTRAINT tenant_exports_pkey PRIMARY KEY (id);
-
-
---
--- Name: tenant_subjects tenant_subjects_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenant_subjects
-    ADD CONSTRAINT tenant_subjects_pkey PRIMARY KEY (id);
-
-
---
--- Name: tenants tenants_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenants
-    ADD CONSTRAINT tenants_pkey PRIMARY KEY (id);
-
-
---
--- Name: tier_policies tier_policies_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tier_policies
-    ADD CONSTRAINT tier_policies_pkey PRIMARY KEY (id);
-
-
---
--- Name: manual_rebill_attempts uniq_manual_rebill_processor_order; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.manual_rebill_attempts
-    ADD CONSTRAINT uniq_manual_rebill_processor_order UNIQUE (processor, order_reference);
-
-
---
--- Name: manual_rebill_attempts uniq_manual_rebill_subscription_period; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.manual_rebill_attempts
-    ADD CONSTRAINT uniq_manual_rebill_subscription_period UNIQUE (subscription_id, period_end);
-
-
---
--- Name: prices unique_prices_product_amount_cycle; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.prices
-    ADD CONSTRAINT unique_prices_product_amount_cycle UNIQUE (product_id, amount, currency, billing_cycle_days);
-
-
---
--- Name: tenant_delegated_issuers uq_tenant_delegated_issuers_issuer; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenant_delegated_issuers
-    ADD CONSTRAINT uq_tenant_delegated_issuers_issuer UNIQUE (issuer);
-
-
---
--- Name: tenant_subjects uq_tenant_subjects_issuer_subject; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenant_subjects
-    ADD CONSTRAINT uq_tenant_subjects_issuer_subject UNIQUE (tenant_id, issuer, subject);
-
-
---
--- Name: tenants uq_tenants_slug; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenants
-    ADD CONSTRAINT uq_tenants_slug UNIQUE (slug);
-
-
---
--- Name: usage_events usage_events_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.usage_events
-    ADD CONSTRAINT usage_events_pkey PRIMARY KEY (id);
-
-
---
--- Name: usdc_funding_sessions usdc_funding_sessions_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.usdc_funding_sessions
-    ADD CONSTRAINT usdc_funding_sessions_pkey PRIMARY KEY (id);
-
-
---
--- Name: credit_balances credit_balances_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_balances
-    ADD CONSTRAINT credit_balances_pkey PRIMARY KEY (id);
-
-
---
--- Name: checkout_sessions_expires_at_idx; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX checkout_sessions_expires_at_idx ON openrails.checkout_sessions USING btree (expires_at);
-
-
---
--- Name: checkout_sessions_processor_reference_idx; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX checkout_sessions_processor_reference_idx ON openrails.checkout_sessions USING btree (processor, reference) WHERE (reference IS NOT NULL);
-
-
---
--- Name: checkout_sessions_processor_transaction_id_idx; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX checkout_sessions_processor_transaction_id_idx ON openrails.checkout_sessions USING btree (processor, transaction_id) WHERE (transaction_id IS NOT NULL);
-
-
---
--- Name: idx_admin_grants_granted_by; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_admin_grants_granted_by ON openrails.admin_grants USING btree (granted_by);
-
-
---
--- Name: idx_admin_grants_payment_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_admin_grants_payment_id ON openrails.admin_grants USING btree (payment_id) WHERE (payment_id IS NOT NULL);
-
-
---
--- Name: idx_admin_grants_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_admin_grants_tenant_id ON openrails.admin_grants USING btree (tenant_id);
-
-
---
--- Name: idx_admin_grants_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_admin_grants_tenant_subject ON openrails.admin_grants USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-
-
---
--- Name: idx_break_glass_active; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_break_glass_active ON openrails.platform_break_glass USING btree (expires_at) WHERE (revoked_at IS NULL);
-
-
---
--- Name: idx_break_glass_actor; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_break_glass_actor ON openrails.platform_break_glass USING btree (actor_user_id, expires_at DESC);
-
-
---
--- Name: idx_catalog_drift_events_open; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_catalog_drift_events_open ON openrails.catalog_drift_events USING btree (detected_at DESC) WHERE (resolved_at IS NULL);
-
-
---
--- Name: idx_catalog_drift_events_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_catalog_drift_events_tenant_id ON openrails.catalog_drift_events USING btree (tenant_id);
-
-
---
--- Name: idx_checkout_sessions_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_checkout_sessions_tenant_id ON openrails.checkout_sessions USING btree (tenant_id);
-
-
---
--- Name: idx_checkout_sessions_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_checkout_sessions_tenant_subject ON openrails.checkout_sessions USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-
-
---
--- Name: idx_credit_blocks_payer; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_blocks_payer ON openrails.credit_blocks USING btree (tenant_id, tenant_subject_id, credit_type_id, expires_at);
-
-
---
--- Name: idx_credit_blocks_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_blocks_tenant_id ON openrails.credit_blocks USING btree (tenant_id);
-
-
---
--- Name: idx_credit_holds_active_expires; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_holds_active_expires ON openrails.credit_transactions USING btree (expires_at) WHERE ((transaction_type = 'hold'::text) AND (status = 'active'::text));
-
-
---
--- Name: idx_credit_transactions_payer; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_transactions_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, created_at DESC);
-
-
---
--- Name: idx_credit_transactions_payer_actor; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_transactions_payer_actor ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, actor, created_at DESC);
-
-
---
--- Name: idx_credit_transactions_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_transactions_tenant_id ON openrails.credit_transactions USING btree (tenant_id);
-
-
---
--- Name: idx_credit_types_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_types_tenant_id ON openrails.credit_types USING btree (tenant_id);
-
-
---
--- Name: idx_entitlements_grace_by_subscription_live; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_entitlements_grace_by_subscription_live ON openrails.entitlements USING btree (source_id, entitlement, start_at, end_at) WHERE ((source_type = 'grace'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
-
-
---
--- Name: idx_entitlements_live_by_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_entitlements_live_by_id ON openrails.entitlements USING btree (id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
-
-
---
--- Name: idx_entitlements_one_off_source_live; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_entitlements_one_off_source_live ON openrails.entitlements USING btree (source_id, entitlement) WHERE ((source_type = 'one_off'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
-
-
---
--- Name: idx_entitlements_source; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_entitlements_source ON openrails.entitlements USING btree (source_type, source_id) WHERE (source_id IS NOT NULL);
-
-
---
--- Name: idx_entitlements_subscription_source_live; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_entitlements_subscription_source_live ON openrails.entitlements USING btree (source_id, entitlement, end_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
-
-
---
--- Name: idx_entitlements_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_entitlements_tenant_id ON openrails.entitlements USING btree (tenant_id);
-
-
---
--- Name: idx_entitlements_tenant_subject_active_window; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_entitlements_tenant_subject_active_window ON openrails.entitlements USING btree (tenant_id, tenant_subject_id, entitlement, start_at, end_at) WHERE ((tenant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
-
-
---
--- Name: idx_invoices_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_invoices_tenant_subject ON openrails.invoices USING btree (tenant_subject_id, period_from DESC);
-
-
---
--- Name: idx_linked_wallets_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_linked_wallets_tenant_subject ON openrails.linked_wallets USING btree (tenant_id, tenant_subject_id);
-
-
---
--- Name: idx_manual_rebill_attempts_status_claimed; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_manual_rebill_attempts_status_claimed ON openrails.manual_rebill_attempts USING btree (status, claimed_until);
-
-
---
--- Name: idx_manual_rebill_attempts_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_manual_rebill_attempts_tenant_id ON openrails.manual_rebill_attempts USING btree (tenant_id);
-
-
---
--- Name: idx_notification_queue_created_at; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_notification_queue_created_at ON openrails.notification_queue USING btree (created_at);
-
-
---
--- Name: idx_notification_queue_event_type; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_notification_queue_event_type ON openrails.notification_queue USING btree (event_type);
-
-
---
--- Name: idx_notification_queue_seen; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_notification_queue_seen ON openrails.notification_queue USING btree (seen);
-
-
---
--- Name: idx_notification_queue_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_notification_queue_tenant_id ON openrails.notification_queue USING btree (tenant_id);
-
-
---
--- Name: idx_notification_queue_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_notification_queue_tenant_subject ON openrails.notification_queue USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-
-
---
--- Name: idx_payment_methods_processor; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payment_methods_processor ON openrails.payment_methods USING btree (processor);
-
-
---
--- Name: idx_payment_methods_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payment_methods_tenant_id ON openrails.payment_methods USING btree (tenant_id);
-
-
---
--- Name: idx_payment_methods_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payment_methods_tenant_subject ON openrails.payment_methods USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-
-
---
--- Name: idx_payment_methods_vault_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payment_methods_vault_id ON openrails.payment_methods USING btree (vault_id);
-
-
---
--- Name: idx_payments_price_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payments_price_id ON openrails.payments USING btree (price_id);
-
-
---
--- Name: idx_payments_processor; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payments_processor ON openrails.payments USING btree (processor);
-
-
---
--- Name: idx_payments_purchased_at; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payments_purchased_at ON openrails.payments USING btree (purchased_at);
-
-
---
--- Name: idx_payments_refunded_payment_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payments_refunded_payment_id ON openrails.payments USING btree (refunded_payment_id);
-
-
---
--- Name: idx_payments_subscription_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payments_subscription_id ON openrails.payments USING btree (subscription_id);
-
-
---
--- Name: idx_payments_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payments_tenant_id ON openrails.payments USING btree (tenant_id);
-
-
---
--- Name: idx_payments_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_payments_tenant_subject ON openrails.payments USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-
-
---
--- Name: idx_platform_audit_action; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_platform_audit_action ON openrails.platform_audit USING btree (action, created_at DESC);
-
-
---
--- Name: idx_platform_audit_actor; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_platform_audit_actor ON openrails.platform_audit USING btree (actor_user_id, created_at DESC);
-
-
---
--- Name: idx_platform_audit_target; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_platform_audit_target ON openrails.platform_audit USING btree (target_tenant_id, created_at DESC);
-
-
---
--- Name: idx_prices_processors; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_prices_processors ON openrails.prices USING gin (processors);
-
-
---
--- Name: idx_prices_product_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_prices_product_id ON openrails.prices USING btree (product_id);
-
-
---
--- Name: idx_prices_status; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_prices_status ON openrails.prices USING btree (status);
-
-
---
--- Name: idx_prices_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_prices_tenant_id ON openrails.prices USING btree (tenant_id);
-
-
---
--- Name: idx_processor_customers_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_processor_customers_tenant_id ON openrails.processor_customers USING btree (tenant_id);
-
-
---
--- Name: idx_processor_customers_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_processor_customers_tenant_subject ON openrails.processor_customers USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-
-
---
--- Name: idx_product_access_grants_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_product_access_grants_tenant_subject ON openrails.product_access_grants USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-
-
---
--- Name: idx_product_entitlement_features_feature; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_product_entitlement_features_feature ON openrails.product_entitlement_features USING btree (tenant_id, entitlement_feature_id);
-
-
---
--- Name: idx_product_entitlement_features_product; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_product_entitlement_features_product ON openrails.product_entitlement_features USING btree (tenant_id, product_id);
-
-
---
--- Name: idx_products_slug; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_products_slug ON openrails.products USING btree (slug);
-
-
---
--- Name: idx_products_status; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_products_status ON openrails.products USING btree (status);
-
-
---
--- Name: idx_products_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_products_tenant_id ON openrails.products USING btree (tenant_id);
-
-
---
--- Name: idx_products_tier_group; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_products_tier_group ON openrails.products USING btree (tier_group) WHERE (tier_group IS NOT NULL);
-
-
---
--- Name: idx_solana_subscriptions_due; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_solana_subscriptions_due ON openrails.solana_subscriptions USING btree (tenant_id, next_pull_at) WHERE (status = 'active'::text);
-
-
---
--- Name: idx_solana_subscriptions_subscription_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_solana_subscriptions_subscription_id ON openrails.solana_subscriptions USING btree (subscription_id);
-
-
---
--- Name: idx_subscriptions_due_dunning; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_due_dunning ON openrails.subscriptions USING btree (next_retry_at, processor) WHERE ((status = 'past_due'::openrails.subscription_status) AND (next_retry_at IS NOT NULL));
-
-
---
--- Name: idx_subscriptions_grace_ends_at; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_grace_ends_at ON openrails.subscriptions USING btree (grace_ends_at) WHERE (grace_ends_at IS NOT NULL);
-
-
---
--- Name: idx_subscriptions_next_retry_at; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_next_retry_at ON openrails.subscriptions USING btree (next_retry_at) WHERE (next_retry_at IS NOT NULL);
-
-
---
--- Name: idx_subscriptions_payment_method_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_payment_method_id ON openrails.subscriptions USING btree (payment_method_id);
-
-
---
--- Name: idx_subscriptions_price_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_price_id ON openrails.subscriptions USING btree (price_id);
-
-
---
--- Name: idx_subscriptions_processor; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_processor ON openrails.subscriptions USING btree (processor);
-
-
---
--- Name: idx_subscriptions_processor_subscription; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_processor_subscription ON openrails.subscriptions USING btree (processor, processor_subscription_id);
-
-
---
--- Name: idx_subscriptions_product_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_product_id ON openrails.subscriptions USING btree (product_id);
-
-
---
--- Name: idx_subscriptions_status; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_status ON openrails.subscriptions USING btree (status);
-
-
---
--- Name: idx_subscriptions_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_tenant_id ON openrails.subscriptions USING btree (tenant_id);
-
-
---
--- Name: idx_subscriptions_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_subscriptions_tenant_subject ON openrails.subscriptions USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
-
-
---
--- Name: idx_tenant_credential_audit_tenant; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_tenant_credential_audit_tenant ON openrails.tenant_credential_audit USING btree (tenant_id, created_at DESC);
-
-
---
--- Name: idx_tenant_delegated_issuers_enabled; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_tenant_delegated_issuers_enabled ON openrails.tenant_delegated_issuers USING btree (enabled) WHERE enabled;
-
-
---
--- Name: idx_tenant_delegated_issuers_tenant; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_tenant_delegated_issuers_tenant ON openrails.tenant_delegated_issuers USING btree (tenant_id);
-
-
---
--- Name: idx_tenant_exports_tenant; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_tenant_exports_tenant ON openrails.tenant_exports USING btree (tenant_id, created_at DESC);
-
-
---
--- Name: idx_tenant_subjects_tenant; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_tenant_subjects_tenant ON openrails.tenant_subjects USING btree (tenant_id);
-
-
---
--- Name: idx_usage_events_tenant_subject_time; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_usage_events_tenant_subject_time ON openrails.usage_events USING btree (tenant_subject_id, occurred_at);
-
-
---
--- Name: idx_usdc_funding_sessions_checkout; Type: INDEX; Schema: billing; Owner: -
---
 
 CREATE INDEX idx_usdc_funding_sessions_checkout ON openrails.usdc_funding_sessions USING btree (tenant_id, checkout_session_id) WHERE (checkout_session_id IS NOT NULL);
-
-
---
--- Name: idx_usdc_funding_sessions_idempotency; Type: INDEX; Schema: billing; Owner: -
---
-
 CREATE UNIQUE INDEX idx_usdc_funding_sessions_idempotency ON openrails.usdc_funding_sessions USING btree (tenant_id, tenant_subject_id, idempotency_key) WHERE ((idempotency_key IS NOT NULL) AND (btrim(idempotency_key) <> ''::text));
-
-
---
--- Name: idx_usdc_funding_sessions_provider_session; Type: INDEX; Schema: billing; Owner: -
---
-
 CREATE INDEX idx_usdc_funding_sessions_provider_session ON openrails.usdc_funding_sessions USING btree (provider, provider_session_id) WHERE (provider_session_id IS NOT NULL);
-
-
---
--- Name: idx_usdc_funding_sessions_tenant_subject; Type: INDEX; Schema: billing; Owner: -
---
-
 CREATE INDEX idx_usdc_funding_sessions_tenant_subject ON openrails.usdc_funding_sessions USING btree (tenant_id, tenant_subject_id, created_at DESC);
-
-
---
--- Name: idx_credit_balances_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX idx_credit_balances_tenant_id ON openrails.credit_balances USING btree (tenant_id);
-
-
---
--- Name: ix_budget_reservations_window; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX ix_budget_reservations_window ON openrails.budget_reservations USING btree (tenant_id, tenant_subject_id, actor, created_at);
-
-
---
--- Name: ix_invoices_payer; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX ix_invoices_payer ON openrails.invoices USING btree (tenant_id, tenant_subject_id, period_from DESC);
-
-
---
--- Name: ix_product_access_grants_payment; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX ix_product_access_grants_payment ON openrails.product_access_grants USING btree (payment_id) WHERE (payment_id IS NOT NULL);
-
-
---
--- Name: ix_usage_events_payer_time; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX ix_usage_events_payer_time ON openrails.usage_events USING btree (tenant_id, tenant_subject_id, occurred_at);
-
-
---
--- Name: ix_usage_events_payer_type_time; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE INDEX ix_usage_events_payer_type_time ON openrails.usage_events USING btree (tenant_id, tenant_subject_id, event_type, occurred_at);
-
-
---
--- Name: uniq_credit_deposit_idem_payer; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uniq_credit_deposit_idem_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, source, source_id) WHERE ((transaction_type = 'deposit'::text) AND (source_id IS NOT NULL));
-
-
---
--- Name: uniq_credit_hold_idem_payer; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uniq_credit_hold_idem_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, source, source_id) WHERE (transaction_type = 'hold'::text);
-
-
---
--- Name: uniq_credit_withdrawal_idem_payer; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uniq_credit_withdrawal_idem_payer ON openrails.credit_transactions USING btree (tenant_id, tenant_subject_id, credit_type_id, source, source_id) WHERE ((transaction_type = 'withdrawal'::text) AND (source_id IS NOT NULL));
-
-
---
--- Name: uniq_manual_rebill_processor_transaction; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uniq_manual_rebill_processor_transaction ON openrails.manual_rebill_attempts USING btree (processor, transaction_id) WHERE (transaction_id IS NOT NULL);
-
-
---
--- Name: uq_budget_reservations_idem; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_budget_reservations_idem ON openrails.budget_reservations USING btree (tenant_id, tenant_subject_id, actor, source, source_id);
-
-
---
--- Name: uq_catalog_drift_open; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_catalog_drift_open ON openrails.catalog_drift_events USING btree (provider, kind, openrails_resource_type, COALESCE(openrails_resource_id, ''::text), COALESCE(external_resource_id, ''::text), COALESCE(field, ''::text)) WHERE (resolved_at IS NULL);
-
-
---
--- Name: uq_credit_account_settings_payer_type; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_credit_account_settings_payer_type ON openrails.credit_account_settings USING btree (tenant_id, tenant_subject_id, credit_type_id);
-
-
---
--- Name: uq_credit_spend_limits_payer_actor; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_credit_spend_limits_payer_actor ON openrails.credit_spend_limits USING btree (tenant_id, tenant_subject_id, credit_type_id, actor);
-
-
---
--- Name: uq_entitlements_tenant_subject_active; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_entitlements_tenant_subject_active ON openrails.entitlements USING btree (tenant_id, tenant_subject_id, entitlement) WHERE ((tenant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL) AND (end_at IS NULL));
-
-
---
--- Name: uq_invoices_period; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_invoices_period ON openrails.invoices USING btree (tenant_id, tenant_subject_id, credit_type_id, period_from, period_to);
-
-
---
--- Name: uq_payment_blocklist; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_payment_blocklist ON openrails.payment_blocklist USING btree (tenant_id, kind, value);
-
-
---
--- Name: uq_payment_methods_tenant_processor_vault; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_payment_methods_tenant_processor_vault ON openrails.payment_methods USING btree (tenant_id, processor, vault_id);
-
-
---
--- Name: uq_payment_methods_tenant_subject_vault; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_payment_methods_tenant_subject_vault ON openrails.payment_methods USING btree (tenant_id, tenant_subject_id, vault_id);
-
-
---
--- Name: uq_payments_tenant_processor_transaction; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_payments_tenant_processor_transaction ON openrails.payments USING btree (tenant_id, processor, transaction_id);
-
-
---
--- Name: uq_processor_customers_tenant_processor_customer; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_processor_customers_tenant_processor_customer ON openrails.processor_customers USING btree (tenant_id, processor, customer_id);
-
-
---
--- Name: uq_processor_customers_tenant_subject_processor; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_processor_customers_tenant_subject_processor ON openrails.processor_customers USING btree (tenant_id, tenant_subject_id, processor);
-
-
---
--- Name: uq_subscriptions_tenant_processor_subscription_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_subscriptions_tenant_processor_subscription_id ON openrails.subscriptions USING btree (tenant_id, processor, processor_subscription_id) WHERE (processor_subscription_id <> ''::text);
-
-
---
--- Name: uq_subscriptions_tenant_subject_product_lifecycle; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_subscriptions_tenant_subject_product_lifecycle ON openrails.subscriptions USING btree (tenant_id, tenant_subject_id, product_id) WHERE (status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status, 'past_due'::openrails.subscription_status]));
-
-
---
--- Name: uq_subscriptions_tenant_subject_tier_group_active; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_subscriptions_tenant_subject_tier_group_active ON openrails.subscriptions USING btree (tenant_subject_id, tier_group) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status])) AND (tier_group IS NOT NULL));
-
-
---
--- Name: uq_tenants_authkit_tenant_id; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_tenants_authkit_tenant_id ON openrails.tenants USING btree (authkit_tenant_id) WHERE (authkit_tenant_id IS NOT NULL);
-
-
---
--- Name: uq_tenants_webhook_host; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_tenants_webhook_host ON openrails.tenants USING btree (lower(webhook_host)) WHERE (webhook_host IS NOT NULL);
-
-
---
--- Name: uq_tier_policies; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_tier_policies ON openrails.tier_policies USING btree (tenant_id, tenant_subject_id, tier);
-
-
---
--- Name: uq_usage_events_idem; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_usage_events_idem ON openrails.usage_events USING btree (tenant_id, tenant_subject_id, event_type, source, source_id);
-
-
---
--- Name: uq_credit_balances_payer_type; Type: INDEX; Schema: billing; Owner: -
---
-
-CREATE UNIQUE INDEX uq_credit_balances_payer_type ON openrails.credit_balances USING btree (tenant_id, tenant_subject_id, credit_type_id);
-
-
---
--- Name: subscriptions trg_subscriptions_set_tier_group; Type: TRIGGER; Schema: billing; Owner: -
---
-
-CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF product_id ON openrails.subscriptions FOR EACH ROW EXECUTE FUNCTION openrails.subscriptions_set_tier_group();
-
-
---
--- Name: admin_grants admin_grants_payment_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.admin_grants
-    ADD CONSTRAINT admin_grants_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES openrails.payments(id);
-
-
---
--- Name: admin_grants admin_grants_price_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.admin_grants
-    ADD CONSTRAINT admin_grants_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id);
-
-
---
--- Name: admin_grants admin_grants_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.admin_grants
-    ADD CONSTRAINT admin_grants_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: budget_reservations budget_reservations_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.budget_reservations
-    ADD CONSTRAINT budget_reservations_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: checkout_sessions checkout_sessions_payment_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES openrails.payments(id);
-
-
---
--- Name: checkout_sessions checkout_sessions_price_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id);
-
-
---
--- Name: checkout_sessions checkout_sessions_subscription_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id);
-
-
---
--- Name: checkout_sessions checkout_sessions_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: credit_account_settings credit_account_settings_credit_type_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_account_settings
-    ADD CONSTRAINT credit_account_settings_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id) ON DELETE CASCADE;
-
-
---
--- Name: credit_account_settings credit_account_settings_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_account_settings
-    ADD CONSTRAINT credit_account_settings_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: credit_blocks credit_blocks_credit_type_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_blocks
-    ADD CONSTRAINT credit_blocks_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id);
-
-
---
--- Name: credit_blocks credit_blocks_source_transaction_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_blocks
-    ADD CONSTRAINT credit_blocks_source_transaction_id_fkey FOREIGN KEY (source_transaction_id) REFERENCES openrails.credit_transactions(id);
-
-
---
--- Name: credit_blocks credit_blocks_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_blocks
-    ADD CONSTRAINT credit_blocks_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: credit_spend_limits credit_spend_limits_credit_type_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_spend_limits
-    ADD CONSTRAINT credit_spend_limits_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id) ON DELETE CASCADE;
-
-
---
--- Name: credit_spend_limits credit_spend_limits_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_spend_limits
-    ADD CONSTRAINT credit_spend_limits_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: credit_transactions credit_transactions_credit_type_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_transactions
-    ADD CONSTRAINT credit_transactions_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id);
-
-
---
--- Name: credit_transactions credit_transactions_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_transactions
-    ADD CONSTRAINT credit_transactions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: entitlements entitlements_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.entitlements
-    ADD CONSTRAINT entitlements_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: invoices invoices_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.invoices
-    ADD CONSTRAINT invoices_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: linked_wallets linked_wallets_tenant_subject_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.linked_wallets
-    ADD CONSTRAINT linked_wallets_tenant_subject_id_fkey FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id) ON DELETE CASCADE;
-
-
---
--- Name: manual_rebill_attempts manual_rebill_attempts_subscription_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.manual_rebill_attempts
-    ADD CONSTRAINT manual_rebill_attempts_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id);
-
-
---
--- Name: notification_queue notification_queue_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.notification_queue
-    ADD CONSTRAINT notification_queue_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: payment_blocklist payment_blocklist_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.payment_blocklist
-    ADD CONSTRAINT payment_blocklist_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: payment_methods payment_methods_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.payment_methods
-    ADD CONSTRAINT payment_methods_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: payments payments_price_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id);
-
-
---
--- Name: payments payments_refunded_payment_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_refunded_payment_id_fkey FOREIGN KEY (refunded_payment_id) REFERENCES openrails.payments(id);
-
-
---
--- Name: payments payments_subscription_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE SET NULL;
-
-
---
--- Name: payments payments_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: prices prices_product_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.prices
-    ADD CONSTRAINT prices_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id) ON DELETE RESTRICT;
-
-
---
--- Name: processor_customers processor_customers_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.processor_customers
-    ADD CONSTRAINT processor_customers_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: product_access_grants product_access_grants_product_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.product_access_grants
-    ADD CONSTRAINT product_access_grants_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id);
-
-
---
--- Name: product_access_grants product_access_grants_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.product_access_grants
-    ADD CONSTRAINT product_access_grants_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: product_entitlement_features product_entitlement_features_entitlement_feature_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.product_entitlement_features
-    ADD CONSTRAINT product_entitlement_features_entitlement_feature_id_fkey FOREIGN KEY (entitlement_feature_id) REFERENCES openrails.entitlement_features(id) ON DELETE CASCADE;
-
-
---
--- Name: product_entitlement_features product_entitlement_features_product_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.product_entitlement_features
-    ADD CONSTRAINT product_entitlement_features_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id) ON DELETE CASCADE;
-
-
---
--- Name: solana_subscriptions solana_subscriptions_subscription_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.solana_subscriptions
-    ADD CONSTRAINT solana_subscriptions_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE CASCADE;
-
-
---
--- Name: subscriptions subscriptions_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_payment_method_id_fkey FOREIGN KEY (payment_method_id) REFERENCES openrails.payment_methods(id) ON DELETE SET NULL;
-
-
---
--- Name: subscriptions subscriptions_price_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id);
-
-
---
--- Name: subscriptions subscriptions_product_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id);
-
-
---
--- Name: subscriptions subscriptions_scheduled_price_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_scheduled_price_id_fkey FOREIGN KEY (scheduled_price_id) REFERENCES openrails.prices(id);
-
-
---
--- Name: subscriptions subscriptions_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: tenant_delegated_issuers tenant_delegated_issuers_tenant_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenant_delegated_issuers
-    ADD CONSTRAINT tenant_delegated_issuers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES openrails.tenants(id) ON DELETE CASCADE;
-
-
---
--- Name: tenant_subjects tenant_subjects_tenant_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tenant_subjects
-    ADD CONSTRAINT tenant_subjects_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES openrails.tenants(id);
-
-
---
--- Name: tier_policies tier_policies_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.tier_policies
-    ADD CONSTRAINT tier_policies_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: usage_events usage_events_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.usage_events
-    ADD CONSTRAINT usage_events_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: usdc_funding_sessions usdc_funding_sessions_checkout_session_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.usdc_funding_sessions
-    ADD CONSTRAINT usdc_funding_sessions_checkout_session_id_fkey FOREIGN KEY (checkout_session_id) REFERENCES openrails.checkout_sessions(id) ON DELETE SET NULL;
-
-
---
--- Name: usdc_funding_sessions usdc_funding_sessions_tenant_subject_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.usdc_funding_sessions
-    ADD CONSTRAINT usdc_funding_sessions_tenant_subject_id_fkey FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id) ON DELETE CASCADE;
-
-
---
--- Name: credit_balances credit_balances_credit_type_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_balances
-    ADD CONSTRAINT credit_balances_credit_type_id_fkey FOREIGN KEY (credit_type_id) REFERENCES openrails.credit_types(id);
-
-
---
--- Name: credit_balances credit_balances_tenant_subject_fk; Type: FK CONSTRAINT; Schema: billing; Owner: -
---
-
-ALTER TABLE ONLY openrails.credit_balances
-    ADD CONSTRAINT credit_balances_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id);
-
-
---
--- Name: admin_grants; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.admin_grants ENABLE ROW LEVEL SECURITY;
-
---
--- Name: budget_reservations; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.budget_reservations ENABLE ROW LEVEL SECURITY;
-
---
--- Name: catalog_drift_events; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.catalog_drift_events ENABLE ROW LEVEL SECURITY;
-
---
--- Name: checkout_sessions; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.checkout_sessions ENABLE ROW LEVEL SECURITY;
-
---
--- Name: credit_account_settings; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.credit_account_settings ENABLE ROW LEVEL SECURITY;
-
---
--- Name: credit_blocks; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.credit_blocks ENABLE ROW LEVEL SECURITY;
-
---
--- Name: credit_spend_limits; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.credit_spend_limits ENABLE ROW LEVEL SECURITY;
-
---
--- Name: credit_transactions; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.credit_transactions ENABLE ROW LEVEL SECURITY;
-
---
--- Name: credit_types; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.credit_types ENABLE ROW LEVEL SECURITY;
-
---
--- Name: entitlement_features; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.entitlement_features ENABLE ROW LEVEL SECURITY;
-
---
--- Name: entitlements; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.entitlements ENABLE ROW LEVEL SECURITY;
-
---
--- Name: invoices; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.invoices ENABLE ROW LEVEL SECURITY;
-
---
--- Name: manual_rebill_attempts; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.manual_rebill_attempts ENABLE ROW LEVEL SECURITY;
-
---
--- Name: notification_queue; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.notification_queue ENABLE ROW LEVEL SECURITY;
-
---
--- Name: payment_blocklist; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.payment_blocklist ENABLE ROW LEVEL SECURITY;
-
---
--- Name: payment_methods; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.payment_methods ENABLE ROW LEVEL SECURITY;
-
---
--- Name: payments; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.payments ENABLE ROW LEVEL SECURITY;
-
---
--- Name: prices; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.prices ENABLE ROW LEVEL SECURITY;
-
---
--- Name: processor_customers; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.processor_customers ENABLE ROW LEVEL SECURITY;
-
---
--- Name: product_access_grants; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.product_access_grants ENABLE ROW LEVEL SECURITY;
-
---
--- Name: product_entitlement_features; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.product_entitlement_features ENABLE ROW LEVEL SECURITY;
-
---
--- Name: products; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.products ENABLE ROW LEVEL SECURITY;
-
---
--- Name: subscriptions; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.subscriptions ENABLE ROW LEVEL SECURITY;
-
---
--- Name: admin_grants tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.admin_grants USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: budget_reservations tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.budget_reservations USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: catalog_drift_events tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.catalog_drift_events USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: checkout_sessions tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.checkout_sessions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: credit_account_settings tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.credit_account_settings USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: credit_blocks tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.credit_blocks USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: credit_spend_limits tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.credit_spend_limits USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: credit_transactions tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.credit_transactions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: credit_types tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.credit_types USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: entitlement_features tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.entitlement_features USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: entitlements tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.entitlements USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: invoices tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.invoices USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: manual_rebill_attempts tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.manual_rebill_attempts USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: notification_queue tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.notification_queue USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: payment_blocklist tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.payment_blocklist USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: payment_methods tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.payment_methods USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: payments tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.payments USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: prices tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.prices USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: processor_customers tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.processor_customers USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: product_access_grants tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.product_access_grants USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: product_entitlement_features tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.product_entitlement_features USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: products tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.products USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: subscriptions tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.subscriptions USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: tier_policies tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.tier_policies USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: usage_events tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.usage_events USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: credit_balances tenant_isolation; Type: POLICY; Schema: billing; Owner: -
---
-
-CREATE POLICY tenant_isolation ON openrails.credit_balances USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
-
-
---
--- Name: tier_policies; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.tier_policies ENABLE ROW LEVEL SECURITY;
-
---
--- Name: usage_events; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.usage_events ENABLE ROW LEVEL SECURITY;
-
---
--- Name: credit_balances; Type: ROW SECURITY; Schema: billing; Owner: -
---
-
-ALTER TABLE openrails.credit_balances ENABLE ROW LEVEL SECURITY;
-
---
--- Name: SCHEMA billing; Type: ACL; Schema: -; Owner: -
---
-
-GRANT USAGE ON SCHEMA openrails TO openrails_app;
-
-
---
--- Name: TABLE admin_grants; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.admin_grants TO openrails_app;
-
-
---
--- Name: TABLE budget_reservations; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.budget_reservations TO openrails_app;
-
-
---
--- Name: TABLE catalog_drift_events; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_drift_events TO openrails_app;
-
-
---
--- Name: TABLE checkout_sessions; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.checkout_sessions TO openrails_app;
-
-
---
--- Name: TABLE credit_account_settings; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_account_settings TO openrails_app;
-
-
---
--- Name: TABLE credit_blocks; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_blocks TO openrails_app;
-
-
---
--- Name: TABLE credit_spend_limits; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_spend_limits TO openrails_app;
-
-
---
--- Name: TABLE credit_transactions; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_transactions TO openrails_app;
-
-
---
--- Name: TABLE credit_types; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_types TO openrails_app;
-
-
---
--- Name: TABLE entitlement_features; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlement_features TO openrails_app;
-
-
---
--- Name: TABLE entitlements; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlements TO openrails_app;
-
-
---
--- Name: TABLE invoices; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoices TO openrails_app;
-
-
---
--- Name: TABLE linked_wallets; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.linked_wallets TO openrails_app;
-
-
---
--- Name: TABLE manual_rebill_attempts; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.manual_rebill_attempts TO openrails_app;
-
-
---
--- Name: TABLE notification_queue; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.notification_queue TO openrails_app;
-
-
---
--- Name: TABLE payment_blocklist; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payment_blocklist TO openrails_app;
-
-
---
--- Name: TABLE payment_methods; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payment_methods TO openrails_app;
-
-
---
--- Name: TABLE payments; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payments TO openrails_app;
-
-
---
--- Name: TABLE platform_audit; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.platform_audit TO openrails_app;
-
-
---
--- Name: TABLE platform_break_glass; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.platform_break_glass TO openrails_app;
-
-
---
--- Name: TABLE prices; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.prices TO openrails_app;
-
-
---
--- Name: TABLE processor_customers; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.processor_customers TO openrails_app;
-
-
---
--- Name: TABLE product_access_grants; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_access_grants TO openrails_app;
-
-
---
--- Name: TABLE product_entitlement_features; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_entitlement_features TO openrails_app;
-
-
---
--- Name: TABLE products; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.products TO openrails_app;
-
-
---
--- Name: TABLE solana_subscriptions; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.solana_subscriptions TO openrails_app;
-
-
---
--- Name: TABLE subscriptions; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.subscriptions TO openrails_app;
-
-
---
--- Name: TABLE tenant_credential_audit; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_credential_audit TO openrails_app;
-
-
---
--- Name: TABLE tenant_deks; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_deks TO openrails_app;
-
-
---
--- Name: TABLE tenant_delegated_issuers; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_delegated_issuers TO openrails_app;
-
-
---
--- Name: TABLE tenant_exports; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_exports TO openrails_app;
-
-
---
--- Name: TABLE tenant_secrets; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_secrets TO openrails_app;
-
-
---
--- Name: TABLE tenant_subjects; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenant_subjects TO openrails_app;
-
-
---
--- Name: TABLE tenants; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tenants TO openrails_app;
-
-
---
--- Name: TABLE tier_policies; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tier_policies TO openrails_app;
-
-
---
--- Name: TABLE usage_events; Type: ACL; Schema: billing; Owner: -
---
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.usage_events TO openrails_app;
-
-
---
--- Name: TABLE usdc_funding_sessions; Type: ACL; Schema: billing; Owner: -
---
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.usdc_funding_sessions TO openrails_app;
 
+COMMENT ON TABLE openrails.usdc_funding_sessions IS 'External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.';
 
---
--- Name: TABLE credit_balances; Type: ACL; Schema: billing; Owner: -
---
+-- =============================================================================
+-- solana_subscriptions
+-- =============================================================================
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credit_balances TO openrails_app;
+CREATE TABLE openrails.solana_subscriptions (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    subscription_id uuid NOT NULL,
+    subscriber_wallet text NOT NULL,
+    authority_pda text NOT NULL,
+    subscription_pda text NOT NULL,
+    plan_pda text NOT NULL,
+    merchant_address text NOT NULL,
+    mint text NOT NULL,
+    plan_created_at_fingerprint bigint NOT NULL,
+    last_pulled_period_start timestamp with time zone,
+    last_signature text,
+    next_pull_at timestamp with time zone NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT solana_subscriptions_pkey PRIMARY KEY (id),
+    CONSTRAINT solana_subscriptions_subscription_pda_key UNIQUE (subscription_pda),
+    CONSTRAINT solana_subscriptions_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE CASCADE
+);
 
+CREATE INDEX idx_solana_subscriptions_due ON openrails.solana_subscriptions USING btree (tenant_id, next_pull_at) WHERE (status = 'active'::text);
+CREATE INDEX idx_solana_subscriptions_subscription_id ON openrails.solana_subscriptions USING btree (subscription_id);
 
---
--- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: billing; Owner: -
---
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.solana_subscriptions TO openrails_app;
+
+-- =============================================================================
+-- admin_grants
+-- =============================================================================
+
+CREATE TABLE openrails.admin_grants (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    price_id uuid,
+    granted_by text NOT NULL,
+    reason text NOT NULL,
+    payment_id uuid,
+    duration_days integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid NOT NULL,
+    CONSTRAINT admin_grants_pkey PRIMARY KEY (id),
+    CONSTRAINT admin_grants_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES openrails.payments(id),
+    CONSTRAINT admin_grants_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id),
+    CONSTRAINT admin_grants_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.admin_grants FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_admin_grants_granted_by ON openrails.admin_grants USING btree (granted_by);
+CREATE INDEX idx_admin_grants_payment_id ON openrails.admin_grants USING btree (payment_id) WHERE (payment_id IS NOT NULL);
+CREATE INDEX idx_admin_grants_tenant_id ON openrails.admin_grants USING btree (tenant_id);
+CREATE INDEX idx_admin_grants_tenant_subject ON openrails.admin_grants USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+
+ALTER TABLE openrails.admin_grants ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.admin_grants USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.admin_grants TO openrails_app;
+
+COMMENT ON TABLE openrails.admin_grants IS 'Records admin-initiated product grants (comps, contest winners, manual payments, partnerships)';
+COMMENT ON COLUMN openrails.admin_grants.price_id IS 'Price/Product being granted - entitlements derived from Product.EntitlementsSpec';
+COMMENT ON COLUMN openrails.admin_grants.granted_by IS 'Admin user ID who made the grant';
+COMMENT ON COLUMN openrails.admin_grants.reason IS 'Reason for grant: comp, contest_winner, refund_compensation, partnership, manual_payment, etc.';
+COMMENT ON COLUMN openrails.admin_grants.payment_id IS 'Optional link to Payment record if money was received';
+COMMENT ON COLUMN openrails.admin_grants.duration_days IS 'Override entitlement duration (NULL=use Product spec, 0=indefinite, N=N days)';
+
+-- =============================================================================
+-- product_access_grants
+-- =============================================================================
+
+CREATE TABLE openrails.product_access_grants (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    product_id uuid NOT NULL,
+    source_type text NOT NULL,
+    source_id text DEFAULT ''::text NOT NULL,
+    payment_id uuid,
+    status text DEFAULT 'active'::text NOT NULL,
+    starts_at timestamp with time zone DEFAULT now() NOT NULL,
+    ends_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    revoke_reason text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    tenant_subject_id uuid NOT NULL,
+    CONSTRAINT product_access_grants_pkey PRIMARY KEY (id),
+    CONSTRAINT product_access_grants_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text]))),
+    CONSTRAINT product_access_grants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'revoked'::text]))),
+    CONSTRAINT product_access_grants_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id),
+    CONSTRAINT product_access_grants_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.product_access_grants FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_product_access_grants_tenant_subject ON openrails.product_access_grants USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+CREATE INDEX ix_product_access_grants_payment ON openrails.product_access_grants USING btree (payment_id) WHERE (payment_id IS NOT NULL);
+
+ALTER TABLE openrails.product_access_grants ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.product_access_grants USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_access_grants TO openrails_app;
+
+COMMENT ON TABLE openrails.product_access_grants IS 'Durable, application-facing product ownership/access (issue #250). Distinct from feature entitlements: answers "does this user own product X?" / "list products this user can access". A successful one-time purchase creates a grant; refunds/chargebacks/admin revocation revoke it.';
+
+-- =============================================================================
+-- entitlements
+-- =============================================================================
+
+CREATE TABLE openrails.entitlements (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    entitlement text NOT NULL,
+    start_at timestamp with time zone NOT NULL,
+    end_at timestamp with time zone,
+    source_id uuid NOT NULL,
+    source_type text NOT NULL,
+    revoked_at timestamp with time zone,
+    revoke_reason text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at timestamp with time zone,
+    period tstzrange GENERATED ALWAYS AS (tstzrange(start_at, COALESCE(end_at, 'infinity'::timestamp with time zone), '[)'::text)) STORED,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid NOT NULL,
+    CONSTRAINT entitlements_pkey PRIMARY KEY (id),
+    CONSTRAINT chk_entitlements_source_type CHECK ((source_type = ANY (ARRAY['subscription'::text, 'one_off'::text, 'admin'::text, 'grace'::text]))),
+    CONSTRAINT chk_revoke_fields_together CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
+    CONSTRAINT chk_valid_time_window CHECK (((end_at IS NULL) OR (start_at < end_at))),
+    CONSTRAINT entitlements_tenant_subject_no_overlap EXCLUDE USING gist (tenant_id WITH =, tenant_subject_id WITH =, entitlement WITH =, period WITH &&) WHERE (((tenant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL))),
+    CONSTRAINT entitlements_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.entitlements FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_entitlements_grace_by_subscription_live ON openrails.entitlements USING btree (source_id, entitlement, start_at, end_at) WHERE ((source_type = 'grace'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_live_by_id ON openrails.entitlements USING btree (id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_one_off_source_live ON openrails.entitlements USING btree (source_id, entitlement) WHERE ((source_type = 'one_off'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_source ON openrails.entitlements USING btree (source_type, source_id) WHERE (source_id IS NOT NULL);
+CREATE INDEX idx_entitlements_subscription_source_live ON openrails.entitlements USING btree (source_id, entitlement, end_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_tenant_id ON openrails.entitlements USING btree (tenant_id);
+CREATE INDEX idx_entitlements_tenant_subject_active_window ON openrails.entitlements USING btree (tenant_id, tenant_subject_id, entitlement, start_at, end_at) WHERE ((tenant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_entitlements_tenant_subject_active ON openrails.entitlements USING btree (tenant_id, tenant_subject_id, entitlement) WHERE ((tenant_subject_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL) AND (end_at IS NULL));
+
+ALTER TABLE openrails.entitlements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.entitlements USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlements TO openrails_app;
+
+COMMENT ON COLUMN openrails.entitlements.tenant_subject_id IS 'OpenRails payable tenant subject for this entitlement window.';
+
+-- =============================================================================
+-- invoices
+-- =============================================================================
+
+CREATE TABLE openrails.invoices (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT invoices_tenant_subject_id_not_null NOT NULL,
+    credit_type_id uuid NOT NULL,
+    currency text DEFAULT ''::text NOT NULL,
+    period_from timestamp with time zone NOT NULL,
+    period_to timestamp with time zone NOT NULL,
+    usage_total bigint DEFAULT 0 NOT NULL,
+    deposits_total bigint DEFAULT 0 NOT NULL,
+    owed_accrued bigint DEFAULT 0 NOT NULL,
+    owed_paid bigint DEFAULT 0 NOT NULL,
+    closing_balance bigint DEFAULT 0 NOT NULL,
+    line_items jsonb DEFAULT '[]'::jsonb NOT NULL,
+    money_movements jsonb DEFAULT '{}'::jsonb NOT NULL,
+    status text DEFAULT 'draft'::text NOT NULL,
+    finalized_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT invoices_pkey PRIMARY KEY (id),
+    CONSTRAINT invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'finalized'::text, 'voided'::text]))),
+    CONSTRAINT invoices_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.invoices FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_invoices_tenant_subject ON openrails.invoices USING btree (tenant_subject_id, period_from DESC);
+CREATE INDEX ix_invoices_payer ON openrails.invoices USING btree (tenant_id, tenant_subject_id, period_from DESC);
+CREATE UNIQUE INDEX uq_invoices_period ON openrails.invoices USING btree (tenant_id, tenant_subject_id, credit_type_id, period_from, period_to);
+
+ALTER TABLE openrails.invoices ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.invoices USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoices TO openrails_app;
+
+COMMENT ON TABLE openrails.invoices IS 'Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the credit ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.';
+
+-- =============================================================================
+-- linked_wallets
+-- =============================================================================
+
+CREATE TABLE openrails.linked_wallets (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid NOT NULL,
+    chain text NOT NULL,
+    address text NOT NULL,
+    verification_provider text NOT NULL,
+    verified_at timestamp with time zone NOT NULL,
+    display_name text,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT linked_wallets_pkey PRIMARY KEY (id),
+    CONSTRAINT linked_wallets_unique_chain_address UNIQUE (tenant_id, chain, address),
+    CONSTRAINT linked_wallets_unique_subject_chain UNIQUE (tenant_id, tenant_subject_id, chain),
+    CONSTRAINT linked_wallets_chain_address_nonempty CHECK (((btrim(chain) <> ''::text) AND (btrim(address) <> ''::text))),
+    CONSTRAINT linked_wallets_tenant_subject_id_fkey FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_linked_wallets_tenant_subject ON openrails.linked_wallets USING btree (tenant_id, tenant_subject_id);
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.linked_wallets TO openrails_app;
+
+COMMENT ON TABLE openrails.linked_wallets IS 'Verified user wallet links for browser self-service billing identity. The wallet must come from trusted delegated-token claims, not request body input.';
+
+-- =============================================================================
+-- notification_queue
+-- =============================================================================
+
+CREATE TABLE openrails.notification_queue (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    event_type text NOT NULL,
+    data jsonb NOT NULL,
+    seen boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid NOT NULL,
+    CONSTRAINT notification_queue_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_queue_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.notification_queue FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_notification_queue_created_at ON openrails.notification_queue USING btree (created_at);
+CREATE INDEX idx_notification_queue_event_type ON openrails.notification_queue USING btree (event_type);
+CREATE INDEX idx_notification_queue_seen ON openrails.notification_queue USING btree (seen);
+CREATE INDEX idx_notification_queue_tenant_id ON openrails.notification_queue USING btree (tenant_id);
+CREATE INDEX idx_notification_queue_tenant_subject ON openrails.notification_queue USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+
+ALTER TABLE openrails.notification_queue ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.notification_queue USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.notification_queue TO openrails_app;
+
+COMMENT ON TABLE openrails.notification_queue IS 'Queue for user notifications related to billing and subscriptions';
+
+-- =============================================================================
+-- payment_blocklist
+-- =============================================================================
+
+CREATE TABLE openrails.payment_blocklist (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid,
+    kind text NOT NULL,
+    value text NOT NULL,
+    reason text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT payment_blocklist_pkey PRIMARY KEY (id),
+    CONSTRAINT payment_blocklist_kind_check CHECK ((kind = ANY (ARRAY['card_fingerprint'::text, 'processor_customer'::text, 'email'::text, 'ip'::text]))),
+    CONSTRAINT payment_blocklist_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.payment_blocklist FORCE ROW LEVEL SECURITY;
+
+CREATE UNIQUE INDEX uq_payment_blocklist ON openrails.payment_blocklist USING btree (tenant_id, kind, value);
+
+ALTER TABLE openrails.payment_blocklist ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.payment_blocklist USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payment_blocklist TO openrails_app;
+
+COMMENT ON TABLE openrails.payment_blocklist IS 'Tenant-scoped blocklist of known-bad payment identifiers (issue #300). tenant_subject_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.';
+
+-- =============================================================================
+-- processor_customers
+-- =============================================================================
+
+CREATE TABLE openrails.processor_customers (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    processor text NOT NULL,
+    customer_id text NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid NOT NULL,
+    CONSTRAINT processor_customers_pkey PRIMARY KEY (id),
+    CONSTRAINT processor_customers_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.processor_customers FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_processor_customers_tenant_id ON openrails.processor_customers USING btree (tenant_id);
+CREATE INDEX idx_processor_customers_tenant_subject ON openrails.processor_customers USING btree (tenant_subject_id) WHERE (tenant_subject_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_processor_customers_tenant_processor_customer ON openrails.processor_customers USING btree (tenant_id, processor, customer_id);
+CREATE UNIQUE INDEX uq_processor_customers_tenant_subject_processor ON openrails.processor_customers USING btree (tenant_id, tenant_subject_id, processor);
+
+ALTER TABLE openrails.processor_customers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.processor_customers USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.processor_customers TO openrails_app;
+
+-- =============================================================================
+-- budget_reservations
+-- =============================================================================
+
+CREATE TABLE openrails.budget_reservations (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT budget_reservations_tenant_subject_id_not_null NOT NULL,
+    actor text CONSTRAINT budget_reservations_actor_not_null NOT NULL,
+    amount_micros bigint NOT NULL,
+    captured_micros bigint DEFAULT 0 NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    source text NOT NULL,
+    source_id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone,
+    CONSTRAINT budget_reservations_pkey PRIMARY KEY (id),
+    CONSTRAINT budget_reservations_status_check CHECK ((status = ANY (ARRAY['active'::text, 'captured'::text, 'released'::text]))),
+    CONSTRAINT budget_reservations_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.budget_reservations FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX budget_reservations_window_agg_idx ON openrails.budget_reservations USING btree (tenant_id, tenant_subject_id, actor, created_at) WHERE (status = ANY (ARRAY['active'::text, 'captured'::text]));
+CREATE INDEX ix_budget_reservations_window ON openrails.budget_reservations USING btree (tenant_id, tenant_subject_id, actor, created_at);
+CREATE UNIQUE INDEX uq_budget_reservations_idem ON openrails.budget_reservations USING btree (tenant_id, tenant_subject_id, actor, source, source_id);
+
+ALTER TABLE openrails.budget_reservations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.budget_reservations USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.budget_reservations TO openrails_app;
+
+COMMENT ON TABLE openrails.budget_reservations IS 'Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor''s passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).';
+COMMENT ON COLUMN openrails.budget_reservations.actor IS 'Caller-supplied principal string whose rolling money-budget windows are capped. Opaque to OpenRails.';
+
+-- =============================================================================
+-- budget_window_state
+-- =============================================================================
+
+CREATE TABLE openrails.budget_window_state (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT budget_window_state_tenant_subject_id_not_null NOT NULL,
+    actor text CONSTRAINT budget_window_state_actor_not_null NOT NULL,
+    window_key text CONSTRAINT budget_window_state_window_key_not_null NOT NULL,
+    cadence text NOT NULL,
+    window_seconds bigint NOT NULL,
+    anchor timestamp with time zone NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT budget_window_state_pkey PRIMARY KEY (id),
+    CONSTRAINT budget_window_state_uniq UNIQUE (tenant_id, tenant_subject_id, actor, window_key),
+    CONSTRAINT budget_window_state_cadence_check CHECK ((cadence = ANY (ARRAY['session'::text, 'fixed'::text]))),
+    CONSTRAINT budget_window_state_window_seconds_check CHECK ((window_seconds > 0)),
+    CONSTRAINT budget_window_state_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.budget_window_state FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE openrails.budget_window_state ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.budget_window_state USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.budget_window_state TO openrails_app;
+
+COMMENT ON TABLE openrails.budget_window_state IS 'Per-(tenant, tenant subject, actor, window_key) fixed-window anchor (#337). session: window_start rewritten on reopen; fixed: window_start derived from anchor. Locked FOR UPDATE in Reserve as the boundary-rollover serialization point.';
+COMMENT ON COLUMN openrails.budget_window_state.anchor IS 'First-ever window open for this (subject, actor, window_key); fixed-cadence boundaries are anchor + k*window_seconds.';
+COMMENT ON COLUMN openrails.budget_window_state.window_start IS 'Start of the most recently OPENED window. Authoritative for session cadence; for fixed cadence the current start is derived from anchor at read time.';
+
+-- =============================================================================
+-- tier_policies
+-- =============================================================================
+
+CREATE TABLE openrails.tier_policies (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT tier_policies_tenant_subject_id_not_null NOT NULL,
+    tier text NOT NULL,
+    policy jsonb DEFAULT '{}'::jsonb NOT NULL,
+    policy_version bigint DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT tier_policies_pkey PRIMARY KEY (id),
+    CONSTRAINT tier_policies_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.tier_policies FORCE ROW LEVEL SECURITY;
+
+CREATE UNIQUE INDEX uq_tier_policies ON openrails.tier_policies USING btree (tenant_id, tenant_subject_id, tier);
+
+ALTER TABLE openrails.tier_policies ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.tier_policies USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tier_policies TO openrails_app;
+
+COMMENT ON TABLE openrails.tier_policies IS 'Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in credit_account_settings; rolling money budgets are #304.';
+
+-- =============================================================================
+-- usage_events
+-- =============================================================================
+
+CREATE TABLE openrails.usage_events (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    tenant_subject_id uuid CONSTRAINT usage_events_tenant_subject_id_not_null NOT NULL,
+    actor text CONSTRAINT usage_events_actor_not_null NOT NULL,
+    resource text,
+    credit_type_id uuid NOT NULL,
+    event_type text NOT NULL,
+    dimensions jsonb DEFAULT '{}'::jsonb NOT NULL,
+    amount bigint NOT NULL,
+    source text NOT NULL,
+    source_id text NOT NULL,
+    credit_transaction_id uuid,
+    metadata jsonb,
+    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT usage_events_pkey PRIMARY KEY (id),
+    CONSTRAINT usage_events_amount_check CHECK ((amount >= 0)),
+    CONSTRAINT usage_events_tenant_subject_fk FOREIGN KEY (tenant_subject_id) REFERENCES openrails.tenant_subjects(id)
+);
+
+ALTER TABLE ONLY openrails.usage_events FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_usage_events_tenant_subject_time ON openrails.usage_events USING btree (tenant_subject_id, occurred_at);
+CREATE INDEX ix_usage_events_payer_time ON openrails.usage_events USING btree (tenant_id, tenant_subject_id, occurred_at);
+CREATE INDEX ix_usage_events_payer_type_time ON openrails.usage_events USING btree (tenant_id, tenant_subject_id, event_type, occurred_at);
+CREATE UNIQUE INDEX uq_usage_events_idem ON openrails.usage_events USING btree (tenant_id, tenant_subject_id, event_type, source, source_id);
+
+ALTER TABLE openrails.usage_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.usage_events USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.usage_events TO openrails_app;
+
+COMMENT ON TABLE openrails.usage_events IS 'Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.';
+COMMENT ON COLUMN openrails.usage_events.actor IS 'Caller-supplied principal string (e.g. a username slug) that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.';
+COMMENT ON COLUMN openrails.usage_events.resource IS 'Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.';
+
+-- =============================================================================
+-- catalog_drift_events
+-- =============================================================================
+
+CREATE TABLE openrails.catalog_drift_events (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    provider text NOT NULL,
+    kind text NOT NULL,
+    openrails_resource_type text NOT NULL,
+    openrails_resource_id text,
+    external_resource_id text,
+    field text,
+    openrails_value text,
+    external_value text,
+    detected_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    resolved_at timestamp with time zone,
+    tenant_id uuid NOT NULL,
+    CONSTRAINT catalog_drift_events_pkey PRIMARY KEY (id),
+    CONSTRAINT catalog_drift_events_kind_check CHECK ((kind = ANY (ARRAY['orphan_in_stripe'::text, 'missing_in_stripe'::text, 'orphan_in_nmi'::text, 'missing_in_nmi'::text, 'field_drift'::text]))),
+    CONSTRAINT catalog_drift_events_openrails_resource_type_check CHECK ((openrails_resource_type = ANY (ARRAY['product'::text, 'price'::text]))),
+    CONSTRAINT catalog_drift_events_provider_check CHECK ((provider = ANY (ARRAY['stripe'::text, 'nmi'::text])))
+);
+
+ALTER TABLE ONLY openrails.catalog_drift_events FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_catalog_drift_events_open ON openrails.catalog_drift_events USING btree (detected_at DESC) WHERE (resolved_at IS NULL);
+CREATE INDEX idx_catalog_drift_events_tenant_id ON openrails.catalog_drift_events USING btree (tenant_id);
+CREATE UNIQUE INDEX uq_catalog_drift_open ON openrails.catalog_drift_events USING btree (provider, kind, openrails_resource_type, COALESCE(openrails_resource_id, ''::text), COALESCE(external_resource_id, ''::text), COALESCE(field, ''::text)) WHERE (resolved_at IS NULL);
+
+ALTER TABLE openrails.catalog_drift_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.catalog_drift_events USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_drift_events TO openrails_app;
+
+COMMENT ON TABLE openrails.catalog_drift_events IS 'Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.';
+
+-- =============================================================================
+-- reconciliation_runs
+-- =============================================================================
+
+CREATE TABLE openrails.reconciliation_runs (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    mode text NOT NULL,
+    providers text[] NOT NULL,
+    window_since timestamp with time zone,
+    window_until timestamp with time zone,
+    started_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    finished_at timestamp with time zone,
+    status text DEFAULT 'running'::text NOT NULL,
+    summary jsonb,
+    error text,
+    CONSTRAINT reconciliation_runs_pkey PRIMARY KEY (id),
+    CONSTRAINT chk_reconciliation_runs_mode CHECK ((mode = ANY (ARRAY['advisory'::text, 'enforce'::text]))),
+    CONSTRAINT chk_reconciliation_runs_status CHECK ((status = ANY (ARRAY['running'::text, 'completed'::text, 'failed'::text])))
+);
+
+ALTER TABLE ONLY openrails.reconciliation_runs FORCE ROW LEVEL SECURITY;
+
+CREATE INDEX idx_reconciliation_runs_tenant_id ON openrails.reconciliation_runs USING btree (tenant_id);
+CREATE INDEX idx_reconciliation_runs_started_at ON openrails.reconciliation_runs USING btree (started_at DESC);
+
+ALTER TABLE openrails.reconciliation_runs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.reconciliation_runs USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reconciliation_runs TO openrails_app;
+
+COMMENT ON TABLE openrails.reconciliation_runs IS 'One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment processors. Summary jsonb carries per-provider counts and the dunning-forensics report.';
+
+-- =============================================================================
+-- reconciliation_findings
+-- =============================================================================
+
+CREATE TABLE openrails.reconciliation_findings (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    provider text NOT NULL,
+    finding_type text NOT NULL,
+    subject_key text NOT NULL,
+    severity text NOT NULL,
+    status text DEFAULT 'open'::text NOT NULL,
+    requires_admin boolean DEFAULT false NOT NULL,
+    recommended_action text,
+    local_evidence jsonb,
+    remote_evidence jsonb,
+    intent_evidence jsonb,
+    resolution_evidence jsonb,
+    first_seen_run uuid NOT NULL,
+    last_seen_run uuid NOT NULL,
+    first_seen_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    occurrence_count integer DEFAULT 1 NOT NULL,
+    resolved_at timestamp with time zone,
+    resolution text,
+    notes text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT reconciliation_findings_pkey PRIMARY KEY (id),
+    CONSTRAINT chk_reconciliation_findings_type CHECK ((finding_type = ANY (ARRAY['PS-1'::text, 'PS-2'::text, 'PS-3'::text, 'PS-4'::text, 'PS-5'::text, 'PS-6'::text, 'PS-7'::text, 'PS-8'::text, 'PS-9'::text, 'PS-10'::text]))),
+    CONSTRAINT chk_reconciliation_findings_severity CHECK ((severity = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text]))),
+    CONSTRAINT chk_reconciliation_findings_status CHECK ((status = ANY (ARRAY['open'::text, 'auto_fixed'::text, 'admin_pending'::text, 'resolved'::text, 'dismissed'::text]))),
+    CONSTRAINT chk_reconciliation_findings_resolution CHECK ((resolution IS NULL OR resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_ack'::text, 'dismissed'::text]))),
+    CONSTRAINT chk_reconciliation_findings_resolved_fields CHECK (((resolved_at IS NULL) = (resolution IS NULL)))
+);
+
+ALTER TABLE ONLY openrails.reconciliation_findings FORCE ROW LEVEL SECURITY;
+
+CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON openrails.reconciliation_findings USING btree (tenant_id, provider, finding_type, subject_key);
+CREATE INDEX idx_reconciliation_findings_tenant_id ON openrails.reconciliation_findings USING btree (tenant_id);
+CREATE INDEX idx_reconciliation_findings_open ON openrails.reconciliation_findings USING btree (provider, finding_type) WHERE (status = ANY (ARRAY['open'::text, 'admin_pending'::text]));
+CREATE INDEX idx_reconciliation_findings_admin_queue ON openrails.reconciliation_findings USING btree (last_seen_at DESC) WHERE (requires_admin AND (status = 'admin_pending'::text));
+
+ALTER TABLE openrails.reconciliation_findings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.reconciliation_findings USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reconciliation_findings TO openrails_app;
+
+COMMENT ON TABLE openrails.reconciliation_findings IS 'Durable local-vs-processor drift ledger (#107 PS-1..PS-9). Stable identity per (tenant, provider, finding_type, subject_key): re-runs update, disappearance auto-resolves as auto_vanished. requires_admin = true rows are the admin action queue.';
+COMMENT ON COLUMN openrails.reconciliation_findings.subject_key IS 'Stable identity of the drifted subject within (provider, finding_type): processor subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.';
+COMMENT ON COLUMN openrails.reconciliation_findings.intent_evidence IS 'Class-3 local-intent annotation (design decision 5): e.g. DeletionScheduledAt marker present => "recorded delete never executed; boot rescan replays it" — keeps the admin queue to genuine unknowns.';
+
+-- =============================================================================
+-- probe_verdicts (RLS-exempt by design: instance-level credential state)
+-- =============================================================================
+
+CREATE TABLE openrails.probe_verdicts (
+    provider text NOT NULL,
+    key_hash text NOT NULL,
+    verdict text NOT NULL,
+    checked_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT probe_verdicts_pkey PRIMARY KEY (provider, key_hash),
+    CONSTRAINT chk_probe_verdicts_verdict CHECK ((verdict = ANY (ARRAY['live'::text, 'simulated'::text])))
+);
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.probe_verdicts TO openrails_app;
+
+COMMENT ON TABLE openrails.probe_verdicts IS 'Cached NMI test-mode probe verdicts (#348): one row per (provider, sha256(security_key)). Fresh ''live'' refuses boot from cache, fresh ''simulated'' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.';
+COMMENT ON COLUMN openrails.probe_verdicts.key_hash IS 'sha256 hex of the provider security key. A rotated key hashes differently, so the cache never answers for a credential it has not seen.';
+
+-- =============================================================================
+-- provider_intents
+-- =============================================================================
+
+CREATE TABLE openrails.provider_intents (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    tenant_id uuid NOT NULL,
+    provider text NOT NULL,
+    intent_type text NOT NULL,
+    subscription_id uuid,
+    payment_id uuid,
+    price_id uuid,
+    payload jsonb,
+    idempotency_key text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    claimed_until timestamp with time zone,
+    origin text NOT NULL,
+    origin_reason text,
+    last_failure_reason text,
+    expires_at timestamp with time zone,
+    result_evidence jsonb,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    executed_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    account_fingerprint text,
+    CONSTRAINT provider_intents_pkey PRIMARY KEY (id),
+    CONSTRAINT chk_provider_intents_status CHECK ((status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'succeeded'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text]))),
+    CONSTRAINT chk_provider_intents_origin CHECK ((origin = ANY (ARRAY['user'::text, 'admin'::text, 'system'::text]))),
+    CONSTRAINT chk_provider_intents_executed CHECK ((status <> 'succeeded'::text OR executed_at IS NOT NULL))
+);
+
+ALTER TABLE ONLY openrails.provider_intents FORCE ROW LEVEL SECURITY;
+
+CREATE UNIQUE INDEX uq_provider_intents_tenant_idempotency_key ON openrails.provider_intents USING btree (tenant_id, idempotency_key);
+CREATE INDEX idx_provider_intents_tenant_id ON openrails.provider_intents USING btree (tenant_id);
+CREATE INDEX idx_provider_intents_due ON openrails.provider_intents USING btree (next_attempt_at) WHERE (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text]));
+CREATE INDEX idx_provider_intents_subscription ON openrails.provider_intents USING btree (subscription_id) WHERE (subscription_id IS NOT NULL);
+
+ALTER TABLE openrails.provider_intents ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON openrails.provider_intents USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.provider_intents TO openrails_app;
+
+COMMENT ON TABLE openrails.provider_intents IS 'Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.';
+COMMENT ON COLUMN openrails.provider_intents.provider IS 'Provider/processor key the mutation targets (e.g. ''mobius'' for an NMI-backed processor, ''stripe'').';
+COMMENT ON COLUMN openrails.provider_intents.intent_type IS 'Registry key selecting the per-type semantics (executor, verifier, relevance, backoff): nmi_delete_subscription, and in later phases manual_rebill, refund, plan_archive, ...';
+COMMENT ON COLUMN openrails.provider_intents.idempotency_key IS 'Deterministic identity of the logical intent within the tenant. Re-enqueues conflict here: a pending intent is refreshed, a superseded/expired one revived (relevance returned), anything else untouched — effectively-once per logical intent.';
+COMMENT ON COLUMN openrails.provider_intents.claimed_until IS 'Single-executor lease (SKIP LOCKED claim). An in_flight row whose lease elapsed was orphaned by a crashed executor and becomes claimable again; per-type execute semantics (verify-then-execute, verifier-before-retry) make the reclaim safe.';
+COMMENT ON COLUMN openrails.provider_intents.origin IS 'Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.';
+COMMENT ON COLUMN openrails.provider_intents.last_failure_reason IS 'Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.';
+COMMENT ON COLUMN openrails.provider_intents.expires_at IS 'End of the relevance window: past this instant the intent expires with a finding instead of firing stale (NULL = relevance governed solely by the type''s relevance check).';
+COMMENT ON COLUMN openrails.provider_intents.result_evidence IS 'How the terminal status was established (e.g. {"verified_absent": true} for a delete confirmed by a provider read).';
+COMMENT ON COLUMN openrails.provider_intents.account_fingerprint IS 'Fingerprint of the provider account the intent was enqueued against (#365). NULL = pre-guard or unresolvable: executes ungated. Mismatch with the current credentials parks the intent.';
+
+-- =============================================================================
+-- platform_audit (GLOBAL control-plane)
+-- =============================================================================
+
+CREATE TABLE openrails.platform_audit (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    actor_user_id text NOT NULL,
+    actor_tenant text,
+    action text NOT NULL,
+    target_tenant_id uuid,
+    reason text,
+    before_state jsonb,
+    after_state jsonb,
+    detail jsonb,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT platform_audit_pkey PRIMARY KEY (id)
+);
+
+CREATE INDEX idx_platform_audit_action ON openrails.platform_audit USING btree (action, created_at DESC);
+CREATE INDEX idx_platform_audit_actor ON openrails.platform_audit USING btree (actor_user_id, created_at DESC);
+CREATE INDEX idx_platform_audit_target ON openrails.platform_audit USING btree (target_tenant_id, created_at DESC);
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.platform_audit TO openrails_app;
+
+COMMENT ON TABLE openrails.platform_audit IS 'Append-only cross-tenant platform superadmin audit log (issue #226). Records actor, target tenant, action, reason, and before/after state. CROSS-TENANT control-plane state: NOT purged by tenant delete.';
+
+-- =============================================================================
+-- platform_break_glass (GLOBAL control-plane)
+-- =============================================================================
+
+CREATE TABLE openrails.platform_break_glass (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    actor_user_id text NOT NULL,
+    target_tenant_id uuid,
+    justification text NOT NULL,
+    granted_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    CONSTRAINT platform_break_glass_pkey PRIMARY KEY (id),
+    CONSTRAINT chk_break_glass_justified CHECK ((length(btrim(justification)) > 0)),
+    CONSTRAINT chk_break_glass_window CHECK ((expires_at > granted_at))
+);
+
+CREATE INDEX idx_break_glass_active ON openrails.platform_break_glass USING btree (expires_at) WHERE (revoked_at IS NULL);
+CREATE INDEX idx_break_glass_actor ON openrails.platform_break_glass USING btree (actor_user_id, expires_at DESC);
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.platform_break_glass TO openrails_app;
+
+COMMENT ON TABLE openrails.platform_break_glass IS 'Time-boxed break-glass elevation grants (issue #226). Each grant carries a written justification and an expiry, and is mirrored into platform_audit. CROSS-TENANT control-plane state.';
+
+-- =============================================================================
+-- Schema-level grants and default privileges
+-- =============================================================================
+
+GRANT USAGE ON SCHEMA openrails TO openrails_app;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA openrails GRANT USAGE, SELECT ON SEQUENCES TO openrails_app;
-
-
---
--- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: billing; Owner: -
---
-
 ALTER DEFAULT PRIVILEGES IN SCHEMA openrails GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openrails_app;
-
-
---
---

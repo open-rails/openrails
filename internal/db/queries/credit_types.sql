@@ -2,9 +2,9 @@
 
 -- name: CreateCreditType :execrows
 INSERT INTO openrails.credit_types (
-    id, name, display_name, unit, decimal_places, is_active, created_at
+    id, tenant_id, name, display_name, unit, decimal_places, is_active, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
+    $1, sqlc.arg(tenant_id)::uuid, $2, $3, $4, $5, $6,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
 

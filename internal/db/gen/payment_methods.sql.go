@@ -44,15 +44,15 @@ func (q *Queries) CountPaymentMethodsByTenantSubject(ctx context.Context, tenant
 const createPaymentMethod = `-- name: CreatePaymentMethod :execrows
 
 INSERT INTO openrails.payment_methods (
-    id, tenant_subject_id, processor, vault_id, billing_id,
+    id, tenant_id, tenant_subject_id, processor, vault_id, billing_id,
     initial_transaction_id, last_four, card_type, expiry_date,
     failure_reason, metadata, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $6,
-    $5, $7, $8, $9,
-    $10, $11,
-    COALESCE(NULLIF($12::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($13::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $1, $6::uuid, $2, $3, $4, $7,
+    $5, $8, $9, $10,
+    $11, $12,
+    COALESCE(NULLIF($13::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    COALESCE(NULLIF($14::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `
 
@@ -62,6 +62,7 @@ type CreatePaymentMethodParams struct {
 	Processor            string
 	VaultID              string
 	InitialTransactionID string
+	TenantID             uuid.UUID
 	BillingID            *string
 	LastFour             *string
 	CardType             *string
@@ -80,6 +81,7 @@ func (q *Queries) CreatePaymentMethod(ctx context.Context, arg CreatePaymentMeth
 		arg.Processor,
 		arg.VaultID,
 		arg.InitialTransactionID,
+		arg.TenantID,
 		arg.BillingID,
 		arg.LastFour,
 		arg.CardType,

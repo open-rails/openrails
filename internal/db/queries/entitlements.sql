@@ -7,8 +7,7 @@ INSERT INTO openrails.entitlements (
     source_id, source_type, revoked_at, revoke_reason, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    COALESCE(NULLIF(sqlc.arg(tenant_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    sqlc.arg(tenant_id)::uuid,
     NULLIF(sqlc.arg(tenant_subject_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
     $1, $2, sqlc.narg(end_at), sqlc.narg(source_id), $3,
     sqlc.narg(revoked_at), sqlc.narg(revoke_reason),

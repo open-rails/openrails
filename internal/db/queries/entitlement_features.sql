@@ -5,8 +5,7 @@ INSERT INTO openrails.entitlement_features (
     id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    COALESCE(NULLIF(sqlc.arg(tenant_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    sqlc.arg(tenant_id)::uuid,
     $1, $2, $3, sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -45,8 +44,7 @@ INSERT INTO openrails.product_entitlement_features (
     metadata, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    COALESCE(NULLIF(sqlc.arg(tenant_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    sqlc.arg(tenant_id)::uuid,
     $1, $2, sqlc.narg(duration_days), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())

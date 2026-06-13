@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type CreditTypeRepo struct {
@@ -30,9 +31,14 @@ func creditTypeFromGen(ct gen.BillingCreditType) *models.CreditType {
 }
 
 func (r *CreditTypeRepo) Create(ctx context.Context, ct *models.CreditType) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
 	decimalPlaces32, _ := safecast.Convert[int32](ct.DecimalPlaces)
 	rows, err := r.db.Gen(ctx).CreateCreditType(ctx, gen.CreateCreditTypeParams{
 		ID:            ct.ID,
+		TenantID:      tid.UUID(),
 		Name:          ct.Name,
 		DisplayName:   ct.DisplayName,
 		Unit:          ct.Unit,

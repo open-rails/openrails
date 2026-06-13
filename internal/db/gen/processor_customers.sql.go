@@ -52,8 +52,8 @@ func (q *Queries) GetProcessorCustomerSubject(ctx context.Context, arg GetProces
 const upsertProcessorCustomer = `-- name: UpsertProcessorCustomer :exec
 
 INSERT INTO openrails.processor_customers (
-    id, tenant_subject_id, processor, customer_id, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6)
+    id, tenant_id, tenant_subject_id, processor, customer_id, created_at, updated_at
+) VALUES ($1, $7::uuid, $2, $3, $4, $5, $6)
 ON CONFLICT (tenant_id, tenant_subject_id, processor) DO UPDATE SET
     customer_id = EXCLUDED.customer_id,
     updated_at = EXCLUDED.updated_at
@@ -66,6 +66,7 @@ type UpsertProcessorCustomerParams struct {
 	CustomerID      string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	TenantID        uuid.UUID
 }
 
 // openrails.processor_customers: payable-subject <-> processor customer mapping.
@@ -77,6 +78,7 @@ func (q *Queries) UpsertProcessorCustomer(ctx context.Context, arg UpsertProcess
 		arg.CustomerID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.TenantID,
 	)
 	return err
 }

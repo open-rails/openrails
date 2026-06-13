@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/query"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type NotificationFilters struct {
@@ -59,8 +60,13 @@ func (r *NotificationQueueRepo) Create(ctx context.Context, notification *models
 	if err != nil {
 		return err
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
 	rows, err := r.db.Gen(ctx).CreateNotification(ctx, gen.CreateNotificationParams{
 		ID:              notification.ID,
+		TenantID:        tid.UUID(),
 		TenantSubjectID: notification.TenantSubjectID,
 		EventType:       string(notification.EventType),
 		Data:            data,

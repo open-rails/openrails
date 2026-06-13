@@ -297,9 +297,10 @@ WHERE NOT EXISTS (
 -- Dedupe rides the uq_payments_tenant_processor_transaction identity.
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
-    price_id, processor, transaction_id, amount, list_amount, currency,
+    tenant_id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, tenant_subject_id
 ) VALUES (
+    sqlc.arg(tenant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(processor)::openrails.processor_type,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
@@ -313,10 +314,11 @@ ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING;
 -- amount payment row linked to the refunded payment. Same dedupe identity.
 -- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
-    price_id, processor, transaction_id, amount, list_amount, currency,
+    tenant_id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
     tenant_subject_id
 ) VALUES (
+    sqlc.arg(tenant_id)::uuid,
     sqlc.arg(price_id), sqlc.arg(processor)::openrails.processor_type,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     COALESCE(NULLIF(sqlc.arg(currency)::text, ''), 'usd'),
@@ -341,11 +343,11 @@ WHERE id = sqlc.arg(id) AND status <> 'refunded';
 -- rows returned = already materialized).
 -- name: ReconcileMaterializeSubscription :many
 INSERT INTO openrails.subscriptions (
-    price_id, product_id, status, processor, processor_subscription_id,
+    tenant_id, price_id, product_id, status, processor, processor_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
     entitlements_spec_snapshot, credits_spec_snapshot, tenant_subject_id
 )
-SELECT pr.id, pr.product_id, sqlc.arg(status)::openrails.subscription_status,
+SELECT sqlc.arg(tenant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::openrails.subscription_status,
        sqlc.arg(processor), sqlc.arg(processor_subscription_id),
        sqlc.narg(user_email),
        sqlc.narg(period_starts_at)::timestamptz,

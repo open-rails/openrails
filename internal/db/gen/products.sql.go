@@ -41,8 +41,7 @@ INSERT INTO openrails.products (
     credits_spec, tier_group, tier_rank, status, created_at, updated_at
 ) VALUES (
     $1,
-    COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    $4::uuid,
     $2, $3, $5, $6,
     $7, $8,
     COALESCE(NULLIF($9::int, 0), 0),

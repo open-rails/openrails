@@ -76,10 +76,10 @@ func (q *Queries) CountRepairAlerts(ctx context.Context, arg CountRepairAlertsPa
 const createNotification = `-- name: CreateNotification :execrows
 
 INSERT INTO openrails.notification_queue (
-    id, tenant_subject_id, event_type, data, seen, created_at
+    id, tenant_id, tenant_subject_id, event_type, data, seen, created_at
 ) VALUES (
-    $1, $2, $3, COALESCE($5, '{}'::jsonb), $4,
-    COALESCE(NULLIF($6::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $1, $5::uuid, $2, $3, COALESCE($6, '{}'::jsonb), $4,
+    COALESCE(NULLIF($7::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `
 
@@ -88,6 +88,7 @@ type CreateNotificationParams struct {
 	TenantSubjectID uuid.UUID
 	EventType       string
 	Seen            bool
+	TenantID        uuid.UUID
 	Data            []byte
 	CreatedAt       time.Time
 }
@@ -99,6 +100,7 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 		arg.TenantSubjectID,
 		arg.EventType,
 		arg.Seen,
+		arg.TenantID,
 		arg.Data,
 		arg.CreatedAt,
 	)

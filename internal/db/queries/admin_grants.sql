@@ -3,10 +3,11 @@
 -- name: CreateAdminGrant :one
 -- RETURNING id matches bun's pk write-back for the uuidv7() default.
 INSERT INTO openrails.admin_grants (
-    id, tenant_subject_id, price_id, granted_by, reason, payment_id,
+    id, tenant_id, tenant_subject_id, price_id, granted_by, reason, payment_id,
     duration_days, created_at
 ) VALUES (
     COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
+    sqlc.arg(tenant_id)::uuid,
     $1, sqlc.narg(price_id), $2, $3, sqlc.narg(payment_id),
     sqlc.narg(duration_days),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())

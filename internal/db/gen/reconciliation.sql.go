@@ -545,20 +545,22 @@ func (q *Queries) ReconcileAdoptSubscriptionStatus(ctx context.Context, arg Reco
 
 const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
 INSERT INTO openrails.payments (
-    price_id, processor, transaction_id, amount, list_amount, currency,
+    tenant_id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, tenant_subject_id
 ) VALUES (
-    $1, $2::openrails.processor_type,
-    $3, $4, $4,
-    COALESCE(NULLIF($5::text, ''), 'usd'),
-    'completed', $6, $7,
-    COALESCE(NULLIF($8::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $9
+    $1::uuid,
+    $2, $3::openrails.processor_type,
+    $4, $5, $5,
+    COALESCE(NULLIF($6::text, ''), 'usd'),
+    'completed', $7, $8,
+    COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    $10
 )
 ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING
 `
 
 type ReconcileBackfillPaymentParams struct {
+	TenantID        uuid.UUID
 	PriceID         uuid.UUID
 	Processor       BillingProcessorType
 	TransactionID   string
@@ -574,6 +576,7 @@ type ReconcileBackfillPaymentParams struct {
 // Dedupe rides the uq_payments_tenant_processor_transaction identity.
 func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBackfillPaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileBackfillPayment,
+		arg.TenantID,
 		arg.PriceID,
 		arg.Processor,
 		arg.TransactionID,
@@ -1008,29 +1011,30 @@ func (q *Queries) ReconcileMarkPaymentRefunded(ctx context.Context, id uuid.UUID
 
 const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscription :many
 INSERT INTO openrails.subscriptions (
-    price_id, product_id, status, processor, processor_subscription_id,
+    tenant_id, price_id, product_id, status, processor, processor_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
     entitlements_spec_snapshot, credits_spec_snapshot, tenant_subject_id
 )
-SELECT pr.id, pr.product_id, $1::openrails.subscription_status,
-       $2, $3,
-       $4,
-       $5::timestamptz,
+SELECT $1::uuid, pr.id, pr.product_id, $2::openrails.subscription_status,
+       $3, $4,
+       $5,
        $6::timestamptz,
-       COALESCE($7::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, $8
+       $7::timestamptz,
+       COALESCE($8::timestamptz, now()),
+       p.entitlements_spec, p.credits_spec, $9
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
-WHERE pr.id = $9
+WHERE pr.id = $10
   AND NOT EXISTS (
       SELECT 1 FROM openrails.subscriptions s
-      WHERE s.processor_subscription_id = $3
-        AND s.processor = ANY ($10::text[])
+      WHERE s.processor_subscription_id = $4
+        AND s.processor = ANY ($11::text[])
   )
 RETURNING id, entitlements_spec_snapshot
 `
 
 type ReconcileMaterializeSubscriptionParams struct {
+	TenantID                uuid.UUID
 	Status                  BillingSubscriptionStatus
 	Processor               string
 	ProcessorSubscriptionID string
@@ -1057,6 +1061,7 @@ type ReconcileMaterializeSubscriptionRow struct {
 // rows returned = already materialized).
 func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg ReconcileMaterializeSubscriptionParams) ([]ReconcileMaterializeSubscriptionRow, error) {
 	rows, err := q.db.Query(ctx, reconcileMaterializeSubscription,
+		arg.TenantID,
 		arg.Status,
 		arg.Processor,
 		arg.ProcessorSubscriptionID,
@@ -1088,22 +1093,24 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 
 const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO openrails.payments (
-    price_id, processor, transaction_id, amount, list_amount, currency,
+    tenant_id, price_id, processor, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
     tenant_subject_id
 ) VALUES (
-    $1, $2::openrails.processor_type,
-    $3, $4, $4,
-    COALESCE(NULLIF($5::text, ''), 'usd'),
-    'completed', $6, $7,
-    $8,
-    COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    $10
+    $1::uuid,
+    $2, $3::openrails.processor_type,
+    $4, $5, $5,
+    COALESCE(NULLIF($6::text, ''), 'usd'),
+    'completed', $7, $8,
+    $9,
+    COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    $11
 )
 ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING
 `
 
 type ReconcileRecordRefundParams struct {
+	TenantID          uuid.UUID
 	PriceID           uuid.UUID
 	Processor         BillingProcessorType
 	TransactionID     string
@@ -1120,6 +1127,7 @@ type ReconcileRecordRefundParams struct {
 // amount payment row linked to the refunded payment. Same dedupe identity.
 func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecordRefundParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileRecordRefund,
+		arg.TenantID,
 		arg.PriceID,
 		arg.Processor,
 		arg.TransactionID,

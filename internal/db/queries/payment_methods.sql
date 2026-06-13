@@ -2,11 +2,11 @@
 
 -- name: CreatePaymentMethod :execrows
 INSERT INTO openrails.payment_methods (
-    id, tenant_subject_id, processor, vault_id, billing_id,
+    id, tenant_id, tenant_subject_id, processor, vault_id, billing_id,
     initial_transaction_id, last_four, card_type, expiry_date,
     failure_reason, metadata, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, sqlc.narg(billing_id),
+    $1, sqlc.arg(tenant_id)::uuid, $2, $3, $4, sqlc.narg(billing_id),
     $5, sqlc.narg(last_four), sqlc.narg(card_type), sqlc.narg(expiry_date),
     sqlc.narg(failure_reason), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),

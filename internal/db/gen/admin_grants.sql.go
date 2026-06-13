@@ -37,13 +37,14 @@ func (q *Queries) CountAdminGrantsByTenantSubject(ctx context.Context, tenantSub
 const createAdminGrant = `-- name: CreateAdminGrant :one
 
 INSERT INTO openrails.admin_grants (
-    id, tenant_subject_id, price_id, granted_by, reason, payment_id,
+    id, tenant_id, tenant_subject_id, price_id, granted_by, reason, payment_id,
     duration_days, created_at
 ) VALUES (
     COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    $1, $5, $2, $3, $6,
-    $7,
-    COALESCE(NULLIF($8::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $5::uuid,
+    $1, $6, $2, $3, $7,
+    $8,
+    COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 RETURNING id
 `
@@ -53,6 +54,7 @@ type CreateAdminGrantParams struct {
 	GrantedBy       string
 	Reason          string
 	ID              uuid.UUID
+	TenantID        uuid.UUID
 	PriceID         *uuid.UUID
 	PaymentID       *uuid.UUID
 	DurationDays    *int32
@@ -67,6 +69,7 @@ func (q *Queries) CreateAdminGrant(ctx context.Context, arg CreateAdminGrantPara
 		arg.GrantedBy,
 		arg.Reason,
 		arg.ID,
+		arg.TenantID,
 		arg.PriceID,
 		arg.PaymentID,
 		arg.DurationDays,

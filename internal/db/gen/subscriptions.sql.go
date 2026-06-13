@@ -95,7 +95,7 @@ func (q *Queries) CountSubscriptionsFiltered(ctx context.Context, arg CountSubsc
 const createSubscription = `-- name: CreateSubscription :execrows
 
 INSERT INTO openrails.subscriptions (
-    id, tenant_subject_id, product_id, price_id, scheduled_price_id,
+    id, tenant_id, tenant_subject_id, product_id, price_id, scheduled_price_id,
     entitlements_spec_snapshot, credits_spec_snapshot, status, started_at,
     ended_at, current_period_starts_at, current_period_ends_at, processor,
     processor_subscription_id, user_email, payment_method_id, last_retry_at,
@@ -103,18 +103,18 @@ INSERT INTO openrails.subscriptions (
     cancel_type, cancelled_at, deletion_scheduled_at, gateway_response,
     created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7,
-    COALESCE(NULLIF($8::text, ''), 'pending')::openrails.subscription_status,
-    $9,
-    $10, $11, $12,
-    $13, $14,
-    $15, $16, $17,
-    $18, $19, $20,
-    $21, $22, $23,
-    $24, $25,
-    COALESCE(NULLIF($26::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($27::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $1, $5::uuid, $2, $3, $4, $6,
+    $7, $8,
+    COALESCE(NULLIF($9::text, ''), 'pending')::openrails.subscription_status,
+    $10,
+    $11, $12, $13,
+    $14, $15,
+    $16, $17, $18,
+    $19, $20, $21,
+    $22, $23, $24,
+    $25, $26,
+    COALESCE(NULLIF($27::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    COALESCE(NULLIF($28::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `
 
@@ -123,6 +123,7 @@ type CreateSubscriptionParams struct {
 	TenantSubjectID          uuid.UUID
 	ProductID                uuid.UUID
 	PriceID                  *uuid.UUID
+	TenantID                 uuid.UUID
 	ScheduledPriceID         *uuid.UUID
 	EntitlementsSpecSnapshot []byte
 	CreditsSpecSnapshot      []byte
@@ -156,6 +157,7 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 		arg.TenantSubjectID,
 		arg.ProductID,
 		arg.PriceID,
+		arg.TenantID,
 		arg.ScheduledPriceID,
 		arg.EntitlementsSpecSnapshot,
 		arg.CreditsSpecSnapshot,

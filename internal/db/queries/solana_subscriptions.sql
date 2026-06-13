@@ -8,8 +8,7 @@ INSERT INTO openrails.solana_subscriptions (
     next_pull_at, status, created_at, updated_at
 ) VALUES (
     $1,
-    COALESCE(NULLIF(sqlc.arg(tenant_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    sqlc.arg(tenant_id)::uuid,
     $2, $3, $4, $5, $6, $7, $8, $9,
     sqlc.narg(last_pulled_period_start), sqlc.narg(last_signature),
     $10, $11, $12, $13

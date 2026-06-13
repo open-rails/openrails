@@ -68,9 +68,9 @@ func (q *Queries) CountOpenCatalogDriftFiltered(ctx context.Context, arg CountOp
 
 const insertCatalogDriftEvent = `-- name: InsertCatalogDriftEvent :exec
 INSERT INTO openrails.catalog_drift_events (
-    id, provider, kind, openrails_resource_type, openrails_resource_id,
+    id, tenant_id, provider, kind, openrails_resource_type, openrails_resource_id,
     external_resource_id, field, openrails_value, external_value, detected_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+) VALUES ($1, $11::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type InsertCatalogDriftEventParams struct {
@@ -84,6 +84,7 @@ type InsertCatalogDriftEventParams struct {
 	OpenrailsValue        *string
 	ExternalValue         *string
 	DetectedAt            time.Time
+	TenantID              uuid.UUID
 }
 
 func (q *Queries) InsertCatalogDriftEvent(ctx context.Context, arg InsertCatalogDriftEventParams) error {
@@ -98,6 +99,7 @@ func (q *Queries) InsertCatalogDriftEvent(ctx context.Context, arg InsertCatalog
 		arg.OpenrailsValue,
 		arg.ExternalValue,
 		arg.DetectedAt,
+		arg.TenantID,
 	)
 	return err
 }

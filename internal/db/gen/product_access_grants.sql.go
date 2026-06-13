@@ -20,8 +20,7 @@ INSERT INTO openrails.product_access_grants (
     created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    COALESCE(NULLIF($5::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    $5::uuid,
     $1, $2, $3,
     COALESCE($6::text, ''),
     $7,

@@ -2,8 +2,8 @@
 
 -- name: UpsertProcessorCustomer :exec
 INSERT INTO openrails.processor_customers (
-    id, tenant_subject_id, processor, customer_id, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6)
+    id, tenant_id, tenant_subject_id, processor, customer_id, created_at, updated_at
+) VALUES ($1, sqlc.arg(tenant_id)::uuid, $2, $3, $4, $5, $6)
 ON CONFLICT (tenant_id, tenant_subject_id, processor) DO UPDATE SET
     customer_id = EXCLUDED.customer_id,
     updated_at = EXCLUDED.updated_at;

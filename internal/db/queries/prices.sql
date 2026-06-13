@@ -6,8 +6,7 @@ INSERT INTO openrails.prices (
     billing_cycle_days, processors, created_at, updated_at
 ) VALUES (
     $1,
-    COALESCE(NULLIF(sqlc.arg(tenant_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    sqlc.arg(tenant_id)::uuid,
     $2,
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'active'),
     $3, $4,

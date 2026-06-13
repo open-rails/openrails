@@ -7,8 +7,7 @@ INSERT INTO openrails.product_access_grants (
     created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    COALESCE(NULLIF(sqlc.arg(tenant_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    sqlc.arg(tenant_id)::uuid,
     $1, $2, $3,
     COALESCE(sqlc.arg(source_id)::text, ''),
     sqlc.narg(payment_id),

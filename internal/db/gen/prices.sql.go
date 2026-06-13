@@ -55,8 +55,7 @@ INSERT INTO openrails.prices (
     billing_cycle_days, processors, created_at, updated_at
 ) VALUES (
     $1,
-    COALESCE(NULLIF($5::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    $5::uuid,
     $2,
     COALESCE(NULLIF($6::text, ''), 'active'),
     $3, $4,

@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/processors"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type PaymentMethodRepo struct {
@@ -32,8 +33,13 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 	if err != nil {
 		return err
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   m.ID,
+		TenantID:             tid.UUID(),
 		TenantSubjectID:      m.TenantSubjectID,
 		Processor:            string(m.Processor),
 		VaultID:              m.VaultID,

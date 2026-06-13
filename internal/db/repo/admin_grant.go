@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type AdminGrantRepo struct {
@@ -95,8 +96,13 @@ func (r *AdminGrantRepo) Create(ctx context.Context, grant *models.AdminGrant) e
 	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, grant.TenantSubjectID); err != nil {
 		return err
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
 	id, err := r.db.Gen(ctx).CreateAdminGrant(ctx, gen.CreateAdminGrantParams{
 		ID:              grant.ID,
+		TenantID:        tid.UUID(),
 		TenantSubjectID: grant.TenantSubjectID,
 		PriceID:         grant.PriceID,
 		GrantedBy:       grant.GrantedBy,

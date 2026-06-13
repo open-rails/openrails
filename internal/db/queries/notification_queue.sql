@@ -2,9 +2,9 @@
 
 -- name: CreateNotification :execrows
 INSERT INTO openrails.notification_queue (
-    id, tenant_subject_id, event_type, data, seen, created_at
+    id, tenant_id, tenant_subject_id, event_type, data, seen, created_at
 ) VALUES (
-    $1, $2, $3, COALESCE(sqlc.narg(data), '{}'::jsonb), $4,
+    $1, sqlc.arg(tenant_id)::uuid, $2, $3, COALESCE(sqlc.narg(data), '{}'::jsonb), $4,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 );
 

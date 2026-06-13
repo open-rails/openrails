@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/repo"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type ProcessorCustomerService struct {
@@ -39,10 +40,15 @@ func (s *ProcessorCustomerService) Upsert(ctx context.Context, userID, processor
 	if err != nil {
 		return err
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
 	// id is generated explicitly: the upsert targets the tenant-scoped
 	// (tenant_id, tenant_subject_id, processor) unique, not the pk.
 	return s.DB.Gen(ctx).UpsertProcessorCustomer(ctx, gen.UpsertProcessorCustomerParams{
 		ID:              uuidutil.NewV7(),
+		TenantID:        tid.UUID(),
 		TenantSubjectID: tenantSubjectID,
 		Processor:       processor,
 		CustomerID:      customerID,

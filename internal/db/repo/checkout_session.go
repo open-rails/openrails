@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 type CheckoutSessionRepo struct {
@@ -42,8 +43,13 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 	if err != nil {
 		return err
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
 	rows, err := r.db.Gen(ctx).CreateCheckoutSession(ctx, gen.CreateCheckoutSessionParams{
 		ID:              session.ID,
+		TenantID:        tid.UUID(),
 		TenantSubjectID: session.TenantSubjectID,
 		PriceID:         session.PriceID,
 		Mode:            string(session.Mode),

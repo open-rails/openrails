@@ -3,7 +3,7 @@
 
 -- name: CreateSubscription :execrows
 INSERT INTO openrails.subscriptions (
-    id, tenant_subject_id, product_id, price_id, scheduled_price_id,
+    id, tenant_id, tenant_subject_id, product_id, price_id, scheduled_price_id,
     entitlements_spec_snapshot, credits_spec_snapshot, status, started_at,
     ended_at, current_period_starts_at, current_period_ends_at, processor,
     processor_subscription_id, user_email, payment_method_id, last_retry_at,
@@ -11,7 +11,7 @@ INSERT INTO openrails.subscriptions (
     cancel_type, cancelled_at, deletion_scheduled_at, gateway_response,
     created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, sqlc.narg(scheduled_price_id),
+    $1, sqlc.arg(tenant_id)::uuid, $2, $3, $4, sqlc.narg(scheduled_price_id),
     sqlc.narg(entitlements_spec_snapshot), sqlc.narg(credits_spec_snapshot),
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending')::openrails.subscription_status,
     sqlc.arg(started_at),

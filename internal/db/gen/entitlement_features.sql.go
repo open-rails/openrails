@@ -18,8 +18,7 @@ INSERT INTO openrails.entitlement_features (
     id, tenant_id, lookup_key, name, active, metadata, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    COALESCE(NULLIF($5::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    $5::uuid,
     $1, $2, $3, $6,
     COALESCE(NULLIF($7::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($8::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -61,8 +60,7 @@ INSERT INTO openrails.product_entitlement_features (
     metadata, created_at, updated_at
 ) VALUES (
     COALESCE(NULLIF($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    $4::uuid,
     $1, $2, $5, $6,
     COALESCE(NULLIF($7::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($8::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())

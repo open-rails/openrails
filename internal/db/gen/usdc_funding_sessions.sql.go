@@ -21,8 +21,7 @@ INSERT INTO openrails.usdc_funding_sessions (
     last_checked_at, expires_at, created_at, updated_at
 ) VALUES (
     $1,
-    COALESCE(NULLIF($10::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-             '00000000-0000-0000-0000-000000000001'::uuid),
+    $10::uuid,
     $2, $11, $3, $4, $5, $6, $7,
     $12, $8, $9, $13,
     $14, $15,
