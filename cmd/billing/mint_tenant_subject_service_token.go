@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
@@ -42,9 +41,8 @@ func mintTenantSubjectServiceToken(cmd *cobra.Command, _ []string) error {
 	}
 	bootstrapTenant = strings.ToLower(strings.TrimSpace(bootstrapTenant))
 	if bootstrapTenant == "" {
-		// HARDCUT (#312): service tokens are minted under the default tenant's own
-		// AuthKit org — there is no separate "operator" tenant.
-		bootstrapTenant = tenant.DefaultSlug
+		// No default tenant (#336): the authority tenant must be named explicitly.
+		return fmt.Errorf("--org is required (the AuthKit tenant slug hosting the admin authority)")
 	}
 	if _, err := embcp.RunBootstrap(ctx, embeddedApp.App(), controlplane.BootstrapOptions{
 		BootstrapTenantSlug:     bootstrapTenant,

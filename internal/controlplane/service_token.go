@@ -90,7 +90,8 @@ func TenantSubjectResource(id uuid.UUID) authcore.ServiceTokenResource {
 func (c *ControlPlane) TenantScope(ctx context.Context, ref string) (tenant.ID, string, authcore.ServiceTokenResource, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		ref = tenant.DefaultSlug
+		// No default tenant (#336): the tenant to scope to must be named explicitly.
+		return tenant.ID{}, "", authcore.ServiceTokenResource{}, ErrServiceTokenTenantUnresolved
 	}
 	if c == nil || c.pool == nil {
 		return tenant.ID{}, "", authcore.ServiceTokenResource{}, errors.New("controlplane: pgx pool unavailable for tenant resolution")

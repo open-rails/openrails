@@ -36,9 +36,13 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 	if !to.After(from) {
 		return nil, fmt.Errorf("invalid period: to must be after from")
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Materialize the payable tenant_subjects row so the invoices FK (migration
 	// 076) is satisfied even if no prior credit op touched this subject (#317).
-	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
+	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
 	ct, err := s.GetCreditTypeByName(ctx, creditType)
@@ -49,7 +53,7 @@ func (s *CreditsService) FinalizeInvoice(ctx context.Context, payer identity.Ten
 	var inv *models.Invoice
 	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		tenantID := tid.UUID()
 		payerID := payer.UUID()
 		pfrom, pto := from.UTC(), to.UTC()
 
@@ -201,7 +205,11 @@ func (s *CreditsService) ListInvoices(ctx context.Context, payer identity.Tenant
 	var total int
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
-		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		tenantID := tid.UUID()
 		n, e := q.CountInvoicesByPayer(ctx, gen.CountInvoicesByPayerParams{
 			TenantID: tenantID, TenantSubjectID: payer.UUID(),
 		})
@@ -247,8 +255,12 @@ func (s *CreditsService) GetInvoiceByID(ctx context.Context, payer identity.Tena
 	}
 	var inv *models.Invoice
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
 		row, e := s.db.Gen(ctx).GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{
-			TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+			TenantID:        tid.UUID(),
 			TenantSubjectID: payer.UUID(),
 			ID:              id,
 		})
@@ -271,9 +283,13 @@ func (s *CreditsService) FinalizeDueInvoices(ctx context.Context, from, to time.
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("credits service not initialized")
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := tid.UUID()
 	var accts []gen.ListCreditAccountPairsRow
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
 		accts, e = s.db.Gen(ctx).ListCreditAccountPairs(ctx, tenantID)
 		return e

@@ -223,7 +223,11 @@ func (s *VaultService) resolveNMIClient(ctx context.Context, provider string) (*
 		secretName = tenancy.SecretNMIMobiusProductionKey
 	}
 	if secretName != "" && s != nil && s.TenantSecrets != nil {
-		sec, err := s.TenantSecrets.Get(ctx, tenant.FromContextOrDefault(ctx), secretName)
+		tid, err := tenant.Require(ctx)
+		if err != nil {
+			return nil, err
+		}
+		sec, err := s.TenantSecrets.Get(ctx, tid, secretName)
 		if err != nil {
 			if !errors.Is(err, tenancy.ErrSecretNotFound) {
 				return nil, fmt.Errorf("load tenant NMI secret: %w", err)

@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // EnsureTenantSubjectIDPgx materializes the tenant_subjects FK row for
@@ -26,9 +25,12 @@ func EnsureTenantSubjectIDPgx(ctx context.Context, t testing.TB, qx gen.DBTX, us
 	uid, err := uuid.Parse(userID)
 	require.NoError(t, err, "test user id must be a UUID (#364): %q", userID)
 
+	// No default tenant (#336): materialize the canonical test tenant first so
+	// the tenant_subjects FK resolves, then pin the subject under it.
+	EnsureTestTenant(ctx, t, qx)
 	id, err := gen.New(qx).UpsertSelfTenantSubject(ctx, gen.UpsertSelfTenantSubjectParams{
 		ID:       uid,
-		TenantID: tenant.DefaultID.UUID(),
+		TenantID: TestTenantID.UUID(),
 		Issuer:   "openrails:self",
 		Subject:  uid.String(),
 	})

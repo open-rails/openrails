@@ -80,7 +80,11 @@ func (s *CreditsService) RecordUsage(ctx context.Context, params RecordUsagePara
 	var ev *models.UsageEvent
 	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		tenantID := tid.UUID()
 		payerID := payer.UUID()
 		now := s.now()
 
@@ -191,11 +195,15 @@ func (s *CreditsService) AggregateUsage(ctx context.Context, payer identity.Tena
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 
 	rows := map[string]*UsageRollupRow{}
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		totals, err := q.AggregateUsageTotals(ctx, gen.AggregateUsageTotalsParams{
 			TenantID: tenantID, TenantSubjectID: payerID,

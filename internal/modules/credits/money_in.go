@@ -58,7 +58,11 @@ type moneyInAccount struct {
 // belowThresholdAccounts returns accounts whose available balance
 // (balance - held) is under their configured low-balance threshold.
 func (s *CreditsService) belowThresholdAccounts(ctx context.Context) ([]moneyInAccount, error) {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	rows, err := s.db.Gen(ctx).ListBelowThresholdCreditAccounts(ctx, tenantID)
 	if err != nil {
 		return nil, err

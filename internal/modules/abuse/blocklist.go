@@ -53,7 +53,7 @@ func validKind(kind string) bool {
 
 // BlocklistService manages the tenant-scoped payment blocklist (issue #300).
 // All operations are RLS-scoped to the request tenant
-// (tenant.FromContextOrDefault) via the db.DB tenant-connection helpers, exactly
+// (tenant.Require) via the db.DB tenant-connection helpers, exactly
 // like the credits service.
 type BlocklistService struct {
 	db *db.DB
@@ -83,7 +83,11 @@ func (s *BlocklistService) Add(ctx context.Context, payer *identity.TenantSubjec
 		return fmt.Errorf("value required")
 	}
 
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tenantID := tid.UUID()
 	var payerTenantID *uuid.UUID
 	if payer != nil && !payer.IsZero() {
 		id := payer.UUID()
@@ -139,7 +143,11 @@ func (s *BlocklistService) Remove(ctx context.Context, kind, value string) error
 		return fmt.Errorf("value required")
 	}
 
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tenantID := tid.UUID()
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		return s.db.Gen(ctx).DeletePaymentBlock(ctx, gen.DeletePaymentBlockParams{
 			TenantID: tenantID, Kind: kind, Value: value,
@@ -163,9 +171,13 @@ func (s *BlocklistService) IsBlocked(ctx context.Context, kind, value string) (b
 		return false, fmt.Errorf("value required")
 	}
 
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	tenantID := tid.UUID()
 	var blocked bool
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		exists, err := s.db.Gen(ctx).PaymentBlockExists(ctx, gen.PaymentBlockExistsParams{
 			TenantID: tenantID, Kind: kind, Value: value,
 		})

@@ -38,11 +38,11 @@ func errNonUUIDSubject(userID string) error {
 // returns the zero id without touching the database (documented no-op for
 // callers with optional identity).
 //
-// A zero tenantID falls back to the request's tenant context (and, absent that,
-// the default tenant) — the same source the commerce tables use to stamp their
-// own tenant_id column — so the resolved subject lands under the exact tenant
-// the row itself belongs to. Multi-tenant writers that already hold an explicit
-// tenant may pass it directly.
+// A zero tenantID falls back to the request's tenant context (required — an
+// absent tenant is an error) — the same source the commerce tables use to stamp
+// their own tenant_id column — so the resolved subject lands under the exact
+// tenant the row itself belongs to. Multi-tenant writers that already hold an
+// explicit tenant may pass it directly.
 func EnsureTenantSubjectID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, userID string) (uuid.UUID, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -53,7 +53,11 @@ func EnsureTenantSubjectID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID,
 		return uuid.Nil, errNonUUIDSubject(userID)
 	}
 	if tenantID == uuid.Nil {
-		tenantID = tenant.FromContextOrDefault(ctx).UUID()
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return uuid.Nil, terr
+		}
+		tenantID = tid.UUID()
 	}
 	return gen.New(qx).UpsertSelfTenantSubject(ctx, gen.UpsertSelfTenantSubjectParams{
 		ID:       uid,
@@ -92,7 +96,11 @@ func ensureTenantSubjectRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID
 		return nil
 	}
 	if tenantID == uuid.Nil {
-		tenantID = tenant.FromContextOrDefault(ctx).UUID()
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		tenantID = tid.UUID()
 	}
 	return gen.New(qx).EnsureTenantSubjectRow(ctx, gen.EnsureTenantSubjectRowParams{
 		ID:       tsid,

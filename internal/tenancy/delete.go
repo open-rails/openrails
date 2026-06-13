@@ -173,15 +173,11 @@ type DeleteOptions struct {
 //     credential/audit/export bookkeeping, then tombstones the directory row
 //     (status='deleted', deleted_at set) inside ONE transaction.
 //
-// The default tenant can never be deleted. Re-running Delete on an
-// already-deleted tenant returns ErrTenantNotFound (the active-row lookup
-// misses), so the purge itself is not re-run.
+// Re-running Delete on an already-deleted tenant returns ErrTenantNotFound (the
+// active-row lookup misses), so the purge itself is not re-run.
 func (s *Service) Delete(ctx context.Context, id tenant.ID, opts DeleteOptions) error {
 	if !opts.Confirm {
 		return errors.New("tenancy: delete requires confirmation")
-	}
-	if id.IsDefault() {
-		return errors.New("tenancy: the default tenant cannot be deleted")
 	}
 	if _, err := s.tenantByID(ctx, id); err != nil {
 		return err

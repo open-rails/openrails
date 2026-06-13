@@ -16,7 +16,7 @@ import (
 //
 // These endpoints are the PER-TENANT admin dashboard surface. Every handler
 // passes r.Request.Context() into AdminMetricsService, which resolves the
-// tenant id from that context (tenant.FromContextOrDefault) and pins every
+// tenant id from that context (tenant.Require) and pins every
 // ClickHouse query to WHERE tenant_id = ?. A tenant operator therefore can only
 // ever read their OWN metrics; there is no cross-tenant read on this path.
 //

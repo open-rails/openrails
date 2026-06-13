@@ -82,7 +82,11 @@ func (s *DunningHistoryService) ListDunningHistory(ctx context.Context, processo
 	}
 	defer func() { _ = conn.Close() }()
 
-	tenantID := tenant.FromContextOrDefault(ctx).String()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.String()
 
 	window := ""
 	args := []any{tenantID, processors, tenantID, processors}

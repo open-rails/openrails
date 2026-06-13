@@ -150,9 +150,13 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	if !status.Valid() {
 		return nil, fmt.Errorf("invalid status %q", status)
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	p := &models.Product{
 		ID:               uuidutil.NewV7(),
-		TenantID:         tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:         tid.UUID(),
 		Slug:             req.Slug,
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
@@ -424,10 +428,14 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		}
 	}
 
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	price := &models.Price{
 		ID:               priceID,
-		TenantID:         tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:         tid.UUID(),
 		ProductID:        req.ProductID,
 		Status:           status,
 		Amount:           req.UnitAmount,

@@ -127,7 +127,10 @@ func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx
 // tenant-owned writes go through this (or run on a connection pinned by
 // WithTenantConn).
 func (d *DB) TenantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
-	id := tenant.FromContextOrDefault(ctx)
+	id, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
 	tx, err := d.pgxBegin(ctx)
 	if err != nil {
 		return err
@@ -146,7 +149,11 @@ func (d *DB) TenantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.T
 // already-open pgx transaction — for callbacks that already received a
 // pgx.Tx.
 func SetTenantGUCPgx(ctx context.Context, tx pgx.Tx) error {
-	return setTenantLocalGUCPgx(ctx, tx, tenant.FromContextOrDefault(ctx))
+	id, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	return setTenantLocalGUCPgx(ctx, tx, id)
 }
 
 // setTenantLocalGUCPgx sets the tenant GUC transaction-locally

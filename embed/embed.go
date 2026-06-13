@@ -39,7 +39,7 @@ import (
 //				return nil, billingauth.ErrUnauthenticated
 //			}
 //			return &billingauth.DelegatedPrincipal{
-//				TenantID:    tenant.DefaultID.String(), // explicit per-deployment mapping
+//				TenantID:    hostCfg.OpenRailsTenantID, // explicit per-deployment mapping to a real tenant
 //				SubjectID:   user.CanonicalID,
 //				Permissions: []string{"openrails:self:billing:read"},
 //			}, nil

@@ -68,7 +68,11 @@ func (s *CreditsService) SpendCredits(ctx context.Context, params SpendParams) e
 			return err
 		}
 		if params.SourceID != "" {
-			tenantID := tenant.FromContextOrDefault(ctx).UUID()
+			tid, terr := tenant.Require(ctx)
+			if terr != nil {
+				return terr
+			}
+			tenantID := tid.UUID()
 			existing, cerr := q.CountCreditSpendByCoords(ctx, gen.CountCreditSpendByCoordsParams{
 				TenantID: tenantID, TenantSubjectID: payer.UUID(), CreditTypeID: ct.ID,
 				Source: params.Source, SourceID: &params.SourceID,
@@ -99,7 +103,11 @@ func (s *CreditsService) spendBalanceThenOwedTx(
 		return nil, nil, fmt.Errorf("amount must be positive")
 	}
 	now := s.now()
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 
 	bal, err := s.lockBalance(ctx, q, payer, userID, ct.ID)
@@ -193,7 +201,11 @@ func nullStr(s string) *string {
 // never re-gates. Returns the post-settlement balance.
 func (s *CreditsService) captureSettleTx(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, userID string, creditTypeID uuid.UUID, amount, availableAfter int64) (int64, error) {
 	now := s.now()
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	if availableAfter < 0 {
 		availableAfter = 0

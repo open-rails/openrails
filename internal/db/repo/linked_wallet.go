@@ -67,7 +67,11 @@ func (r *LinkedWalletRepo) UpsertForUserID(ctx context.Context, userID string, w
 	if err != nil {
 		return nil, err
 	}
-	wallet.TenantID = tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	wallet.TenantID = tid.UUID()
 	wallet.TenantSubjectID = tsid
 	wallet.Chain = strings.ToLower(strings.TrimSpace(wallet.Chain))
 	if wallet.Metadata == nil {

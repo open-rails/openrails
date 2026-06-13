@@ -102,7 +102,11 @@ func (s *CreditsService) OpenWindow(ctx context.Context, p OpenWindowParams) (*m
 		}
 
 		now := s.now()
-		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		tid, err := tenant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		tenantID := tid.UUID()
 		payerID := p.Payer.UUID()
 		if err := ensureTenantSubject(ctx, q, tenantID, payerID); err != nil {
 			return err

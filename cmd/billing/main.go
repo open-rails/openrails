@@ -226,6 +226,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Bootstrap the OpenRails-owned AuthKit control plane (#224). Idempotent;
 	// runs after migrations have been applied (migrations are a separate
 	// `billing migrate` step) and at startup.
+	//
+	// TODO(#336): no default tenant — startup bootstrap must resolve/configure a
+	// real tenant slug to seed. This previously relied on the (now removed) default
+	// tenant; with an empty BootstrapTenantSlug, RunBootstrap now errors. A
+	// deployment-level config field (e.g. auth.control_plane.bootstrap_tenant_slug)
+	// must supply it before standalone startup can bootstrap a tenant.
 	if res, err := embcp.RunBootstrap(context.Background(), embeddedApp.App(), controlplane.BootstrapOptions{MintInitialServiceToken: true}); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("control plane bootstrap: %w", err)

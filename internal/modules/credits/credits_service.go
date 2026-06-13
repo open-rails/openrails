@@ -127,7 +127,11 @@ func (s *CreditsService) GetBalanceForTenantSubject(ctx context.Context, payer i
 	if err != nil {
 		return nil, err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	row, err := s.db.Gen(ctx).GetCreditBalance(ctx, gen.GetCreditBalanceParams{
 		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: ct.ID,
@@ -174,7 +178,11 @@ func (s *CreditsService) GetTransactionsByTenantSubject(ctx context.Context, pay
 	if err != nil {
 		return nil, 0, err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	q := s.db.Gen(ctx)
 	total, err := q.CountCreditTransactionsByPayer(ctx, gen.CountCreditTransactionsByPayerParams{
@@ -261,8 +269,12 @@ func (s *CreditsService) GetTransactionBySource(ctx context.Context, actorID str
 	if err != nil {
 		return nil, err
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	row, err := s.db.Gen(ctx).GetCreditTransactionByCoords(ctx, gen.GetCreditTransactionByCoordsParams{
-		TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:        tid.UUID(),
 		TenantSubjectID: payer.UUID(),
 		CreditTypeID:    ct.ID,
 		TransactionType: transactionType,
@@ -351,7 +363,11 @@ func ensureTenantSubject(ctx context.Context, q *gen.Queries, tenantID, tsid uui
 		return nil
 	}
 	if tenantID == uuid.Nil {
-		tenantID = tenant.FromContextOrDefault(ctx).UUID()
+		tid, err := tenant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		tenantID = tid.UUID()
 	}
 	return q.EnsureTenantSubjectRow(ctx, gen.EnsureTenantSubjectRowParams{
 		ID: tsid, TenantID: tenantID, Issuer: "openrails:self", Subject: tsid.String(),
@@ -360,7 +376,11 @@ func ensureTenantSubject(ctx context.Context, q *gen.Queries, tenantID, tsid uui
 
 func (s *CreditsService) depositTx(ctx context.Context, q *gen.Queries, ct *models.CreditType, params CreditDepositParams) (*models.CreditTransaction, error) {
 	now := s.now()
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	payer, err := resolveTenantSubject(params.TenantSubjectID, params.Actor)
 	if err != nil {
 		return nil, err
@@ -535,7 +555,11 @@ func (s *CreditsService) Hold(ctx context.Context, payer *identity.TenantSubject
 	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		now := s.now()
-		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		tenantID := tid.UUID()
 		payerSubject, rerr := resolveTenantSubject(payer, actorID)
 		if rerr != nil {
 			return rerr
@@ -636,7 +660,11 @@ func (s *CreditsService) CaptureHold(ctx context.Context, holdID uuid.UUID, actu
 			return fmt.Errorf("invalid capture amount")
 		}
 
-		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		tenantID := tid.UUID()
 		holdPayer := identity.TenantSubjectID(h.TenantSubjectID)
 		bal, lerr := s.lockBalance(ctx, q, holdPayer, h.Actor, h.CreditTypeID)
 		if lerr != nil {
@@ -699,7 +727,11 @@ func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) erro
 		authorized := *row.AuthorizedAmount
 
 		now := s.now()
-		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		tenantID := tid.UUID()
 		holdPayer := identity.TenantSubjectID(row.TenantSubjectID)
 		bal, lerr := s.lockBalance(ctx, q, holdPayer, row.Actor, row.CreditTypeID)
 		if lerr != nil {
@@ -717,7 +749,11 @@ func (s *CreditsService) ReleaseHold(ctx context.Context, holdID uuid.UUID) erro
 
 func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID string, creditTypeID uuid.UUID, amount int64) (int64, error) {
 	now := s.now()
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	bal, err := s.lockBalance(ctx, q, payer, actorID, creditTypeID)
 	if err != nil {
@@ -773,7 +809,11 @@ func (s *CreditsService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Qu
 // targets that constraint to avoid a duplicate-key error on concurrent
 // first-touch, after which the row is re-selected FOR UPDATE.
 func (s *CreditsService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.TenantSubjectID, actorID string, creditTypeID uuid.UUID) (*models.CreditBalance, error) {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	key := gen.LockCreditBalanceParams{
 		TenantID: tenantID, TenantSubjectID: payerID, CreditTypeID: creditTypeID,
@@ -801,7 +841,11 @@ func (s *CreditsService) lockBalance(ctx context.Context, q *gen.Queries, payer 
 
 func (s *CreditsService) withdrawTx(ctx context.Context, q *gen.Queries, creditTypeID uuid.UUID, params CreditWithdrawParams) (*models.CreditTransaction, error) {
 	now := s.now()
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	payer, err := resolveTenantSubject(params.TenantSubjectID, params.Actor)
 	if err != nil {
 		return nil, err

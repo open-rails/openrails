@@ -46,7 +46,11 @@ func (s *TierPolicyStore) UpsertTierPolicy(ctx context.Context, payer identity.T
 
 // UpsertTierPolicyFull sets the full tier policy (windows + entitled resources).
 func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identity.TenantSubjectID, tier string, policy models.ThroughputPolicy) error {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tenantID := tid.UUID()
 	now := time.Now().UTC()
 	row := &models.TierPolicy{
 		ID:              uuidutil.NewV7(),
@@ -84,10 +88,14 @@ func (s *TierPolicyStore) UpsertTierPolicyFull(ctx context.Context, payer identi
 // GetTierPolicy returns the enforceable policy for (payer, tier). A missing row
 // yields an empty policy (no throughput limit, all resources allowed).
 func (s *TierPolicyStore) GetTierPolicy(ctx context.Context, payer identity.TenantSubjectID, tier string) (ResolvedPolicy, error) {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return ResolvedPolicy{}, err
+	}
+	tenantID := tid.UUID()
 	row := new(models.TierPolicy)
 	found := false
-	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		genRow, e := s.db.Gen(ctx).GetTierPolicy(ctx, gen.GetTierPolicyParams{
 			TenantID: tenantID, TenantSubjectID: payer.UUID(), Tier: tier,
 		})

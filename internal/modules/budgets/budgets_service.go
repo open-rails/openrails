@@ -207,7 +207,11 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 		return uuid.Nil, nil, false, fmt.Errorf("amount must be non-negative")
 	}
 
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return uuid.Nil, nil, false, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 
 	var (
@@ -215,7 +219,7 @@ func (s *Service) Reserve(ctx context.Context, payer identity.TenantSubjectID, a
 		statuses      []WindowStatus
 		allowed       bool
 	)
-	err := s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 
 		// Materialize the payable tenant_subjects row so the budget_reservations /
@@ -440,7 +444,11 @@ func windowStateFromGen(r gen.BillingBudgetWindowState) *models.BudgetWindowStat
 // post-insert echo) nothing is locked and opens is nil.
 func (s *Service) computeWindows(ctx context.Context, qx gen.DBTX, payer identity.TenantSubjectID, actor string, windows []BudgetWindow, requestedMicros int64, lock bool) ([]WindowStatus, bool, []windowOpen, error) {
 	now := s.now()
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	q := gen.New(qx)
 

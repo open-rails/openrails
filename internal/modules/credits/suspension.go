@@ -40,7 +40,11 @@ func (s *CreditsService) SetPaymentMethodVerified(ctx context.Context, payer ide
 	if err != nil {
 		return err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	now := s.now()
 
@@ -67,7 +71,11 @@ func (s *CreditsService) Suspend(ctx context.Context, payer identity.TenantSubje
 	if err != nil {
 		return err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	now := s.now()
 	reason = strings.TrimSpace(reason)
@@ -94,7 +102,11 @@ func (s *CreditsService) Resume(ctx context.Context, payer identity.TenantSubjec
 	if err != nil {
 		return err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	now := s.now()
 

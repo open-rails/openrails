@@ -32,6 +32,12 @@ import (
 // A backend error (store unavailable) is returned so the caller can fail boot
 // loudly rather than start a signer that will never resolve a key.
 func SeedDefaultTenantSolanaSecret(ctx context.Context, store tenancy.TenantSecretStore, configKey string) error {
+	// TODO(#336): this bridge hardcoded tenant.DefaultID, which no longer exists.
+	// There is no tenant on ctx at this boot-time seed call (caller passes
+	// context.Background()), so the host's configured single tenant id must now be
+	// threaded in explicitly (e.g. a new tenantID parameter wired from config at the
+	// composition root) and forwarded to SeedTenantSolanaSecret. Cannot be resolved
+	// from context here.
 	return SeedTenantSolanaSecret(ctx, store, tenant.DefaultID, configKey)
 }
 

@@ -45,7 +45,7 @@ func newReconcileCmd() *cobra.Command {
 		c.Flags().StringVar(&since, "since", "", "Transaction window start (RFC3339 or YYYY-MM-DD)")
 		c.Flags().StringVar(&until, "until", "", "Transaction window end (RFC3339 or YYYY-MM-DD)")
 		c.Flags().StringVar(&format, "format", "table", "Output format: table, json")
-		c.Flags().StringVar(&tenantSlug, "tenant", "", "Tenant slug or id (default: the default tenant)")
+		c.Flags().StringVar(&tenantSlug, "tenant", "", "Tenant slug or id (required)")
 	}
 
 	checkCmd := &cobra.Command{
@@ -75,7 +75,7 @@ func newReconcileCmd() *cobra.Command {
 	}
 	reportCmd.Flags().StringVar(&runIDStr, "run", "", "Run ID (default: the latest run)")
 	reportCmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
-	reportCmd.Flags().StringVar(&tenantSlug, "tenant", "", "Tenant slug or id (default: the default tenant)")
+	reportCmd.Flags().StringVar(&tenantSlug, "tenant", "", "Tenant slug or id (required)")
 
 	cmd.AddCommand(checkCmd, fixCmd, reportCmd)
 	return cmd
@@ -108,7 +108,8 @@ func withReconcileApp(cmd *cobra.Command, tenantSlug string, fn func(ctx context
 func resolveReconcileTenant(ctx context.Context, application *app.App, slug string) (tenant.ID, error) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
-		return tenant.DefaultID, nil
+		// No default tenant (#336): reconciliation must target a named tenant.
+		return tenant.ID{}, fmt.Errorf("--tenant is required (slug or id of the tenant to reconcile)")
 	}
 	if tid, err := tenant.ParseID(slug); err == nil {
 		return tid, nil

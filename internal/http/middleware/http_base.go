@@ -113,6 +113,11 @@ func CORSHTTP(allowedOrigins []string) HTTPMiddleware {
 func ResolveTenantHTTP() HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// TODO(#336): the "default tenant" was removed (tenant.DefaultID no longer
+			// exists). This resolver is the SOURCE of the tenant — it must pin the
+			// host's configured single tenant id onto the context (threaded in from
+			// config at the composition root), not a silent default. A missing tenant
+			// must become an error, never a fallback.
 			ctx := tenant.WithID(r.Context(), tenant.DefaultID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

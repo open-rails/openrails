@@ -43,7 +43,11 @@ func (s *CreditsService) AccrueOwed(ctx context.Context, payer identity.TenantSu
 	if err != nil {
 		return nil, err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	now := s.now()
 
@@ -138,7 +142,11 @@ func (s *CreditsService) ChargeOutstanding(ctx context.Context, charger Charger,
 	if charger == nil {
 		return 0, fmt.Errorf("charger required")
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := tid.UUID()
 	genRows, err := s.db.Gen(ctx).ListChargeableArrearsAccounts(ctx, gen.ListChargeableArrearsAccountsParams{
 		TenantID: tenantID, MinThreshold: minThresholdMicros,
 	})

@@ -151,9 +151,13 @@ func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptVaultActi
 func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error) {
 	now := w.now()
 	granted := 0
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return granted, err
+	}
 	for _, name := range a.Entitlements {
 		n, err := w.DB.Gen(ctx).ReconcileGrantSubscriptionEntitlement(ctx, gen.ReconcileGrantSubscriptionEntitlementParams{
-			TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+			TenantID:        tid.UUID(),
 			TenantSubjectID: a.TenantSubjectID,
 			Entitlement:     name,
 			StartAt:         a.StartAt,

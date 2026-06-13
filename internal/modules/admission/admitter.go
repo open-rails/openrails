@@ -144,7 +144,11 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	}
 
 	// --- throughput axis (cheap Redis op; counts even if money later denies) ---
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return AdmitDecision{}, err
+	}
+	tenantID := tid.UUID()
 	base := fmt.Sprintf("%s:%s:%s:%s", tenantID, req.TenantSubjectID.UUID(), req.Actor, req.Resource)
 	tp, err := a.limiter.Check(ctx, base, pol.Throughput, req.Amounts)
 	if err != nil {

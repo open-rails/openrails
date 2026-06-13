@@ -36,7 +36,11 @@ func (s *CheckoutService) tenantSecret(ctx context.Context, name string) (string
 	if s == nil || s.TenantSecrets == nil {
 		return "", false, nil
 	}
-	sec, err := s.TenantSecrets.Get(ctx, tenant.FromContextOrDefault(ctx), name)
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	sec, err := s.TenantSecrets.Get(ctx, tid, name)
 	if err != nil {
 		if errors.Is(err, tenancy.ErrSecretNotFound) {
 			return "", false, nil

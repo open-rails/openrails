@@ -40,7 +40,7 @@ import (
 //     admin DISPLAY metrics (see AdminMetricsService); it must never be wired
 //     into a credit/hold/entitlement/charge/authz decision path.
 //  2. Every ClickHouse event is tenant-scoped: it carries the resolved
-//     tenant_id (tenant.FromContextOrDefault). Hosted multi-tenant analytics
+//     tenant_id (tenant.Require). Hosted multi-tenant analytics
 //     must never be written unscoped.
 //  3. ClickHouse is OPTIONAL: when unconfigured/unavailable, every Log* method
 //     is a no-op or spools-and-returns-nil — it never errors on the billing
@@ -114,15 +114,18 @@ func (s *EventLogService) Clock() clockwork.Clock {
 
 // resolveTenantID returns the tenant id to stamp on a ClickHouse analytics
 // event. It prefers a tenant_id already set on the event (e.g. resolved by an
-// upstream writer), otherwise resolves it from the request context, falling
-// back to the well-known default tenant for single-tenant / self-hosted
-// installs (issue #232). The result is never empty, so analytics events are
-// always tenant-scoped.
-func resolveTenantID(ctx context.Context, existing string) string {
+// upstream writer), otherwise resolves it from the request context. A missing
+// tenant is an error: analytics events must always be tenant-scoped, so we
+// never write an unscoped hosted event (issue #232).
+func resolveTenantID(ctx context.Context, existing string) (string, error) {
 	if existing != "" {
-		return existing
+		return existing, nil
 	}
-	return tenant.FromContextOrDefault(ctx).String()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return "", err
+	}
+	return tid.String(), nil
 }
 
 // ensureConn lazily (re)establishes the ClickHouse connection
@@ -252,7 +255,11 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			d.TenantID = resolveTenantID(ctx, d.TenantID)
+			if d.TenantID, err = resolveTenantID(ctx, d.TenantID); err != nil {
+				log.WithError(err).Warn("resolve tenant for subscription")
+				dead(p)
+				continue
+			}
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
@@ -268,7 +275,11 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			d.TenantID = resolveTenantID(ctx, d.TenantID)
+			if d.TenantID, err = resolveTenantID(ctx, d.TenantID); err != nil {
+				log.WithError(err).Warn("resolve tenant for payment")
+				dead(p)
+				continue
+			}
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
@@ -287,7 +298,11 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			d.TenantID = resolveTenantID(ctx, d.TenantID)
+			if d.TenantID, err = resolveTenantID(ctx, d.TenantID); err != nil {
+				log.WithError(err).Warn("resolve tenant for transaction")
+				dead(p)
+				continue
+			}
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
@@ -325,7 +340,11 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			d.TenantID = resolveTenantID(ctx, d.TenantID)
+			if d.TenantID, err = resolveTenantID(ctx, d.TenantID); err != nil {
+				log.WithError(err).Warn("resolve tenant for acu")
+				dead(p)
+				continue
+			}
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
@@ -341,7 +360,11 @@ func (s *EventLogService) flushOnce(ctx context.Context, limit int) error {
 			if d.EventID == uuid.Nil {
 				d.EventID = uuidutil.NewV7()
 			}
-			d.TenantID = resolveTenantID(ctx, d.TenantID)
+			if d.TenantID, err = resolveTenantID(ctx, d.TenantID); err != nil {
+				log.WithError(err).Warn("resolve tenant for chargeback")
+				dead(p)
+				continue
+			}
 			if d.Timestamp.IsZero() {
 				d.Timestamp = s.now().UTC()
 			}
@@ -422,7 +445,7 @@ type SubscriptionEventData struct {
 	EventID uuid.UUID `json:"event_id"`
 	// TenantID scopes this analytics event to a tenant / billing namespace
 	// (issue #232). It is populated from the request context at log time via
-	// tenant.FromContextOrDefault; never write an unscoped hosted event.
+	// tenant.Require; never write an unscoped hosted event.
 	TenantID                string     `json:"tenant_id"`
 	SubscriptionID          uuid.UUID  `json:"subscription_id"`
 	UserID                  string     `json:"user_id"`
@@ -581,7 +604,11 @@ func (s *EventLogService) LogSubscriptionEvent(ctx context.Context, data Subscri
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	data.TenantID = resolveTenantID(ctx, data.TenantID)
+	if resolved, err := resolveTenantID(ctx, data.TenantID); err != nil {
+		return err
+	} else {
+		data.TenantID = resolved
+	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
@@ -623,7 +650,11 @@ func (s *EventLogService) LogPaymentEvent(ctx context.Context, data PaymentEvent
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	data.TenantID = resolveTenantID(ctx, data.TenantID)
+	if resolved, err := resolveTenantID(ctx, data.TenantID); err != nil {
+		return err
+	} else {
+		data.TenantID = resolved
+	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
@@ -669,7 +700,11 @@ func (s *EventLogService) LogTransactionEvent(ctx context.Context, data Transact
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	data.TenantID = resolveTenantID(ctx, data.TenantID)
+	if resolved, err := resolveTenantID(ctx, data.TenantID); err != nil {
+		return err
+	} else {
+		data.TenantID = resolved
+	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
@@ -733,7 +768,11 @@ func (s *EventLogService) LogACUEvent(ctx context.Context, data ACUEventData) er
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	data.TenantID = resolveTenantID(ctx, data.TenantID)
+	if resolved, err := resolveTenantID(ctx, data.TenantID); err != nil {
+		return err
+	} else {
+		data.TenantID = resolved
+	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}
@@ -801,7 +840,11 @@ func (s *EventLogService) LogChargebackEvent(ctx context.Context, data Chargebac
 	if data.EventID == uuid.Nil {
 		data.EventID = uuidutil.NewV7()
 	}
-	data.TenantID = resolveTenantID(ctx, data.TenantID)
+	if resolved, err := resolveTenantID(ctx, data.TenantID); err != nil {
+		return err
+	} else {
+		data.TenantID = resolved
+	}
 	if data.Timestamp.IsZero() {
 		data.Timestamp = s.now().UTC()
 	}

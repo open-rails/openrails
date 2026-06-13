@@ -287,8 +287,12 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 	}
 
 	paymentRowID := prepared.payment.ID
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, 0, adminRefundHTTPError(http.StatusInternalServerError, "no tenant resolved on request")
+	}
 	intent, err := r.State.IntentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
-		TenantID:       tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:       tid.UUID(),
 		Provider:       provider,
 		IntentType:     intentType,
 		SubscriptionID: prepared.payment.SubscriptionID,

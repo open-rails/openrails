@@ -21,11 +21,10 @@ import (
 // subject is rejected with 401 (fail closed).
 type DelegatedPrincipal struct {
 	// TenantID is the resolved OpenRails tenant id in UUID string form
-	// (REQUIRED). For a single-tenant deployment this is the well-known
-	// default tenant id ("00000000-0000-0000-0000-000000000001"; see
-	// pkg/tenant.DefaultID). The mapping from the host's credential to this
-	// tenant is per-deployment configuration owned by the host — explicit,
-	// never inferred.
+	// (REQUIRED). The mapping from the host's credential to this tenant is
+	// per-deployment configuration owned by the host — explicit, never inferred.
+	// There is no default tenant to fall back to (#336): a deployment must
+	// resolve a real tenant id here.
 	TenantID string
 
 	// TenantSlug is the tenant's display/audit slug (optional).

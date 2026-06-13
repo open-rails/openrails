@@ -103,8 +103,12 @@ func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider
 	for _, p := range providers {
 		names = append(names, string(p))
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
 	row, err := s.DB.Gen(ctx).CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
-		TenantID:    tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:    tid.UUID(),
 		Mode:        string(mode),
 		Providers:   names,
 		WindowSince: since,
@@ -135,8 +139,12 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 	if f.RecommendedAction != "" {
 		action = &f.RecommendedAction
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return FindingRecord{}, err
+	}
 	row, err := s.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
-		TenantID:          tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:          tid.UUID(),
 		Provider:          string(f.Provider),
 		FindingType:       string(f.Type),
 		SubjectKey:        f.SubjectKey,

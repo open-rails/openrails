@@ -60,7 +60,11 @@ func (r *USDCFundingSessionRepo) CreateForUserID(ctx context.Context, userID str
 	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), uuid.Nil, tsid); err != nil {
 		return err
 	}
-	session.TenantID = tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	session.TenantID = tid.UUID()
 	session.TenantSubjectID = tsid
 	if session.Metadata == nil {
 		session.Metadata = map[string]any{}

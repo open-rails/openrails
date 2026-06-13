@@ -96,7 +96,11 @@ func (s *CreditsService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldI
 			return ErrCreditTypeInactive
 		}
 
-		tenantID := tenant.FromContextOrDefault(ctx).UUID()
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		tenantID := tid.UUID()
 		payerID := in.Payer.UUID()
 		now := s.now()
 

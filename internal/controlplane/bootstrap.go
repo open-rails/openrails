@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	authcore "github.com/open-rails/authkit/core"
 	log "github.com/sirupsen/logrus"
 
@@ -28,10 +29,12 @@ type BootstrapResult struct {
 
 // BootstrapOptions parameterizes the control-plane bootstrap.
 type BootstrapOptions struct {
-	// BootstrapTenantSlug is the AuthKit tenant slug under which the default
-	// tenant's admin role + deployment admin service token are seeded (#312). When
-	// empty, defaults to the default tenant slug ("default") — there is NO
-	// separate "operator" AuthKit tenant.
+	// BootstrapTenantSlug is the AuthKit tenant slug under which this tenant's
+	// admin role + deployment admin service token are seeded (#312). It is also
+	// the OpenRails tenant slug used to locate the directory row to link the org
+	// onto (#336): there is NO default tenant, so an empty slug is an error and a
+	// matching openrails.tenants row must already exist. There is NO separate
+	// "operator" AuthKit tenant.
 	BootstrapTenantSlug string
 
 	// InitialAdminUserID, when set, is assigned the admin role in the bootstrap
@@ -70,7 +73,8 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 
 	slug := strings.ToLower(strings.TrimSpace(opts.BootstrapTenantSlug))
 	if slug == "" {
-		slug = tenant.DefaultSlug
+		// No default tenant (#336): bootstrap must name the tenant slug to seed.
+		return nil, errors.New("controlplane: bootstrap requires a tenant slug (BootstrapTenantSlug)")
 	}
 
 	res := &BootstrapResult{BootstrapTenantSlug: slug}
@@ -122,9 +126,12 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 			Info("controlplane: assigned admin role to initial admin")
 	}
 
-	// 4. Record the default tenant's AuthKit org on the DEFAULT tenant directory
-	//    row so tenant resolution / admin policy can map the default tenant -> org.
-	if err := c.recordAuthKitTenantOnDefaultTenant(ctx, tenant.DefaultID, authkitTenant.ID, slug); err != nil {
+	// 4. Record the AuthKit org on the bootstrap tenant's directory row
+	//    (openrails.tenants, keyed by slug) so tenant resolution / admin policy can
+	//    map this tenant -> org. The resolved OpenRails tenant id is what the admin
+	//    service token below is resource-scoped to (no default tenant; #336).
+	bootstrapTenantID, err := c.recordAuthKitTenantBySlug(ctx, slug, authkitTenant.ID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -144,7 +151,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 			serviceToken, secret, merr := core.MintServiceTokenWithOptions(ctx, slug, authcore.ServiceTokenMintOptions{
 				Name:        name,
 				Permissions: OperatorRolePermissions(),
-				Resources:   []authcore.ServiceTokenResource{TenantResource(tenant.DefaultID)},
+				Resources:   []authcore.ServiceTokenResource{TenantResource(bootstrapTenantID)},
 			})
 			if merr != nil {
 				return nil, fmt.Errorf("controlplane: mint initial admin service token: %w", merr)
@@ -251,24 +258,33 @@ func anyLiveServiceToken(toks []authcore.ServiceToken) bool {
 	return false
 }
 
-// recordAuthKitTenantOnDefaultTenant writes the default tenant's AuthKit org
-// id/slug onto the default tenant directory row (openrails.tenants). openrails.* is
-// OpenRails-owned control-plane state, so this is a direct, idempotent UPDATE —
-// not AuthKit SQL.
-func (c *ControlPlane) recordAuthKitTenantOnDefaultTenant(ctx context.Context, tenantID tenant.ID, authKitTenantID, authKitTenantSlug string) error {
+// recordAuthKitTenantBySlug writes the AuthKit org id/slug onto the bootstrap
+// tenant's directory row (openrails.tenants), keyed by the bootstrap slug, and
+// returns the resolved OpenRails tenant id. openrails.* is OpenRails-owned
+// control-plane state, so this is a direct, idempotent UPDATE ... RETURNING — not
+// AuthKit SQL. The bootstrap slug is BOTH the AuthKit org slug and the OpenRails
+// tenant slug; there is no default tenant the row could fall back to (#336), so a
+// missing directory row is an error the caller must surface (provision the tenant
+// first).
+func (c *ControlPlane) recordAuthKitTenantBySlug(ctx context.Context, slug, authKitTenantID string) (tenant.ID, error) {
 	if c.pool == nil {
-		return errors.New("controlplane: pgx pool unavailable for tenant directory update")
+		return tenant.ID{}, errors.New("controlplane: pgx pool unavailable for tenant directory update")
 	}
-	_, err := c.pool.Exec(ctx, `
+	var idStr string
+	err := c.pool.QueryRow(ctx, `
 		UPDATE openrails.tenants
 		   SET authkit_tenant_id   = $2,
-		       authkit_tenant_slug = $3,
+		       authkit_tenant_slug = $1,
 		       updated_at       = current_timestamp
-		 WHERE id = $1::uuid
-		   AND (authkit_tenant_id IS DISTINCT FROM $2 OR authkit_tenant_slug IS DISTINCT FROM $3)
-	`, tenantID.String(), authKitTenantID, authKitTenantSlug)
-	if err != nil {
-		return fmt.Errorf("controlplane: record authkit tenant on default tenant: %w", err)
+		 WHERE lower(slug) = lower($1)
+		   AND deleted_at IS NULL
+		RETURNING id::text
+	`, slug, authKitTenantID).Scan(&idStr)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tenant.ID{}, fmt.Errorf("controlplane: no openrails tenant directory row for bootstrap slug %q (provision the tenant before bootstrap)", slug)
 	}
-	return nil
+	if err != nil {
+		return tenant.ID{}, fmt.Errorf("controlplane: record authkit tenant on tenant %q: %w", slug, err)
+	}
+	return tenant.ParseID(idStr)
 }

@@ -25,7 +25,11 @@ func (s *CreditsService) CumulativePaidMicros(ctx context.Context, payer identit
 	if err != nil {
 		return 0, err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := tid.UUID()
 	var total int64
 	err = s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		var e error
@@ -71,7 +75,11 @@ func (s *CreditsService) GraduateTier(ctx context.Context, payer identity.Tenant
 		}
 	}
 
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return "", err
+	}
+	tenantID := tid.UUID()
 	now := s.now()
 	err = s.db.TenantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)

@@ -861,8 +861,13 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 		return err
 	}
 
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+
 	res, err := s.solanaPrepareSubscribe.Prepare(ctx, recurring.PrepareSubscribeInput{
-		TenantID:         tenant.FromContextOrDefault(ctx),
+		TenantID:         tid,
 		SubscriberWallet: wallet,
 		PlanID:           terms.planID,
 		MintSymbol:       terms.mintSymbol,
@@ -972,7 +977,10 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 	if v := strings.TrimSpace(getStringField(session.ProcessorState, "plan_created_at")); v != "" {
 		terms.createdAt, _ = strconv.ParseInt(v, 10, 64)
 	}
-	tenantID := tenant.FromContextOrDefault(ctx)
+	tenantID, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Step 1: the signed transaction was init_subscription_authority. Re-prepare
 	// the subscribe transaction (the authority now exists) and stay in
@@ -2356,8 +2364,13 @@ func (s *CheckoutSessionService) buildSolanaSubscribeTransaction(ctx context.Con
 		terms.createdAt, _ = strconv.ParseInt(v, 10, 64)
 	}
 
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	res, err := s.solanaPrepareSubscribe.Prepare(ctx, recurring.PrepareSubscribeInput{
-		TenantID:         tenant.FromContextOrDefault(ctx),
+		TenantID:         tid,
 		SubscriberWallet: account,
 		PlanID:           terms.planID,
 		MintSymbol:       terms.mintSymbol,
@@ -2465,8 +2478,12 @@ func (s *CheckoutSessionService) tierChangePrepareInput(ctx context.Context, ses
 	if safeErr != nil {
 		return in, fmt.Errorf("%w: tier_new_plan_created_at overflows int64", ErrCheckoutSessionValidation)
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return in, err
+	}
 	in = recurring.PrepareTierChangeInput{
-		TenantID:             tenant.FromContextOrDefault(ctx),
+		TenantID:             tid,
 		SubscriberWallet:     oldRow.SubscriberWallet,
 		MintSymbol:           getStringField(session.ProcessorState, "tier_new_mint_symbol"),
 		OldPlanPDA:           oldRow.PlanPDA,
@@ -2577,7 +2594,10 @@ func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Conte
 	if v := strings.TrimSpace(getStringField(session.ProcessorState, "plan_created_at")); v != "" {
 		terms.createdAt, _ = strconv.ParseInt(v, 10, 64)
 	}
-	tenantID := tenant.FromContextOrDefault(ctx)
+	tenantID, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
 
 	// Gate on authority existence: if Prepare still returns the init step, the
 	// authority is not on-chain yet (init has not landed / not visible) → the

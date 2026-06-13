@@ -33,10 +33,14 @@ func (r *EntitlementRepo) IsEntitled(ctx context.Context, userID, entitlement st
 }
 
 func (r *EntitlementRepo) IsTenantSubjectEntitled(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
-	// Tenant scoping (issue #223): defaults to the default tenant when the
-	// request has not resolved one, so single-tenant runs unchanged.
+	// Tenant scoping (issue #223): the tenant is resolved from context and is
+	// required — an absent tenant is an error.
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
 	return r.db.Gen(ctx).EntitlementExistsActive(ctx, gen.EntitlementExistsActiveParams{
-		TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:        tid.UUID(),
 		TenantSubjectID: tenantSubjectID,
 		Entitlement:     entitlement,
 		At:              at,
@@ -52,8 +56,12 @@ func (r *EntitlementRepo) HasActiveIndefinite(ctx context.Context, userID, entit
 }
 
 func (r *EntitlementRepo) HasActiveIndefiniteByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
 	return r.db.Gen(ctx).EntitlementHasActiveIndefinite(ctx, gen.EntitlementHasActiveIndefiniteParams{
-		TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:        tid.UUID(),
 		TenantSubjectID: tenantSubjectID,
 		Entitlement:     entitlement,
 		At:              at,
@@ -69,8 +77,12 @@ func (r *EntitlementRepo) GetLatestActive(ctx context.Context, userID, entitleme
 }
 
 func (r *EntitlementRepo) GetLatestActiveByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string) (*models.Entitlement, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	row, err := r.db.Gen(ctx).GetLatestActiveEntitlement(ctx, gen.GetLatestActiveEntitlementParams{
-		TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:        tid.UUID(),
 		TenantSubjectID: tenantSubjectID,
 		Entitlement:     entitlement,
 	})
@@ -89,8 +101,12 @@ func (r *EntitlementRepo) GetLatestFiniteActive(ctx context.Context, userID, ent
 }
 
 func (r *EntitlementRepo) GetLatestFiniteActiveByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	row, err := r.db.Gen(ctx).GetLatestFiniteActiveEntitlement(ctx, gen.GetLatestFiniteActiveEntitlementParams{
-		TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:        tid.UUID(),
 		TenantSubjectID: tenantSubjectID,
 		Entitlement:     entitlement,
 		At:              at,
@@ -108,10 +124,14 @@ func (r *EntitlementRepo) Insert(ctx context.Context, entitlement *models.Entitl
 	}
 
 	// Stamp the resolved tenant (issue #223) when the caller did not set one,
-	// so new rows are tenant-scoped consistently with reads. Defaults to the
-	// default tenant for single-tenant / self-hosted runs.
+	// so new rows are tenant-scoped consistently with reads. The tenant is
+	// required from context — an absent tenant is an error.
 	if (entitlement.TenantID == uuid.UUID{}) {
-		entitlement.TenantID = tenant.FromContextOrDefault(ctx).UUID()
+		tid, err := tenant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		entitlement.TenantID = tid.UUID()
 	}
 
 	id, err := r.db.Gen(ctx).CreateEntitlement(ctx, gen.CreateEntitlementParams{
@@ -147,8 +167,12 @@ func (r *EntitlementRepo) ListActiveEntitlements(ctx context.Context, userID str
 }
 
 func (r *EntitlementRepo) ListActiveEntitlementsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]string, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return r.db.Gen(ctx).ListActiveEntitlementNamesTenant(ctx, gen.ListActiveEntitlementNamesTenantParams{
-		TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:        tid.UUID(),
 		TenantSubjectID: tenantSubjectID,
 		At:              at,
 	})
@@ -170,8 +194,12 @@ func (r *EntitlementRepo) ListActiveRecords(ctx context.Context, userID string, 
 }
 
 func (r *EntitlementRepo) ListActiveRecordsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]models.Entitlement, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.Gen(ctx).ListActiveEntitlementRecordsTenant(ctx, gen.ListActiveEntitlementRecordsTenantParams{
-		TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:        tid.UUID(),
 		TenantSubjectID: tenantSubjectID,
 		At:              at,
 	})
@@ -184,8 +212,12 @@ func (r *EntitlementRepo) ListActiveRecordsByTenantSubject(ctx context.Context, 
 // ListActiveRecordsByExternalSubjects (#354): one query, grouped by subject;
 // subjects with no active rows are absent from the map.
 func (r *EntitlementRepo) ListActiveRecordsByExternalSubjects(ctx context.Context, issuer string, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.Gen(ctx).ListActiveEntitlementRecordsByExternalSubjects(ctx, gen.ListActiveEntitlementRecordsByExternalSubjectsParams{
-		TenantID: tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID: tid.UUID(),
 		Issuer:   issuer,
 		Subjects: subjects,
 		At:       at,

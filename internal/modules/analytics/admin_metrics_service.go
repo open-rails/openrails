@@ -24,7 +24,7 @@ import (
 // queries fail soft at the handler layer, never blocking openrails.
 //
 // TENANT SCOPING (issue #232): every query in this service is filtered by the
-// tenant id resolved from the request context (tenant.FromContextOrDefault), so
+// tenant id resolved from the request context (tenant.Require), so
 // a tenant operator can only ever read their OWN metrics. Cross-tenant
 // (platform-wide) reads are a SEPARATE, explicit control-plane path gated on
 // controlplane.PermPlatformSuperadmin — see the *CrossTenant methods below.
@@ -335,7 +335,11 @@ func bucketStartExpr(granularity string) string {
 // GetSummary returns per-currency summaries scoped to the tenant resolved from
 // ctx (issue #232). A tenant operator can only ever see their own metrics.
 func (s *AdminMetricsService) GetSummary(ctx context.Context, rng MetricsDateRange, currency string) ([]SummaryResponse, error) {
-	return s.getSummary(ctx, rng, currency, tenant.FromContextOrDefault(ctx), false)
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.getSummary(ctx, rng, currency, tid, false)
 }
 
 // GetSummaryCrossTenant returns platform-wide (all-tenant) summaries. This is
@@ -442,7 +446,11 @@ func (s *AdminMetricsService) getSummary(ctx context.Context, rng MetricsDateRan
 // GetRevenueSeries returns revenue buckets scoped to the tenant resolved from
 // ctx (issue #232).
 func (s *AdminMetricsService) GetRevenueSeries(ctx context.Context, rng MetricsDateRange, granularity string, currency string) ([]RevenueSeriesResponse, error) {
-	return s.getRevenueSeries(ctx, rng, granularity, currency, tenant.FromContextOrDefault(ctx), false)
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.getRevenueSeries(ctx, rng, granularity, currency, tid, false)
 }
 
 // GetRevenueSeriesCrossTenant is the platform-superadmin cross-tenant variant.
@@ -516,7 +524,11 @@ func (s *AdminMetricsService) getRevenueSeries(ctx context.Context, rng MetricsD
 // GetSubscriptionSeries returns subscription buckets scoped to the tenant
 // resolved from ctx (issue #232).
 func (s *AdminMetricsService) GetSubscriptionSeries(ctx context.Context, rng MetricsDateRange, granularity string, currency string) ([]SubscriptionSeriesResponse, error) {
-	return s.getSubscriptionSeries(ctx, rng, granularity, currency, tenant.FromContextOrDefault(ctx), false)
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.getSubscriptionSeries(ctx, rng, granularity, currency, tid, false)
 }
 
 // GetSubscriptionSeriesCrossTenant is the platform-superadmin cross-tenant
@@ -591,7 +603,11 @@ func (s *AdminMetricsService) getSubscriptionSeries(ctx context.Context, rng Met
 // GetProcessorMetrics returns processor metrics scoped to the tenant resolved
 // from ctx (issue #232).
 func (s *AdminMetricsService) GetProcessorMetrics(ctx context.Context, rng MetricsDateRange, currency string) ([]ProcessorMetricsResponse, error) {
-	return s.getProcessorMetrics(ctx, rng, currency, tenant.FromContextOrDefault(ctx), false)
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.getProcessorMetrics(ctx, rng, currency, tid, false)
 }
 
 // GetProcessorMetricsCrossTenant is the platform-superadmin cross-tenant
@@ -661,7 +677,11 @@ func (s *AdminMetricsService) getProcessorMetrics(ctx context.Context, rng Metri
 // GetChurn returns churn metrics scoped to the tenant resolved from ctx
 // (issue #232).
 func (s *AdminMetricsService) GetChurn(ctx context.Context, rng MetricsDateRange, currency string) ([]ChurnResponse, error) {
-	return s.getChurn(ctx, rng, currency, tenant.FromContextOrDefault(ctx), false)
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.getChurn(ctx, rng, currency, tid, false)
 }
 
 // GetChurnCrossTenant is the platform-superadmin cross-tenant variant. See

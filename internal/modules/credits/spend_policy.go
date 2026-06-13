@@ -166,7 +166,11 @@ func (s *CreditsService) GetAccountSettings(ctx context.Context, payer identity.
 	if err != nil {
 		return nil, err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	row, err := s.db.Gen(ctx).GetCreditAccountSettings(ctx, gen.GetCreditAccountSettingsParams{
 		TenantID: tenantID, TenantSubjectID: payer.UUID(), CreditTypeID: ct.ID,
 	})
@@ -203,9 +207,13 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Materialize the payable tenant_subjects row so the credit_account_settings
 	// FK (migration 076) is satisfied on a subject's first settings write (#317).
-	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
+	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
 	if in.BillingMode != nil {
@@ -222,7 +230,7 @@ func (s *CreditsService) UpsertAccountSettings(ctx context.Context, payer identi
 	if err != nil {
 		return nil, err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tenantID := tid.UUID()
 	now := s.now()
 
 	cur, err := s.GetAccountSettings(ctx, payer, creditType)
@@ -317,9 +325,13 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.Tenan
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("credits service not initialized")
 	}
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Materialize the payable tenant_subjects row so the credit_spend_limits FK
 	// (migration 076) is satisfied on a subject's first spend-limit write (#317).
-	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tenant.FromContextOrDefault(ctx).UUID(), payer.UUID()); err != nil {
+	if err := ensureTenantSubject(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
 		return nil, err
 	}
 	actor = strings.TrimSpace(actor)
@@ -330,7 +342,7 @@ func (s *CreditsService) SetSpendLimit(ctx context.Context, payer identity.Tenan
 	if err != nil {
 		return nil, err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tenantID := tid.UUID()
 	now := s.now()
 	row := &models.CreditSpendLimit{
 		ID:                     uuidutil.NewV7(),
@@ -408,7 +420,11 @@ func (s *CreditsService) CheckSpendAllowed(ctx context.Context, payer identity.T
 	if err != nil {
 		return SpendDecision{}, err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return SpendDecision{}, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	now := s.now()
 	dayStart, dayReset := dayWindow(now)

@@ -61,12 +61,16 @@ func (s *CreditsService) InsertCaptureUsageEvent(ctx context.Context, p CaptureU
 	now := s.now()
 	return s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
-		if err := ensureTenantSubject(ctx, q, tenant.FromContextOrDefault(ctx).UUID(), p.TenantSubjectID); err != nil {
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
+		if err := ensureTenantSubject(ctx, q, tid.UUID(), p.TenantSubjectID); err != nil {
 			return err
 		}
 		ev := &models.UsageEvent{
 			ID:                  uuidutil.NewV7(),
-			TenantID:            tenant.FromContextOrDefault(ctx).UUID(),
+			TenantID:            tid.UUID(),
 			TenantSubjectID:     p.TenantSubjectID,
 			Actor:               p.Actor,
 			Resource:            nilIfEmpty(p.Resource),
@@ -144,8 +148,12 @@ func (s *CreditsService) ServiceUsageRollup(ctx context.Context, payer identity.
 	}
 	var out []ServiceUsageRollupRow
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
 		rows, err := s.db.Gen(ctx).ServiceUsageRollup(ctx, gen.ServiceUsageRollupParams{
-			TenantID:        tenant.FromContextOrDefault(ctx).UUID(),
+			TenantID:        tid.UUID(),
 			TenantSubjectID: payer.UUID(),
 			GroupBy:         groupBy,
 			FromAt:          from.UTC(),
@@ -186,8 +194,12 @@ func (s *CreditsService) ResourceRevenueDaily(ctx context.Context, resource stri
 	}
 	var out []ResourceRevenueDailyRow
 	err := s.db.RunInTenantConn(ctx, func(ctx context.Context) error {
+		tid, terr := tenant.Require(ctx)
+		if terr != nil {
+			return terr
+		}
 		rows, err := s.db.Gen(ctx).ResourceRevenueDaily(ctx, gen.ResourceRevenueDailyParams{
-			TenantID: tenant.FromContextOrDefault(ctx).UUID(),
+			TenantID: tid.UUID(),
 			Resource: &resource,
 			FromAt:   from.UTC(),
 			ToAt:     to.UTC(),

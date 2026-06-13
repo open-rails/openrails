@@ -15,13 +15,13 @@ import (
 // resolution from host / path / JWT / service token / admin route is layered in by #222
 // (tenant-scoped public routes & service tokens) at the marked extension point below; the
 // rest of the stack already reads the tenant from context via
-// tenant.FromContextOrDefault, so only this resolver needs to change.
+// tenant.Require, so only this resolver needs to change.
 func ResolveTenant() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := resolveTenantID(c)
 
 		// Attach to the request context so repositories/services downstream
-		// (which call tenant.FromContextOrDefault) are tenant-scoped.
+		// (which call tenant.Require) are tenant-scoped.
 		ctx := tenant.WithID(c.Request.Context(), id)
 		c.Request = c.Request.WithContext(ctx)
 
@@ -40,5 +40,10 @@ func ResolveTenant() gin.HandlerFunc {
 // `tenant` claim, look the slug up in openrails.tenants, and return that id.
 // Until then every request maps to the single default tenant.
 func resolveTenantID(_ *gin.Context) tenant.ID {
+	// TODO(#336): the "default tenant" was removed (tenant.DefaultID no longer
+	// exists). This resolver is the SOURCE of the tenant — it cannot tenant.Require
+	// from context because nothing upstream has resolved one yet. It must resolve
+	// the host's configured single tenant id (or the #222 host/path/token lookup)
+	// and return it; a missing tenant must become an error, never a silent default.
 	return tenant.DefaultID
 }

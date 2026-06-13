@@ -513,7 +513,11 @@ func (s *Service) ArchiveCatalogExtras(ctx context.Context, extras []CatalogExtr
 	if err != nil {
 		return nil, err
 	}
-	return archiveCatalogExtrasVia(ctx, rt.IntentRunner(), tenant.FromContextOrDefault(ctx).UUID(), s.now().UTC(), extras)
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return archiveCatalogExtrasVia(ctx, rt.IntentRunner(), tid.UUID(), s.now().UTC(), extras)
 }
 
 // archiveCatalogExtrasVia is the testable core of ArchiveCatalogExtras: the

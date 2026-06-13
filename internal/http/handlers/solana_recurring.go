@@ -49,7 +49,11 @@ func AdminPublishSolanaPlan(r *httprequest.Request) {
 		return
 	}
 
-	tenantID := tenant.FromContextOrDefault(r.Request.Context())
+	tenantID, err := tenant.Require(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
+		return
+	}
 	handle, err := svc.PublishPlan(r.Request.Context(), recurring.PublishPlanInput{
 		TenantID:        tenantID,
 		PlanID:          req.PlanID,
@@ -151,7 +155,11 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 	if user.Email != nil {
 		email = *user.Email
 	}
-	tenantID := tenant.FromContextOrDefault(r.Request.Context())
+	tenantID, err := tenant.Require(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
+		return
+	}
 	sub, err := svc.ConfirmEnrollment(r.Request.Context(), recurring.EnrollInput{
 		TenantID:         tenantID,
 		UserID:           user.ID,
@@ -534,8 +542,13 @@ func PrepareSolanaTierChange(r *httprequest.Request) {
 		return
 	}
 
+	tenantID, err := tenant.Require(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
+		return
+	}
 	res, err := svc.Prepare(r.Request.Context(), recurring.PrepareTierChangeInput{
-		TenantID:             tenant.FromContextOrDefault(r.Request.Context()),
+		TenantID:             tenantID,
 		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
 		MintSymbol:           resolved.newTerms.mintSymbol,
 		OldPlanPDA:           resolved.oldRow.PlanPDA,
@@ -591,8 +604,13 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	// not trust a client-supplied PDA. PrepareTierChangeService returns it, but the
 	// confirm body only carries the signature + price; deriving it server-side from
 	// the canonical terms keeps the mirror authoritative.
+	tenantID, err := tenant.Require(r.Request.Context())
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "no tenant resolved on request")
+		return
+	}
 	prep, err := r.State.SolanaPrepareTierChangeService.Prepare(r.Request.Context(), recurring.PrepareTierChangeInput{
-		TenantID:             tenant.FromContextOrDefault(r.Request.Context()),
+		TenantID:             tenantID,
 		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
 		MintSymbol:           resolved.newTerms.mintSymbol,
 		OldPlanPDA:           resolved.oldRow.PlanPDA,

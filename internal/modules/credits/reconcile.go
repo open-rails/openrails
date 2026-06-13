@@ -81,7 +81,11 @@ func (s *CreditsService) Reconcile(ctx context.Context) (ReconcileReport, error)
 
 // FindOrphanedExpiredHolds returns holds still 'active' whose expiry has passed.
 func (s *CreditsService) FindOrphanedExpiredHolds(ctx context.Context) ([]OrphanedHold, error) {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	now := s.now()
 	holds, err := s.db.Gen(ctx).ListOrphanedExpiredHolds(ctx, gen.ListOrphanedExpiredHoldsParams{
 		TenantID: tenantID, Now: now,
@@ -103,7 +107,11 @@ func (s *CreditsService) FindOrphanedExpiredHolds(ctx context.Context) ([]Orphan
 // FindHeldBalanceDrift returns balance rows whose stored held_balance differs
 // from the sum of their active holds.
 func (s *CreditsService) FindHeldBalanceDrift(ctx context.Context) ([]HeldBalanceDrift, error) {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	rows, err := s.db.Gen(ctx).ListHeldBalanceDrift(ctx, tenantID)
 	if err != nil {
 		return nil, err
@@ -124,7 +132,11 @@ func (s *CreditsService) FindHeldBalanceDrift(ctx context.Context) ([]HeldBalanc
 // FindBalanceAnomalies returns balance rows violating hard invariants:
 // balance < 0, held_balance < 0, or held_balance > balance.
 func (s *CreditsService) FindBalanceAnomalies(ctx context.Context) ([]BalanceAnomaly, error) {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	rows, err := s.db.Gen(ctx).ListBalanceAnomalies(ctx, tenantID)
 	if err != nil {
 		return nil, err
@@ -162,7 +174,11 @@ func (s *CreditsService) RepairHeldBalance(ctx context.Context, payer identity.T
 	if err != nil {
 		return 0, err
 	}
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := tid.UUID()
 	payerID := payer.UUID()
 	computed, err := s.activeHoldsTotal(ctx, tenantID, payerID, ct.ID)
 	if err != nil {

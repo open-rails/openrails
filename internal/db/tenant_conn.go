@@ -42,7 +42,10 @@ func (d *DB) WithTenantConn(ctx context.Context) (context.Context, func(), error
 		return ctx, func() {}, nil
 	}
 
-	id := tenant.FromContextOrDefault(ctx)
+	id, err := tenant.Require(ctx)
+	if err != nil {
+		return ctx, func() {}, fmt.Errorf("db: WithTenantConn requires a tenant in context: %w", err)
+	}
 	if id.IsZero() {
 		return ctx, func() {}, fmt.Errorf("db: WithTenantConn requires a tenant in context")
 	}

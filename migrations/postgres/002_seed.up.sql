@@ -9,6 +9,9 @@
 SET lock_timeout = '10s';
 SET statement_timeout = '300s';
 
-INSERT INTO openrails.tenants (id, slug, name, status)
-VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default Tenant', 'active')
-ON CONFLICT (slug) DO NOTHING;
+-- #336: there is no "default tenant". Tenants are created explicitly — by the
+-- control plane (SaaS), the bootstrap manifest (embedded hosts; e.g. doujins
+-- resolves slug 'doujins'), or the test harness (dbtest.EnsureTestTenant). No
+-- tenant row is seeded. An existing '…0001'/'default' row from an older deploy
+-- is left untouched here; re-attributing or removing default-tenant data is a
+-- separate operational migration, not seed data.

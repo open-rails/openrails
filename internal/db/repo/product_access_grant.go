@@ -52,7 +52,11 @@ func productAccessGrantFromGen(g gen.BillingProductAccessGrant) *models.ProductA
 // zero (consistent with reads).
 func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.ProductAccessGrant) error {
 	if (grant.TenantID == uuid.UUID{}) {
-		grant.TenantID = tenant.FromContextOrDefault(ctx).UUID()
+		tid, err := tenant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		grant.TenantID = tid.UUID()
 	}
 	if err := ensureTenantSubjectRow(ctx, r.db.Qx(ctx), grant.TenantID, grant.TenantSubjectID); err != nil {
 		return err
@@ -88,7 +92,11 @@ func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.Produ
 // GetBySource returns the existing grant for a (user, product, source)
 // idempotency key, or nil if none. Used to make granting idempotent.
 func (r *ProductAccessGrantRepo) GetBySource(ctx context.Context, userID string, productID uuid.UUID, sourceID string) (*models.ProductAccessGrant, error) {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
@@ -111,7 +119,11 @@ func (r *ProductAccessGrantRepo) GetBySource(ctx context.Context, userID string,
 // HasActiveAccess reports whether the user has an active, in-window grant for the
 // product at time t.
 func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID string, productID uuid.UUID, at time.Time) (bool, error) {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	tenantID := tid.UUID()
 	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return false, err
@@ -126,7 +138,11 @@ func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID str
 
 // ListActiveByUser returns the user's active, in-window grants, most recent first.
 func (r *ProductAccessGrantRepo) ListActiveByUser(ctx context.Context, userID string, at time.Time) ([]models.ProductAccessGrant, error) {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
@@ -149,7 +165,11 @@ func (r *ProductAccessGrantRepo) ListActiveByUser(ctx context.Context, userID st
 // ListByUser returns ALL of the user's grants (active + revoked), most recent
 // first. Used by admin views.
 func (r *ProductAccessGrantRepo) ListByUser(ctx context.Context, userID string) ([]models.ProductAccessGrant, error) {
-	tenantID := tenant.FromContextOrDefault(ctx).UUID()
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := tid.UUID()
 	tsid, err := ResolveTenantSubjectID(userID)
 	if err != nil {
 		return nil, err
@@ -170,8 +190,12 @@ func (r *ProductAccessGrantRepo) ListByUser(ctx context.Context, userID string) 
 
 // GetByID returns a single grant by id (tenant-scoped).
 func (r *ProductAccessGrantRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.ProductAccessGrant, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	row, err := r.db.Gen(ctx).GetProductAccessGrantByID(ctx, gen.GetProductAccessGrantByIDParams{
-		TenantID: tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID: tid.UUID(),
 		ID:       id,
 	})
 	if err != nil {
@@ -187,8 +211,12 @@ func (r *ProductAccessGrantRepo) GetByID(ctx context.Context, id uuid.UUID) (*mo
 // so callers can detect "already revoked / not found".
 func (r *ProductAccessGrantRepo) RevokeByID(ctx context.Context, id uuid.UUID, now time.Time, reason models.ProductAccessRevokeReason) (int64, error) {
 	rr := string(reason)
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
 	return r.db.Gen(ctx).RevokeProductAccessGrantByID(ctx, gen.RevokeProductAccessGrantByIDParams{
-		TenantID: tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID: tid.UUID(),
 		ID:       id,
 		Now:      now,
 		Reason:   &rr,
@@ -199,8 +227,12 @@ func (r *ProductAccessGrantRepo) RevokeByID(ctx context.Context, id uuid.UUID, n
 // refund / chargeback reversal path. Returns rows affected.
 func (r *ProductAccessGrantRepo) RevokeByPayment(ctx context.Context, paymentID uuid.UUID, now time.Time, reason models.ProductAccessRevokeReason) (int64, error) {
 	rr := string(reason)
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
 	return r.db.Gen(ctx).RevokeProductAccessGrantsByPayment(ctx, gen.RevokeProductAccessGrantsByPaymentParams{
-		TenantID:  tenant.FromContextOrDefault(ctx).UUID(),
+		TenantID:  tid.UUID(),
 		PaymentID: &paymentID,
 		Now:       now,
 		Reason:    &rr,

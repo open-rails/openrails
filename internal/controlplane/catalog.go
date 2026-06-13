@@ -15,7 +15,7 @@
 // HARDCUT (#312): admin authority is the LIVE openrails:admin permission held in
 // the caller's OWN tenant (or carried on a deployment-minted admin service
 // token) — deployment authority, NOT membership in a separate "operator" AuthKit
-// tenant. The default tenant (tenant.DefaultSlug) hosts its own admin role.
+// tenant. The bootstrap tenant (named by its slug) hosts its own admin role.
 package controlplane
 
 import (

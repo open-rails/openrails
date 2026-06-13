@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
-	"github.com/open-rails/openrails/pkg/tenant"
 )
 
 // mintOperatorJWT mints a real, JWKS-verifiable, tenant-scoped user access token
@@ -54,9 +53,8 @@ func mintOperatorJWT(cmd *cobra.Command, _ []string) error {
 	authorityTenantSlug, _ := cmd.Flags().GetString("org")
 	authorityTenantSlug = strings.ToLower(strings.TrimSpace(authorityTenantSlug))
 	if authorityTenantSlug == "" {
-		// HARDCUT (#312): admin authority lives under the default tenant's own
-		// AuthKit org — there is no separate "operator" tenant.
-		authorityTenantSlug = tenant.DefaultSlug
+		// No default tenant (#336): the authority tenant must be named explicitly.
+		return fmt.Errorf("--org is required (the AuthKit tenant slug hosting the admin authority)")
 	}
 
 	email, _ := cmd.Flags().GetString("email")
