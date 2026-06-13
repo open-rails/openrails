@@ -97,13 +97,18 @@ balances ({unit, amount}) alongside entitlements; non-1:1 = price≠grant.
       hold-expiry + credit-expiry workers now thread the row's currency into the balance key
       (were querying currency='' and missing the USD row); affected tests un-skipped, passing.
 
-### Remaining loose ends (small)
-- [ ] D. tests/seed_data.go product/price/subscription/payment-method INSERTs omit tenant_id
-      (NOT NULL post-#336) — add tenant_id (+ currency for money rows). Unblocks the dunning
-      state-machine + runtime-clock integration tests.
-- [ ] E. FinalizeDueInvoices is a stub — add a ListMoneyAccountPairs (enumerate payer×currency)
-      query + iterate; un-skip its test.
-- [ ] F. (future) usdc_funding deposit → USDC balance (multi-currency wiring; today USD-only).
+### Remaining loose ends
+- [x] D. (commit 488ef935) tests/seed_data.go stamps tenant_id (+ pinned tenant ctx in the dunning/
+      clock tests); also fixed a real #336 bug — repo InsertTimelineWindow stamped tenant_id from a
+      zero model (RLS-bypass role let it land NULL); now stamps the resolved tenant.
+- [x] E. (commit 488ef935) ListMoneyAccountPairs query + real FinalizeDueInvoices (enumerate payers,
+      finalize each); test restored.
+- [ ] F. (future) usdc_funding deposit → USDC balance; FinalizeInvoice per-currency. Multi-currency
+      wiring — the seam (currency column + registry) is in; today USD-only in practice.
+
+**#472 SUBSTANTIVELY COMPLETE** (one money ledger, currency-aware, product grants, integration parity;
+build + vet + non-integration tests green; key integration suites green). Deferred: F (multi-currency
+runtime wiring) and #473 (tenant-defined custom credits, qualified `tenant/name` unit codes).
 
 ---
 
