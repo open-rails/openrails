@@ -37,7 +37,7 @@ func (r *EntitlementFeatureRepo) tenantID(ctx context.Context) (uuid.UUID, error
 	return tid.UUID(), nil
 }
 
-func entitlementFeatureFromGen(f gen.BillingEntitlementFeature) (*models.EntitlementFeature, error) {
+func entitlementFeatureFromGen(f gen.OpenrailsEntitlementFeature) (*models.EntitlementFeature, error) {
 	m := &models.EntitlementFeature{
 		ID:        f.ID,
 		TenantID:  f.TenantID,
@@ -53,7 +53,7 @@ func entitlementFeatureFromGen(f gen.BillingEntitlementFeature) (*models.Entitle
 	return m, nil
 }
 
-func productEntitlementFeatureFromGen(p gen.BillingProductEntitlementFeature) (*models.ProductEntitlementFeature, error) {
+func productEntitlementFeatureFromGen(p gen.OpenrailsProductEntitlementFeature) (*models.ProductEntitlementFeature, error) {
 	m := &models.ProductEntitlementFeature{
 		ID:                   p.ID,
 		TenantID:             p.TenantID,
@@ -279,11 +279,11 @@ func (r *EntitlementFeatureRepo) ListProductFeatures(ctx context.Context, produc
 	}
 	out := make([]models.ProductEntitlementFeature, 0, len(rows))
 	for _, row := range rows {
-		pef, err := productEntitlementFeatureFromGen(row.BillingProductEntitlementFeature)
+		pef, err := productEntitlementFeatureFromGen(row.OpenrailsProductEntitlementFeature)
 		if err != nil {
 			return nil, err
 		}
-		feature, err := entitlementFeatureFromGen(row.BillingEntitlementFeature)
+		feature, err := entitlementFeatureFromGen(row.OpenrailsEntitlementFeature)
 		if err != nil {
 			return nil, err
 		}

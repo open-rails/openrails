@@ -52,7 +52,7 @@ type OpenWindowParams struct {
 }
 
 // creditWindowFromGen maps a generated window row onto the domain model.
-func creditWindowFromGen(r gen.BillingMoneyWindow) *models.MoneyWindow {
+func creditWindowFromGen(r gen.OpenrailsMoneyWindow) *models.MoneyWindow {
 	return &models.MoneyWindow{
 		ID:              r.ID,
 		TenantID:        r.TenantID,

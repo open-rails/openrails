@@ -26,7 +26,7 @@ type NotificationQueueRepo struct {
 
 func NewNotificationQueueRepo(d *db.DB) *NotificationQueueRepo { return &NotificationQueueRepo{db: d} }
 
-func notificationFromGen(n gen.BillingNotificationQueue) (*models.NotificationQueue, error) {
+func notificationFromGen(n gen.OpenrailsNotificationQueue) (*models.NotificationQueue, error) {
 	m := &models.NotificationQueue{
 		ID:              n.ID,
 		TenantSubjectID: n.TenantSubjectID,
@@ -40,7 +40,7 @@ func notificationFromGen(n gen.BillingNotificationQueue) (*models.NotificationQu
 	return m, nil
 }
 
-func notificationsFromGen(rows []gen.BillingNotificationQueue) ([]*models.NotificationQueue, error) {
+func notificationsFromGen(rows []gen.OpenrailsNotificationQueue) ([]*models.NotificationQueue, error) {
 	out := make([]*models.NotificationQueue, 0, len(rows))
 	for _, r := range rows {
 		m, err := notificationFromGen(r)
@@ -248,6 +248,6 @@ func (r *NotificationQueueRepo) GetNotifications(ctx context.Context, opts query
 
 // NotificationFromGen exposes the gen -> model mapping for callers outside the
 // repo (e.g. the admin operations handlers reading repair alerts).
-func NotificationFromGen(n gen.BillingNotificationQueue) (*models.NotificationQueue, error) {
+func NotificationFromGen(n gen.OpenrailsNotificationQueue) (*models.NotificationQueue, error) {
 	return notificationFromGen(n)
 }

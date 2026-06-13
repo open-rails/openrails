@@ -56,7 +56,7 @@ func (r *PriceRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Price, e
 	return priceFromGen(row)
 }
 
-func pricesFromGen(rows []gen.BillingPrice) ([]*models.Price, error) {
+func pricesFromGen(rows []gen.OpenrailsPrice) ([]*models.Price, error) {
 	out := make([]*models.Price, 0, len(rows))
 	for _, r := range rows {
 		p, err := priceFromGen(r)
@@ -91,7 +91,7 @@ func (r *PriceRepo) GetAllActive(ctx context.Context) ([]*models.Price, error) {
 	}
 	out := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
-		price, err := priceWithProduct(row.BillingPrice, row.BillingProduct)
+		price, err := priceWithProduct(row.OpenrailsPrice, row.OpenrailsProduct)
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +107,7 @@ func (r *PriceRepo) GetAll(ctx context.Context) ([]*models.Price, error) {
 	}
 	out := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
-		price, err := priceWithProduct(row.BillingPrice, row.BillingProduct)
+		price, err := priceWithProduct(row.OpenrailsPrice, row.OpenrailsProduct)
 		if err != nil {
 			return nil, err
 		}
@@ -116,7 +116,7 @@ func (r *PriceRepo) GetAll(ctx context.Context) ([]*models.Price, error) {
 	return out, nil
 }
 
-func priceWithProduct(p gen.BillingPrice, prod gen.BillingProduct) (*models.Price, error) {
+func priceWithProduct(p gen.OpenrailsPrice, prod gen.OpenrailsProduct) (*models.Price, error) {
 	price, err := priceFromGen(p)
 	if err != nil {
 		return nil, err
@@ -185,7 +185,7 @@ func (r *PriceRepo) ListPaginated(ctx context.Context, filter PriceFilter, limit
 	}
 	out := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
-		price, err := priceWithProduct(row.BillingPrice, row.BillingProduct)
+		price, err := priceWithProduct(row.OpenrailsPrice, row.OpenrailsProduct)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -213,7 +213,7 @@ func (r *PriceRepo) GetByCCBillPriceID(ctx context.Context, ccbillPriceID string
 	if err != nil {
 		return nil, err
 	}
-	return priceWithProduct(row.BillingPrice, row.BillingProduct)
+	return priceWithProduct(row.OpenrailsPrice, row.OpenrailsProduct)
 }
 
 func (r *PriceRepo) GetByStripePriceID(ctx context.Context, stripePriceID string) (*models.Price, error) {
@@ -221,7 +221,7 @@ func (r *PriceRepo) GetByStripePriceID(ctx context.Context, stripePriceID string
 	if err != nil {
 		return nil, err
 	}
-	return priceWithProduct(row.BillingPrice, row.BillingProduct)
+	return priceWithProduct(row.OpenrailsPrice, row.OpenrailsProduct)
 }
 
 func (r *PriceRepo) Update(ctx context.Context, price *models.Price) error {

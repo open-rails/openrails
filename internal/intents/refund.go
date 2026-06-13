@@ -75,7 +75,7 @@ func (r refundReservations) payments() *payments.PaymentService {
 	return payments.NewPaymentService(r.DB, r.Clock)
 }
 
-func decodeRefundPayload(intent gen.BillingProviderIntent) (RefundPayload, error) {
+func decodeRefundPayload(intent gen.OpenrailsProviderIntent) (RefundPayload, error) {
 	var p RefundPayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("refund intent has no payload")
@@ -92,7 +92,7 @@ func decodeRefundPayload(intent gen.BillingProviderIntent) (RefundPayload, error
 // checkRelevance: a refund intent applies while its local reservation is
 // still open (pending). A completed reservation means the refund already
 // finalized; a released/failed or deleted one means it was abandoned.
-func (r refundReservations) checkRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
+func (r refundReservations) checkRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	p, err := decodeRefundPayload(intent)
 	if err != nil {
 		// Malformed payloads can never become executable; superseding surfaces
@@ -183,11 +183,11 @@ func NewNMIRefundHandler(d *db.DB, clients map[string]*nmi.NMIClient, clock cloc
 func (h *NMIRefundHandler) Type() string                         { return TypeNMIRefund }
 func (h *NMIRefundHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
-func (h *NMIRefundHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
+func (h *NMIRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent)
 }
 
-func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	client, ok := h.Clients[strings.ToLower(intent.Provider)]
 	if !ok || client == nil {
 		return Parked(fmt.Sprintf("nmi client not configured for provider %q", intent.Provider))
@@ -243,7 +243,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 // refund/credit action of the intent's amount against the original
 // transaction means the money moved (finalize + succeed); a clean read with
 // no such action means it definitively did not (the executor may retry).
-func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	client, ok := h.Clients[strings.ToLower(intent.Provider)]
 	if !ok || client == nil {
 		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Provider))
@@ -370,11 +370,11 @@ func NewStripeRefundHandler(d *db.DB, cfg *config.Config, clock clockwork.Clock)
 func (h *StripeRefundHandler) Type() string                         { return TypeStripeRefund }
 func (h *StripeRefundHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
-func (h *StripeRefundHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
+func (h *StripeRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent)
 }
 
-func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	p, err := decodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -426,7 +426,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.BillingPro
 	return Succeeded(map[string]any{"provider_refund_id": result.ID, "refund_status": result.Status})
 }
 
-func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	p, err := decodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())

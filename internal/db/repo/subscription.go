@@ -162,7 +162,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		ProductID:                s.ProductID,
 		EntitlementsSpecSnapshot: entSnap,
 		CreditsSpecSnapshot:      credSnap,
-		Status:                   gen.BillingSubscriptionStatus(s.Status),
+		Status:                   gen.OpenrailsSubscriptionStatus(s.Status),
 		StartedAt:                s.StartedAt,
 		EndedAt:                  s.EndedAt,
 		CurrentPeriodStartsAt:    s.CurrentPeriodStartsAt,
@@ -234,11 +234,11 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 				return err
 			}
 			for _, row := range rows {
-				price, err := priceFromGen(row.BillingPrice)
+				price, err := priceFromGen(row.OpenrailsPrice)
 				if err != nil {
 					return err
 				}
-				product, err := productFromGen(row.BillingProduct)
+				product, err := productFromGen(row.OpenrailsProduct)
 				if err != nil {
 					return err
 				}
@@ -283,7 +283,7 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 }
 
 // oneWithDetails maps a single gen row and attaches the standard relations.
-func (r *SubscriptionRepo) oneWithDetails(ctx context.Context, row gen.BillingSubscription, withProduct bool) (*models.Subscription, error) {
+func (r *SubscriptionRepo) oneWithDetails(ctx context.Context, row gen.OpenrailsSubscription, withProduct bool) (*models.Subscription, error) {
 	sub, err := subscriptionFromGen(row)
 	if err != nil {
 		return nil, err
@@ -294,7 +294,7 @@ func (r *SubscriptionRepo) oneWithDetails(ctx context.Context, row gen.BillingSu
 	return sub, nil
 }
 
-func (r *SubscriptionRepo) manyWithDetails(ctx context.Context, rows []gen.BillingSubscription) ([]*models.Subscription, error) {
+func (r *SubscriptionRepo) manyWithDetails(ctx context.Context, rows []gen.OpenrailsSubscription) ([]*models.Subscription, error) {
 	subs, err := subscriptionsFromGen(rows)
 	if err != nil {
 		return nil, err

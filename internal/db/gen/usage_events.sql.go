@@ -128,7 +128,7 @@ type GetUsageEventByCoordsParams struct {
 	SourceID        string
 }
 
-func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventByCoordsParams) (BillingUsageEvent, error) {
+func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventByCoordsParams) (OpenrailsUsageEvent, error) {
 	row := q.db.QueryRow(ctx, getUsageEventByCoords,
 		arg.TenantID,
 		arg.TenantSubjectID,
@@ -136,7 +136,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		arg.Source,
 		arg.SourceID,
 	)
-	var i BillingUsageEvent
+	var i OpenrailsUsageEvent
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,

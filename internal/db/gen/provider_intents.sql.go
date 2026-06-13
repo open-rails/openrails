@@ -49,15 +49,15 @@ type ClaimDueProviderIntentsParams struct {
 // (crashed executor; per-type semantics make the reclaim safe). Never claims
 // past the relevance window — those rows are swept by
 // ExpireOverdueProviderIntents.
-func (q *Queries) ClaimDueProviderIntents(ctx context.Context, arg ClaimDueProviderIntentsParams) ([]BillingProviderIntent, error) {
+func (q *Queries) ClaimDueProviderIntents(ctx context.Context, arg ClaimDueProviderIntentsParams) ([]OpenrailsProviderIntent, error) {
 	rows, err := q.db.Query(ctx, claimDueProviderIntents, arg.LeaseUntil, arg.Now, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProviderIntent
+	var items []OpenrailsProviderIntent
 	for rows.Next() {
-		var i BillingProviderIntent
+		var i OpenrailsProviderIntent
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -119,15 +119,15 @@ type ClaimDueVerifyProviderIntentsParams struct {
 // Claims due unknown_needs_verify intents for the verifier. Status stays
 // unknown_needs_verify (verification is a read, not an attempt — attempts is
 // not bumped); the lease alone prevents double-verification.
-func (q *Queries) ClaimDueVerifyProviderIntents(ctx context.Context, arg ClaimDueVerifyProviderIntentsParams) ([]BillingProviderIntent, error) {
+func (q *Queries) ClaimDueVerifyProviderIntents(ctx context.Context, arg ClaimDueVerifyProviderIntentsParams) ([]OpenrailsProviderIntent, error) {
 	rows, err := q.db.Query(ctx, claimDueVerifyProviderIntents, arg.LeaseUntil, arg.Now, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProviderIntent
+	var items []OpenrailsProviderIntent
 	for rows.Next() {
-		var i BillingProviderIntent
+		var i OpenrailsProviderIntent
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -189,9 +189,9 @@ type ClaimProviderIntentByIDParams struct {
 // next_attempt_at — the interactive caller asked for the attempt NOW — but
 // honors the relevance window and existing leases; anything not claimable here
 // is drained by the scheduled executor instead.
-func (q *Queries) ClaimProviderIntentByID(ctx context.Context, arg ClaimProviderIntentByIDParams) (BillingProviderIntent, error) {
+func (q *Queries) ClaimProviderIntentByID(ctx context.Context, arg ClaimProviderIntentByIDParams) (OpenrailsProviderIntent, error) {
 	row := q.db.QueryRow(ctx, claimProviderIntentByID, arg.LeaseUntil, arg.ID, arg.Now)
-	var i BillingProviderIntent
+	var i OpenrailsProviderIntent
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -339,7 +339,7 @@ type EnqueueProviderIntentParams struct {
 //	                        their backoff/terminal state)
 //
 // Always RETURNs the canonical row for the key.
-func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProviderIntentParams) (BillingProviderIntent, error) {
+func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProviderIntentParams) (OpenrailsProviderIntent, error) {
 	row := q.db.QueryRow(ctx, enqueueProviderIntent,
 		arg.TenantID,
 		arg.Provider,
@@ -355,7 +355,7 @@ func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProvider
 		arg.ExpiresAt,
 		arg.AccountFingerprint,
 	)
-	var i BillingProviderIntent
+	var i OpenrailsProviderIntent
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -410,9 +410,9 @@ SELECT id, tenant_id, provider, intent_type, subscription_id, payment_id, price_
 // ============================================================================
 // Reads
 // ============================================================================
-func (q *Queries) GetProviderIntent(ctx context.Context, id uuid.UUID) (BillingProviderIntent, error) {
+func (q *Queries) GetProviderIntent(ctx context.Context, id uuid.UUID) (OpenrailsProviderIntent, error) {
 	row := q.db.QueryRow(ctx, getProviderIntent, id)
-	var i BillingProviderIntent
+	var i OpenrailsProviderIntent
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -450,9 +450,9 @@ type GetProviderIntentByIdempotencyKeyParams struct {
 	IdempotencyKey string
 }
 
-func (q *Queries) GetProviderIntentByIdempotencyKey(ctx context.Context, arg GetProviderIntentByIdempotencyKeyParams) (BillingProviderIntent, error) {
+func (q *Queries) GetProviderIntentByIdempotencyKey(ctx context.Context, arg GetProviderIntentByIdempotencyKeyParams) (OpenrailsProviderIntent, error) {
 	row := q.db.QueryRow(ctx, getProviderIntentByIdempotencyKey, arg.TenantID, arg.IdempotencyKey)
-	var i BillingProviderIntent
+	var i OpenrailsProviderIntent
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -499,7 +499,7 @@ type ListProviderIntentsParams struct {
 	PageLimit      int64
 }
 
-func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderIntentsParams) ([]BillingProviderIntent, error) {
+func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderIntentsParams) ([]OpenrailsProviderIntent, error) {
 	rows, err := q.db.Query(ctx, listProviderIntents,
 		arg.Status,
 		arg.Provider,
@@ -512,9 +512,9 @@ func (q *Queries) ListProviderIntents(ctx context.Context, arg ListProviderInten
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProviderIntent
+	var items []OpenrailsProviderIntent
 	for rows.Next() {
-		var i BillingProviderIntent
+		var i OpenrailsProviderIntent
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -571,15 +571,15 @@ type ListStuckProviderIntentsParams struct {
 // cutoff (2h — a healthy verifier resolves unknowns in minutes; an in_flight
 // lease outliving hours means a dead executor). Read-only; runs tenant-scoped
 // on the engine's tenant-pinned connection.
-func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckProviderIntentsParams) ([]BillingProviderIntent, error) {
+func (q *Queries) ListStuckProviderIntents(ctx context.Context, arg ListStuckProviderIntentsParams) ([]OpenrailsProviderIntent, error) {
 	rows, err := q.db.Query(ctx, listStuckProviderIntents, arg.ActionCutoff, arg.VerifyCutoff)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingProviderIntent
+	var items []OpenrailsProviderIntent
 	for rows.Next() {
-		var i BillingProviderIntent
+		var i OpenrailsProviderIntent
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,

@@ -85,9 +85,9 @@ WHERE ufs.id = $1
 LIMIT 1
 `
 
-func (q *Queries) GetUSDCFundingSessionByID(ctx context.Context, id uuid.UUID) (BillingUsdcFundingSession, error) {
+func (q *Queries) GetUSDCFundingSessionByID(ctx context.Context, id uuid.UUID) (OpenrailsUsdcFundingSession, error) {
 	row := q.db.QueryRow(ctx, getUSDCFundingSessionByID, id)
-	var i BillingUsdcFundingSession
+	var i OpenrailsUsdcFundingSession
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -123,9 +123,9 @@ type GetUSDCFundingSessionByIDForTenantSubjectParams struct {
 	TenantSubjectID uuid.UUID
 }
 
-func (q *Queries) GetUSDCFundingSessionByIDForTenantSubject(ctx context.Context, arg GetUSDCFundingSessionByIDForTenantSubjectParams) (BillingUsdcFundingSession, error) {
+func (q *Queries) GetUSDCFundingSessionByIDForTenantSubject(ctx context.Context, arg GetUSDCFundingSessionByIDForTenantSubjectParams) (OpenrailsUsdcFundingSession, error) {
 	row := q.db.QueryRow(ctx, getUSDCFundingSessionByIDForTenantSubject, arg.ID, arg.TenantSubjectID)
-	var i BillingUsdcFundingSession
+	var i OpenrailsUsdcFundingSession
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -161,9 +161,9 @@ type GetUSDCFundingSessionByIdempotencyKeyParams struct {
 	IdempotencyKey  *string
 }
 
-func (q *Queries) GetUSDCFundingSessionByIdempotencyKey(ctx context.Context, arg GetUSDCFundingSessionByIdempotencyKeyParams) (BillingUsdcFundingSession, error) {
+func (q *Queries) GetUSDCFundingSessionByIdempotencyKey(ctx context.Context, arg GetUSDCFundingSessionByIdempotencyKeyParams) (OpenrailsUsdcFundingSession, error) {
 	row := q.db.QueryRow(ctx, getUSDCFundingSessionByIdempotencyKey, arg.TenantSubjectID, arg.IdempotencyKey)
-	var i BillingUsdcFundingSession
+	var i OpenrailsUsdcFundingSession
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,

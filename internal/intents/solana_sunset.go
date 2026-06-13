@@ -40,7 +40,7 @@ type SolanaSunsetPayload struct {
 	Label   string `json:"label,omitempty"`
 }
 
-func decodeSolanaSunsetPayload(intent gen.BillingProviderIntent) (SolanaSunsetPayload, solanago.PublicKey, error) {
+func decodeSolanaSunsetPayload(intent gen.OpenrailsProviderIntent) (SolanaSunsetPayload, solanago.PublicKey, error) {
 	var p SolanaSunsetPayload
 	if len(intent.Payload) == 0 {
 		return p, solanago.PublicKey{}, errors.New("solana sunset intent has no payload")
@@ -111,7 +111,7 @@ func (h *SolanaSunsetPlanHandler) Backoff(attempts int32) time.Duration {
 // CheckRelevance: superseded when a purchasable local price references the
 // plan PDA again — sunsetting a plan the catalog actively sells would be
 // wrong. Local reads only.
-func (h *SolanaSunsetPlanHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
+func (h *SolanaSunsetPlanHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsProviderIntent) (Relevance, error) {
 	p, _, err := decodeSolanaSunsetPayload(intent)
 	if err != nil {
 		return SupersededBy("unusable solana sunset intent: " + err.Error()), nil
@@ -150,7 +150,7 @@ func (h *SolanaSunsetPlanHandler) readPlan(ctx context.Context, pda solanago.Pub
 	return acct, true, nil
 }
 
-func (h *SolanaSunsetPlanHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *SolanaSunsetPlanHandler) Execute(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	if h.Reader == nil || h.Plans == nil {
 		return Parked("solana recurring is not configured (rpc/plan service unavailable)")
 	}
@@ -190,7 +190,7 @@ func (h *SolanaSunsetPlanHandler) Execute(ctx context.Context, intent gen.Billin
 // Verify resolves an ambiguous sunset by reading the plan account back:
 // absent/sunset means done (whenever it landed); still active means it
 // definitely has not happened and the executor may retry.
-func (h *SolanaSunsetPlanHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+func (h *SolanaSunsetPlanHandler) Verify(ctx context.Context, intent gen.OpenrailsProviderIntent) Outcome {
 	if h.Reader == nil {
 		return Ambiguous("solana rpc not configured; cannot verify")
 	}

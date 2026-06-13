@@ -114,9 +114,9 @@ const getPriceByID = `-- name: GetPriceByID :one
 SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM openrails.prices WHERE id = $1
 `
 
-func (q *Queries) GetPriceByID(ctx context.Context, id uuid.UUID) (BillingPrice, error) {
+func (q *Queries) GetPriceByID(ctx context.Context, id uuid.UUID) (OpenrailsPrice, error) {
 	row := q.db.QueryRow(ctx, getPriceByID, id)
-	var i BillingPrice
+	var i OpenrailsPrice
 	err := row.Scan(
 		&i.ID,
 		&i.ProductID,
@@ -149,9 +149,9 @@ type GetPriceByNMIPlanParams struct {
 
 // include_nmi_fallback replicates the bun-era behavior: for non-"nmi"
 // providers the legacy "nmi" key is also consulted.
-func (q *Queries) GetPriceByNMIPlan(ctx context.Context, arg GetPriceByNMIPlanParams) (BillingPrice, error) {
+func (q *Queries) GetPriceByNMIPlan(ctx context.Context, arg GetPriceByNMIPlanParams) (OpenrailsPrice, error) {
 	row := q.db.QueryRow(ctx, getPriceByNMIPlan, arg.Provider, arg.PlanID, arg.IncludeNmiFallback)
-	var i BillingPrice
+	var i OpenrailsPrice
 	err := row.Scan(
 		&i.ID,
 		&i.ProductID,
@@ -177,36 +177,36 @@ LIMIT 1
 `
 
 type GetPriceWithProductByCCBillPriceIDRow struct {
-	BillingPrice   BillingPrice
-	BillingProduct BillingProduct
+	OpenrailsPrice   OpenrailsPrice
+	OpenrailsProduct OpenrailsProduct
 }
 
 func (q *Queries) GetPriceWithProductByCCBillPriceID(ctx context.Context, flexID string) (GetPriceWithProductByCCBillPriceIDRow, error) {
 	row := q.db.QueryRow(ctx, getPriceWithProductByCCBillPriceID, flexID)
 	var i GetPriceWithProductByCCBillPriceIDRow
 	err := row.Scan(
-		&i.BillingPrice.ID,
-		&i.BillingPrice.ProductID,
-		&i.BillingPrice.Amount,
-		&i.BillingPrice.Currency,
-		&i.BillingPrice.BillingCycleDays,
-		&i.BillingPrice.Processors,
-		&i.BillingPrice.Status,
-		&i.BillingPrice.CreatedAt,
-		&i.BillingPrice.UpdatedAt,
-		&i.BillingPrice.TenantID,
-		&i.BillingProduct.ID,
-		&i.BillingProduct.Slug,
-		&i.BillingProduct.DisplayName,
-		&i.BillingProduct.Description,
-		&i.BillingProduct.EntitlementsSpec,
-		&i.BillingProduct.CreditsSpec,
-		&i.BillingProduct.TierGroup,
-		&i.BillingProduct.TierRank,
-		&i.BillingProduct.Status,
-		&i.BillingProduct.CreatedAt,
-		&i.BillingProduct.UpdatedAt,
-		&i.BillingProduct.TenantID,
+		&i.OpenrailsPrice.ID,
+		&i.OpenrailsPrice.ProductID,
+		&i.OpenrailsPrice.Amount,
+		&i.OpenrailsPrice.Currency,
+		&i.OpenrailsPrice.BillingCycleDays,
+		&i.OpenrailsPrice.Processors,
+		&i.OpenrailsPrice.Status,
+		&i.OpenrailsPrice.CreatedAt,
+		&i.OpenrailsPrice.UpdatedAt,
+		&i.OpenrailsPrice.TenantID,
+		&i.OpenrailsProduct.ID,
+		&i.OpenrailsProduct.Slug,
+		&i.OpenrailsProduct.DisplayName,
+		&i.OpenrailsProduct.Description,
+		&i.OpenrailsProduct.EntitlementsSpec,
+		&i.OpenrailsProduct.CreditsSpec,
+		&i.OpenrailsProduct.TierGroup,
+		&i.OpenrailsProduct.TierRank,
+		&i.OpenrailsProduct.Status,
+		&i.OpenrailsProduct.CreatedAt,
+		&i.OpenrailsProduct.UpdatedAt,
+		&i.OpenrailsProduct.TenantID,
 	)
 	return i, err
 }
@@ -221,36 +221,36 @@ LIMIT 1
 `
 
 type GetPriceWithProductByStripePriceIDRow struct {
-	BillingPrice   BillingPrice
-	BillingProduct BillingProduct
+	OpenrailsPrice   OpenrailsPrice
+	OpenrailsProduct OpenrailsProduct
 }
 
 func (q *Queries) GetPriceWithProductByStripePriceID(ctx context.Context, stripePriceID string) (GetPriceWithProductByStripePriceIDRow, error) {
 	row := q.db.QueryRow(ctx, getPriceWithProductByStripePriceID, stripePriceID)
 	var i GetPriceWithProductByStripePriceIDRow
 	err := row.Scan(
-		&i.BillingPrice.ID,
-		&i.BillingPrice.ProductID,
-		&i.BillingPrice.Amount,
-		&i.BillingPrice.Currency,
-		&i.BillingPrice.BillingCycleDays,
-		&i.BillingPrice.Processors,
-		&i.BillingPrice.Status,
-		&i.BillingPrice.CreatedAt,
-		&i.BillingPrice.UpdatedAt,
-		&i.BillingPrice.TenantID,
-		&i.BillingProduct.ID,
-		&i.BillingProduct.Slug,
-		&i.BillingProduct.DisplayName,
-		&i.BillingProduct.Description,
-		&i.BillingProduct.EntitlementsSpec,
-		&i.BillingProduct.CreditsSpec,
-		&i.BillingProduct.TierGroup,
-		&i.BillingProduct.TierRank,
-		&i.BillingProduct.Status,
-		&i.BillingProduct.CreatedAt,
-		&i.BillingProduct.UpdatedAt,
-		&i.BillingProduct.TenantID,
+		&i.OpenrailsPrice.ID,
+		&i.OpenrailsPrice.ProductID,
+		&i.OpenrailsPrice.Amount,
+		&i.OpenrailsPrice.Currency,
+		&i.OpenrailsPrice.BillingCycleDays,
+		&i.OpenrailsPrice.Processors,
+		&i.OpenrailsPrice.Status,
+		&i.OpenrailsPrice.CreatedAt,
+		&i.OpenrailsPrice.UpdatedAt,
+		&i.OpenrailsPrice.TenantID,
+		&i.OpenrailsProduct.ID,
+		&i.OpenrailsProduct.Slug,
+		&i.OpenrailsProduct.DisplayName,
+		&i.OpenrailsProduct.Description,
+		&i.OpenrailsProduct.EntitlementsSpec,
+		&i.OpenrailsProduct.CreditsSpec,
+		&i.OpenrailsProduct.TierGroup,
+		&i.OpenrailsProduct.TierRank,
+		&i.OpenrailsProduct.Status,
+		&i.OpenrailsProduct.CreatedAt,
+		&i.OpenrailsProduct.UpdatedAt,
+		&i.OpenrailsProduct.TenantID,
 	)
 	return i, err
 }
@@ -260,15 +260,15 @@ SELECT id, product_id, amount, currency, billing_cycle_days, processors, status,
 WHERE price.product_id = $1 AND price.status = 'active'
 `
 
-func (q *Queries) ListActivePricesByProduct(ctx context.Context, productID uuid.UUID) ([]BillingPrice, error) {
+func (q *Queries) ListActivePricesByProduct(ctx context.Context, productID uuid.UUID) ([]OpenrailsPrice, error) {
 	rows, err := q.db.Query(ctx, listActivePricesByProduct, productID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPrice
+	var items []OpenrailsPrice
 	for rows.Next() {
-		var i BillingPrice
+		var i OpenrailsPrice
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProductID,
@@ -297,15 +297,15 @@ WHERE price.product_id = $1 AND price.status = 'active'
 ORDER BY price.amount ASC
 `
 
-func (q *Queries) ListActivePricesByProductOrdered(ctx context.Context, productID uuid.UUID) ([]BillingPrice, error) {
+func (q *Queries) ListActivePricesByProductOrdered(ctx context.Context, productID uuid.UUID) ([]OpenrailsPrice, error) {
 	rows, err := q.db.Query(ctx, listActivePricesByProductOrdered, productID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPrice
+	var items []OpenrailsPrice
 	for rows.Next() {
-		var i BillingPrice
+		var i OpenrailsPrice
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProductID,
@@ -337,8 +337,8 @@ ORDER BY price.amount ASC
 `
 
 type ListAllActivePricesWithProductRow struct {
-	BillingPrice   BillingPrice
-	BillingProduct BillingProduct
+	OpenrailsPrice   OpenrailsPrice
+	OpenrailsProduct OpenrailsProduct
 }
 
 func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context) ([]ListAllActivePricesWithProductRow, error) {
@@ -351,28 +351,28 @@ func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context) ([]ListAll
 	for rows.Next() {
 		var i ListAllActivePricesWithProductRow
 		if err := rows.Scan(
-			&i.BillingPrice.ID,
-			&i.BillingPrice.ProductID,
-			&i.BillingPrice.Amount,
-			&i.BillingPrice.Currency,
-			&i.BillingPrice.BillingCycleDays,
-			&i.BillingPrice.Processors,
-			&i.BillingPrice.Status,
-			&i.BillingPrice.CreatedAt,
-			&i.BillingPrice.UpdatedAt,
-			&i.BillingPrice.TenantID,
-			&i.BillingProduct.ID,
-			&i.BillingProduct.Slug,
-			&i.BillingProduct.DisplayName,
-			&i.BillingProduct.Description,
-			&i.BillingProduct.EntitlementsSpec,
-			&i.BillingProduct.CreditsSpec,
-			&i.BillingProduct.TierGroup,
-			&i.BillingProduct.TierRank,
-			&i.BillingProduct.Status,
-			&i.BillingProduct.CreatedAt,
-			&i.BillingProduct.UpdatedAt,
-			&i.BillingProduct.TenantID,
+			&i.OpenrailsPrice.ID,
+			&i.OpenrailsPrice.ProductID,
+			&i.OpenrailsPrice.Amount,
+			&i.OpenrailsPrice.Currency,
+			&i.OpenrailsPrice.BillingCycleDays,
+			&i.OpenrailsPrice.Processors,
+			&i.OpenrailsPrice.Status,
+			&i.OpenrailsPrice.CreatedAt,
+			&i.OpenrailsPrice.UpdatedAt,
+			&i.OpenrailsPrice.TenantID,
+			&i.OpenrailsProduct.ID,
+			&i.OpenrailsProduct.Slug,
+			&i.OpenrailsProduct.DisplayName,
+			&i.OpenrailsProduct.Description,
+			&i.OpenrailsProduct.EntitlementsSpec,
+			&i.OpenrailsProduct.CreditsSpec,
+			&i.OpenrailsProduct.TierGroup,
+			&i.OpenrailsProduct.TierRank,
+			&i.OpenrailsProduct.Status,
+			&i.OpenrailsProduct.CreatedAt,
+			&i.OpenrailsProduct.UpdatedAt,
+			&i.OpenrailsProduct.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -392,8 +392,8 @@ ORDER BY price.amount ASC
 `
 
 type ListAllPricesWithProductRow struct {
-	BillingPrice   BillingPrice
-	BillingProduct BillingProduct
+	OpenrailsPrice   OpenrailsPrice
+	OpenrailsProduct OpenrailsProduct
 }
 
 func (q *Queries) ListAllPricesWithProduct(ctx context.Context) ([]ListAllPricesWithProductRow, error) {
@@ -406,28 +406,28 @@ func (q *Queries) ListAllPricesWithProduct(ctx context.Context) ([]ListAllPrices
 	for rows.Next() {
 		var i ListAllPricesWithProductRow
 		if err := rows.Scan(
-			&i.BillingPrice.ID,
-			&i.BillingPrice.ProductID,
-			&i.BillingPrice.Amount,
-			&i.BillingPrice.Currency,
-			&i.BillingPrice.BillingCycleDays,
-			&i.BillingPrice.Processors,
-			&i.BillingPrice.Status,
-			&i.BillingPrice.CreatedAt,
-			&i.BillingPrice.UpdatedAt,
-			&i.BillingPrice.TenantID,
-			&i.BillingProduct.ID,
-			&i.BillingProduct.Slug,
-			&i.BillingProduct.DisplayName,
-			&i.BillingProduct.Description,
-			&i.BillingProduct.EntitlementsSpec,
-			&i.BillingProduct.CreditsSpec,
-			&i.BillingProduct.TierGroup,
-			&i.BillingProduct.TierRank,
-			&i.BillingProduct.Status,
-			&i.BillingProduct.CreatedAt,
-			&i.BillingProduct.UpdatedAt,
-			&i.BillingProduct.TenantID,
+			&i.OpenrailsPrice.ID,
+			&i.OpenrailsPrice.ProductID,
+			&i.OpenrailsPrice.Amount,
+			&i.OpenrailsPrice.Currency,
+			&i.OpenrailsPrice.BillingCycleDays,
+			&i.OpenrailsPrice.Processors,
+			&i.OpenrailsPrice.Status,
+			&i.OpenrailsPrice.CreatedAt,
+			&i.OpenrailsPrice.UpdatedAt,
+			&i.OpenrailsPrice.TenantID,
+			&i.OpenrailsProduct.ID,
+			&i.OpenrailsProduct.Slug,
+			&i.OpenrailsProduct.DisplayName,
+			&i.OpenrailsProduct.Description,
+			&i.OpenrailsProduct.EntitlementsSpec,
+			&i.OpenrailsProduct.CreditsSpec,
+			&i.OpenrailsProduct.TierGroup,
+			&i.OpenrailsProduct.TierRank,
+			&i.OpenrailsProduct.Status,
+			&i.OpenrailsProduct.CreatedAt,
+			&i.OpenrailsProduct.UpdatedAt,
+			&i.OpenrailsProduct.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -443,15 +443,15 @@ const listPricesByIDs = `-- name: ListPricesByIDs :many
 SELECT id, product_id, amount, currency, billing_cycle_days, processors, status, created_at, updated_at, tenant_id FROM openrails.prices WHERE id = ANY($1::uuid[])
 `
 
-func (q *Queries) ListPricesByIDs(ctx context.Context, ids []uuid.UUID) ([]BillingPrice, error) {
+func (q *Queries) ListPricesByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsPrice, error) {
 	rows, err := q.db.Query(ctx, listPricesByIDs, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPrice
+	var items []OpenrailsPrice
 	for rows.Next() {
-		var i BillingPrice
+		var i OpenrailsPrice
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProductID,
@@ -502,8 +502,8 @@ type ListPricesFilteredParams struct {
 }
 
 type ListPricesFilteredRow struct {
-	BillingPrice   BillingPrice
-	BillingProduct BillingProduct
+	OpenrailsPrice   OpenrailsPrice
+	OpenrailsProduct OpenrailsProduct
 }
 
 func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFilteredParams) ([]ListPricesFilteredRow, error) {
@@ -526,28 +526,28 @@ func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFiltered
 	for rows.Next() {
 		var i ListPricesFilteredRow
 		if err := rows.Scan(
-			&i.BillingPrice.ID,
-			&i.BillingPrice.ProductID,
-			&i.BillingPrice.Amount,
-			&i.BillingPrice.Currency,
-			&i.BillingPrice.BillingCycleDays,
-			&i.BillingPrice.Processors,
-			&i.BillingPrice.Status,
-			&i.BillingPrice.CreatedAt,
-			&i.BillingPrice.UpdatedAt,
-			&i.BillingPrice.TenantID,
-			&i.BillingProduct.ID,
-			&i.BillingProduct.Slug,
-			&i.BillingProduct.DisplayName,
-			&i.BillingProduct.Description,
-			&i.BillingProduct.EntitlementsSpec,
-			&i.BillingProduct.CreditsSpec,
-			&i.BillingProduct.TierGroup,
-			&i.BillingProduct.TierRank,
-			&i.BillingProduct.Status,
-			&i.BillingProduct.CreatedAt,
-			&i.BillingProduct.UpdatedAt,
-			&i.BillingProduct.TenantID,
+			&i.OpenrailsPrice.ID,
+			&i.OpenrailsPrice.ProductID,
+			&i.OpenrailsPrice.Amount,
+			&i.OpenrailsPrice.Currency,
+			&i.OpenrailsPrice.BillingCycleDays,
+			&i.OpenrailsPrice.Processors,
+			&i.OpenrailsPrice.Status,
+			&i.OpenrailsPrice.CreatedAt,
+			&i.OpenrailsPrice.UpdatedAt,
+			&i.OpenrailsPrice.TenantID,
+			&i.OpenrailsProduct.ID,
+			&i.OpenrailsProduct.Slug,
+			&i.OpenrailsProduct.DisplayName,
+			&i.OpenrailsProduct.Description,
+			&i.OpenrailsProduct.EntitlementsSpec,
+			&i.OpenrailsProduct.CreditsSpec,
+			&i.OpenrailsProduct.TierGroup,
+			&i.OpenrailsProduct.TierRank,
+			&i.OpenrailsProduct.Status,
+			&i.OpenrailsProduct.CreatedAt,
+			&i.OpenrailsProduct.UpdatedAt,
+			&i.OpenrailsProduct.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -567,8 +567,8 @@ WHERE price.id = ANY($1::uuid[])
 `
 
 type ListPricesWithProductByIDsRow struct {
-	BillingPrice   BillingPrice
-	BillingProduct BillingProduct
+	OpenrailsPrice   OpenrailsPrice
+	OpenrailsProduct OpenrailsProduct
 }
 
 func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, ids []uuid.UUID) ([]ListPricesWithProductByIDsRow, error) {
@@ -581,28 +581,28 @@ func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, ids []uuid.UUI
 	for rows.Next() {
 		var i ListPricesWithProductByIDsRow
 		if err := rows.Scan(
-			&i.BillingPrice.ID,
-			&i.BillingPrice.ProductID,
-			&i.BillingPrice.Amount,
-			&i.BillingPrice.Currency,
-			&i.BillingPrice.BillingCycleDays,
-			&i.BillingPrice.Processors,
-			&i.BillingPrice.Status,
-			&i.BillingPrice.CreatedAt,
-			&i.BillingPrice.UpdatedAt,
-			&i.BillingPrice.TenantID,
-			&i.BillingProduct.ID,
-			&i.BillingProduct.Slug,
-			&i.BillingProduct.DisplayName,
-			&i.BillingProduct.Description,
-			&i.BillingProduct.EntitlementsSpec,
-			&i.BillingProduct.CreditsSpec,
-			&i.BillingProduct.TierGroup,
-			&i.BillingProduct.TierRank,
-			&i.BillingProduct.Status,
-			&i.BillingProduct.CreatedAt,
-			&i.BillingProduct.UpdatedAt,
-			&i.BillingProduct.TenantID,
+			&i.OpenrailsPrice.ID,
+			&i.OpenrailsPrice.ProductID,
+			&i.OpenrailsPrice.Amount,
+			&i.OpenrailsPrice.Currency,
+			&i.OpenrailsPrice.BillingCycleDays,
+			&i.OpenrailsPrice.Processors,
+			&i.OpenrailsPrice.Status,
+			&i.OpenrailsPrice.CreatedAt,
+			&i.OpenrailsPrice.UpdatedAt,
+			&i.OpenrailsPrice.TenantID,
+			&i.OpenrailsProduct.ID,
+			&i.OpenrailsProduct.Slug,
+			&i.OpenrailsProduct.DisplayName,
+			&i.OpenrailsProduct.Description,
+			&i.OpenrailsProduct.EntitlementsSpec,
+			&i.OpenrailsProduct.CreditsSpec,
+			&i.OpenrailsProduct.TierGroup,
+			&i.OpenrailsProduct.TierRank,
+			&i.OpenrailsProduct.Status,
+			&i.OpenrailsProduct.CreatedAt,
+			&i.OpenrailsProduct.UpdatedAt,
+			&i.OpenrailsProduct.TenantID,
 		); err != nil {
 			return nil, err
 		}

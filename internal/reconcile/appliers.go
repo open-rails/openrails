@@ -62,7 +62,7 @@ func (w *PGLocalWriter) CancelSubscriptionLocal(ctx context.Context, a CancelLoc
 
 func (w *PGLocalWriter) AdoptSubscriptionStatus(ctx context.Context, a AdoptStatusAction) (bool, error) {
 	n, err := w.DB.Gen(ctx).ReconcileAdoptSubscriptionStatus(ctx, gen.ReconcileAdoptSubscriptionStatusParams{
-		Status:         gen.BillingSubscriptionStatus(a.Status),
+		Status:         gen.OpenrailsSubscriptionStatus(a.Status),
 		PeriodStartsAt: a.PeriodStartsAt,
 		PeriodEndsAt:   a.PeriodEndsAt,
 		ID:             a.SubscriptionID,
@@ -89,7 +89,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
 		TenantID:        tid.UUID(),
 		PriceID:         a.PriceID,
-		Processor:       gen.BillingProcessorType(a.Processor),
+		Processor:       gen.OpenrailsProcessorType(a.Processor),
 		TransactionID:   a.TransactionID,
 		Amount:          a.AmountCents,
 		Currency:        a.Currency,
@@ -128,7 +128,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
 		TenantID:          tid.UUID(),
 		PriceID:           a.PriceID,
-		Processor:         gen.BillingProcessorType(a.Processor),
+		Processor:         gen.OpenrailsProcessorType(a.Processor),
 		TransactionID:     a.TransactionID,
 		Amount:            amount,
 		Currency:          a.Currency,
@@ -200,7 +200,7 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 	}
 	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
 		TenantID:                tid.UUID(),
-		Status:                  gen.BillingSubscriptionStatus(a.Status),
+		Status:                  gen.OpenrailsSubscriptionStatus(a.Status),
 		Processor:               a.Processor,
 		ProcessorSubscriptionID: a.ProcessorSubscriptionID,
 		UserEmail:               emailPtr,

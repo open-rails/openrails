@@ -50,9 +50,9 @@ type GetMoneyAccountSettingsParams struct {
 	Currency        string
 }
 
-func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccountSettingsParams) (BillingMoneyAccount, error) {
+func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccountSettingsParams) (OpenrailsMoneyAccount, error) {
 	row := q.db.QueryRow(ctx, getMoneyAccountSettings, arg.TenantID, arg.TenantSubjectID, arg.Currency)
-	var i BillingMoneyAccount
+	var i OpenrailsMoneyAccount
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -96,14 +96,14 @@ type GetMoneySpendLimitParams struct {
 	Currency        string
 }
 
-func (q *Queries) GetMoneySpendLimit(ctx context.Context, arg GetMoneySpendLimitParams) (BillingMoneySpendLimit, error) {
+func (q *Queries) GetMoneySpendLimit(ctx context.Context, arg GetMoneySpendLimitParams) (OpenrailsMoneySpendLimit, error) {
 	row := q.db.QueryRow(ctx, getMoneySpendLimit,
 		arg.TenantID,
 		arg.TenantSubjectID,
 		arg.Actor,
 		arg.Currency,
 	)
-	var i BillingMoneySpendLimit
+	var i OpenrailsMoneySpendLimit
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -314,9 +314,9 @@ type LockMoneyAccountSettingsParams struct {
 	Currency        string
 }
 
-func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAccountSettingsParams) (BillingMoneyAccount, error) {
+func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAccountSettingsParams) (OpenrailsMoneyAccount, error) {
 	row := q.db.QueryRow(ctx, lockMoneyAccountSettings, arg.TenantID, arg.TenantSubjectID, arg.Currency)
-	var i BillingMoneyAccount
+	var i OpenrailsMoneyAccount
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,

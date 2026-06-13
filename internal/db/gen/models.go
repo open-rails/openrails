@@ -13,142 +13,142 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type BillingProcessorType string
+type OpenrailsProcessorType string
 
 const (
-	BillingProcessorTypePaypal BillingProcessorType = "paypal"
-	BillingProcessorTypeSolana BillingProcessorType = "solana"
-	BillingProcessorTypeMobius BillingProcessorType = "mobius"
-	BillingProcessorTypeCcbill BillingProcessorType = "ccbill"
-	BillingProcessorTypeStripe BillingProcessorType = "stripe"
-	BillingProcessorTypeAdmin  BillingProcessorType = "admin"
-	BillingProcessorTypeNmi    BillingProcessorType = "nmi"
-	BillingProcessorTypeManual BillingProcessorType = "manual"
+	OpenrailsProcessorTypePaypal OpenrailsProcessorType = "paypal"
+	OpenrailsProcessorTypeSolana OpenrailsProcessorType = "solana"
+	OpenrailsProcessorTypeMobius OpenrailsProcessorType = "mobius"
+	OpenrailsProcessorTypeCcbill OpenrailsProcessorType = "ccbill"
+	OpenrailsProcessorTypeStripe OpenrailsProcessorType = "stripe"
+	OpenrailsProcessorTypeAdmin  OpenrailsProcessorType = "admin"
+	OpenrailsProcessorTypeNmi    OpenrailsProcessorType = "nmi"
+	OpenrailsProcessorTypeManual OpenrailsProcessorType = "manual"
 )
 
-func (e *BillingProcessorType) Scan(src interface{}) error {
+func (e *OpenrailsProcessorType) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = BillingProcessorType(s)
+		*e = OpenrailsProcessorType(s)
 	case string:
-		*e = BillingProcessorType(s)
+		*e = OpenrailsProcessorType(s)
 	default:
-		return fmt.Errorf("unsupported scan type for BillingProcessorType: %T", src)
+		return fmt.Errorf("unsupported scan type for OpenrailsProcessorType: %T", src)
 	}
 	return nil
 }
 
-type NullBillingProcessorType struct {
-	BillingProcessorType BillingProcessorType
-	Valid                  bool // Valid is true if BillingProcessorType is not NULL
+type NullOpenrailsProcessorType struct {
+	OpenrailsProcessorType OpenrailsProcessorType
+	Valid                  bool // Valid is true if OpenrailsProcessorType is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullBillingProcessorType) Scan(value interface{}) error {
+func (ns *NullOpenrailsProcessorType) Scan(value interface{}) error {
 	if value == nil {
-		ns.BillingProcessorType, ns.Valid = "", false
+		ns.OpenrailsProcessorType, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.BillingProcessorType.Scan(value)
+	return ns.OpenrailsProcessorType.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullBillingProcessorType) Value() (driver.Value, error) {
+func (ns NullOpenrailsProcessorType) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.BillingProcessorType), nil
+	return string(ns.OpenrailsProcessorType), nil
 }
 
-type BillingPurchaseStatus string
+type OpenrailsPurchaseStatus string
 
 const (
-	BillingPurchaseStatusPending   BillingPurchaseStatus = "pending"
-	BillingPurchaseStatusCompleted BillingPurchaseStatus = "completed"
-	BillingPurchaseStatusFailed    BillingPurchaseStatus = "failed"
-	BillingPurchaseStatusRefunded  BillingPurchaseStatus = "refunded"
+	OpenrailsPurchaseStatusPending   OpenrailsPurchaseStatus = "pending"
+	OpenrailsPurchaseStatusCompleted OpenrailsPurchaseStatus = "completed"
+	OpenrailsPurchaseStatusFailed    OpenrailsPurchaseStatus = "failed"
+	OpenrailsPurchaseStatusRefunded  OpenrailsPurchaseStatus = "refunded"
 )
 
-func (e *BillingPurchaseStatus) Scan(src interface{}) error {
+func (e *OpenrailsPurchaseStatus) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = BillingPurchaseStatus(s)
+		*e = OpenrailsPurchaseStatus(s)
 	case string:
-		*e = BillingPurchaseStatus(s)
+		*e = OpenrailsPurchaseStatus(s)
 	default:
-		return fmt.Errorf("unsupported scan type for BillingPurchaseStatus: %T", src)
+		return fmt.Errorf("unsupported scan type for OpenrailsPurchaseStatus: %T", src)
 	}
 	return nil
 }
 
-type NullBillingPurchaseStatus struct {
-	BillingPurchaseStatus BillingPurchaseStatus
-	Valid                   bool // Valid is true if BillingPurchaseStatus is not NULL
+type NullOpenrailsPurchaseStatus struct {
+	OpenrailsPurchaseStatus OpenrailsPurchaseStatus
+	Valid                   bool // Valid is true if OpenrailsPurchaseStatus is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullBillingPurchaseStatus) Scan(value interface{}) error {
+func (ns *NullOpenrailsPurchaseStatus) Scan(value interface{}) error {
 	if value == nil {
-		ns.BillingPurchaseStatus, ns.Valid = "", false
+		ns.OpenrailsPurchaseStatus, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.BillingPurchaseStatus.Scan(value)
+	return ns.OpenrailsPurchaseStatus.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullBillingPurchaseStatus) Value() (driver.Value, error) {
+func (ns NullOpenrailsPurchaseStatus) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.BillingPurchaseStatus), nil
+	return string(ns.OpenrailsPurchaseStatus), nil
 }
 
-type BillingSubscriptionStatus string
+type OpenrailsSubscriptionStatus string
 
 const (
-	BillingSubscriptionStatusPending   BillingSubscriptionStatus = "pending"
-	BillingSubscriptionStatusActive    BillingSubscriptionStatus = "active"
-	BillingSubscriptionStatusExpired   BillingSubscriptionStatus = "expired"
-	BillingSubscriptionStatusCancelled BillingSubscriptionStatus = "cancelled"
-	BillingSubscriptionStatusFailed    BillingSubscriptionStatus = "failed"
-	BillingSubscriptionStatusPastDue   BillingSubscriptionStatus = "past_due"
+	OpenrailsSubscriptionStatusPending   OpenrailsSubscriptionStatus = "pending"
+	OpenrailsSubscriptionStatusActive    OpenrailsSubscriptionStatus = "active"
+	OpenrailsSubscriptionStatusExpired   OpenrailsSubscriptionStatus = "expired"
+	OpenrailsSubscriptionStatusCancelled OpenrailsSubscriptionStatus = "cancelled"
+	OpenrailsSubscriptionStatusFailed    OpenrailsSubscriptionStatus = "failed"
+	OpenrailsSubscriptionStatusPastDue   OpenrailsSubscriptionStatus = "past_due"
 )
 
-func (e *BillingSubscriptionStatus) Scan(src interface{}) error {
+func (e *OpenrailsSubscriptionStatus) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = BillingSubscriptionStatus(s)
+		*e = OpenrailsSubscriptionStatus(s)
 	case string:
-		*e = BillingSubscriptionStatus(s)
+		*e = OpenrailsSubscriptionStatus(s)
 	default:
-		return fmt.Errorf("unsupported scan type for BillingSubscriptionStatus: %T", src)
+		return fmt.Errorf("unsupported scan type for OpenrailsSubscriptionStatus: %T", src)
 	}
 	return nil
 }
 
-type NullBillingSubscriptionStatus struct {
-	BillingSubscriptionStatus BillingSubscriptionStatus
-	Valid                       bool // Valid is true if BillingSubscriptionStatus is not NULL
+type NullOpenrailsSubscriptionStatus struct {
+	OpenrailsSubscriptionStatus OpenrailsSubscriptionStatus
+	Valid                       bool // Valid is true if OpenrailsSubscriptionStatus is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullBillingSubscriptionStatus) Scan(value interface{}) error {
+func (ns *NullOpenrailsSubscriptionStatus) Scan(value interface{}) error {
 	if value == nil {
-		ns.BillingSubscriptionStatus, ns.Valid = "", false
+		ns.OpenrailsSubscriptionStatus, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.BillingSubscriptionStatus.Scan(value)
+	return ns.OpenrailsSubscriptionStatus.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullBillingSubscriptionStatus) Value() (driver.Value, error) {
+func (ns NullOpenrailsSubscriptionStatus) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.BillingSubscriptionStatus), nil
+	return string(ns.OpenrailsSubscriptionStatus), nil
 }
 
 type Migration struct {
@@ -160,7 +160,7 @@ type Migration struct {
 }
 
 // Records admin-initiated product grants (comps, contest winners, manual payments, partnerships)
-type BillingAdminGrant struct {
+type OpenrailsAdminGrant struct {
 	ID uuid.UUID
 	// Price/Product being granted - entitlements derived from Product.EntitlementsSpec
 	PriceID *uuid.UUID
@@ -177,8 +177,8 @@ type BillingAdminGrant struct {
 	TenantSubjectID uuid.UUID
 }
 
-// Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor's passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).
-type BillingBudgetPolicy struct {
+// Hierarchical money-budget policies (#473): {scope, owner, windows[]} composed in one admit verdict over the one payer balance. owner=platform rows are writable only via the platform path (the subject cannot see/loosen them); owner=subject rows are the subject's own caps.
+type OpenrailsBudgetPolicy struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
@@ -193,7 +193,8 @@ type BillingBudgetPolicy struct {
 	UpdatedAt     time.Time
 }
 
-type BillingBudgetReservation struct {
+// Rolling-window money-budget reservations (issue #304). One row per in-flight/settled charge against an actor's passed-in windows; used/reserved/remaining are windowed SUM() over created_at. Idempotent on (tenant, tenant subject, actor, source, source_id).
+type OpenrailsBudgetReservation struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
@@ -209,7 +210,7 @@ type BillingBudgetReservation struct {
 }
 
 // Per-(tenant, tenant subject, actor, window_key) fixed-window anchor (#337). session: window_start rewritten on reopen; fixed: window_start derived from anchor. Locked FOR UPDATE in Reserve as the boundary-rollover serialization point.
-type BillingBudgetWindowState struct {
+type OpenrailsBudgetWindowState struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
@@ -226,7 +227,7 @@ type BillingBudgetWindowState struct {
 }
 
 // Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.
-type BillingCatalogDriftEvent struct {
+type OpenrailsCatalogDriftEvent struct {
 	ID                    uuid.UUID
 	Provider              string
 	Kind                  string
@@ -241,7 +242,7 @@ type BillingCatalogDriftEvent struct {
 	TenantID              uuid.UUID
 }
 
-type BillingCheckoutSession struct {
+type OpenrailsCheckoutSession struct {
 	ID              uuid.UUID
 	PriceID         uuid.UUID
 	Mode            string
@@ -264,7 +265,7 @@ type BillingCheckoutSession struct {
 	TenantSubjectID uuid.UUID
 }
 
-type BillingEntitlement struct {
+type OpenrailsEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string
 	StartAt      time.Time
@@ -283,7 +284,7 @@ type BillingEntitlement struct {
 }
 
 // Stripe-shaped first-class entitlement feature definitions (issue #245). lookup_key is the stable value carried in AuthKit JWT entitlements and host-app checks. The internal openrails.entitlements window ledger remains the source of truth for active access.
-type BillingEntitlementFeature struct {
+type OpenrailsEntitlementFeature struct {
 	ID        uuid.UUID
 	TenantID  uuid.UUID
 	LookupKey string
@@ -295,7 +296,7 @@ type BillingEntitlementFeature struct {
 }
 
 // Monthly itemized statements (issue #303). Line items rolled up from openrails.usage_events; money movements from the money ledger; snapshotted at finalize. Prepaid = receipt, arrears = statement the #301 sweep settles.
-type BillingInvoice struct {
+type OpenrailsInvoice struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
@@ -316,7 +317,7 @@ type BillingInvoice struct {
 }
 
 // Verified user wallet links for browser self-service billing identity. The wallet must come from trusted delegated-token claims, not request body input.
-type BillingLinkedWallet struct {
+type OpenrailsLinkedWallet struct {
 	ID                   uuid.UUID
 	TenantID             uuid.UUID
 	TenantSubjectID      uuid.UUID
@@ -331,7 +332,7 @@ type BillingLinkedWallet struct {
 }
 
 // Per-(tenant, tenant subject, currency) money spend policy + money-in config. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD). Tensorhub SETS these; OpenRails STORES + ENFORCES them.
-type BillingMoneyAccount struct {
+type OpenrailsMoneyAccount struct {
 	ID                        uuid.UUID
 	TenantID                  uuid.UUID
 	TenantSubjectID           uuid.UUID
@@ -363,7 +364,7 @@ type BillingMoneyAccount struct {
 }
 
 // amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
-type BillingMoneyBalance struct {
+type OpenrailsMoneyBalance struct {
 	ID              uuid.UUID
 	Balance         int64
 	HeldBalance     int64
@@ -376,7 +377,7 @@ type BillingMoneyBalance struct {
 }
 
 // amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
-type BillingMoneyBlock struct {
+type OpenrailsMoneyBlock struct {
 	ID                  uuid.UUID
 	OriginalAmount      int64
 	RemainingAmount     int64
@@ -390,7 +391,7 @@ type BillingMoneyBlock struct {
 }
 
 // Optional per-(actor, currency) money spend caps for a tenant subject. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD). actor is a caller-supplied opaque principal string.
-type BillingMoneySpendLimit struct {
+type OpenrailsMoneySpendLimit struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
@@ -405,7 +406,7 @@ type BillingMoneySpendLimit struct {
 }
 
 // amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
-type BillingMoneyTransaction struct {
+type OpenrailsMoneyTransaction struct {
 	ID uuid.UUID
 	// Caller-supplied principal string (e.g. a username slug) that caused this charge. Opaque to OpenRails; used as the per-actor spend-cap grouping key and as attribution.
 	Actor string
@@ -432,7 +433,7 @@ type BillingMoneyTransaction struct {
 }
 
 // Prepaid money windows: one bulk held reservation a host admits requests against locally; settled in cross-payer batches, remainder released at close/expiry. amounts are integers in the row currency's minor unit; default µ$ (1e-6 USD).
-type BillingMoneyWindow struct {
+type OpenrailsMoneyWindow struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
@@ -449,7 +450,7 @@ type BillingMoneyWindow struct {
 }
 
 // Queue for user notifications related to billing and subscriptions
-type BillingNotificationQueue struct {
+type OpenrailsNotificationQueue struct {
 	ID              uuid.UUID
 	EventType       string
 	Data            []byte
@@ -460,15 +461,15 @@ type BillingNotificationQueue struct {
 }
 
 // Records of all payment transactions (formerly purchases table)
-type BillingPayment struct {
+type OpenrailsPayment struct {
 	ID            uuid.UUID
 	PriceID       uuid.UUID
-	Processor     BillingProcessorType
+	Processor     OpenrailsProcessorType
 	TransactionID string
 	Amount        int64
 	ListAmount    int64
 	Currency      string
-	Status        BillingPurchaseStatus
+	Status        OpenrailsPurchaseStatus
 	// Links a payment to the subscription that generated it (nullable for one-off payments)
 	SubscriptionID           *uuid.UUID
 	RefundedPaymentID        *uuid.UUID
@@ -487,7 +488,7 @@ type BillingPayment struct {
 }
 
 // Tenant-scoped blocklist of known-bad payment identifiers (issue #300). tenant_subject_id NULL = tenant-wide block; set = tenant-subject scoped. Checkout/admission deny wiring is a separate slice.
-type BillingPaymentBlocklist struct {
+type OpenrailsPaymentBlocklist struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	TenantSubjectID *uuid.UUID
@@ -498,7 +499,7 @@ type BillingPaymentBlocklist struct {
 }
 
 // Generalized payment method table supporting multiple processors.
-type BillingPaymentMethod struct {
+type OpenrailsPaymentMethod struct {
 	ID uuid.UUID
 	// Payment processor type: nmi, ccbill, stripe, etc.
 	Processor string
@@ -518,7 +519,7 @@ type BillingPaymentMethod struct {
 }
 
 // Append-only cross-tenant platform superadmin audit log (issue #226). Records actor, target tenant, action, reason, and before/after state. CROSS-TENANT control-plane state: NOT purged by tenant delete.
-type BillingPlatformAudit struct {
+type OpenrailsPlatformAudit struct {
 	ID             uuid.UUID
 	ActorUserID    string
 	ActorTenant    *string
@@ -532,7 +533,7 @@ type BillingPlatformAudit struct {
 }
 
 // Time-boxed break-glass elevation grants (issue #226). Each grant carries a written justification and an expiry, and is mirrored into platform_audit. CROSS-TENANT control-plane state.
-type BillingPlatformBreakGlass struct {
+type OpenrailsPlatformBreakGlass struct {
 	ID             uuid.UUID
 	ActorUserID    string
 	TargetTenantID *uuid.UUID
@@ -543,7 +544,7 @@ type BillingPlatformBreakGlass struct {
 }
 
 // Pricing tiers for products with processor-specific identifiers
-type BillingPrice struct {
+type OpenrailsPrice struct {
 	ID               uuid.UUID
 	ProductID        uuid.UUID
 	Amount           int64
@@ -557,7 +558,7 @@ type BillingPrice struct {
 }
 
 // Cached NMI test-mode probe verdicts (#348): one row per (provider, sha256(security_key)). Fresh 'live' refuses boot from cache, fresh 'simulated' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.
-type BillingProbeVerdict struct {
+type OpenrailsProbeVerdict struct {
 	Provider string
 	// sha256 hex of the provider security key. A rotated key hashes differently, so the cache never answers for a credential it has not seen.
 	KeyHash   string
@@ -565,7 +566,7 @@ type BillingProbeVerdict struct {
 	CheckedAt time.Time
 }
 
-type BillingProcessorCustomer struct {
+type OpenrailsProcessorCustomer struct {
 	ID              uuid.UUID
 	Processor       string
 	CustomerID      string
@@ -576,7 +577,7 @@ type BillingProcessorCustomer struct {
 }
 
 // Product definitions that can be purchased or subscribed to
-type BillingProduct struct {
+type OpenrailsProduct struct {
 	ID               uuid.UUID
 	Slug             string
 	DisplayName      string
@@ -595,7 +596,7 @@ type BillingProduct struct {
 }
 
 // Durable, application-facing product ownership/access (issue #250). Distinct from feature entitlements: answers "does this user own product X?" / "list products this user can access". A successful one-time purchase creates a grant; refunds/chargebacks/admin revocation revoke it.
-type BillingProductAccessGrant struct {
+type OpenrailsProductAccessGrant struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	ProductID       uuid.UUID
@@ -613,7 +614,7 @@ type BillingProductAccessGrant struct {
 }
 
 // Stripe-shaped product_feature attachments (issue #245): which entitlement features a product grants when purchased. duration_days null = indefinite.
-type BillingProductEntitlementFeature struct {
+type OpenrailsProductEntitlementFeature struct {
 	ID                   uuid.UUID
 	TenantID             uuid.UUID
 	ProductID            uuid.UUID
@@ -625,7 +626,7 @@ type BillingProductEntitlementFeature struct {
 }
 
 // Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
-type BillingProviderIntent struct {
+type OpenrailsProviderIntent struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
 	// Provider/processor key the mutation targets (e.g. 'mobius' for an NMI-backed processor, 'stripe').
@@ -660,7 +661,7 @@ type BillingProviderIntent struct {
 }
 
 // Durable local-vs-processor drift ledger (#107 PS-1..PS-9). Stable identity per (tenant, provider, finding_type, subject_key): re-runs update, disappearance auto-resolves as auto_vanished. requires_admin = true rows are the admin action queue.
-type BillingReconciliationFinding struct {
+type OpenrailsReconciliationFinding struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID
 	Provider    string
@@ -689,7 +690,7 @@ type BillingReconciliationFinding struct {
 }
 
 // One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment processors. Summary jsonb carries per-provider counts and the dunning-forensics report.
-type BillingReconciliationRun struct {
+type OpenrailsReconciliationRun struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID
 	Mode        string
@@ -703,7 +704,7 @@ type BillingReconciliationRun struct {
 	Error       *string
 }
 
-type BillingSolanaSubscription struct {
+type OpenrailsSolanaSubscription struct {
 	ID                       uuid.UUID
 	TenantID                 uuid.UUID
 	SubscriptionID           uuid.UUID
@@ -723,12 +724,12 @@ type BillingSolanaSubscription struct {
 }
 
 // Core subscription records tracking user billing relationships
-type BillingSubscription struct {
+type OpenrailsSubscription struct {
 	ID      uuid.UUID
 	PriceID *uuid.UUID
 	// Denormalized product ID for efficient user+product lookups without joining prices
 	ProductID               uuid.UUID
-	Status                  BillingSubscriptionStatus
+	Status                  OpenrailsSubscriptionStatus
 	Processor               string
 	ProcessorSubscriptionID string
 	UserEmail               *string
@@ -759,7 +760,7 @@ type BillingSubscription struct {
 }
 
 // Tenant / billing-namespace directory. GLOBAL (control-plane) table, not tenant-scoped. Tenants are created explicitly; there is no default tenant.
-type BillingTenant struct {
+type OpenrailsTenant struct {
 	ID uuid.UUID
 	// Stable tenant slug used in tenant-scoped routes and resolution.
 	Slug   string
@@ -784,7 +785,7 @@ type BillingTenant struct {
 }
 
 // Append-only audit log of per-tenant credential put/rotate/delete/test events (issue #225).
-type BillingTenantCredentialAudit struct {
+type OpenrailsTenantCredentialAudit struct {
 	ID        uuid.UUID
 	TenantID  uuid.UUID
 	Name      string
@@ -795,7 +796,7 @@ type BillingTenantCredentialAudit struct {
 }
 
 // Wrapped per-tenant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = tenant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. GLOBAL control-plane table.
-type BillingTenantDek struct {
+type OpenrailsTenantDek struct {
 	TenantID uuid.UUID
 	// AES-256-GCM(master_key, tenant_dek): nonce(12) || ciphertext(32) || tag(16).
 	WrappedDek []byte
@@ -805,7 +806,7 @@ type BillingTenantDek struct {
 }
 
 // Federated delegated-token issuer registry (issue #259). Maps a globally-unique token issuer (iss) to the OpenRails tenant it speaks for and the JWKS URL its public keys are fetched from. MANY issuers -> ONE tenant (multiple host apps = distinct keys, one tenant, shared users). GLOBAL control-plane table, not tenant-scoped.
-type BillingTenantDelegatedIssuer struct {
+type OpenrailsTenantDelegatedIssuer struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
 	// Token iss value. GLOBALLY UNIQUE -> maps to exactly one tenant (no cross-tenant forgery).
@@ -821,7 +822,7 @@ type BillingTenantDelegatedIssuer struct {
 }
 
 // Tenant logical-export bookkeeping (issue #225). Tenant deletion is gated on a completed export row (export-before-delete).
-type BillingTenantExport struct {
+type OpenrailsTenantExport struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID
 	Status      string
@@ -832,7 +833,7 @@ type BillingTenantExport struct {
 }
 
 // DB-backed per-tenant secret store (issue #225). Namespaced by (tenant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. GLOBAL control-plane table.
-type BillingTenantSecret struct {
+type OpenrailsTenantSecret struct {
 	TenantID  uuid.UUID
 	Name      string
 	Value     string
@@ -842,7 +843,7 @@ type BillingTenantSecret struct {
 }
 
 // OpenRails payable identity. One row per OIDC-style subject under an OpenRails tenant; billing tables reference this row.
-type BillingTenantSubject struct {
+type OpenrailsTenantSubject struct {
 	ID       uuid.UUID
 	TenantID uuid.UUID
 	// OIDC issuer that asserted the subject.
@@ -854,7 +855,7 @@ type BillingTenantSubject struct {
 }
 
 // Per-tenant-subject tier throughput policies for the admission check (issue #298). MONEY caps stay in money_accounts; rolling money budgets are #304.
-type BillingTierPolicy struct {
+type OpenrailsTierPolicy struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
@@ -866,7 +867,7 @@ type BillingTierPolicy struct {
 }
 
 // Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.
-type BillingUsageEvent struct {
+type OpenrailsUsageEvent struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
 	TenantSubjectID uuid.UUID
@@ -886,7 +887,7 @@ type BillingUsageEvent struct {
 }
 
 // External Robinhood/Coinbase handoffs that fund USDC into a user self-custody wallet before normal OpenRails wallet checkout. Return from provider is not proof of funding.
-type BillingUsdcFundingSession struct {
+type OpenrailsUsdcFundingSession struct {
 	ID                uuid.UUID
 	TenantID          uuid.UUID
 	TenantSubjectID   uuid.UUID

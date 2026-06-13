@@ -22,7 +22,7 @@ type LinkedWalletRepo struct {
 
 func NewLinkedWalletRepo(d *db.DB) *LinkedWalletRepo { return &LinkedWalletRepo{db: d} }
 
-func linkedWalletFromGen(w gen.BillingLinkedWallet) (*models.LinkedWallet, error) {
+func linkedWalletFromGen(w gen.OpenrailsLinkedWallet) (*models.LinkedWallet, error) {
 	m := &models.LinkedWallet{
 		ID:                   w.ID,
 		TenantID:             w.TenantID,

@@ -1,8 +1,9 @@
 package nmi
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
-	"math/rand/v2"
 	"net/url"
 	"strings"
 
@@ -43,9 +44,13 @@ const (
 )
 
 // probeAmount returns a randomized auth amount in [$1.01, $1.99] so repeated
-// probes never trip duplicate-transaction detection.
+// probes never trip duplicate-transaction detection. crypto/rand is used (over
+// math/rand) only to satisfy gosec G404 — randomness here is for uniqueness,
+// not security; a read failure just degrades to the lower bound.
 func probeAmount() string {
-	return fmt.Sprintf("1.%02d", 1+rand.IntN(99))
+	var b [1]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("1.%02d", 1+int(b[0])%99)
 }
 
 // TestModeProbeResult classifies what the probe learned about the account.
@@ -87,6 +92,14 @@ func (c *NMIClient) ProbeTestMode() (TestModeProbeResult, error) {
 	return ProbeSimulated, nil
 }
 
+// probeOrderIDSuffix returns 8 hex chars of randomness for the per-probe
+// order_id. Same crypto/rand-for-gosec note as probeAmount.
+func probeOrderIDSuffix() string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%08x", binary.BigEndian.Uint32(b[:]))
+}
+
 // probeAuth submits an authorization-only request with the documented test
 // card. Returns the approval verdict, the transaction id (for voiding), the
 // gateway error text when the gateway rejected the REQUEST itself
@@ -98,7 +111,7 @@ func (c *NMIClient) probeAuth(amount string) (approved bool, txnID string, gatew
 		"ccnumber":     {probeTestCard},
 		"ccexp":        {probeTestExpiry},
 		"amount":       {amount},
-		"order_id":     {probeOrderIDPrefix + fmt.Sprintf("%08x", rand.Uint32())},
+		"order_id":     {probeOrderIDPrefix + probeOrderIDSuffix()},
 	}
 	response, err := c.sendDirectRequest(values)
 	if err != nil {

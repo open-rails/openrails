@@ -152,9 +152,9 @@ const getNotificationByID = `-- name: GetNotificationByID :one
 SELECT id, event_type, data, seen, created_at, tenant_id, tenant_subject_id FROM openrails.notification_queue WHERE id = $1
 `
 
-func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (BillingNotificationQueue, error) {
+func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (OpenrailsNotificationQueue, error) {
 	row := q.db.QueryRow(ctx, getNotificationByID, id)
-	var i BillingNotificationQueue
+	var i OpenrailsNotificationQueue
 	err := row.Scan(
 		&i.ID,
 		&i.EventType,
@@ -173,15 +173,15 @@ WHERE nq.event_type = $1
 ORDER BY nq.created_at DESC
 `
 
-func (q *Queries) ListNotificationsByEventType(ctx context.Context, eventType string) ([]BillingNotificationQueue, error) {
+func (q *Queries) ListNotificationsByEventType(ctx context.Context, eventType string) ([]OpenrailsNotificationQueue, error) {
 	rows, err := q.db.Query(ctx, listNotificationsByEventType, eventType)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingNotificationQueue
+	var items []OpenrailsNotificationQueue
 	for rows.Next() {
-		var i BillingNotificationQueue
+		var i OpenrailsNotificationQueue
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -207,15 +207,15 @@ WHERE nq.tenant_subject_id = $1
 ORDER BY nq.created_at DESC
 `
 
-func (q *Queries) ListNotificationsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]BillingNotificationQueue, error) {
+func (q *Queries) ListNotificationsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]OpenrailsNotificationQueue, error) {
 	rows, err := q.db.Query(ctx, listNotificationsByTenantSubject, tenantSubjectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingNotificationQueue
+	var items []OpenrailsNotificationQueue
 	for rows.Next() {
-		var i BillingNotificationQueue
+		var i OpenrailsNotificationQueue
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -252,7 +252,7 @@ type ListNotificationsFilteredParams struct {
 	PageLimit       int32
 }
 
-func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotificationsFilteredParams) ([]BillingNotificationQueue, error) {
+func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotificationsFilteredParams) ([]OpenrailsNotificationQueue, error) {
 	rows, err := q.db.Query(ctx, listNotificationsFiltered,
 		arg.TenantSubjectID,
 		arg.EventType,
@@ -264,9 +264,9 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingNotificationQueue
+	var items []OpenrailsNotificationQueue
 	for rows.Next() {
-		var i BillingNotificationQueue
+		var i OpenrailsNotificationQueue
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -302,7 +302,7 @@ type ListPendingDigestForTenantSubjectParams struct {
 	PageLimit       int32
 }
 
-func (q *Queries) ListPendingDigestForTenantSubject(ctx context.Context, arg ListPendingDigestForTenantSubjectParams) ([]BillingNotificationQueue, error) {
+func (q *Queries) ListPendingDigestForTenantSubject(ctx context.Context, arg ListPendingDigestForTenantSubjectParams) ([]OpenrailsNotificationQueue, error) {
 	rows, err := q.db.Query(ctx, listPendingDigestForTenantSubject,
 		arg.TenantSubjectID,
 		arg.EventType,
@@ -313,9 +313,9 @@ func (q *Queries) ListPendingDigestForTenantSubject(ctx context.Context, arg Lis
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingNotificationQueue
+	var items []OpenrailsNotificationQueue
 	for rows.Next() {
-		var i BillingNotificationQueue
+		var i OpenrailsNotificationQueue
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -353,7 +353,7 @@ type ListRepairAlertsParams struct {
 	Seen            *bool
 }
 
-func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsParams) ([]BillingNotificationQueue, error) {
+func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsParams) ([]OpenrailsNotificationQueue, error) {
 	rows, err := q.db.Query(ctx, listRepairAlerts,
 		arg.TenantSubjectID,
 		arg.EventType,
@@ -365,9 +365,9 @@ func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsPara
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingNotificationQueue
+	var items []OpenrailsNotificationQueue
 	for rows.Next() {
-		var i BillingNotificationQueue
+		var i OpenrailsNotificationQueue
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -424,15 +424,15 @@ WHERE nq.tenant_subject_id = $1 AND nq.seen = false
 ORDER BY nq.created_at DESC
 `
 
-func (q *Queries) ListUnseenNotificationsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]BillingNotificationQueue, error) {
+func (q *Queries) ListUnseenNotificationsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]OpenrailsNotificationQueue, error) {
 	rows, err := q.db.Query(ctx, listUnseenNotificationsByTenantSubject, tenantSubjectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingNotificationQueue
+	var items []OpenrailsNotificationQueue
 	for rows.Next() {
-		var i BillingNotificationQueue
+		var i OpenrailsNotificationQueue
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,

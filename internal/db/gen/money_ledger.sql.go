@@ -134,9 +134,9 @@ type GetMoneyBalanceParams struct {
 // The money ledger (modules/money): balances, FIFO blocks, transactions.
 // amounts are integers in the row currency's minor unit (default µ$ = 1e-6 USD).
 // currency is a system code (USD/USDC/EUR/JPY/SOL); the Go registry is authority.
-func (q *Queries) GetMoneyBalance(ctx context.Context, arg GetMoneyBalanceParams) (BillingMoneyBalance, error) {
+func (q *Queries) GetMoneyBalance(ctx context.Context, arg GetMoneyBalanceParams) (OpenrailsMoneyBalance, error) {
 	row := q.db.QueryRow(ctx, getMoneyBalance, arg.TenantID, arg.TenantSubjectID, arg.Currency)
-	var i BillingMoneyBalance
+	var i OpenrailsMoneyBalance
 	err := row.Scan(
 		&i.ID,
 		&i.Balance,
@@ -168,7 +168,7 @@ type GetMoneyTransactionByCoordsParams struct {
 
 // (tenant, payer, currency, transaction_type, source, source_id) is the
 // idempotency key for deposits / withdrawals / holds.
-func (q *Queries) GetMoneyTransactionByCoords(ctx context.Context, arg GetMoneyTransactionByCoordsParams) (BillingMoneyTransaction, error) {
+func (q *Queries) GetMoneyTransactionByCoords(ctx context.Context, arg GetMoneyTransactionByCoordsParams) (OpenrailsMoneyTransaction, error) {
 	row := q.db.QueryRow(ctx, getMoneyTransactionByCoords,
 		arg.TenantID,
 		arg.TenantSubjectID,
@@ -177,7 +177,7 @@ func (q *Queries) GetMoneyTransactionByCoords(ctx context.Context, arg GetMoneyT
 		arg.SourceID,
 		arg.Currency,
 	)
-	var i BillingMoneyTransaction
+	var i OpenrailsMoneyTransaction
 	err := row.Scan(
 		&i.ID,
 		&i.Actor,
@@ -206,9 +206,9 @@ const getMoneyTransactionForUpdate = `-- name: GetMoneyTransactionForUpdate :one
 SELECT id, actor, resource, metadata, amount, balance_after, transaction_type, source, source_id, expires_at, description, status, authorized_amount, captured_amount, created_at, updated_at, tenant_id, tenant_subject_id, currency FROM openrails.money_transactions WHERE id = $1 FOR UPDATE
 `
 
-func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID) (BillingMoneyTransaction, error) {
+func (q *Queries) GetMoneyTransactionForUpdate(ctx context.Context, id uuid.UUID) (OpenrailsMoneyTransaction, error) {
 	row := q.db.QueryRow(ctx, getMoneyTransactionForUpdate, id)
-	var i BillingMoneyTransaction
+	var i OpenrailsMoneyTransaction
 	err := row.Scan(
 		&i.ID,
 		&i.Actor,
@@ -237,9 +237,9 @@ const getMoneyWindow = `-- name: GetMoneyWindow :one
 SELECT id, tenant_id, tenant_subject_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows WHERE id = $1 LIMIT 1
 `
 
-func (q *Queries) GetMoneyWindow(ctx context.Context, id uuid.UUID) (BillingMoneyWindow, error) {
+func (q *Queries) GetMoneyWindow(ctx context.Context, id uuid.UUID) (OpenrailsMoneyWindow, error) {
 	row := q.db.QueryRow(ctx, getMoneyWindow, id)
-	var i BillingMoneyWindow
+	var i OpenrailsMoneyWindow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -259,9 +259,9 @@ const getMoneyWindowForUpdate = `-- name: GetMoneyWindowForUpdate :one
 SELECT id, tenant_id, tenant_subject_id, held_amount, settled_amount, status, expires_at, created_at, updated_at, currency FROM openrails.money_windows WHERE id = $1 FOR UPDATE
 `
 
-func (q *Queries) GetMoneyWindowForUpdate(ctx context.Context, id uuid.UUID) (BillingMoneyWindow, error) {
+func (q *Queries) GetMoneyWindowForUpdate(ctx context.Context, id uuid.UUID) (OpenrailsMoneyWindow, error) {
 	row := q.db.QueryRow(ctx, getMoneyWindowForUpdate, id)
-	var i BillingMoneyWindow
+	var i OpenrailsMoneyWindow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -505,15 +505,15 @@ type ListExpiredActiveMoneyHoldsForUpdateParams struct {
 }
 
 // Hold expiry sweep (cross-tenant, SKIP LOCKED so concurrent sweeps don't contend).
-func (q *Queries) ListExpiredActiveMoneyHoldsForUpdate(ctx context.Context, arg ListExpiredActiveMoneyHoldsForUpdateParams) ([]BillingMoneyTransaction, error) {
+func (q *Queries) ListExpiredActiveMoneyHoldsForUpdate(ctx context.Context, arg ListExpiredActiveMoneyHoldsForUpdateParams) ([]OpenrailsMoneyTransaction, error) {
 	rows, err := q.db.Query(ctx, listExpiredActiveMoneyHoldsForUpdate, arg.Now, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingMoneyTransaction
+	var items []OpenrailsMoneyTransaction
 	for rows.Next() {
-		var i BillingMoneyTransaction
+		var i OpenrailsMoneyTransaction
 		if err := rows.Scan(
 			&i.ID,
 			&i.Actor,
@@ -560,15 +560,15 @@ type ListExpiredMoneyBlocksForUpdateParams struct {
 }
 
 // Money block expiry sweep (cross-tenant, SKIP LOCKED).
-func (q *Queries) ListExpiredMoneyBlocksForUpdate(ctx context.Context, arg ListExpiredMoneyBlocksForUpdateParams) ([]BillingMoneyBlock, error) {
+func (q *Queries) ListExpiredMoneyBlocksForUpdate(ctx context.Context, arg ListExpiredMoneyBlocksForUpdateParams) ([]OpenrailsMoneyBlock, error) {
 	rows, err := q.db.Query(ctx, listExpiredMoneyBlocksForUpdate, arg.Now, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingMoneyBlock
+	var items []OpenrailsMoneyBlock
 	for rows.Next() {
-		var i BillingMoneyBlock
+		var i OpenrailsMoneyBlock
 		if err := rows.Scan(
 			&i.ID,
 			&i.OriginalAmount,
@@ -605,15 +605,15 @@ type ListExpiredOpenMoneyWindowsForUpdateParams struct {
 
 // Cross-tenant expiry sweep (the window analogue of hold expiry): open windows
 // past expiry, oldest first, SKIP LOCKED so concurrent sweeps don't contend.
-func (q *Queries) ListExpiredOpenMoneyWindowsForUpdate(ctx context.Context, arg ListExpiredOpenMoneyWindowsForUpdateParams) ([]BillingMoneyWindow, error) {
+func (q *Queries) ListExpiredOpenMoneyWindowsForUpdate(ctx context.Context, arg ListExpiredOpenMoneyWindowsForUpdateParams) ([]OpenrailsMoneyWindow, error) {
 	rows, err := q.db.Query(ctx, listExpiredOpenMoneyWindowsForUpdate, arg.Now, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingMoneyWindow
+	var items []OpenrailsMoneyWindow
 	for rows.Next() {
-		var i BillingMoneyWindow
+		var i OpenrailsMoneyWindow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -747,7 +747,7 @@ type ListMoneyTransactionsByPayerParams struct {
 	Currency        string
 }
 
-func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMoneyTransactionsByPayerParams) ([]BillingMoneyTransaction, error) {
+func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMoneyTransactionsByPayerParams) ([]OpenrailsMoneyTransaction, error) {
 	rows, err := q.db.Query(ctx, listMoneyTransactionsByPayer,
 		arg.TenantID,
 		arg.TenantSubjectID,
@@ -759,9 +759,9 @@ func (q *Queries) ListMoneyTransactionsByPayer(ctx context.Context, arg ListMone
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingMoneyTransaction
+	var items []OpenrailsMoneyTransaction
 	for rows.Next() {
-		var i BillingMoneyTransaction
+		var i OpenrailsMoneyTransaction
 		if err := rows.Scan(
 			&i.ID,
 			&i.Actor,
@@ -805,15 +805,15 @@ type ListOrphanedExpiredMoneyHoldsParams struct {
 	Now      time.Time
 }
 
-func (q *Queries) ListOrphanedExpiredMoneyHolds(ctx context.Context, arg ListOrphanedExpiredMoneyHoldsParams) ([]BillingMoneyTransaction, error) {
+func (q *Queries) ListOrphanedExpiredMoneyHolds(ctx context.Context, arg ListOrphanedExpiredMoneyHoldsParams) ([]OpenrailsMoneyTransaction, error) {
 	rows, err := q.db.Query(ctx, listOrphanedExpiredMoneyHolds, arg.TenantID, arg.Now)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingMoneyTransaction
+	var items []OpenrailsMoneyTransaction
 	for rows.Next() {
-		var i BillingMoneyTransaction
+		var i OpenrailsMoneyTransaction
 		if err := rows.Scan(
 			&i.ID,
 			&i.Actor,
@@ -862,7 +862,7 @@ type ListSpendableMoneyBlocksForUpdateParams struct {
 }
 
 // FIFO draw order: soonest-expiring first, then oldest.
-func (q *Queries) ListSpendableMoneyBlocksForUpdate(ctx context.Context, arg ListSpendableMoneyBlocksForUpdateParams) ([]BillingMoneyBlock, error) {
+func (q *Queries) ListSpendableMoneyBlocksForUpdate(ctx context.Context, arg ListSpendableMoneyBlocksForUpdateParams) ([]OpenrailsMoneyBlock, error) {
 	rows, err := q.db.Query(ctx, listSpendableMoneyBlocksForUpdate,
 		arg.TenantID,
 		arg.TenantSubjectID,
@@ -873,9 +873,9 @@ func (q *Queries) ListSpendableMoneyBlocksForUpdate(ctx context.Context, arg Lis
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingMoneyBlock
+	var items []OpenrailsMoneyBlock
 	for rows.Next() {
-		var i BillingMoneyBlock
+		var i OpenrailsMoneyBlock
 		if err := rows.Scan(
 			&i.ID,
 			&i.OriginalAmount,
@@ -909,9 +909,9 @@ type LockMoneyBalanceParams struct {
 	Currency        string
 }
 
-func (q *Queries) LockMoneyBalance(ctx context.Context, arg LockMoneyBalanceParams) (BillingMoneyBalance, error) {
+func (q *Queries) LockMoneyBalance(ctx context.Context, arg LockMoneyBalanceParams) (OpenrailsMoneyBalance, error) {
 	row := q.db.QueryRow(ctx, lockMoneyBalance, arg.TenantID, arg.TenantSubjectID, arg.Currency)
-	var i BillingMoneyBalance
+	var i OpenrailsMoneyBalance
 	err := row.Scan(
 		&i.ID,
 		&i.Balance,

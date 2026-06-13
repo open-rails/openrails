@@ -460,7 +460,7 @@ func (w *DunningWorker) applyDeclinedRebill(
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	processor models.Processor,
-	intent gen.BillingProviderIntent,
+	intent gen.OpenrailsProviderIntent,
 ) dunningOutcome {
 	reason := normalize.FromPtr(intent.LastFailureReason)
 	if reason == "" {
@@ -501,7 +501,7 @@ func (w *DunningWorker) applyDeclinedRebill(
 
 // manualRebillEvidenceString reads one string field off the intent's
 // result_evidence.
-func manualRebillEvidenceString(intent gen.BillingProviderIntent, key string) string {
+func manualRebillEvidenceString(intent gen.OpenrailsProviderIntent, key string) string {
 	if len(intent.ResultEvidence) == 0 {
 		return ""
 	}
@@ -515,7 +515,7 @@ func manualRebillEvidenceString(intent gen.BillingProviderIntent, key string) st
 
 // manualRebillEvidenceResponseCode reads the gateway decline code off the
 // intent's result_evidence (0 when absent — classified soft).
-func manualRebillEvidenceResponseCode(intent gen.BillingProviderIntent) int {
+func manualRebillEvidenceResponseCode(intent gen.OpenrailsProviderIntent) int {
 	if len(intent.ResultEvidence) == 0 {
 		return 0
 	}

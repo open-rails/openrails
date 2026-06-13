@@ -123,9 +123,9 @@ type GetEntitlementFeatureByIDParams struct {
 	TenantID uuid.UUID
 }
 
-func (q *Queries) GetEntitlementFeatureByID(ctx context.Context, arg GetEntitlementFeatureByIDParams) (BillingEntitlementFeature, error) {
+func (q *Queries) GetEntitlementFeatureByID(ctx context.Context, arg GetEntitlementFeatureByIDParams) (OpenrailsEntitlementFeature, error) {
 	row := q.db.QueryRow(ctx, getEntitlementFeatureByID, arg.ID, arg.TenantID)
-	var i BillingEntitlementFeature
+	var i OpenrailsEntitlementFeature
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -149,9 +149,9 @@ type GetEntitlementFeatureByLookupKeyParams struct {
 	TenantID  uuid.UUID
 }
 
-func (q *Queries) GetEntitlementFeatureByLookupKey(ctx context.Context, arg GetEntitlementFeatureByLookupKeyParams) (BillingEntitlementFeature, error) {
+func (q *Queries) GetEntitlementFeatureByLookupKey(ctx context.Context, arg GetEntitlementFeatureByLookupKeyParams) (OpenrailsEntitlementFeature, error) {
 	row := q.db.QueryRow(ctx, getEntitlementFeatureByLookupKey, arg.LookupKey, arg.TenantID)
-	var i BillingEntitlementFeature
+	var i OpenrailsEntitlementFeature
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -175,9 +175,9 @@ type GetProductEntitlementFeatureByIDParams struct {
 	TenantID uuid.UUID
 }
 
-func (q *Queries) GetProductEntitlementFeatureByID(ctx context.Context, arg GetProductEntitlementFeatureByIDParams) (BillingProductEntitlementFeature, error) {
+func (q *Queries) GetProductEntitlementFeatureByID(ctx context.Context, arg GetProductEntitlementFeatureByIDParams) (OpenrailsProductEntitlementFeature, error) {
 	row := q.db.QueryRow(ctx, getProductEntitlementFeatureByID, arg.ID, arg.TenantID)
-	var i BillingProductEntitlementFeature
+	var i OpenrailsProductEntitlementFeature
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -197,15 +197,15 @@ WHERE ef.tenant_id = $1
 ORDER BY ef.created_at DESC
 `
 
-func (q *Queries) ListEntitlementFeatures(ctx context.Context, tenantID uuid.UUID) ([]BillingEntitlementFeature, error) {
+func (q *Queries) ListEntitlementFeatures(ctx context.Context, tenantID uuid.UUID) ([]OpenrailsEntitlementFeature, error) {
 	rows, err := q.db.Query(ctx, listEntitlementFeatures, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingEntitlementFeature
+	var items []OpenrailsEntitlementFeature
 	for rows.Next() {
-		var i BillingEntitlementFeature
+		var i OpenrailsEntitlementFeature
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -237,15 +237,15 @@ type ListEntitlementFeaturesByLookupKeysParams struct {
 	LookupKeys []string
 }
 
-func (q *Queries) ListEntitlementFeaturesByLookupKeys(ctx context.Context, arg ListEntitlementFeaturesByLookupKeysParams) ([]BillingEntitlementFeature, error) {
+func (q *Queries) ListEntitlementFeaturesByLookupKeys(ctx context.Context, arg ListEntitlementFeaturesByLookupKeysParams) ([]OpenrailsEntitlementFeature, error) {
 	rows, err := q.db.Query(ctx, listEntitlementFeaturesByLookupKeys, arg.TenantID, arg.LookupKeys)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingEntitlementFeature
+	var items []OpenrailsEntitlementFeature
 	for rows.Next() {
-		var i BillingEntitlementFeature
+		var i OpenrailsEntitlementFeature
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -280,8 +280,8 @@ type ListProductEntitlementFeaturesParams struct {
 }
 
 type ListProductEntitlementFeaturesRow struct {
-	BillingProductEntitlementFeature BillingProductEntitlementFeature
-	BillingEntitlementFeature        BillingEntitlementFeature
+	OpenrailsProductEntitlementFeature OpenrailsProductEntitlementFeature
+	OpenrailsEntitlementFeature        OpenrailsEntitlementFeature
 }
 
 func (q *Queries) ListProductEntitlementFeatures(ctx context.Context, arg ListProductEntitlementFeaturesParams) ([]ListProductEntitlementFeaturesRow, error) {
@@ -294,22 +294,22 @@ func (q *Queries) ListProductEntitlementFeatures(ctx context.Context, arg ListPr
 	for rows.Next() {
 		var i ListProductEntitlementFeaturesRow
 		if err := rows.Scan(
-			&i.BillingProductEntitlementFeature.ID,
-			&i.BillingProductEntitlementFeature.TenantID,
-			&i.BillingProductEntitlementFeature.ProductID,
-			&i.BillingProductEntitlementFeature.EntitlementFeatureID,
-			&i.BillingProductEntitlementFeature.DurationDays,
-			&i.BillingProductEntitlementFeature.Metadata,
-			&i.BillingProductEntitlementFeature.CreatedAt,
-			&i.BillingProductEntitlementFeature.UpdatedAt,
-			&i.BillingEntitlementFeature.ID,
-			&i.BillingEntitlementFeature.TenantID,
-			&i.BillingEntitlementFeature.LookupKey,
-			&i.BillingEntitlementFeature.Name,
-			&i.BillingEntitlementFeature.Active,
-			&i.BillingEntitlementFeature.Metadata,
-			&i.BillingEntitlementFeature.CreatedAt,
-			&i.BillingEntitlementFeature.UpdatedAt,
+			&i.OpenrailsProductEntitlementFeature.ID,
+			&i.OpenrailsProductEntitlementFeature.TenantID,
+			&i.OpenrailsProductEntitlementFeature.ProductID,
+			&i.OpenrailsProductEntitlementFeature.EntitlementFeatureID,
+			&i.OpenrailsProductEntitlementFeature.DurationDays,
+			&i.OpenrailsProductEntitlementFeature.Metadata,
+			&i.OpenrailsProductEntitlementFeature.CreatedAt,
+			&i.OpenrailsProductEntitlementFeature.UpdatedAt,
+			&i.OpenrailsEntitlementFeature.ID,
+			&i.OpenrailsEntitlementFeature.TenantID,
+			&i.OpenrailsEntitlementFeature.LookupKey,
+			&i.OpenrailsEntitlementFeature.Name,
+			&i.OpenrailsEntitlementFeature.Active,
+			&i.OpenrailsEntitlementFeature.Metadata,
+			&i.OpenrailsEntitlementFeature.CreatedAt,
+			&i.OpenrailsEntitlementFeature.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

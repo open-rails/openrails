@@ -1557,7 +1557,7 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, pro
 	}
 
 	rows, err := s.DB.Gen(ctx).MatchChargebackPayments(ctx, gen.MatchChargebackPaymentsParams{
-		Processor:   gen.BillingProcessorType(processor),
+		Processor:   gen.OpenrailsProcessorType(processor),
 		AmountCents: amountCents,
 		Last4:       last4,
 		FromAt:      targetTs.Add(-7 * 24 * time.Hour),

@@ -43,9 +43,9 @@ type GetLinkedWalletByTenantSubjectAndChainParams struct {
 }
 
 // openrails.linked_wallets.
-func (q *Queries) GetLinkedWalletByTenantSubjectAndChain(ctx context.Context, arg GetLinkedWalletByTenantSubjectAndChainParams) (BillingLinkedWallet, error) {
+func (q *Queries) GetLinkedWalletByTenantSubjectAndChain(ctx context.Context, arg GetLinkedWalletByTenantSubjectAndChainParams) (OpenrailsLinkedWallet, error) {
 	row := q.db.QueryRow(ctx, getLinkedWalletByTenantSubjectAndChain, arg.TenantSubjectID, arg.Chain)
-	var i BillingLinkedWallet
+	var i OpenrailsLinkedWallet
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -97,7 +97,7 @@ type UpsertLinkedWalletParams struct {
 	UpdatedAt            time.Time
 }
 
-func (q *Queries) UpsertLinkedWallet(ctx context.Context, arg UpsertLinkedWalletParams) (BillingLinkedWallet, error) {
+func (q *Queries) UpsertLinkedWallet(ctx context.Context, arg UpsertLinkedWalletParams) (OpenrailsLinkedWallet, error) {
 	row := q.db.QueryRow(ctx, upsertLinkedWallet,
 		arg.ID,
 		arg.TenantSubjectID,
@@ -111,7 +111,7 @@ func (q *Queries) UpsertLinkedWallet(ctx context.Context, arg UpsertLinkedWallet
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
-	var i BillingLinkedWallet
+	var i OpenrailsLinkedWallet
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,

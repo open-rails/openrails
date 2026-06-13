@@ -96,7 +96,7 @@ WHERE purch.tenant_subject_id = $1
 
 type CountPaymentOutcomesBySubjectProcessorParams struct {
 	TenantSubjectID uuid.UUID
-	Processor       BillingProcessorType
+	Processor       OpenrailsProcessorType
 }
 
 type CountPaymentOutcomesBySubjectProcessorRow struct {
@@ -195,7 +195,7 @@ INSERT INTO openrails.payments (
 type CreatePaymentParams struct {
 	ID                       uuid.UUID
 	PriceID                  uuid.UUID
-	Processor                BillingProcessorType
+	Processor                OpenrailsProcessorType
 	TransactionID            string
 	Amount                   int64
 	ListAmount               int64
@@ -280,7 +280,7 @@ ON CONFLICT (tenant_id, processor, transaction_id) DO NOTHING
 type CreatePaymentIfNotExistsParams struct {
 	ID                       uuid.UUID
 	PriceID                  uuid.UUID
-	Processor                BillingProcessorType
+	Processor                OpenrailsProcessorType
 	TransactionID            string
 	Amount                   int64
 	ListAmount               int64
@@ -354,9 +354,9 @@ ORDER BY purch.purchased_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID *uuid.UUID) (BillingPayment, error) {
+func (q *Queries) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID *uuid.UUID) (OpenrailsPayment, error) {
 	row := q.db.QueryRow(ctx, getLatestChargeBySubscriptionID, subscriptionID)
-	var i BillingPayment
+	var i OpenrailsPayment
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -391,9 +391,9 @@ ORDER BY purch.purchased_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestPaymentBySubscriptionID(ctx context.Context, subscriptionID *uuid.UUID) (BillingPayment, error) {
+func (q *Queries) GetLatestPaymentBySubscriptionID(ctx context.Context, subscriptionID *uuid.UUID) (OpenrailsPayment, error) {
 	row := q.db.QueryRow(ctx, getLatestPaymentBySubscriptionID, subscriptionID)
-	var i BillingPayment
+	var i OpenrailsPayment
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -432,12 +432,12 @@ LIMIT 1
 
 type GetLatestPaymentByTenantSubjectProcessorParams struct {
 	TenantSubjectID uuid.UUID
-	Processor       BillingProcessorType
+	Processor       OpenrailsProcessorType
 }
 
-func (q *Queries) GetLatestPaymentByTenantSubjectProcessor(ctx context.Context, arg GetLatestPaymentByTenantSubjectProcessorParams) (BillingPayment, error) {
+func (q *Queries) GetLatestPaymentByTenantSubjectProcessor(ctx context.Context, arg GetLatestPaymentByTenantSubjectProcessorParams) (OpenrailsPayment, error) {
 	row := q.db.QueryRow(ctx, getLatestPaymentByTenantSubjectProcessor, arg.TenantSubjectID, arg.Processor)
-	var i BillingPayment
+	var i OpenrailsPayment
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -469,9 +469,9 @@ const getPaymentByID = `-- name: GetPaymentByID :one
 SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, tenant_id, tenant_subject_id FROM openrails.payments WHERE id = $1
 `
 
-func (q *Queries) GetPaymentByID(ctx context.Context, id uuid.UUID) (BillingPayment, error) {
+func (q *Queries) GetPaymentByID(ctx context.Context, id uuid.UUID) (OpenrailsPayment, error) {
 	row := q.db.QueryRow(ctx, getPaymentByID, id)
-	var i BillingPayment
+	var i OpenrailsPayment
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -510,9 +510,9 @@ type GetPaymentByMetadataValueParams struct {
 	Value string
 }
 
-func (q *Queries) GetPaymentByMetadataValue(ctx context.Context, arg GetPaymentByMetadataValueParams) (BillingPayment, error) {
+func (q *Queries) GetPaymentByMetadataValue(ctx context.Context, arg GetPaymentByMetadataValueParams) (OpenrailsPayment, error) {
 	row := q.db.QueryRow(ctx, getPaymentByMetadataValue, arg.Key, arg.Value)
-	var i BillingPayment
+	var i OpenrailsPayment
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -546,13 +546,13 @@ WHERE purch.processor = $1 AND purch.transaction_id = $2
 `
 
 type GetPaymentByTransactionIDParams struct {
-	Processor     BillingProcessorType
+	Processor     OpenrailsProcessorType
 	TransactionID string
 }
 
-func (q *Queries) GetPaymentByTransactionID(ctx context.Context, arg GetPaymentByTransactionIDParams) (BillingPayment, error) {
+func (q *Queries) GetPaymentByTransactionID(ctx context.Context, arg GetPaymentByTransactionIDParams) (OpenrailsPayment, error) {
 	row := q.db.QueryRow(ctx, getPaymentByTransactionID, arg.Processor, arg.TransactionID)
-	var i BillingPayment
+	var i OpenrailsPayment
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -589,59 +589,59 @@ WHERE purch.id = $1
 `
 
 type GetPaymentWithPriceProductRow struct {
-	BillingPayment BillingPayment
-	BillingPrice   BillingPrice
-	BillingProduct BillingProduct
+	OpenrailsPayment OpenrailsPayment
+	OpenrailsPrice   OpenrailsPrice
+	OpenrailsProduct OpenrailsProduct
 }
 
 func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, id uuid.UUID) (GetPaymentWithPriceProductRow, error) {
 	row := q.db.QueryRow(ctx, getPaymentWithPriceProduct, id)
 	var i GetPaymentWithPriceProductRow
 	err := row.Scan(
-		&i.BillingPayment.ID,
-		&i.BillingPayment.PriceID,
-		&i.BillingPayment.Processor,
-		&i.BillingPayment.TransactionID,
-		&i.BillingPayment.Amount,
-		&i.BillingPayment.ListAmount,
-		&i.BillingPayment.Currency,
-		&i.BillingPayment.Status,
-		&i.BillingPayment.SubscriptionID,
-		&i.BillingPayment.RefundedPaymentID,
-		&i.BillingPayment.DiscountCode,
-		&i.BillingPayment.DiscountReason,
-		&i.BillingPayment.DiscountMetadata,
-		&i.BillingPayment.EntitlementsSpecSnapshot,
-		&i.BillingPayment.CreditsSpecSnapshot,
-		&i.BillingPayment.Metadata,
-		&i.BillingPayment.PurchasedAt,
-		&i.BillingPayment.CreatedAt,
-		&i.BillingPayment.CardBrand,
-		&i.BillingPayment.CardLast4,
-		&i.BillingPayment.TenantID,
-		&i.BillingPayment.TenantSubjectID,
-		&i.BillingPrice.ID,
-		&i.BillingPrice.ProductID,
-		&i.BillingPrice.Amount,
-		&i.BillingPrice.Currency,
-		&i.BillingPrice.BillingCycleDays,
-		&i.BillingPrice.Processors,
-		&i.BillingPrice.Status,
-		&i.BillingPrice.CreatedAt,
-		&i.BillingPrice.UpdatedAt,
-		&i.BillingPrice.TenantID,
-		&i.BillingProduct.ID,
-		&i.BillingProduct.Slug,
-		&i.BillingProduct.DisplayName,
-		&i.BillingProduct.Description,
-		&i.BillingProduct.EntitlementsSpec,
-		&i.BillingProduct.CreditsSpec,
-		&i.BillingProduct.TierGroup,
-		&i.BillingProduct.TierRank,
-		&i.BillingProduct.Status,
-		&i.BillingProduct.CreatedAt,
-		&i.BillingProduct.UpdatedAt,
-		&i.BillingProduct.TenantID,
+		&i.OpenrailsPayment.ID,
+		&i.OpenrailsPayment.PriceID,
+		&i.OpenrailsPayment.Processor,
+		&i.OpenrailsPayment.TransactionID,
+		&i.OpenrailsPayment.Amount,
+		&i.OpenrailsPayment.ListAmount,
+		&i.OpenrailsPayment.Currency,
+		&i.OpenrailsPayment.Status,
+		&i.OpenrailsPayment.SubscriptionID,
+		&i.OpenrailsPayment.RefundedPaymentID,
+		&i.OpenrailsPayment.DiscountCode,
+		&i.OpenrailsPayment.DiscountReason,
+		&i.OpenrailsPayment.DiscountMetadata,
+		&i.OpenrailsPayment.EntitlementsSpecSnapshot,
+		&i.OpenrailsPayment.CreditsSpecSnapshot,
+		&i.OpenrailsPayment.Metadata,
+		&i.OpenrailsPayment.PurchasedAt,
+		&i.OpenrailsPayment.CreatedAt,
+		&i.OpenrailsPayment.CardBrand,
+		&i.OpenrailsPayment.CardLast4,
+		&i.OpenrailsPayment.TenantID,
+		&i.OpenrailsPayment.TenantSubjectID,
+		&i.OpenrailsPrice.ID,
+		&i.OpenrailsPrice.ProductID,
+		&i.OpenrailsPrice.Amount,
+		&i.OpenrailsPrice.Currency,
+		&i.OpenrailsPrice.BillingCycleDays,
+		&i.OpenrailsPrice.Processors,
+		&i.OpenrailsPrice.Status,
+		&i.OpenrailsPrice.CreatedAt,
+		&i.OpenrailsPrice.UpdatedAt,
+		&i.OpenrailsPrice.TenantID,
+		&i.OpenrailsProduct.ID,
+		&i.OpenrailsProduct.Slug,
+		&i.OpenrailsProduct.DisplayName,
+		&i.OpenrailsProduct.Description,
+		&i.OpenrailsProduct.EntitlementsSpec,
+		&i.OpenrailsProduct.CreditsSpec,
+		&i.OpenrailsProduct.TierGroup,
+		&i.OpenrailsProduct.TierRank,
+		&i.OpenrailsProduct.Status,
+		&i.OpenrailsProduct.CreatedAt,
+		&i.OpenrailsProduct.UpdatedAt,
+		&i.OpenrailsProduct.TenantID,
 	)
 	return i, err
 }
@@ -658,9 +658,9 @@ type GetRefundByAdminIdempotencyKeyParams struct {
 	IdemKey           string
 }
 
-func (q *Queries) GetRefundByAdminIdempotencyKey(ctx context.Context, arg GetRefundByAdminIdempotencyKeyParams) (BillingPayment, error) {
+func (q *Queries) GetRefundByAdminIdempotencyKey(ctx context.Context, arg GetRefundByAdminIdempotencyKeyParams) (OpenrailsPayment, error) {
 	row := q.db.QueryRow(ctx, getRefundByAdminIdempotencyKey, arg.RefundedPaymentID, arg.IdemKey)
-	var i BillingPayment
+	var i OpenrailsPayment
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -731,15 +731,15 @@ const listPaymentsByIDs = `-- name: ListPaymentsByIDs :many
 SELECT id, price_id, processor, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, credits_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, tenant_id, tenant_subject_id FROM openrails.payments WHERE id = ANY($1::uuid[])
 `
 
-func (q *Queries) ListPaymentsByIDs(ctx context.Context, ids []uuid.UUID) ([]BillingPayment, error) {
+func (q *Queries) ListPaymentsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsPayment, error) {
 	rows, err := q.db.Query(ctx, listPaymentsByIDs, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPayment
+	var items []OpenrailsPayment
 	for rows.Next() {
-		var i BillingPayment
+		var i OpenrailsPayment
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -781,15 +781,15 @@ WHERE purch.price_id = $1
 ORDER BY purch.purchased_at DESC
 `
 
-func (q *Queries) ListPaymentsByPriceID(ctx context.Context, priceID uuid.UUID) ([]BillingPayment, error) {
+func (q *Queries) ListPaymentsByPriceID(ctx context.Context, priceID uuid.UUID) ([]OpenrailsPayment, error) {
 	rows, err := q.db.Query(ctx, listPaymentsByPriceID, priceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPayment
+	var items []OpenrailsPayment
 	for rows.Next() {
-		var i BillingPayment
+		var i OpenrailsPayment
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -831,15 +831,15 @@ WHERE purch.processor = $1
 ORDER BY purch.purchased_at DESC
 `
 
-func (q *Queries) ListPaymentsByProcessor(ctx context.Context, processor BillingProcessorType) ([]BillingPayment, error) {
+func (q *Queries) ListPaymentsByProcessor(ctx context.Context, processor OpenrailsProcessorType) ([]OpenrailsPayment, error) {
 	rows, err := q.db.Query(ctx, listPaymentsByProcessor, processor)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPayment
+	var items []OpenrailsPayment
 	for rows.Next() {
-		var i BillingPayment
+		var i OpenrailsPayment
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -881,15 +881,15 @@ WHERE purch.tenant_subject_id = $1
 ORDER BY purch.purchased_at DESC
 `
 
-func (q *Queries) ListPaymentsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]BillingPayment, error) {
+func (q *Queries) ListPaymentsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]OpenrailsPayment, error) {
 	rows, err := q.db.Query(ctx, listPaymentsByTenantSubject, tenantSubjectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPayment
+	var items []OpenrailsPayment
 	for rows.Next() {
-		var i BillingPayment
+		var i OpenrailsPayment
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -938,15 +938,15 @@ type ListPaymentsByTenantSubjectPagedParams struct {
 	PageLimit       int32
 }
 
-func (q *Queries) ListPaymentsByTenantSubjectPaged(ctx context.Context, arg ListPaymentsByTenantSubjectPagedParams) ([]BillingPayment, error) {
+func (q *Queries) ListPaymentsByTenantSubjectPaged(ctx context.Context, arg ListPaymentsByTenantSubjectPagedParams) ([]OpenrailsPayment, error) {
 	rows, err := q.db.Query(ctx, listPaymentsByTenantSubjectPaged, arg.TenantSubjectID, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPayment
+	var items []OpenrailsPayment
 	for rows.Next() {
-		var i BillingPayment
+		var i OpenrailsPayment
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -1023,7 +1023,7 @@ type ListPaymentsFilteredParams struct {
 
 // Sorting is static SQL over a validated (sort_by, sort_desc) pair via the
 // CASE pattern — no identifier interpolation (#334 escape-hatch rule).
-func (q *Queries) ListPaymentsFiltered(ctx context.Context, arg ListPaymentsFilteredParams) ([]BillingPayment, error) {
+func (q *Queries) ListPaymentsFiltered(ctx context.Context, arg ListPaymentsFilteredParams) ([]OpenrailsPayment, error) {
 	rows, err := q.db.Query(ctx, listPaymentsFiltered,
 		arg.TenantSubjectID,
 		arg.PriceID,
@@ -1044,9 +1044,9 @@ func (q *Queries) ListPaymentsFiltered(ctx context.Context, arg ListPaymentsFilt
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPayment
+	var items []OpenrailsPayment
 	for rows.Next() {
-		var i BillingPayment
+		var i OpenrailsPayment
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -1088,7 +1088,7 @@ WHERE refunded_payment_id = $1
 
 type ListRefundRowsForTotalRow struct {
 	Amount int64
-	Status BillingPurchaseStatus
+	Status OpenrailsPurchaseStatus
 }
 
 func (q *Queries) ListRefundRowsForTotal(ctx context.Context, refundedPaymentID *uuid.UUID) ([]ListRefundRowsForTotalRow, error) {
@@ -1117,15 +1117,15 @@ WHERE refunded_payment_id = $1
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListRefundsForPayment(ctx context.Context, refundedPaymentID *uuid.UUID) ([]BillingPayment, error) {
+func (q *Queries) ListRefundsForPayment(ctx context.Context, refundedPaymentID *uuid.UUID) ([]OpenrailsPayment, error) {
 	rows, err := q.db.Query(ctx, listRefundsForPayment, refundedPaymentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPayment
+	var items []OpenrailsPayment
 	for rows.Next() {
-		var i BillingPayment
+		var i OpenrailsPayment
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -1196,7 +1196,7 @@ LIMIT 2
 `
 
 type MatchChargebackPaymentsParams struct {
-	Processor   BillingProcessorType
+	Processor   OpenrailsProcessorType
 	AmountCents int64
 	Last4       string
 	FromAt      time.Time

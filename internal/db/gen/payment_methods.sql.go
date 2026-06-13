@@ -113,9 +113,9 @@ const getPaymentMethodByID = `-- name: GetPaymentMethodByID :one
 SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods WHERE id = $1
 `
 
-func (q *Queries) GetPaymentMethodByID(ctx context.Context, id uuid.UUID) (BillingPaymentMethod, error) {
+func (q *Queries) GetPaymentMethodByID(ctx context.Context, id uuid.UUID) (OpenrailsPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodByID, id)
-	var i BillingPaymentMethod
+	var i OpenrailsPaymentMethod
 	err := row.Scan(
 		&i.ID,
 		&i.Processor,
@@ -146,9 +146,9 @@ type GetPaymentMethodByInitialTransactionIDParams struct {
 	InitialTransactionID string
 }
 
-func (q *Queries) GetPaymentMethodByInitialTransactionID(ctx context.Context, arg GetPaymentMethodByInitialTransactionIDParams) (BillingPaymentMethod, error) {
+func (q *Queries) GetPaymentMethodByInitialTransactionID(ctx context.Context, arg GetPaymentMethodByInitialTransactionIDParams) (OpenrailsPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodByInitialTransactionID, arg.Processor, arg.InitialTransactionID)
-	var i BillingPaymentMethod
+	var i OpenrailsPaymentMethod
 	err := row.Scan(
 		&i.ID,
 		&i.Processor,
@@ -179,9 +179,9 @@ type GetPaymentMethodByVaultIDParams struct {
 	VaultID   string
 }
 
-func (q *Queries) GetPaymentMethodByVaultID(ctx context.Context, arg GetPaymentMethodByVaultIDParams) (BillingPaymentMethod, error) {
+func (q *Queries) GetPaymentMethodByVaultID(ctx context.Context, arg GetPaymentMethodByVaultIDParams) (OpenrailsPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodByVaultID, arg.Processor, arg.VaultID)
-	var i BillingPaymentMethod
+	var i OpenrailsPaymentMethod
 	err := row.Scan(
 		&i.ID,
 		&i.Processor,
@@ -205,15 +205,15 @@ const listPaymentMethodsByIDs = `-- name: ListPaymentMethodsByIDs :many
 SELECT id, processor, vault_id, billing_id, initial_transaction_id, last_four, card_type, expiry_date, failure_reason, metadata, created_at, updated_at, tenant_id, tenant_subject_id FROM openrails.payment_methods WHERE id = ANY($1::uuid[])
 `
 
-func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) ([]BillingPaymentMethod, error) {
+func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsPaymentMethod, error) {
 	rows, err := q.db.Query(ctx, listPaymentMethodsByIDs, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPaymentMethod
+	var items []OpenrailsPaymentMethod
 	for rows.Next() {
-		var i BillingPaymentMethod
+		var i OpenrailsPaymentMethod
 		if err := rows.Scan(
 			&i.ID,
 			&i.Processor,
@@ -246,15 +246,15 @@ WHERE pm.processor = $1
 ORDER BY pm.created_at DESC
 `
 
-func (q *Queries) ListPaymentMethodsByProcessor(ctx context.Context, processor string) ([]BillingPaymentMethod, error) {
+func (q *Queries) ListPaymentMethodsByProcessor(ctx context.Context, processor string) ([]OpenrailsPaymentMethod, error) {
 	rows, err := q.db.Query(ctx, listPaymentMethodsByProcessor, processor)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPaymentMethod
+	var items []OpenrailsPaymentMethod
 	for rows.Next() {
-		var i BillingPaymentMethod
+		var i OpenrailsPaymentMethod
 		if err := rows.Scan(
 			&i.ID,
 			&i.Processor,
@@ -287,15 +287,15 @@ WHERE pm.processor = ANY($1::text[])
 ORDER BY pm.created_at DESC
 `
 
-func (q *Queries) ListPaymentMethodsByProcessors(ctx context.Context, processors []string) ([]BillingPaymentMethod, error) {
+func (q *Queries) ListPaymentMethodsByProcessors(ctx context.Context, processors []string) ([]OpenrailsPaymentMethod, error) {
 	rows, err := q.db.Query(ctx, listPaymentMethodsByProcessors, processors)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPaymentMethod
+	var items []OpenrailsPaymentMethod
 	for rows.Next() {
-		var i BillingPaymentMethod
+		var i OpenrailsPaymentMethod
 		if err := rows.Scan(
 			&i.ID,
 			&i.Processor,
@@ -328,15 +328,15 @@ WHERE pm.tenant_subject_id = $1
 ORDER BY pm.created_at DESC
 `
 
-func (q *Queries) ListPaymentMethodsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]BillingPaymentMethod, error) {
+func (q *Queries) ListPaymentMethodsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]OpenrailsPaymentMethod, error) {
 	rows, err := q.db.Query(ctx, listPaymentMethodsByTenantSubject, tenantSubjectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPaymentMethod
+	var items []OpenrailsPaymentMethod
 	for rows.Next() {
-		var i BillingPaymentMethod
+		var i OpenrailsPaymentMethod
 		if err := rows.Scan(
 			&i.ID,
 			&i.Processor,
@@ -376,15 +376,15 @@ type ListPaymentMethodsByTenantSubjectPagedParams struct {
 	PageLimit       int32
 }
 
-func (q *Queries) ListPaymentMethodsByTenantSubjectPaged(ctx context.Context, arg ListPaymentMethodsByTenantSubjectPagedParams) ([]BillingPaymentMethod, error) {
+func (q *Queries) ListPaymentMethodsByTenantSubjectPaged(ctx context.Context, arg ListPaymentMethodsByTenantSubjectPagedParams) ([]OpenrailsPaymentMethod, error) {
 	rows, err := q.db.Query(ctx, listPaymentMethodsByTenantSubjectPaged, arg.TenantSubjectID, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPaymentMethod
+	var items []OpenrailsPaymentMethod
 	for rows.Next() {
-		var i BillingPaymentMethod
+		var i OpenrailsPaymentMethod
 		if err := rows.Scan(
 			&i.ID,
 			&i.Processor,
@@ -423,15 +423,15 @@ type ListPaymentMethodsByTenantSubjectProcessorsParams struct {
 	Processors      []string
 }
 
-func (q *Queries) ListPaymentMethodsByTenantSubjectProcessors(ctx context.Context, arg ListPaymentMethodsByTenantSubjectProcessorsParams) ([]BillingPaymentMethod, error) {
+func (q *Queries) ListPaymentMethodsByTenantSubjectProcessors(ctx context.Context, arg ListPaymentMethodsByTenantSubjectProcessorsParams) ([]OpenrailsPaymentMethod, error) {
 	rows, err := q.db.Query(ctx, listPaymentMethodsByTenantSubjectProcessors, arg.TenantSubjectID, arg.Processors)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingPaymentMethod
+	var items []OpenrailsPaymentMethod
 	for rows.Next() {
-		var i BillingPaymentMethod
+		var i OpenrailsPaymentMethod
 		if err := rows.Scan(
 			&i.ID,
 			&i.Processor,

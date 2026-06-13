@@ -53,15 +53,15 @@ type EnqueueParams struct {
 
 // Enqueue records the intent (idempotent) and returns the canonical row for
 // its idempotency key.
-func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error) {
+func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsProviderIntent, error) {
 	if p.IntentType == "" || p.IdempotencyKey == "" {
-		return gen.BillingProviderIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
+		return gen.OpenrailsProviderIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
 	}
 	var payload []byte
 	if p.Payload != nil {
 		b, err := json.Marshal(p.Payload)
 		if err != nil {
-			return gen.BillingProviderIntent{}, fmt.Errorf("intents: marshal payload: %w", err)
+			return gen.OpenrailsProviderIntent{}, fmt.Errorf("intents: marshal payload: %w", err)
 		}
 		payload = b
 	}
@@ -120,7 +120,7 @@ func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subsc
 // ClaimByID leases ONE specific intent for the synchronous execute path.
 // ok=false means the row is not claimable (terminal, expired, or leased by a
 // live executor) — the caller inspects the canonical row instead.
-func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error) {
+func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsProviderIntent, bool, error) {
 	row, err := s.db.Gen(ctx).ClaimProviderIntentByID(ctx, gen.ClaimProviderIntentByIDParams{
 		ID:         id,
 		Now:        now.UTC(),
@@ -128,20 +128,20 @@ func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil tim
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.BillingProviderIntent{}, false, nil
+			return gen.OpenrailsProviderIntent{}, false, nil
 		}
-		return gen.BillingProviderIntent{}, false, err
+		return gen.OpenrailsProviderIntent{}, false, err
 	}
 	return row, true, nil
 }
 
 // Get returns the intent row by id.
-func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
+func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsProviderIntent, error) {
 	return s.db.Gen(ctx).GetProviderIntent(ctx, id)
 }
 
 // ClaimDue leases up to batch due executable intents (SKIP LOCKED).
-func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error) {
+func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error) {
 	return s.db.Gen(ctx).ClaimDueProviderIntents(ctx, gen.ClaimDueProviderIntentsParams{
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
@@ -150,7 +150,7 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 }
 
 // ClaimDueVerify leases up to batch due unknown_needs_verify intents.
-func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error) {
+func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsProviderIntent, error) {
 	return s.db.Gen(ctx).ClaimDueVerifyProviderIntents(ctx, gen.ClaimDueVerifyProviderIntentsParams{
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),

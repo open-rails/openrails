@@ -44,9 +44,9 @@ const getSolanaSubscriptionByPDA = `-- name: GetSolanaSubscriptionByPDA :one
 SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE subscription_pda = $1
 `
 
-func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, subscriptionPda string) (BillingSolanaSubscription, error) {
+func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, subscriptionPda string) (OpenrailsSolanaSubscription, error) {
 	row := q.db.QueryRow(ctx, getSolanaSubscriptionByPDA, subscriptionPda)
-	var i BillingSolanaSubscription
+	var i OpenrailsSolanaSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -72,9 +72,9 @@ const getSolanaSubscriptionBySubscriptionID = `-- name: GetSolanaSubscriptionByS
 SELECT id, tenant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE subscription_id = $1
 `
 
-func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (BillingSolanaSubscription, error) {
+func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (OpenrailsSolanaSubscription, error) {
 	row := q.db.QueryRow(ctx, getSolanaSubscriptionBySubscriptionID, subscriptionID)
-	var i BillingSolanaSubscription
+	var i OpenrailsSolanaSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -136,15 +136,15 @@ ORDER BY updated_at ASC
 LIMIT NULLIF($1::int, 0)
 `
 
-func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context, pageLimit int32) ([]BillingSolanaSubscription, error) {
+func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context, pageLimit int32) ([]OpenrailsSolanaSubscription, error) {
 	rows, err := q.db.Query(ctx, listActiveSolanaSubscriptionsWithSignature, pageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSolanaSubscription
+	var items []OpenrailsSolanaSubscription
 	for rows.Next() {
-		var i BillingSolanaSubscription
+		var i OpenrailsSolanaSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -185,15 +185,15 @@ type ListDueSolanaSubscriptionsParams struct {
 	PageLimit int32
 }
 
-func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSolanaSubscriptionsParams) ([]BillingSolanaSubscription, error) {
+func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSolanaSubscriptionsParams) ([]OpenrailsSolanaSubscription, error) {
 	rows, err := q.db.Query(ctx, listDueSolanaSubscriptions, arg.Now, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSolanaSubscription
+	var items []OpenrailsSolanaSubscription
 	for rows.Next() {
-		var i BillingSolanaSubscription
+		var i OpenrailsSolanaSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,

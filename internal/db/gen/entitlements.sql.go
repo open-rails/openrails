@@ -246,9 +246,9 @@ WHERE ent.id = $1
 LIMIT 1
 `
 
-func (q *Queries) GetEntitlementByID(ctx context.Context, id uuid.UUID) (BillingEntitlement, error) {
+func (q *Queries) GetEntitlementByID(ctx context.Context, id uuid.UUID) (OpenrailsEntitlement, error) {
 	row := q.db.QueryRow(ctx, getEntitlementByID, id)
-	var i BillingEntitlement
+	var i OpenrailsEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -285,9 +285,9 @@ type GetLatestActiveEntitlementParams struct {
 	Entitlement     string
 }
 
-func (q *Queries) GetLatestActiveEntitlement(ctx context.Context, arg GetLatestActiveEntitlementParams) (BillingEntitlement, error) {
+func (q *Queries) GetLatestActiveEntitlement(ctx context.Context, arg GetLatestActiveEntitlementParams) (OpenrailsEntitlement, error) {
 	row := q.db.QueryRow(ctx, getLatestActiveEntitlement, arg.TenantID, arg.TenantSubjectID, arg.Entitlement)
-	var i BillingEntitlement
+	var i OpenrailsEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -328,14 +328,14 @@ type GetLatestFiniteActiveEntitlementParams struct {
 	At              time.Time
 }
 
-func (q *Queries) GetLatestFiniteActiveEntitlement(ctx context.Context, arg GetLatestFiniteActiveEntitlementParams) (BillingEntitlement, error) {
+func (q *Queries) GetLatestFiniteActiveEntitlement(ctx context.Context, arg GetLatestFiniteActiveEntitlementParams) (OpenrailsEntitlement, error) {
 	row := q.db.QueryRow(ctx, getLatestFiniteActiveEntitlement,
 		arg.TenantID,
 		arg.TenantSubjectID,
 		arg.Entitlement,
 		arg.At,
 	)
-	var i BillingEntitlement
+	var i OpenrailsEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -374,9 +374,9 @@ type GetTimelineCoveringWindowParams struct {
 }
 
 // The window covering instant `at` (for already-covered EndAt requests).
-func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimelineCoveringWindowParams) (BillingEntitlement, error) {
+func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimelineCoveringWindowParams) (OpenrailsEntitlement, error) {
 	row := q.db.QueryRow(ctx, getTimelineCoveringWindow, arg.TenantSubjectID, arg.Entitlement, arg.At)
-	var i BillingEntitlement
+	var i OpenrailsEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -412,9 +412,9 @@ type GetTimelineIndefiniteParams struct {
 	Entitlement     string
 }
 
-func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineIndefiniteParams) (BillingEntitlement, error) {
+func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineIndefiniteParams) (OpenrailsEntitlement, error) {
 	row := q.db.QueryRow(ctx, getTimelineIndefinite, arg.TenantSubjectID, arg.Entitlement)
-	var i BillingEntitlement
+	var i OpenrailsEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -544,15 +544,15 @@ type ListActiveEntitlementRecordsParams struct {
 	At              time.Time
 }
 
-func (q *Queries) ListActiveEntitlementRecords(ctx context.Context, arg ListActiveEntitlementRecordsParams) ([]BillingEntitlement, error) {
+func (q *Queries) ListActiveEntitlementRecords(ctx context.Context, arg ListActiveEntitlementRecordsParams) ([]OpenrailsEntitlement, error) {
 	rows, err := q.db.Query(ctx, listActiveEntitlementRecords, arg.TenantSubjectID, arg.At)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingEntitlement
+	var items []OpenrailsEntitlement
 	for rows.Next() {
-		var i BillingEntitlement
+		var i OpenrailsEntitlement
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
@@ -680,15 +680,15 @@ type ListActiveEntitlementRecordsTenantParams struct {
 	At              time.Time
 }
 
-func (q *Queries) ListActiveEntitlementRecordsTenant(ctx context.Context, arg ListActiveEntitlementRecordsTenantParams) ([]BillingEntitlement, error) {
+func (q *Queries) ListActiveEntitlementRecordsTenant(ctx context.Context, arg ListActiveEntitlementRecordsTenantParams) ([]OpenrailsEntitlement, error) {
 	rows, err := q.db.Query(ctx, listActiveEntitlementRecordsTenant, arg.TenantID, arg.TenantSubjectID, arg.At)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingEntitlement
+	var items []OpenrailsEntitlement
 	for rows.Next() {
-		var i BillingEntitlement
+		var i OpenrailsEntitlement
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
@@ -731,15 +731,15 @@ type ListActiveGraceWindowsForUpdateParams struct {
 	Now      time.Time
 }
 
-func (q *Queries) ListActiveGraceWindowsForUpdate(ctx context.Context, arg ListActiveGraceWindowsForUpdateParams) ([]BillingEntitlement, error) {
+func (q *Queries) ListActiveGraceWindowsForUpdate(ctx context.Context, arg ListActiveGraceWindowsForUpdateParams) ([]OpenrailsEntitlement, error) {
 	rows, err := q.db.Query(ctx, listActiveGraceWindowsForUpdate, arg.SourceID, arg.Now)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingEntitlement
+	var items []OpenrailsEntitlement
 	for rows.Next() {
-		var i BillingEntitlement
+		var i OpenrailsEntitlement
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
@@ -806,15 +806,15 @@ WHERE ent.tenant_subject_id = $1
 ORDER BY ent.start_at DESC
 `
 
-func (q *Queries) ListEntitlementsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]BillingEntitlement, error) {
+func (q *Queries) ListEntitlementsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]OpenrailsEntitlement, error) {
 	rows, err := q.db.Query(ctx, listEntitlementsByTenantSubject, tenantSubjectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingEntitlement
+	var items []OpenrailsEntitlement
 	for rows.Next() {
-		var i BillingEntitlement
+		var i OpenrailsEntitlement
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
@@ -856,15 +856,15 @@ type ListExtendableSubscriptionEntitlementsParams struct {
 	EndAt    time.Time
 }
 
-func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, arg ListExtendableSubscriptionEntitlementsParams) ([]BillingEntitlement, error) {
+func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, arg ListExtendableSubscriptionEntitlementsParams) ([]OpenrailsEntitlement, error) {
 	rows, err := q.db.Query(ctx, listExtendableSubscriptionEntitlements, arg.SourceID, arg.EndAt)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingEntitlement
+	var items []OpenrailsEntitlement
 	for rows.Next() {
-		var i BillingEntitlement
+		var i OpenrailsEntitlement
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,

@@ -66,6 +66,66 @@ func (q *Queries) CaptureBudgetReservation(ctx context.Context, arg CaptureBudge
 	return result.RowsAffected(), nil
 }
 
+const captureBudgetReservationsByCoords = `-- name: CaptureBudgetReservationsByCoords :execrows
+UPDATE openrails.budget_reservations
+SET status = 'captured', captured_micros = $5::bigint
+WHERE tenant_id = $1 AND tenant_subject_id = $2
+  AND source = $3 AND source_id = $4 AND status = 'active'
+`
+
+type CaptureBudgetReservationsByCoordsParams struct {
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	Source          string
+	SourceID        string
+	CapturedMicros  int64
+}
+
+// Settle ALL scopes reserved under one request (#473): every active budget
+// reservation for (tenant, subject, source, source_id) -> captured. Idempotent
+// (already-settled rows are skipped by the status filter).
+func (q *Queries) CaptureBudgetReservationsByCoords(ctx context.Context, arg CaptureBudgetReservationsByCoordsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, captureBudgetReservationsByCoords,
+		arg.TenantID,
+		arg.TenantSubjectID,
+		arg.Source,
+		arg.SourceID,
+		arg.CapturedMicros,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteBudgetPolicy = `-- name: DeleteBudgetPolicy :execrows
+DELETE FROM openrails.budget_policies
+WHERE tenant_id = $1 AND tenant_subject_id = $2
+  AND scope = $3 AND owner = $4 AND scope_key = $5
+`
+
+type DeleteBudgetPolicyParams struct {
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	Scope           string
+	Owner           string
+	ScopeKey        string
+}
+
+func (q *Queries) DeleteBudgetPolicy(ctx context.Context, arg DeleteBudgetPolicyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteBudgetPolicy,
+		arg.TenantID,
+		arg.TenantSubjectID,
+		arg.Scope,
+		arg.Owner,
+		arg.ScopeKey,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deletePaymentBlock = `-- name: DeletePaymentBlock :exec
 DELETE FROM openrails.payment_blocklist
 WHERE tenant_id = $1 AND kind = $2 AND value = $3
@@ -100,7 +160,7 @@ type GetBudgetReservationByCoordsParams struct {
 
 // Admission-plane support tables: rolling money budgets (#304), the payment
 // blocklist (#300), and per-(payer, tier) throughput policies.
-func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudgetReservationByCoordsParams) (BillingBudgetReservation, error) {
+func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudgetReservationByCoordsParams) (OpenrailsBudgetReservation, error) {
 	row := q.db.QueryRow(ctx, getBudgetReservationByCoords,
 		arg.TenantID,
 		arg.TenantSubjectID,
@@ -108,7 +168,7 @@ func (q *Queries) GetBudgetReservationByCoords(ctx context.Context, arg GetBudge
 		arg.Source,
 		arg.SourceID,
 	)
-	var i BillingBudgetReservation
+	var i OpenrailsBudgetReservation
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -139,14 +199,14 @@ type GetBudgetWindowStateParams struct {
 	WindowKey       string
 }
 
-func (q *Queries) GetBudgetWindowState(ctx context.Context, arg GetBudgetWindowStateParams) (BillingBudgetWindowState, error) {
+func (q *Queries) GetBudgetWindowState(ctx context.Context, arg GetBudgetWindowStateParams) (OpenrailsBudgetWindowState, error) {
 	row := q.db.QueryRow(ctx, getBudgetWindowState,
 		arg.TenantID,
 		arg.TenantSubjectID,
 		arg.Actor,
 		arg.WindowKey,
 	)
-	var i BillingBudgetWindowState
+	var i OpenrailsBudgetWindowState
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -179,14 +239,14 @@ type GetBudgetWindowStateForUpdateParams struct {
 
 // The boundary-rollover serialization point: Reserve locks the state row so
 // concurrent reserves around a window boundary serialize on it (#337).
-func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudgetWindowStateForUpdateParams) (BillingBudgetWindowState, error) {
+func (q *Queries) GetBudgetWindowStateForUpdate(ctx context.Context, arg GetBudgetWindowStateForUpdateParams) (OpenrailsBudgetWindowState, error) {
 	row := q.db.QueryRow(ctx, getBudgetWindowStateForUpdate,
 		arg.TenantID,
 		arg.TenantSubjectID,
 		arg.Actor,
 		arg.WindowKey,
 	)
-	var i BillingBudgetWindowState
+	var i OpenrailsBudgetWindowState
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -215,9 +275,9 @@ type GetTierPolicyParams struct {
 	Tier            string
 }
 
-func (q *Queries) GetTierPolicy(ctx context.Context, arg GetTierPolicyParams) (BillingTierPolicy, error) {
+func (q *Queries) GetTierPolicy(ctx context.Context, arg GetTierPolicyParams) (OpenrailsTierPolicy, error) {
 	row := q.db.QueryRow(ctx, getTierPolicy, arg.TenantID, arg.TenantSubjectID, arg.Tier)
-	var i BillingTierPolicy
+	var i OpenrailsTierPolicy
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -337,6 +397,93 @@ func (q *Queries) InsertPaymentBlockIfAbsent(ctx context.Context, arg InsertPaym
 	return err
 }
 
+const listBudgetPolicies = `-- name: ListBudgetPolicies :many
+SELECT id, tenant_id, tenant_subject_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at FROM openrails.budget_policies
+WHERE tenant_id = $1 AND tenant_subject_id = $2
+`
+
+type ListBudgetPoliciesParams struct {
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+}
+
+// ALL budget policies for a subject regardless of owner (the admit path reads
+// every scope to compose the verdict).
+func (q *Queries) ListBudgetPolicies(ctx context.Context, arg ListBudgetPoliciesParams) ([]OpenrailsBudgetPolicy, error) {
+	rows, err := q.db.Query(ctx, listBudgetPolicies, arg.TenantID, arg.TenantSubjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsBudgetPolicy
+	for rows.Next() {
+		var i OpenrailsBudgetPolicy
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.TenantSubjectID,
+			&i.Scope,
+			&i.Owner,
+			&i.ScopeKey,
+			&i.Windows,
+			&i.PolicyVersion,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBudgetPoliciesByOwner = `-- name: ListBudgetPoliciesByOwner :many
+SELECT id, tenant_id, tenant_subject_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at FROM openrails.budget_policies
+WHERE tenant_id = $1 AND tenant_subject_id = $2 AND owner = $3
+`
+
+type ListBudgetPoliciesByOwnerParams struct {
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	Owner           string
+}
+
+// Budget policies for a subject filtered by owner (the subject-facing read must
+// NOT expose platform-owned rows).
+func (q *Queries) ListBudgetPoliciesByOwner(ctx context.Context, arg ListBudgetPoliciesByOwnerParams) ([]OpenrailsBudgetPolicy, error) {
+	rows, err := q.db.Query(ctx, listBudgetPoliciesByOwner, arg.TenantID, arg.TenantSubjectID, arg.Owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsBudgetPolicy
+	for rows.Next() {
+		var i OpenrailsBudgetPolicy
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.TenantSubjectID,
+			&i.Scope,
+			&i.Owner,
+			&i.ScopeKey,
+			&i.Windows,
+			&i.PolicyVersion,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const paymentBlockExists = `-- name: PaymentBlockExists :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.payment_blocklist
@@ -371,6 +518,35 @@ func (q *Queries) ReleaseBudgetReservation(ctx context.Context, id uuid.UUID) (i
 	return result.RowsAffected(), nil
 }
 
+const releaseBudgetReservationsByCoords = `-- name: ReleaseBudgetReservationsByCoords :execrows
+UPDATE openrails.budget_reservations
+SET status = 'released'
+WHERE tenant_id = $1 AND tenant_subject_id = $2
+  AND source = $3 AND source_id = $4 AND status = 'active'
+`
+
+type ReleaseBudgetReservationsByCoordsParams struct {
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	Source          string
+	SourceID        string
+}
+
+// Free ALL scopes reserved under one request (#473): every active budget
+// reservation for (tenant, subject, source, source_id) -> released. Idempotent.
+func (q *Queries) ReleaseBudgetReservationsByCoords(ctx context.Context, arg ReleaseBudgetReservationsByCoordsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseBudgetReservationsByCoords,
+		arg.TenantID,
+		arg.TenantSubjectID,
+		arg.Source,
+		arg.SourceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const reopenBudgetWindowState = `-- name: ReopenBudgetWindowState :exec
 UPDATE openrails.budget_window_state
 SET window_start = $2, cadence = $3, window_seconds = $4, updated_at = $5
@@ -393,6 +569,47 @@ func (q *Queries) ReopenBudgetWindowState(ctx context.Context, arg ReopenBudgetW
 		arg.WindowStart,
 		arg.Cadence,
 		arg.WindowSeconds,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertBudgetPolicy = `-- name: UpsertBudgetPolicy :exec
+INSERT INTO openrails.budget_policies (
+    id, tenant_id, tenant_subject_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (tenant_id, tenant_subject_id, scope, owner, scope_key) DO UPDATE SET
+    windows = EXCLUDED.windows,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertBudgetPolicyParams struct {
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	TenantSubjectID uuid.UUID
+	Scope           string
+	Owner           string
+	ScopeKey        string
+	Windows         []byte
+	PolicyVersion   int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// Hierarchical money-budget policy upsert (#473). The owner discriminator is the
+// write-authz split (platform vs subject); the caller (service layer) enforces
+// that a subject path may only write owner='subject' rows.
+func (q *Queries) UpsertBudgetPolicy(ctx context.Context, arg UpsertBudgetPolicyParams) error {
+	_, err := q.db.Exec(ctx, upsertBudgetPolicy,
+		arg.ID,
+		arg.TenantID,
+		arg.TenantSubjectID,
+		arg.Scope,
+		arg.Owner,
+		arg.ScopeKey,
+		arg.Windows,
+		arg.PolicyVersion,
+		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
 	return err
@@ -430,219 +647,4 @@ func (q *Queries) UpsertTierPolicy(ctx context.Context, arg UpsertTierPolicyPara
 		arg.UpdatedAt,
 	)
 	return err
-}
-
-const captureBudgetReservationsByCoords = `-- name: CaptureBudgetReservationsByCoords :execrows
-UPDATE openrails.budget_reservations
-SET status = 'captured', captured_micros = $5::bigint
-WHERE tenant_id = $1 AND tenant_subject_id = $2
-  AND source = $3 AND source_id = $4 AND status = 'active'
-`
-
-type CaptureBudgetReservationsByCoordsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Source          string
-	SourceID        string
-	CapturedMicros  int64
-}
-
-// Settle ALL scopes reserved under one request (#473): every active budget
-// reservation for (tenant, subject, source, source_id) -> captured. Idempotent
-// (already-settled rows are skipped by the status filter).
-func (q *Queries) CaptureBudgetReservationsByCoords(ctx context.Context, arg CaptureBudgetReservationsByCoordsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, captureBudgetReservationsByCoords,
-		arg.TenantID,
-		arg.TenantSubjectID,
-		arg.Source,
-		arg.SourceID,
-		arg.CapturedMicros,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const releaseBudgetReservationsByCoords = `-- name: ReleaseBudgetReservationsByCoords :execrows
-UPDATE openrails.budget_reservations
-SET status = 'released'
-WHERE tenant_id = $1 AND tenant_subject_id = $2
-  AND source = $3 AND source_id = $4 AND status = 'active'
-`
-
-type ReleaseBudgetReservationsByCoordsParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Source          string
-	SourceID        string
-}
-
-// Free ALL scopes reserved under one request (#473): every active budget
-// reservation for (tenant, subject, source, source_id) -> released. Idempotent.
-func (q *Queries) ReleaseBudgetReservationsByCoords(ctx context.Context, arg ReleaseBudgetReservationsByCoordsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, releaseBudgetReservationsByCoords,
-		arg.TenantID,
-		arg.TenantSubjectID,
-		arg.Source,
-		arg.SourceID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const upsertBudgetPolicy = `-- name: UpsertBudgetPolicy :exec
-INSERT INTO openrails.budget_policies (
-    id, tenant_id, tenant_subject_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-ON CONFLICT (tenant_id, tenant_subject_id, scope, owner, scope_key) DO UPDATE SET
-    windows = EXCLUDED.windows,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertBudgetPolicyParams struct {
-	ID              uuid.UUID
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Scope           string
-	Owner           string
-	ScopeKey        string
-	Windows         []byte
-	PolicyVersion   int64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-}
-
-// Hierarchical money-budget policy upsert (#473).
-func (q *Queries) UpsertBudgetPolicy(ctx context.Context, arg UpsertBudgetPolicyParams) error {
-	_, err := q.db.Exec(ctx, upsertBudgetPolicy,
-		arg.ID,
-		arg.TenantID,
-		arg.TenantSubjectID,
-		arg.Scope,
-		arg.Owner,
-		arg.ScopeKey,
-		arg.Windows,
-		arg.PolicyVersion,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	return err
-}
-
-const deleteBudgetPolicy = `-- name: DeleteBudgetPolicy :execrows
-DELETE FROM openrails.budget_policies
-WHERE tenant_id = $1 AND tenant_subject_id = $2
-  AND scope = $3 AND owner = $4 AND scope_key = $5
-`
-
-type DeleteBudgetPolicyParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Scope           string
-	Owner           string
-	ScopeKey        string
-}
-
-func (q *Queries) DeleteBudgetPolicy(ctx context.Context, arg DeleteBudgetPolicyParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteBudgetPolicy,
-		arg.TenantID,
-		arg.TenantSubjectID,
-		arg.Scope,
-		arg.Owner,
-		arg.ScopeKey,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const listBudgetPolicies = `-- name: ListBudgetPolicies :many
-SELECT id, tenant_id, tenant_subject_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at FROM openrails.budget_policies
-WHERE tenant_id = $1 AND tenant_subject_id = $2
-`
-
-type ListBudgetPoliciesParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-}
-
-// ALL budget policies for a subject regardless of owner (the admit path reads
-// every scope to compose the verdict).
-func (q *Queries) ListBudgetPolicies(ctx context.Context, arg ListBudgetPoliciesParams) ([]BillingBudgetPolicy, error) {
-	rows, err := q.db.Query(ctx, listBudgetPolicies, arg.TenantID, arg.TenantSubjectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingBudgetPolicy
-	for rows.Next() {
-		var i BillingBudgetPolicy
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.TenantSubjectID,
-			&i.Scope,
-			&i.Owner,
-			&i.ScopeKey,
-			&i.Windows,
-			&i.PolicyVersion,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listBudgetPoliciesByOwner = `-- name: ListBudgetPoliciesByOwner :many
-SELECT id, tenant_id, tenant_subject_id, scope, owner, scope_key, windows, policy_version, created_at, updated_at FROM openrails.budget_policies
-WHERE tenant_id = $1 AND tenant_subject_id = $2 AND owner = $3
-`
-
-type ListBudgetPoliciesByOwnerParams struct {
-	TenantID        uuid.UUID
-	TenantSubjectID uuid.UUID
-	Owner           string
-}
-
-// Budget policies for a subject filtered by owner (the subject-facing read must
-// NOT expose platform-owned rows).
-func (q *Queries) ListBudgetPoliciesByOwner(ctx context.Context, arg ListBudgetPoliciesByOwnerParams) ([]BillingBudgetPolicy, error) {
-	rows, err := q.db.Query(ctx, listBudgetPoliciesByOwner, arg.TenantID, arg.TenantSubjectID, arg.Owner)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingBudgetPolicy
-	for rows.Next() {
-		var i BillingBudgetPolicy
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.TenantSubjectID,
-			&i.Scope,
-			&i.Owner,
-			&i.ScopeKey,
-			&i.Windows,
-			&i.PolicyVersion,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }

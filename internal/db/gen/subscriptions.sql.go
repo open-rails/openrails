@@ -214,9 +214,9 @@ type GetActiveSubscriptionByTenantSubjectAtParams struct {
 	Now             time.Time
 }
 
-func (q *Queries) GetActiveSubscriptionByTenantSubjectAt(ctx context.Context, arg GetActiveSubscriptionByTenantSubjectAtParams) (BillingSubscription, error) {
+func (q *Queries) GetActiveSubscriptionByTenantSubjectAt(ctx context.Context, arg GetActiveSubscriptionByTenantSubjectAtParams) (OpenrailsSubscription, error) {
 	row := q.db.QueryRow(ctx, getActiveSubscriptionByTenantSubjectAt, arg.TenantSubjectID, arg.Now)
-	var i BillingSubscription
+	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -265,9 +265,9 @@ type GetLatestResumableCancelledSubscriptionParams struct {
 	Now             time.Time
 }
 
-func (q *Queries) GetLatestResumableCancelledSubscription(ctx context.Context, arg GetLatestResumableCancelledSubscriptionParams) (BillingSubscription, error) {
+func (q *Queries) GetLatestResumableCancelledSubscription(ctx context.Context, arg GetLatestResumableCancelledSubscriptionParams) (OpenrailsSubscription, error) {
 	row := q.db.QueryRow(ctx, getLatestResumableCancelledSubscription, arg.TenantSubjectID, arg.Now)
-	var i BillingSubscription
+	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -309,9 +309,9 @@ ORDER BY sub.created_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestSubscriptionByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) (BillingSubscription, error) {
+func (q *Queries) GetLatestSubscriptionByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) (OpenrailsSubscription, error) {
 	row := q.db.QueryRow(ctx, getLatestSubscriptionByTenantSubject, tenantSubjectID)
-	var i BillingSubscription
+	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -361,9 +361,9 @@ type GetLifecycleSubscriptionByTenantSubjectAndProductParams struct {
 }
 
 // NULLS FIRST prioritizes indefinite subscriptions.
-func (q *Queries) GetLifecycleSubscriptionByTenantSubjectAndProduct(ctx context.Context, arg GetLifecycleSubscriptionByTenantSubjectAndProductParams) (BillingSubscription, error) {
+func (q *Queries) GetLifecycleSubscriptionByTenantSubjectAndProduct(ctx context.Context, arg GetLifecycleSubscriptionByTenantSubjectAndProductParams) (OpenrailsSubscription, error) {
 	row := q.db.QueryRow(ctx, getLifecycleSubscriptionByTenantSubjectAndProduct, arg.TenantSubjectID, arg.ProductID)
-	var i BillingSubscription
+	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -413,9 +413,9 @@ type GetLifecycleSubscriptionByTenantSubjectAndTierGroupParams struct {
 	TierGroup       *string
 }
 
-func (q *Queries) GetLifecycleSubscriptionByTenantSubjectAndTierGroup(ctx context.Context, arg GetLifecycleSubscriptionByTenantSubjectAndTierGroupParams) (BillingSubscription, error) {
+func (q *Queries) GetLifecycleSubscriptionByTenantSubjectAndTierGroup(ctx context.Context, arg GetLifecycleSubscriptionByTenantSubjectAndTierGroupParams) (OpenrailsSubscription, error) {
 	row := q.db.QueryRow(ctx, getLifecycleSubscriptionByTenantSubjectAndTierGroup, arg.TenantSubjectID, arg.TierGroup)
-	var i BillingSubscription
+	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -454,9 +454,9 @@ const getSubscriptionByID = `-- name: GetSubscriptionByID :one
 SELECT id, price_id, product_id, status, processor, processor_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, tenant_id, tenant_subject_id FROM openrails.subscriptions WHERE id = $1
 `
 
-func (q *Queries) GetSubscriptionByID(ctx context.Context, id uuid.UUID) (BillingSubscription, error) {
+func (q *Queries) GetSubscriptionByID(ctx context.Context, id uuid.UUID) (OpenrailsSubscription, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionByID, id)
-	var i BillingSubscription
+	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -504,9 +504,9 @@ type GetSubscriptionByProcessorMetadataValueParams struct {
 	Value     string
 }
 
-func (q *Queries) GetSubscriptionByProcessorMetadataValue(ctx context.Context, arg GetSubscriptionByProcessorMetadataValueParams) (BillingSubscription, error) {
+func (q *Queries) GetSubscriptionByProcessorMetadataValue(ctx context.Context, arg GetSubscriptionByProcessorMetadataValueParams) (OpenrailsSubscription, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionByProcessorMetadataValue, arg.Processor, arg.Key, arg.Value)
-	var i BillingSubscription
+	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -552,9 +552,9 @@ type GetSubscriptionByProcessorSubIDParams struct {
 	ProcessorSubscriptionID string
 }
 
-func (q *Queries) GetSubscriptionByProcessorSubID(ctx context.Context, arg GetSubscriptionByProcessorSubIDParams) (BillingSubscription, error) {
+func (q *Queries) GetSubscriptionByProcessorSubID(ctx context.Context, arg GetSubscriptionByProcessorSubIDParams) (OpenrailsSubscription, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionByProcessorSubID, arg.Processor, arg.ProcessorSubscriptionID)
-	var i BillingSubscription
+	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -600,9 +600,9 @@ type GetSubscriptionByTenantSubjectAndPriceParams struct {
 	PriceID         *uuid.UUID
 }
 
-func (q *Queries) GetSubscriptionByTenantSubjectAndPrice(ctx context.Context, arg GetSubscriptionByTenantSubjectAndPriceParams) (BillingSubscription, error) {
+func (q *Queries) GetSubscriptionByTenantSubjectAndPrice(ctx context.Context, arg GetSubscriptionByTenantSubjectAndPriceParams) (OpenrailsSubscription, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionByTenantSubjectAndPrice, arg.TenantSubjectID, arg.PriceID)
-	var i BillingSubscription
+	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -642,15 +642,15 @@ SELECT id, price_id, product_id, status, processor, processor_subscription_id, u
 WHERE sub.processor = $1 AND sub.status = 'active'
 `
 
-func (q *Queries) ListActiveSubscriptionsByProcessor(ctx context.Context, processor string) ([]BillingSubscription, error) {
+func (q *Queries) ListActiveSubscriptionsByProcessor(ctx context.Context, processor string) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listActiveSubscriptionsByProcessor, processor)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSubscription
+	var items []OpenrailsSubscription
 	for rows.Next() {
-		var i BillingSubscription
+		var i OpenrailsSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -698,15 +698,15 @@ WHERE sub.tenant_subject_id = $1 AND sub.status = 'active'
 ORDER BY sub.created_at DESC
 `
 
-func (q *Queries) ListActiveSubscriptionsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]BillingSubscription, error) {
+func (q *Queries) ListActiveSubscriptionsByTenantSubject(ctx context.Context, tenantSubjectID uuid.UUID) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listActiveSubscriptionsByTenantSubject, tenantSubjectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSubscription
+	var items []OpenrailsSubscription
 	for rows.Next() {
-		var i BillingSubscription
+		var i OpenrailsSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -761,15 +761,15 @@ type ListDueDunningSubscriptionsParams struct {
 }
 
 // Dunning: past_due NMI-backed subscriptions whose next retry is due.
-func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDunningSubscriptionsParams) ([]BillingSubscription, error) {
+func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDunningSubscriptionsParams) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listDueDunningSubscriptions, arg.Processors, arg.Now)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSubscription
+	var items []OpenrailsSubscription
 	for rows.Next() {
-		var i BillingSubscription
+		var i OpenrailsSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -821,15 +821,15 @@ WHERE sub.status = 'cancelled'
 // deletion_scheduled_at marker — their deferred processor-side delete never
 // finalized (the deletion kill switch skipped it, or the job was lost). The
 // worker-startup rescan re-enqueues these via the deferred-delete scheduler.
-func (q *Queries) ListPendingDeletionScheduledSubscriptions(ctx context.Context) ([]BillingSubscription, error) {
+func (q *Queries) ListPendingDeletionScheduledSubscriptions(ctx context.Context) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listPendingDeletionScheduledSubscriptions)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSubscription
+	var items []OpenrailsSubscription
 	for rows.Next() {
-		var i BillingSubscription
+		var i OpenrailsSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -897,15 +897,15 @@ type ListSilentLapsedSubscriptionsParams struct {
 // cohort is dunning's, excluded here), and no payment recorded at/after the
 // period end. Re-derived every pass, so an unreachable provider needs no
 // durable read-queue: unchanged state simply reappears next cycle.
-func (q *Queries) ListSilentLapsedSubscriptions(ctx context.Context, arg ListSilentLapsedSubscriptionsParams) ([]BillingSubscription, error) {
+func (q *Queries) ListSilentLapsedSubscriptions(ctx context.Context, arg ListSilentLapsedSubscriptionsParams) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listSilentLapsedSubscriptions, arg.Processors, arg.Cutoff)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSubscription
+	var items []OpenrailsSubscription
 	for rows.Next() {
-		var i BillingSubscription
+		var i OpenrailsSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -951,15 +951,15 @@ const listSubscriptionsByIDs = `-- name: ListSubscriptionsByIDs :many
 SELECT id, price_id, product_id, status, processor, processor_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, tenant_id, tenant_subject_id FROM openrails.subscriptions WHERE id = ANY($1::uuid[])
 `
 
-func (q *Queries) ListSubscriptionsByIDs(ctx context.Context, ids []uuid.UUID) ([]BillingSubscription, error) {
+func (q *Queries) ListSubscriptionsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listSubscriptionsByIDs, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSubscription
+	var items []OpenrailsSubscription
 	for rows.Next() {
-		var i BillingSubscription
+		var i OpenrailsSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -1006,15 +1006,15 @@ SELECT id, price_id, product_id, status, processor, processor_subscription_id, u
 WHERE sub.payment_method_id = ANY($1::uuid[])
 `
 
-func (q *Queries) ListSubscriptionsByPaymentMethodIDs(ctx context.Context, paymentMethodIds []uuid.UUID) ([]BillingSubscription, error) {
+func (q *Queries) ListSubscriptionsByPaymentMethodIDs(ctx context.Context, paymentMethodIds []uuid.UUID) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listSubscriptionsByPaymentMethodIDs, paymentMethodIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSubscription
+	var items []OpenrailsSubscription
 	for rows.Next() {
-		var i BillingSubscription
+		var i OpenrailsSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -1069,15 +1069,15 @@ type ListSubscriptionsByTenantSubjectPagedParams struct {
 	PageLimit       int32
 }
 
-func (q *Queries) ListSubscriptionsByTenantSubjectPaged(ctx context.Context, arg ListSubscriptionsByTenantSubjectPagedParams) ([]BillingSubscription, error) {
+func (q *Queries) ListSubscriptionsByTenantSubjectPaged(ctx context.Context, arg ListSubscriptionsByTenantSubjectPagedParams) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listSubscriptionsByTenantSubjectPaged, arg.TenantSubjectID, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSubscription
+	var items []OpenrailsSubscription
 	for rows.Next() {
-		var i BillingSubscription
+		var i OpenrailsSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -1130,15 +1130,15 @@ type ListSubscriptionsByTenantSubjectProcessorParams struct {
 	Processor       string
 }
 
-func (q *Queries) ListSubscriptionsByTenantSubjectProcessor(ctx context.Context, arg ListSubscriptionsByTenantSubjectProcessorParams) ([]BillingSubscription, error) {
+func (q *Queries) ListSubscriptionsByTenantSubjectProcessor(ctx context.Context, arg ListSubscriptionsByTenantSubjectProcessorParams) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listSubscriptionsByTenantSubjectProcessor, arg.TenantSubjectID, arg.Processor)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSubscription
+	var items []OpenrailsSubscription
 	for rows.Next() {
-		var i BillingSubscription
+		var i OpenrailsSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -1217,7 +1217,7 @@ type ListSubscriptionsFilteredParams struct {
 	PageLimit       int32
 }
 
-func (q *Queries) ListSubscriptionsFiltered(ctx context.Context, arg ListSubscriptionsFilteredParams) ([]BillingSubscription, error) {
+func (q *Queries) ListSubscriptionsFiltered(ctx context.Context, arg ListSubscriptionsFilteredParams) ([]OpenrailsSubscription, error) {
 	rows, err := q.db.Query(ctx, listSubscriptionsFiltered,
 		arg.TenantSubjectID,
 		arg.Status,
@@ -1237,9 +1237,9 @@ func (q *Queries) ListSubscriptionsFiltered(ctx context.Context, arg ListSubscri
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingSubscription
+	var items []OpenrailsSubscription
 	for rows.Next() {
-		var i BillingSubscription
+		var i OpenrailsSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -1351,7 +1351,7 @@ type UpdateSubscriptionAtParams struct {
 	ProductID                uuid.UUID
 	EntitlementsSpecSnapshot []byte
 	CreditsSpecSnapshot      []byte
-	Status                   BillingSubscriptionStatus
+	Status                   OpenrailsSubscriptionStatus
 	StartedAt                time.Time
 	EndedAt                  *time.Time
 	CurrentPeriodStartsAt    *time.Time

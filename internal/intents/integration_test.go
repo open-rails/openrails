@@ -130,7 +130,7 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 	return fx
 }
 
-func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Time) gen.BillingProviderIntent {
+func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Time) gen.OpenrailsProviderIntent {
 	t.Helper()
 	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
 		TenantID:       dbtest.TestTenantID.UUID(),
@@ -147,7 +147,7 @@ func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Ti
 	return row
 }
 
-func (fx intentFixture) intent(t *testing.T, id uuid.UUID) gen.BillingProviderIntent {
+func (fx intentFixture) intent(t *testing.T, id uuid.UUID) gen.OpenrailsProviderIntent {
 	t.Helper()
 	row, err := fx.db.Gen(context.Background()).GetProviderIntent(context.Background(), id)
 	require.NoError(t, err)
